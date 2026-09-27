@@ -64,6 +64,7 @@ documentation:
     - .claude/skills/worktree/SKILL.md
 completed_phase: 5
 implemented: true
+implementation_1: "2026-09-26T18:02:41-07:00"
 ---
 
 # Implementation Log for 2026-09-26-more-info-on-list (5 phases)
@@ -450,3 +451,34 @@ paths, and every result above comes from this worktree.
   assumption on every OS in CI. The PR's Linux and macOS cells cover it, and
   Windows runs it on `main`.
 - There were no pre-existing failures.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-26T18:02:41-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/features/2026-09-26-more-info-on-list/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Real-terminal tests do not verify the narrow width gate or parent comparison cells' at 18:02:47
+        - discovered: `TmuxHarness::resize` already pins a detached session's window size, so `DesignFixture::list_in_pane` resizes a fresh pane to exactly the requested width and asserts `pane_cols()` took it; `list_until` keeps its at-least-100 check through the same helper, and the new `list_at(cols)` sizes the pane
+        - added `DesignFixture::with_child` in `cli/tests/level2_list_verbose.rs`: `wt-child-work` (`child/long-descriptive-name`) forked from `feature-test`, with a fork-origin record naming `feature-test` and a stored PR #105 targeting it, so `-> parent` shows `clean +1 -1` and a badge; the long branch name pushes the table past 100 columns so the parent cell wraps at exactly 100
+        - discovered: at a real 100-column pane the child's badge wraps between `PR` and `#105` (a split badge), not whole as in the L1 fixture, because the badge's inner space is a `Table` break opportunity; the test asserts that shape and both halves on the PR badge background, and the rendering is left unchanged (a design question, not this finding)
+        - added `level2_list_hides_the_counts_in_a_99_column_pane` (state words and both PR badges kept, no `+N`/`-N` and no green cell in any table row, no wrapped row)
+        - added `level2_list_shows_target_and_parent_counts_in_a_100_column_pane` (target and parent counts dim green/dim red before the badge, and the wrapped `#105` line alone in the `-> parent` column)
+        - updated the `level2_list_verbose.rs` module doc and the `wt list` styling bullet of `.claude/skills/worktree/SKILL.md`
+        - `just test`: 466 passed, 18 skipped, 0 failed
+        - `just lint`: clean
+        - `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2`: blocked by `level2_graph_in_kitty::level2_graph_fits_a_narrow_kitty_window`, which failed with "nothing drawn where the graph belongs" (the calling session lacks the macOS Screen Recording permission its screenshot needs); unrelated to this change, and nextest's fail-fast then cancelled the rest
+        - the tier's other 18 tests, run as `cargo nextest run -p worktree-cli -p worktree --features terminal-tests -E 'test(/(^|::)level2_/) & !binary(level2_graph_in_kitty)'` with the tmux requirement: 18 passed, 0 failed, including both new tests
+        - `just check-tier-coverage worktree`: 0 stranded
+        - orchestrator re-ran the `level2_list_verbose` target with the tmux requirement: 9 passed, 0 failed
+- work completed for 'Real-terminal tests do not verify the narrow width gate or parent comparison cells' at 18:07:06
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 4m 25s. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- observation for the next review: at a real 100-column pane the `-> parent` PR badge splits across lines (`PR` / `#105`) because the badge's inner space is a table break opportunity; the new L2 test pins that shape, and whether to make it non-breaking is a design decision left open
+- `just test-l2` as a whole stays red on this host only because `level2_graph_in_kitty` lacks the macOS Screen Recording permission; it needs a run from a terminal that has that permission
+
+The files changed in this cycle are `worktree/cli/tests/level2_list_verbose.rs`, `.claude/skills/worktree/SKILL.md`, and this log.
