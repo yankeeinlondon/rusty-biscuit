@@ -21,6 +21,7 @@ mod git_parity;
 mod host_capability_cache;
 mod integration;
 mod lockfile_fixtures;
+mod lockfile_isolation;
 mod lockfile_provenance;
 mod merge_conflict_prediction;
 mod network_primitives;

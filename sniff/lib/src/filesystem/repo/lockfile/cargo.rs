@@ -79,7 +79,8 @@ fn membership(document: &CargoLockDocument) -> Outcome {
     Ok(ParsedLockfile::CargoPackages(sourceless))
 }
 
-/// Check every non-root manifest member against the source-less entries.
+/// Check every non-root, non-excluded manifest member against the
+/// source-less entries.
 pub(super) fn compare(
     sourceless: &[(String, String)],
     layer: &MonorepoLayer,
@@ -98,7 +99,19 @@ pub(super) fn compare(
         .map(|(name, version)| (name.as_str(), version.as_str()))
         .collect();
     let mut missing = BTreeSet::new();
-    for seed in owned {
+    // `[workspace].exclude` directories are catalogued but are not members,
+    // so Cargo never locks them as members. A directory matched by both
+    // `members` and `exclude` has one seed of each here (they merge later), and
+    // exclusion wins.
+    let excluded: HashSet<&std::path::Path> = owned
+        .iter()
+        .filter(|seed| seed.is_excluded)
+        .map(|seed| seed.path.as_path())
+        .collect();
+    for seed in owned
+        .iter()
+        .filter(|seed| !excluded.contains(seed.path.as_path()))
+    {
         let member = match membership::manifest_member(&layer.root, &seed.path) {
             Ok(member) => member,
             Err(reason) => return LockfileObservation::unverifiable(paths, reason),
