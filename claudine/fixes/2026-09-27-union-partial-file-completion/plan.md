@@ -10,8 +10,33 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/tests/common/pty.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/level1_provider_picker_pty.rs
+    - biscuit-terminal/lib/src/errors/source_context.rs
+    - biscuit-terminal/lib/src/errors/mod.rs
+    - darkmatter/lib/src/markdown/dsl/mod.rs
+    - darkmatter/lib/src/markdown/code_block.rs
+    - darkmatter/lib/src/markdown/output/code_block.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+docs_updated_during_phase_2:
+    - biscuit-terminal/README.md
+    - darkmatter/docs/topics/code-blocks.md
+    - darkmatter/docs/topics/yamlblock-migration.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/rendering.md
 packages:
     - claudine-cli
+    - claudine
+    - biscuit-terminal
+    - darkmatter
 ---
 
 # Plan: union partial file completion, early failure, and focused excerpts
@@ -68,7 +93,7 @@ independent technical tracks that meet in Claudine's compose preparation:
 - [ ] Every unresolved caller-supplied file reference names the caller's
       launch directory. The late verdict no longer reports `…/prompts` for
       `spec=fix` typed at the repo root.
-- [ ] The provider picker renders inline below the cursor (no `\x1b[?1049h`)
+- [x] The provider picker renders inline below the cursor (no `\x1b[?1049h`)
       and leaves scrollback intact.
 - [ ] Frontmatter excerpts show only focused regions with real line numbers,
       `⋮` elision, and highlights. No `BlockOnly` path remains. Unlocatable
@@ -76,7 +101,7 @@ independent technical tracks that meet in Claudine's compose preparation:
 - [ ] Every R7 test (1–8) exists and passes. The existing `supplied.rs` tests
       pass unchanged. Every changed snapshot or L1 expectation is listed with
       its reason in the Phase 5 changed-expectations table.
-- [ ] `just test` and `just lint` are green in `claudine/`, `biscuit-terminal/`,
+- [x] `just test` and `just lint` are green in `claudine/`, `biscuit-terminal/`,
       and `darkmatter/`. The Windows compile surface is unchanged in shape: no
       new `#[cfg(unix)]` except on PTY tests, which already follow that
       convention.
@@ -597,7 +622,7 @@ subagent. The tracks do not depend on one another.
 
 ### Wave 2 — parallel tracks
 
-- [ ] **Tolerant arm selection** (`claudine` lib; R1, N5)
+- [x] **Tolerant arm selection** (`claudine` lib; R1, N5)
     - Extract `is_composition_independent` in `schema/mod.rs`. Rewire the
       pre-validator filter through it, with no behavior change.
     - In `supplied_file_shape`, replace `projected.validate(&candidate).valid`
@@ -611,7 +636,7 @@ subagent. The tracks do not depend on one another.
       `None` for conflicting discriminants and for string-only alternatives. A
       literal invalid sibling still rules an arm out. Existing tests are
       unchanged.
-- [ ] **Focused-region locator** (`biscuit-terminal`; N3)
+- [x] **Focused-region locator** (`biscuit-terminal`; N3)
     - Add `FocusedRegion` and `SourceContext::focused_yaml_regions`, the
       non-falling-back locator.
     - Extend `locate_key_region` for sequence-item (`- key:`) segments, and
@@ -624,7 +649,7 @@ subagent. The tracks do not depend on one another.
       and merge keys still give `None`.
     - Update `biscuit-terminal/docs` for `SourceContext` if it is documented
       there.
-- [ ] **`CodeBlock` start line** (`darkmatter`; N1)
+- [x] **`CodeBlock` start line** (`darkmatter`; N1)
     - Add `CodeBlockMeta::start_line`, honored for gutter numbering and
       highlight lookup in both renderers. The default keeps current output
       byte-identical.
@@ -634,7 +659,7 @@ subagent. The tracks do not depend on one another.
     - Update the Darkmatter `CodeBlock`/DSL docs. Decide in-task whether the
       Markdown DSL fence meta (`dsl/parser.rs`) gets a matching key. The
       default is **no** (Rule 2: there is no consumer for it).
-- [ ] **Inline provider picker** (`claudine-cli`; R5, N8)
+- [x] **Inline provider picker** (`claudine-cli`; R5, N8)
     - Move the chooser sizing into a shared `pub(crate)` helper, and use it in
       `schema_interactive` and `prompt_one_shot_provider`.
     - Update the `prompt_one_shot_provider` doc to state that it is inline and
@@ -647,10 +672,10 @@ subagent. The tracks do not depend on one another.
 
 ### Checkpoint 2
 
-- [ ] The R7.1 reproduction test is **green** (a direct consequence of R1).
-- [ ] `just test` and `just lint` are green in `claudine/`, `biscuit-terminal/`,
+- [x] The R7.1 reproduction test is **green** (a direct consequence of R1).
+- [x] `just test` and `just lint` are green in `claudine/`, `biscuit-terminal/`,
       and `darkmatter/`.
-- [ ] The existing `supplied.rs` tests are unchanged and passing.
+- [x] The existing `supplied.rs` tests are unchanged and passing.
 
 ---
 
