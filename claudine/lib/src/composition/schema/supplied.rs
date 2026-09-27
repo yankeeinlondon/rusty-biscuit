@@ -9,7 +9,7 @@ use darkmatter::markdown::schemas::{
 
 use super::{
     CompositionError, ResolvedCompositionSource, build_effective_instance,
-    load_effective_schema_in_context, value_needs_composition,
+    is_composition_independent, load_effective_schema_in_context, value_needs_composition,
 };
 
 /// An unresolved supplied file, retaining its slot when the caller supplied an array.
@@ -113,9 +113,14 @@ pub fn unresolved_supplied_files(
 }
 
 /// A root union needs a unique applicable arm before its file metadata has meaning.
-/// Existence is the only constraint relaxed, and only for caller-owned files:
-/// initialization still owns the verdict, while ordinary string alternatives
-/// and conflicting discriminants must never trigger an unsolicited file chooser.
+///
+/// Two relaxations apply when judging each arm. Existence is relaxed only for
+/// caller-owned files, because initialization still owns that verdict. A
+/// problem on a value that still needs composition (`{{…}}`/`$(…)`) is ignored,
+/// by the same rule the pre-validator uses, because composition may yet make
+/// it valid. Nothing else is relaxed: ordinary string alternatives, literal
+/// invalid siblings, and conflicting discriminants never select an arm, so they
+/// cannot trigger an unsolicited file chooser.
 fn supplied_file_shape<'a>(
     source: &ResolvedCompositionSource,
     records: &CallerInputRecords,
@@ -163,7 +168,12 @@ fn supplied_file_shape<'a>(
             .with_baseline(SimplifiedSchema::Single(relaxed))
             .ok()?;
         let projected = schemas.effective_for(&schema_source).ok()??;
-        if projected.validate(&candidate).valid {
+        let report = projected.validate(&candidate);
+        if report
+            .problems
+            .iter()
+            .all(|problem| !is_composition_independent(problem, &candidate))
+        {
             if selected.is_some() {
                 return None;
             }
@@ -322,5 +332,122 @@ mod tests {
                 unresolved_supplied_files(&source, &records, &context.for_source(&path)).is_empty()
             );
         }
+    }
+    /// The two-arm shape from `prompts/clarify.md`, with `doc` templated over
+    /// both alternatives. `sibling` replaces the `doc` value.
+    fn union_with_templated_sibling(sibling: &str) -> String {
+        format!(
+            "---\n\
+             $schema:\n\
+             \x20 - spec: 'file(required;match(**/*spec*.md);eager)'\n\
+             \x20   doc: file\n\
+             \x20 - design: 'file(required;match(**/*design*.md))'\n\
+             \x20   doc: file\n\
+             doc: {sibling}\n\
+             initialize:\n\
+             \x20 stack:\n\
+             \x20   - action: {{append_line: [\"events.log\", \"initialize\"]}}\n\
+             ---\nSpec document: {{{{spec}}}}\n"
+        )
+    }
+
+    fn pending_for(document: &str, overrides: serde_json::Value) -> Vec<UnresolvedSuppliedFile> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plan.md");
+        std::fs::write(&path, document).unwrap();
+        std::fs::write(dir.path().join("unrelated.md"), "unrelated").unwrap();
+        let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+        let context = FileResolutionContext::new(dir.path());
+        let records = CallerInputLayers::from_caller_overrides(Some(overrides), context.clone())
+            .caller_input_records;
+        unresolved_supplied_files(&source, &records, &context.for_source(&path))
+    }
+
+    fn assert_single_spec_partial(pending: &[UnresolvedSuppliedFile], expected: &str) {
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        let CompositionError::UnresolvedFileReference {
+            property,
+            provided,
+            patterns,
+            is_array,
+            ..
+        } = &pending[0].error
+        else {
+            panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
+        };
+        assert_eq!(property, "spec");
+        assert_eq!(provided, expected);
+        assert_eq!(patterns, &vec!["**/*spec*.md".to_string()]);
+        assert!(!is_array);
+        assert_eq!(pending[0].array_index, None);
+    }
+
+    #[test]
+    fn templated_file_sibling_does_not_rule_out_the_applicable_union_arm() {
+        for sibling in ["\"{{spec || design}}\"", "'{{ spec }}'", "\"$(echo spec.md)\""] {
+            let pending =
+                pending_for(&union_with_templated_sibling(sibling), json!({"spec": "everywhere"}));
+            assert_single_spec_partial(&pending, "everywhere");
+        }
+    }
+
+    #[test]
+    fn literal_invalid_sibling_still_rules_out_the_union_arm() {
+        let document = |count: &str| {
+            format!(
+                "---\n\
+                 $schema:\n\
+                 \x20 - spec: 'file(required;match(**/*spec*.md);eager)'\n\
+                 \x20   doc: file\n\
+                 \x20   count: number\n\
+                 \x20 - design: 'file(required;match(**/*design*.md))'\n\
+                 \x20   doc: file\n\
+                 doc: \"{{{{spec || design}}}}\"\n\
+                 count: {count}\n\
+                 ---\nbody\n"
+            )
+        };
+        // Control: a valid literal leaves the arm applicable.
+        assert_single_spec_partial(
+            &pending_for(&document("3"), json!({"spec": "everywhere"})),
+            "everywhere",
+        );
+        // A literal that no composition can repair rules the arm out, even
+        // though its `doc` sibling is templated.
+        let pending = pending_for(&document("many"), json!({"spec": "everywhere"}));
+        assert!(pending.is_empty(), "{pending:?}");
+    }
+
+    #[test]
+    fn templated_sibling_does_not_select_conflicting_or_string_only_arms() {
+        for schema in [
+            // Conflicting discriminants: `kind` is literal and matches neither arm.
+            "[{kind: 'literal(file)', spec: 'file(required;eager;match(**/*.md))', doc: file}, \
+             {kind: 'literal(text)', spec: 'string(required)', doc: file}]",
+            // String-only alternative: both arms accept `spec`, so neither is unique.
+            "[{spec: 'file(required;eager;match(**/*.md))', doc: file}, \
+             {spec: 'string(required)', doc: file}]",
+        ] {
+            let document = format!(
+                "---\n$schema: {schema}\ndoc: \"{{{{spec}}}}\"\n---\nbody\n"
+            );
+            let pending =
+                pending_for(&document, json!({"spec": "partial", "kind": "other"}));
+            assert!(pending.is_empty(), "{schema}: {pending:?}");
+        }
+    }
+
+    #[test]
+    fn supplied_files_select_shipped_clarify_spec_arm() {
+        let pending = pending_for(
+            include_str!("../../../../../prompts/clarify.md"),
+            json!({"spec": "fix"}),
+        );
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert!(matches!(
+            &pending[0].error,
+            CompositionError::UnresolvedFileReference { property, provided, patterns, .. }
+                if property == "spec" && provided == "fix" && patterns == &vec!["**/*spec*.md".to_string()]
+        ));
     }
 }

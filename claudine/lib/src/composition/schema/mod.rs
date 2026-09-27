@@ -612,25 +612,14 @@ pub fn pre_validate_schema_for_mode(
     // unresolved partial must remain visible so the CLI can offer completion.
     // Missing verdicts are composition-independent (no template or provenance
     // can conjure a key absent from both raw frontmatter and overrides).
-    let instance_map = instance.as_object();
     let composition_independent: Vec<_> = report
         .problems
         .iter()
-        .filter(|p| match p.kind {
-            ValidationProblemKind::Missing => true,
-            ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
-                let property = top_level_pointer_segment(&p.path);
-                if property
-                    .as_ref()
-                    .is_some_and(|name| caller_resolved_eager_files.contains(name))
-                {
-                    return false;
-                }
-                let raw = property
-                    .as_deref()
-                    .and_then(|name| instance_map.and_then(|m| m.get(name)));
-                !value_needs_composition(raw)
-            }
+        .filter(|p| {
+            let caller_resolved = !matches!(p.kind, ValidationProblemKind::Missing)
+                && top_level_pointer_segment(&p.path)
+                    .is_some_and(|name| caller_resolved_eager_files.contains(&name));
+            !caller_resolved && is_composition_independent(p, &instance)
         })
         .cloned()
         .collect();
@@ -902,6 +891,27 @@ fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path
             !values.is_empty() && values.iter().all(|value| file_override_resolves_from(value, base))
         }
         _ => false,
+    }
+}
+
+/// Whether a validation problem stands regardless of composition.
+///
+/// `Missing` always stands: no template can conjure a key absent from both raw
+/// frontmatter and overrides. `Type`/`Invalid` stand only when the problem's
+/// top-level property in `instance` holds no template or shell syntax, since
+/// composition may still turn such a value valid. Shared by the pre-validator
+/// and root-union arm selection so both judge arms by the same rule.
+pub(super) fn is_composition_independent(
+    problem: &ValidationProblem,
+    instance: &serde_json::Value,
+) -> bool {
+    match problem.kind {
+        ValidationProblemKind::Missing => true,
+        ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
+            let raw = top_level_pointer_segment(&problem.path)
+                .and_then(|name| instance.as_object().and_then(|map| map.get(&name)));
+            !value_needs_composition(raw)
+        }
     }
 }
 
