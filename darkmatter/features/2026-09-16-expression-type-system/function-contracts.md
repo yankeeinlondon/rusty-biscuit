@@ -1,27 +1,141 @@
-# Coercion Design
+# Function and tuple contracts
 
-> Historical consolidation input. The authoritative successor is
-> `2026-09-16-expression-type-system`, particularly its `function-contracts.md`
-> and `number-contract.md` annexes. Proposed or unresolved wording below records
-> the earlier design and does not override the consolidated contract.
+This annex is part of the consolidated expression-type-system specification.
+It absorbs the schema-enhancement grammar and coercion design. The parent
+[specification](spec.md), [numeric contract](number-contract.md), and
+[merge decisions](merge-decisions.md) supply the settled policy. This document
+specifies future implementation; it does not claim the grammar exists today.
 
-This is the proposed function-binding contract for
-`2026-09-21-schema-enhancements`. It replaces the preliminary design; it does
-not describe implemented behavior. The companion `current-state-coercion.md`
-is the compatibility baseline. The function catalog in
-`claudine/docs/schemas/partials/functions.yaml` is a draft to reconcile with
-this contract, not an authority for preserving its current broad types.
+The authoritative built-in catalog will be
+`darkmatter/schemas/partials/functions.yaml`. The current review draft remains
+`claudine/docs/schemas/partials/functions.yaml` until implementation updates
+consumers together. Darkmatter must never depend on Claudine for its built-ins.
+The embedded `darkmatter/docs/schemas/expression-functions.yaml` remains live
+until migration retires it as an independent authority.
 
-This design was consolidated into `2026-09-16-expression-type-system`.
-Its confirmed merge decisions override conflicting proposals here: shared
-argument conversion is adopted, ordinary functions reject null unless their
-purpose requires it, and `number` takes `numberlike` with its fallback retained.
-Unresolved policies below remain proposals, not author decisions.
+## Authored grammar
 
-The settled authoritative catalog location is
-`darkmatter/schemas/partials/functions.yaml`; the current Claudine file is
-migration material. Keep the live embedded catalog operational until the new
-grammar is implemented, then update consumers and retire duplicate authority.
+Extend the existing SimplifiedSchema type grammar rather than creating a
+second parser for function signatures. Type expressions below include named
+types, refinements and constraints, arrays, and `|` unions. Resolve named types
+through the same passive schema resolver. Unions are available in parameter,
+result, and tuple-element positions; existing property-level YAML union syntax
+continues to work. Parenthesized nested constraint blocks and quoted strings
+must be parsed structurally, not split on every comma or semicolon.
+
+```yaml
+kind: schema
+categories:
+  - Math -> Numeric operations.
+types:
+  coordinates: tuple([number, number]; required)
+  row: tuple([string, number?, boolean?])
+  samples: tuple([string, ...number[]])
+  min: |-
+    function(
+      parameters(a: number, b: number);
+      returns(number);
+      category(Math);
+      example('min("4", 5)', '4');
+    ) -> Returns the smaller of two numbers.
+```
+
+### Tuples
+
+`tuple([T, U?, ...V[]]; constraints)` describes an ordered array. Fixed elements
+are required unless suffixed with `?`; optional fixed elements trail required
+ones. At most one spread is allowed, in the final position. A spread names an
+array type and contributes zero or more elements of its item type; it cannot
+also carry `?`. A fixed element's trailing `?` applies to its whole type,
+including a union. Optional positions cannot be skipped to fill later positions.
+Omitted trailing elements are not synthesized as null. An empty tuple `tuple([])`
+accepts only an empty array. Explicit null requires a null-admitting element
+type, regardless of `?`.
+
+The tuple property itself retains ordinary schema optionality unless marked
+`required`. That property rule does not make its elements optional. Compile
+positional types, minimum/maximum lengths, and rest items into the shared
+schema validator and binder. A tuple is more precise than a homogeneous array;
+projection must retain its shape.
+
+### Functions
+
+A function declaration contains exactly one `parameters(...)` and one
+`returns(T)` clause. Semicolons separate clauses; a trailing semicolon is
+allowed. A description follows `->` outside the function's closing parenthesis.
+The declaration describes a callable; it neither constructs nor executes one.
+
+- Parameters are named `name: T`, optional `name?: T`, or a final rest parameter
+  `...name: T`. Required parameters precede optional ones; names are unique.
+- Rest type `T` describes each remaining argument. `...values: number[]` takes
+  array arguments, unlike a tuple spread `...number[]`, which contributes numbers.
+- `parameters(void)` denotes exactly zero arguments. Empty `parameters()` is
+  invalid; `void` cannot be mixed with named parameters or used as a value type.
+- Required call presence is independent of schema-property optionality: even
+  `x: any` or `x: null` must be supplied. `x?: number` permits omission, not null.
+- Successful return values obey `returns(T)`. Fallibility is separate and never
+  implicitly adds null. No return coercion hides a broken handler contract.
+- `fallible` is an optional marker for domain errors after valid arguments.
+  Every function can still have arity, binding, or argument-evaluation errors.
+- Multiple overloads are a YAML list under the function name. Each list member
+  is a complete declaration. Overload selection follows the rules below.
+- Parameter defaults are not new grammar in this feature; omission reaches
+  the handler distinctly so its documented default behavior can apply.
+
+### Categories and examples
+
+`category(Name)` is metadata available on all schema types. A schema may declare
+an ordered top-level `categories` list containing names or `Name -> description`
+strings. Names must be unique; when the list is present, each used category must
+be listed. Without it, category names remain free-form metadata. Function
+reference generation uses declared category order and sorts names alphabetically
+within a category; it does not require per-function order numbers.
+
+Functions accept zero or more `example(expression, result)` clauses; both
+arguments are quoted strings. They retain the authored expression and displayed
+result, and never execute while parsing, checking, generating documentation,
+or serving DMLS. This adds repeated function examples without removing existing
+non-function `example(...)` support. Migration preserves the live catalog's
+example verification modes and display-only reasons in the test/example records;
+a printed example is not proof of execution. Context-dependent examples run
+only in explicitly prepared test fixtures with the existing access boundaries.
+
+## Shared behavior metadata
+
+Signatures cannot express recovery, source exclusions, advisory false results,
+lazy evaluation, or facts established by predicates. Compile these into the
+same descriptor as the signature. The catalog's top-level `behavior` mapping
+is keyed by function name; hosts supply equivalent metadata with registrations.
+It is semantic data, not a host callback or a second coercion matrix.
+
+| Field | Meaning |
+|---|---|
+| `reject_sources: {argument: [type, ...]}` | Reject listed original source types before ordinary conversion. |
+| `numeric_recovery: {argument: x, fallback: fallback}` | Convert the subject using the canonical routine; select a valid supplied fallback on failure, otherwise preserve the error. Independently validate every supplied fallback. |
+| `advisory_file: argument` | Inspect original value without scalar stringification. Null returns false. Unsupported types or passively malformed references return false, with a warning when statically known; unknown-type warnings are opt-in. Valid references retain the parent's file-access contract. |
+| `evaluation: short-circuit-and` or `short-circuit-or` | Evaluate operands only as needed; zero operands yield true or false respectively. |
+| `true_facts: [{argument: name, suitable_for: type}]` | A true result establishes suitability for that value type in the guarded branch. It does not mutate the value or authorize effects. |
+
+Validate metadata against declared parameter names, arities, and return types at
+catalog compilation. Reject unknown fields and conflicting rules on one argument.
+Recovery requires a required subject, an optional numeric fallback, and a numeric
+result; it handles failed subject coercion, never missing arguments or failures
+while evaluating an argument expression. A recovery call is checked as a whole:
+`number("pear", 7)` is valid in DMLS as well as runtime.
+
+Precedence is presence/evaluation strategy, explicit original-source handling,
+ordinary binding (including supplied fallback validation), then declared
+recovery or advisory outcome. A rejected unrelated argument still fails the
+call. Advisory/recovery outcomes are descriptor-driven and never invoke a
+handler with invalid arguments. All other handlers use ordinary binding.
+
+The `length` boolean exclusion, `number`/`round` recovery, and `file_exists`
+advisory behavior are the confirmed exceptions. `any` inspecting predicates
+need no conversion exception. `is_integer` proves a numeric whole value but
+must not claim the narrower `number(integer)` upper bound merely from its
+existing whole-number test; its declared suitability fact is `number`.
+Library built-ins may be the first slice, but completed support includes host
+predicate facts through this same contract. DMLS never executes a host callback.
 
 The central rule is:
 
@@ -89,7 +203,7 @@ The invocation grammar has these presence rules:
 | `parameters(value?: string \| null)` | Omission and explicit null are both valid and remain distinct. |
 | `parameters(void)` | Exactly zero arguments. |
 
-Recommended completion of the grammar: optional parameters must trail required
+The grammar requires: optional parameters must trail required
 parameters, and one final rest parameter may follow them. Use the catalog's
 `parameters(...values: any)` spelling: the type after `:` describes each
 remaining argument. Thus `...values: number[]` means zero or more array
@@ -98,10 +212,8 @@ This is function-parameter syntax; tuple spreads use `...number[]` as specified
 in the parent spec. Parameter names must be unique. Named-call syntax is not
 introduced by giving parameters names.
 
-Defaults do not repair invalid supplied values. If a parameter default is
-supported by the surrounding grammar, compile and validate it once, and apply
-it only to omission. Otherwise preserve omission in `BoundArgs` so the function
-can implement documented domain behavior. Do not import frontmatter's
+Defaults do not repair invalid supplied values. Preserve omission in
+`BoundArgs` so the function can implement documented default behavior. Do not import frontmatter's
 null-as-absent behavior into function parameters.
 
 `category` is documentation metadata. `returns` describes successful results;
@@ -138,8 +250,8 @@ side effects of argument expressions already evaluated by the evaluator.
 
 Lazy constructs require a distinct evaluator path. The draft catalog describes
 `and` and `or` as short-circuiting; the binder must not eagerly evaluate their
-remaining operands to select an overload. Preserve or explicitly settle their
-evaluation strategy during migration. A function signature alone cannot encode
+remaining operands to select an overload. Preserve their existing evaluation strategy during migration. Zero-argument
+`and()` returns true and `or()` returns false. A function signature alone cannot encode
 laziness; an internal evaluation-strategy registration may supply it without
 inventing public coercion syntax.
 
@@ -152,7 +264,9 @@ a different accessor or storage representation.
 
 ## Standard Conversion Rules
 
-Exact acceptance means the original value satisfies the complete target type,
+Numeric values have already entered the `f64` representation before binding;
+`any` does not introduce another numeric conversion or preserve a parallel
+integer model. Exact acceptance means the original value satisfies the complete target type,
 including its passive constraints. Preserve that value. If it does not satisfy
 the contract, try the permitted target-directed conversion and validate the
 result. Failure of a same-type constraint does not permit arbitrary repair:
@@ -164,7 +278,7 @@ strings are not trimmed to satisfy a pattern and numbers are not clamped.
 | `number(integer)` | Numeric string whose parsed value is integral | Integral JSON number |
 | `boolean` | `"true"`, `"false"`, `"True"`, `"False"`, `"TRUE"`, `"FALSE"` | JSON boolean |
 | `string` | JSON number or boolean | Canonical scalar string |
-| String refinements, including `file`, dates, enums, and string literals | Only conversions explicitly inherited by that schema type | String satisfying the refinement |
+| String formats, including `file`, dates, URL, and `expression` | Number or boolean, followed by passive format validation | String satisfying the refinement |
 | `json` / `yaml` | Non-string native JSON value, including null | Serialized content string, validated in the target format |
 | Typed array or tuple | Array with compatible shape | Recursively bound elements |
 | Structured object | Object with compatible declared structure | Recursively bound declared fields |
@@ -206,11 +320,28 @@ the consolidated number contract.
 
 The six boolean spellings above deliberately pin the documented schema matrix.
 Do not infer arbitrary mixed-case acceptance from prose describing `boolish`
-as case-insensitive. Reconcile that documentation discrepancy against the
-shared recognizer during implementation and record any chosen policy change.
+as case-insensitive. Update that documentation to enumerate the six supported
+spellings when implementing this shared rule.
 `"yes"`, `"no"`, `"on"`, `"off"`, `"1"`, and `"0"` are rejected.
 
 ### Refinements and Content Types
+
+String formats inherit scalar-to-string conversion, matching the existing
+schema conversion relation; they still must pass the format's passive checks.
+Bare enums, string literals, and the `schema`/`type-definition` meta-types do
+not inherit scalar stringification. This is type-level behavior shared by all
+callers, not individual handler coercion. `file_exists` and `is_file_type`
+inspect original inputs under their explicit contracts.
+
+Preserve the live catalog's `ip-address` refinement as a passive literal IPv4,
+IPv6, or scoped-IPv6 check, using the existing shared address parser without
+DNS, interface lookup, or ICMP. `agentic-cli` is the finite supported-name and
+alias refinement backed by Darkmatter's existing generated roster artifact;
+unknown names fail binding. Catalog migration must not add a Darkmatter runtime
+or build dependency on Claudine. Generation ownership can use the existing
+artifact until a shared owner is implemented; the built-in catalog remains
+Darkmatter-owned. Missing captured runtime context is an implementation/setup
+error, not a new possible result of an otherwise total inspection operation.
 
 Constraints are checked against the bound value. Numeric bounds, integrality,
 string patterns, and enum membership can eliminate a conversion candidate.
@@ -257,7 +388,7 @@ existing YAML list representation for overloaded function properties:
 pr_list:
     - |-
         function(
-            parameters(count: number(integer; min(1)));
+            parameters(count: number(integer; min(1); max(100)));
             returns(string[]);
             fallible;
         )
@@ -270,8 +401,9 @@ pr_list:
 ```
 
 This illustrates the catalog's integer shorthand and string-array result.
-The final query arm needs a declared structured query type and its bounds;
-`object` here is not a claim that every object is a valid provider query.
+The object arm retains provider query validation as domain logic;
+`object` is not a claim that every object is a valid provider query. Its closed
+key vocabulary and bounds remain those of the existing provider contract.
 The count overload is domain shorthand, not a global integer-to-object coercion.
 
 ### Union Selection
@@ -362,13 +494,13 @@ conversion. These are the justified exceptions to conversion-free handlers:
 | Function family | Contract and responsibility |
 |---|---|
 | `is_number`, `is_string`, `is_integer` | Accept `any`; inspect the original value. `is_number("4")` remains false. |
-| `is_positive`, `is_negative` | Propose `number`; the binder handles numeric strings. Booleans become invalid inputs under the standard matrix. |
+| `is_positive`, `is_negative` | Use `number`; the binder handles numeric strings. Booleans become invalid inputs under the standard matrix. |
 | `round` | `round(x: numberlike, fallback?: number) → number`: use the same conversion/recovery as `number`, then round the selected value; halfway values round away from zero (M14). |
 | `number(value, fallback?)` | Accept `numberlike` for the conversion subject and `number` for a supplied fallback. Retain the fallback; M12–M13 define recovery from any unsuccessful subject conversion and an error when fallback is omitted. Conversion is the operation; reuse the shared value converter. |
 | `contains` | Preserve text-based substring/element/value comparison (M10); the needle accepts `any` unchanged. |
 | `length` | Accept string, number, array, or object; reject booleans before shared string conversion (M11), and null under M2. |
 | List renderers | Accept `any[]` when rendering heterogeneous elements is the operation; rendering is not argument coercion. |
-| `ensure_leading`, `ensure_trailing` | Retain a string/number union if type-preserving concatenation remains intended behavior. |
+| `ensure_leading`, `ensure_trailing` | Retain the string/number union and existing type-preserving affix operation. |
 | Provider identifiers | Declare meaningful numeric/string alternatives and their passive constraints; contextual provider lookup remains domain logic. |
 
 M12 specifies that `number` uses a valid supplied fallback whenever its input
@@ -551,7 +683,7 @@ priority over concurrent batch execution. Measure before adding concurrency.
 descriptor. Validate registration structure before serving calls, and cover
 accessor/descriptor agreement through dispatch conformance tests. Treat an
 accessor mismatch as an implementation defect. Generated typed adapters can
-strengthen this boundary after the contract settles; they are not a prerequisite
+strengthen this boundary during implementation; they are not a prerequisite
 for the first implementation.
 
 ### First End-to-End Slice
@@ -563,18 +695,18 @@ catalog:
 |---|---|
 | `min` | Ordinary numeric binding, exact-value preservation, numeric-string conversion, and invalid-input rejection before invocation. |
 | `is_number` | An `any` parameter reaches the handler unchanged; inspection and predicate narrowing do not accidentally become coercion. |
-| `number(value, fallback?)` | Explicit conversion remains a domain operation using the shared converter; omission, fallback binding, and domain failure remain distinct. |
+| `number(value, fallback?)` | Explicit conversion remains a domain operation using the shared converter; omission, fallback binding, and unsuccessful coercion remain distinct. |
 
 Include a constrained parameter and an overload in this slice as well. Use the
 integer-count arm of `pr_list` to exercise both its constrained count and its
-object alternative once their contracts are settled. Test binding passively
+object alternative with its existing provider query validation. Test binding passively
 without performing provider requests. This avoids inventing overlapping
 overloads solely to demonstrate the machinery.
 
 Carry the slice through authored grammar, compiled descriptors, normal dispatch,
 structured diagnostics, DMLS call checking, and descriptor-derived documentation.
-Resolve numeric precision, nullable contracts, and conversion fallback behavior
-for these functions before migrating them. Do not preserve legacy quirks by
+Apply the settled numeric, nullable, and recovery contracts when migrating
+these functions. Do not preserve legacy quirks by
 adding binder exceptions.
 
 Expand to the remaining catalog only after this slice demonstrates that the
@@ -584,6 +716,10 @@ overloaded calls resolve correctly, and conditional editor results do not
 become false errors. The acceptance criteria below govern the full migration.
 
 ### Catalog-Wide Rollout
+
+Preserve registered aliases, contextual effect requirements, paired context
+metadata, and example verification records during migration. An alias resolves
+to the same descriptor; do not copy its signature into another semantic model.
 
 The executable descriptor must derive from the authored grammar and retain
 parameter names, constraints, optional/rest status, unions, overloads, returns,
@@ -615,13 +751,10 @@ quirk as a permanent union or strict mode:
    compatibility APIs. Close the migration only when every provided function
    is accounted for.
 
-The catalog revision addresses earlier discrepancies in `min` fallibility,
-`length`'s object input, optional-argument spelling, and zero-argument syntax.
-Those edits remain subject to semantic review; YAML validity and an unchanged
-inventory do not validate the proposed function grammar. Review every changed
-contract against source, including entries without `REVIEW` comments. The
-M12–M14 settle numeric conversion, recovery, and rounding. Do not infer
-additional undocumented binder exceptions.
+The [catalog audit](catalog-audit.md) records source checks, deliberate behavior
+changes, inventory coverage, and the limits of this specification-only review.
+The Claudine draft stays in place until the replacement grammar and consumers
+are implemented. YAML validity does not validate the new function grammar.
 
 ## Acceptance Criteria
 
@@ -649,5 +782,5 @@ Implementation is ready for review when these behaviors have evidence:
 - Warm compatibility and batch benchmarks establish whether further
   optimization or concurrency is justified.
 
-These are proposed implementation checks. This document revision changes no
+These are required implementation checks. This document revision changes no
 runtime behavior and does not claim those checks have already passed.
