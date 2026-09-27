@@ -22,15 +22,18 @@ use std::time::{Duration, Instant};
 
 use crate::git::git_from;
 
-/// The ruled deadline for one live `ls-remote` (Decision 21).
+/// Removal's ruled deadline for one live `ls-remote` (Decision 21). The
+/// `wt list` live-head refresh uses
+/// [`REMOTE_HEAD_REFRESH_DEADLINE`](crate::remote_head::REMOTE_HEAD_REFRESH_DEADLINE).
 pub const LIVE_CHECK_DEADLINE: Duration = Duration::from_secs(3);
 
-/// Deadline for the lease-protected deletion push.
+/// Deadline for removal's lease-protected deletion push.
 pub const PUSH_DEADLINE: Duration = Duration::from_secs(30);
 
 /// Reads live branch heads.
 ///
-/// A trait so the tier logic can be tested with scripted answers.
+/// A trait so removal's tier logic and the live-head refresh can be tested
+/// with scripted answers.
 pub trait RemoteHeads: Sync {
     /// The live SHA of `refs/heads/<branch>` at `remote` (a remote name, which
     /// reads its fetch URL, or a URL): `Ok(None)` when it answered completely

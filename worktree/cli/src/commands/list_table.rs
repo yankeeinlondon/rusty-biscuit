@@ -34,7 +34,8 @@ use worktree::worktree::{DirtyStatus, WorktreeList, WorktreeStatus};
 /// columns; `--width` sizes only the graph and does not move this gate.
 const METRICS_MIN_WIDTH: u32 = 100;
 
-/// Everything the table shows.
+/// Everything [`render`] shows: the caption and its remote observation, the
+/// table, the legend, and the PR age line.
 pub struct TableFacts<'a> {
     pub default_branch: &'a str,
     pub target: Option<&'a DefaultTarget>,

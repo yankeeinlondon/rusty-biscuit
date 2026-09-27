@@ -153,7 +153,8 @@ fn ahead_behind(target: &str, branch: &str) -> Option<(usize, usize)> {
 }
 
 /// The local default branch measured against its **local tracking ref**
-/// `origin/<default>`, as of the last fetch, the one line above the table.
+/// `origin/<default>`, as of the last fetch: the comparison that opens the
+/// caption above the table.
 /// Nothing here comes from the live remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caption {

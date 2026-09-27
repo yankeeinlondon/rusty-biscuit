@@ -97,8 +97,8 @@ pub fn copy_source(entries: &[WorktreeEntry], fork_branch: Option<&str>) -> Copy
     }
 }
 
-/// Detect the default branch name (main or master) of the repository at the
-/// current directory.
+/// Detect the default branch name of the repository at the current directory;
+/// see [`default_branch_in`].
 pub fn default_branch() -> Result<String, WorktreeError> {
     default_branch_in(Path::new("."))
 }
