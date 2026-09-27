@@ -26,6 +26,30 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
   - .claude/skills/sniff/architecture.md
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+  - sniff/fixes/2026-09-25-recent-commits/plan.md
+  - sniff/fixes/2026-09-25-recent-commits/implementation-log.md
+  - sniff/fixes/2026-09-25-recent-commits/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_code:
+  - sniff/lib/src/filesystem/git/recent_commits/collect.rs
+  - sniff/lib/src/filesystem/repo/ownership.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/tests/l1/recent_commits.rs
+  - sniff/cli/tests/l1/cli.rs
+documentation:
+  - sniff/docs/topics/repo/recent-commits.md
+  - sniff/docs/topics/repo/recent-commits-schema.md
+  - sniff/docs/cli/repo_recent-commits.md
+  - sniff/cli/README.md
+  - sniff/lib/README.md
+  - .claude/skills/sniff/architecture.md
+  - sniff/fixes/2026-09-25-recent-commits/plan.md
+  - sniff/fixes/2026-09-25-recent-commits/implementation-log.md
+completed_phase: 3
+implemented: true
 packages:
   - sniff
   - sniff-cli
@@ -194,3 +218,70 @@ check-tier-coverage sniff`: 0 stranded.
   Linux, native Windows, and WSL2 is Phase 3 Wave 4 work. The new index uses
   the same `normalize_path(root.join(..))` keying as the ownership index,
   which is why Windows risk is expected to be low, but that is unverified.
+
+## Phase 3
+
+Phase 3 is Wave 4 (platform validation) and Wave 5 (acceptance audit). No
+source, test, or product documentation changed. The only edits are to this
+log, the plan, and the spec frontmatter.
+
+### Local verification (macOS)
+
+- Focused nextest (`-p sniff -p sniff-cli --features sniff/remote`, filter
+  `recent_commits|area_lookup|nested_areas|area_membership|shared_area`):
+  154 passed.
+- `just test` (sniff): 2908 passed, 32 skipped. Same as the Phase 2 close.
+- `just lint` (sniff): clean.
+- `cargo clippy -p sniff --all-targets -- -D warnings`, the same with
+  `--features remote`, and `cargo clippy -p sniff-cli --all-targets -- -D
+  warnings`: clean.
+- Doctests (`cargo test -p sniff --features remote --doc`): 96 passed, 22
+  ignored.
+- `just check-tier-coverage sniff`: 0 stranded.
+- `cargo fmt --check -p sniff -p sniff-cli` (check only; nothing
+  reformatted, per the no-formatting rule): the check reports drift in 42 files
+  across both packages. Most of those files were never touched by this
+  fix. In the five changed files, rustfmt reports this many diffs against
+  pre-fix `012858ffc`:
+  `collect.rs` 1→2, `ownership.rs` 0→2, `types.rs` 2→2,
+  `cli/tests/l1/cli.rs` 34→42, `lib/tests/l1/recent_commits.rs` 48→77.
+  This belongs to the separate formatting pass.
+- No rendering changed, so `just test-l2` was not required and was not run.
+
+### Platform evidence
+
+`just cross-check sniff --os all` then `just cross-check sniff-cli --os all`,
+archive mode (the CI producer/consumer path), no extra features or filters.
+Tested tree `2ae698bd0` is HEAD `d6ed07b48` plus the uncommitted plan
+checkbox edit, so its source is identical to HEAD. Because the tree was not
+HEAD's, no `wsl2-ubuntu` receipt was published.
+
+| Host | sniff | sniff-cli |
+|---|---|---|
+| build-linux (ubuntu-latest key `1c3d4c912a977b09` / `cd19fd4f8980daa3`) | 2023 passed, 30 skipped | 862 passed, 7 skipped |
+| build-win-native (windows-latest `900b45cbd9adc7fb` / `bf1d2aea9325f33f`) | 2012 passed, 23 skipped | 858 passed, 7 skipped |
+| build-win WSL2 (consumed as wsl2-ubuntu) | 2023 passed, 30 skipped | 862 passed, 7 skipped |
+
+On each host, every targeted test ran and passed: 19 library tests
+(`recent_commits::area_membership::*`, `recent_commits::attribution::*`, and
+the ownership/types area unit tests) and both CLI regressions. None were
+skipped. Native Windows therefore exercised `\\?\` verbatim-root joins,
+deleted historical paths (C12), moved paths (C11), and the sibling-prefix
+exclusion (C5). The Windows build also emitted two unused-code warnings
+(`programs/windows_apps.rs`, `executable_index.rs`). Neither file is touched
+by this fix.
+
+### Acceptance audit
+
+- The criterion-to-test map is recorded in the plan as the "Wave 5
+  Acceptance Record".
+- A stale-wording scan of `sniff/lib/src`, `sniff/cli/src`, `sniff/docs`,
+  both READMEs, and the sniff skill found no old-contract claims. The one
+  remaining "unattributed" line (a repository-root `README.md`) matches the
+  new contract.
+- `012858ffc..HEAD` changes no `Cargo.toml` or `Cargo.lock`, no CLI source,
+  and adds no network work.
+- The sniff skill needs no update beyond Phase 2's `architecture.md` edit.
+- State: implementation complete, ready for review. The spec stays in its
+  current lifecycle location.
+

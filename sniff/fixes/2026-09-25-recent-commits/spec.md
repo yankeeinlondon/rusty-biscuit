@@ -19,32 +19,22 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: planned
-implemented: false
+status: implemented
+implemented: true
 implemented_by: claude/opus
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 2 (Waves 2 and 3) is complete on macOS only. The fix: a
-    crate-private PackageAreaIndex in sniff/lib/src/filesystem/repo/ownership.rs
-    (non-empty areas keyed as normalize_path(root.join(area)), deepest-ancestor
-    lookup), used by PackageCatalog::resolve in recent_commits/collect.rs for
-    both filtering and attribution, and by
-    RepoInfo::package_area_for_dir_with_index in repo/types.rs in place of its
-    HashSet fallback. Key tests for Phase 3 platform evidence (all L1):
-    sniff l1 `recent_commits::area_membership::*` and
-    `recent_commits::attribution::*`; sniff unit
-    `filesystem::repo::ownership::tests::area_lookup_chooses_the_deepest_area_and_never_the_root_area`
-    and `filesystem::repo::types::tests::an_unowned_directory_in_nested_areas_resolves_to_the_deepest_area`;
-    sniff-cli l1 `cli::test_recent_commits_package_area_selects_shared_area_files_by_location`
-    and `cli::test_repo_aggregate_attributes_shared_area_files_like_the_focused_command`.
-    No cross-OS run was made in Phase 2; Windows is the one to watch, because
-    area keys mix a canonical `\\?\` root with `/`-separated area strings
-    (the same join as the ownership index, which already works there).
-    Baseline after Phase 2: sniff `just test` 2908 passed / 32 skipped, `just
-    lint` and strict clippy for sniff (with and without `remote`) and
-    sniff-cli clean. A content-identical move is not content-diffed, so
-    `git.file_diffs` can be lower than the survivors' file count.
+    All three phases are implemented. Phase 3 changed no source code. Local
+    macOS gates pass: just test (2908), just lint, and clippy with
+    --all-targets -D warnings for sniff (with and without the remote feature)
+    and for sniff-cli. just cross-check runs of sniff and sniff-cli passed on
+    build-linux, build-win-native, and the WSL2 guest build-win. Those runs
+    tested source identical to HEAD d6ed07b48, but the tree carried
+    uncommitted plan edits, so no wsl2-ubuntu receipt was published. For
+    review: cargo fmt --check reports formatting drift in the five changed
+    files, some of it added by this fix. It was left alone because agents may
+    not run cargo fmt; the separate formatting pass should handle it.
 ---
 
 # Recent Commits: Package-Area Filtering
