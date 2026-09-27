@@ -50,7 +50,7 @@ variant changes only the lockfile, as described in its `PROVENANCE.md`.
 | `bun-1.2.0/workspace`, `bun-1.3.3/workspace` | `match` | `null` | `[]` | `[]` |
 | `bun-1.3.3/workspace-edited-comments-trailing-commas` | `match` | `null` | `[]` | `[]` |
 | `uv-0.9.5/workspace`, `uv-0.9.5/virtual-root` | `match` | `null` | `[]` | `[]` |
-| `uv-0.9.5/root-only-workspace` | `match` (both sets empty) | `null` | `[]` | `[]` |
+| `uv-0.9.5/root-only-workspace` | `match` (both sets empty) at the parser and engine level; through detection there is no `UvWorkspace` layer, because the uv detector requires a non-empty `members` (Phase 2 finding) | `null` | `[]` | `[]` |
 | `cargo-1.98.1/workspace`, `cargo-1.77.2/workspace-v3`, `cargo-1.52.0/workspace-v2` | `members_present` | `subset_only` | `[]` | `[]` |
 | `rush-5.179.0/pnpm-workspace` | `match` | `null` | `[]` | `[]` |
 | `npm-6.14.18/single-project` | `unverifiable` | `unsupported_version` | `[]` | `[]` |

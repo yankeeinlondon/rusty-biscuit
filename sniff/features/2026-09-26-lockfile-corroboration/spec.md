@@ -34,36 +34,46 @@ related:
     - 2026-09-21-lockfile-provenance-cost
 human_review: false
 message_to_agent: |-
-    Phase 1 (rulings, fixtures, spikes, matrix) is complete. Read these before Phase 2:
+    Phase 2 (engine, types, pnpm/uv/Cargo) is complete. Read the "## Phase 2" section of
+    implementation-log.md first. Key facts for Phases 3-5:
 
-    1. Owner rulings R1-R11 are in this spec under "## Owner rulings" as ADOPTED DEFAULTS.
-       Treat them as the contract unless the owner has since overridden one.
-    2. `accepted-versions.md` is the test oracle: its "Expected results" table gives the
-       exact status/reason/extra/missing for every fixture and edited variant. The fixtures
-       are in `sniff/lib/tests/fixtures/lockfiles/<tool>-<version>/<case>/`.
-    3. `plan.md` Phase 2/3 tasks now carry "_Phase 1 finding:_" bullets (pnpm non-string keys
-       need `serde_yaml_ng::Value` keys; uv absent `[manifest]` = root-only, not parse_failed;
-       Cargo missing `[[package]]` = parse_failed for corroboration only; npm filters by the
-       locked `packages[""].workspaces` globs; Yarn Classic signature before parsing).
-    4. `spike-s4-evidence-audit.md` lists every lockfile probe site and the R10 signals (none
-       exist yet). Gating reads on presence changes the meaning of the existing unit test
-       `absent_cargo_lock_counts_one_read_attempt_and_no_parse` in detection.rs.
-    5. FIXTURE DISCOVERY: `sniff/lib/tests/fixtures/lockfiles/.ignore` (`/*/`) keeps Sniff's
-       own walks from reporting 61 fixture workspaces as nested layers of this monorepo (the
-       nested-marker walk in nested.rs has no fixture-directory exclusion, unlike the manifest
-       index's `is_fixture_manifest`). Without it, `integration::test_rusty_biscuit_repo_topology_parity`
-       fails. Keep it. It also hides fixtures from `rg`/Grep: use `--no-ignore`, `ls`, or Read.
-       Do NOT change the nested walk's exclusion rules unless the owner decides to; that is a
-       public behavior change. Tests must copy a fixture into a tempdir before detecting it
-       (in place, this monorepo's `.git` and workspaces take over).
-    6. Real `rush.json` has comments, so today's strict `serde_json` parse detects NO Rush layer
-       on the real fixture. This is a Phase 3 Rush prerequisite (JSONC via `jsonc-parser`),
-       not Phase 2 work.
-    7. Parser cost: `serde_yaml_ng` buffers every event and `toml` builds its own tree, so typed
-       YAML/TOML parses do not stream (see `measurements.md` S3). Do not claim streaming; the
-       spec's "no generic tree" rule is met by not materializing a `Value` in Sniff code.
-    8. Something outside the agent session staged part of the Phase 1 output in the git index
-       mid-phase. No agent ran `git add`. Do not assume the index reflects only your own work.
+    1. ENGINE CONTRACT. Each format module exposes `parse(content: &str) -> Outcome`
+       (`Result<ParsedLockfile, String>`; Err = parse_failed). Return
+       `ParsedLockfile::Members(raw paths as written, root allowed)`,
+       `AmbiguousMembership`, or `UnsupportedVersion`. The engine (lockfile/mod.rs) does
+       normalization, root exclusion, comparison, and provenance. npm.rs, yarn.rs, and bun.rs
+       are stubs returning UnsupportedVersion; replace their bodies only. Format selection and
+       precedence live solely in lockfile/sources.rs.
+    2. RUSH. lockfile/rush.rs is a placeholder: it probes the three
+       common/config/rush/<manager lockfile> paths and reports absent / not_requested /
+       unverifiable+unsupported_layout without reading config. Phase 3 replaces `observe`.
+       To compare, call `compare_members(recorded, &["common", "temp"], layer, owned, paths)`
+       in mod.rs (make it pub(super)) and drop the synthetic "." importer first.
+       Config reads must count as manifest parses (R3/R8). The rush.json JSONC detection bug
+       from Phase 1 is still open.
+    3. FALLBACK. lockfile/fallback.rs handles Go/Gradle-root/Bazel single files. Still to do in
+       Phase 3: the Gradle legacy `gradle/dependency-locks/*.lockfile` group, and the Bazel
+       "only when MODULE.bazel exists" gate.
+    4. STORE. Use `ManifestStore::lockfile_presence` for any lockfile probe (it counts
+       filesystem.repo.lockfile_probes + one metadata probe, cached, lexical key) and
+       `ManifestStore::lockfile(path, format)` for reads. Never call `probe_exists` or
+       `std::fs` for a lockfile. The Yarn and Bun detectors already probe through
+       lockfile_presence, so lockfile_probes includes their marker probes (tests pin exact
+       counts with that explanation).
+    5. TEST SEAM. `lockfile::test_seam::fail_metadata(path, kind)` is a #[cfg(test)]
+       per-thread metadata-failure injector that works through full detection.
+    6. UNREACHABLE ROW. A uv workspace with `members = []` gets no layer from the uv detector,
+       so accepted-versions' root-only uv row is proven only at the parser/engine level
+       (annotated in accepted-versions.md). Do not change the uv detector for it without an
+       owner decision.
+    7. R10(c) (glob expander bound) has no signal to use: the expander is unbounded. Its
+       silently dropped walk errors are still an owner decision (S4 §3c); nothing flags them.
+    8. COMMIT. The breaking change needs the `!` marker (R11). The commit message must call
+       out the changed expectations listed in the log (Cargo -> members_present/globbed, uv real
+       layout with the root excluded, absent lockfile = probe not read, CLI test renames, the
+       aggregate snapshot).
+    9. Fixtures stay hidden from rg by `.ignore`. The L1 test lockfile_fixtures.rs copies each
+       fixture into a tempdir; extend its `assert_rows` tables for npm/Yarn/Bun/Rush in Phase 3.
 ---
 
 # Lockfile corroboration for every workspace standard

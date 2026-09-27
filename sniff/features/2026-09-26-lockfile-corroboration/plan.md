@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 1
+phase: 2
 agent: "claude/opus"
 yolo: "true"
 feature: 2026-09-26-lockfile-corroboration
@@ -30,8 +30,53 @@ docs_created_during_phase_1:
     - sniff/fixes/_unscheduled/package-manager-uv-label/spec.md
 skills_files_updated_during_phase_1:
     - .claude/skills/sniff/SKILL.md
+source_files_during_phase_2:
+    - sniff/lib/src/filesystem/repo/lockfile/mod.rs
+    - sniff/lib/src/filesystem/repo/lockfile/sources.rs
+    - sniff/lib/src/filesystem/repo/lockfile/membership.rs
+    - sniff/lib/src/filesystem/repo/lockfile/pnpm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/uv.rs
+    - sniff/lib/src/filesystem/repo/lockfile/cargo.rs
+    - sniff/lib/src/filesystem/repo/lockfile/npm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/yarn.rs
+    - sniff/lib/src/filesystem/repo/lockfile/bun.rs
+    - sniff/lib/src/filesystem/repo/lockfile/rush.rs
+    - sniff/lib/src/filesystem/repo/lockfile/fallback.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/src/filesystem/repo/detection.rs
+    - sniff/lib/src/filesystem/repo/manifest_index.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/src/filesystem/repo/npm.rs
+    - sniff/lib/src/filesystem/repo/standard.rs
+    - sniff/lib/src/filesystem/repo/topology.rs
+    - sniff/lib/src/filesystem/repo/types.rs
+    - sniff/lib/src/filesystem/repo/aggregate_view.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/src/request.rs
+    - sniff/lib/tests/fixtures.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/integration.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/lib/tests/l1/lockfile_fixtures.rs
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+    - claudine/lib/src/events/environment.rs
+docs_updated_during_phase_2:
+    - sniff/lib/README.md
+    - sniff/cli/README.md
+    - sniff/features/2026-09-26-lockfile-corroboration/accepted-versions.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/performance.md
 packages:
     - sniff
+    - sniff-cli
+    - claudine
 ---
 
 # Lockfile corroboration for every workspace standard: implementation plan
@@ -404,7 +449,7 @@ ports pnpm, uv, and Cargo to the new contract.
 
 **Wave 1** (sequential, one agent; it touches the shared core)
 
-- [ ] **Observation types**
+- [x] **Observation types**
   - In a new `sniff/lib/src/filesystem/repo/lockfile/mod.rs`, add
     `LockfileObservation`, `LockfileStatus`, and `LockfileReason`, using the
     serde `rename_all = "snake_case"` values from R5.
@@ -414,7 +459,7 @@ ports pnpm, uv, and Cargo to the new contract.
     `#[serde(default)]`, so old result JSON fails to deserialize by design.
   - Add a `LockfileObservation::not_applicable(reason)` constructor for the
     layer-building sites.
-- [ ] **Fix every constructor and consumer**
+- [x] **Fix every constructor and consumer**
   - Update `topology.rs`, `types.rs`, the `standard.rs` tests,
     `aggregate_view.rs` (its comment references `lockfile_match`),
     `sniff/cli/src/output/repo_json.rs` (4 fixtures), and
@@ -422,14 +467,14 @@ ports pnpm, uv, and Cargo to the new contract.
   - Update the `standard.rs` docs so `PackageProvenance::Lockfile` and
     `MonorepoLayer::provenance` no longer say "committed", and describe the
     exact-`match` rule.
-- [ ] **Candidate table**
+- [x] **Candidate table**
   - In `lockfile/sources.rs`, map `MonorepoStandard` to either `Source::Candidates`
     (an ordered list of `(relative path, Format)`), `Source::Fallback`
     (metadata only), `Source::NotApplicable(reason)`, or `Source::Configured`
     (Rush: the path comes from configuration).
   - This table is the single source of truth. Every one of the 17 standards
     plus `Unknown` must be matched exhaustively, with no wildcard arm.
-- [ ] **Tri-state probe and typed store cache**
+- [x] **Tri-state probe and typed store cache**
   - Extend `ManifestStore` with `lockfile_presence(path) -> Present | Absent |
     Failed(kind)`, cached. It uses `symlink_metadata` and then follows links as
     today, and treats a directory as present, so the read fails later with
@@ -442,7 +487,7 @@ ports pnpm, uv, and Cargo to the new contract.
   - Wire the existing lockfile probe sites that S4 found reachable to share
     this cache.
   - Add the R9 `#[cfg(test)]` metadata-failure seam.
-- [ ] **Selection state machine**
+- [x] **Selection state machine**
   - `observe_layer_lockfile(layer, request, store, seeds) -> LockfileObservation`
     implements the precedence rules in steps 1–5 of the spec, exactly in that
     order.
@@ -450,7 +495,7 @@ ports pnpm, uv, and Cargo to the new contract.
     always probed. It reads contents only when
     `request.wants_lockfile_provenance()`.
   - Replace the gated loop at `detection.rs:747` with an unconditional loop.
-- [ ] **Path normalization and comparison**
+- [x] **Path normalization and comparison**
   - `lockfile/membership.rs` does component-wise normalization:
     - `.` and trailing separators are removed, leading dots in names are kept,
       `..` resolves against a per-format base, and case is preserved;
@@ -462,7 +507,7 @@ ports pnpm, uv, and Cargo to the new contract.
     - no intersection before comparison;
     - sorted `extra` and `missing` sets are computed.
   - An incomplete manifest-side set (R10) short-circuits to `unverifiable`.
-- [ ] **Provenance upgrade**
+- [x] **Provenance upgrade**
   - On `match` only, set `layer.provenance` and the provenance of seeds this
     layer owns (by ownership, not by bare `relative` match) to `Lockfile`.
   - Nested or overlapping layers never overwrite another authority's seeds.
@@ -470,7 +515,7 @@ ports pnpm, uv, and Cargo to the new contract.
     `uv_lockfile_matches`, and `cargo_lockfile_matches`. Also delete
     `normalize_layer_package_relative` and `layer_relative_path` if nothing
     else uses them.
-- [ ] **Stub every format**
+- [x] **Stub every format**
   - Create `lockfile/{pnpm,npm,yarn,bun,uv,cargo,rush,fallback}.rs`, each
     exposing `parse(content) -> Outcome`. Formats not yet implemented return
     `Unsupported` so the engine yields `unverifiable`.
@@ -478,7 +523,7 @@ ports pnpm, uv, and Cargo to the new contract.
 
 **Wave 2** (concurrent; each task owns one format file and its tests)
 
-- [ ] **pnpm parser**
+- [x] **pnpm parser**
   - Apply `pnpm-typed-parser.patch` into `lockfile/pnpm.rs` and fix three
     things:
     - capture `lockfileVersion` and classify it against the matrix;
@@ -494,7 +539,7 @@ ports pnpm, uv, and Cargo to the new contract.
     (`spike-s3-parsers.md`).
   - Add parity against a `#[cfg(test)]` generic `serde_yaml_ng::Value`
     reference on the S1 fixtures.
-- [ ] **uv parser**
+- [x] **uv parser**
   - Implement the layout confirmed by S3 in `lockfile/uv.rs`:
     - check `version` and `revision`;
     - map `[manifest].members` names to paths through `package[].source.
@@ -506,7 +551,7 @@ ports pnpm, uv, and Cargo to the new contract.
   - _Phase 1 finding:_ uv omits `[manifest]` when the root is the only
     member, so an absent `[manifest]` is the root-only set (empty after root
     exclusion), not `parse_failed`. Accept `version = 1`, `revision = 3`.
-- [ ] **Cargo partial evidence**
+- [x] **Cargo partial evidence**
   - In `manifest_index.rs`/`lockfile/cargo.rs`, make the typed `Cargo.lock`
     parse keep `name`, `version`, and whether `source` is present. Keep one
     parse per request shared with `CargoLockVersions`, as the spec requires.
@@ -519,7 +564,7 @@ ports pnpm, uv, and Cargo to the new contract.
     for corroboration only; `CargoLockVersions` keeps its empty-index result.
     v2 is accepted by signature (no `version` key and no `[metadata]` table);
     v1 is `unsupported_version`. See `accepted-versions.md`.
-- [ ] **Validation checkpoint 2**
+- [x] **Validation checkpoint 2**
   - `cargo check --workspace --all-targets` compiles, including Claudine.
   - `just test` in `sniff/` passes after updating `lockfile_provenance.rs`,
     `integration.rs`, and the `detection.rs` unit tests. Cargo's old
