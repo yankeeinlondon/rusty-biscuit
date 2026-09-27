@@ -32,6 +32,38 @@ owner: Ken Snyder <ken@ken.net>
 origin: review 3 of 2026-09-21-lockfile-provenance-cost
 related:
     - 2026-09-21-lockfile-provenance-cost
+human_review: false
+message_to_agent: |-
+    Phase 1 (rulings, fixtures, spikes, matrix) is complete. Read these before Phase 2:
+
+    1. Owner rulings R1-R11 are in this spec under "## Owner rulings" as ADOPTED DEFAULTS.
+       Treat them as the contract unless the owner has since overridden one.
+    2. `accepted-versions.md` is the test oracle: its "Expected results" table gives the
+       exact status/reason/extra/missing for every fixture and edited variant. The fixtures
+       are in `sniff/lib/tests/fixtures/lockfiles/<tool>-<version>/<case>/`.
+    3. `plan.md` Phase 2/3 tasks now carry "_Phase 1 finding:_" bullets (pnpm non-string keys
+       need `serde_yaml_ng::Value` keys; uv absent `[manifest]` = root-only, not parse_failed;
+       Cargo missing `[[package]]` = parse_failed for corroboration only; npm filters by the
+       locked `packages[""].workspaces` globs; Yarn Classic signature before parsing).
+    4. `spike-s4-evidence-audit.md` lists every lockfile probe site and the R10 signals (none
+       exist yet). Gating reads on presence changes the meaning of the existing unit test
+       `absent_cargo_lock_counts_one_read_attempt_and_no_parse` in detection.rs.
+    5. FIXTURE DISCOVERY: `sniff/lib/tests/fixtures/lockfiles/.ignore` (`/*/`) keeps Sniff's
+       own walks from reporting 61 fixture workspaces as nested layers of this monorepo (the
+       nested-marker walk in nested.rs has no fixture-directory exclusion, unlike the manifest
+       index's `is_fixture_manifest`). Without it, `integration::test_rusty_biscuit_repo_topology_parity`
+       fails. Keep it. It also hides fixtures from `rg`/Grep: use `--no-ignore`, `ls`, or Read.
+       Do NOT change the nested walk's exclusion rules unless the owner decides to; that is a
+       public behavior change. Tests must copy a fixture into a tempdir before detecting it
+       (in place, this monorepo's `.git` and workspaces take over).
+    6. Real `rush.json` has comments, so today's strict `serde_json` parse detects NO Rush layer
+       on the real fixture. This is a Phase 3 Rush prerequisite (JSONC via `jsonc-parser`),
+       not Phase 2 work.
+    7. Parser cost: `serde_yaml_ng` buffers every event and `toml` builds its own tree, so typed
+       YAML/TOML parses do not stream (see `measurements.md` S3). Do not claim streaming; the
+       spec's "no generic tree" rule is met by not materializing a `Value` in Sniff code.
+    8. Something outside the agent session staged part of the Phase 1 output in the git index
+       mid-phase. No agent ran `git add`. Do not assume the index reflects only your own work.
 ---
 
 # Lockfile corroboration for every workspace standard
@@ -112,6 +144,8 @@ implemented by the CLI.
 | `absent` | All applicable, selected lockfile candidates were probed and are missing |
 | `not_applicable` | The authority has no applicable lockfile source in the supported configuration |
 | `not_requested` | A candidate exists, but the request disabled content-based corroboration |
+| `members_present` | Cargo only (ruling R1): every manifest member has a matching source-less lockfile entry; set equality is not claimed |
+| `members_missing` | Cargo only (ruling R1): at least one manifest member has no matching source-less lockfile entry |
 
 The object has these fields, always serialized with the indicated empty value:
 
@@ -120,10 +154,11 @@ The object has these fields, always serialized with the indicated empty value:
 | `status` | One of the snake-case values above |
 | `paths` | Sorted, unique lockfile paths relative to the layer root; `[]` when none is known to exist |
 | `reason` | Stable machine-readable reason, or `null` for ordinary match/mismatch/absence; distinguish unsupported version, unsupported layout, no membership data, ambiguous membership, and metadata/read/parse failure |
-| `extra` | Sorted, unique layer-relative member paths present only in the lockfile; `[]` unless `mismatch` |
-| `missing` | Sorted, unique layer-relative member paths present only in the manifest; `[]` unless `mismatch` |
+| `extra` | Sorted, unique layer-relative member paths present only in the lockfile; `[]` unless `mismatch` (always `[]` for Cargo) |
+| `missing` | Sorted, unique layer-relative member paths present only in the manifest; `[]` unless `mismatch` or `members_missing` |
 
-Use `request_disabled` for `not_requested`, and distinguish
+The complete `reason` vocabulary is frozen by ruling R5 under **Owner
+rulings**. Use `request_disabled` for `not_requested`, and distinguish
 `no_lockfile_source` from `unknown_standard` for `not_applicable`. An optional
 human-readable diagnostic may include the failed candidate path, but must not
 include lockfile contents or be needed to interpret `reason`. Final Rust type
@@ -142,6 +177,24 @@ For example, a pnpm lockfile that omits one current member reports:
   "missing": ["packages/ui"]
 }
 ```
+
+### Repository-level standalone lockfiles
+
+Ruling R2 adds `standalone_lockfiles` to the repository result for Poetry, PDM,
+and Composer lockfiles that no workspace layer covers. Each entry has these
+fields, always serialized by the library:
+
+| Field | Contract |
+|---|---|
+| `root` | Repository-relative, `/`-separated root the file was found at; `""` for the repository root |
+| `tool` | `poetry`, `pdm`, or `composer` |
+| `status` | `not_requested`, `unverifiable`, or `unreadable`; an absent file produces no entry |
+| `paths` | Sorted lockfile paths relative to `root` |
+| `reason` | `request_disabled`, `no_membership_data`, or `metadata_failed` |
+| `extra`, `missing` | Always `[]` |
+
+The library always serializes the list (`[]` when empty); the CLI omits an
+empty list under the rule it applies to `monorepo_layers`.
 
 ### Selection and state precedence
 
@@ -222,9 +275,9 @@ All rows also obey the absence, error, and disabled-request rules above.
 | `NpmWorkspaces` | `npm-shrinkwrap.json`, otherwise `package-lock.json` | Compare supported v2/v3 workspace records; v1 is `unverifiable` |
 | `YarnWorkspaces` | `yarn.lock` | Compare supported Berry workspace resolutions; Classic is `unverifiable` |
 | `BunWorkspaces` | `bun.lock`, otherwise `bun.lockb` | Compare supported text workspace records; binary is `unverifiable` |
-| `CargoWorkspace` | `Cargo.lock` | Exact membership is not recoverable directly; resolve the Cargo open question |
+| `CargoWorkspace` | `Cargo.lock` | Exact membership is not recoverable directly; `members_present` or `members_missing` per ruling R1, never `match`/`mismatch` |
 | `UvWorkspace` | `uv.lock` | Compare supported member identities mapped to recorded local package paths |
-| `RushStack` | Manager/configuration-selected committed lockfiles | Compare supported pnpm layouts after translating importer paths; resolve the layout boundary below |
+| `RushStack` | Manager/configuration-selected lockfiles | Compare the ordinary single pnpm workspace layout after translating importer paths; every other layout is `unverifiable` + `unsupported_layout` (ruling R3) |
 | `GoWorkspace` | `go.work.sum` | `unverifiable`; checksums do not enumerate workspace members |
 | `GradleMultiProject` | Root `gradle.lockfile` or legacy root `gradle/dependency-locks/` files | `unverifiable`; dependency locks do not establish project membership |
 | `Bazel` | `MODULE.bazel.lock` when Bzlmod applies | `unverifiable`; external module resolution is not local package membership |
@@ -402,7 +455,158 @@ the root and area dependency documentation.
 - Reading installed dependency trees or executing package-manager commands.
 - Changing package-manager detection without resolving its scope question below.
 
+## Owner rulings
+
+> **Adopted default — override before Phase 2.** The plan runs with
+> `yolo: true`, so each ruling below adopts the recommended option of the
+> matching open question, with a concrete wire shape. The owner may override
+> any ruling before Phase 2 starts. An override of R1, R2, or R5 changes the
+> wire contract, so it must update this spec and the plan first. This spec
+> stays `draft-spec` until the owner confirms.
+
+### R1: Cargo reports partial evidence under separate statuses
+
+- Two Cargo-only statuses are added: `members_present` and `members_missing`.
+  `match` and `mismatch` keep their exact set-equality meaning on every
+  ecosystem, and Cargo never produces either one.
+- A member counts as present when `Cargo.lock` has a `[[package]]` entry with
+  the member's name, the member's resolved manifest version (including
+  `version.workspace = true` inheritance), and **no** `source`.
+- `members_missing` lists the absent members, as layer-relative paths, in
+  `missing`. `extra` is always `[]` for Cargo, because stale extra members
+  cannot be recovered from `Cargo.lock`. `reason` is `subset_only` on both
+  statuses, so no consumer can read either one as equality.
+- Neither status upgrades provenance. Only `match` upgrades to `Lockfile`.
+- The `Cargo.lock` parse keeps `source`. The dependency-version lookup
+  (`CargoLockVersions::resolve`) keeps its current results byte for byte,
+  proven by a parity test.
+- A `Cargo.lock` without a numeric `version` key is v1 or v2. Classify it by
+  its format signature, recorded in `accepted-versions.md`.
+
+### R2: Standalone Python and PHP lockfiles are repository-level observations
+
+- **Wire location:** `RepoInfo.standalone_lockfiles`, a list that is always
+  serialized by the library (`[]` when empty). The CLI JSON projection omits
+  the empty array under the same rule it applies to `monorepo_layers`.
+- **Entry fields:** `root` (repository-relative, `/`-separated, `""` for the
+  repository root), `tool` (`poetry` | `pdm` | `composer`), plus the same
+  `status`, `paths`, `reason`, `extra`, and `missing` fields as a layer's
+  `lockfile` object. `paths` is relative to `root`.
+- **Roots probed:** the requested project root and every already-discovered
+  package root. Reuse manifest-index evidence where it exists. Add no
+  descendant walk and no `vendor/` or `.venv` search.
+- **Candidates:** `poetry.lock`, `pdm.lock`, `composer.lock`.
+- **Absence:** an absent file produces **no entry**.
+- **Present file:** `not_requested` with `request_disabled` when corroboration
+  is disabled, otherwise `unverifiable` with `no_membership_data`. A metadata
+  error produces `unreadable` with `metadata_failed`.
+- **Deduplication:** entries are unique by `(root, tool)`. A root that is also
+  a workspace layer root still gets a standalone entry, because no layer
+  authority covers these tools.
+- Standalone Go modules (`go.sum`) are out of scope. Decision 2 covers Go only
+  through `GoWorkspace` layers.
+
+### R3: Rush compares only the ordinary single pnpm workspace layout
+
+- The supported layout requires all of the following:
+  - `rush.json` declares `pnpmVersion`;
+  - subspaces are not enabled (`common/config/rush/subspaces.json` is absent
+    or sets `subspacesEnabled: false`);
+  - the pnpm configuration does not disable workspaces (`useWorkspaces`);
+  - no variant directory exists under `common/config/rush/variants/`.
+- In that layout the candidate is `common/config/rush/pnpm-lock.yaml`, and its
+  importer keys resolve against `common/temp`.
+- Every other layout reports `unverifiable` with `unsupported_layout` and any
+  confidently identified paths: `npmVersion` and `yarnVersion` managers,
+  enabled subspaces, the legacy non-workspace install, and variants.
+- The Rush configuration files are manifests, not lockfiles. They are read only
+  when corroboration is enabled, and each read counts as a manifest parse.
+
+### R4: Package-manager detection stays separate
+
+The uv-labeled-as-pip gap is tracked as the unscheduled fix
+`package-manager-uv-label`. This feature does not change
+`detect_package_managers`.
+
+### R5: Status and reason vocabulary (frozen wire contract)
+
+- **`status`** (snake_case): `match`, `mismatch`, `members_present`,
+  `members_missing`, `unverifiable`, `unreadable`, `absent`,
+  `not_applicable`, `not_requested`.
+- **`reason`** (snake_case):
+
+  | Reason | Used with |
+  |---|---|
+  | `request_disabled` | `not_requested` |
+  | `no_lockfile_source` | `not_applicable` |
+  | `unknown_standard` | `not_applicable` |
+  | `unsupported_version` | `unverifiable` |
+  | `unsupported_layout` | `unverifiable` |
+  | `no_membership_data` | `unverifiable`, including fallback formats and binary `bun.lockb` |
+  | `ambiguous_membership` | `unverifiable`, when the name-to-path mapping is ambiguous |
+  | `incomplete_manifest_discovery` | `unverifiable` |
+  | `invalid_member_path` | `unverifiable`, for absolute or unrepresentable paths |
+  | `metadata_failed` | `unreadable` |
+  | `read_failed` | `unreadable`, including a directory where a file is expected and a file that vanished between probe and read |
+  | `parse_failed` | `unreadable`, for invalid syntax or invalid required membership fields |
+  | `subset_only` | Cargo `members_present` and `members_missing` |
+
+- `reason` is `null` for `match`, `mismatch`, and `absent`.
+- The wire object has no human-readable diagnostic field. Failure detail (the
+  candidate path and the error kind, never file contents) goes to
+  `tracing::debug!` only.
+
+### R6: `paths` contains only the selected source
+
+- `npm-shrinkwrap.json` beats `package-lock.json`, and `bun.lock` beats
+  `bun.lockb`. Only the winning file appears in `paths`.
+- Legacy Gradle is the one multi-file group: `paths` lists each concrete
+  `*.lockfile` directly under the root `gradle/dependency-locks/`.
+- When the selected file fails or has an unsupported version, no
+  lower-priority file is tried.
+
+### R7: Authority selection is not revisited
+
+Corroboration uses `layer.authority` as already selected. Nx, Turborepo, and
+Lerna never produce a layer of their own.
+
+### R8: Counter vocabulary
+
+- `filesystem.repo.lockfile_probes` is added for lockfile metadata probes.
+- The existing lockfile read and parse counters keep their meanings: reads
+  count attempted content opens, and parses count parser invocations after a
+  successful read.
+- The shared file-open, bytes-read, and metadata-probe counters stay at their
+  shared increment points.
+- Rush configuration reads count as manifest parses.
+
+### R9: Deterministic failure injection
+
+- A read failure is injected with a directory in place of the lockfile, which
+  fails on every OS.
+- A metadata failure is injected through a `#[cfg(test)]` probe seam in the
+  request-local store, because Unix mode bits are not portable.
+- Unix permission tests may be extras, but none is the only proof of a
+  behavior.
+
+### R10: Signal for incomplete manifest discovery
+
+A layer's manifest-side set is incomplete when any of these holds: a declared
+member has no resolved package, a member manifest failed to parse, or the glob
+expander reported its bound. Where no existing signal covers one of these, add
+a crate-private flag on the layer outcome. Never infer completeness.
+
+### R11: Breaking-change commit convention
+
+Library and CLI commits that remove `lockfile_match` use the `!` conventional
+commit marker (for example `feat(sniff)!:`) so release tooling bumps the
+version correctly.
+
 ## Open questions
+
+> Each question below is answered by an adopted-default ruling above: Cargo by
+> R1, standalone Python and PHP by R2, Rush by R3, and package-manager
+> detection by R4. The option analysis is kept as the record of why.
 
 ### How should Cargo report useful but incomplete evidence?
 

@@ -205,6 +205,16 @@ artifacts, include passive corpus coverage plus an end-to-end CLI test through
 the real shipped artifact. Do not run workspace-wide Cargo gates for a
 Sniff-only change; include only dependency-derived downstream packages.
 
+Real-tool lockfile fixtures live in `sniff/lib/tests/fixtures/lockfiles/<tool>-<version>/<case>/`,
+each with a `PROVENANCE.md`; the accepted-version matrix is
+`sniff/features/2026-09-26-lockfile-corroboration/accepted-versions.md`. The
+nested-marker walk has no fixture-directory exclusion (unlike the manifest
+index's `is_fixture_manifest`), so a `.ignore` there keeps Sniff from reporting
+each fixture as a layer of this monorepo. That `.ignore` also hides the files
+from `rg`/Grep (use `--no-ignore`). Copy a fixture into a temporary directory
+before detecting it: in place, the enclosing monorepo's `.git` and workspaces
+take over.
+
 Level 1 `sniff-cli` integration tests obtain the binary through
 `cli/tests/common::SniffCliFixture`. Its default command pins disposable
 cwd/home/config/cache/install roots and a bounded PATH; use the named
