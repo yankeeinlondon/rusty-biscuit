@@ -12,13 +12,19 @@ use crate::components::prose::Prose;
 
 /// A dotted, indentation-aware path to a YAML mapping key within frontmatter.
 ///
-/// Used by [`SourceContext::focused_yaml_excerpt`] to identify which keys an
-/// error involves, so the excerpt can show only those keys plus their
-/// structural ancestors (e.g. a `$schema:` parent) instead of the whole
-/// frontmatter block.
+/// Used by [`SourceContext::focused_yaml_regions`] and
+/// [`SourceContext::focused_yaml_excerpt`] to identify which keys an error
+/// involves, so the excerpt can show only those keys plus their structural
+/// ancestors (e.g. a `$schema:` parent) instead of the whole frontmatter block.
+///
+/// When a segment's parent value is a sequence of mappings (`- key: …` items),
+/// the segment matches the key in the first item that has it. Use
+/// [`in_every_arm`](Self::in_every_arm) to match it in every item instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YamlKeyPath {
     segments: Vec<String>,
+    /// Index of the segment matched in every sequence item of its parent.
+    every_arm: Option<usize>,
 }
 
 impl YamlKeyPath {
@@ -33,13 +39,41 @@ impl YamlKeyPath {
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect();
-        Self { segments }
+        Self {
+            segments,
+            every_arm: None,
+        }
     }
 
     /// Build a key path from explicit, root-first segments.
     pub fn new(segments: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             segments: segments.into_iter().map(Into::into).collect(),
+            every_arm: None,
+        }
+    }
+
+    /// Build a path to `key` inside every sequence item (union arm) of the
+    /// dotted `parent`.
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use biscuit_terminal::errors::YamlKeyPath;
+    ///
+    /// // Matches `doc:` in both `- spec: …` and `- design: …` arms of
+    /// // a `$schema:` sequence.
+    /// let path = YamlKeyPath::in_every_arm("$schema", "doc");
+    /// assert_eq!(path.segments(), ["$schema", "doc"]);
+    /// ```
+    pub fn in_every_arm(parent: impl AsRef<str>, key: impl AsRef<str>) -> Self {
+        let parent = Self::dotted(parent);
+        let every_arm = Some(parent.segments.len());
+        let mut segments = parent.segments;
+        segments.extend(Self::dotted(key).segments);
+        Self {
+            segments,
+            every_arm,
         }
     }
 
@@ -143,6 +177,74 @@ impl SourceContext {
         Prose::new(buf)
     }
 
+    /// Select the frontmatter lines that show `keys`: each located key line,
+    /// its value, `context` lines either side, and its ancestor header lines.
+    ///
+    /// Ancestors (a `$schema:` parent, or the `- …` line opening a union arm)
+    /// are always included, even outside the window. Overlapping or adjacent
+    /// selections merge, so each returned region is one contiguous run and
+    /// consecutive regions are separated by at least one unselected line.
+    ///
+    /// ## Returns
+    ///
+    /// Regions in ascending line order, with 1-based line numbers absolute
+    /// within [`content`](Self::content). Windows are clamped to the
+    /// frontmatter block, whose `---` delimiter lines they may include.
+    ///
+    /// `None` when there is no frontmatter, no requested key resolves, or the
+    /// block uses anchors, aliases, or merge keys (`&`, `*`, `<<`), which make
+    /// a partial slice misleading. Unresolved keys are otherwise ignored.
+    /// There is no whole-block fallback.
+    pub fn focused_yaml_regions(
+        &self,
+        keys: &[YamlKeyPath],
+        context: usize,
+    ) -> Option<Vec<FocusedRegion>> {
+        let range = self.frontmatter.as_ref()?;
+        let block = &self.content[range.clone()];
+        if has_unsafe_yaml_features(block) {
+            return None;
+        }
+        let lines: Vec<&str> = block.lines().collect();
+        let last = lines.len().checked_sub(1)?;
+
+        let mut shown: BTreeSet<usize> = BTreeSet::new();
+        let mut highlighted: BTreeSet<usize> = BTreeSet::new();
+        for path in keys {
+            for found in locate_key_regions(&lines, path) {
+                let start = found.target.start().saturating_sub(context);
+                let end = found.target.end().saturating_add(context).min(last);
+                shown.extend(start..=end);
+                shown.extend(found.ancestors);
+                highlighted.insert(*found.target.start());
+            }
+        }
+        if highlighted.is_empty() {
+            return None;
+        }
+
+        // Block index 0 is the source line after `range.start`'s newlines.
+        let first_line = self.content[..range.start].matches('\n').count() + 1;
+        let mut regions: Vec<FocusedRegion> = Vec::new();
+        for idx in shown {
+            let line = first_line + idx;
+            match regions.last_mut() {
+                Some(region) if region.end_line + 1 == line => region.end_line = line,
+                _ => regions.push(FocusedRegion {
+                    start_line: line,
+                    end_line: line,
+                    highlighted: Vec::new(),
+                }),
+            }
+            if highlighted.contains(&idx)
+                && let Some(region) = regions.last_mut()
+            {
+                region.highlighted.push(line);
+            }
+        }
+        Some(regions)
+    }
+
     /// Render a focused, structure-aware excerpt of the frontmatter that shows
     /// only the lines for `keys` plus the structural ancestors that give them
     /// context (e.g. a `$schema:` parent), with elision markers (`⋮`) between
@@ -156,46 +258,40 @@ impl SourceContext {
     /// ## Returns
     ///
     /// A fenced `yaml` [`Prose`] block whose 1-based gutter numbers match the
-    /// source file (frontmatter opens on line 1).
+    /// source file.
     ///
     /// ## Notes
     ///
-    /// Falls back to a whole-frontmatter numbered excerpt when there is no
-    /// frontmatter, `keys` is empty, none of the requested paths resolve, or
-    /// the block uses YAML features that prevent safe non-contiguous slicing
-    /// (anchors, aliases, merge keys). This keeps the method total — it never
-    /// guesses a partial slice.
+    /// The lines are those of [`focused_yaml_regions`](Self::focused_yaml_regions)
+    /// with no surrounding context. Where that returns `None`, this falls back
+    /// to a whole-frontmatter numbered excerpt, which keeps the method total —
+    /// it never guesses a partial slice.
     pub fn focused_yaml_excerpt(&self, keys: &[YamlKeyPath]) -> Prose {
-        self.try_focused_yaml_excerpt(keys)
-            .unwrap_or_else(|| self.whole_frontmatter_excerpt())
+        match self.focused_yaml_regions(keys, 0) {
+            Some(regions) => self.render_regions(&regions),
+            None => self.whole_frontmatter_excerpt(),
+        }
     }
 
-    /// Attempt the focused slice; `None` triggers the whole-block fallback.
-    fn try_focused_yaml_excerpt(&self, keys: &[YamlKeyPath]) -> Option<Prose> {
-        if keys.is_empty() {
-            return None;
-        }
-        let range = self.frontmatter.as_ref()?;
-        let block = &self.content[range.clone()];
-        if has_unsafe_yaml_features(block) {
-            return None;
-        }
-        let lines: Vec<&str> = block.lines().collect();
+    /// Render `regions` as one fenced `yaml` block with absolute gutter line
+    /// numbers and an elision marker between regions.
+    fn render_regions(&self, regions: &[FocusedRegion]) -> Prose {
+        let lines: Vec<&str> = self.content.lines().collect();
+        let max_line = regions.last().map_or(1, |r| r.end_line);
+        let width = max_line.to_string().len().max(1);
 
-        // Union each key's ancestor header lines with its own value range.
-        let mut shown: BTreeSet<usize> = BTreeSet::new();
-        let mut any = false;
-        for path in keys {
-            if let Some(region) = locate_key_region(&lines, path) {
-                any = true;
-                shown.extend(region.ancestors);
-                shown.extend(region.target);
+        let mut buf = String::from("```yaml\n");
+        for (idx, region) in regions.iter().enumerate() {
+            if idx > 0 {
+                writeln!(buf, "  {blank:>width$} ⋮", blank = "", width = width).unwrap();
+            }
+            for n in region.start_line..=region.end_line {
+                let line = lines.get(n - 1).copied().unwrap_or_default();
+                writeln!(buf, "  {n:>width$} │ {line}", width = width).unwrap();
             }
         }
-        if !any {
-            return None;
-        }
-        Some(render_focused(&lines, &shown))
+        buf.push_str("```");
+        Prose::new(buf)
     }
 
     /// Render the entire frontmatter block as a gutter-numbered `yaml` excerpt.
@@ -218,8 +314,23 @@ impl SourceContext {
     }
 }
 
-/// The lines (0-based into the frontmatter block) involved in showing one key
-/// path: the ancestor header lines plus the target key's own value range.
+/// One contiguous run of frontmatter lines selected by
+/// [`SourceContext::focused_yaml_regions`].
+///
+/// Line numbers are 1-based and absolute within [`SourceContext::content`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusedRegion {
+    /// First line of the run.
+    pub start_line: usize,
+    /// Last line of the run, inclusive.
+    pub end_line: usize,
+    /// Lines within the run that name a requested key, ascending.
+    pub highlighted: Vec<usize>,
+}
+
+/// The lines (0-based into the frontmatter block) involved in showing one
+/// match of a key path: the ancestor header lines plus the target key's own
+/// value range.
 struct KeyRegion {
     /// Ancestor header line indices, root-first, excluding the target key.
     ancestors: Vec<usize>,
@@ -227,106 +338,160 @@ struct KeyRegion {
     target: std::ops::RangeInclusive<usize>,
 }
 
-/// Locate the ancestor header lines and value range for `path` within `lines`.
+/// The mapping-key shape of one frontmatter line.
+struct LineShape<'a> {
+    indent: isize,
+    /// Column of the key: after the `- ` marker on a sequence-item line,
+    /// otherwise `indent`.
+    key_col: isize,
+    key: Option<&'a str>,
+    /// The line opens a sequence item (`- …`).
+    item: bool,
+    /// Neither blank nor a comment.
+    meaningful: bool,
+}
+
+impl<'a> LineShape<'a> {
+    fn parse(line: &'a str) -> Self {
+        let indent = indent_of(line);
+        let trimmed = line.trim_start();
+        let meaningful = !is_blank_or_comment(line);
+        let item = trimmed == "-" || trimmed.starts_with("- ");
+        if !item {
+            return Self {
+                indent,
+                key_col: indent,
+                key: key_name(line),
+                item,
+                meaningful,
+            };
+        }
+        let rest = &trimmed[1..];
+        let body = rest.trim_start();
+        // An empty marker line's mapping starts on the next line, two columns in.
+        let key_col = if body.is_empty() {
+            indent + 2
+        } else {
+            indent + 1 + (rest.len() - body.len()) as isize
+        };
+        Self {
+            indent,
+            key_col,
+            key: key_name(body),
+            item,
+            meaningful,
+        }
+    }
+
+    /// Whether this line belongs to the value of a key whose key column is
+    /// `key_col`: deeper lines, or sequence items at the key's own column.
+    fn in_value_of(&self, key_col: isize) -> bool {
+        self.indent > key_col || (self.item && self.indent == key_col)
+    }
+}
+
+/// Locate every match of `path` within `lines`.
 ///
-/// Walks each dotted segment by indentation (the same scheme as Claudine's
+/// Walks each segment by indentation (the same scheme as Claudine's
 /// `locate_property_line`, reproduced here because `biscuit-terminal` is below
-/// Claudine in the dependency graph; the two converge in a later phase), then
-/// extends the final segment's range over any more-deeply-indented value lines.
-/// Returns `None` when any segment cannot be found.
-fn locate_key_region(lines: &[&str], path: &YamlKeyPath) -> Option<KeyRegion> {
-    let segments = path.segments();
-    if segments.is_empty() {
-        return None;
+/// Claudine in the dependency graph). Each sequence item is its own scope; a
+/// segment inside a sequence matches in the first item that has it, or in
+/// every item for the path's every-arm segment. Empty when nothing resolves.
+fn locate_key_regions(lines: &[&str], path: &YamlKeyPath) -> Vec<KeyRegion> {
+    let mut found = Vec::new();
+    if !path.segments().is_empty() {
+        let shapes: Vec<LineShape> = lines.iter().map(|l| LineShape::parse(l)).collect();
+        let mut walk = KeyWalk {
+            shapes: &shapes,
+            path,
+            ancestors: Vec::new(),
+            found: &mut found,
+        };
+        walk.scope(0..lines.len(), 0);
     }
-
-    let mut ancestors: Vec<usize> = Vec::new();
-    let mut target_line: Option<usize> = None;
-    // Top-level keys sit at indent >= 0; the synthetic root indent is below 0.
-    let mut parent_indent: isize = -1;
-    let mut lo = 0usize;
-
-    for (seg_idx, segment) in segments.iter().enumerate() {
-        let mut level_indent: Option<isize> = None;
-        let mut matched: Option<usize> = None;
-
-        for (idx, line) in lines.iter().enumerate().skip(lo) {
-            if is_blank_or_comment(line) {
-                continue;
-            }
-            let indent = indent_of(line);
-            // A line at or shallower than the parent ends the parent's scope.
-            if indent <= parent_indent {
-                break;
-            }
-            // The first meaningful line fixes the indentation for this level.
-            let level = *level_indent.get_or_insert(indent);
-            if indent != level {
-                continue;
-            }
-            if key_name(line) == Some(segment.as_str()) {
-                matched = Some(idx);
-                break;
-            }
-        }
-
-        let idx = matched?;
-        if seg_idx + 1 == segments.len() {
-            target_line = Some(idx);
-        } else {
-            ancestors.push(idx);
-        }
-        parent_indent = indent_of(lines[idx]);
-        lo = idx + 1;
-    }
-
-    let target_start = target_line?;
-    let target_indent = indent_of(lines[target_start]);
-    // Extend over the value: subsequent non-blank lines more indented than the
-    // key belong to its value (a nested mapping or multi-line scalar).
-    let mut target_end = target_start;
-    for (idx, line) in lines.iter().enumerate().skip(target_start + 1) {
-        if is_blank_or_comment(line) {
-            break;
-        }
-        if indent_of(line) > target_indent {
-            target_end = idx;
-        } else {
-            break;
-        }
-    }
-
-    Some(KeyRegion {
-        ancestors,
-        target: target_start..=target_end,
-    })
+    found
 }
 
-/// Render the `shown` line indices as a fenced `yaml` block with gutter line
-/// numbers, inserting an elision marker between non-adjacent regions.
-fn render_focused(lines: &[&str], shown: &BTreeSet<usize>) -> Prose {
-    let max_line = shown.iter().max().map(|&i| i + 1).unwrap_or(1);
-    let width = max_line.to_string().len().max(1);
-
-    let mut buf = String::from("```yaml\n");
-    let mut prev: Option<usize> = None;
-    for &idx in shown {
-        if let Some(p) = prev
-            && idx > p + 1
-        {
-            // Gap between regions: align the marker under the gutter separator.
-            writeln!(buf, "  {blank:>width$} ⋮", blank = "", width = width).unwrap();
-        }
-        writeln!(buf, "  {n:>width$} │ {line}", n = idx + 1, line = lines[idx], width = width)
-            .unwrap();
-        prev = Some(idx);
-    }
-    buf.push_str("```");
-    Prose::new(buf)
+struct KeyWalk<'s, 'a> {
+    shapes: &'s [LineShape<'a>],
+    path: &'s YamlKeyPath,
+    ancestors: Vec<usize>,
+    found: &'s mut Vec<KeyRegion>,
 }
 
-/// Conservatively detect YAML features that make non-contiguous slicing unsafe,
-/// signalling the caller to fall back to a whole-block excerpt.
+impl KeyWalk<'_, '_> {
+    /// Match segment `seg` among the lines of `lines`, which hold either a
+    /// mapping or a sequence of items.
+    fn scope(&mut self, lines: std::ops::Range<usize>, seg: usize) {
+        let Some(first) = lines.clone().find(|&i| self.shapes[i].meaningful) else {
+            return;
+        };
+        if !self.shapes[first].item {
+            // The first meaningful line fixes the key column for this level.
+            self.mapping(lines, self.shapes[first].key_col, seg);
+            return;
+        }
+
+        let item_indent = self.shapes[first].indent;
+        let markers: Vec<usize> = lines
+            .clone()
+            .filter(|&i| {
+                let shape = &self.shapes[i];
+                shape.meaningful && shape.item && shape.indent == item_indent
+            })
+            .collect();
+        let every = self.path.every_arm == Some(seg);
+        for (n, &marker) in markers.iter().enumerate() {
+            let end = markers.get(n + 1).copied().unwrap_or(lines.end);
+            let before = self.found.len();
+            self.ancestors.push(marker);
+            self.mapping(marker..end, self.shapes[marker].key_col, seg);
+            self.ancestors.pop();
+            if !every && self.found.len() > before {
+                return;
+            }
+        }
+    }
+
+    /// Match segment `seg` among the keys at column `key_col` in `lines`.
+    fn mapping(&mut self, lines: std::ops::Range<usize>, key_col: isize, seg: usize) {
+        let segment = self.path.segments()[seg].as_str();
+        let Some(idx) = lines.clone().find(|&i| {
+            let shape = &self.shapes[i];
+            shape.meaningful && shape.key_col == key_col && shape.key == Some(segment)
+        }) else {
+            return;
+        };
+
+        if seg + 1 == self.path.segments().len() {
+            // The value stops at the first blank or comment line, or the first
+            // line outside it.
+            let end = (idx + 1..lines.end)
+                .take_while(|&i| self.shapes[i].meaningful && self.shapes[i].in_value_of(key_col))
+                .last()
+                .unwrap_or(idx);
+            self.found.push(KeyRegion {
+                ancestors: self
+                    .ancestors
+                    .iter()
+                    .copied()
+                    .filter(|&a| a != idx)
+                    .collect(),
+                target: idx..=end,
+            });
+            return;
+        }
+
+        let child_end = (idx + 1..lines.end)
+            .find(|&i| self.shapes[i].meaningful && !self.shapes[i].in_value_of(key_col))
+            .unwrap_or(lines.end);
+        self.ancestors.push(idx);
+        self.scope(idx + 1..child_end, seg + 1);
+        self.ancestors.pop();
+    }
+}
+
+/// Conservatively detect YAML features that make non-contiguous slicing unsafe.
 fn has_unsafe_yaml_features(block: &str) -> bool {
     block.lines().any(|line| {
         let trimmed = line.trim_start();
@@ -338,8 +503,8 @@ fn has_unsafe_yaml_features(block: &str) -> bool {
     })
 }
 
-/// The byte-width of a line's leading spaces, signed for comparison against the
-/// synthetic `-1` root indent.
+/// The byte-width of a line's leading spaces, signed so a key column can sit
+/// below every real line.
 fn indent_of(line: &str) -> isize {
     (line.len() - line.trim_start().len()) as isize
 }
@@ -645,5 +810,155 @@ mod tests {
         );
         // The tag structure must remain intact
         assert!(text.contains("<a href="), "tag structure broken: {text}");
+    }
+
+    fn fm_ctx(content: &str) -> SourceContext {
+        SourceContext::new(PathBuf::from("/f.md"), PathBuf::from("f.md"), content)
+    }
+
+    fn region(start_line: usize, end_line: usize, highlighted: &[usize]) -> FocusedRegion {
+        FocusedRegion {
+            start_line,
+            end_line,
+            highlighted: highlighted.to_vec(),
+        }
+    }
+
+    // Two union arms whose `doc:` keys (lines 8 and 14) sit far apart.
+    const UNION_DOC: &str = "---\n$schema:\n  - spec: file(required; match(**/*spec*.md); eager)\n    a: 1\n    b: 2\n    c: 3\n    d: 4\n    doc: file\n  - design: file(required)\n    e: 1\n    f: 2\n    g: 3\n    h: 4\n    doc: file\n---\nbody\n";
+
+    #[test]
+    fn focused_regions_mid_file_key_windows_context_and_keeps_ancestor() {
+        let content = "---\nagent: codex\n$schema:\n  a: 1\n  b: 2\n  c: 3\n  d: 4\n  e: 5\n  f: 6\n  g: 7\n  h: 8\n  target: x\n  i: 9\n  j: 10\n  k: 11\n  l: 12\nyolo: false\n---\n";
+
+        let regions = fm_ctx(content)
+            .focused_yaml_regions(&[YamlKeyPath::dotted("$schema.target")], 3)
+            .unwrap();
+
+        assert_eq!(regions, vec![region(3, 3, &[]), region(9, 15, &[12])]);
+    }
+
+    #[test]
+    fn focused_regions_key_in_both_union_arms_gives_two_regions() {
+        let regions = fm_ctx(UNION_DOC)
+            .focused_yaml_regions(&[YamlKeyPath::in_every_arm("$schema", "doc")], 1)
+            .unwrap();
+
+        assert_eq!(
+            regions,
+            vec![region(2, 3, &[]), region(7, 9, &[8]), region(13, 15, &[14])]
+        );
+    }
+
+    #[test]
+    fn focused_regions_plain_segment_matches_first_arm_only() {
+        let regions = fm_ctx(UNION_DOC)
+            .focused_yaml_regions(&[YamlKeyPath::dotted("$schema.doc")], 0)
+            .unwrap();
+
+        assert_eq!(regions, vec![region(2, 3, &[]), region(8, 8, &[8])]);
+    }
+
+    #[test]
+    fn focused_regions_sequence_item_key_does_not_swallow_sibling() {
+        // `spec` sits on the `- ` marker line at column 4, the same column as
+        // its sibling `a:`, so its value ends on its own line.
+        let regions = fm_ctx(UNION_DOC)
+            .focused_yaml_regions(&[YamlKeyPath::in_every_arm("$schema", "spec")], 0)
+            .unwrap();
+        assert_eq!(regions, vec![region(2, 3, &[3])]);
+
+        // A sequence at its parent key's own indentation.
+        let flush = "---\n$schema:\n- spec: x\n  doc: y\n- design: z\n  doc: w\nyolo: true\n---\n";
+        let regions = fm_ctx(flush)
+            .focused_yaml_regions(&[YamlKeyPath::in_every_arm("$schema", "doc")], 0)
+            .unwrap();
+        assert_eq!(regions, vec![region(2, 6, &[4, 6])]);
+    }
+
+    #[test]
+    fn focused_regions_every_arm_on_plain_mapping_matches_the_key() {
+        let regions = schema_ctx()
+            .focused_yaml_regions(&[YamlKeyPath::in_every_arm("$schema", "iteration")], 0)
+            .unwrap();
+
+        assert_eq!(regions, vec![region(3, 3, &[]), region(5, 5, &[5])]);
+    }
+
+    #[test]
+    fn focused_regions_missing_key_gives_none() {
+        let ctx = schema_ctx();
+
+        assert_eq!(
+            ctx.focused_yaml_regions(&[YamlKeyPath::dotted("nope")], 3),
+            None
+        );
+        assert_eq!(
+            ctx.focused_yaml_regions(&[YamlKeyPath::in_every_arm("$schema", "nope")], 3),
+            None
+        );
+        assert_eq!(ctx.focused_yaml_regions(&[], 3), None);
+    }
+
+    #[test]
+    fn focused_regions_adjacent_and_overlapping_windows_merge() {
+        let content = "---\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n---\n";
+        let ctx = fm_ctx(content);
+
+        let adjacent = ctx
+            .focused_yaml_regions(&[YamlKeyPath::dotted("a"), YamlKeyPath::dotted("b")], 0)
+            .unwrap();
+        assert_eq!(adjacent, vec![region(2, 3, &[2, 3])]);
+
+        // Windows 3..=5 and 6..=8 touch, so they merge into one run.
+        let touching = ctx
+            .focused_yaml_regions(&[YamlKeyPath::dotted("c"), YamlKeyPath::dotted("f")], 1)
+            .unwrap();
+        assert_eq!(touching, vec![region(3, 8, &[4, 7])]);
+    }
+
+    #[test]
+    fn focused_regions_clamp_to_block_start_and_end() {
+        let content = "---\na: 1\nb: 2\nc: 3\nd: 4\n---\nbody\n";
+        let ctx = fm_ctx(content);
+
+        let first = ctx
+            .focused_yaml_regions(&[YamlKeyPath::dotted("a")], 3)
+            .unwrap();
+        assert_eq!(first, vec![region(1, 5, &[2])]);
+
+        let last = ctx
+            .focused_yaml_regions(&[YamlKeyPath::dotted("d")], 3)
+            .unwrap();
+        assert_eq!(last, vec![region(2, 6, &[5])]);
+    }
+
+    #[test]
+    fn focused_regions_unsafe_yaml_gives_none() {
+        for content in [
+            "---\nbase: &b\n  a: 1\ntail: 2\n---\n",
+            "---\nbase: 1\nother: *b\ntail: 2\n---\n",
+            "---\nbase:\n  <<: {a: 1}\ntail: 2\n---\n",
+        ] {
+            let regions = fm_ctx(content).focused_yaml_regions(&[YamlKeyPath::dotted("tail")], 1);
+            assert_eq!(regions, None, "content: {content}");
+        }
+    }
+
+    #[test]
+    fn focused_regions_line_numbers_are_absolute_in_content() {
+        let content = "intro\n---\na: 1\nb: 2\n---\n";
+        let ctx = SourceContext::with_frontmatter(
+            PathBuf::from("/f.md"),
+            PathBuf::from("f.md"),
+            content,
+            Some(6..content.len()),
+        );
+
+        let regions = ctx
+            .focused_yaml_regions(&[YamlKeyPath::dotted("b")], 0)
+            .unwrap();
+
+        assert_eq!(regions, vec![region(4, 4, &[4])]);
     }
 }

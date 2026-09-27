@@ -189,7 +189,14 @@ Supporting helpers live alongside the trait:
   and auto-detected frontmatter range. Provides
   `linked_path_prose()` (OSC 8 hyperlinked header), `frontmatter_prose()`
   (fenced ```yaml block), and `excerpt_prose(line, context, lang)` (fenced
-  code block with line numbers and a `>` gutter on the offending line). Use
+  code block with line numbers and a `>` gutter on the offending line).
+  `focused_yaml_regions(keys, context)` selects the frontmatter lines for
+  `YamlKeyPath` keys (±`context` lines plus ancestor headers) as contiguous
+  `FocusedRegion` runs with absolute line numbers, returning `None` rather
+  than falling back to the whole block; `YamlKeyPath::in_every_arm("$schema",
+  "doc")` matches a key in every sequence-item arm of a union.
+  `focused_yaml_excerpt(keys)` renders those regions (whole block when none
+  resolve). Use
   this for any error variant whose origin is a file so the rendered block
   can show a linked path, a frontmatter snapshot, and a source excerpt.
 
