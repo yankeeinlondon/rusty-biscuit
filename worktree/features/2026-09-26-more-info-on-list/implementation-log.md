@@ -20,6 +20,16 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Implementation Log for 2026-09-26-more-info-on-list (5 phases)
@@ -173,4 +183,87 @@ one line, the `chore/old-cleanup` target cell `already in` becoming `clean`.
 - `just lint` in `worktree/`: clean.
 - `grep -rn "AlreadyIn\|already in" worktree/lib/src worktree/cli` finds only the
   new absence assertion in `cli/tests/list_table.rs`. `lib/` is clean.
+- No pre-existing failures.
+
+## Phase 3
+
+### Changes (`cli/src/commands/list_table.rs`)
+
+- **Gate (R1/R2).** `const METRICS_MIN_WIDTH: u32 = 100`. `table()` computes
+  `show_metrics = terminal.width() >= METRICS_MIN_WIDTH` once and passes it to
+  `RowCells::new` beside `osc_link_support`. There is no flag or env var, and
+  `list.rs` is unchanged because S1 required no change.
+- **Metrics (R3/R4).** `merge_markup(comparison, show_metrics)` appends
+  ` <dim><green>+A</green></dim>` and ` <dim><red>-B</red></dim>`, omitting a
+  zero side, with an ASCII hyphen-minus. Both `target()` and `parent()` pass
+  `self.show_metrics`, and `with_badges` then appends the PR badges, so the
+  order is `state [+A] [-B] [badges]`. The `—`, `?`, `parent deleted`, and
+  empty cells never call `merge_markup`.
+- **Red dot (R7).** `dirty_dot(DirtySource)` is `<red>●</red>`, and the legend
+  follows.
+- **Legend.** The first two Branch samples are `└─`.
+- **Doc pass.** `merge_markup` gained a doc (state word, counts, zero omitted),
+  and `table()`'s doc names the gate. `dirty_dot`'s "Single-column text
+  glyphs" and `legend_markup`'s doc still hold. `RowCells` has no docs, and none
+  were added.
+
+### Tests (`cli/tests/list_table.rs`)
+
+- Constants: `ALREADY_IN` became `NOTHING_TO_MERGE` (0, 4) (R8), and
+  `EQUAL_TIPS` (0, 0) and `AHEAD_ONLY` (3, 0) were added. In the example,
+  `feat/theme` is ahead-only, `chore/old-cleanup` is nothing-to-merge, and
+  `release/prep` has equal tips, so the one fixture covers zero, ahead-only,
+  behind-only, both, conflicts with counts, parent deleted, `—`, empty cells,
+  and badges. `?` is covered by `an_unknown_comparison_never_gets_counts`.
+- Helpers: `terminal_at(width, color)` (`plain_terminal` and `color_terminal`
+  wrap it at 120), `plain_at`, `target_cells` (the last two columns, counted
+  from the right because the tree guide is also a `│`), and `next_line`.
+
+| Requirement | Test |
+| --- | --- |
+| No counts at ≤ 99; state and badge kept | `up_to_99_columns_cells_keep_state_and_badges_without_counts` (exact cells at 99; no `+N`/`-N` token at 99 or 80), snapshot `the_table_at_99_columns_shows_no_counts` |
+| Counts at 100; zero omitted; equal tips show `clean`; badge after counts; `—`/parent deleted/empty unchanged; still four columns | `counts_follow_the_state_word_and_precede_the_badge_from_100_columns`, snapshot `the_table_at_100_columns_shows_counts` |
+| `?` never gets counts | `an_unknown_comparison_never_gets_counts` |
+| Dim green `+N`, dim red `-N`, order `+` < `-` < badge, and conflicts with counts in color; no green at 99 | `counts_are_dim_green_and_dim_red_in_color` (S2 bytes `\u{1b}[2m\u{1b}[32m+2`, `\u{1b}[2m\u{1b}[31m-1`) |
+| `NO_COLOR` reads `+2 -1` with no escapes | `no_color_counts_read_as_plain_text` |
+| Red source dot, no orange | `styles_follow_the_design` (`\u{1b}[31m●`, no `38;2;255;165;0`) |
+| Legend `└─ … └─ … └┄` | `the_legend_explains_both_columns`, and the real-binary `list_output::list_output_is_the_redesigned_table` |
+| `already in` absent from the whole rendering (Acceptance 1) | `every_cell_kind_renders_as_ruled` (also asserts `clean -4`) |
+
+**Snapshots.** I reviewed all three by eye. `the_spec_example_renders_as_ruled` (120
+columns) now matches the spec's Option A prototype cell for cell
+(`clean +2 -1  PR #99`, `clean +3`, `conflicts +1 -3  PR #104`, `clean -4`,
+`clean`, `conflicts +1 -3`, `parent deleted`). The 99 snapshot shows no counts.
+At exactly 100 columns, the `feat/dark-fixes` parent cell's `PR #104` badge
+wraps under `conflicts +1 -3`. The spec permits this ("the 100-column gate
+does not promise that arbitrary row content fits on one line"), and the test
+asserts the wrapped badge on the next line. At 80, the `PR #99` badge also
+wraps, so the 80-column check asserts only that no count tokens appear.
+
+**Mutation check.** I changed the gate from `>=` to `>`. Four tests failed (the
+100-column snapshot, the exact-cell test, the color test, and the `NO_COLOR` test).
+Then I restored it.
+
+### Deviations and notes
+
+- **`cli/tests/list_output.rs`** was not in the plan's touch points. It runs the
+  real `wt list` binary with captured stderr and asserted the old legend
+  (`├─ … ├─`), so its expected legend line is now `└─ … └─`. Captured with no
+  TTY, the width falls back to 80, so that test also shows the real binary
+  with no counts (`clean`).
+- The L2 files (`level2_list_verbose.rs`, `level2_dirty_tree.rs`) still assert
+  orange and are Phase 4 work. `level2_list_verbose` will now also fail on its
+  source-dot color under tmux until Phase 4.
+- `docs/cli/list.md` still shows the `├─` legend and has no counts, which is Phase 4 work.
+- The worktree skill is unchanged here. Phase 4 adds the gate line.
+- The code is platform-neutral rendering with no OS-specific paths, so there was no cross-check.
+
+### Gates
+
+- `cargo nextest run -p worktree-cli --test list_table`: 19 passed.
+- `just test` in `worktree/`: 465 passed, 18 skipped (tier-gated L2+), none failed.
+- `just lint` in `worktree/`: clean, with no warnings.
+- `grep -rn "orange\|AlreadyIn\|already in" worktree/lib/src worktree/cli/src worktree/cli/tests`
+  finds only the L2 files (Phase 4), `styled_capture_parse.rs` (excluded), and the
+  two absence assertions in `list_table.rs`.
 - No pre-existing failures.

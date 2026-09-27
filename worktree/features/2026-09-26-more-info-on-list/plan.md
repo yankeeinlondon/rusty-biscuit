@@ -21,6 +21,16 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: More Info on `wt list`
@@ -202,18 +212,18 @@ Wave 2 has two parallel tasks that touch disjoint files.
 
 Wave 3 is one agent, because every change is in `list_table.rs` and its integration test.
 
-- [ ] **Metrics and gate**
+- [x] **Metrics and gate**
     - Add `METRICS_MIN_WIDTH` (R1). Compute `show_metrics` in `table()` from
       `terminal.width()` and pass it to `RowCells::new` alongside `osc_link_support`.
     - Implement `merge_markup(comparison, show_metrics)` per R3/R4. The metrics come
       after the state word, and `with_badges` then appends the PR badges, which gives the order.
     - Call it from both `target()` and `parent()`.
     - If S1 required it, change `list.rs` to build the list `Terminal` with a stderr-based width (R2).
-- [ ] **Red dirty dot**
+- [x] **Red dirty dot**
     - `dirty_dot(DirtySource)` becomes `<red>●</red>`. The legend picks this up automatically.
-- [ ] **Legend connectors**
+- [x] **Legend connectors**
     - In `legend_markup`, the first two samples change from `├─` to `└─`. The colors are unchanged.
-- [ ] **L1 tests** (`cli/tests/list_table.rs`)
+- [x] **L1 tests** (`cli/tests/list_table.rs`)
     - Add `terminal_at(width, color: bool)` or `plain_at(width)`/`color_at(width)`
       helpers. Keep `plain_terminal`/`color_terminal` if they are still used.
     - Extend the example (or add a focused fixture) so the rows cover the following: zero (`EQUAL_TIPS`,
@@ -234,9 +244,9 @@ Wave 3 is one agent, because every change is in `list_table.rs` and its integrat
     - `the_legend_explains_both_columns`: the Branch line becomes `└─ … └─ … └┄ …`.
     - `every_cell_kind_renders_as_ruled`: no `already in`. Assert it is absent from
       the full rendering (Acceptance 1).
-- [ ] **Doc-comment pass** on the changed symbols (`merge_markup`, `dirty_dot`,
+- [x] **Doc-comment pass** on the changed symbols (`merge_markup`, `dirty_dot`,
   `legend_markup`, `RowCells`), per CLAUDE.md "Authoring discipline".
-- [ ] **Checkpoint 3**: `just test` and `just lint` in `worktree/` are green. Review the snapshots
+- [x] **Checkpoint 3**: `just test` and `just lint` in `worktree/` are green. Review the snapshots
   by eye against the spec's Option A prototype.
 
 ## Phase 4 — L2 Proof and Documentation

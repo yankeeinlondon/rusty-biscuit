@@ -28,16 +28,22 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 2 is done: `MergeState` is two-state (`Clean`/`Conflicts`), the parent-local
-    test `the_parent_column_measures_against_the_parents_local_tip` is in `listing.rs`,
-    and dirty-tree source names are `<red>`. In `list_table.rs` only the `AlreadyIn` arm
-    was deleted; `merge_markup` still takes one argument and `dirty_dot(DirtySource)` is
-    still `<orange>` (both Phase 3). In `cli/tests/list_table.rs` the const is still named
-    `ALREADY_IN` (rename to `NOTHING_TO_MERGE` in Phase 3); the `chore/old-cleanup`
-    assertion now expects `clean` and the absence of `already in`, and the spec-example
-    snapshot was re-accepted (one line: `already in` -> `clean`). Known break until
-    Phase 4: the L2 test `level2_dirty_tree` still asserts `lib.rs` is ORANGE, so it will
-    fail under tmux now; `just test` (L1) is unaffected.
+    Phase 3 is done. `list_table.rs` has `METRICS_MIN_WIDTH = 100`,
+    `merge_markup(comparison, show_metrics)` (dim green `+N`, dim red `-N`, zero side
+    omitted, before PR badges), a `<red>` source dot, and a `└─ … └─ … └┄` Branch
+    legend. L1 is green (`just test` 465 passed). Phase 4 notes:
+    (1) BOTH L2 files are now expected to fail under tmux until you update them:
+    `level2_dirty_tree` (lib.rs asserted ORANGE) and `level2_list_verbose` (source dot
+    asserted ORANGE at ~491 and in the legend at ~527-530; its Branch legend reader may
+    match `├─`). The red to assert is basic ANSI 31, the same `RED` constant the
+    `conflicts` checks use.
+    (2) At exactly 100 columns the table may wrap a PR badge onto a second line
+    (the spec allows it). An L2 assertion that reads a badge on the same line as the
+    counts should use a 120-column pane (the default `spawn_shell` size) or read the
+    next line.
+    (3) `cli/tests/list_output.rs` (real binary, no TTY, so width 80 and no counts)
+    was updated for the new legend; it was not in the plan's touch points.
+    (4) `docs/cli/list.md` line 27 still shows the old `├─` legend.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance
