@@ -64,13 +64,25 @@ The fix changes how selected branches are represented, not which branches are se
 
 Here, “default branch” means the repository's existing default-branch selection; `main` in the reported case is an example, not a new hard-coded name. Existing handling of the local and remote-tracking default tips remains part of the graph's context.
 
-The interaction between branch selection and the existing terminal-height lane cap still needs a ruling. Selection does not yet establish an exemption from that cap.
+Preserve the existing height behavior: only the base view has the half-terminal-height lane cap, activity-based lane selection, and omitted-worktree notice. The focused view remains exempt. This fix does not change those selection and sizing policies.
+
+### Supported merge histories
+
+Restore lanes for selected branches whose current tips are fully integrated through an actual Git merge commit into a displayed parent, including a non-default parent. Show the verified fork and merge relationships. A branch with identifiable separate history does not become a label-only branch merely because its tip is now reachable from its parent.
+
+For branches that continue after an earlier merge, preserve their current relationship without adding reconstruction of earlier partial or repeated merges. Squash-merge inference is outside this fix.
+
+Fast-forward integration and equal tips must be represented truthfully, without inventing a merge commit. When the available history establishes that a branch has no separate history to draw, show its label at the actual commit, without an empty lane or an explanatory legend. Equal tips alone do not prove that the branch never had separate history.
 
 ### Essential historical connections remain visible
 
 When a selected branch's fork or merge predates the ordinary displayed history, retain the essential fork and merge connections and compress intervening omitted history. Keep ordinary commit-history limits; do not expand every intervening commit merely to reach an older connection.
 
-This requires the graph to communicate the relationship despite the age of those connections. The exact representation when the necessary Git history is unavailable remains open.
+### Unavailable history
+
+If local history cannot establish a connection, draw verified information and retain the selected branch wherever it can be truthfully represented. Leave unknown connections undrawn and show a brief incomplete-history notice. Keep the worktree table available. Do not fetch automatically or introduce a new network request to fill the gap.
+
+Unknown history is distinct from successfully determining that a branch has no separate history: do not silently apply the label-only exception merely because discovery failed. Preserve the existing policy for ordinary renderer failures.
 
 ### Full labels remain attached to their commits
 
@@ -82,11 +94,15 @@ This requires the graph to communicate the relationship despite the age of those
 
 Combining labels by moving one to a different commit is excluded, because it would misrepresent the reference's location.
 
+### Compatibility and operational boundaries
+
+Preserve existing default-branch handling and command behavior outside the graph corrections. This fix introduces no new graph-specific network requests, persistent branch-history logging, command flags, or migration. Existing `--perf` timing provides review evidence; no operational telemetry is added.
+
 ## Ownership and implementation proposals
 
 The functional requirements above are confirmed. The following are implementation directions to evaluate, not human-approved algorithms or API contracts.
 
-- **`worktree-cli`:** its `commands::git_graph` module gathers Git facts and selects branches. It should provide sufficient ancestry and merge information for the selected branches without taking over layout. First-parent traversal is a candidate for keeping merged branch commits out of the default lane. Finding the merge that introduced a branch, and choosing its fork, need to handle the supported histories agreed below; the original proposal's simple default-lane traversal has not yet been shown sufficient for non-main parents or continued branch development.
+- **`worktree-cli`:** its `commands::git_graph` module gathers Git facts and selects branches. It should provide sufficient ancestry and merge information for the selected branches without taking over layout. First-parent traversal is a candidate for keeping merged branch commits out of the default lane. Finding the merge that introduced a branch, and choosing its fork, need to handle the supported histories above; simple default-lane traversal has not yet been shown sufficient for non-default parents.
 - **`biscuit-terminal`:** its `GitGraph` component owns lanes, labels, omitted-history compression, and sizing. Extending its `GraphLine` input with a merge destination, such as a `merged_into` builder method accepting a commit identifier, is a candidate. No public API spelling is settled.
 - **Renderer integration:** Mermaid merge statements are a candidate for drawing the connection. Existing renderer limitations around attributes on merge statements may require a workaround. Commit spacing or label layout changes are candidates for preventing collisions, but must be evaluated against exact attachment, full labels, compression, and shrinking.
 
@@ -94,22 +110,33 @@ Changing `mermaid-rs-renderer`, adding a dependency, or changing the shared comp
 
 ## Acceptance criteria and validation
 
-These criteria cover the confirmed behavior. They do not settle the open history cases, resource limits, or incomplete-history fallback below.
+These criteria describe user-visible outcomes; implementation-specific API names and Mermaid statements are not acceptance requirements.
 
 | Case | Required observable outcome | Validation approach |
 |---|---|---|
 | Current branch has been merged through a recorded merge commit, with its worktree retained | The current branch has a lane; its branch commits are not presented as a straight segment of default-branch history; its merge connection is visible at the correct commit | Real-Git fixture for gathered facts, component output assertions, and rendered-image inspection |
-| Same merged branch viewed from the default branch | It remains eligible for its lane under the same branch-selection rule; merged status alone cannot collapse it into a tag | Real-Git fixture and component assertions, with enough terminal height to avoid the unresolved cap policy |
+| Same merged branch viewed from the default branch | It remains eligible for its lane under the same branch-selection rule; merged status alone cannot collapse it into a tag | Real-Git fixture and component assertions, with enough terminal height to retain the lane under the existing base-view cap |
 | Current branch has a recorded existing non-default parent | The parent remains selected and the child retains the recorded parent relationship; test both with and without a worktree for the parent | Real-Git selection fixtures |
+| Branch fully merged into a displayed non-default parent | Its separate lane and verified merge connection into that parent remain visible | Real-Git child/parent merge fixture and component assertions |
+| Branch continues after an earlier merge | Its current relationship remains represented without requiring reconstruction of earlier partial or repeated merges | Real-Git fixture with a commit after the merge |
+| Fast-forward integration or equal tips | No fabricated merge commit appears; a branch established to have no separate history is labeled at its actual commit, with no empty lane or new legend | Real-Git fixtures covering no separate history and identifiable merged history with equal tips |
+| Necessary local history is unavailable | Verified information remains, unknown connections stay undrawn, a brief notice appears, and the table remains available without a new network request | Incomplete-history fixture with output assertions and request-count verification |
+| Terminal height is constrained | Base-view cap, activity ordering, and omission notice remain; focused view remains exempt | Existing sizing regressions, including the focused-view exemption |
 | Recorded parent has been deleted | Existing parent-missing fallback remains unchanged | Existing or extended selection regression fixture |
 | Essential fork or merge is older than the ordinary displayed window | The relationship remains visible, with intervening history omitted or compressed rather than all commits expanded | Fixture exceeding the ordinary windows; assert connection commit identities and omitted-history representation |
 | Neighboring commits carry long branch or reference labels | Full labels remain attached to their respective commits and do not overlap | Inspect actual rendered label bounds or pixels; source snapshots alone cannot prove this |
 | `main` and `origin/main` are one commit apart | Both labels remain fully represented at the correct commits without overlap | Component fixture and rendering validation |
 | Width is too small for the compressed natural image | Existing compression and shrinking behavior remains, without shortened labels or a new text fallback | Narrow-width fixture and existing explicit-width regression coverage |
 
-Use the repository's nextest-based L1 recipes for gathering and component tests. Rendered output needs direct validation in addition to Mermaid snapshots; the precise dimensions, fixtures, and pass/fail measurement remain to be agreed. The existing Kitty L2 graph test in `worktree-cli` is a candidate integration point. Any L2 or L3 tests must avoid taking terminal or browser focus.
+Use the repository's nextest-based L1 recipes for gathering and component tests. Rendered output needs direct validation in addition to Mermaid snapshots. Select representative long labels and narrow and ordinary dimensions during planning, and inspect actual label bounds or rendered pixels for overlap and attachment. The existing Kitty L2 graph test in `worktree-cli` is a candidate integration point. Any L2 or L3 tests must avoid taking terminal or browser focus.
 
 The affected packages must continue to compile and work on macOS, Linux, native Windows, and WSL2. The implementation plan must distinguish portable behavior tests from terminal-specific image evidence.
+
+## Performance and completion
+
+Preserve existing performance gates. Record before/after measurements of the existing `graph gather` and `graph image render (biscuit-terminal)` stages for ordinary history, older essential connections, and multiple selected branches. Review the measured changes rather than introduce a new numerical threshold. The existing full-command one-second gate covers the non-image path and is not a graph-rendering budget.
+
+Implementation is complete and ready for review when the acceptance cases pass, relevant existing gates remain passing, rendered evidence establishes nonoverlap and exact commit attachment, performance comparisons are recorded, and affected documentation is updated. Human acceptance of the timing and visual evidence closes review; reviewers assess any performance regression against the measured cases. An agent does not move the specification to a completed lifecycle directory.
 
 ## Documentation affected
 
@@ -118,12 +145,8 @@ The affected packages must continue to compile and work on macOS, Linux, native 
 
 The existing documentation describes the current implementation; the implementation change must update it alongside the code.
 
-## Decisions still required
+## Remaining risk assessment
 
-1. **Supported Git histories and merge meaning.** Define expected output for a child merged into its non-default parent, fast-forward integration without a merge commit, a branch that continues after an earlier merge, and repeated or partial merges. Decide what “fork” and “merge connection” mean in those cases. The original draft's rule that a branch equal to its parent's tip with no distinct history stays a tag has not yet been confirmed. Squash-merge inference and new remote requests are proposed exclusions, not settled scope decisions.
-2. **Incomplete or changing history.** Choose behavior when a shallow repository, missing object, rewritten history, or changed reference prevents a reliable fork or merge determination. Specify whether the graph preserves a partial lane, marks an unknown relationship, omits the graph, or reports an error; do not invent ancestry.
-3. **Terminal-height limits.** Decide whether to preserve the existing half-terminal-height cap, activity-based lane selection, and omitted-worktree notice unchanged, or protect particular selected lanes. Establish how historical connections are represented when another lane is omitted by the cap.
-4. **Measurable success and performance.** Agree on representative branch counts, history depth, label lengths, and terminal dimensions; define an acceptable gathering and rendering cost. Specify how nonoverlap and correct attachment will be measured in rendered output and what evidence completes review.
-5. **Renderer feasibility and preparatory authorization.** Decide whether a small renderer experiment would resolve uncertainty about labels and merge attributes. Establish the permitted dependency and shared-API change boundary before implementation, including whether a renderer modification would need another human decision. No spike or dependency change has been authorized by this clarification batch.
+The user-visible scope and fallback behavior above are settled. Before finalizing this specification, assess whether a focused rendering experiment is warranted to resolve label-collision avoidance and merge-label feasibility. If an experiment would help, present its purpose and obtain the user's choice before running it.
 
-These rulings must be resolved or explicitly recorded as deferred before the specification is finalized. This document currently separates confirmed user-visible requirements from candidate implementation details; it is not yet an implementation plan.
+Any proposed dependency change, renderer modification, or shared-component API change must identify its effects beyond `wt list`. The permitted preparatory scope and whether such a change needs another human decision remain to be established. No spike or dependency change has been authorized in the clarification batches. Concrete API spelling, test dimensions, and fixture construction are implementation-planning details, not additional human rulings.
