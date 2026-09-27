@@ -13,6 +13,7 @@ mod cli;
 mod cli_process_fixture;
 mod install_interview_cli;
 mod install_plan;
+mod lockfile_cli;
 mod snapshots;
 mod spawn_site_guard;
 mod test_layout;

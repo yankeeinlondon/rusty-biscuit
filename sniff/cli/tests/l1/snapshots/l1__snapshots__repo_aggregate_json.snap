@@ -329,7 +329,8 @@ expression: stable
         "root": "[BASE]",
         "standard": "cargo-workspace"
       }
-    ]
+    ],
+    "standalone_lockfiles": []
   },
   "test_runner": "cargo test",
   "unstaged": {

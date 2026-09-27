@@ -8,3 +8,7 @@ Repository (cargo / 2 packages)
 - (root)
     - pkg-a v0.1.0 (pkg-a) [Rust]
     - pkg-b v0.1.0 (pkg-b) [Rust]
+
+Lockfiles
+
+- cargo (.): absent — no lockfile was found

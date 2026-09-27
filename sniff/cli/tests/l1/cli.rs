@@ -1196,7 +1196,6 @@ fn expected_lockfile_structure_json() -> Value {
             "root_is_package": false,
             "packages": ["pkg-a/lib", "pkg-b/lib"],
         }],
-        "standalone_lockfiles": [],
     })
 }
 
@@ -1221,6 +1220,11 @@ fn repo_aggregate_json_reports_cargo_subset_evidence_for_matching_lockfile() {
             "extra": [],
             "missing": [],
         }),
+        "{json}"
+    );
+    assert_eq!(
+        json["structure"]["standalone_lockfiles"],
+        serde_json::json!([]),
         "{json}"
     );
 }

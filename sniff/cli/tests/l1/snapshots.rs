@@ -695,6 +695,7 @@ fn stable_aggregate_json(json: &Value) -> Value {
             "is_monorepo": json["structure"]["is_monorepo"],
             "monorepo_standards": monorepo_standards,
             "monorepo_layers": json["structure"]["monorepo_layers"],
+            "standalone_lockfiles": json["structure"]["standalone_lockfiles"],
         },
         "git_status": {
             "current_branch": json["git_status"]["current_branch"],
