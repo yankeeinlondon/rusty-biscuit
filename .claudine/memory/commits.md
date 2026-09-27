@@ -127,6 +127,26 @@ belong here.
   crates leaked in". List the dropped crates in the commit body so a
   reviewer scanning the body sees the shrink is intentional, not a
   surprise from the version bump.
+- A `Cargo.lock` checked in under a fix or feature subdirectory
+  (e.g. `worktree/fixes/<name>/renderer-spike/Cargo.lock`) without a
+  paired `Cargo.toml` is a deliberate standalone experiment, not a
+  monorepo orphan. The orphan rule above assumes the lockfile is in
+  the workspace root and `cargo metadata` would resolve it; a
+  spike's lockfile is for a separate Cargo.toml that the
+  reproduction step generates in `/tmp` (or wherever the spec says)
+  and never builds from the monorepo. Verify by reading the
+  surrounding `spike.rs` / `reproduction` text in the same commit:
+  if the reproduction step is `cat > "$spike_dir/Cargo.toml" <<TOML
+  ...` and `cargo run --offline --locked --manifest-path
+  "$spike_dir/Cargo.toml"`, the lock is for that generated manifest
+  and intentionally does not appear in the monorepo's graph. The
+  commit body should still call out the dependency and version pin
+  (`mermaid-rs-renderer = "=0.3.1"`, `default-features = false`,
+  `features = ["png"]` in the canonical spike) so a reviewer
+  scanning `git log -- <path>` sees what the spike built against.
+  Flagging this as an orphan would reject a legitimate experiment
+  artifact; the carve-out belongs in the journal precisely because
+  the orphan heuristic will fire.
 - A workflow `BISCUIT_REQUIRE_<TOOL>: "1"` declaration on a step is coupled
   to a `require_tools("<tool>", ...)` call in the Python suite that step
   runs: the env var only does work when the guard reads it, and the guard
