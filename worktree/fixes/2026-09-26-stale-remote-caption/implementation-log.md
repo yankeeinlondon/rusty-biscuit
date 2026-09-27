@@ -31,6 +31,30 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+docs_updated_during_phase_3:
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/SKILL.md
 ---
 
 # Implementation Log for 2026-09-26-stale-remote-caption (5 phases)
@@ -216,3 +240,106 @@ The blocked-request tests use an `mpsc` readiness channel and a release channel,
 ### Checkpoint 2
 
 Met: `just test` and `just lint` pass in `worktree/`, and no source file names `remove::live_remote`.
+
+## Phase 3
+
+Phase 3 covers the worker, the caption rendering, and the list orchestration. To keep `just test` green once the command is renamed and the worker gains its live-head half, it also does most of Phase 4's **Migrate existing tests** task. That task stays unchecked in the plan, because what is left of it is listed under "Left for Phase 4" below.
+
+### Wave 1 — shared worker (`cli/src/commands/refresh_worker.rs`)
+
+- `pr_refresh.rs` is now `refresh_worker.rs`: `SUBCOMMAND = "internal-refresh"` and `Commands::InternalRefresh { repo }`, still `hide = true`. As in Phase 2, the file was `git mv`'d and then unstaged, so the working tree shows a deletion plus a new file. The launcher is unchanged: `main_checkout` validation, cwd = main, null stdio, `WT_SHELL_WRAPPER`/`COMPLETE` removed, `configure_detached_child`, and silent failure.
+- `run(repo)` → `run_halves(main, pr_half, head_half)`. Each half runs on its own `std::thread::scope` thread. Each is joined separately and its panic is discarded. The PR half is the unchanged `pull_requests::refresh`. The head half is `refresh_remote_head` with `LsRemote { base: main, deadline: REMOTE_HEAD_REFRESH_DEADLINE }`.
+- **Deviation from Rule 9 (small).** `run_halves` takes `impl FnOnce(&Path) + Send`, not `fn(&Path)`. The tests need closures that capture `mpsc` channels and a fixture's store paths, which a plain `fn` pointer cannot do without statics. Production passes the two `fn`s unchanged.
+- Tests. All are in the module, so they run under both the lib and bin targets. They use real stores in a temp dir, a real repo with an `origin`, and stub sources. The blocked tests wait on channels bounded by `recv_timeout(10 s)` and never sleep a fixed time.
+
+| Requirement (acceptance 4, worker side) | Test |
+|---|---|
+| Head half publishes while the PR half is blocked; a sequential worker would time out | `the_head_half_publishes_while_the_pr_half_is_blocked` |
+| PR half publishes while the head half is blocked | `the_pr_half_publishes_while_the_head_half_is_blocked` |
+| A failing or unsupported-provider PR half still lets the head half publish | `a_failing_or_unsupported_pr_half_leaves_the_head_half_publishing` |
+| A contended PR half (another refresh holds the lock mid-request) still lets the head half publish | `a_contended_pr_half_leaves_the_head_half_publishing` |
+| A failing head half still lets the PR half publish, and stores nothing | `a_failing_head_half_leaves_the_pr_half_publishing` |
+| A panicking half, either one, does not stop the other | `a_panicking_half_does_not_stop_the_other` |
+| Kept: main-checkout validation and spawn failure | `only_the_top_level_of_a_main_checkout_is_accepted`, `a_worker_that_cannot_start_is_an_error_launch_discards` |
+
+### Wave 1 — caption rendering (`cli/src/commands/list_table.rs`)
+
+- `RemoteFacts { default_branch, tracking_tip: Option<&str>, answer: Option<&RemoteHead> }` is `Copy`. `TableFacts` gains `remote: Option<RemoteFacts>`. `TableFacts::from_list(list, prs, remote)` sets `caption` to `None` whenever `remote` is `None`, so with no origin, leftover `origin/*` refs never render.
+- **Deviation from Rule 10 (small).** There is no `tracking_ref` field. The name is always `origin/<default>` (it is how the library builds `Caption.remote`), so `RemoteFacts::tracking_ref()` derives it. A stored field could only disagree with the name.
+- `caption_markup` now reads "… with/behind/ahead of/diverged from local tracking ref `origin/main`." and ends with a period. The count is still the only yellow text.
+- `observation_markup(remote, now)` covers the spec's five rows plus the two no-tracking-ref variants. Branch names use the existing badges, and the rest is `<dim>`. An answer is ignored when it is future-dated at `now` or names another branch. Every observation is past tense.
+- **Wording decision (not in the spec table).** An answer of absence when there is no local tracking ref reads "No local tracking ref `origin/main`; the remote branch was absent when checked N ago." This is the spec's no-tracking-ref sentence form with the absent row's fact. It never claims the branch is still deleted.
+- `age_text(seconds)` is shared: "less than 1 min", then `N min`, `N h`, and `N days`, using the existing bands. `pr_age_markup` calls it with `minutes * 60`, and its output is unchanged. (PR ages are at least 1 min, because the line appears only when the answer is stale.)
+- `render` prints the caption paragraph (comparison, then observation, in one `Prose`) when either part exists.
+- **Wrapping change (found by the L2 run).** The caption `Prose` had no word-wrap policy. While the caption was one short sentence that did no harm. With the observation added, a 120-column tmux pane broke the line mid-word ("1 m" / "in ago"). The caption paragraph now uses `WordWrap::WrapProse(None, Some(1))`: it breaks between words, and continuation lines keep the caption's one-space indent. The 99-column snapshot now shows the caption on two lines. The spec asks to "preserve wrapping". The old paragraph never wrapped only because it never needed to, so this does not change any existing short caption.
+- Module and function docs were updated for the new contract (the authoring discipline).
+
+### Wave 2 — list orchestration (`cli/src/commands/list.rs`)
+
+- `PrSeams` is now `ListSeams { connect, launch }` (`PrLaunch` → `RefreshLaunch`). `gather_prs` is now `gather_remote(Stores { prs, head }, main, default_branch, seams) -> RemoteAnswers { prs, head: Option<CachedRemoteHead>, origin_present, pr_gather, remote_select }`, per Rule 8:
+    - read `origin_url(main)` once, then select the PR store
+    - on a PR miss with an origin, finish the 300 ms foreground request
+    - select the live head with `list.default_branch`
+    - launch once if `pr_stale || (origin && head != Fresh)`
+- The `pr gather` perf stage now covers only the origin lookup, the PR selection, and any foreground request. The new `remote select` stage covers the live-head selection plus the launch, for Phase 4's < 300 ms stage gate. Previously a stale-PR launch was counted inside `pr gather`, so that stage can only get smaller.
+- `run_pipeline` builds `RemoteFacts` only when an origin exists. `tracking_tip` is `caption.tracking_sha`, falling back to `list.refs().remote("origin/<default>")` (the same snapshot). The library already exposed `WorktreeList::refs()`, so this phase changed no library code.
+- Unit tests (`commands::list::tests::gather`). They record the order of every seam call (`Connect`, `Fetch`, `Launch`) and seed the head store by writing its JSON format:
+
+| Requirement (acceptance 4, launch side) | Test |
+|---|---|
+| Stale PR plus missing head: exactly one launch | `a_stale_pr_answer_and_a_missing_head_launch_exactly_once` |
+| Both fresh: no connect and no launch; the only git call is the origin lookup | `two_fresh_answers_neither_request_nor_refresh` |
+| No origin: nothing requested or launched; `head` is `None` | `without_an_origin_stored_answers_are_ignored_and_nothing_is_requested_or_launched` |
+| PR miss plus fresh head: one foreground request, no launch (unchanged) | `a_pr_miss_with_a_fresh_head_requests_in_the_foreground_and_launches_nothing` |
+| PR miss plus missing or stale head: `Connect`, `Fetch`, then `Launch`, so the two never overlap | `a_pr_miss_settles_before_the_worker_is_launched` |
+| Missing or stale head with a fresh PR answer: launch, no connect, no foreground `ls-remote` (the git calls are only the origin lookup) | `a_missing_or_stale_head_launches_without_any_foreground_request` |
+| Existing PR behavior kept (stale shown at once, empty answer, failed miss, changed origin) | `a_stale_answer_is_shown_at_once_and_refreshed_in_the_background`, `a_stale_empty_answer_is_still_an_answer`, `a_failed_miss_shows_no_badges_and_stores_nothing`, `a_changed_origin_never_shows_the_old_answers` |
+
+The `NO_PRS` pipeline tests still pass: their repositories have no origin.
+
+### Test migration pulled forward from Phase 4 (needed for green)
+
+Renaming the command and adding a live-head half broke 7 `list_prs` tests. They failed for two reasons: the old argv, and git's HTTP transport honoring `HTTPS_PROXY`/`HTTP_PROXY`. The worker's `ls-remote` to the `github.com`/`gitea.test` origins reached `ProxyStub`/`FakeGitea` and was counted as a PR request.
+
+- `perf_support`:
+    - `refresh_workers` and `refresh_worker_via_gitea` now match `internal-refresh`.
+    - `wt_command_without_network` refuses git's own transports with `GIT_CONFIG_COUNT=2`, `protocol.http.allow=never`, and `protocol.https.allow=never`. With that, only PR requests reach the stand-ins.
+    - New helpers: `remote_head_store()`, `seed_remote_head_store(age, sha)`, and `probe_head_refresh()`.
+    - `NoRequest` also implements `RemoteHeads`.
+    - `wait_until_unlocked` now requires both locks to be free **and** no `internal-refresh` process (Rule 12).
+    - `RemoveOnDrop` also removes the head store and its lock (Windows real cache).
+- **Linux-only finding.** On WSL2, `refresh_workers` saw two "workers" for one process. `sysinfo` on Linux lists every thread (task) with its process's argv, and the worker now has two threads. It now filters `thread_kind().is_none()`. I added this to the `os` skill's standing rules.
+- `list_prs.rs`: every fixture that counts requests or asserts that no worker runs seeds a fresh head. Two assertions were added: two fresh answers start no worker, and a PR miss alone starts no worker. The help and completion check now looks for `internal-refresh`. The network-down test now waits for the worker's exit and both locks.
+    - A detail I found along the way: listing reads `origin` once, before the PR request (Rule 8). So in the foreground origin-change test, the head is selected with the old origin, and the fresh head seeded for the old origin is what keeps a worker from racing the assertions.
+- `perf_pr_request.rs`: all three tests seed a fresh head and hold a `RemoveOnDrop`, so no sample launches a worker for the live head alone.
+- `level2_list_verbose.rs` (L2, tmux): the fixture seeds a fresh head that matches `origin/main`, and the caption assertion now checks the new wording plus the observation, whitespace-normalized because it wraps.
+- `list_table.rs`:
+    - `Example` gains a stored head (`origin/main`'s tip, 2 min old).
+    - The two existing caption tests are updated.
+    - The three snapshots change only in the caption lines.
+    - New plain-text tests: `every_remote_observation_reads_as_ruled` (every row, the no-tracking-ref variants, future-dated, other branch), `the_observation_follows_the_comparison_in_one_paragraph`, `a_stale_answer_keeps_past_tense_and_shows_its_age` (5 h, 3 days), `ages_use_the_pr_age_units` (0, 59, 60, 3599, 3600, 2 days − 1 min, and 2 days in seconds), `without_an_origin_leftover_tracking_refs_show_no_caption`, `a_failed_comparison_still_shows_the_observation`, and `a_long_caption_wraps_between_words_within_the_terminal`.
+
+#### Left for Phase 4
+
+- The full acceptance-3 **snapshot** matrix. The plain-text tests above cover the rows but not snapshots of each state.
+- `seed_remote_head_store` always writes branch `main`, because every current fixture uses `main`. A `trunk` fixture needs a parameter.
+- The Rule 13 live-hold fixture. Remember that `MixedFixture`'s network-free command now sets `GIT_CONFIG_COUNT`, so a live-head test that needs git's HTTP transport must `env_remove("GIT_CONFIG_COUNT")` (or build its own command).
+- The Rule 14 `401` test, the `remote select` < 300 ms assertion, and the real-Git detection file.
+
+### Verification
+
+- `just test` in `worktree/`: **512 passed, 18 skipped, 0 failed** (Phase 2 ended at 487/18).
+- `just lint` in `worktree/`: clean after one fix (an overlapping `0` / `..=59` match range in `age_text`).
+- L2: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_list_verbose)'` gave **9/9 passed**.
+- Cross-OS (`just cross-check worktree-cli`):
+    - WSL2: first run 2 failures (the `sysinfo` thread over-count above); after the fix, **285 passed**.
+    - Native Windows: **271 passed** on the pre-wrap tree, and **272 passed** on the final tree.
+- Checkpoint 3 manual smoke, in this checkout (`NO_COLOR=1 target/debug/wt list`, origin `git@github.com:…`):
+    1. First run: "main is in sync with local tracking ref origin/main. Remote state has not been verified."
+    2. About 5 s later: "… origin/main matched the remote when checked less than 1 min ago." (`git ls-remote` confirmed `69b207ee3`, equal to local `origin/main`).
+    3. `ps` about 15 s later showed no `internal-refresh` process.
+- New tests and tiers: every new test is L1. None has a tier marker in its path, and all sit in declared targets: the `refresh_worker` and `list` unit modules, and `tests/list_table.rs`. `worktree-cli` does not set `autotests = false`. The only L2 edit is inside the existing `level2_list_verbose` binary.
+
+### Checkpoint 3
+
+Met: `just test` passes, the smoke run shows the qualified caption and "Remote state has not been verified." first and an aged observation next, and no worker lingers.

@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 packages:
@@ -32,6 +32,30 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+docs_updated_during_phase_3:
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/SKILL.md
 ---
 
 # Plan: `wt list` caption trusts a stale `origin/<default>`
@@ -198,12 +222,12 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **Shared worker** (`cli/src/commands/refresh_worker.rs`, `commands/mod.rs`, `args.rs`, `main.rs`)
+- [x] **Shared worker** (`cli/src/commands/refresh_worker.rs`, `commands/mod.rs`, `args.rs`, `main.rs`)
     - Rename the module and the hidden command (Rule 1). Keep `main_checkout` validation, cwd = main, null stdio, the `WT_SHELL_WRAPPER`/`COMPLETE` env removal, `configure_detached_child`, and silent failure.
     - Implement `run_halves` (Rule 9). The PR half is the existing `pull_requests::refresh`. The head half is `refresh_remote_head` with `LsRemote` at `REMOTE_HEAD_REFRESH_DEADLINE`.
     - Update the module docs to describe both halves.
     - Unit tests (acceptance 4, worker side): with the PR half blocked on a channel, the head half publishes, and the reverse. A PR half that returns `Contended`, fails, or has an unsupported provider still lets the head half run. A failing head half still lets the PR half run. A panicking half does not stop the other. Keep the existing `main_checkout` and spawn-failure tests.
-- [ ] **Caption rendering** (`cli/src/commands/list_table.rs`)
+- [x] **Caption rendering** (`cli/src/commands/list_table.rs`)
     - Add `RemoteFacts` and `TableFacts.remote`, and change the `from_list` signature (Rule 10). Extract `age_text` (Rule 11).
     - Rewrite `caption_markup` for the four comparison states with "local tracking ref". Add `observation_markup(remote, now)` covering the five spec rows, the "no tracking ref and no usable answer" sentence, and the stale-absent wording (past tense only).
     - `render` shows the caption paragraph when a comparison **or** an observation exists. No raw URL and no new protocol line; output stays on stderr.
@@ -211,7 +235,7 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **List orchestration** (`cli/src/commands/list.rs`, `cli/src/commands/list/tests.rs`)
+- [x] **List orchestration** (`cli/src/commands/list.rs`, `cli/src/commands/list/tests.rs`)
     - Implement Rule 8: `ListSeams`, a single launch after the foreground PR request settles, and a return of `(prs, head, origin_present)` from the PR thread. Pass `RemoteFacts` into `TableFacts::from_list`.
     - Keep the `pr gather` perf stage. Add a `remote select` perf stage that covers live-head selection plus the launch call, for the Phase 4 stage measurement.
     - Unit tests (acceptance 4, launch side), using counting `connect`/`launch` seams and a seeded store directory:

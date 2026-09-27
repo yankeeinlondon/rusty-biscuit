@@ -31,32 +31,34 @@ related:
     - 2026-09-24-ux-improvements
 human_review: false
 message_to_agent: |-
-    Phase 2 (library foundations) is complete; details in implementation-log.md "## Phase 2".
-    Library API now available to Phase 3:
-    - worktree::live_remote (moved from remove::live_remote, which no longer exists):
-      RemoteHeads, LsRemote, run_noninteractive, is_object_id, LIVE_CHECK_DEADLINE, PUSH_DEADLINE.
-      Incomplete stdout or a malformed ls-remote line is now Err, never Ok(None).
-    - worktree::remote_head: remote_head_store_path(main), remote_head_lock_path(store),
-      select_cached_head(store, origin, default_branch, now) -> CachedRemoteHead
-      {Fresh(RemoteHead) | Stale(RemoteHead) | Miss}, RemoteHead { branch, sha: Option<String>,
-      checked_at } with is_stale_at/is_future_at, refresh_remote_head(store, main, clock,
-      &dyn RemoteHeads) -> RefreshOutcome, REMOTE_HEAD_REFRESH_DEADLINE (10 s). The freshness
-      window is pull_requests::FRESHNESS_WINDOW (not duplicated).
-    - Small deviation from Rule 5: pull_requests::RefreshOutcome gained BOTH NoDefaultBranch and
-      DefaultBranchChanged (a default change is not reported as OriginChanged).
-    - worktree::worktree::default_branch_in(repo) exists; use it in the worker (not the cwd form).
-    - listing::Caption has tracking_sha: String (same RefTips snapshot as the counts).
-    - cache::try_lock_sidecar is pub(crate), so CLI tests cannot call it. To probe the
-      remote-head lock from a CLI test, call refresh_remote_head with a stub RemoteHeads (the trait
-      is public) and check for RefreshOutcome::Contended, as probe_refresh does for PRs.
-    - No public writer exists for the store. The Phase 4 seed_remote_head_store helper must write
-      JSON {format_version: 1, origin_digest: pull_requests::origin_digest(<exact origin url>),
-      branch, sha: "<40|64 lowercase hex>" or null, checked_at}. Every field is required,
-      including sha (a missing sha is a miss, not an absence).
-    - The build-linux cross-check rig currently fails before compiling ("target/release/deps/*.rmeta
-      is not writeable"), a permission problem on that host. Use `just cross-check <pkg> --os wsl`
-      for Linux evidence until it is fixed. Windows and WSL2 passed this phase.
-    - Test baseline after Phase 2 (macOS): just test in worktree/ = 487 passed, 18 skipped.
+    Phase 3 (worker, rendering, orchestration) is complete; details in implementation-log.md "## Phase 3".
+    What exists now for Phase 4:
+    - Hidden command is `wt internal-refresh <main>` (cli/src/commands/refresh_worker.rs). run_halves runs the PR
+      half and the live-head half on two scoped threads; panics are discarded per half.
+    - list::gather_remote implements Rule 8 via ListSeams { connect, launch }. Perf stages: `pr gather` (origin
+      lookup + PR select + any foreground request) and NEW `remote select` (live-head select + launch). Phase 4
+      adds the < 300 ms per-sample assertion on `remote select` in perf_pr_request.rs.
+    - list_table: RemoteFacts { default_branch, tracking_tip, answer } (no tracking_ref field; derived as
+      origin/<default>), TableFacts.remote, from_list(list, prs, remote) drops the caption when remote is None,
+      observation_markup(remote, now), age_text(seconds). The caption paragraph now word-wraps
+      (WordWrap::WrapProse(None, Some(1))); the 99-column snapshot shows it on two lines.
+    - Much of Phase 4's "Migrate existing tests" task is ALREADY DONE (it was needed to keep just test green):
+      argv rename, seed_remote_head_store(age, sha) / remote_head_store() / probe_head_refresh(),
+      wait_until_unlocked = both locks free AND no worker process, RemoveOnDrop removes the head store too,
+      fresh-head seeds in list_prs / perf_pr_request / level2_list_verbose. The plan checkbox is left unchecked;
+      verify against the S2 inventory and check it off.
+    - IMPORTANT: MixedFixture::wt_command_via / wt_command_via_gitea now set GIT_CONFIG_COUNT=2 with
+      protocol.http.allow=never and protocol.https.allow=never, because git honors HTTP(S)_PROXY and the
+      worker's ls-remote was being counted as a PR request by ProxyStub/FakeGitea. The Rule 13 live-hold test
+      needs git's HTTP transport, so it must env_remove("GIT_CONFIG_COUNT") (or build its own command).
+    - Linux/WSL: sysinfo lists threads as processes with the same argv; refresh_workers() now filters
+      thread_kind().is_none(). Any new process-counting helper must do the same (recorded in the os skill).
+    - Listing reads origin ONCE before the PR request (Rule 8), so the live head is selected with the
+      pre-request origin; seed heads for the origin that is current when `wt list` starts.
+    - seed_remote_head_store always writes branch "main"; add a parameter if a trunk fixture needs it.
+    - Test baseline after Phase 3 (macOS): just test in worktree/ = 512 passed, 18 skipped; level2_list_verbose
+      (tmux) 9/9. Cross-check worktree-cli: WSL2 285 passed; native Windows 272 passed (final tree).
+      build-linux rig was not retried (Phase 2 found it broken).
 ---
 
 # `wt list` caption trusts a stale `origin/<default>`
