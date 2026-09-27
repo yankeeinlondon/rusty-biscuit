@@ -150,6 +150,19 @@ Positive criteria — comments worth their length:
 Update alongside code changes:
 
 - READMEs when public behavior changes
+- the area's `docs/` topic pages when behavior changes; **the `docs/` tree is
+  the current record of how a package behaves**, so a page that describes
+  behavior that no longer exists, or omits behavior that does, is a defect of
+  the change that made it so
+    - behavior that is decided but not yet built is written into the topic page
+      and marked **planned**; the marker is removed by the change that lands
+      the code
+    - **the audience of a `docs/` page is a developer with no experience of
+      this repository.** A spec can be dense because its readers were in the
+      room; a doc cannot. Lead with what the reader can do, give a compact
+      example for each rule, and use a Mermaid diagram wherever a flow,
+      lifecycle, or state change is easier to see than to read. A page that
+      only a repo veteran can follow is not finished
 - `docs/dependencies.md` (and per-area `docs/dependencies.md`) when crates are added/removed
 - `.claude/skills/` when architecture or workflows change
 - This file when workspace layout, commands, or repo-wide conventions change
@@ -178,6 +191,17 @@ Update alongside code changes:
       review cycle closes
         - an agent never makes that move and never runs `just complete`; an
           agent's terminal state is "implementation complete, ready for review"
+- **a spec is a snapshot in time, not a current record.** It says what was
+  decided and why as of its date, is not maintained after it closes, and is
+  never the place to learn how something behaves now; that is the `docs/`
+  tree
+    - a spec may link to a `docs/` page; **a `docs/` page never links to, or
+      names, a feature or fix**, by path or by `{date}-{name}`. A doc that says
+      "tracked in `2026-…`" has delegated its content to a snapshot that will
+      move and go stale; it states the behavior or the defect in its own words
+    - when an implementation departs from its spec, the docs are corrected and
+      the departure is recorded in the implementation log; the spec is left
+      saying what was decided
 - **reference a feature/fix by its `{date}-{name}` directory alone**, never by a
   path that carries a lifecycle directory
     - write `2026-09-13-cicd-redundancies`, not
