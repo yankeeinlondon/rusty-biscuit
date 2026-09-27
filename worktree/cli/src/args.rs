@@ -93,10 +93,10 @@ pub enum Commands {
         handoff: Option<String>,
     },
 
-    /// Refresh the stored open-PR answer for a main checkout (internal; `wt
-    /// list` starts it in the background)
-    #[command(name = crate::commands::pr_refresh::SUBCOMMAND, hide = true)]
-    InternalRefreshPrs {
+    /// Refresh the stored open-PR and live-head answers for a main checkout
+    /// (internal; `wt list` starts it in the background)
+    #[command(name = crate::commands::refresh_worker::SUBCOMMAND, hide = true)]
+    InternalRefresh {
         /// The repository's main checkout
         repo: std::path::PathBuf,
     },
