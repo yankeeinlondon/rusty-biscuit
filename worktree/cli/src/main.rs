@@ -52,8 +52,8 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
             commands::create(&branch, from.as_deref(), stay)
         }
         Commands::Go { name, .. } => commands::go(&name),
-        Commands::InternalRefresh { repo } => {
-            commands::refresh_worker::run(&repo);
+        Commands::InternalRefresh { repo, attempt, force } => {
+            commands::refresh_worker::run(&repo, attempt.as_deref(), force);
             Ok(())
         }
         Commands::Remove {

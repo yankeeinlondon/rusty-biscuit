@@ -245,7 +245,7 @@ pub fn fetch_and_publish(
 }
 
 /// Why a [`refresh`] ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshOutcome {
     /// A new answer was stored.
     Refreshed,
@@ -257,16 +257,10 @@ pub enum RefreshOutcome {
     LockFailed,
     /// `origin` is missing; no request was made.
     NoOrigin,
-    /// The default branch could not be resolved; no request was made (live
-    /// head only).
-    NoDefaultBranch,
     /// `origin` changed during the request, so the answer was discarded.
     OriginChanged,
-    /// The default branch changed during the request, so the answer was
-    /// discarded (live head only).
-    DefaultBranchChanged,
     /// The request failed; the store is untouched.
-    Failed,
+    Failed(PrFailure),
     /// The answer could not be written; the store is untouched.
     PublishFailed,
 }
@@ -279,11 +273,13 @@ pub enum RefreshOutcome {
 /// concurrent refreshes make at most one request, and a crashed holder's lock
 /// is released by the OS. The sidecar is never deleted: unlinking it would let
 /// a new process lock a different file while the old lock is held. `clock` is
-/// read before the request, so the stored age errs old.
+/// read before the request, so the stored age errs old. `force` asks even
+/// when the stored answer is fresh (`wt list --refresh`).
 pub fn refresh(
     store: &Path,
     repo_root: &Path,
     clock: impl Fn() -> u64,
+    force: bool,
     connect: impl FnOnce(&str) -> Box<dyn OpenPrSource>,
 ) -> RefreshOutcome {
     let Some(_lock) = (match try_lock_sidecar(&pr_lock_path(store)) {
@@ -297,11 +293,12 @@ pub fn refresh(
         return RefreshOutcome::NoOrigin;
     };
     let started = clock();
-    if matches!(select_cached(store, Some(&origin), started), CachedPrs::Fresh(_)) {
+    if !force && matches!(select_cached(store, Some(&origin), started), CachedPrs::Fresh(_)) {
         return RefreshOutcome::AlreadyFresh;
     }
-    let Ok(file) = fetch(&origin, started, connect(&origin).as_ref()) else {
-        return RefreshOutcome::Failed;
+    let file = match fetch(&origin, started, connect(&origin).as_ref()) {
+        Ok(file) => file,
+        Err(failure) => return RefreshOutcome::Failed(failure),
     };
     if origin_url(repo_root).as_deref() != Some(origin.as_str()) {
         return RefreshOutcome::OriginChanged;
@@ -658,7 +655,7 @@ mod tests {
             ticks.set(now + 5);
             now
         };
-        assert_eq!(refresh(&store, &root, clock, connect), RefreshOutcome::Refreshed);
+        assert_eq!(refresh(&store, &root, clock, false, connect), RefreshOutcome::Refreshed);
         assert_eq!(calls.get(), 1);
         assert_eq!(*origins.borrow(), [ORIGIN], "the request is made for the exact origin value");
 
@@ -671,7 +668,7 @@ mod tests {
 
         let (calls, source) = stub(Ok(vec![pr(105, Some("o/r"), "feat/z", "main")]));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 700, connect), RefreshOutcome::Refreshed);
+        assert_eq!(refresh(&store, &root, || NOW + 700, false, connect), RefreshOutcome::Refreshed);
         assert_eq!(calls.get(), 1);
         let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW + 701) else {
             panic!("fresh after the second refresh");
@@ -684,12 +681,12 @@ mod tests {
         let (_dir, root, store) = repo(Some(ORIGIN));
         let (_, source) = stub(Ok(vec![pr(1, Some("o/r"), "a", "main")]));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW, connect), RefreshOutcome::Refreshed);
+        assert_eq!(refresh(&store, &root, || NOW, false, connect), RefreshOutcome::Refreshed);
 
         git(&root, &["remote", "set-url", "origin", "https://prs.example.invalid/o/new.git"]);
         let (calls, source) = stub(Ok(vec![pr(2, Some("o/new"), "b", "main")]));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 1, connect), RefreshOutcome::Refreshed);
+        assert_eq!(refresh(&store, &root, || NOW + 1, false, connect), RefreshOutcome::Refreshed);
         assert_eq!(calls.get(), 1, "a fresh answer for the old origin does not count");
         let CachedPrs::Fresh(listing) = select_cached(&store, Some("https://prs.example.invalid/o/new.git"), NOW + 2) else {
             panic!("bound to the new origin");
@@ -704,9 +701,33 @@ mod tests {
         let before = fs::read(&store).unwrap();
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 59, connect), RefreshOutcome::AlreadyFresh);
+        assert_eq!(refresh(&store, &root, || NOW + 59, false, connect), RefreshOutcome::AlreadyFresh);
         assert_eq!(calls.get(), 0);
         assert_eq!(fs::read(&store).unwrap(), before);
+    }
+
+    #[test]
+    fn a_forced_refresh_asks_even_when_the_answer_is_fresh() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        seed(&store, &root, ORIGIN, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
+        let (calls, source) = stub(Ok(vec![pr(7, Some("o/r"), "feat/y", "main")]));
+        let (_, connect) = connector(source);
+
+        assert_eq!(refresh(&store, &root, || NOW + 1, true, connect), RefreshOutcome::Refreshed);
+
+        assert_eq!(calls.get(), 1);
+        let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW + 1) else {
+            panic!("the forced answer is stored");
+        };
+        assert_eq!(numbers(&listing), [7]);
+
+        // Forcing never skips the lock.
+        let holder = try_lock_sidecar(&pr_lock_path(&store)).unwrap().expect("free");
+        let (calls, source) = stub(Ok(Vec::new()));
+        let (_, connect) = connector(source);
+        assert_eq!(refresh(&store, &root, || NOW + 2, true, connect), RefreshOutcome::Contended);
+        assert_eq!(calls.get(), 0);
+        drop(holder);
     }
 
     #[test]
@@ -718,7 +739,7 @@ mod tests {
         let holder = try_lock_sidecar(&pr_lock_path(&store)).unwrap().expect("the first lock is free");
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::Contended);
+        assert_eq!(refresh(&store, &root, || NOW + 600, false, connect), RefreshOutcome::Contended);
         assert_eq!(calls.get(), 0);
         assert_eq!(fs::read(&store).unwrap(), before);
 
@@ -726,7 +747,7 @@ mod tests {
         assert!(pr_lock_path(&store).exists(), "the sidecar persists across holders");
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::Refreshed);
+        assert_eq!(refresh(&store, &root, || NOW + 600, false, connect), RefreshOutcome::Refreshed);
         assert_eq!(calls.get(), 1, "a released lock lets the next refresh run");
         assert!(pr_lock_path(&store).exists(), "a refresh never deletes the sidecar");
     }
@@ -739,7 +760,7 @@ mod tests {
         fs::create_dir_all(pr_lock_path(&store)).unwrap();
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::LockFailed);
+        assert_eq!(refresh(&store, &root, || NOW + 600, false, connect), RefreshOutcome::LockFailed);
         assert_eq!(calls.get(), 0);
         assert_eq!(fs::read(&store).unwrap(), before);
     }
@@ -752,7 +773,7 @@ mod tests {
         for reason in [PrFailure::Other, PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }] {
             let (calls, source) = stub(Err(reason.clone()));
             let (_, connect) = connector(source);
-            assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::Failed);
+            assert_eq!(refresh(&store, &root, || NOW + 600, false, connect), RefreshOutcome::Failed(reason.clone()));
             assert_eq!(calls.get(), 1);
             assert_eq!(fs::read(&store).unwrap(), before, "{reason:?} must not replace the answer");
         }
@@ -771,7 +792,7 @@ mod tests {
         let moved = root.clone();
         source.during = Some(Box::new(move || git(&moved, &["remote", "set-url", "origin", "https://prs.example.invalid/o/new.git"])));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::OriginChanged);
+        assert_eq!(refresh(&store, &root, || NOW + 600, false, connect), RefreshOutcome::OriginChanged);
         assert_eq!(fs::read(&store).unwrap(), before);
     }
 
@@ -780,7 +801,7 @@ mod tests {
         let (_dir, root, store) = repo(None);
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
-        assert_eq!(refresh(&store, &root, || NOW, connect), RefreshOutcome::NoOrigin);
+        assert_eq!(refresh(&store, &root, || NOW, false, connect), RefreshOutcome::NoOrigin);
         assert_eq!(calls.get(), 0);
         assert!(!store.exists());
     }

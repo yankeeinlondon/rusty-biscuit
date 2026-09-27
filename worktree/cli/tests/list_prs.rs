@@ -4,9 +4,11 @@
 //! `wt internal-refresh`, and a refused connection on a miss shows the
 //! table without badges and stores nothing.
 //!
-//! Each test seeds a fresh live-head answer, so the worker's live-head half
-//! neither starts a worker nor makes a request, and git's own HTTP transport
-//! is refused (see `perf_support`): only PR requests reach the stand-ins.
+//! Each test seeds a fresh live-head answer, so listing starts no worker for
+//! the live head alone, and git's own HTTP transport is refused (see
+//! `perf_support`). A worker's live-head half still asks the provider for the
+//! branch head: [`FakeGitea`] answers that apart from its PR requests, and
+//! through [`ProxyStub`] it is one more connection.
 //!
 //! The worker's lifecycle runs against [`FakeGitea`], which holds a request
 //! until the test releases it: the parent returns while its worker is
@@ -32,7 +34,7 @@ use perf_support::{
 };
 use serial_test::serial;
 use worktree::pull_requests::{RefreshOutcome, pr_lock_path};
-use worktree::remote_head::remote_head_lock_path;
+use worktree::remote_head::{CheckFailure, Outcome, Phase, read_store, remote_head_lock_path};
 
 /// How long a test waits for the detached worker to act before failing.
 const WORKER_WAIT: Duration = Duration::from_secs(20);
@@ -177,22 +179,24 @@ fn a_stale_store_shows_its_badges_at_once_and_a_detached_worker_makes_the_reques
     assert!(row(&stderr, "divergent-0").contains("PR #99"), "{stderr}");
     assert!(stderr.contains("PRs as of 12 min ago"), "{stderr}");
 
-    // The worker's request reaches the proxy after `wt list` returned, and
-    // it holds the refresh lock while that request is blocked.
-    assert!(proxy.wait_for_connections(1, WORKER_WAIT), "the worker never made its request");
+    // The worker's requests reach the proxy after `wt list` returned: one
+    // from its PR half and one from its live-head half (the provider's
+    // branch-head API, which the proxy cannot tell apart). It holds the PR
+    // refresh lock while that request is blocked.
+    assert!(proxy.wait_for_connections(2, WORKER_WAIT), "the worker never made its requests");
     assert_eq!(fixture.probe_refresh(), RefreshOutcome::Contended, "the blocked worker holds the lock");
     finish_worker(&fixture, &proxy);
-    // A foreground request would be a second connection. Its duration is
+    // A foreground request would be a third connection. Its duration is
     // `perf_pr_request.rs`'s to bound: parallel L1 load on Windows pushes
     // even a no-request `pr gather` past the 300 ms deadline.
-    assert_eq!(proxy.connections(), 1, "one worker, one request, none in the foreground");
+    assert_eq!(proxy.connections(), 2, "one worker, one request per half, none in the foreground");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "a failed refresh is never stored");
 
     // The failed refresh left the answer stale, so the next list shows it
     // again and tries again.
     let (_, stderr) = list(&fixture, &proxy);
     assert!(row(&stderr, "divergent-0").contains("PR #99"), "{stderr}");
-    assert!(proxy.wait_for_connections(2, WORKER_WAIT), "the next stale list refreshes again");
+    assert!(proxy.wait_for_connections(4, WORKER_WAIT), "the next stale list refreshes again");
     finish_worker(&fixture, &proxy);
 }
 
@@ -226,7 +230,7 @@ fn the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout() 
     fixture.seed_pr_store(Duration::from_secs(12 * 60 + 5), 99, "divergent-0");
     fixture.seed_remote_head_store(Duration::from_secs(12 * 60 + 5), Some(HEAD_SHA));
     let stored = fs::read(fixture.pr_store()).expect("seeded store");
-    let stored_head = fs::read(fixture.remote_head_store()).expect("seeded head");
+    let stored_head = read_store(&fixture.remote_head_store()).answer.expect("seeded head");
     let head_lock = remote_head_lock_path(&fixture.remote_head_store());
     let proxy = ProxyStub::refusing();
     let run_worker = |repo: &std::path::Path| {
@@ -252,7 +256,10 @@ fn the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout() 
     assert!(pr_lock_path(&fixture.pr_store()).exists(), "the main checkout's worker took its PR lock");
     assert!(head_lock.exists(), "and its live-head lock");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), stored, "its failed PR refresh stored nothing");
-    assert_eq!(fs::read(fixture.remote_head_store()).expect("head"), stored_head, "nor its failed live-head refresh");
+    let head = read_store(&fixture.remote_head_store());
+    assert_eq!(head.answer, Some(stored_head), "nor its failed live-head check replace the answer");
+    let attempt = head.attempt.expect("the attempt is recorded");
+    assert_eq!(attempt.outcome, Some(Outcome::CheckFailed { reason: CheckFailure::Other }), "{attempt:?}");
 }
 
 #[test]
@@ -345,6 +352,7 @@ fn a_detached_workers_answer_replaces_the_stale_one_on_the_next_list() {
     assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "the worker finished");
     assert_ne!(stored(&fixture), seeded, "the worker stored its answer");
     assert_eq!(gitea.requests(), 1);
+    assert_eq!(gitea.branch_requests(), 1, "its live-head half asked the provider for the branch head");
 
     let (_, stderr) = list_with(fixture.wt_command_via_gitea(&gitea));
     assert!(row(&stderr, "divergent-1").contains("PR #7"), "{stderr}");
@@ -543,7 +551,7 @@ fn a_missing_or_stale_live_head_never_holds_up_the_listing() {
         if let Some(age) = head_age {
             fixture.seed_remote_head_store(age, Some(HEAD_SHA));
         }
-        let stored_head = fs::read(fixture.remote_head_store()).ok();
+        let stored_head = read_store(&fixture.remote_head_store()).answer;
 
         // `.output()` returns only once every holder of stdout and stderr has
         // exited, so it returning while `origin` still holds the worker's
@@ -551,7 +559,7 @@ fn a_missing_or_stale_live_head_never_holds_up_the_listing() {
         let (_, stderr) = list_with(fixture.wt_command_direct());
 
         assert!(origin.wait_for_requests(1, WORKER_WAIT), "{head_age:?}: the worker never asked origin");
-        assert_eq!(fixture.probe_head_refresh(), RefreshOutcome::Contended, "{head_age:?}: the request is still held");
+        assert!(fixture.head_lock_held(), "{head_age:?}: the request is still held");
         assert_eq!(refresh_workers(fixture.main()).len(), 1, "{head_age:?}: one worker");
         let caption = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
         match head_age {
@@ -565,6 +573,9 @@ fn a_missing_or_stale_live_head_never_holds_up_the_listing() {
             requests[0].starts_with("GET /r.git/info/refs?service=git-upload-pack"),
             "{head_age:?}: the only request is git's: {requests:?}"
         );
-        assert_eq!(fs::read(fixture.remote_head_store()).ok(), stored_head, "{head_age:?}: nothing stored yet");
+        let head = read_store(&fixture.remote_head_store());
+        assert_eq!(head.answer, stored_head, "{head_age:?}: no answer stored yet");
+        let attempt = head.attempt.expect("the attempt is recorded before its request");
+        assert_eq!((attempt.phase, attempt.outcome), (Phase::Checking, None), "{head_age:?}: still checking");
     }
 }

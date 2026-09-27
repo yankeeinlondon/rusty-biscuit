@@ -86,6 +86,12 @@ impl Preferences {
     pub fn is_ignored(&self, identity: &RepoIdentity) -> bool {
         self.ignore_api.contains(identity)
     }
+
+    /// Whether the repository `origin` (a URL) names is ignored; an origin
+    /// without an identity never is.
+    pub fn ignores_origin(&self, origin: &str) -> bool {
+        RepoIdentity::from_origin(origin).is_some_and(|identity| self.is_ignored(&identity))
+    }
 }
 
 /// `~/.wt.json`, through the same home-directory lookup as `~/.worktree.json`
@@ -259,6 +265,21 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_slice(&after_two).unwrap();
         assert_eq!(parsed["format_version"], 1);
+    }
+
+    #[test]
+    fn an_added_repository_is_ignored_by_any_of_its_origin_spellings() {
+        let (_dir, path) = store();
+        let https = "https://github.com/Owner/Repo.git";
+        add(&path, &RepoIdentity::from_origin(https).unwrap()).unwrap();
+        let preferences = load(&path);
+
+        for origin in [https, "git@github.com:Owner/Repo.git", "https://token@github.com/Owner/Repo"] {
+            assert!(preferences.ignores_origin(origin), "{origin}");
+        }
+        for origin in ["https://github.com/Owner/Other.git", "https://github.com:8443/Owner/Repo.git", "/srv/git/repo.git"] {
+            assert!(!preferences.ignores_origin(origin), "{origin}");
+        }
     }
 
     #[test]

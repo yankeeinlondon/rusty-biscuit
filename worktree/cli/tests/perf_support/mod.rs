@@ -27,11 +27,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
-use worktree::live_remote::RemoteHeads;
 use worktree::pull_requests::{
     OpenPrSource, OpenPullRequest, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
-use worktree::remote_head::{PrFailure, refresh_remote_head, remote_head_lock_path, remote_head_store_path};
+use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
 
 /// Branches of each divergence shape in the mixed fixture. The total worktree
 /// count is `1 (main) + DIVERGENT + FAST_FORWARD + BEHIND`.
@@ -326,12 +325,12 @@ impl MixedFixture {
     /// Runs a refresh the way a competing worker would, with a source that
     /// must never be asked: `Contended` while a worker holds the lock.
     pub fn probe_refresh(&self) -> RefreshOutcome {
-        refresh(&self.pr_store(), &self.main, unix_now, |_| Box::new(NoRequest))
+        refresh(&self.pr_store(), &self.main, unix_now, false, |_| Box::new(NoRequest))
     }
 
-    /// [`MixedFixture::probe_refresh`] for the live-head lock.
-    pub fn probe_head_refresh(&self) -> RefreshOutcome {
-        refresh_remote_head(&self.remote_head_store(), &self.main, unix_now, &NoRequest)
+    /// Whether a worker holds the live-head lock.
+    pub fn head_lock_held(&self) -> bool {
+        refresh_lock_held(&self.remote_head_store())
     }
 
     /// Waits up to `limit` until no worker for the fixture runs and neither
@@ -343,7 +342,7 @@ impl MixedFixture {
         loop {
             nudge();
             if self.probe_refresh() != RefreshOutcome::Contended
-                && self.probe_head_refresh() != RefreshOutcome::Contended
+                && !self.head_lock_held()
                 && refresh_workers(&self.main).is_empty()
             {
                 return true;
@@ -423,14 +422,8 @@ impl Drop for RemoveOnDrop {
     }
 }
 
-/// A source (PR or live head) that must never be asked.
+/// A PR source that must never be asked.
 pub struct NoRequest;
-
-impl RemoteHeads for NoRequest {
-    fn live_head(&self, _remote: &str, _branch: &str) -> Result<Option<String>, String> {
-        Err("the probe makes no request".into())
-    }
-}
 
 impl OpenPrSource for NoRequest {
     fn source_repo(&self) -> Option<String> {
@@ -678,6 +671,7 @@ pub enum GiteaReply {
 #[derive(Debug)]
 struct GiteaState {
     requests: usize,
+    branch_requests: usize,
     waiting: usize,
     held: bool,
     reply: GiteaReply,
@@ -687,9 +681,14 @@ struct GiteaState {
 /// [`FakeGitea::ORIGIN`] through `HTTP_PROXY` (sniff maps a `gitea.` host to
 /// the Gitea API), so no request leaves the host and no TLS is involved.
 ///
-/// While [`FakeGitea::hold`] is in effect every request waits unanswered,
+/// While [`FakeGitea::hold`] is in effect every PR request waits unanswered,
 /// which is how a test blocks a detached worker mid-request with its lock
 /// held. Dropping the server answers every waiting request with 503.
+///
+/// The worker's live-head half asks for the default branch's head
+/// (`/branches/`); that request is answered 404 at once and counted apart
+/// ([`FakeGitea::branch_requests`]), so it never holds or counts as a PR
+/// request. Its `ls-remote` fallback is refused by the fixture's git config.
 pub struct FakeGitea {
     port: u16,
     shared: Arc<(Mutex<GiteaState>, Condvar)>,
@@ -708,7 +707,7 @@ impl FakeGitea {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake gitea");
         let port = listener.local_addr().expect("fake gitea address").port();
         let shared = Arc::new((
-            Mutex::new(GiteaState { requests: 0, waiting: 0, held: false, reply }),
+            Mutex::new(GiteaState { requests: 0, branch_requests: 0, waiting: 0, held: false, reply }),
             Condvar::new(),
         ));
         let before_reply: BeforeReply = Arc::new(Mutex::new(None));
@@ -751,9 +750,14 @@ impl FakeGitea {
         self.shared.1.notify_all();
     }
 
-    /// Requests received so far, answered or not.
+    /// PR requests received so far, answered or not.
     pub fn requests(&self) -> usize {
         self.state().requests
+    }
+
+    /// Branch-head requests received so far, each answered 404 at once.
+    pub fn branch_requests(&self) -> usize {
+        self.state().branch_requests
     }
 
     /// Requests received and not yet answered.
@@ -794,6 +798,19 @@ fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_re
             Ok(0) | Err(_) => return,
             Ok(read) => head.extend_from_slice(&buffer[..read]),
         }
+    }
+    let request_line = head.split(|byte| *byte == b'\r').next().unwrap_or_default();
+    if request_line.windows(10).any(|window| window == b"/branches/") {
+        let (lock, changed) = shared;
+        lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).branch_requests += 1;
+        changed.notify_all();
+        let body = r#"{"message":"branch not found"}"#;
+        let response = format!(
+            "HTTP/1.1 404 Fake\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(response.as_bytes());
+        return;
     }
     let reply = {
         let (lock, changed) = shared;

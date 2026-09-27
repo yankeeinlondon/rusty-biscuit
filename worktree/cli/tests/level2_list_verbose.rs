@@ -28,7 +28,7 @@ use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
 use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
-use worktree::remote_head::{refresh_remote_head, remote_head_store_path};
+use worktree::remote_head::{refresh_lock_held, remote_head_store_path};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -494,6 +494,12 @@ impl DesignFixture {
         let bin = cargo_bin("wt").display().to_string();
         let home = self.home.display().to_string();
         let cache = self.home.join("cache").display().to_string();
+        // No user or system git config (no `insteadOf` can send the worker's
+        // `ls-remote` fallback to the real host), and git's HTTP transports
+        // refused, since git honors `HTTPS_PROXY` too.
+        let empty_config = self.home.join("empty.gitconfig");
+        fs::write(&empty_config, "").expect("write an empty global git config");
+        let empty_config = empty_config.display().to_string();
         harness
             .send_text(format!("cd '{}'\n", self.feature.display()).as_bytes())
             .expect("send cd failed");
@@ -506,6 +512,13 @@ impl DesignFixture {
                     ("HTTPS_PROXY", proxy),
                     ("FORCE_COLOR", "1"),
                     ("COLORFGBG", colorfgbg),
+                    ("GIT_CONFIG_NOSYSTEM", "1"),
+                    ("GIT_CONFIG_GLOBAL", &empty_config),
+                    ("GIT_CONFIG_COUNT", "2"),
+                    ("GIT_CONFIG_KEY_0", "protocol.http.allow"),
+                    ("GIT_CONFIG_VALUE_0", "never"),
+                    ("GIT_CONFIG_KEY_1", "protocol.https.allow"),
+                    ("GIT_CONFIG_VALUE_1", "never"),
                 ],
             )
             .expect("send wt list failed");
@@ -681,7 +694,7 @@ fn level2_list_width_flag_leaves_the_counts_in_tmux() {
 
 /// A stale stored answer in a real terminal: its badge still shows, and the
 /// dim age line follows the legend. The detached refresh `wt list` starts
-/// sends its request to a hanging local proxy, which the test then closes so
+/// sends its requests to a hanging local proxy, which the test then closes so
 /// the worker fails, stores nothing, and exits before the fixture is removed.
 #[test]
 #[serial(level2_terminal)]
@@ -704,32 +717,33 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     assert_eq!(screen.text(age).trim(), "PRs as of 12 min ago", "{plain}");
     screen.assert_span(age, "PRs as of 12 min ago", "dim", |s| s.dim);
 
-    // The worker's request reached the stub, not the network. Unblock it and
-    // wait until it released its lock and exited.
+    // The worker's requests reached the stub, not the network: one from its
+    // PR half and one from its live-head half (the provider's branch-head
+    // API; git's own fallback is refused). Unblock them and wait until the
+    // worker released both locks and exited.
     let deadline = Instant::now() + Duration::from_secs(20);
-    assert!(proxy.wait_for_connections(1, Duration::from_secs(20)), "the worker never made its request");
+    assert!(proxy.wait_for_connections(2, Duration::from_secs(20)), "the worker never made its requests");
     let lock = pr_lock_path(&fixture.pr_store());
-    while !lock.exists() || probe_refresh(&fixture) == RefreshOutcome::Contended {
+    while !lock.exists() || probe_refresh(&fixture) == RefreshOutcome::Contended || head_lock_held(&fixture) {
         proxy.close_held();
         assert!(Instant::now() < deadline, "the worker never released its lock");
         std::thread::sleep(Duration::from_millis(20));
     }
     let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
     assert!(left.is_empty(), "the worker outlived its request: {left:?}");
-    assert_ne!(probe_head_refresh(&fixture), RefreshOutcome::Contended, "the live-head lock is free");
-    assert_eq!(proxy.connections(), 1, "one worker request, none in the foreground");
+    assert!(!head_lock_held(&fixture), "the live-head lock is free");
+    assert_eq!(proxy.connections(), 2, "one worker request per half, none in the foreground");
     assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
 }
 
 /// A refresh that makes no request: `Contended` while a worker holds the lock.
 fn probe_refresh(fixture: &DesignFixture) -> RefreshOutcome {
-    refresh(&fixture.pr_store(), &fixture.main, unix_now, |_| Box::new(NoRequest))
+    refresh(&fixture.pr_store(), &fixture.main, unix_now, false, |_| Box::new(NoRequest))
 }
 
-/// [`probe_refresh`] for the live-head lock.
-fn probe_head_refresh(fixture: &DesignFixture) -> RefreshOutcome {
-    let store = fixture.store_path(remote_head_store_path(&fixture.main).expect("remote-head store path"));
-    refresh_remote_head(&store, &fixture.main, unix_now, &NoRequest)
+/// Whether a worker holds the live-head lock.
+fn head_lock_held(fixture: &DesignFixture) -> bool {
+    refresh_lock_held(&fixture.store_path(remote_head_store_path(&fixture.main).expect("remote-head store path")))
 }
 
 

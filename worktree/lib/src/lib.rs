@@ -12,6 +12,7 @@ pub mod listing;
 pub mod live_remote;
 pub mod pull_requests;
 pub mod remote_head;
+pub mod remote_update;
 pub mod remove;
 pub mod util;
 pub mod worktree;
