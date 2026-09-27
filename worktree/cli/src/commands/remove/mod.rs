@@ -26,7 +26,7 @@ use worktree::remove::handoff::{
     self, Approvals, BranchAction, HandoffError, HandoffRecord, HandoffRefusal, HandoffState,
     RemoteApproval, canonical, is_within,
 };
-use worktree::remove::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
+use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::remote::{
     Reinterpretation, RemoteState, delete_remote_branch, preflight_remote_deletion,
     remote_destination,

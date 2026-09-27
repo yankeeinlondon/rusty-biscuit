@@ -7,6 +7,13 @@
 //! `git-remote-https`) in a grandchild that would otherwise keep the output
 //! pipe open, and on Windows the `git.exe` launcher's real git would keep
 //! running (spike S2).
+//!
+//! Output is complete or it is an error. A successful exit whose stdout could
+//! not be read to the end (a read error, a pipe still open after the grace
+//! period) is `Err`, never `Ok("")`, and [`LsRemote`] rejects any line that is
+//! not `<object id>\t<refname>`. So only a complete answer without the exact
+//! ref is `Ok(None)`: a failed or truncated request can never read as a
+//! deleted branch. Removal and the `wt list` live-head store both rely on that.
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -26,9 +33,10 @@ pub const PUSH_DEADLINE: Duration = Duration::from_secs(30);
 /// A trait so the tier logic can be tested with scripted answers.
 pub trait RemoteHeads: Sync {
     /// The live SHA of `refs/heads/<branch>` at `remote` (a remote name, which
-    /// reads its fetch URL, or a URL): `Ok(None)` when it answered and has no
-    /// such branch, `Err` with a reason when it could not be asked
-    /// (unreachable, no credentials, deadline).
+    /// reads its fetch URL, or a URL): `Ok(None)` when it answered completely
+    /// and has no such branch, `Err` with a reason when it could not be asked
+    /// (unreachable, no credentials, deadline) or its answer was incomplete
+    /// or malformed.
     fn live_head(&self, remote: &str, branch: &str) -> Result<Option<String>, String>;
 }
 
@@ -47,11 +55,35 @@ impl RemoteHeads for LsRemote<'_> {
             &["ls-remote", remote, &refname],
             self.deadline,
         )?;
-        Ok(output.lines().find_map(|line| {
-            let (sha, name) = line.split_once('\t')?;
-            (name == refname).then(|| sha.to_string())
-        }))
+        parse_live_head(&output, &refname)
     }
+}
+
+/// Whether `value` is a full git object ID: 40 (SHA-1) or 64 (SHA-256)
+/// lowercase hex digits.
+pub fn is_object_id(value: &str) -> bool {
+    matches!(value.len(), 40 | 64)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// The object ID `ls-remote` reported for exactly `refname`. Every non-empty
+/// line must be `<object id>\t<refname>`; a line for another ref (a server
+/// that ignores the pattern) is skipped, but a malformed one fails the whole
+/// answer.
+fn parse_live_head(output: &str, refname: &str) -> Result<Option<String>, String> {
+    let mut found = None;
+    for line in output.lines().filter(|line| !line.is_empty()) {
+        let (sha, name) = line
+            .split_once('\t')
+            .filter(|(sha, name)| is_object_id(sha) && !name.is_empty())
+            .ok_or_else(|| format!("unexpected ls-remote output: {line:?}"))?;
+        if name == refname && found.is_none() {
+            found = Some(sha.to_string());
+        }
+    }
+    Ok(found)
 }
 
 /// Runs `git -C <base> -c credential.interactive=never <args>` with prompts
@@ -59,11 +91,12 @@ impl RemoteHeads for LsRemote<'_> {
 ///
 /// ## Returns
 ///
-/// Stdout on success.
+/// All of stdout on success.
 ///
 /// ## Errors
 ///
-/// A readable reason: git's stderr on failure, or the deadline.
+/// A readable reason: git's stderr on failure, the deadline, or stdout that
+/// could not be read completely.
 pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Result<String, String> {
     let mut command = Command::new("git");
     command
@@ -95,11 +128,10 @@ pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Res
                 // The pipes close when the transport exits too; bound the wait
                 // anyway so an orphan holding them cannot hang `wt`.
                 let grace = Duration::from_millis(500);
-                let out = stdout.recv_timeout(grace).unwrap_or_default();
                 if status.success() {
-                    return Ok(out);
+                    return collect(&stdout, grace);
                 }
-                let err = stderr.recv_timeout(grace).unwrap_or_default();
+                let err = collect(&stderr, grace).unwrap_or_default();
                 let err = err.trim();
                 return Err(if err.is_empty() {
                     format!("git exited with {status}")
@@ -123,16 +155,39 @@ pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Res
     }
 }
 
-fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> mpsc::Receiver<String> {
+/// Reads `pipe` to its end on a thread. A read error is sent as `Err`; a
+/// missing pipe sends nothing, which [`collect`] reports as incomplete.
+fn drain<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+) -> mpsc::Receiver<Result<String, String>> {
     let (sender, receiver) = mpsc::channel();
     if let Some(mut pipe) = pipe {
         std::thread::spawn(move || {
             let mut bytes = Vec::new();
-            let _ = pipe.read_to_end(&mut bytes);
-            let _ = sender.send(String::from_utf8_lossy(&bytes).into_owned());
+            let read = match pipe.read_to_end(&mut bytes) {
+                Ok(_) => Ok(String::from_utf8_lossy(&bytes).into_owned()),
+                Err(e) => Err(format!("could not read git's output: {e}")),
+            };
+            let _ = sender.send(read);
         });
     }
     receiver
+}
+
+/// The drained output, or `Err` when it did not arrive whole within `grace`.
+fn collect(
+    receiver: &mpsc::Receiver<Result<String, String>>,
+    grace: Duration,
+) -> Result<String, String> {
+    match receiver.recv_timeout(grace) {
+        Ok(read) => read,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err("git's output did not finish after it exited".to_string())
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err("git's output could not be read".to_string())
+        }
+    }
 }
 
 fn kill_tree(child: &mut Child) {
@@ -211,6 +266,83 @@ mod tests {
             deadline: LIVE_CHECK_DEADLINE,
         };
         assert!(heads.live_head("origin", "main").is_err());
+    }
+
+    const SHA1: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    #[test]
+    fn only_the_exact_ref_counts_and_an_empty_answer_is_absence() {
+        let sha256 = "a".repeat(64);
+        let output = format!(
+            "{SHA1}\trefs/heads/x/main\n{sha256}\trefs/heads/main\n"
+        );
+        assert_eq!(
+            parse_live_head(&output, "refs/heads/main").unwrap(),
+            Some(sha256)
+        );
+        // `refs/heads/x/main` alone is not `refs/heads/main`.
+        let nested = format!("{SHA1}\trefs/heads/x/main\n");
+        assert_eq!(parse_live_head(&nested, "refs/heads/main").unwrap(), None);
+        assert_eq!(parse_live_head("", "refs/heads/main").unwrap(), None);
+    }
+
+    #[test]
+    fn a_malformed_line_is_an_error_not_an_absent_branch() {
+        for output in [
+            "garbage\n",
+            &format!("{SHA1} refs/heads/main\n"),
+            &format!("{SHA1}\t\n"),
+            // A truncated line from a cut-off answer.
+            &SHA1[..20],
+            // Right line present, but another line is malformed.
+            &format!("{SHA1}\trefs/heads/main\nnot-a-line\n"),
+        ] {
+            assert!(
+                parse_live_head(output, "refs/heads/main").is_err(),
+                "{output:?} must be an error"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wrong_length_or_uppercase_object_id_is_an_error() {
+        for sha in [
+            &SHA1[..39],
+            &format!("{SHA1}0"),
+            &SHA1.to_uppercase(),
+            &"a".repeat(63),
+            &"g".repeat(40),
+        ] {
+            let output = format!("{sha}\trefs/heads/main\n");
+            assert!(
+                parse_live_head(&output, "refs/heads/main").is_err(),
+                "{sha} must be rejected"
+            );
+        }
+        assert!(is_object_id(SHA1));
+        assert!(is_object_id(&"f".repeat(64)));
+    }
+
+    #[test]
+    fn unreadable_or_unfinished_output_is_an_error() {
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("pipe broke"))
+            }
+        }
+        let grace = Duration::from_secs(5);
+        assert!(collect(&drain(Some(Broken)), grace).is_err());
+        assert!(collect(&drain(None::<Broken>), grace).is_err());
+
+        // A sender that never finishes (a transport still holding the pipe).
+        let (_held, receiver) = mpsc::channel();
+        assert!(collect(&receiver, Duration::from_millis(20)).is_err());
+
+        assert_eq!(
+            collect(&drain(Some(&b"complete"[..])), grace).unwrap(),
+            "complete"
+        );
     }
 
     #[cfg(unix)]
