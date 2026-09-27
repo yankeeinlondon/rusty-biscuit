@@ -397,12 +397,12 @@ impl DesignFixture {
     fn list_in(&self, colorfgbg: &str) -> StyledScreen {
         // A refused proxy keeps any request off the network; the fresh store
         // means none is made.
-        self.list_until(colorfgbg, "http://127.0.0.1:9", "parent deleted")
+        self.list_until("list", colorfgbg, "http://127.0.0.1:9", "parent deleted")
     }
 
-    /// [`Self::list_in`] with every request sent to `proxy`, returning the
-    /// pane once it shows `ready`.
-    fn list_until(&self, colorfgbg: &str, proxy: &str, ready: &str) -> StyledScreen {
+    /// [`Self::list_in`] running `wt {args}` with every request sent to
+    /// `proxy`, returning the pane once it shows `ready`.
+    fn list_until(&self, args: &str, colorfgbg: &str, proxy: &str, ready: &str) -> StyledScreen {
         let mut harness = TmuxHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
         let harness = &mut harness;
@@ -417,7 +417,7 @@ impl DesignFixture {
             .expect("send cd failed");
         harness
             .send_command_with_env(
-                &format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN {bin} list"),
+                &format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN {bin} {args}"),
                 &[
                     ("HOME", &home),
                     ("XDG_CACHE_HOME", &cache),
@@ -570,6 +570,24 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     });
 }
 
+/// `-w` sizes only the graph: a narrow `-w` in a pane of at least 100 columns
+/// keeps the counts, because the gate reads the terminal's own width.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_width_flag_leaves_the_counts_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    let screen = fixture.list_until("list -w 40", "15;0", "http://127.0.0.1:9", "parent deleted");
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    let feature_text = screen.text(feature);
+    let cells: Vec<&str> = feature_text.split('│').map(str::trim).collect();
+    assert_eq!(cells[3], "clean +1 -2  PR #99", "{feature_text:?}\n{plain}");
+    screen.assert_span(feature, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+}
+
 /// A stale stored answer in a real terminal: its badge still shows, and the
 /// dim age line follows the legend. The detached refresh `wt list` starts
 /// sends its request to a hanging local proxy, which the test then closes so
@@ -583,7 +601,7 @@ fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
     let seeded = fs::read(fixture.pr_store()).expect("seeded store");
     let proxy = ProxyStub::hanging();
 
-    let screen = fixture.list_until("15;0", &proxy.url(), "PRs as of");
+    let screen = fixture.list_until("list", "15;0", &proxy.url(), "PRs as of");
     let plain = screen.plain();
 
     let feature = screen.row_with(&["● wt-feature", "│"]);
