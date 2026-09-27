@@ -25,22 +25,26 @@ implemented_by: claude/opus
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 changed no source. Read "Wave 1 Decision Record" and "Wave 1
-    Regression Blueprint" in plan.md before coding. Key points: (1) do not
-    reuse RepoInfo::package_area_for_dir_with_index as-is per file -- its
-    HashSet fallback is nondeterministic for nested areas, allocates per call,
-    and treats a file whose path equals an area directory as inside it;
-    (2) add one crate-private area index in repo/ownership.rs built from the
-    ownership index's already-canonical root, and route both
-    PackageCatalog::matches and ::attribute through a single per-path resolver
-    (package-first area for owned files, else deepest strictly-containing
-    non-empty area); (3) switch package_area_for_dir_with_index's fallback to
-    the same index (inclusive lookup for directories); (4) the existing test
-    monorepo_commits_carry_deepest_package_arrays_and_area_files_stay_unattributed
-    encodes the old contract and must be renamed and re-expected, not deleted.
-    Baseline before Phase 2: sniff `just test` 2894 passed / 32 skipped,
-    `just lint` clean. The working tree carries unrelated uncommitted edits
-    from 2026-09-21-lockfile-provenance-cost; preserve them.
+    Phase 2 (Waves 2 and 3) is complete on macOS only. The fix: a
+    crate-private PackageAreaIndex in sniff/lib/src/filesystem/repo/ownership.rs
+    (non-empty areas keyed as normalize_path(root.join(area)), deepest-ancestor
+    lookup), used by PackageCatalog::resolve in recent_commits/collect.rs for
+    both filtering and attribution, and by
+    RepoInfo::package_area_for_dir_with_index in repo/types.rs in place of its
+    HashSet fallback. Key tests for Phase 3 platform evidence (all L1):
+    sniff l1 `recent_commits::area_membership::*` and
+    `recent_commits::attribution::*`; sniff unit
+    `filesystem::repo::ownership::tests::area_lookup_chooses_the_deepest_area_and_never_the_root_area`
+    and `filesystem::repo::types::tests::an_unowned_directory_in_nested_areas_resolves_to_the_deepest_area`;
+    sniff-cli l1 `cli::test_recent_commits_package_area_selects_shared_area_files_by_location`
+    and `cli::test_repo_aggregate_attributes_shared_area_files_like_the_focused_command`.
+    No cross-OS run was made in Phase 2; Windows is the one to watch, because
+    area keys mix a canonical `\\?\` root with `/`-separated area strings
+    (the same join as the ownership index, which already works there).
+    Baseline after Phase 2: sniff `just test` 2908 passed / 32 skipped, `just
+    lint` and strict clippy for sniff (with and without `remote`) and
+    sniff-cli clean. A content-identical move is not content-diffed, so
+    `git.file_diffs` can be lower than the survivors' file count.
 ---
 
 # Recent Commits: Package-Area Filtering

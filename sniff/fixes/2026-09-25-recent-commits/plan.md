@@ -10,7 +10,26 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - sniff/fixes/2026-09-25-recent-commits/implementation-log.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - sniff/lib/src/filesystem/git/recent_commits/collect.rs
+  - sniff/lib/src/filesystem/repo/ownership.rs
+  - sniff/lib/src/filesystem/repo/types.rs
+  - sniff/lib/tests/l1/recent_commits.rs
+  - sniff/cli/tests/l1/cli.rs
+docs_updated_during_phase_2:
+  - sniff/docs/topics/repo/recent-commits.md
+  - sniff/docs/topics/repo/recent-commits-schema.md
+  - sniff/docs/cli/repo_recent-commits.md
+  - sniff/cli/README.md
+  - sniff/lib/README.md
+  - sniff/fixes/2026-09-25-recent-commits/plan.md
+  - sniff/fixes/2026-09-25-recent-commits/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/sniff/architecture.md
+packages:
+  - sniff
+  - sniff-cli
 ---
 
 # Recent Commits: Package-Area Filtering Plan
@@ -249,7 +268,7 @@ Docs → Phase 2 Wave 3. Cross-OS → Phase 3 Wave 4.
 
 Prerequisite: Wave 1 decisions and fixture expectations are recorded. These tasks can run concurrently because they own separate files; the CLI tests may remain red until the library task lands.
 
-- [ ] **Library correction**
+- [x] **Library correction**
   - Own `collect.rs`, any necessary shared resolver changes, and `sniff/lib/tests/l1/recent_commits.rs`. Add the regression first and demonstrate the old implementation's failure on shared area files.
   - Replace package-index-only area filtering with recognized directory boundaries. Resolve area membership independently in attribution and filtering through the agreed shared semantics, retaining package ownership for package names and package filters.
   - Preserve selector validation, parent-area filtering, sorted/deduplicated attribution, full surviving file lists, and source-path attribution for moves. Update behavior-linked rustdoc and inline comments, especially `PackageCatalog::attribute`.
@@ -257,7 +276,7 @@ Prerequisite: Wave 1 decisions and fixture expectations are recorded. These task
   - Assert exact hash sequences for count 5 across intervening nonmatches and for a request larger than available matches. Assert a mixed-area survivor retains files and attribution outside the selected area. Preserve combined-filter behavior, including when different files satisfy different filter kinds.
   - Update existing tests that intentionally expected area-root files to remain unattributed; explain the contract change in their names and assertions.
 
-- [ ] **CLI regression**
+- [x] **CLI regression**
   - Own only the relevant tests in `sniff/cli/tests/l1/cli.rs` and narrowly necessary fixture code. Use `SniffCliFixture` and fixture-owned Git setup, with isolated environment/configuration and the archive-safe binary lookup already provided by the harness.
   - Run the shipped CLI against the blueprint repository with `--package-area worktree`, `--package worktree`, and the CLI package selector. Assert successful exit, exact commit hashes/order, exclusions, and count filling/exhaustion.
   - Parse all stdout as JSON and assert shared-only `packages: []`, the area name, and complete files for mixed commits. Include an unfiltered JSON assertion so attribution cannot accidentally depend on the area filter being present.
@@ -269,12 +288,12 @@ Prerequisite: Wave 1 decisions and fixture expectations are recorded. These task
 
 Prerequisite: Wave 2 behavior is stable. The following tasks can run concurrently with separate ownership of documentation and tests.
 
-- [ ] **Document boundaries**
+- [x] **Document boundaries**
   - Update `sniff/docs/topics/repo/recent-commits.md`, `sniff/docs/topics/repo/recent-commits-schema.md`, and `sniff/docs/cli/repo_recent-commits.md`: distinguish package directories from area directories, replace the obsolete unattributed-area rule, and show the shared-file JSON example.
   - Add concise public behavior notes to the relevant recent-commit sections of `sniff/cli/README.md` and `sniff/lib/README.md`. Explain count-of-matches and full changed-file retention without suggesting scope-based membership.
   - Update `.claude/skills/sniff/architecture.md` where its ownership description needs the independent area contract. Preserve existing edits in these files. No dependency-document changes are needed unless implementation actually changes dependencies.
 
-- [ ] **Integration safeguards**
+- [x] **Integration safeguards**
   - Own narrowly scoped integration/counter assertions. Check the aggregate path through `RecentCommits::collect_observed` and `sniff/lib/src/filesystem/repo/aggregate_view.rs`; add a shared-file attribution assertion proving aggregate and focused collection agree.
   - Reuse existing recent-commit performance collector assertions to prove only survivors receive expensive file diffs, structure discovery remains inventory/document/enrichment-free, and the aggregate does not gain redundant manifest discovery. Read the Sniff performance reference before changing or interpreting counters.
   - Inspect category projections for attribution preservation; reuse their existing tests where sufficient. Avoid unrelated renderer changes or new visual snapshots.
