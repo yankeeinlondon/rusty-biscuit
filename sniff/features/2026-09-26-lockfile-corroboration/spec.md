@@ -34,41 +34,39 @@ related:
     - 2026-09-21-lockfile-provenance-cost
 human_review: false
 message_to_agent: |-
-    Phases 2 and 3 are complete (every format parser, Rush, fallbacks, standalone lockfiles).
-    Read the "## Phase 3" section of implementation-log.md first. Key facts for Phases 4-5:
+    Phases 2, 3, and 4 are complete. Read the "## Phase 3" and "## Phase 4" sections of
+    implementation-log.md first. Key facts for Phase 5:
 
-    1. CLI JSON (Phase 4, must do). `RepoInfo` gained `standalone_lockfiles`
-       (Vec<StandaloneLockfileObservation>, always serialized by the library, `#[serde(default)]`).
-       `sniff repo structure --json` serializes RepoInfo directly, so it currently emits
-       `"standalone_lockfiles": []`. Ruling R2 says the CLI omits an empty list under the same rule it
-       applies to `monorepo_layers`. Implement that in the CLI projection and flip the expectation in
-       sniff/cli/tests/l1/cli.rs `expected_lockfile_structure_json()` (it pins today's `[]` with no
-       comment). Check the aggregate/consolidated projections too.
-    2. WIRE SHAPE for standalone entries is flat: root, tool (composer|pdm|poetry), status, paths,
-       reason, extra, missing (`#[serde(flatten)] observation: LockfileObservation`). Types are
-       re-exported from sniff::filesystem::repo.
-    3. HUMAN OUTPUT reasons to explain (Phase 4): Rush uses `unsupported_layout` for npm/Yarn managers,
-       subspaces, variants, useWorkspaces off, AND for Rush config files it cannot read/parse; Bazel
-       without MODULE.bazel is `not_applicable` + `no_lockfile_source`; npm can report
-       `ambiguous_membership`; Gradle legacy locks list many paths (14 in the fixture), so render paths
-       as a list, not one line.
-    4. COUNTERS (Phase 5). Every request now adds 3 lockfile probes per unique root (repo root plus each
+    1. CLI (done in Phase 4). Every CLI site that serializes RepoInfo strips an empty
+       `standalone_lockfiles` through `repo_json::repo_info_value` / `omit_empty_standalone_lockfiles`
+       (repo structure, fallback, `sniff --json`, `sniff filesystem --json`). The bare `repo --json`
+       aggregate's `structure` ALWAYS carries `standalone_lockfiles` (like its `monorepo_layers`).
+       Human output has a "Lockfiles" section (sniff/cli/src/output/filesystem/lockfile.rs).
+    2. No stderr "use the full request" hint was added: every CLI command that displays layers
+       corroborates and no CLI flag toggles corroboration, so no CLI command can show `not_requested`.
+       Documented as a deviation in the Phase 4 log. The README/docs pass should describe the
+       Lockfiles section (sniff/docs/cli/repo_structure.md is already updated) and must not mention a flag.
+    3. The CLI's `repo structure` on a single Poetry/PDM/Composer project reports no repository
+       (pre-existing CLI scope: it uses workspace detection), so standalone entries reach the CLI
+       only inside a workspace. Do not document standalone projects as visible via the CLI.
+    4. COUNTERS (Phase 5). Every request adds 3 lockfile probes per unique root (repo root plus each
        final package root) for standalone candidates, never a read. Tests that pin exact
-       `filesystem.repo.lockfile_probes` must count them (see the two updated detection.rs tests).
-       Gradle's legacy dir costs one `filesystem.io.read_dirs`. Rush config reads count as
-       `REPO_MANIFEST_PARSES` and happen only when corroborating.
+       `filesystem.repo.lockfile_probes` must count them. Gradle's legacy dir costs one
+       `filesystem.io.read_dirs`. Rush config reads count as `REPO_MANIFEST_PARSES` and happen only
+       when corroborating.
     5. JSONC. `filesystem::repo::jsonc::from_str` is the only way to read bun.lock / rush.json / Rush
-       config (strict jsonc-parser options). Dependency docs for jsonc-parser are ALREADY updated
-       (sniff/docs/dependencies.md and root docs/dependencies.md); Phase 5 only needs to verify them.
-    6. Carried over from Phase 2: engine contract (`parse(content) -> Outcome`; engine does
-       normalization and comparison), store rules (`ManifestStore::lockfile_presence` /
-       `lockfile(path, format)`, never `probe_exists`/`std::fs` for a lockfile),
-       `lockfile::test_seam::fail_metadata` (R9), the unreachable root-only uv row, and R10(c)
-       having no signal. The breaking-change commit needs the `!` marker (R11) and must list the
-       changed expectations from both phase logs.
-    7. Fixtures stay hidden from rg by `.ignore` (use --no-ignore). L1 tests copy each fixture into a
-       tempdir. The Bazel fixture needs BUILD files added in the copy, and the Composer fixture needs
-       a package.json (Sniff has no PHP-only package detection); both are done in lockfile_fixtures.rs.
+       config. Dependency docs for jsonc-parser are ALREADY updated; Phase 5 only verifies them.
+    6. Carried over: engine contract (`parse(content) -> Outcome`), store rules
+       (`ManifestStore::lockfile_presence` / `lockfile(path, format)`), `lockfile::test_seam::fail_metadata`
+       (R9), the unreachable root-only uv row, and R10(c) having no signal. The breaking-change commit
+       needs the `!` marker (R11) and must list the changed expectations from all phase logs
+       (Phase 4 changed four CLI snapshots and `expected_lockfile_structure_json()`).
+    7. Fixtures stay hidden from rg by `.ignore` (use --no-ignore). Tests copy each fixture into a
+       tempdir. sniff-cli's L1 `lockfile_cli.rs` reads the lib fixtures through
+       `env!("CARGO_MANIFEST_DIR")` + `.parent()` + `join("lib/tests/fixtures/lockfiles")`, and its
+       `unreadable-directory` case already exercises a directory-as-lockfile through the CLI.
+    8. `just cross-check sniff` runs only the `sniff` lib package; run `just cross-check sniff-cli`
+       separately for CLI evidence.
 ---
 
 # Lockfile corroboration for every workspace standard

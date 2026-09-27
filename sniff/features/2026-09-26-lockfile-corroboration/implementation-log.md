@@ -98,6 +98,29 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/sniff/SKILL.md
     - .claude/skills/sniff/performance.md
+source_files_during_phase_4:
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/filesystem/repo.rs
+    - sniff/cli/src/output/filesystem/lockfile.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/lockfile_cli.rs
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_pnpm_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__pnpm_nx_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+docs_updated_during_phase_4:
+    - sniff/docs/cli/repo_structure.md
+    - sniff/cli/README.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/cli.md
 packages:
     - sniff
     - sniff-cli
@@ -638,4 +661,142 @@ are in the lib target. `lockfile_fixtures` was already declared in
   rows, has a passing real-fixture L1 test. Every edited variant produces its
   specified status. Every unknown-version fixture and generated case is
   `unverifiable`, never `mismatch`.
+- Skipped: nothing. No pre-existing failures.
+
+## Phase 4
+
+One agent did Wave 1 (JSON projection, human output, CLI tests) and the Wave 2
+checkpoint. No library source changed; the CLI only projects library
+observations.
+
+### JSON projection (`cli/src/output/repo_json.rs`, `cli/src/output/mod.rs`)
+
+- New `repo_json::repo_info_value` serializes a `RepoInfo` and removes an
+  empty `standalone_lockfiles` through `omit_empty_standalone_lockfiles`
+  (ruling R2). It is used by `repo structure --json` (unfiltered and
+  filtered) and the unspecialized fallback. `sniff --json` (`/filesystem/repo`)
+  and `sniff filesystem --json` (`/repo`) call the omission helper on the
+  nested object. A populated list is emitted unchanged, in the flat wire shape.
+- The bare `sniff repo --json` aggregate's `structure` gained
+  `standalone_lockfiles`, always an array, because the aggregate always
+  carries `monorepo_layers` too ("the same rule"). It is a projection of the
+  captured `RepoInfo`; no new observation.
+- Layers already carried `lockfile` everywhere because every site serializes
+  `MonorepoLayer` directly. No CLI code rediscovers or reinterprets lockfiles.
+
+### Human output (`cli/src/output/filesystem/lockfile.rs`, new)
+
+- `render_lockfile_section` renders a "Lockfiles" section with `Prose` and
+  `UnorderedList`: one headline per layer (label, root relative to the
+  repository root, status, plain-language explanation), then one line per
+  selected lockfile, per `missing` member, and per `extra` member. Standalone
+  entries follow the layers (tool label, root `.` for the repository root).
+  Paths and labels go through `Prose::escape_text`.
+- The explanation derives from the reason first, then the status. Every R5
+  pairing has its own text, including `unsupported_layout` (Rush managers,
+  subspaces, variants, unreadable Rush config), `no_lockfile_source`,
+  `ambiguous_membership`, and Cargo's `subset_only` statuses.
+- Wired into `render_repo_section` (both single-package and monorepo
+  branches, after the package list) and `render_filesystem_section`. The
+  section is empty when there is no layer and no standalone entry, so
+  single-package output is unchanged.
+- `--plain` strips the styling; the section has no glyph-only content, so the
+  text fallback reads the same.
+
+### Deviation: no stderr "use the full request" hint
+
+Every CLI command that displays layers (`repo structure`, `sniff`,
+`sniff filesystem`, and the bare `repo --json` aggregate, which opts in with
+`with_lockfile_provenance(true)`) corroborates. No CLI command can show a
+`not_requested` layer, and there is no CLI flag that toggles corroboration.
+So the plan's stderr hint naming a flag would be unreachable code. The
+`not_requested` headline states the fact ("a lockfile exists, but this request
+did not compare it") and names no flag, which keeps CLI hints off stdout. The
+renderer unit test covers it. If a structure-tier command ever renders
+layers, add the stderr hint there.
+
+### Other observations
+
+- `sniff repo structure` on a single Poetry, PDM, or Composer project
+  reports no repository (the CLI uses workspace detection, not
+  `detect_repo_with_request_or_root_package`), so standalone entries reach
+  the CLI only inside a workspace. That is pre-existing CLI scope, not
+  changed here.
+- Styled output piped to a file still carries escape codes on this host
+  because `COLORTERM=truecolor` is set; that is `Terminal::default()`
+  behavior shared by the whole CLI, not new. `--plain` output is clean.
+
+### Requirement-to-test mapping
+
+| Behavior | Tests |
+|---|---|
+| Empty `standalone_lockfiles` omitted from `repo structure --json` (unfiltered, filtered) and the fallback; the omitted form reads back as empty | `repo_json::tests::monorepo_topology::repo_info_projections_omit_an_empty_standalone_lockfile_list` |
+| Populated list kept in the flat wire shape; write/read/write round trip is stable | `repo_json::tests::monorepo_topology::repo_info_projections_keep_a_populated_standalone_lockfile_list` |
+| `sniff --json` and `sniff filesystem --json` omit an empty list and keep a populated one | `output::tests::standalone_lockfiles::{an_empty_list_is_omitted, a_populated_list_is_kept}` |
+| Aggregate `structure` always carries `standalone_lockfiles` (empty and populated) beside layer `lockfile` | `repo_json::tests::monorepo_topology::aggregate_structure_always_carries_standalone_lockfiles`; `snapshots::repo_aggregate_json_snapshot` (projection now includes the key); L1 `cli::repo_aggregate_json_reports_cargo_subset_evidence_for_matching_lockfile`, `lockfile_cli::aggregate_json_carries_the_layer_lockfile_and_standalone_list` |
+| Phase 3 handoff: `expected_lockfile_structure_json()` no longer pins `"standalone_lockfiles": []` | L1 `cli::repo_structure_json_reports_cargo_subset_evidence_for_matching_lockfile` |
+| Shipped CLI on real pnpm 10.32.1 fixture copies: `match`, `mismatch` (missing), `mismatch` (extra), `unreadable` (`parse_failed`, malformed trailing content), `unreadable` (`read_failed`, a directory where the lockfile goes), `absent`; exactly one JSON document on stdout, empty stderr, exit 0; provenance upgraded only on `match` for the layer and every package | L1 `lockfile_cli::structure_json_carries_each_layer_lockfile_observation` |
+| The same six cases in `--plain` human mode: layer, status, explanation, lockfile path, missing and extra members; not JSON; empty stderr; exit 0 | L1 `lockfile_cli::structure_human_output_names_each_layer_status_paths_and_members` |
+| Standalone Poetry lockfile at a package root in JSON and human output | L1 `lockfile_cli::a_standalone_lockfile_is_reported_in_json_and_human_output` |
+| `not_requested` layer and standalone entry (no CLI command produces one) say the request skipped them and print no flag | `output::filesystem::lockfile::tests::not_requested_layers_and_standalone_lockfiles_say_the_request_skipped_them` |
+| Each missing and extra member on its own line; a multi-file Gradle group lists every file on its own line; no section without layers or standalone entries | `lockfile::tests::{a_mismatch_lists_each_missing_and_extra_member, a_multi_file_lockfile_group_lists_each_file_on_its_own_line, nothing_is_rendered_without_a_layer_or_standalone_lockfile}` |
+| No two R5 status/reason pairings share an explanation | `lockfile::tests::each_status_and_reason_pairing_has_its_own_explanation` |
+| Existing text snapshots now end with the Lockfiles section (`absent` layers) | `snapshots::{cargo_monorepo_structure_text_snapshot, cargo_pnpm_monorepo_structure_text_snapshot, pnpm_nx_monorepo_structure_text_snapshot}` |
+
+Regression check: with the omission helper neutered, four of these tests
+fail (`an_empty_list_is_omitted`,
+`repo_info_projections_omit_an_empty_standalone_lockfile_list`,
+`structure_json_carries_each_layer_lockfile_observation`, and
+`repo_structure_json_reports_cargo_subset_evidence_for_matching_lockfile`).
+
+Placement: every new test is L1 and has no tier marker in any path segment.
+Unit tests live in the `sniff-cli` lib target. The new integration module
+`tests/l1/lockfile_cli.rs` is declared in `tests/l1/main.rs`
+(`test_layout::every_test_source_is_compiled_by_a_declared_target` passes). It
+reads the library's fixtures through
+`Path::new(env!("CARGO_MANIFEST_DIR")).parent()...join("lib/tests/fixtures/lockfiles")`,
+a form `docs/cicd/test-inputs.md` indexes. The fixtures are copied into a
+tempdir and no package-manager binary runs.
+
+### Snapshot and expectation changes
+
+- `l1__snapshots__{cargo_monorepo,cargo_pnpm_monorepo,pnpm_nx_monorepo}_structure_text.snap`:
+  added the Lockfiles section. Headers kept as they were; only bodies
+  changed.
+- `l1__snapshots__repo_aggregate_json.snap`: `structure` gained
+  `"standalone_lockfiles": []`; `snapshots.rs`'s stable projection now copies
+  that key.
+- `cli.rs`: `expected_lockfile_structure_json()` dropped
+  `"standalone_lockfiles": []`; the aggregate test asserts
+  `structure.standalone_lockfiles == []`.
+
+### Docs and skill
+
+- `sniff/docs/cli/repo_structure.md`: the Lockfiles section, the layer
+  `lockfile` object in the JSON example, and `standalone_lockfiles`.
+- `sniff/cli/README.md`: the `repo structure` JSON row mentions
+  `standalone_lockfiles` omission and the aggregate.
+- `.claude/skills/sniff/cli.md`: a "Lockfile observations" section (the
+  omission chokepoint every serializer site must use, and why no CLI command
+  shows `not_requested`).
+- The full documentation pass remains Phase 5.
+
+### Gates
+
+- `just test` (sniff): 3038 passed, 32 skipped.
+- `just lint` (sniff): clean.
+- `cargo clippy -p sniff -p sniff-cli --all-targets -- -D warnings`: clean,
+  and also clean with `--all-features`. The first run flagged two
+  `needless_borrows_for_generic_args` in the new unit tests, which were fixed.
+- Validation checkpoint 4: `sniff --base <copy of pnpm-10.32.1/workspace-edited-stale-extra> repo structure --json | jq`
+  showed the `mismatch` object with `extra: ["packages/gamma"]` and no
+  `standalone_lockfiles` key. Human output was reviewed on stdout and
+  redirected to a file (exit 0, 0 bytes on stderr).
+- `just check-tier-coverage sniff`: 0 stranded tests.
+- `just cross-check sniff --os all`: linux pass (2138), windows pass (2127),
+  wsl pass (2138, archive mode). That recipe's package argument selects the
+  `sniff` lib only, so the CLI was checked separately:
+  `just cross-check sniff-cli --os all`: linux pass (877), windows pass (873),
+  wsl pass (877). All 17 new or changed Phase 4 tests passed on each of the
+  three, including the `unreadable-directory` CLI case on native Windows.
 - Skipped: nothing. No pre-existing failures.

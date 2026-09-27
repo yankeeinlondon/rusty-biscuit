@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 3
+phase: 4
 agent: "claude/opus"
 yolo: "true"
 feature: 2026-09-26-lockfile-corroboration
@@ -108,6 +108,29 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/sniff/SKILL.md
     - .claude/skills/sniff/performance.md
+source_files_during_phase_4:
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/filesystem/repo.rs
+    - sniff/cli/src/output/filesystem/lockfile.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/lockfile_cli.rs
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_pnpm_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__pnpm_nx_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+docs_updated_during_phase_4:
+    - sniff/docs/cli/repo_structure.md
+    - sniff/cli/README.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/cli.md
 packages:
     - sniff
     - sniff-cli
@@ -697,13 +720,13 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
 
 **Wave 1** (concurrent)
 
-- [ ] **JSON projection**
+- [x] **JSON projection**
   - `sniff/cli/src/output/repo_json.rs`: make sure every place layers are
     serialized carries `lockfile`, including consolidated repository JSON and
     the aggregate views. Project `standalone_lockfiles` with the existing
     rule for omitting empty arrays.
   - Nothing in the CLI rediscovers or reinterprets lockfiles.
-- [ ] **Human output**
+- [x] **Human output**
   - In `sniff/cli/src/output/filesystem/repo.rs`, render a lockfile line per
     layer: status, selected paths, and `extra`/`missing` lists.
   - Give fallback, `not_requested`, `not_applicable`, and `members_*` statuses
@@ -715,7 +738,7 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
     plain-text and terminal fallbacks.
   - Repository facts go to stdout. Any "use the full request" hint goes to
     stderr and is suppressed under `--json`.
-- [ ] **CLI tests**
+- [x] **CLI tests**
   - In `sniff/cli/tests/l1/cli.rs`, replace the `lockfile_match` assertions
     (around lines 1038, 1177, 1196) with object assertions.
   - Add disposable-repository cases using the existing fixture harness:
@@ -728,7 +751,7 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
 
 **Wave 2**
 
-- [ ] **Validation checkpoint 4**
+- [x] **Validation checkpoint 4**
   - `just test` in `sniff/` passes for the lib and CLI.
   - A manual run of `sniff repo structure --json | jq .` against a Phase 1
     fixture shows the object.
