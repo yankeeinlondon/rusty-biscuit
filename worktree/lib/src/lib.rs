@@ -5,6 +5,7 @@ pub mod config;
 pub mod copy_record;
 pub mod default_target;
 pub mod error;
+pub mod fast_forward;
 pub mod fork_origin;
 pub mod git;
 pub mod include;
