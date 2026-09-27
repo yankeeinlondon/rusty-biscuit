@@ -1,0 +1,24 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: "labeled(vec![(\"diverged, matching\", with_caption(Some(&matched))),\n(\"diverged, differing\", with_caption(Some(&differs))),\n(\"diverged, absent\", with_caption(Some(&absent))),\n(\"diverged, no answer\", with_caption(None)),\n(\"diverged, answer for main is not trunk's\", with_caption(Some(&for_main))),\n(\"missing tracking tip, usable present answer\",\nparagraph_text(None, Some(trunk(None, Some(&matched))), NOW),),\n(\"missing tracking tip, no answer\",\nparagraph_text(None, Some(trunk(None, None)), NOW),),])"
+---
+## diverged, matching
+trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind.  origin/trunk  matched the remote when checked 2 min ago.
+
+## diverged, differing
+trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind.  origin/trunk  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs.
+
+## diverged, absent
+trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind.  trunk  was absent on origin when checked 2 min ago.
+
+## diverged, no answer
+trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind. Remote state has not been verified.
+
+## diverged, answer for main is not trunk's
+trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind. Remote state has not been verified.
+
+## missing tracking tip, usable present answer
+No local tracking ref  origin/trunk ; the remote branch was present when checked 2 min ago.
+
+## missing tracking tip, no answer
+No local tracking ref  origin/trunk ; remote state has not been verified.

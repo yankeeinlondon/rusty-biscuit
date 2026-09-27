@@ -708,3 +708,234 @@ fn a_long_caption_wraps_between_words_within_the_terminal() {
     let joined = lines.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ");
     assert_eq!(joined, caption_paragraph(&example, example.facts().remote, true, NOW), "no word was split");
 }
+
+// Caption snapshots (acceptance 3). Each snapshot concatenates labeled cases
+// of one group, rendered plain and unwrapped, so a reviewer reads one file per
+// group.
+
+const TRACKING_TIP: &str = "ffffffffffffffffffffffffffffffffffffffff";
+const OTHER_TIP: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+
+/// The caption paragraph for `caption` and `remote` at `now`, or an empty
+/// string when the render has no caption paragraph at all.
+fn paragraph_text(caption: Option<&Caption>, remote: Option<RemoteFacts<'_>>, now: u64) -> String {
+    let example = Example::new();
+    let facts = TableFacts {
+        caption,
+        remote,
+        ..example.facts()
+    };
+    let rendered = list_table::render(&facts, &terminal_at(400, false), now);
+    if rendered.lines().nth(1).is_some_and(|line| line.starts_with('┌')) {
+        return String::new();
+    }
+    rendered
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn labeled(cases: Vec<(&str, String)>) -> String {
+    cases
+        .into_iter()
+        .map(|(label, text)| format!("## {label}\n{text}"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn answer_for(branch: &str, sha: Option<&str>, age: u64) -> RemoteHead {
+    RemoteHead {
+        branch: branch.to_string(),
+        sha: sha.map(str::to_string),
+        checked_at: NOW - age,
+    }
+}
+
+fn remote<'a>(tracking_tip: Option<&'a str>, answer: Option<&'a RemoteHead>) -> RemoteFacts<'a> {
+    RemoteFacts {
+        default_branch: "main",
+        tracking_tip,
+        answer,
+    }
+}
+
+fn comparison(ahead: usize, behind: usize) -> Caption {
+    Caption {
+        local: "main".to_string(),
+        remote: "origin/main".to_string(),
+        tracking_sha: TRACKING_TIP.to_string(),
+        ahead,
+        behind,
+    }
+}
+
+#[test]
+fn caption_snapshot_observation_rows() {
+    let in_sync = comparison(0, 0);
+    let matched = head(Some(TRACKING_TIP), 120);
+    let differs = head(Some(OTHER_TIP), 120);
+    let absent = head(None, 120);
+    let other_branch = answer_for("develop", Some(TRACKING_TIP), 120);
+    let with_tip = |answer| paragraph_text(Some(&in_sync), Some(remote(Some(TRACKING_TIP), answer)), NOW);
+
+    insta::assert_snapshot!(
+        "caption_observation_rows",
+        labeled(vec![
+            ("usable SHA equals the local tracking tip", with_tip(Some(&matched))),
+            ("usable SHA differs from the local tracking tip", with_tip(Some(&differs))),
+            ("usable answer reports absence", with_tip(Some(&absent))),
+            ("miss", with_tip(None)),
+            ("unusable answer (another branch)", with_tip(Some(&other_branch))),
+            (
+                "usable SHA, no local tracking tip",
+                paragraph_text(None, Some(remote(None, Some(&matched))), NOW),
+            ),
+        ])
+    );
+}
+
+#[test]
+fn caption_snapshot_comparison_states() {
+    let matched = head(Some(TRACKING_TIP), 120);
+    let state = |ahead, behind| {
+        paragraph_text(
+            Some(&comparison(ahead, behind)),
+            Some(remote(Some(TRACKING_TIP), Some(&matched))),
+            NOW,
+        )
+    };
+
+    insta::assert_snapshot!(
+        "caption_comparison_states",
+        labeled(vec![
+            ("in sync", state(0, 0)),
+            ("behind by one", state(0, 1)),
+            ("behind", state(0, 7)),
+            ("ahead by one", state(1, 0)),
+            ("ahead", state(3, 0)),
+            ("diverged", state(3, 7)),
+        ])
+    );
+}
+
+#[test]
+fn caption_snapshot_fresh_and_stale_answers() {
+    let behind = comparison(0, 7);
+    let fresh = 30;
+    let stale = 3 * 86_400;
+    let observe = |sha: Option<&str>, age| {
+        let answer = head(sha, age);
+        paragraph_text(Some(&behind), Some(remote(Some(TRACKING_TIP), Some(&answer))), NOW)
+    };
+
+    insta::assert_snapshot!(
+        "caption_fresh_and_stale_answers",
+        labeled(vec![
+            ("fresh matching (30 s)", observe(Some(TRACKING_TIP), fresh)),
+            ("fresh differing (30 s)", observe(Some(OTHER_TIP), fresh)),
+            ("fresh absent (30 s)", observe(None, fresh)),
+            ("stale matching (3 days)", observe(Some(TRACKING_TIP), stale)),
+            ("stale differing (3 days)", observe(Some(OTHER_TIP), stale)),
+            ("stale absent (3 days)", observe(None, stale)),
+        ])
+    );
+}
+
+#[test]
+fn caption_snapshot_missing_refs_and_failed_comparison() {
+    let matched = head(Some(TRACKING_TIP), 120);
+    let differs = head(Some(OTHER_TIP), 120);
+    let absent = head(None, 120);
+    let future = RemoteHead {
+        checked_at: NOW + 1,
+        ..matched.clone()
+    };
+    // Without a local default the library has no comparison caption, but the
+    // tracking tip is still in the ref snapshot.
+    let no_local_default = |answer| paragraph_text(None, Some(remote(Some(TRACKING_TIP), answer)), NOW);
+    let no_tracking_tip = |answer| paragraph_text(None, Some(remote(None, answer)), NOW);
+
+    insta::assert_snapshot!(
+        "caption_missing_refs_and_failed_comparison",
+        labeled(vec![
+            ("missing local default, tracking tip, matching answer", no_local_default(Some(&matched))),
+            ("missing local default, tracking tip, differing answer", no_local_default(Some(&differs))),
+            ("missing local default, tracking tip, absent answer", no_local_default(Some(&absent))),
+            ("missing local default, tracking tip, no answer", no_local_default(None)),
+            ("missing tracking tip, usable present answer", no_tracking_tip(Some(&matched))),
+            ("missing tracking tip, usable absent answer", no_tracking_tip(Some(&absent))),
+            ("missing tracking tip, no answer", no_tracking_tip(None)),
+            ("missing tracking tip, future-dated answer", no_tracking_tip(Some(&future))),
+            ("failed comparison, differing observation", no_local_default(Some(&differs))),
+        ])
+    );
+
+    // No origin: `from_list` drops the caption and there is no observation,
+    // so leftover tracking refs render nothing.
+    assert_eq!(paragraph_text(None, None, NOW), "");
+}
+
+#[test]
+fn caption_snapshot_trunk_default_branch() {
+    let caption = Caption {
+        local: "trunk".to_string(),
+        remote: "origin/trunk".to_string(),
+        tracking_sha: TRACKING_TIP.to_string(),
+        ahead: 2,
+        behind: 5,
+    };
+    let trunk = |tracking_tip, answer| RemoteFacts {
+        default_branch: "trunk",
+        tracking_tip,
+        answer,
+    };
+    let matched = answer_for("trunk", Some(TRACKING_TIP), 120);
+    let differs = answer_for("trunk", Some(OTHER_TIP), 120);
+    let absent = answer_for("trunk", None, 120);
+    let for_main = answer_for("main", Some(TRACKING_TIP), 120);
+    let with_caption = |answer| paragraph_text(Some(&caption), Some(trunk(Some(TRACKING_TIP), answer)), NOW);
+
+    insta::assert_snapshot!(
+        "caption_trunk_default_branch",
+        labeled(vec![
+            ("diverged, matching", with_caption(Some(&matched))),
+            ("diverged, differing", with_caption(Some(&differs))),
+            ("diverged, absent", with_caption(Some(&absent))),
+            ("diverged, no answer", with_caption(None)),
+            ("diverged, answer for main is not trunk's", with_caption(Some(&for_main))),
+            (
+                "missing tracking tip, usable present answer",
+                paragraph_text(None, Some(trunk(None, Some(&matched))), NOW),
+            ),
+            (
+                "missing tracking tip, no answer",
+                paragraph_text(None, Some(trunk(None, None)), NOW),
+            ),
+        ])
+    );
+}
+
+#[test]
+fn caption_snapshot_age_boundaries_and_future_answers() {
+    let answer = head(Some(TRACKING_TIP), 0);
+    let checked_at = answer.checked_at;
+    let at = |now| paragraph_text(None, Some(remote(Some(TRACKING_TIP), Some(&answer))), now);
+
+    insta::assert_snapshot!(
+        "caption_age_boundaries_and_future_answers",
+        labeled(vec![
+            ("0 s", at(checked_at)),
+            ("59 s", at(checked_at + 59)),
+            ("60 s", at(checked_at + 60)),
+            ("3599 s", at(checked_at + 3599)),
+            ("3600 s", at(checked_at + 3600)),
+            ("2 days - 1 min", at(checked_at + 2 * 86_400 - 60)),
+            ("2 days", at(checked_at + 2 * 86_400)),
+            ("future-dated by 1 s at render time", at(checked_at - 1)),
+            ("future-dated by 1 day at render time", at(checked_at - 86_400)),
+        ])
+    );
+}
