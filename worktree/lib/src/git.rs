@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::io::Write;
 
 use crate::error::WorktreeError;
 
@@ -136,23 +137,47 @@ pub fn git_from(base: &Path, dir: &Path, args: &[&str]) -> Result<String, Worktr
 /// Invalid UTF-8 becomes U+FFFD, so distinct paths can read as one; use
 /// [`git_from_bytes`] where a path's identity matters.
 pub fn git_from_raw(base: &Path, dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    git_from_bytes(base, dir, args).map(|out| String::from_utf8_lossy(&out).into_owned())
+    git_from_bytes(base, dir, args, None).map(|out| String::from_utf8_lossy(&out).into_owned())
 }
 
 /// [`git_from`]'s stdout exactly as git wrote it.
-pub fn git_from_bytes(base: &Path, dir: &Path, args: &[&str]) -> Result<Vec<u8>, WorktreeError> {
+pub fn git_from_bytes(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, WorktreeError> {
+    git_from_bytes_status(base, dir, args, stdin, false)
+}
+
+/// Like [`git_from_bytes`], but accepts Git's no-matches exit code.
+pub(crate) fn git_from_bytes_allow_no_match(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Result<Vec<u8>, WorktreeError> {
+    git_from_bytes_status(base, dir, args, stdin, true)
+}
+
+fn git_from_bytes_status(base: &Path, dir: &Path, args: &[&str], stdin: Option<&[u8]>, allow_no_match: bool) -> Result<Vec<u8>, WorktreeError> {
     #[cfg(any(test, feature = "count-git"))]
     recorder::record(args);
 
-    let output = Command::new("git")
-        .current_dir(base)
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
+    let mut command = Command::new("git");
+    command.current_dir(base).arg("-C").arg(dir).args(args)
+        .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    if stdin.is_some() {
+        command.stdin(std::process::Stdio::piped());
+    }
+    let mut child = command
+        .spawn()
         .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+    let output = std::thread::scope(|scope| {
+        let writer = stdin.map(|bytes| {
+            let mut pipe = child.stdin.take().expect("piped stdin");
+            scope.spawn(move || pipe.write_all(bytes))
+        });
+        let output = child.wait_with_output()
+            .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+        if let Some(writer) = writer {
+            writer.join().expect("git stdin writer panicked")
+                .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+        }
+        Ok::<_, WorktreeError>(output)
+    })?;
 
-    if !output.status.success() {
+    if !output.status.success() && !(allow_no_match && output.status.code() == Some(1)) {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(WorktreeError::GitCommand(stderr));
     }
@@ -299,5 +324,17 @@ mod tests {
             symbolic_ref_count, 1,
             "expected exactly one symbolic-ref call, got {calls:?}"
         );
+    }
+
+    #[test]
+    fn git_from_bytes_preserves_nul_input_and_output() {
+        let repo = temp_repo();
+        fs::write(repo.path().join(".gitignore"), b"*.env\n").unwrap();
+        let input = b"a.env\0not ignored\0";
+        let output = git_from_bytes(repo.path(), repo.path(),
+            &["check-ignore", "--stdin", "-z", "--verbose", "--non-matching"], Some(input)).unwrap();
+        assert!(output.windows(b"a.env\0".len()).any(|part| part == b"a.env\0"));
+        assert!(output.windows(b"not ignored\0".len()).any(|part| part == b"not ignored\0"));
+        assert!(output.contains(&0));
     }
 }

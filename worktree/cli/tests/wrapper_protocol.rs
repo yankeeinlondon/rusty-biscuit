@@ -146,6 +146,10 @@ fn exit_4_for_go_without_the_shell_wrapper() {
         ] {
             assert!(stderr.contains(line), "WT_SHELL_WRAPPER={value:?}: missing {line}");
         }
+        assert!(
+            !stderr.contains("dim>") && !stderr.contains("\\<"),
+            "markup leaked into the rendered help:\n{stderr}"
+        );
     }
 }
 

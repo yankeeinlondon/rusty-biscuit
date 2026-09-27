@@ -126,6 +126,241 @@ impl Drop for Fixture {
     }
 }
 
+#[test]
+fn unchanged_included_copy_and_other_ignored_files_remove_without_force() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\ntarget/\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    fs::create_dir_all(fixture.root.path().join("wts")).unwrap();
+    let created = fixture.wt(&fixture.repo()).args(["create", "included"])
+        .env("WT", fixture.root.path().join("wts")).output().unwrap();
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    let target = fixture.root.path().join("wts/repo/included");
+    let record = worktree::copy_record::record_path(&fixture.repo(), &target).unwrap();
+    assert!(record.exists());
+    fs::create_dir_all(target.join("target")).unwrap();
+    fs::write(target.join("target/build"), b"generated").unwrap();
+    fs::write(fixture.repo().join(".env"), b"SECRET=new\n").unwrap();
+    let removed = fixture.wt(&fixture.repo()).args(["remove", "included"])
+        .output().unwrap();
+    assert!(removed.status.success(), "{}", String::from_utf8_lossy(&removed.stderr));
+    assert!(!target.exists());
+    assert!(!record.exists());
+}
+
+fn setup_included(fixture: &Fixture) -> PathBuf {
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    fs::create_dir_all(fixture.root.path().join("wts")).unwrap();
+    let output = fixture.wt(&fixture.repo()).args(["create", "included"])
+        .env("WT", fixture.root.path().join("wts")).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    fixture.root.path().join("wts/repo/included")
+}
+
+#[test]
+fn changed_included_copy_requires_force_and_preserves_state_on_refusal() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    fs::write(target.join(".env"), b"SECRET=new\n").unwrap();
+    let output = fixture.wt(&fixture.repo()).args(["remove", "included"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(3));
+    let report = String::from_utf8_lossy(&output.stderr);
+    assert!(report.contains(".env") && report.contains("changed"), "{report}");
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("included"));
+    fixture.wt(&fixture.repo()).args(["remove", "included", "--force-worktree"])
+        .assert().code(0);
+    assert!(!target.exists());
+}
+
+#[test]
+fn same_size_included_edit_with_restored_mtime_requires_consent_at_both_sizes() {
+    for size in [11, 2_000_000] {
+        let fixture = Fixture::new();
+        fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+        fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+        git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+        git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+        fs::write(fixture.repo().join(".env"), vec![b'a'; size]).unwrap();
+        fs::create_dir_all(fixture.root.path().join("wts")).unwrap();
+        let created = fixture.wt(&fixture.repo()).args(["create", "included"])
+            .env("WT", fixture.root.path().join("wts")).output().unwrap();
+        assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+        let target = fixture.root.path().join("wts/repo/included");
+        let path = target.join(".env");
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, vec![b'b'; size]).unwrap();
+        fs::File::options().write(true).open(&path).unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified)).unwrap();
+        let output = fixture.wt(&fixture.repo()).args(["remove", "included"]).output().unwrap();
+        assert_eq!(output.status.code(), Some(3), "size={size}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("changed"));
+        assert_eq!(fs::read(path).unwrap(), vec![b'b'; size]);
+    }
+}
+
+#[test]
+fn no_record_uses_distinct_source_and_new_file_needs_consent() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(target.join(".env"), b"SECRET=old\n").unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).assert().code(0);
+    assert!(!target.exists());
+
+    let target = fixture.add_worktree("feat/y", "feat-y");
+    fs::write(target.join(".env"), b"SECRET=new\n").unwrap();
+    fs::remove_file(fixture.repo().join(".env")).unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-y"]).assert().code(3)
+        .stderr(predicate::str::contains(".env"))
+        .stderr(predicate::str::contains("new"));
+    assert!(target.join(".env").exists());
+}
+
+#[test]
+fn no_record_source_change_refuses_handoff() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=old\n").unwrap();
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(target.join(".env"), b"SECRET=old\n").unwrap();
+    let (landing, token) = first_run(&fixture, &target, &[]);
+    fs::write(fixture.repo().join(".env"), b"SECRET=new\n").unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("copy baseline"));
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn no_record_uses_the_checked_out_fork_parent_as_source() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    fs::write(fixture.repo().join(".env"), b"BASE=1\n").unwrap();
+    let parent = fixture.add_worktree("feat/parent", "parent");
+    fs::write(parent.join(".env"), b"PARENT=1\n").unwrap();
+    let target = fixture.add_worktree("feat/child", "child");
+    fs::write(target.join(".env"), b"PARENT=1\n").unwrap();
+    let path = worktree::fork_origin::fork_origin_path(&fixture.repo()).unwrap();
+    worktree::fork_origin::record(&path, "feat/child", worktree::fork_origin::ForkOrigin {
+        base_branch: "feat/parent".into(), base_sha: git(&fixture.repo(), &["rev-parse", "HEAD"]), created_at: 0,
+    }).unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "child"]).assert().code(0);
+    assert!(!target.exists());
+    assert!(parent.join(".env").exists());
+}
+
+#[test]
+fn changed_include_rules_refuse_handoff_even_when_file_leaves_set() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    let first = fixture.wt(&target).env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "included"]).assert().code(0).get_output().stdout.clone();
+    let (landing, token) = protocol(&first);
+    fs::write(target.join(".worktreeinclude"), b"other.env\n").unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("include rules"));
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("included"));
+}
+
+#[test]
+fn changed_copy_record_refuses_handoff_and_keeps_registration() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    let first = fixture.wt(&target).env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "included"]).assert().code(0).get_output().stdout.clone();
+    let (landing, token) = protocol(&first);
+    let path = worktree::copy_record::record_path(&fixture.repo(), &target).unwrap();
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    value["source_label"] = serde_json::Value::String("changed source label".into());
+    fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("copy baseline"));
+    assert!(target.join(".env").exists());
+    assert!(fixture.branch_exists("included"));
+}
+
+#[test]
+fn changed_included_contents_refuse_handoff_even_when_classification_stays_changed() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    fs::write(target.join(".env"), b"SECRET=one\n").unwrap();
+    let first = fixture.wt(&target).env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "included", "--force-worktree"])
+        .assert().code(0).get_output().stdout.clone();
+    let (landing, token) = protocol(&first);
+    fs::write(target.join(".env"), b"SECRET=two\n").unwrap();
+    fixture.wt(&landing).args(["remove", "--handoff", &token]).assert().code(3)
+        .stderr(predicate::str::contains("included files"));
+    assert_eq!(fs::read(target.join(".env")).unwrap(), b"SECRET=two\n");
+    assert!(fixture.branch_exists("included"));
+}
+
+#[test]
+fn corrupt_copy_record_falls_back_to_source_without_consent() {
+    let fixture = Fixture::new();
+    let target = setup_included(&fixture);
+    let path = worktree::copy_record::record_path(&fixture.repo(), &target).unwrap();
+    fs::write(&path, b"{not json").unwrap();
+    let output = fixture.wt(&fixture.repo()).args(["remove", "included"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("copy record is untrusted"));
+    assert!(!target.exists());
+    assert!(!path.exists());
+}
+
+#[test]
+fn unavailable_distinct_source_marks_included_file_unknown() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b".env\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b".env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::write(target.join(".env"), b"SECRET=old\n").unwrap();
+    let path = worktree::fork_origin::fork_origin_path(&fixture.repo()).unwrap();
+    worktree::fork_origin::record(&path, "feat/x", worktree::fork_origin::ForkOrigin {
+        base_branch: "feat/x".into(), base_sha: git(&fixture.repo(), &["rev-parse", "HEAD"]), created_at: 0,
+    }).unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"]).assert().code(3)
+        .stderr(predicate::str::contains("unknown"));
+    assert!(target.join(".env").exists());
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"])
+        .assert().code(0);
+    assert!(!target.exists());
+}
+
+#[test]
+fn invalid_include_rules_fail_before_removal() {
+    let fixture = Fixture::new();
+    let target = fixture.add_worktree("feat/x", "feat-x");
+    fs::create_dir(target.join(".worktreeinclude")).unwrap();
+    fs::write(target.join(".worktreeinclude/entry"), b"secret").unwrap();
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x", "--force-worktree"])
+        .assert().code(1);
+    assert!(target.join(".worktreeinclude/entry").exists());
+    assert!(fixture.branch_exists("feat/x"));
+    assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
+}
+
 // --- Flag surface -----------------------------------------------------------
 
 #[test]
@@ -345,7 +580,7 @@ fn example_all_three_flags_remove_worktree_branch_and_origin_branch() {
 // --- Ignored entries, conflicts, and remote failures -------------------------
 
 #[test]
-fn ignored_entries_need_consent_like_dirty_files() {
+fn ordinary_ignored_entries_are_disposable() {
     for (ignore, make) in [(".env", ".env"), ("target/", "target/debug/app")] {
         let fixture = Fixture::new();
         fs::write(fixture.repo().join(".gitignore"), format!("{ignore}\n")).unwrap();
@@ -360,19 +595,32 @@ fn ignored_entries_need_consent_like_dirty_files() {
             .wt(&fixture.repo())
             .args(["remove", "feat-x"])
             .assert()
-            .code(3)
-            .stderr(predicate::str::contains("Ignored files"))
+            .code(0)
+            .stderr(predicate::str::contains("Also deletes ignored files"))
             .stderr(predicate::str::contains("deletes"))
             .stderr(predicate::str::contains(ignore));
-        assert!(file.exists(), "{ignore}");
-
-        fixture
-            .wt(&fixture.repo())
-            .args(["remove", "feat-x", "--force-worktree"])
-            .assert()
-            .code(0);
         assert!(!wt.exists(), "{ignore}");
     }
+}
+
+#[test]
+fn mixed_ignored_directory_report_names_disposable_files() {
+    let fixture = Fixture::new();
+    fs::write(fixture.repo().join(".gitignore"), b"config/\n").unwrap();
+    fs::write(fixture.repo().join(".worktreeinclude"), b"config/.env\n").unwrap();
+    git(&fixture.repo(), &["add", ".gitignore", ".worktreeinclude"]);
+    git(&fixture.repo(), &["commit", "-q", "-m", "include rules"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fs::create_dir_all(wt.join("config")).unwrap();
+    fs::write(wt.join("config/.env"), b"secret").unwrap();
+    fs::write(wt.join("config/cache.bin"), b"cache").unwrap();
+
+    fixture.wt(&fixture.repo()).args(["remove", "feat-x"])
+        .assert().code(3)
+        .stderr(predicate::str::contains("config/.env (new)"))
+        .stderr(predicate::str::contains("Also deletes ignored files: config/cache.bin"));
+    assert!(wt.join("config/.env").exists());
+    assert!(wt.join("config/cache.bin").exists());
 }
 
 #[test]
@@ -740,7 +988,7 @@ fn a_changed_branch_tip_between_the_runs_refuses_with_nothing_removed() {
 }
 
 #[test]
-fn a_new_ignored_entry_between_the_runs_refuses() {
+fn a_new_disposable_ignored_entry_between_the_runs_does_not_refuse() {
     let fixture = Fixture::new();
     fs::write(fixture.repo().join(".gitignore"), ".env\n").unwrap();
     git(&fixture.repo(), &["add", ".gitignore"]);
@@ -753,9 +1001,8 @@ fn a_new_ignored_entry_between_the_runs_refuses() {
         .wt(&landing)
         .args(["remove", "--handoff", &token])
         .assert()
-        .code(3)
-        .stderr(predicate::str::contains("uncommitted or ignored files"));
-    assert!(wt.join(".env").exists());
+        .code(0);
+    assert!(!wt.exists());
 }
 
 /// Restaging keeps the status (`MM`) and the working bytes, even with
@@ -779,7 +1026,7 @@ fn a_restaged_version_between_the_runs_refuses_with_nothing_removed() {
         .args(["remove", "--handoff", &token])
         .assert()
         .code(3)
-        .stderr(predicate::str::contains("uncommitted or ignored files"))
+        .stderr(predicate::str::contains("uncommitted or included files"))
         .stderr(predicate::str::contains("Removed").not());
     assert_eq!(fs::read_to_string(wt.join("README.md")).unwrap(), "working copy\n");
     assert_eq!(git(&wt, &["show", ":README.md"]), "new staged work");
@@ -813,7 +1060,7 @@ fn changes_inside_an_untracked_nested_repo_between_the_runs_refuse_with_nothing_
         .args(["remove", "--handoff", &token])
         .assert()
         .code(3)
-        .stderr(predicate::str::contains("uncommitted or ignored files"))
+        .stderr(predicate::str::contains("uncommitted or included files"))
         .stderr(predicate::str::contains("Removed").not());
     assert_eq!(fs::read_to_string(wt.join("nested/notes")).unwrap(), "new work after approval\n");
     assert_eq!(fs::read_to_string(wt.join("nested/new-file")).unwrap(), "new work\n");
@@ -863,6 +1110,179 @@ fn an_unreadable_file_inside_a_nested_repo_refuses_the_handoff_with_exit_4() {
     assert!(fixture.branch_exists("feat/x"));
 }
 
+/// 1.5 MiB of varied bytes: past the 1 MiB size a metadata shortcut was once
+/// proposed for.
+fn large_contents() -> Vec<u8> {
+    (0..1_572_864_u32).map(|index| (index % 251) as u8).collect()
+}
+
+/// Flips bytes at the start, middle, and end of `path` and then restores
+/// its modification time, so neither its size nor its time shows the edit.
+/// Returns the new contents.
+fn edit_keeping_size_and_mtime(path: &Path) -> Vec<u8> {
+    let before = fs::metadata(path).unwrap();
+    let modified = before.modified().unwrap();
+    let mut bytes = fs::read(path).unwrap();
+    let last = bytes.len() - 1;
+    for index in [0, bytes.len() / 2, last] {
+        bytes[index] ^= 0x01;
+    }
+    fs::write(path, &bytes).unwrap();
+    // A separate handle, so no later write through it can move the time.
+    fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    let after = fs::metadata(path).unwrap();
+    assert_eq!(after.len(), before.len(), "{path:?} kept its size");
+    assert_eq!(after.modified().unwrap(), modified, "{path:?} kept its modification time");
+    bytes
+}
+
+/// The spec's fingerprint scenario: an edit that keeps both size and
+/// modification time, to a large dirty file and to files inside an untracked
+/// nested repository, refuses the handoff and keeps the edit. The consumed
+/// token cannot then be replayed.
+#[test]
+fn a_same_size_same_mtime_edit_between_the_runs_refuses_and_keeps_the_edit() {
+    for case in [
+        "a large untracked file",
+        "a large modified tracked file",
+        "a file inside an untracked nested repo",
+        "a large file inside an untracked nested repo",
+    ] {
+        let fixture = Fixture::new();
+        let (wt, edited) = match case {
+            "a large untracked file" => {
+                let wt = fixture.add_worktree("feat/x", "feat-x");
+                fs::write(wt.join("big.bin"), large_contents()).unwrap();
+                (wt.clone(), wt.join("big.bin"))
+            }
+            "a large modified tracked file" => {
+                fs::write(fixture.repo().join("big.bin"), large_contents()).unwrap();
+                git(&fixture.repo(), &["add", "big.bin"]);
+                git(&fixture.repo(), &["commit", "-q", "-m", "big"]);
+                let wt = fixture.add_worktree("feat/x", "feat-x");
+                let mut dirty = large_contents();
+                dirty[10] ^= 0x02;
+                fs::write(wt.join("big.bin"), dirty).unwrap();
+                assert_eq!(git(&wt, &["status", "--porcelain=v1"]), "M big.bin");
+                (wt.clone(), wt.join("big.bin"))
+            }
+            "a file inside an untracked nested repo" => {
+                let wt = worktree_with_nested_repo(&fixture);
+                (wt.clone(), wt.join("nested/notes"))
+            }
+            _ => {
+                let wt = worktree_with_nested_repo(&fixture);
+                fs::write(wt.join("nested/big.bin"), large_contents()).unwrap();
+                (wt.clone(), wt.join("nested/big.bin"))
+            }
+        };
+        let status = git(&wt, &["status", "--porcelain=v1", "-uall"]);
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        let new_bytes = edit_keeping_size_and_mtime(&edited);
+        assert_eq!(git(&wt, &["status", "--porcelain=v1", "-uall"]), status, "{case}: git sees no change");
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(3)
+            .stderr(predicate::str::contains("uncommitted or included files"))
+            .stderr(predicate::str::contains("Removed").not());
+        assert!(fs::read(&edited).unwrap() == new_bytes, "{case}: the edit is kept");
+        assert_nothing_removed(&fixture, &wt);
+
+        fixture
+            .wt(&landing)
+            .args(["remove", "--handoff", &token])
+            .assert()
+            .code(4)
+            .stderr(predicate::str::contains("no pending removal"));
+        assert!(fs::read(&edited).unwrap() == new_bytes, "{case}: a replay removes nothing");
+        assert_nothing_removed(&fixture, &wt);
+    }
+}
+
+/// Keeps `path` unreadable while alive: mode 000 on Unix, an exclusive open
+/// on Windows, where mode bits cannot deny a read.
+struct Unreadable {
+    #[cfg(unix)]
+    path: PathBuf,
+    #[cfg(windows)]
+    _held: fs::File,
+}
+
+impl Unreadable {
+    /// `None` when the file stays readable (root ignores mode bits).
+    fn new(path: &Path) -> Option<Self> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
+            let this = Self { path: path.to_path_buf() };
+            fs::File::open(path).is_err().then_some(this)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let held = fs::OpenOptions::new().read(true).share_mode(0).open(path).unwrap();
+            assert!(fs::File::open(path).is_err(), "the exclusive open denies other readers");
+            Some(Self { _held: held })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            None
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o644));
+    }
+}
+
+/// A dirty file the second run cannot read, at the top level or inside an
+/// untracked nested repository, refuses the handoff (exit 4, as every
+/// `WorktreeError::Io` does) and keeps the file.
+#[test]
+fn an_unreadable_dirty_file_refuses_the_handoff_with_exit_4_and_is_kept() {
+    for case in ["an untracked file", "a file inside an untracked nested repo"] {
+        let fixture = Fixture::new();
+        let (wt, dirty, contents) = if case == "an untracked file" {
+            let wt = fixture.add_worktree("feat/x", "feat-x");
+            fs::write(wt.join("scratch.txt"), "approved scratch\n").unwrap();
+            (wt.clone(), wt.join("scratch.txt"), "approved scratch\n")
+        } else {
+            let wt = worktree_with_nested_repo(&fixture);
+            (wt.clone(), wt.join("nested/notes"), "approved content\n")
+        };
+        let (landing, token) = first_run(&fixture, &wt, &["--force-worktree"]);
+
+        let Some(unreadable) = Unreadable::new(&dirty) else {
+            eprintln!("skipping {case}: the file stays readable to this user");
+            continue;
+        };
+        let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+        drop(unreadable);
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(4), "{case}: {stderr}");
+        assert!(stderr.contains("Could not read everything"), "{case}: {stderr}");
+        assert!(stderr.contains("Nothing was removed"), "{case}: {stderr}");
+        assert!(!stderr.contains("Removed"), "{case}: {stderr}");
+        assert_eq!(fs::read_to_string(&dirty).unwrap(), contents, "{case}");
+        assert_nothing_removed(&fixture, &wt);
+    }
+}
+
 /// Paths that are not UTF-8. `\xff` and `\xfe` both decode lossily to
 /// U+FFFD, so only a byte-faithful fingerprint tells them apart.
 #[cfg(unix)]
@@ -904,7 +1324,7 @@ mod non_utf8_paths {
             .args(["remove", "--handoff", token])
             .assert()
             .code(3)
-            .stderr(predicate::str::contains("uncommitted or ignored files"))
+            .stderr(predicate::str::contains("uncommitted or included files"))
             .stderr(predicate::str::contains("Removed").not());
         assert!(git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"));
         assert!(fixture.branch_exists("feat/x"));
@@ -1032,7 +1452,7 @@ mod executable_bit {
             .args(["remove", "--handoff", &token])
             .assert()
             .code(3)
-            .stderr(predicate::str::contains("uncommitted or ignored files"))
+            .stderr(predicate::str::contains("uncommitted or included files"))
             .stderr(predicate::str::contains("Removed").not());
         assert_eq!(fs::read_to_string(&script).unwrap(), "echo edited\n");
         assert_eq!(mode_of(&script), 0o755);
@@ -1113,15 +1533,28 @@ fn the_handoff_carries_force_flags_to_the_second_run() {
     let wt = fixture.add_worktree("feat/x", "feat-x");
     fixture.commit(&wt, "unique.txt");
     fs::write(wt.join("scratch.txt"), "x\n").unwrap();
-    let (landing, token) = first_run(&fixture, &wt, &["--force-worktree", "--force-branch"]);
+    let first = fixture
+        .wt(&wt)
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x", "--force-worktree", "--force-branch"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("1 commit exists nowhere else"))
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&first);
     assert!(wt.join("scratch.txt").exists());
 
+    // The first run named the lost commit and the caller approved it; the
+    // second run does not reassess safety, so it claims no count.
     fixture
         .wt(&landing)
         .args(["remove", "--handoff", &token])
         .assert()
         .code(0)
-        .stderr(predicate::str::contains("(1 commit lost)"));
+        .stderr(predicate::str::contains("Deleted branch feat/x"))
+        .stderr(predicate::str::contains("lost").not());
     assert!(!wt.exists());
     assert!(!fixture.branch_exists("feat/x"));
 }
@@ -1168,6 +1601,632 @@ fn a_changed_remote_destination_between_the_runs_refuses_with_nothing_removed() 
     assert!(fixture.origin_has("unapproved"));
     assert!(wt.exists());
     assert!(fixture.branch_exists("feat/x"));
+}
+
+// --- What the second run proves again -----------------------------------------
+
+/// The worktree directory, its registration, and the branch are all intact.
+fn assert_nothing_removed(fixture: &Fixture, wt: &Path) {
+    assert!(wt.exists(), "the worktree directory stays");
+    assert!(
+        git(&fixture.repo(), &["worktree", "list", "--porcelain"]).contains("branch refs/heads/feat/x"),
+        "the worktree stays registered"
+    );
+    assert!(fixture.branch_exists("feat/x"), "the branch stays");
+}
+
+/// A clone of `origin` standing in for someone else's pushes.
+fn pusher(fixture: &Fixture) -> PathBuf {
+    let pusher = fixture.root.path().join("pusher");
+    git(fixture.root.path(), &["clone", "-q", fixture.origin().to_str().unwrap(), "pusher"]);
+    configure(&pusher);
+    pusher
+}
+
+/// The first run trusts `origin/main` as of the last fetch; the second run
+/// must ask origin, because the tracking ref cannot see a force-push made
+/// after the approval.
+#[test]
+fn a_branch_proved_only_by_origin_default_refuses_once_origin_drops_the_tip() {
+    let fixture = Fixture::with_origin();
+    let old_main = git(&fixture.repo(), &["rev-parse", "main"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let tip = fixture.commit(&wt, "only-here.txt");
+    git(&wt, &["push", "-q", "origin", "feat/x:main"]);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/main"]), tip);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "main"]), old_main, "local main is older");
+
+    let first = fixture
+        .wt(&wt)
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("its commits are on origin/main"))
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&first);
+
+    let pusher = pusher(&fixture);
+    git(&pusher, &["push", "-q", "--force", "origin", &format!("{old_main}:refs/heads/main")]);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/main"]), tip, "the tracking ref is unchanged");
+
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("no longer safe"))
+        .stderr(predicate::str::contains("origin/main has moved"))
+        .stderr(predicate::str::contains("Detached HEAD").not())
+        .stderr(predicate::str::contains("Removed").not());
+    assert_nothing_removed(&fixture, &wt);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip);
+}
+
+#[test]
+fn a_branch_proved_only_by_origin_default_is_deleted_while_origin_still_has_it() {
+    let fixture = Fixture::with_origin();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fixture.commit(&wt, "only-here.txt");
+    git(&wt, &["push", "-q", "origin", "feat/x:main"]);
+    let (landing, token) = first_run(&fixture, &wt, &[]);
+
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Deleted branch feat/x"));
+    assert!(!wt.exists());
+    assert!(!fixture.branch_exists("feat/x"));
+}
+
+/// `feat/x` pushed to origin at the worktree's tip (main's commit, so the
+/// local branch is Safe on its own), and the handoff approved with
+/// `--force-remote` while origin had it.
+fn approved_with_origin_branch_present(fixture: &Fixture) -> (PathBuf, PathBuf, String) {
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    git(&wt, &["push", "-q", "-u", "origin", "feat/x"]);
+    let (landing, token) = first_run(fixture, &wt, &["--force-remote"]);
+    (wt, landing, token)
+}
+
+#[test]
+fn an_origin_branch_deleted_between_the_runs_refuses_with_nothing_removed() {
+    let fixture = Fixture::with_origin();
+    let (wt, landing, token) = approved_with_origin_branch_present(&fixture);
+
+    let pusher = pusher(&fixture);
+    git(&pusher, &["push", "-q", "origin", "--delete", "feat/x"]);
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("branch on origin changed since you confirmed"))
+        .stderr(predicate::str::contains("Detached HEAD").not())
+        .stderr(predicate::str::contains("Removed").not());
+    assert_nothing_removed(&fixture, &wt);
+}
+
+/// The push URL still reads the same, but nothing answers there: an
+/// unavailable head is not proof that it did not change.
+#[test]
+fn an_unreachable_origin_in_the_second_run_refuses_force_remote_with_nothing_removed() {
+    let fixture = Fixture::with_origin();
+    let (wt, landing, token) = approved_with_origin_branch_present(&fixture);
+
+    let moved = fixture.root.path().join("moved.git");
+    fs::rename(fixture.origin(), &moved).unwrap();
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+    fs::rename(&moved, fixture.origin()).unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("could not be reached"), "{stderr}");
+    assert!(stderr.contains("Nothing was removed"), "{stderr}");
+    assert!(!stderr.contains("Removed"), "{stderr}");
+    assert_nothing_removed(&fixture, &wt);
+    assert!(fixture.origin_has("feat/x"));
+}
+
+#[test]
+fn an_origin_branch_moved_between_the_runs_refuses_with_nothing_removed() {
+    let fixture = Fixture::with_origin();
+    let (wt, landing, token) = approved_with_origin_branch_present(&fixture);
+
+    let pusher = pusher(&fixture);
+    git(&pusher, &["checkout", "-q", "-b", "feat/x", "origin/feat/x"]);
+    let pushed = fixture.commit(&pusher, "their-work.txt");
+    git(&pusher, &["push", "-q", "origin", "feat/x"]);
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("branch on origin changed since you confirmed"))
+        .stderr(predicate::str::contains("Removed").not());
+    assert_nothing_removed(&fixture, &wt);
+    assert_eq!(TwoRemotes::head_in(&fixture.origin(), "feat/x"), Some(pushed));
+}
+
+#[test]
+fn an_origin_branch_still_absent_in_the_second_run_leaves_nothing_to_delete() {
+    let fixture = Fixture::with_origin();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
+
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("Removed worktree"))
+        .stderr(predicate::str::contains("Nothing to delete on origin"));
+    assert!(!wt.exists());
+    assert!(!fixture.origin_has("feat/x"));
+}
+
+#[test]
+fn an_origin_branch_created_between_the_runs_refuses_with_nothing_removed() {
+    let fixture = Fixture::with_origin();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
+
+    let pusher = pusher(&fixture);
+    git(&pusher, &["push", "-q", "origin", "main:refs/heads/feat/x"]);
+    fixture
+        .wt(&landing)
+        .args(["remove", "--handoff", &token])
+        .assert()
+        .code(3)
+        .stderr(predicate::str::contains("branch on origin changed since you confirmed"))
+        .stderr(predicate::str::contains("Removed").not());
+    assert_nothing_removed(&fixture, &wt);
+    assert!(fixture.origin_has("feat/x"));
+}
+
+/// A push that lands after the second run's preflight (here from a
+/// `pre-push` hook, which runs inside the deletion's own push) fails the
+/// approved lease. The local removal has happened by then, so the result is
+/// partial.
+#[test]
+fn a_push_after_the_second_run_preflight_fails_the_lease_with_a_partial_result() {
+    let fixture = Fixture::with_origin();
+    let main = git(&fixture.repo(), &["rev-parse", "main"]);
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fixture.commit(&wt, "only-here.txt");
+    git(&wt, &["push", "-q", "-u", "origin", "feat/x"]);
+    let (landing, token) = first_run(&fixture, &wt, &["--force-remote"]);
+
+    let hooks = fixture.root.path().join("hooks");
+    fs::create_dir(&hooks).unwrap();
+    let origin = fixture.origin().to_str().unwrap().replace('\\', "/");
+    let hook = hooks.join("pre-push");
+    fs::write(
+        &hook,
+        format!("#!/bin/sh\ngit --git-dir=\"{origin}\" update-ref refs/heads/feat/x {main}\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    git(&fixture.repo(), &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+
+    let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("Removed worktree"), "{stderr}");
+    assert!(stderr.contains("but origin/feat/x was not deleted"), "{stderr}");
+    assert!(stderr.contains("git push origin --delete feat/x"), "{stderr}");
+    assert!(!wt.exists(), "the local removal has already happened");
+    assert!(fixture.branch_exists("feat/x"), "not safe without origin's copy, so kept");
+    assert_eq!(TwoRemotes::head_in(&fixture.origin(), "feat/x"), Some(main));
+}
+
+// --- Second runs that need no network -------------------------------------------
+
+const PROXIED_ORIGIN: &str = "http://gitea.test/o/r.git";
+
+/// Stands in for every HTTP host: origin is `http://gitea.test/o/r.git` and
+/// the proxy variables point at a local port, so each request the PR lookup
+/// or a git transport makes arrives here as one connection. It is closed
+/// unanswered (origin is unreachable), except that a PR list request gets
+/// [`CountingProxy::answer_pulls`]'s body when one is set.
+struct CountingProxy {
+    address: std::net::SocketAddr,
+    requests: std::sync::mpsc::Receiver<(std::net::SocketAddr, String)>,
+    pulls: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+}
+
+impl CountingProxy {
+    fn start() -> Self {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, requests) = std::sync::mpsc::channel();
+        let pulls = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let answer = std::sync::Arc::clone(&pulls);
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let Ok(peer) = stream.peer_addr() else { continue };
+                // Every client here (reqwest, git's curl, the sentinel) sends
+                // its request at once; the timeout only bounds a silent one.
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut head = Vec::new();
+                let mut chunk = [0_u8; 4096];
+                while !head.windows(4).any(|window| window == b"\r\n\r\n") && head.len() < 65_536 {
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => head.extend_from_slice(&chunk[..read]),
+                    }
+                }
+                let line = String::from_utf8_lossy(&head).lines().next().unwrap_or_default().to_string();
+                if is_pr_lookup(&line)
+                    && let Some(body) = answer.lock().unwrap().clone()
+                {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+                if sender.send((peer, line)).is_err() {
+                    return;
+                }
+            }
+        });
+        Self {
+            address,
+            requests,
+            pulls,
+        }
+    }
+
+    fn apply(&self, cmd: &mut assert_cmd::Command) {
+        let url = format!("http://{}", self.address);
+        for name in ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"] {
+            cmd.env(name, &url);
+        }
+        cmd.env_remove("NO_PROXY").env_remove("no_proxy");
+        // A developer's real provider token never reaches the stand-in.
+        for name in [
+            "GITEA_TOKEN",
+            "FORGEJO_TOKEN",
+            "CODEBERG_TOKEN",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GITLAB_TOKEN",
+            "GITLAB_PRIVATE_TOKEN",
+            "BITBUCKET_TOKEN",
+        ] {
+            cmd.env_remove(name);
+        }
+    }
+
+    /// Serves `body` to every later PR list request; `None` leaves them
+    /// unanswered, like every other request.
+    fn answer_pulls(&self, body: Option<String>) {
+        *self.pulls.lock().unwrap() = body;
+    }
+
+    /// The request line of each connection since the previous call. A
+    /// sentinel connection is accepted after every earlier one, so none
+    /// still in the backlog is missed.
+    fn requests(&self) -> Vec<String> {
+        use std::io::Write;
+
+        let mut sentinel = std::net::TcpStream::connect(self.address).unwrap();
+        sentinel.write_all(b"SENTINEL / HTTP/1.1\r\n\r\n").unwrap();
+        let sentinel_address = sentinel.local_addr().unwrap();
+        let mut lines = Vec::new();
+        loop {
+            let (peer, line) = self
+                .requests
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("the proxy accepts the sentinel");
+            if peer == sentinel_address {
+                return lines;
+            }
+            lines.push(line);
+        }
+    }
+
+    /// Connections since the previous call (see [`CountingProxy::requests`]).
+    fn connections(&self) -> usize {
+        self.requests().len()
+    }
+}
+
+/// sniff's Gitea PR list (`GET http://gitea.test/api/v1/repos/o/r/pulls?…`);
+/// every other request through the proxy is a git transport's.
+fn is_pr_lookup(request_line: &str) -> bool {
+    request_line.contains("/api/v1/")
+}
+
+/// Runs the first run (which asks origin about PRs) and the second run with
+/// every HTTP request counted, and returns the second run's stderr after
+/// asserting it made none.
+fn second_run_without_network(fixture: &Fixture, wt: &Path, extra: &[&str]) -> String {
+    git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+    let proxy = CountingProxy::start();
+    let mut first = fixture.wt(wt);
+    proxy.apply(&mut first);
+    let out = first
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x"])
+        .args(extra)
+        .assert()
+        .code(0)
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&out);
+    assert!(proxy.connections() > 0, "the first run's PR lookup reaches the proxy");
+
+    let mut second = fixture.wt(&landing);
+    proxy.apply(&mut second);
+    let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(proxy.connections(), 0, "the second run made a network request: {stderr}");
+    assert!(!wt.exists(), "{stderr}");
+    stderr
+}
+
+#[test]
+fn keeping_the_branch_makes_no_network_request_in_the_second_run() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fixture.commit(&wt, "only-here.txt");
+
+    let stderr = second_run_without_network(&fixture, &wt, &[]);
+    assert!(stderr.contains("Kept branch feat/x"), "{stderr}");
+    assert!(fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn an_explicitly_deleted_branch_makes_no_network_request_in_the_second_run() {
+    let fixture = Fixture::new();
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    fixture.commit(&wt, "only-here.txt");
+
+    let stderr = second_run_without_network(&fixture, &wt, &["--force-branch"]);
+    assert!(stderr.contains("Deleted branch feat/x"), "{stderr}");
+    assert!(!stderr.contains("lost"), "safety was not reassessed: {stderr}");
+    assert!(!fixture.branch_exists("feat/x"));
+}
+
+#[test]
+fn automatic_deletion_with_local_proof_makes_no_network_request_in_the_second_run() {
+    for proof in ["the local default branch", "another local branch", "a tag"] {
+        let fixture = Fixture::new();
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        // The worktree starts at main's tip; the other proofs hold a commit
+        // of its own.
+        if proof != "the local default branch" {
+            let tip = fixture.commit(&wt, "only-here.txt");
+            let proving_ref = if proof == "a tag" { "refs/tags/v1" } else { "refs/heads/backup" };
+            git(&fixture.repo(), &["update-ref", proving_ref, &tip]);
+        }
+
+        let stderr = second_run_without_network(&fixture, &wt, &[]);
+        assert!(stderr.contains("Deleted branch feat/x"), "{proof}: {stderr}");
+        assert!(!fixture.branch_exists("feat/x"), "{proof}");
+    }
+}
+
+/// A merged Gitea PR from `o/r`'s own `feat/x` whose head is `head`, as
+/// sniff's PR list reads it.
+fn merged_pr_list(head: &str) -> String {
+    serde_json::json!([{
+        "number": 7,
+        "title": "feat/x",
+        "state": "closed",
+        "user": {"login": "dev"},
+        "head": {"ref": "feat/x", "label": "feat/x", "sha": head, "repo": {"full_name": "o/r"}},
+        "base": {"ref": "main", "repo": {"full_name": "o/r"}},
+        "created_at": "2026-01-01T00:00:00Z",
+        "merged": true,
+        "merged_at": "2026-01-02T00:00:00Z",
+        "html_url": "http://gitea.test/o/r/pulls/7",
+    }])
+    .to_string()
+}
+
+/// Only a merged PR holds the tip, so the second run must ask the provider
+/// again: it deletes while the PR still answers, and refuses before
+/// removing anything once the PR is gone or the provider does not answer.
+#[test]
+fn automatic_deletion_proved_only_by_a_pr_asks_the_provider_again_in_the_second_run() {
+    for (second_answer, expected_code) in [("the same PR", 0), ("no PR", 3), ("no answer", 3)] {
+        let fixture = Fixture::new();
+        git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let tip = fixture.commit(&wt, "only-here.txt");
+        let proxy = CountingProxy::start();
+        proxy.answer_pulls(Some(merged_pr_list(&tip)));
+
+        let mut first = fixture.wt(&wt);
+        proxy.apply(&mut first);
+        let out = first
+            .env("WT_SHELL_WRAPPER", "1")
+            .args(["remove", "feat-x"])
+            .assert()
+            .code(0)
+            .stderr(predicate::str::contains("PR #7"))
+            .get_output()
+            .stdout
+            .clone();
+        let (landing, token) = protocol(&out);
+        assert!(proxy.requests().iter().any(|line| is_pr_lookup(line)), "{second_answer}");
+
+        proxy.answer_pulls(match second_answer {
+            "the same PR" => Some(merged_pr_list(&tip)),
+            "no PR" => Some("[]".to_string()),
+            _ => None,
+        });
+        let mut second = fixture.wt(&landing);
+        proxy.apply(&mut second);
+        let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let requests = proxy.requests();
+        assert!(
+            requests.iter().any(|line| is_pr_lookup(line)),
+            "{second_answer}: the second run asked the provider: {requests:?}"
+        );
+        assert_eq!(output.status.code(), Some(expected_code), "{second_answer}: {stderr}");
+        if expected_code == 0 {
+            assert!(stderr.contains("Deleted branch feat/x"), "{second_answer}: {stderr}");
+            assert!(!wt.exists());
+            assert!(!fixture.branch_exists("feat/x"));
+        } else {
+            assert!(stderr.contains("no longer safe"), "{second_answer}: {stderr}");
+            assert!(!stderr.contains("Removed"), "{second_answer}: {stderr}");
+            assert_nothing_removed(&fixture, &wt);
+            assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip);
+        }
+    }
+}
+
+/// `feat/x` has a commit of its own that only `origin/backup` holds (not the
+/// default branch), and the first run approved automatic deletion on that
+/// proof after checking origin live.
+fn approved_on_another_origin_branch(fixture: &Fixture) -> (PathBuf, PathBuf, String, String) {
+    let wt = fixture.add_worktree("feat/x", "feat-x");
+    let tip = fixture.commit(&wt, "only-here.txt");
+    git(&wt, &["push", "-q", "origin", "feat/x:refs/heads/backup"]);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/backup"]), tip);
+    let out = fixture
+        .wt(&wt)
+        .env("WT_SHELL_WRAPPER", "1")
+        .args(["remove", "feat-x"])
+        .assert()
+        .code(0)
+        .stderr(predicate::str::contains("origin/backup"))
+        .get_output()
+        .stdout
+        .clone();
+    let (landing, token) = protocol(&out);
+    (wt, landing, token, tip)
+}
+
+/// The last remote protection is taken away on origin itself; the tracking
+/// ref still holds the tip, so only a live check can notice.
+#[test]
+fn a_branch_proved_only_by_another_origin_branch_refuses_once_origin_drops_it() {
+    for change in ["unchanged", "deleted on origin", "moved on origin"] {
+        let fixture = Fixture::with_origin();
+        let old_main = git(&fixture.repo(), &["rev-parse", "main"]);
+        let (wt, landing, token, tip) = approved_on_another_origin_branch(&fixture);
+
+        if change != "unchanged" {
+            let pusher = pusher(&fixture);
+            match change {
+                "deleted on origin" => git(&pusher, &["push", "-q", "origin", "--delete", "backup"]),
+                _ => git(&pusher, &["push", "-q", "--force", "origin", &format!("{old_main}:refs/heads/backup")]),
+            };
+            assert_eq!(git(&fixture.repo(), &["rev-parse", "origin/backup"]), tip, "{change}");
+        }
+
+        let output = fixture.wt(&landing).args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if change == "unchanged" {
+            assert_eq!(output.status.code(), Some(0), "{change}: {stderr}");
+            assert!(stderr.contains("Deleted branch feat/x"), "{change}: {stderr}");
+            assert!(!fixture.branch_exists("feat/x"), "{change}");
+        } else {
+            assert_eq!(output.status.code(), Some(3), "{change}: {stderr}");
+            assert!(stderr.contains("no longer safe"), "{change}: {stderr}");
+            assert!(!stderr.contains("Removed"), "{change}: {stderr}");
+            assert_nothing_removed(&fixture, &wt);
+            assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip, "{change}");
+        }
+    }
+}
+
+/// The same approval, but origin now answers only through the network,
+/// where nothing answers: the second run asks rather than trusting the
+/// first run's live check, and an unanswered question refuses.
+#[test]
+fn automatic_deletion_proved_only_by_another_origin_branch_asks_origin_again_in_the_second_run() {
+    let fixture = Fixture::with_origin();
+    let (wt, landing, token, tip) = approved_on_another_origin_branch(&fixture);
+    git(&fixture.repo(), &["remote", "set-url", "origin", PROXIED_ORIGIN]);
+
+    let proxy = CountingProxy::start();
+    let mut second = fixture.wt(&landing);
+    proxy.apply(&mut second);
+    let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let requests = proxy.requests();
+    assert!(
+        requests.iter().any(|line| !is_pr_lookup(line)),
+        "the second run checked origin's head live: {requests:?}"
+    );
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(stderr.contains("no longer safe"), "{stderr}");
+    assert!(!stderr.contains("Removed"), "{stderr}");
+    assert_nothing_removed(&fixture, &wt);
+    assert_eq!(git(&fixture.repo(), &["rev-parse", "feat/x"]), tip);
+}
+
+/// With `--force-remote` the second run makes one preflight of the
+/// destination's live head, and nothing else: no PR lookup, whether the
+/// branch is kept, explicitly deleted, or proved by a tag. Origin does not
+/// answer, so every row refuses before removing anything. The preflight is
+/// asserted as "at least one git request" because git's smart-HTTP client
+/// may open more than one connection for one `ls-remote`.
+#[test]
+fn a_force_remote_second_run_makes_only_the_preflight_request() {
+    for (approval, extra) in [
+        ("keep", &["--force-remote"][..]),
+        ("explicit delete", &["--force-remote", "--force-branch"][..]),
+        ("tag proof", &["--force-remote"][..]),
+    ] {
+        let fixture = Fixture::new();
+        git(&fixture.repo(), &["remote", "add", "origin", PROXIED_ORIGIN]);
+        let wt = fixture.add_worktree("feat/x", "feat-x");
+        let tip = fixture.commit(&wt, "only-here.txt");
+        if approval == "tag proof" {
+            git(&fixture.repo(), &["update-ref", "refs/tags/v1", &tip]);
+        }
+        let proxy = CountingProxy::start();
+
+        let mut first = fixture.wt(&wt);
+        proxy.apply(&mut first);
+        let out = first
+            .env("WT_SHELL_WRAPPER", "1")
+            .args(["remove", "feat-x"])
+            .args(extra)
+            .assert()
+            .code(0)
+            .get_output()
+            .stdout
+            .clone();
+        let (landing, token) = protocol(&out);
+        assert!(proxy.connections() > 0, "{approval}: the first run reaches the proxy");
+
+        let mut second = fixture.wt(&landing);
+        proxy.apply(&mut second);
+        let output = second.args(["remove", "--handoff", &token]).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let requests = proxy.requests();
+        assert!(
+            !requests.iter().any(|line| is_pr_lookup(line)),
+            "{approval}: no PR lookup in the second run: {requests:?}"
+        );
+        assert!(!requests.is_empty(), "{approval}: the preflight asked origin: {stderr}");
+        assert_eq!(output.status.code(), Some(3), "{approval}: {stderr}");
+        assert!(stderr.contains("could not be reached"), "{approval}: {stderr}");
+        assert!(!stderr.contains("Removed"), "{approval}: {stderr}");
+        assert_nothing_removed(&fixture, &wt);
+    }
 }
 
 // --- The repository `--force-remote` deletes from -----------------------------

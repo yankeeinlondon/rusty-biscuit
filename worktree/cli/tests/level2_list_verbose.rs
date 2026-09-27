@@ -3,24 +3,28 @@
 //! Verifies that the status table and verbose commit section render correctly
 //! in a real terminal (tmux), both on a plain terminal and when the
 //! image-capable graph path is exercised. The design test checks the table's
-//! colors and emphasis cell by cell in a styled tmux capture. The graph as an
+//! colors and emphasis cell by cell in a styled tmux capture, and the stale
+//! scene checks the dim PR age line beneath the legend. The graph as an
 //! image-capable terminal draws it is tested in `level2_graph_in_kitty.rs`.
 
+mod perf_support;
 mod styled_capture;
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
+use perf_support::{NoRequest, ProxyStub, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
-use worktree::pull_requests::pr_store_path;
+use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -251,7 +255,7 @@ const BADGE_TEXT: Color = Color::Indexed(7);
 /// - `wt-clash` (`clash`) conflicts with `main` (red connector).
 /// - `wt-docs` (`docs-work`) holds an uncommitted Markdown file (yellow dot).
 /// - `wt-feature` (`feature-test`) holds an uncommitted Rust file (orange
-///   dot), has an open PR in a fresh store, and is the current worktree.
+///   dot), has an open PR in the stored answer, and is the current worktree.
 ///
 /// All three branches have fork-origin records naming `main`, so they hang
 /// from it in the Branch column. The stores live under `home`, which the pane
@@ -259,11 +263,19 @@ const BADGE_TEXT: Color = Color::Indexed(7);
 struct DesignFixture {
     _parent: tempfile::TempDir,
     home: PathBuf,
+    main: PathBuf,
     feature: PathBuf,
 }
 
 impl DesignFixture {
+    /// A fixture whose stored PR answer was fetched just now.
     fn new() -> Self {
+        Self::with_pr_age(Duration::ZERO)
+    }
+
+    /// A fixture whose stored PR answer, bound to the current `origin`, was
+    /// fetched `pr_age` ago.
+    fn with_pr_age(pr_age: Duration) -> Self {
         let parent = tempfile::tempdir().expect("create parent temp dir");
         let home = parent.path().join("home");
         let main = parent.path().join("main-repo");
@@ -309,9 +321,10 @@ impl DesignFixture {
         let fixture = Self {
             home,
             feature: sibling("wt-feature"),
+            main,
             _parent: parent,
         };
-        fixture.seed_stores(&main);
+        fixture.seed_stores(pr_age);
         fixture
     }
 
@@ -332,7 +345,12 @@ impl DesignFixture {
         path
     }
 
-    fn seed_stores(&self, main: &std::path::Path) {
+    fn pr_store(&self) -> PathBuf {
+        self.store_path(pr_store_path(&self.main).expect("PR store path"))
+    }
+
+    fn seed_stores(&self, pr_age: Duration) {
+        let main = self.main.as_path();
         let base_sha = String::from_utf8(
             Command::new("git").current_dir(main).args(["rev-parse", "HEAD~1"]).output().unwrap().stdout,
         )
@@ -348,11 +366,13 @@ impl DesignFixture {
             .save_atomic(&self.store_path(fork_origin_path(main).expect("fork-origin path")))
             .expect("write fork-origin store");
 
-        // Fetched just now, so `wt` makes no request.
-        let now = worktree::pull_requests::unix_now();
+        // Bound to this origin; a fresh answer makes `wt` send no request.
+        let fetched_at = unix_now() - pr_age.as_secs();
+        let origin = worktree::pull_requests::origin_url(main).expect("the fixture has an origin");
         let prs = serde_json::json!({
-            "format_version": 1,
-            "fetched_at": now,
+            "format_version": 2,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
+            "fetched_at": fetched_at,
             "source_repo": "owner/repo",
             "pull_requests": [{
                 "number": 99,
@@ -362,11 +382,7 @@ impl DesignFixture {
                 "target_branch": "main",
             }],
         });
-        fs::write(
-            self.store_path(pr_store_path(main).expect("PR store path")),
-            serde_json::to_vec(&prs).unwrap(),
-        )
-        .expect("write PR store");
+        fs::write(self.pr_store(), serde_json::to_vec(&prs).unwrap()).expect("write PR store");
     }
 
     /// Runs `wt list` in the feature worktree with `COLORFGBG` set, and
@@ -376,6 +392,14 @@ impl DesignFixture {
     /// reliably empty a tmux pane, so a reused pane can still show an earlier
     /// run's legend and satisfy this run's wait.
     fn list_in(&self, colorfgbg: &str) -> StyledScreen {
+        // A refused proxy keeps any request off the network; the fresh store
+        // means none is made.
+        self.list_until(colorfgbg, "http://127.0.0.1:9", "parent deleted")
+    }
+
+    /// [`Self::list_in`] with every request sent to `proxy`, returning the
+    /// pane once it shows `ready`.
+    fn list_until(&self, colorfgbg: &str, proxy: &str, ready: &str) -> StyledScreen {
         let mut harness = TmuxHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
         let harness = &mut harness;
@@ -385,22 +409,20 @@ impl DesignFixture {
         harness
             .send_text(format!("cd '{}'\n", self.feature.display()).as_bytes())
             .expect("send cd failed");
-        // A refused proxy keeps any request off the network; the fresh store
-        // means none is made.
         harness
             .send_command_with_env(
                 &format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN {bin} list"),
                 &[
                     ("HOME", &home),
                     ("XDG_CACHE_HOME", &cache),
-                    ("HTTPS_PROXY", "http://127.0.0.1:9"),
+                    ("HTTPS_PROXY", proxy),
                     ("FORCE_COLOR", "1"),
                     ("COLORFGBG", colorfgbg),
                 ],
             )
             .expect("send wt list failed");
 
-        StyledScreen::parse(&wait_for_pane(harness, |plain| plain.contains("parent deleted")).raw)
+        StyledScreen::parse(&wait_for_pane(harness, |plain| plain.contains(ready)).raw)
     }
 }
 
@@ -504,6 +526,7 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     // Legend: both dots, and the red conflict connector.
     let legend = screen.row_with(&["Worktree", "uncommitted source files"]);
     screen.assert_span(legend, "○", "dim", |s| s.dim);
+    assert!(!plain.contains("PRs as of"), "a fresh answer has no age line:\n{plain}");
     let dots: Vec<_> = screen.rows[legend].iter().filter(|c| c.ch == '●').collect();
     assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(ORANGE), "{dots:?}");
 
@@ -513,4 +536,50 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     light.assert_span(feature, "wt-feature", "on the light highlight", |s| {
         s.bold && s.bg_is(LIGHT_ROW_HIGHLIGHT)
     });
+}
+
+/// A stale stored answer in a real terminal: its badge still shows, and the
+/// dim age line follows the legend. The detached refresh `wt list` starts
+/// sends its request to a hanging local proxy, which the test then closes so
+/// the worker fails, stores nothing, and exits before the fixture is removed.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_pr_age(Duration::from_secs(12 * 60 + 5));
+    let seeded = fs::read(fixture.pr_store()).expect("seeded store");
+    let proxy = ProxyStub::hanging();
+
+    let screen = fixture.list_until("15;0", &proxy.url(), "PRs as of");
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE));
+
+    let legend_end = screen.row_with(&["Branch", "parent deleted"]);
+    let age = screen.row_with(&["PRs as of"]);
+    assert_eq!(age, legend_end + 1, "the age line follows the legend:\n{plain}");
+    assert_eq!(screen.text(age).trim(), "PRs as of 12 min ago", "{plain}");
+    screen.assert_span(age, "PRs as of 12 min ago", "dim", |s| s.dim);
+
+    // The worker's request reached the stub, not the network. Unblock it and
+    // wait until it released its lock and exited.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    assert!(proxy.wait_for_connections(1, Duration::from_secs(20)), "the worker never made its request");
+    let lock = pr_lock_path(&fixture.pr_store());
+    while !lock.exists() || probe_refresh(&fixture) == RefreshOutcome::Contended {
+        proxy.close_held();
+        assert!(Instant::now() < deadline, "the worker never released its lock");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
+    assert!(left.is_empty(), "the worker outlived its request: {left:?}");
+    assert_eq!(proxy.connections(), 1, "one worker request, none in the foreground");
+    assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
+}
+
+/// A refresh that makes no request: `Contended` while a worker holds the lock.
+fn probe_refresh(fixture: &DesignFixture) -> RefreshOutcome {
+    refresh(&fixture.pr_store(), &fixture.main, unix_now, |_| Box::new(NoRequest))
 }

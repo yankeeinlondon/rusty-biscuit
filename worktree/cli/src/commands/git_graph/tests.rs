@@ -440,7 +440,6 @@ fn the_git_graph_tags_own_prs_only_and_takes_the_width_override() {
             pr(7, "owner/repo", "feature-b", "main"),
         ],
         fetched_at: Some(0),
-        stale: false,
     };
 
     let mermaid = facts.to_git_graph(&prs, None).mermaid().expect("mermaid");

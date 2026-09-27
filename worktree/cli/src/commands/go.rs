@@ -80,12 +80,22 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
 /// How to activate the shell wrapper, for every shell `wt --completions`
 /// supports. Shared by every command that moves the caller's shell.
 pub(crate) fn wrapper_setup_help() -> String {
-    "Run the line for your shell to activate it, then try again:\n\n\
-    <dim>bash</dim>        source <(wt --completions bash)\n\
-    <dim>zsh</dim>         source <(wt --completions zsh)\n\
-    <dim>fish</dim>        wt --completions fish | source\n\
-    <dim>PowerShell</dim>  wt --completions powershell | Out-String | Invoke-Expression\n\n\
-    Add it to your shell's startup file (<dim>~/.bashrc</dim>, <dim>~/.zshrc</dim>, \
-    <dim>config.fish</dim>, or <dim>$PROFILE</dim>) to make it permanent."
-        .to_string()
+    let lines: String = [
+        ("bash", "source <(wt --completions bash)"),
+        ("zsh", "source <(wt --completions zsh)"),
+        ("fish", "wt --completions fish | source"),
+        ("PowerShell", "wt --completions powershell | Out-String | Invoke-Expression"),
+    ]
+    .iter()
+    // `<(` is Prose markup; unescaped, it swallows the next line's `<dim>`.
+    .map(|(shell, command)| {
+        let command = Prose::escape_text(command);
+        format!("<dim>{shell}</dim>{:pad$}{command}\n", "", pad = 12 - shell.len())
+    })
+    .collect();
+    format!(
+        "Run the line for your shell to activate it, then try again:\n\n{lines}\n\
+        Add it to your shell's startup file (<dim>~/.bashrc</dim>, <dim>~/.zshrc</dim>, \
+        <dim>config.fish</dim>, or <dim>$PROFILE</dim>) to make it permanent."
+    )
 }

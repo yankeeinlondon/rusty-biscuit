@@ -105,16 +105,15 @@ pub fn legend_markup() -> [String; 2] {
     ]
 }
 
-/// The PR age line, shown only when the request failed and stored results
-/// stand in.
+/// The PR age line, shown whenever the badges are older than the freshness
+/// window at `now`.
 pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
-    if !prs.stale {
+    if !prs.is_stale_at(now) {
         return None;
     }
     let minutes = prs.age_minutes(now)?;
     let age = match minutes {
-        0 => "less than a minute".to_string(),
-        1..=59 => format!("{minutes} min"),
+        ..=59 => format!("{minutes} min"),
         60..=2879 => format!("{} h", minutes / 60),
         _ => format!("{} days", minutes / 1440),
     };

@@ -21,6 +21,12 @@ fn esc(text: &str) -> String {
     Prose::escape_text(text)
 }
 
+pub fn visible_include_path(path: &Path) -> String {
+    let visible: String = path.as_os_str().as_encoded_bytes().iter()
+        .flat_map(|byte| std::ascii::escape_default(*byte).map(char::from)).collect();
+    esc(&visible)
+}
+
 pub struct ReportInput<'a> {
     pub display_name: &'a str,
     pub path: &'a Path,
@@ -76,12 +82,13 @@ pub fn heading_markup(input: &ReportInput<'_>) -> String {
     )
 }
 
-/// Dirty files as a tree (or a count above [`LIST_LIMIT`]), then the
-/// ignored entries grouped by top-level folder.
+/// Dirty and protected included files, then disposable ignored names.
 pub fn files_markup(inventory: &Inventory) -> String {
     let mut out = String::new();
     let dirty = inventory.dirty.len();
-    if dirty == 0 && inventory.ignored.is_empty() {
+    let protected = &inventory.included.needs_consent;
+    let disposable = inventory.disposable_ignored_names();
+    if dirty == 0 && protected.is_empty() && disposable.is_empty() && inventory.included.warnings.is_empty() {
         return "<dim>No uncommitted or ignored files.</dim>".to_string();
     }
     if dirty > LIST_LIMIT {
@@ -91,33 +98,22 @@ pub fn files_markup(inventory: &Inventory) -> String {
         let paths: Vec<PathBuf> = inventory.dirty.iter().map(|e| e.path.clone()).collect();
         out.push_str(&dirty_tree::render_markup(&paths));
     }
-    if !inventory.ignored.is_empty() {
-        if dirty > 0 {
-            out.push('\n');
+    if !protected.is_empty() {
+        if !out.is_empty() { out.push('\n'); }
+        out.push_str("<b>Included files needing consent</b>:\n");
+        for (path, mark) in protected {
+            out.push_str(&format!("  <yellow>{}</yellow> <dim>({})</dim>\n",
+                visible_include_path(path), mark.label()));
         }
-        let groups = inventory.ignored_groups();
-        let total = inventory.ignored.len();
-        if groups.len() > LIST_LIMIT {
-            out.push_str(&format!(
-                "<red><b>{total} ignored entries</b></red>; removing the worktree deletes their contents\n"
-            ));
-        } else {
-            let names: Vec<String> = groups
-                .iter()
-                .map(|group| {
-                    let name = esc(&group.name);
-                    if group.entries > 1 {
-                        format!("<yellow>{name}</yellow> <dim>({} entries)</dim>", group.entries)
-                    } else {
-                        format!("<yellow>{name}</yellow>")
-                    }
-                })
-                .collect();
-            out.push_str(&format!(
-                "<b>Ignored files</b>, whose contents removing the worktree deletes: {}\n",
-                names.join(", ")
-            ));
-        }
+    }
+    if !disposable.is_empty() {
+        if !out.is_empty() { out.push('\n'); }
+        out.push_str(&format!("<dim>Also deletes ignored files: {}</dim>\n",
+            disposable.iter().map(|name| visible_include_path(Path::new(name))).collect::<Vec<_>>().join(", ")));
+    }
+    for warning in &inventory.included.warnings {
+        if !out.is_empty() { out.push('\n'); }
+        out.push_str(&format!("<yellow>Warning:</yellow> {}", esc(warning)));
     }
     out.trim_end().to_string()
 }
@@ -373,6 +369,7 @@ mod tests {
                 })
                 .collect(),
             ignored: Vec::new(),
+            included: Default::default(),
         }
     }
 
@@ -412,20 +409,21 @@ mod tests {
     }
 
     #[test]
-    fn ignored_entries_are_grouped_and_say_their_contents_are_deleted() {
+    fn disposable_ignored_entries_get_one_summary_line() {
         let inventory = Inventory {
             dirty: Vec::new(),
             ignored: vec![".env".into(), "notes.md".into(), "target/debug/".into(), "target/CACHEDIR.TAG".into()],
+            included: Default::default(),
         };
         let markup = files_markup(&inventory);
-        assert!(markup.contains("contents removing the worktree deletes"));
-        assert!(markup.contains("<yellow>.env</yellow>, <yellow>notes.md</yellow>, <yellow>target/</yellow> <dim>(2 entries)</dim>"), "{markup}");
+        assert!(markup.contains("Also deletes ignored files: .env, notes.md, target/"), "{markup}");
 
         let many = Inventory {
             dirty: Vec::new(),
             ignored: (0..11).map(|i| PathBuf::from(format!("dir{i}/"))).collect(),
+            included: Default::default(),
         };
-        assert!(files_markup(&many).starts_with("<red><b>11 ignored entries</b></red>"));
+        assert!(files_markup(&many).starts_with("<dim>Also deletes ignored files:"));
         assert_eq!(files_markup(&Inventory::default()), "<dim>No uncommitted or ignored files.</dim>");
     }
 
