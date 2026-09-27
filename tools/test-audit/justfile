@@ -18,8 +18,8 @@ default:
     @echo
 
 # Install pinned Node dependencies through the root pnpm workspace lockfile.
-install:
-    pnpm --dir "{{ ROOT }}" install --frozen-lockfile
+install *args="":
+    pnpm --dir "{{ ROOT }}" install --frozen-lockfile {{ args }}
 
 # Type-check the tool (tsc --noEmit).
 typecheck:
