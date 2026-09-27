@@ -1316,6 +1316,25 @@ belong here.
     this phase did not change it" so reviewers see the reservation.
     See `1aa7ce95b` for the 2026-09-25-list-remove-performance Phase 5
     of 5 example.
+- A third terminal-close hybrid sets `status: implemented` AND keeps
+    `message_to_agent` rewritten as reviewer-oriented notes (not the
+    forward-pointing phase narrative the canonical rule folds into the
+    `## Phase N` block). Distinct from the variant above because the
+    implementation signal IS recognized — `status`, `implemented: true`,
+    and `implemented_by:` all move to terminal-implemented — but the
+    message is preserved because the next reviewer reads spec.md
+    first and benefits from a one-paragraph summary of what shipped,
+    where the gap was closed, and which intentional grep hits to
+    ignore. Author still owns the directory move to `_completed`
+    (the canonical variant keeps the message because status is
+    reserved; this hybrid keeps the message because reviewer ergonomics
+    outweigh removing it). See `ed4aa8306` for the
+    2026-09-26-more-info-on-list Phase 5 of 5 example (the message
+    names AC3's previously-untested "`--width` does not move the gate"
+    clause and the two new tests that close it, lists the intentional
+    grep hits every earlier cycle flagged, and points at the
+    implementation-log Phase 5 acceptance table for the per-criterion
+    evidence map).
 - A parallel wave's plan.md ticks can ship FEWER ticks than tests in
     the wave's commits. When a Wave has N parallel tasks committed as N
     separate `test(<area>):` commits, the implementer may stage plan.md

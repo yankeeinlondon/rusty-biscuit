@@ -1,0 +1,21 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: "labeled(vec![(\"usable SHA equals the local tracking tip\",\nwith_tip(Some(&matched))),\n(\"usable SHA differs from the local tracking tip\", with_tip(Some(&differs))),\n(\"usable answer reports absence\", with_tip(Some(&absent))),\n(\"miss\", with_tip(None)),\n(\"unusable answer (another branch)\", with_tip(Some(&other_branch))),\n(\"usable SHA, no local tracking tip\",\nparagraph_text(None, Some(remote(None, Some(&matched))), NOW),),])"
+---
+## usable SHA equals the local tracking tip
+main  is in sync with local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+
+## usable SHA differs from the local tracking tip
+main  is in sync with local tracking ref  origin/main .  origin/main  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs.
+
+## usable answer reports absence
+main  is in sync with local tracking ref  origin/main .  main  was absent on origin when checked 2 min ago.
+
+## miss
+main  is in sync with local tracking ref  origin/main . Remote state has not been verified.
+
+## unusable answer (another branch)
+main  is in sync with local tracking ref  origin/main . Remote state has not been verified.
+
+## usable SHA, no local tracking tip
+No local tracking ref  origin/main ; the remote branch was present when checked 2 min ago.

@@ -152,6 +152,11 @@ push mode.
 - `#[cfg(unix)]` and `#[cfg(windows)]` test the **target**, not the build
   host. A `#![cfg(unix)]` inside a test file does not stop Cargo building that
   test's dev-dependencies for a Windows target; gate the dependency graph.
+- On Linux (and WSL2), `sysinfo`'s process table also lists every **thread**
+  of a process, each with the process's own argv. A test that counts processes
+  by argv over-counts as soon as the process spawns a thread, while macOS and
+  Windows count it once. Filter with `process.thread_kind().is_none()`
+  (`worktree/cli/tests/perf_support::refresh_workers`).
 - Never override `CARGO_TARGET_DIR` on the `BUILD_WIN` host; its checkout
   pins the target dir to the `W:` volume for a reason ([build-hosts.md](build-hosts.md)).
 

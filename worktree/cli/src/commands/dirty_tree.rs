@@ -96,7 +96,7 @@ fn format_label(name: &str, is_file: bool, full_path: &Path) -> String {
         return format!("<dim>{name}/</dim>");
     }
     if sniff::filesystem::path_kind::is_source_code_path(full_path) {
-        format!("<orange>{name}</orange>")
+        format!("<red>{name}</red>")
     } else {
         format!("<yellow>{name}</yellow>")
     }
@@ -128,8 +128,8 @@ mod tests {
         // docs/ comes before src/ (BTreeMap is alphabetical)
         assert!(out.contains("<dim>docs/</dim>"));
         assert!(out.contains("<dim>src/</dim>"));
-        assert!(out.contains("<orange>lib.rs</orange>"));
-        assert!(out.contains("<orange>main.rs</orange>"));
+        assert!(out.contains("<red>lib.rs</red>"));
+        assert!(out.contains("<red>main.rs</red>"));
         assert!(out.contains("<yellow>intro.md</yellow>"));
         // The first directory at root uses BRANCH; the last uses LAST_BRANCH.
         assert!(out.starts_with("├── <dim>docs/</dim>\n"));

@@ -2,7 +2,7 @@
 //!
 //! Verifies that `dirty_tree::render_markup` output, when processed through
 //! `Prose::new(...).render(terminal)`, keeps its box-drawing layout and its
-//! per-file colors in a real terminal (tmux): source files orange, other files
+//! per-file colors in a real terminal (tmux): source files red, other files
 //! yellow, directories dim, connectors unstyled.
 
 mod styled_capture;
@@ -14,8 +14,8 @@ use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 
-/// `<orange>`, as `styles_follow_the_design` in `list_table.rs` expects.
-const ORANGE: Color = Color::Rgb(255, 165, 0);
+/// `<red>`: the basic ANSI red, the same red as `conflicts` in `wt list`.
+const RED: Color = Color::Indexed(1);
 /// `<yellow>`: the basic ANSI yellow.
 const YELLOW: Color = Color::Indexed(3);
 
@@ -50,8 +50,8 @@ fn level2_dirty_tree_renders_in_tmux() {
         );
     }
 
-    // Colors: source orange, other files yellow, directories dim.
-    screen.assert_span(first + 4, "lib.rs", "orange", |s| s.fg_is(ORANGE));
+    // Colors: source red, other files yellow, directories dim.
+    screen.assert_span(first + 4, "lib.rs", "red", |s| s.fg_is(RED));
     screen.assert_span(first, "README.md", "yellow", |s| s.fg_is(YELLOW));
     screen.assert_span(first + 2, "guide.md", "yellow", |s| s.fg_is(YELLOW));
     screen.assert_span(first + 1, "docs/", "dim", |s| s.dim);

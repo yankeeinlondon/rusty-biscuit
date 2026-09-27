@@ -1,8 +1,47 @@
 ---
-status: draft-spec
-reviewed: false
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+status: implemented
+reviewed: true
+reviewed_by: codex/gpt-6-sol
+reviewed_on: 2026-09-26
+review_iterations: 2
+completed: true
 clarified: false
-implemented: false
+implemented: true
+implemented_by: claude/opus
+human_review: false
+message_to_agent: |-
+    All five phases are implemented; this is ready for review. Phase 5 found
+    one untested acceptance clause: "`--width` does not change the
+    100-column threshold". It held by construction, and it now has two tests:
+    `list_output::a_wide_width_flag_does_not_show_the_counts` (L1, real binary)
+    and `level2_list_verbose::level2_list_width_flag_leaves_the_counts_in_tmux`
+    (L2). `DesignFixture::list_until` in that L2 file now takes the `wt`
+    arguments as its first parameter. The acceptance-to-test map is in the
+    implementation log's Phase 5 section. Known intentional grep hits: the
+    absence assertions at `cli/tests/list_table.rs:288` ("already in") and
+    `:381` ("no orange left"), plus `styled_capture_parse.rs:25`. Parent-column
+    counts are proven at L1 only (the L2 fixture's parents are all the default
+    branch). No cross-OS check was run, because nothing OS-specific changed.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance
@@ -21,21 +60,33 @@ are always at least as wide as the full name, so shortening the header saves
 no width.
 
 The table this builds on is item 5 ("Table Design") of
-`2026-09-24-ux-improvements`. Rendering lives in
-`cli/src/commands/list_table.rs`; the merge states live in
-`worktree::listing::MergeState` (`lib/src/listing.rs`).
+`2026-09-24-ux-improvements`. The `worktree-cli` package renders it in
+[list_table.rs](../../cli/src/commands/list_table.rs). The `worktree` library's
+[MergeState](../../lib/src/listing.rs) describes whether a comparison merges
+cleanly, and its [Comparison](../../lib/src/listing.rs) already holds the
+commit counts this feature displays.
+
+**Change to the earlier design:** That design deliberately omitted per-branch
+counts and specified no width rule for this table. This feature reverses those
+two choices for the comparison cells only. It keeps the selected default target,
+the local fork-parent target, the cache keyed by both commit IDs, the table's four
+columns, and PR badge placement. Showing existing comparison counts needs no
+new Git calls, cache format, or network request.
 
 ## 1. Remove `already in`; it becomes `clean`
 
 Today a cell reads `already in` when the branch has no commits the target
 lacks (`ahead == 0`), and `clean` when it has commits that merge without
 conflict. The distinction moves into the metrics (item 2): a branch with
-nothing to merge shows `clean` and no `+N`.
+no commits to merge shows `clean`, with `-N` if the target is ahead and no
+metric if the tips match. On a narrow terminal the count is intentionally
+hidden, so `clean` means only that the merge would not conflict; it does not
+claim the branch has commits to contribute.
 
 - `MergeState` loses its `AlreadyIn` variant and keeps `Clean` and
   `Conflicts`. `ahead == 0` is `Clean`, since such a merge cannot conflict.
-- `merge_markup` has two arms. The legend is unchanged, since it never
-  mentioned `already in`.
+- `merge_markup` has two state arms. The Branch legend's wording still describes
+  merge readiness; item 5 changes only its connector samples.
 - Update the lib tests that assert `AlreadyIn` (`listing.rs`:
   `state(0, 5, false)`, `state(0, 0, true)`, and
   `the_target_column_reports_already_in_clean_and_conflicts`) and the CLI
@@ -54,19 +105,34 @@ Each `Comparison` already carries `ahead` and `behind`. Show them in the
 - Colors: `+N` green, `-N` red, both dim. The number is the only signal, so
   `NO_COLOR` output stays readable.
 - `conflicts` rows also show metrics (`conflicts +2 -14`).
-- Cells that show `—`, `?`, `parent deleted`, or nothing are unchanged.
+- Metrics follow the state word and precede any PR badge in the same cell:
+  `clean +4 -2 [PR #99]`. PR badges retain their current target-based placement
+  and link behavior.
+- Cells that show `—`, `?`, `parent deleted`, or nothing remain unchanged and
+  never acquire metrics. The default-branch and detached rows, and parent rows
+  without a worktree, keep their current behavior.
+- These are commit counts against the column's named target, not a count of
+  uncommitted files or a measurement against the branch's own remote copy.
+  They use the existing cached `Comparison`; no additional comparison or fetch
+  runs to render them.
 
 ### Width gate
 
-Metrics are shown only when the terminal is at least **100 columns** wide. Below
-that, the table renders as it does after item 1 (state word only), because
-the Branch column's tree guides and PR badges already fill narrow terminals.
-The width comes from the same `Terminal` the table renders against, so it
-stays pure and testable. Snapshot both sides of the gate (99 and 100 columns).
+Metrics are shown only when `Terminal::width()` is at least **100 columns**.
+At 99 columns or less, each comparison cell retains its state word and any PR
+badge, without counts. This gate applies to both target columns together and
+uses the same `Terminal` passed to the table renderer, so it also works when
+output is captured or a test supplies a fixed width. The `-w` / `--width` flag
+controls the optional git graph, not this gate. At wider widths the existing
+`biscuit-terminal` Table still handles long branch names and multiple badges
+with its normal width and wrapping rules; the 100-column gate does not promise
+that arbitrary row content fits on one line. Test the state and badge at 99,
+then the counts and badge order at 100, in both plain and colored output.
 
-### Placement: two prototypes to choose from
+### Placement: inline
 
-Option A was chosen (see "Open decisions"); option B is kept for the record.
+Inline placement was chosen (see "Open decisions"). The second prototype is
+retained below to explain the choice, not as an implementation option.
 
 **Option A: inline, after the state word**
 
@@ -101,25 +167,24 @@ though, because the state words differ in length.
 ╰───────────────────┴───────────────────────┴──────────────────┴────────┴────────────────┴───────╯
 ```
 
-The numbers align (right-aligned, `+` and `-` in fixed sub-columns), but the
-table gets two more columns and two more borders. Headers are blank because
-the column to the left names the target. Below 100 columns the metric columns
-are dropped entirely, not left empty.
-
-The prototype script belongs in the session scratchpad, not the repository.
+The numbers align, but the table gets two more columns and two more borders.
+Headers are blank because the column to the left names the target. This layout
+is not part of the selected design.
 
 ## 3. `-> parent` works like `-> {default}`, always local
 
 The `-> parent` column gets the same treatment as `-> {default}`: `clean` /
-`conflicts` (item 1), metrics and the width gate (item 2), and the same
-placement option (item 2).
+`conflicts` (item 1), metrics and the width gate (item 2), and inline
+placement (item 2).
 
 The parent comparison is always against the parent's **local** branch tip,
-never its `origin/*` copy. This is already the case
-(`fill_worktree_statuses` resolves the parent through `RefTips::local`), so
-the header stays the plain text `-> parent` with no badge. Add a lib test
-pinning that choice: a parent whose `origin/*` copy is ahead of its local tip
-must be compared against the local tip.
+never its `origin/*` copy. This is already the case: the `worktree` library's
+[fill_worktree_statuses](../../lib/src/worktree.rs) resolves the parent through
+local branch refs. The header therefore stays plain text `-> parent`, with no
+badge. Add a library test pinning that choice: give the parent different local
+and remote-tracking tips,
+then assert the child's `ahead` and `behind` against the local tip. Reuse the
+existing comparison and cache path.
 
 ## 4. Uncommitted-source dot turns red
 
@@ -132,11 +197,14 @@ automatically, since it renders the dots through `dirty_dot`.
 The dirty-file tree (`cli/src/commands/dirty_tree.rs`, shown by `wt list`'s
 verbose view and by the `wt remove` report) colors source-file names orange
 for the same reason. It turns red too, so the dot and the file names keep
-meaning the same thing.
+meaning the same thing. Non-source files remain yellow and directory labels
+remain dim. The red `conflicts` text and connectors keep their existing meaning;
+position and shape distinguish them from dirty-file dots and names.
 
 Update the expected colors in `dirty_tree.rs` and `remove/report.rs` unit
 tests, L1 `styles_follow_the_design` (`cli/tests/list_table.rs`), and the L2
-tmux styling tests (`level2_list_verbose`, `level2_dirty_tree`).
+tmux styling tests (`level2_list_verbose`, `level2_dirty_tree`). Update comments
+and test descriptions that still call source files orange.
 
 ## 5. Legend shows a connector that can occur on its own
 
@@ -156,30 +224,36 @@ The colors stay as they are (gray, red, dim). Update the legend assertion in
 
 ## Out of scope
 
-- The Worktree legend still uses "clean" to mean "no uncommitted files".
-  After item 1 the word means two things in one screen. Revisit if it
-  confuses people; it is not changed here.
+- The Worktree legend still uses "clean" to mean "no uncommitted files";
+  comparison cells use it to mean "merges without conflicts." The column
+  headings and legend distinguish those meanings. Changing that vocabulary
+  is outside this feature.
 - Any comparison of a non-default branch with its own `origin/*` copy
   (excluded on purpose by `2026-09-24-ux-improvements`).
 
 ## Acceptance
 
 1. No `wt list` output contains `already in`; `MergeState` has no `AlreadyIn`.
-2. At 100 or more columns, every compared cell shows `+ahead` and `-behind`,
-   omitting zero sides, and shows no metric when the tips are equal.
-3. At 99 columns or fewer, no metrics appear, and with option B no metric
-   columns appear either.
+2. At 100 or more columns, every successfully compared cell shows its nonzero
+   `+ahead` and `-behind` counts, and shows no metric when the tips are equal.
+   Counts appear before a PR badge. The table retains four columns.
+3. At 99 columns or fewer, no metrics appear; state words and PR badges remain.
+   `--width` does not change this threshold.
 4. `-> parent` cells follow 1–3, measured against the parent's local tip.
-5. L1 snapshots in `cli/tests/list_table.rs` cover each case, and the L2
-   styling test (`level2_list_verbose::level2_list_styles_follow_the_design_in_tmux`)
-   asserts the metric colors on cells.
+5. L1 snapshots in `cli/tests/list_table.rs` cover zero, one-sided, two-sided,
+   conflicting, and unavailable comparisons at 99 and 100 columns, including
+   PR badge placement and readable color-free output. The L2 styling test
+   (`level2_list_verbose::level2_list_styles_follow_the_design_in_tmux`)
+   asserts the dim green and dim red metric colors on rendered cells.
 6. A worktree with uncommitted source files shows a red `●` in the table and
    the legend, and its source-file names are red in the dirty-file tree; no
    `wt` output uses orange for them.
 7. The Branch legend's connector samples are `└─`, `└─`, `└┄`; no legend
    sample is `├─`.
-8. `.claude/skills/worktree/SKILL.md` and the worktree README are updated
-   wherever they describe the columns.
+8. `.claude/skills/worktree/SKILL.md`, `worktree/README.md`, and
+   `worktree/docs/cli/list.md` are updated wherever they describe the columns,
+   dirty-file colors, or the legend. The earlier specification remains a
+   historical design record; this document states the intentional changes.
 
 ## Open decisions
 

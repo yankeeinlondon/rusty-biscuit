@@ -402,7 +402,7 @@ mod tests {
     fn up_to_ten_dirty_files_are_a_tree_and_more_are_a_bold_red_count() {
         let ten = files_markup(&dirty(10));
         assert!(ten.starts_with("<b>Uncommitted files</b> (10):"));
-        assert!(ten.contains("<orange>f09.rs</orange>"));
+        assert!(ten.contains("<red>f09.rs</red>"));
 
         let eleven = files_markup(&dirty(11));
         assert_eq!(eleven, "<red><b>11 uncommitted files</b></red>");

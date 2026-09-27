@@ -1,6 +1,6 @@
 use std::io::IsTerminal as _;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
@@ -13,10 +13,11 @@ use worktree::pull_requests::{
     CachedPrs, LIST_DEADLINE, OpenPrSource, PrListing, SniffOpenPrSource, fetch_and_publish, origin_url,
     pr_store_path, select_cached, unix_now,
 };
+use worktree::remote_head::{CachedRemoteHead, remote_head_store_path, select_cached_head};
 use worktree::worktree::{fill_worktree_statuses, parse_worktree_state};
 
 use super::git_graph;
-use super::list_table::{self, TableFacts};
+use super::list_table::{self, RemoteFacts, TableFacts};
 use crate::perf;
 
 /// Builds the open-PR source for an `origin` URL when a request is due.
@@ -30,43 +31,88 @@ fn origin_pr_source(origin: &str) -> Box<dyn OpenPrSource> {
     })
 }
 
-/// Starts the background refresh for the repository whose main checkout is
-/// the argument, without waiting for it.
-pub type PrLaunch = fn(&Path);
+/// Starts the background refresh (`wt internal-refresh`) for the repository
+/// whose main checkout is the argument, without waiting for it.
+pub type RefreshLaunch = fn(&Path);
 
-/// How the PR stage reaches the network: a foreground request on a miss, a
-/// background refresh on a stale answer. Tests replace both.
+/// How listing reaches the network: a foreground PR request on a PR miss, and
+/// one background refresh for whatever is stale or missing. There is no
+/// live-head seam, because listing never asks for the live head itself.
+/// Tests replace both.
 #[derive(Clone, Copy)]
-pub struct PrSeams {
+pub struct ListSeams {
     pub connect: PrConnect,
-    pub launch: PrLaunch,
+    pub launch: RefreshLaunch,
 }
 
-const PRODUCTION_SEAMS: PrSeams = PrSeams {
+const PRODUCTION_SEAMS: ListSeams = ListSeams {
     connect: origin_pr_source,
-    launch: super::pr_refresh::launch,
+    launch: super::refresh_worker::launch,
 };
 
-/// The open PRs for the repository whose main checkout is `main`.
+/// Where the two stored answers live for one main checkout.
+#[derive(Clone, Copy)]
+struct Stores<'a> {
+    prs: &'a Path,
+    head: &'a Path,
+}
+
+/// What the remote stage hands the table.
+#[derive(Default)]
+struct RemoteAnswers {
+    prs: PrListing,
+    /// The stored live-head answer; `None` without an `origin`.
+    head: Option<CachedRemoteHead>,
+    origin_present: bool,
+    /// The `pr gather` perf stage: the origin lookup, PR selection, and any
+    /// foreground PR request.
+    pr_gather: Duration,
+    /// The `remote select` perf stage: live-head selection and the launch.
+    remote_select: Duration,
+}
+
+/// The stored answers for the repository whose main checkout is `main`, with
+/// at most one background refresh launched.
 ///
-/// A stored answer for the current `origin` is shown at once; a stale one
-/// also starts a background refresh, whose answer the next run shows. Only a
-/// miss makes the request here, under [`LIST_DEADLINE`]; a failed request, or
-/// one during which `origin` changed, shows no badges.
-fn gather_prs(store: &Path, main: &Path, seams: PrSeams) -> PrListing {
+/// A stored PR answer for the current `origin` is shown at once. Only a PR
+/// miss makes a request here, under [`LIST_DEADLINE`], and it settles before
+/// the launch decision, so the worker's PR half never races it; a failed
+/// request, or one during which `origin` changed, shows no badges. The
+/// worker is launched once when the PR answer is stale, or when there is an
+/// `origin` and the live-head answer is not fresh; a PR miss alone launches
+/// nothing. The live head is never requested in the foreground.
+fn gather_remote(stores: Stores<'_>, main: &Path, default_branch: &str, seams: ListSeams) -> RemoteAnswers {
+    let t0 = Instant::now();
     let origin = origin_url(main);
-    match select_cached(store, origin.as_deref(), unix_now()) {
-        CachedPrs::Fresh(listing) => return listing,
-        CachedPrs::Stale(listing) => {
-            (seams.launch)(main);
-            return listing;
+    let (prs, pr_stale) = match select_cached(stores.prs, origin.as_deref(), unix_now()) {
+        CachedPrs::Fresh(listing) => (listing, false),
+        CachedPrs::Stale(listing) => (listing, true),
+        CachedPrs::Miss => {
+            let listing = origin
+                .as_deref()
+                .and_then(|origin| {
+                    fetch_and_publish(stores.prs, main, origin, unix_now(), (seams.connect)(origin).as_ref())
+                })
+                .unwrap_or_default();
+            (listing, false)
         }
-        CachedPrs::Miss => {}
-    }
-    let Some(origin) = origin else {
-        return PrListing::default();
     };
-    fetch_and_publish(store, main, &origin, unix_now(), (seams.connect)(&origin).as_ref()).unwrap_or_default()
+    let pr_gather = t0.elapsed();
+    let t0 = Instant::now();
+    let head = origin
+        .as_deref()
+        .map(|origin| select_cached_head(stores.head, Some(origin), Some(default_branch), unix_now()));
+    let head_due = head.as_ref().is_some_and(|head| !matches!(head, CachedRemoteHead::Fresh(_)));
+    if pr_stale || head_due {
+        (seams.launch)(main);
+    }
+    RemoteAnswers {
+        prs,
+        head,
+        origin_present: origin.is_some(),
+        pr_gather,
+        remote_select: t0.elapsed(),
+    }
 }
 
 pub fn run(
@@ -104,7 +150,7 @@ fn run_pipeline(
     process_start: Instant,
     image_support: ImageSupport,
     terminal: &Terminal,
-    pr_seams: PrSeams,
+    seams: ListSeams,
 ) -> Result<Option<perf::PerfCollector>, WorktreeError> {
     let mut collector = if perf {
         Some(perf::PerfCollector::new(process_start))
@@ -123,18 +169,16 @@ fn run_pipeline(
     let needs_verbose = verbose && gather_input.has_verbose();
     let main_checkout = list.entries().first().map(|main| main.path.clone());
     let pr_store = main_checkout.as_deref().and_then(|main| pr_store_path(main).ok());
+    let head_store = main_checkout.as_deref().and_then(|main| remote_head_store_path(main).ok());
+    let default_branch = list.default_branch.clone();
 
     std::thread::scope(|scope| {
         // A PR request (only on a miss) runs beside the git work under its
         // own deadline, so the network never holds the table up for longer
         // than that.
-        let pr_handle = scope.spawn(|| {
-            let t0 = perf.then(Instant::now);
-            let prs = match (&pr_store, &main_checkout) {
-                (Some(store), Some(main)) => gather_prs(store, main, pr_seams),
-                _ => PrListing::default(),
-            };
-            (prs, t0.map(|start| start.elapsed()))
+        let remote_handle = scope.spawn(|| match (&pr_store, &head_store, &main_checkout) {
+            (Some(prs), Some(head), Some(main)) => gather_remote(Stores { prs, head }, main, &default_branch, seams),
+            _ => RemoteAnswers::default(),
         });
         let graph_handle = (needs_graph || needs_verbose).then(|| {
             scope.spawn(|| {
@@ -154,10 +198,12 @@ fn run_pipeline(
             perf::record(&mut collector, "list gather", start.elapsed());
         }
 
-        let (prs, pr_elapsed) = pr_handle.join().expect("PR thread panicked");
-        if let Some(elapsed) = pr_elapsed {
-            perf::record(&mut collector, "pr gather", elapsed);
+        let remote = remote_handle.join().expect("remote thread panicked");
+        if perf {
+            perf::record(&mut collector, "pr gather", remote.pr_gather);
+            perf::record(&mut collector, "remote select", remote.remote_select);
         }
+        let prs = remote.prs;
 
         let (graph_facts, verbose_data) = match graph_handle {
             Some(handle) => {
@@ -172,7 +218,21 @@ fn run_pipeline(
         };
 
         let t0 = perf.then(Instant::now);
-        let facts = TableFacts::from_list(&list, &prs);
+        let answer = match &remote.head {
+            Some(CachedRemoteHead::Fresh(head) | CachedRemoteHead::Stale(head)) => Some(head),
+            _ => None,
+        };
+        let tracking_ref = format!("origin/{}", list.default_branch);
+        let remote_facts = remote.origin_present.then(|| RemoteFacts {
+            default_branch: &list.default_branch,
+            tracking_tip: list
+                .caption
+                .as_ref()
+                .map(|caption| caption.tracking_sha.as_str())
+                .or_else(|| list.refs().remote(&tracking_ref)),
+            answer,
+        });
+        let facts = TableFacts::from_list(&list, &prs, remote_facts);
         eprint!("{}", list_table::render(&facts, terminal, unix_now()));
         if let Some(start) = t0 {
             perf::record(&mut collector, "table render", start.elapsed());

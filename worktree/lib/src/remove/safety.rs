@@ -23,7 +23,7 @@ use std::time::Duration;
 use crate::default_target::{DefaultTarget, select_default_target};
 use crate::git::git_from;
 
-use super::live_remote::RemoteHeads;
+use crate::live_remote::RemoteHeads;
 
 /// The ruled PR-lookup deadline for `wt remove` (Decision 22).
 pub const PR_DEADLINE: Duration = Duration::from_secs(2);
@@ -531,7 +531,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::remove::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
+    use crate::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
     use crate::remove::test_support::TestRepo;
 
     /// Answers every PR lookup with the same result and counts the calls.

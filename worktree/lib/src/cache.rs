@@ -145,6 +145,27 @@ pub fn repo_cache_file(repo_root: &Path, suffix: &str) -> Result<PathBuf, Worktr
     Ok(cache_dir.join("worktree").join(format!("{hash:016x}.{suffix}")))
 }
 
+/// Locks the persistent sidecar at `path` without blocking: `None` when
+/// another process holds it. Dropping the file releases the lock, and the OS
+/// releases a crashed holder's. Never unlink a sidecar: a new process would
+/// lock a different file while the old lock is still held.
+pub(crate) fn try_lock_sidecar(path: &Path) -> std::io::Result<Option<fs::File>> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)?;
+    if fs4::fs_std::FileExt::try_lock_exclusive(&file)? {
+        Ok(Some(file))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Atomically replace `path` with `bytes`.
 ///
 /// The replacement uses write-temp-then-rename, so concurrent writers have

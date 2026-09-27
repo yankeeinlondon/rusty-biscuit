@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-841734b9f5d96d8f
+hash: ef46db3751d8e999-69c75fec331d48c4
 last_updated: 2026-09-26
 ---
 
@@ -12,7 +12,7 @@ This document defines the worktree-owned performance surfaces for `wt list` and 
 The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktree.rs), which produces the status table.
 
 - It runs `git worktree list --porcelain`, resolves the default branch once, and reads every branch tip with one `git for-each-ref refs/heads refs/remotes`.
-- The caption compares the local default branch with `origin/<default>` (cached like any other pair). Its counts also choose the default-branch target, so a warm run makes no `merge-base` call.
+- The caption compares the local default branch with its local tracking ref `origin/<default>` (cached like any other pair) and records the tracking tip it read. Its counts also choose the default-branch target, so a warm run makes no `merge-base` call. The library listing path never touches the network.
 - Per-worktree `git status --porcelain` and per-branch comparisons (`git rev-list --left-right --count` plus a speculative `git merge-tree --write-tree`, against the target and, for a branch whose fork parent is another branch, against the parent) are dispatched in parallel via `std::thread::scope`.
 - `git status` is passed `-c core.untrackedCache=true`; benchmarks assume a warm untracked-cache so the measurement reflects steady-state behavior rather than the first cold walk.
 - The intended Criterion surface benchmarks `list_worktrees()` end-to-end in the `rusty-biscuit` monorepo, using the Phase 1 `count-git` recorder to assert subprocess counts in addition to wall-clock time.
@@ -30,9 +30,18 @@ The second owned cost center is graph data collection in [`worktree/cli/src/comm
 `wt list` makes one repository-wide open-PR request on its own thread, beside the git work ([`pull_requests.rs`](../lib/src/pull_requests.rs)).
 
 - Every stored answer is bound to a digest of the exact `git remote get-url origin` value, so every run pays that one git call, a cache hit included, before it may show stored badges.
-- A matching answer younger than 60 s is used as is. An older one is still shown at once, with its age, and `wt list` starts a detached `wt internal-refresh-prs <main checkout>` worker and never waits for it. The worker holds a lock beside the store from its freshness recheck to publication, so concurrent workers make at most one request, and its answer is shown by the next run.
+- A matching answer younger than 60 s is used as is. An older one is still shown at once, with its age, and `wt list` starts a detached `wt internal-refresh <main checkout>` worker and never waits for it. The worker holds a lock beside the store from its freshness recheck to publication, so concurrent workers make at most one request, and its answer is shown by the next run.
 - Only a miss (no store, another or no `origin`, an older format, a corrupt file, or a future fetch time) makes the request in the foreground, under a 300 ms deadline. A failure is never stored.
-- The `--perf` stage is `pr gather`: the origin lookup, plus the worker's spawn on a stale answer or the request on a miss. It never adds to `list gather`, and it bounds how long the table can wait for the network.
+- The `--perf` stage is `pr gather`: the origin lookup and, on a miss, the request. It never adds to `list gather`, and it bounds how long the table can wait for the network.
+
+## Live Remote Head
+
+The caption's remote observation is read from a store, never requested by `wt list` ([`remote_head.rs`](../lib/src/remote_head.rs)).
+
+- `<repo hash>.remote-head.json` sits beside the PR store and holds `{ origin_digest, branch, sha, checked_at }` for `origin`'s default branch; `sha: null` is a verified absence. An answer for another `origin` or default branch, a future `checked_at`, or an unreadable file is a miss.
+- The only request is `git ls-remote origin refs/heads/<default>` in the background worker, under a 10 s deadline, with credential prompts disabled and the whole process tree killed at the deadline ([`live_remote.rs`](../lib/src/live_remote.rs)). Only complete output without the exact ref is stored as an absence; a failure, deadline, or malformed line leaves the previous bytes untouched.
+- Listing makes one launch decision after any foreground PR request has settled: one `wt internal-refresh <main checkout>` when the PR answer is stale, or when there is an `origin` and the live-head answer is missing or at least 60 s old. A PR miss alone launches nothing. The worker runs its PR half and its live-head half on two threads, each with its own lock (`<repo hash>.prs.lock`, `<repo hash>.remote-head.lock`), freshness recheck, and publication, so neither delays or suppresses the other.
+- The `--perf` stage is `remote select`: the live-head store read and the launch. `perf_pr_request::perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh` asserts every sample stays under 300 ms while the worker's `ls-remote` is held by a loopback origin, and `list_prs::a_missing_or_stale_live_head_never_holds_up_the_listing` proves the captured `wt list` returns while that request is still held.
 
 ## Ahead/Behind + Merge Result Cache
 

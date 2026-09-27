@@ -1,9 +1,16 @@
 //! The `wt list` table: the caption, the Worktree and Branch columns, the two
 //! target columns with their PR badges, the legend, and the PR age line.
 //!
-//! Rendering is pure over the library's listing facts, so every variant can be
-//! tested without git. The design is item 5 ("Table Design") of the worktree
-//! fix `2026-09-24-ux-improvements`.
+//! Rendering is pure over the library's listing facts and an explicit `now`,
+//! so every variant can be tested without git. The design is item 5 ("Table
+//! Design") of the worktree fix `2026-09-24-ux-improvements`; the caption's
+//! remote observation is the fix `2026-09-26-stale-remote-caption`.
+//!
+//! The caption's comparison is against the **local tracking ref**, as of the
+//! last fetch. What the remote itself held comes only from the stored live-head
+//! answer ([`RemoteFacts::answer`]), always with its age, and a difference
+//! between the two is reported as a difference, never as the remote having
+//! moved: the fetch may be newer than the check.
 
 use std::collections::HashMap;
 
@@ -13,15 +20,22 @@ use biscuit_terminal::components::table::table::{Table, TableCellContent, TableC
 use biscuit_terminal::discovery::detection::ColorMode;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::color::{BasicColor, Color, RgbColor};
+use biscuit_terminal::utils::wrap_policy::WordWrap;
 use worktree::default_target::DefaultTarget;
 use worktree::listing::{
     BranchComparisons, Caption, CaptionState, Comparison, MergeState, ParentComparison, TreeNode,
     TreeRow,
 };
 use worktree::pull_requests::{OpenPullRequest, PrListing, PrPlacement, placement};
+use worktree::remote_head::RemoteHead;
 use worktree::worktree::{DirtyStatus, WorktreeList, WorktreeStatus};
 
-/// Everything the table shows.
+/// The narrowest terminal that shows ahead/behind counts in the two target
+/// columns; `--width` sizes only the graph and does not move this gate.
+const METRICS_MIN_WIDTH: u32 = 100;
+
+/// Everything [`render`] shows: the caption and its remote observation, the
+/// table, the legend, and the PR age line.
 pub struct TableFacts<'a> {
     pub default_branch: &'a str,
     pub target: Option<&'a DefaultTarget>,
@@ -31,30 +45,65 @@ pub struct TableFacts<'a> {
     pub statuses: &'a [WorktreeStatus],
     pub comparisons: &'a HashMap<String, BranchComparisons>,
     pub prs: &'a PrListing,
+    /// `None` without an `origin`, which also suppresses the caption.
+    pub remote: Option<RemoteFacts<'a>>,
+}
+
+/// What the caption can say about `origin`'s default branch.
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteFacts<'a> {
+    pub default_branch: &'a str,
+    /// The local tracking ref `origin/<default>`'s tip in this listing's ref
+    /// snapshot, if the ref exists.
+    pub tracking_tip: Option<&'a str>,
+    /// The stored live-head answer, if one matches the current `origin` and
+    /// default branch. Its age and validity are judged at render time.
+    pub answer: Option<&'a RemoteHead>,
+}
+
+impl RemoteFacts<'_> {
+    fn tracking_ref(&self) -> String {
+        format!("origin/{}", self.default_branch)
+    }
 }
 
 impl<'a> TableFacts<'a> {
-    pub fn from_list(list: &'a WorktreeList, prs: &'a PrListing) -> Self {
+    /// Without `remote` (no `origin`) the caption is dropped too, so leftover
+    /// `origin/*` refs never read as a comparison with a remote.
+    pub fn from_list(list: &'a WorktreeList, prs: &'a PrListing, remote: Option<RemoteFacts<'a>>) -> Self {
         Self {
             default_branch: &list.default_branch,
             target: list.target.as_ref(),
-            caption: list.caption.as_ref(),
+            caption: remote.and(list.caption.as_ref()),
             tree: &list.tree,
             statuses: &list.statuses,
             comparisons: &list.comparisons,
             prs,
+            remote,
         }
     }
 }
 
 /// The caption, table, legend, and PR age line, each separated as printed.
 ///
-/// `now` is Unix seconds, for the PR age.
+/// `now` is Unix seconds, for the PR and remote-observation ages.
 pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     let prose = |markup: String| Prose::new(markup).render(terminal);
     let mut out = String::from("\n");
-    if let Some(caption) = facts.caption {
-        out.push_str(&format!(" {}\n\n", prose(caption_markup(caption)).trim_end()));
+    let paragraph: Vec<String> = [
+        facts.caption.map(caption_markup),
+        facts.remote.as_ref().map(|remote| observation_markup(remote, now)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !paragraph.is_empty() {
+        // Comparison and observation together outgrow a narrow terminal, which
+        // would otherwise break the line mid-word.
+        let caption = Prose::new(paragraph.join(" "))
+            .with_word_wrap(WordWrap::WrapProse(None, Some(1)))
+            .render(terminal);
+        out.push_str(&format!(" {}\n\n", caption.trim_end()));
     }
     out.push_str(table(facts, terminal).render(terminal).trim_end());
     out.push_str("\n\n");
@@ -67,23 +116,87 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     out
 }
 
-/// The caption: the local default branch against its origin peer.
+/// The caption's comparison: the local default branch against its local
+/// tracking ref, never the live remote.
 pub fn caption_markup(caption: &Caption) -> String {
     let local = local_badge(&caption.local);
-    let remote = remote_badge(&caption.remote);
+    let remote = format!("local tracking ref {}", remote_badge(&caption.remote));
     let count = |n: usize| {
         let noun = if n == 1 { "commit" } else { "commits" };
         format!("<yellow>{n} {noun}</yellow>")
     };
     match caption.state() {
-        CaptionState::InSync => format!("{local} is in sync with {remote}"),
-        CaptionState::Behind(n) => format!("{local} is {} behind {remote}", count(n)),
-        CaptionState::Ahead(n) => format!("{local} is {} ahead of {remote}", count(n)),
+        CaptionState::InSync => format!("{local} is in sync with {remote}."),
+        CaptionState::Behind(n) => format!("{local} is {} behind {remote}.", count(n)),
+        CaptionState::Ahead(n) => format!("{local} is {} ahead of {remote}.", count(n)),
         CaptionState::Diverged { ahead, behind } => format!(
-            "{local} has diverged from {remote}: {} ahead, {} behind",
+            "{local} has diverged from {remote}: {} ahead, {} behind.",
             count(ahead),
             count(behind)
         ),
+    }
+}
+
+/// The caption's remote observation at `now`: the stored live-head answer
+/// against this listing's tracking tip, with the answer's age.
+///
+/// An answer dated after `now`, or for another branch, is no answer. Every
+/// observed state is past tense, so a stale answer (a failed refresh can leave
+/// one arbitrarily old) never claims the remote's current state.
+pub fn observation_markup(remote: &RemoteFacts<'_>, now: u64) -> String {
+    let dim = |text: &str| format!("<dim>{text}</dim>");
+    let tracking = remote_badge(&remote.tracking_ref());
+    let answer = remote
+        .answer
+        .filter(|answer| answer.branch == remote.default_branch && !answer.is_future_at(now));
+    let Some(answer) = answer else {
+        return match remote.tracking_tip {
+            Some(_) => dim("Remote state has not been verified."),
+            None => format!(
+                "{} {tracking}{}",
+                dim("No local tracking ref"),
+                dim("; remote state has not been verified.")
+            ),
+        };
+    };
+    let ago = format!("{} ago", age_text(now - answer.checked_at));
+    match (answer.sha.as_deref(), remote.tracking_tip) {
+        (Some(sha), Some(tip)) if sha == tip => {
+            format!("{tracking} {}", dim(&format!("matched the remote when checked {ago}.")))
+        }
+        (Some(_), Some(_)) => format!(
+            "{tracking} {}",
+            dim(&format!(
+                "differs from the remote head observed {ago}; run git fetch origin to update local tracking refs."
+            ))
+        ),
+        (Some(_), None) => format!(
+            "{} {tracking}{}",
+            dim("No local tracking ref"),
+            dim(&format!("; the remote branch was present when checked {ago}."))
+        ),
+        (None, Some(_)) => format!(
+            "{} {}",
+            local_badge(remote.default_branch),
+            dim(&format!("was absent on origin when checked {ago}."))
+        ),
+        (None, None) => format!(
+            "{} {tracking}{}",
+            dim("No local tracking ref"),
+            dim(&format!("; the remote branch was absent when checked {ago}."))
+        ),
+    }
+}
+
+/// An age in the PR age line's units: `less than 1 min` below a minute, then
+/// minutes below an hour, hours below two days, then days.
+pub fn age_text(seconds: u64) -> String {
+    let minutes = seconds / 60;
+    match minutes {
+        0 => "less than 1 min".to_string(),
+        1..=59 => format!("{minutes} min"),
+        60..=2879 => format!("{} h", minutes / 60),
+        _ => format!("{} days", minutes / 1440),
     }
 }
 
@@ -98,8 +211,8 @@ pub fn legend_markup() -> [String; 2] {
         ),
         format!(
             "Branch     {} <dim>merges cleanly into parent</dim>    {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
-            connector_markup("├─", Some(MergeState::Clean), false),
-            connector_markup("├─", Some(MergeState::Conflicts), false),
+            connector_markup("└─", Some(MergeState::Clean), false),
+            connector_markup("└─", Some(MergeState::Conflicts), false),
             connector_markup("└┄", None, true),
         ),
     ]
@@ -112,16 +225,12 @@ pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
         return None;
     }
     let minutes = prs.age_minutes(now)?;
-    let age = match minutes {
-        ..=59 => format!("{minutes} min"),
-        60..=2879 => format!("{} h", minutes / 60),
-        _ => format!("{} days", minutes / 1440),
-    };
-    Some(format!("<dim>PRs as of {age} ago</dim>"))
+    Some(format!("<dim>PRs as of {} ago</dim>", age_text(minutes * 60)))
 }
 
 /// The table, one row per tree row, with the current worktree's row
-/// highlighted.
+/// highlighted. The target columns carry ahead/behind counts only when
+/// `terminal` is at least [`METRICS_MIN_WIDTH`] columns wide.
 pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     let prose_cell = |markup: String| -> TableCellContent { Prose::new(markup).render(terminal).into() };
     let target_header = match facts.target {
@@ -137,13 +246,14 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     ];
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
 
+    let show_metrics = terminal.width() >= METRICS_MIN_WIDTH;
     let mut current_row = None;
     for (index, row) in facts.tree.iter().enumerate() {
         let status = row.worktree.and_then(|worktree| facts.statuses.get(worktree));
         if status.is_some_and(|status| status.entry.is_current) {
             current_row = Some(index);
         }
-        let cells = RowCells::new(facts, row, status, terminal.osc_link_support);
+        let cells = RowCells::new(facts, row, status, terminal.osc_link_support, show_metrics);
         table.add_row(vec![
             prose_cell(cells.worktree()),
             prose_cell(cells.branch()),
@@ -173,6 +283,7 @@ struct RowCells<'f, 'a> {
     comparisons: Option<&'f BranchComparisons>,
     prs: Vec<&'f OpenPullRequest>,
     links: bool,
+    show_metrics: bool,
 }
 
 impl<'f, 'a> RowCells<'f, 'a> {
@@ -181,6 +292,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
         row: &'f TreeRow,
         status: Option<&'f WorktreeStatus>,
         links: bool,
+        show_metrics: bool,
     ) -> Self {
         let branch = row.branch();
         let prs = match (branch, status) {
@@ -196,6 +308,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
             comparisons: branch.and_then(|branch| facts.comparisons.get(branch)),
             prs,
             links,
+            show_metrics,
         }
     }
 
@@ -301,7 +414,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
         }
         let cell = match (self.facts.target, self.comparisons.and_then(|c| c.target)) {
             (None, _) => "<dim>—</dim>".to_string(),
-            (Some(_), Some(comparison)) => merge_markup(comparison),
+            (Some(_), Some(comparison)) => merge_markup(comparison, self.show_metrics),
             (Some(_), None) => "<dim>?</dim>".to_string(),
         };
         with_badges(cell, self.badges(PrPlacement::Default))
@@ -315,7 +428,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
             return String::new();
         }
         let cell = match self.comparisons.map(|c| c.parent) {
-            Some(ParentComparison::Compared(Some(comparison))) => merge_markup(comparison),
+            Some(ParentComparison::Compared(Some(comparison))) => merge_markup(comparison, self.show_metrics),
             Some(ParentComparison::Compared(None)) => "<dim>?</dim>".to_string(),
             Some(ParentComparison::Deleted) => "<gray-400>parent deleted</gray-400>".to_string(),
             Some(ParentComparison::NotApplicable) | None => "<dim>—</dim>".to_string(),
@@ -328,12 +441,23 @@ fn with_badges(cell: String, badges: String) -> String {
     if badges.is_empty() { cell } else { format!("{cell} {badges}") }
 }
 
-fn merge_markup(comparison: Comparison) -> String {
-    match comparison.merge_state() {
-        MergeState::AlreadyIn => "<dim><i>already in</i></dim>".to_string(),
+/// The merge state word, then `+ahead` and `-behind` when `show_metrics`;
+/// a zero side is omitted.
+fn merge_markup(comparison: Comparison, show_metrics: bool) -> String {
+    let mut out = match comparison.merge_state() {
         MergeState::Clean => "<dim><i>clean</i></dim>".to_string(),
         MergeState::Conflicts => "<red>conflicts</red>".to_string(),
+    };
+    if show_metrics {
+        if comparison.ahead > 0 {
+            out.push_str(&format!(" <dim><green>+{}</green></dim>", comparison.ahead));
+        }
+        if comparison.behind > 0 {
+            // ASCII hyphen-minus, so plain output stays greppable.
+            out.push_str(&format!(" <dim><red>-{}</red></dim>", comparison.behind));
+        }
     }
+    out
 }
 
 /// Colors a tree connector by the row's merge state; a deleted parent
@@ -353,7 +477,7 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
     match dirty {
         DirtyStatus::Clean => "<dim>○</dim>",
         DirtyStatus::DirtyNonSource => "<yellow>●</yellow>",
-        DirtyStatus::DirtySource => "<orange>●</orange>",
+        DirtyStatus::DirtySource => "<red>●</red>",
     }
 }
 

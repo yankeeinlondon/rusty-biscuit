@@ -20,7 +20,7 @@ use std::path::Path;
 
 use crate::git::{git_from, git_from_raw};
 
-use super::live_remote::{PUSH_DEADLINE, RemoteHeads, run_noninteractive};
+use crate::live_remote::{PUSH_DEADLINE, RemoteHeads, run_noninteractive};
 use super::safety::Commit;
 
 /// The branch's name on origin: its configured upstream when that is on
@@ -308,7 +308,7 @@ pub fn delete_remote_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::remove::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
+    use crate::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
     use crate::remove::test_support::TestRepo;
 
     fn heads(repo: &TestRepo) -> LsRemote<'static> {
