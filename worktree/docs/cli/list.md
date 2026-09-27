@@ -68,7 +68,9 @@ Open pull requests on `origin` whose source is this repository show as a green `
 
 A PR from a fork with a same-named branch is never shown. In terminals that support OSC 8 hyperlinks the badge links to the PR; elsewhere it shows the number only, with no visible URL, so the table always fits.
 
-The PR request runs in parallel with the git work and is given 300 ms. A successful answer is stored for 60 seconds, during which `wt list` makes no request at all. When the request fails or runs out of time, the stored results (if any) are shown instead, followed by a dim `PRs as of N min ago` line; a failure is never stored. With no network and no stored results the table shows no badges.
+A successful answer is stored with the `origin` it came from, and `wt list` shows a stored answer for the current `origin` at once, whatever its age. Once it is 60 seconds old a dim `PRs as of N min ago` line follows the legend, and `wt list` starts a detached `wt` process that asks again and replaces the stored answer for the next run; `wt list` exits without waiting for it. At most one such refresh makes a request at a time, and a refresh that fails leaves the stored answer as it was.
+
+With no stored answer for the current `origin` (the first run, a cleared cache, or a changed or removed `origin`), the request runs in parallel with the git work and is given 300 ms. An answer stored for a different `origin` is never shown. A failure is never stored, and with no network and no usable stored answer the table shows no badges.
 
 ### Git Graph
 
