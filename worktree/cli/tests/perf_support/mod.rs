@@ -154,6 +154,28 @@ impl MixedFixture {
         self
     }
 
+    /// Points `origin` at `url`, such as a [`HoldingOrigin`]. Pair it with
+    /// [`MixedFixture::wt_command_direct`].
+    pub fn with_origin(self, url: &str) -> Self {
+        run_git(&self.main, &["remote", "add", "origin", url]);
+        self
+    }
+
+    /// [`MixedFixture::wt_command`] whose git reaches a loopback `origin`
+    /// directly: no proxy variable, no provider token, and none of the
+    /// user's or the system's git configuration (so no `insteadOf` or
+    /// `http.proxy` applies).
+    pub fn wt_command_direct(&self) -> Command {
+        let global = self.home.path().join("empty.gitconfig");
+        fs::write(&global, "").expect("write an empty global git config");
+        let mut command = self.wt_command_without_network();
+        for name in ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1"] {
+            command.env_remove(name);
+        }
+        command.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", global);
+        command
+    }
+
     /// [`MixedFixture::wt_command`] with every HTTPS request sent through
     /// `proxy`, and no provider token.
     pub fn wt_command_via(&self, proxy: &ProxyStub) -> Command {
@@ -225,15 +247,7 @@ impl MixedFixture {
     /// used there.
     pub fn pr_store(&self) -> PathBuf {
         let real = worktree::pull_requests::pr_store_path(&self.main).expect("PR store path");
-        if cfg!(windows) {
-            return real;
-        }
-        let root = if cfg!(target_os = "macos") {
-            self.home.path().join("Library").join("Caches")
-        } else {
-            self.xdg_cache.path().to_path_buf()
-        };
-        root.join("worktree").join(real.file_name().expect("store file name"))
+        isolated_cache_file(self.home.path(), self.xdg_cache.path(), &real)
     }
 
     /// The live-head store the spawned `wt` reads and the worker writes; see
@@ -287,6 +301,24 @@ impl MixedFixture {
                 "source_branch": branch,
                 "target_branch": "main",
             }],
+        });
+        fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
+    }
+
+    /// Writes a PR store for the current `origin`, fetched `age` ago, holding
+    /// no open PR: an answer for any origin, including one no provider
+    /// recognizes.
+    pub fn seed_empty_pr_store(&self, age: Duration) {
+        let origin = worktree::pull_requests::origin_url(&self.main).expect("the fixture has an origin");
+        let source_repo = SniffOpenPrSource { remote_url: origin.clone(), deadline: Duration::ZERO }.source_repo();
+        let store = self.pr_store();
+        fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
+        let json = serde_json::json!({
+            "format_version": 2,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
+            "fetched_at": unix_now() - age.as_secs(),
+            "source_repo": source_repo,
+            "pull_requests": [],
         });
         fs::write(&store, serde_json::to_vec(&json).expect("serialize")).expect("write store");
     }
@@ -355,6 +387,22 @@ impl Default for MixedFixture {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Where a spawned `wt` with `HOME=home` and `XDG_CACHE_HOME=xdg_cache` keeps
+/// the cache file the library names `real`: under `home` on macOS, under
+/// `xdg_cache` on Linux, and at `real` itself on Windows, whose user cache
+/// ignores both variables.
+pub fn isolated_cache_file(home: &Path, xdg_cache: &Path, real: &Path) -> PathBuf {
+    if cfg!(windows) {
+        return real.to_path_buf();
+    }
+    let root = if cfg!(target_os = "macos") {
+        home.join("Library").join("Caches")
+    } else {
+        xdg_cache.to_path_buf()
+    };
+    root.join("worktree").join(real.file_name().expect("store file name"))
 }
 
 /// Removes a PR store, the live-head store beside it, and both lock sidecars,
@@ -542,6 +590,79 @@ impl ProxyStub {
     /// Connections accepted so far (always 0 for a refusing stub).
     pub fn connections(&self) -> usize {
         self.connections.load(Ordering::SeqCst)
+    }
+}
+
+/// A loopback `origin` for git's smart-HTTP transport that accepts every
+/// connection, records its request line, and never answers, so a live-head
+/// `ls-remote` stays blocked until [`HoldingOrigin::close_held`] or its
+/// deadline. Git reaches it directly: the caller clears the proxy variables
+/// and the user's git configuration.
+pub struct HoldingOrigin {
+    port: u16,
+    requests: Arc<Mutex<Vec<String>>>,
+    held: Arc<Mutex<Vec<TcpStream>>>,
+}
+
+impl HoldingOrigin {
+    pub fn new() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind holding origin");
+        let port = listener.local_addr().expect("holding origin address").port();
+        let requests: Arc<Mutex<Vec<String>>> = Arc::default();
+        let held: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
+        let (recorder, holder) = (Arc::clone(&requests), Arc::clone(&held));
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                let mut head = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => head.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let line = String::from_utf8_lossy(&head).lines().next().unwrap_or_default().to_string();
+                holder.lock().expect("held connections").push(stream);
+                recorder.lock().expect("recorded requests").push(line);
+            }
+        });
+        Self { port, requests, held }
+    }
+
+    /// The URL to set as `origin`.
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}/r.git", self.port)
+    }
+
+    /// The request line of every connection so far.
+    pub fn requests(&self) -> Vec<String> {
+        self.requests.lock().expect("recorded requests").clone()
+    }
+
+    /// Waits up to `limit` for at least `count` recorded requests.
+    pub fn wait_for_requests(&self, count: usize, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while self.requests().len() < count {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+
+    /// Closes every held connection, so a blocked `ls-remote` fails at once.
+    pub fn close_held(&self) {
+        for stream in self.held.lock().expect("held connections").drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+impl Default for HoldingOrigin {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
