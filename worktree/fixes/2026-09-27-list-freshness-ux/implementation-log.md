@@ -9,7 +9,85 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
     - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/bitbucket/types/mod.rs
+    - schematic/definitions/src/bitbucket/types/branches.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/gitea/types.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/github/types/releases.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/gitlab/types.rs
+    - schematic/definitions/src/gitlab/types/branches.rs
+    - schematic/definitions/src/gitlab/endpoints/mod.rs
+    - schematic/definitions/src/gitlab/endpoints/branches.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/gitlab.postman_collection.json
+    - sniff/lib/src/credentials.rs
+    - sniff/lib/src/filesystem/git/commit_links.rs
+    - sniff/lib/src/filesystem/git/mod.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/branch_head.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - biscuit-terminal/lib/src/components/spinner.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/lib/src/api_preference.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/perf_support/mod.rs
+docs_updated_during_phase_2:
+    - schematic/README.md
+    - schematic/definitions/README.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/components/index.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+docs_created_during_phase_2:
+    - biscuit-terminal/docs/components/spinner.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/worktree/SKILL.md
+packages:
+    - schematic-definitions
+    - schematic-schema
+    - sniff
+    - biscuit-terminal
+    - worktree
+    - worktree-cli
 ---
 
 # Implementation Log for 2026-09-27-list-freshness-ux (5 phases)
@@ -336,3 +414,193 @@ There are no pre-existing failures. `just test-l2` was not part of the Phase 1 b
 - An open gap is closed by a proposal (S4): `--attempt` is optional on `internal-refresh`.
 - The baseline is green in all four areas.
 - No source files were changed in Phase 1.
+
+## Phase 2
+
+Phase 2 builds the provider, component, and store foundations. Wave 1 ran as four parallel subagents over disjoint files: schematic, sniff, the Spinner, and remote-head format 2. The orchestrator wrote `api_preference` and did the Wave 2 worktree task. The sniff agent did its Wave 1 and Wave 2 tasks in sequence, because they share files.
+
+The orchestrator added only `pub mod api_preference;` to `worktree/lib/src/lib.rs`. `remote_update` and `fast_forward` are left for Phases 3 and 4, which create them, so no empty module ships in between.
+
+### Schematic endpoints
+
+- GitHub `GetBranchReference` (`GET /repos/{owner}/{repo}/git/ref/heads/{branch}`) reuses `GitRef` (`object.sha`).
+- Gitea `GetBranch` adds `Branch { name, commit: BranchCommit { id, .. } }`.
+- GitLab `GetBranch` adds `Branch`, reusing `Commit` (`commit.id`).
+- Bitbucket `GetBranch` adds `Branch { target: CommitInfo, .. }`. Its `target.hash` is an `Option<String>`.
+- The branch is an ordinary encoded path parameter. The GitHub request was checked to pass it through `urlencoding::encode`.
+- No auth variable changed.
+- `schematic/schema` was regenerated, along with `openapi/*.json` and `postman/*`. Regeneration also rewrote `schematic/schema/Cargo.lock`, which dropped `cargo_metadata`, `camino`, and `cargo-platform`: that lock file was stale against `biscuit-file`'s current dependencies.
+- **Tests (8 new):**
+    - endpoint tests: `{github::tests::get_branch_reference_endpoint, gitea/gitlab/bitbucket::tests::get_branch_endpoint}`
+    - payload parsing: `github::types::releases::tests::git_ref_branch_head`, `{gitea,gitlab}::types::tests::branch_deserialization`, `bitbucket::types::branches::tests::branch_deserialization`
+    - the endpoint-count tests were renamed for the new counts
+- `schematic/README.md` had wrong endpoint counts before this change. They now match the code.
+- **Follow-up (out of scope):** `just check-drift` runs zero tests. Its filter passes `--ignored`, but the drift tests are neither ignored nor in the default target. `cargo test -p schematic-gen --test l1 artifact_drift::` is the working check, and all 5 of its tests pass. The Gitea section of `schematic/definitions/README.md` also says to include the `token ` prefix, which the code does not want.
+
+### sniff: credentials split, `credential_env`, `remote_identity`, `branch_head`
+
+- **`PrUnavailable`** (still `#[non_exhaustive]`):
+    - It is now `Timeout { deadline }`, `Network`, `CredentialsRequired { key: Option<String> }` (always `None`), `CredentialsRejected { key }`, `CredentialsInsufficient { key }`, `NotFoundOrNotPermitted`, `RateLimited { authenticated, key: Option<String> }`, `Unsupported`, and `Other`.
+    - `Auth` is gone.
+    - `key` is a variable name, and no `Display` contains a value. Tests assert this with a sentinel secret.
+- **Key flow.** `credentials::provider_token_variables(flavor)` is the one list of names. `provider_token` returns the `(name, value)` it matched, and `credential_env` reports the same list in the same order (the Rule 13 amendment). `FocusedProviderClient::credential()`/`credential_key()` also cover host-bound `SNIFF_*_TOKEN`.
+- **403 split in `focused.rs`:**
+    - A spent `x-ratelimit-remaining: 0`, or a body containing "rate limit", is `RateLimited` on every provider, not only GitHub.
+    - With a token, a body naming a permission or scope is `CredentialsInsufficient`.
+    - Any other 403 is `NotFoundOrNotPermitted`.
+- **Deviation (hidden coupling, documented at the constant and in the skill).** An insufficient 403 travels as `SniffError::RemoteForbidden` carrying the exact message `INSUFFICIENT_CREDENTIALS_MESSAGE`, and `classify` keys on that text. A new `SniffError` variant or field would have broken sniff-cli and darkmatter code that builds these errors.
+- **Behavior changes outside the blocking path** (recorded in sniff's CHANGELOG):
+    - A rate-limit 403 is now `SniffError::RateLimited` for the focused client, so darkmatter shows RateLimit instead of Authentication.
+    - `Unsupported` messages no longer echo the remote URL, since userinfo can carry a token.
+- **Anonymous fallback.** `open_pull_requests` has no anonymous retry on the blocking path, so `branch_head` has none either. With no token the request goes out anonymously, and a test asserts that no auth header is sent. A rejected token is reported, not retried. Rule 9 already sends those cases to `ls-remote`.
+- **`remote_identity`** is at `sniff::filesystem::git::remote_identity` (also re-exported as `sniff::filesystem::remote_identity`), not under `sniff::remote`. It returns `RemoteIdentity { scheme, host, port: Option<u16>, path }`.
+- **`branch_head`** and `branch_head_with` send the branch as one percent-encoded segment. A SHA that is not 40 or 64 lowercase hex characters, or a body without the field, is `Other`. An empty branch is refused without a request.
+- **Tests:**
+    - `sniff/lib/tests/l1/branch_head.rs` (11 tests, declared in `tests/l1/main.rs` under `feature = "remote"`):
+        - `each_provider_reports_its_own_sha_field`
+        - `a_head_that_is_not_a_full_lowercase_object_id_is_rejected`
+        - `a_body_without_the_sha_field_is_rejected`
+        - `a_response_slower_than_the_deadline_times_out`
+        - `a_branch_name_is_one_encoded_path_segment`, with the input `feature/a b/ü?x=1#y`
+        - `without_a_token_the_request_is_anonymous_and_answers`
+        - `every_credentials_condition_is_classified_on_every_provider`
+        - `the_key_names_the_first_set_candidate_variable`
+        - `an_empty_branch_is_refused_without_a_request`
+        - `an_unsupported_remote_is_refused_without_echoing_its_url`
+        - `credential_env_lists_each_providers_variables_in_lookup_order`
+    - The two L1 `Auth` tests became `credentials_failures_are_unavailable[_not_empty]_on_every_provider`, sharing one case table: 401 and 404 with and without a token, three kinds of 403, and 429 with and without a token, plus GitHub's quota-header and rate-limit-body 403.
+    - The unit test `a_denial_is_never_classified_as_an_answer` now asserts `CredentialsInsufficient`.
+    - `commit_links.rs` gained 3 `remote_identity_*` unit tests.
+
+### Spinner (`biscuit-terminal`)
+
+- **API:** `biscuit_terminal::components::spinner::{Spinner, SpinnerHandle, frame, CLEAR_LINE, FRAMES, FRAME_INTERVAL}`; `Spinner` and `SpinnerHandle` are also in the prelude.
+    - `Spinner::new(text).with_delay(d)[.with_width(w)].start_on_stderr()`, or `.start_on(writer, is_terminal)`.
+    - `SpinnerHandle::set_text`, `finish()`, and `Drop`.
+    - `with_width` is an addition for tests.
+- **Contract:**
+    - Nothing is written, and no thread is started, when the output is not a terminal.
+    - The line is cleared exactly once, and only if a frame was drawn, so a spinner stopped before its delay writes nothing.
+    - Frames are at most `width - 1` columns, because the Windows console wraps early.
+- **Tests (9 unit tests):**
+    - `first_frame_is_drawn_only_after_the_delay`
+    - `finish_before_the_delay_writes_nothing`
+    - `non_terminal_writes_nothing_and_spawns_no_thread`
+    - `set_text_changes_the_next_frame`
+    - `finish_writes_the_clear_sequence_exactly_once`
+    - `drop_writes_the_clear_sequence_exactly_once`
+    - `frames_are_truncated_below_the_width`
+    - `frames_truncate_wide_characters_by_display_width`
+    - `frames_cycle_through_the_glyphs`
+
+### Remote-head store format 2 (`worktree::remote_head`)
+
+- **Public API:**
+    - Constants: `REMOTE_HEAD_FORMAT_VERSION = 2`, `RECEIPT_FORMAT_VERSION = 1`, and `ATTEMPT_MAX_AGE = 75 s`.
+    - Types: `Answer`, `AnswerSource`, `Attempt`, `Phase`, `FallbackReason`, `Outcome`, `CheckFailure`, `FetchFailure`, `UnavailableReason` (`origin-changed` | `branch-changed`), `ApiCondition`, `ApiNote { condition, key, fallback_answered }`, `StoreState`, `PrFailure`, `HeadStatus`, `PrStatus`, and `Receipt`.
+    - Store functions: `read_store`, `select_attempt`, `begin_attempt`, `set_phase`, `finish_attempt`, `publish_answer`, and `new_attempt_id` (delegates to `remove::handoff::new_token`).
+    - Receipt functions: `refresh_receipt_path`, `write_receipt`, and `load_receipt`.
+    - Tagged enums use `kind`; every other spelling is kebab-case.
+- **Read rules:**
+    - Only a non-JSON document or a missing or unknown `format_version` loses the whole file. Otherwise each half is validated on its own.
+    - An attempt exactly 75 s old is still current.
+    - Discarding happens on read and never writes.
+- **Writers:**
+    - They refuse another attempt's id, returning a `NotFound` I/O error and writing nothing.
+    - They refuse invalid values.
+    - `api: None` keeps the stored note.
+    - `finish_attempt` keeps the phase reached.
+- **Existing behavior kept for now.** `refresh_remote_head` and `select_cached_head` keep their signatures. The first publishes `source: git` and leaves any attempt alone; the second reads `answer`. The `AlreadyFresh` recheck is still there, for Phase 3 to remove (Rule 7).
+- **Tests (15 new unit tests):**
+    - `a_format_1_file_reads_as_a_git_answer_and_a_write_keeps_it`
+    - `the_store_round_trips_with_its_documented_spellings` (read, write, read)
+    - `every_phase_and_outcome_survives_a_round_trip`
+    - `an_attempt_is_current_through_attempt_max_age_and_not_one_second_beyond`
+    - `an_invalid_attempt_field_drops_the_attempt_and_keeps_the_answer` (24 cases)
+    - `an_invalid_answer_drops_the_answer_and_keeps_the_attempt`
+    - `writers_keep_the_answer_while_the_attempt_moves`
+    - `publishing_an_answer_keeps_the_attempt`
+    - `a_failed_or_stale_attempt_never_replaces_the_answer`
+    - `writers_refuse_another_attempt_and_invalid_values_without_writing`
+    - `a_refresh_keeps_the_stored_attempt`
+    - `attempt_ids_are_32_random_hex_characters`
+    - `a_receipt_round_trips_with_its_documented_spellings`
+    - `a_receipt_for_another_attempt_or_older_than_the_attempt_is_ignored`
+    - `a_malformed_or_missing_receipt_is_ignored`
+- **Changed test helpers:**
+    - In `cli/tests/list_remote_head.rs`, `stored_head()` now reads the `answer` half, `age_head` edits `answer.checked_at`, and a new `stored_document()` returns the whole file.
+    - `perf_support::seed_remote_head_store` still writes format 1, which is a supported read path.
+- **Duplication left in place:** `is_attempt_id` repeats `handoff::is_token`, which is private.
+
+### API preference store (`worktree::api_preference`)
+
+- **API:**
+    - `preference_path()` = `dirs::home_dir()/.wt.json`.
+    - `RepoIdentity { host, port, path }::from_origin(url)`, built on sniff's `remote_identity`, with the Rule 3 port policy:
+        - `https` is 443 unless the URL gives a port.
+        - `ssh` to a known provider host is 443. A host is known when `GitHostingProvider::from_url` returns GitHub, GitLab, Bitbucket, Gitea, or Forgejo.
+        - Other `ssh` uses its port, or 22.
+        - `http` is 80 and `git` is 9418.
+        - A local path or `file://` URL has no identity.
+    - `Preferences::is_ignored`, `load(path)`, and `add(path, identity)`.
+    - `WorktreeError::PreferenceUnwritable { path, reason }` is new. The CLI's `exit_code` maps it to 1 through its default arm.
+- **Rules:**
+    - `load` treats a missing, unreadable, corrupt, or other-format file as empty.
+    - `add` refuses such a file and leaves it byte-for-byte untouched. It is idempotent, and it takes `~/.wt.json.lock` for at most 2 s, polling `try_lock_sidecar` every 25 ms, before `atomic_write`.
+- **Tests (12 unit tests):**
+    - `https_and_ssh_remotes_of_one_provider_repository_share_an_identity` (6 URL spellings)
+    - `user_information_never_reaches_the_identity_or_the_file`
+    - `distinct_ports_and_paths_stay_distinct`
+    - `ssh_to_an_unknown_host_keeps_its_own_port`
+    - `a_local_path_has_no_identity`
+    - `a_missing_file_ignores_nothing`
+    - `add_round_trips_and_is_idempotent`
+    - `a_corrupt_or_other_format_file_reads_as_empty_and_add_refuses_to_replace_it` (4 variants)
+    - `an_unreadable_file_reads_as_empty_and_add_refuses_it`
+    - `a_held_lock_times_out_as_a_write_error`
+    - `concurrent_adds_keep_every_entry` (8 threads)
+    - `the_file_sits_in_the_home_directory`
+    - `the_file_resolves_under_userprofile_on_windows` (`cfg(windows)`)
+
+### Typed PR failure (Rule 14)
+
+- `OpenPrSource::fetch` now returns `Result<Vec<OpenPullRequest>, PrFailure>`.
+- `PrFailure::from_unavailable(&PrUnavailable)` maps each credentials condition by kind, `NotFoundOrNotPermitted` to itself, and everything else to `Other`. It is implemented in `pull_requests.rs`; the type lives in `remote_head.rs`.
+- `fetch_and_publish` now returns `Result<Option<PrListing>, PrFailure>`: `Err` is this run's failure (for §5), and `Ok(None)` means `origin` changed during the request. `list::gather_remote` flattens it to the old behavior until Phase 4 uses the failure.
+- `RefreshOutcome::Failed` does not carry the failure yet. The receipt needs it, so Phase 3's worker wiring should add it. It was not added now because `RefreshOutcome` is shared with `refresh_remote_head` and is `Copy`.
+- `remove::safety` still calls `to_string()`, and it compiles.
+- **Tests:**
+    - New: `every_sniff_reason_maps_to_its_credentials_condition_or_other` (10 cases) and `each_credentials_failure_reaches_the_foreground_caller_and_is_never_stored` (6 variants; checks the store stays absent and `select_cached` is `Miss`).
+    - Updated: `a_failed_foreground_request_leaves_the_store_untouched` (typed errors) and `a_failed_refresh_leaves_the_stored_answer_untouched`. The CLI test stubs (`list/tests.rs`, `refresh_worker.rs`, `perf_support::NoRequest`) now return `PrFailure`.
+
+### Requirement → test mapping (Phase 2 scope)
+
+| Requirement | Tests |
+|---|---|
+| Endpoint definitions: path, method, and auth per provider | schematic `*_branch*_endpoint` (4) plus payload parsing (4) |
+| sniff §5 split, key names, no secret in `Display` | `credentials_failures_are_unavailable*_on_every_provider`, `every_credentials_condition_is_classified_on_every_provider`, `the_key_names_the_first_set_candidate_variable` |
+| `branch_head`: SHA parsing, invalid SHA, deadline, encoding, anonymous request, `credential_env` | `sniff/lib/tests/l1/branch_head.rs` (11) |
+| Spinner: delay, not a terminal, `set_text`, clear once, width | `components::spinner::tests` (9) |
+| `~/.wt.json`: identity, ports, SSH and HTTPS match, corrupt file, concurrency, Windows path | `api_preference::tests` (12) |
+| Store format 2: format-1 read, discard rules, answer preserved, receipt checks | `remote_head::tests` (15 new) |
+| Typed PR failure, one case per variant | `pull_requests::tests` (2 new, 2 updated) |
+
+### Gates (macOS, final combined tree)
+
+| Area | `just test` | `just lint` |
+|---|---|---|
+| `schematic/` | 1708 passed, 5 skipped (baseline 1700) | pass |
+| `sniff/` | 2872 passed, 31 skipped (baseline 2858) | pass |
+| `biscuit-terminal/` | 3324 passed, 55 skipped (baseline 3315) | pass |
+| `worktree/` | 556 passed, 21 skipped (baseline 527) | pass |
+
+- `cargo check -p worktree -p worktree-cli --all-targets --all-features` is clean.
+- **Native Windows** (`./scripts/cross-check.sh worktree --os windows api_preference remote_head pull_requests`): 69 of 69 pass, including `the_file_resolves_under_userprofile_on_windows` and the directory-as-unreadable-file case.
+- `just cross-check` with a quoted `-E` filterset fails with a bash syntax error, as the worktree skill warns. Call the script directly with substring filters.
+- There are no pre-existing failures and no skipped gates. `just test-l2` is not part of Phase 2.
+
+### Checkpoint 2
+
+- All seven Phase 2 tasks are done, and `just test` and `just lint` pass in all four areas.
+- `cargo check -p worktree-cli` compiles.
+- The worktree skill's `remote_head`, `pull_requests`, and new `api_preference` entries are updated.

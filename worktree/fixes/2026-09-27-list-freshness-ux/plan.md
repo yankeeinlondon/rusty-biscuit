@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -10,6 +10,78 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
     - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - schematic/definitions/src/bitbucket/mod.rs
+    - schematic/definitions/src/bitbucket/types/mod.rs
+    - schematic/definitions/src/bitbucket/types/branches.rs
+    - schematic/definitions/src/gitea/mod.rs
+    - schematic/definitions/src/gitea/types.rs
+    - schematic/definitions/src/github/mod.rs
+    - schematic/definitions/src/github/types/releases.rs
+    - schematic/definitions/src/gitlab/mod.rs
+    - schematic/definitions/src/gitlab/types.rs
+    - schematic/definitions/src/gitlab/types/branches.rs
+    - schematic/definitions/src/gitlab/endpoints/mod.rs
+    - schematic/definitions/src/gitlab/endpoints/branches.rs
+    - schematic/definitions/src/lib.rs
+    - schematic/definitions/src/prelude.rs
+    - schematic/schema/Cargo.lock
+    - schematic/schema/src/bitbucket/mod.rs
+    - schematic/schema/src/bitbucket/requests.rs
+    - schematic/schema/src/gitea/mod.rs
+    - schematic/schema/src/gitea/requests.rs
+    - schematic/schema/src/github/mod.rs
+    - schematic/schema/src/github/requests.rs
+    - schematic/schema/src/gitlab/mod.rs
+    - schematic/schema/src/gitlab/requests.rs
+    - schematic/openapi/bitbucket.json
+    - schematic/openapi/gitea.json
+    - schematic/openapi/github.json
+    - schematic/openapi/gitlab.json
+    - schematic/postman/bitbucket.postman_collection.json
+    - schematic/postman/gitea.postman_collection.json
+    - schematic/postman/github.postman_collection.json
+    - schematic/postman/gitlab.postman_collection.json
+    - sniff/lib/src/credentials.rs
+    - sniff/lib/src/filesystem/git/commit_links.rs
+    - sniff/lib/src/filesystem/git/mod.rs
+    - sniff/lib/src/filesystem/mod.rs
+    - sniff/lib/src/remote/blocking.rs
+    - sniff/lib/src/remote/focused.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/branch_head.rs
+    - sniff/lib/tests/l1/open_pull_requests.rs
+    - sniff/lib/tests/l1/pr_for_branch.rs
+    - biscuit-terminal/lib/src/components/spinner.rs
+    - biscuit-terminal/lib/src/components/mod.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/lib/src/api_preference.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/perf_support/mod.rs
+docs_updated_during_phase_2:
+    - schematic/README.md
+    - schematic/definitions/README.md
+    - sniff/lib/README.md
+    - sniff/lib/CHANGELOG.md
+    - biscuit-terminal/README.md
+    - biscuit-terminal/docs/components/index.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+docs_created_during_phase_2:
+    - biscuit-terminal/docs/components/spinner.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/worktree/SKILL.md
 packages:
     - schematic-definitions
     - schematic-schema
@@ -277,15 +349,15 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **Schematic endpoints** (`schematic/definitions/src/{github,gitea,gitlab,bitbucket}/mod.rs`, then regenerate `schematic/schema`)
+- [x] **Schematic endpoints** (`schematic/definitions/src/{github,gitea,gitlab,bitbucket}/mod.rs`, then regenerate `schematic/schema`)
     - Add GitHub `GetBranchReference` (`GET /repos/{owner}/{repo}/git/ref/heads/{branch}`, beside `GetTagReference`), Gitea `GetBranch`, GitLab `GetBranch`, and Bitbucket `GetBranch`, each with the response type fields from the spec table. Use the existing `env_auth` and `env_mapping`, and add no new variables.
     - Update each module's endpoint table (`//!` docs) and `schematic/definitions/README.md`.
     - Add a definition test per endpoint (path, method, auth) that matches the existing per-provider tests. Run `just generate` (schematic), and confirm the generated client compiles and `just check-drift` is clean.
-- [ ] **sniff credentials split** (`sniff/lib/src/remote/blocking.rs`, the provider modules as needed, `sniff/lib/tests/l1/{open_pull_requests,pr_for_branch}.rs`)
+- [x] **sniff credentials split** (`sniff/lib/src/remote/blocking.rs`, the provider modules as needed, `sniff/lib/tests/l1/{open_pull_requests,pr_for_branch}.rs`)
     - Replace `Auth` per Rule 13, and implement the key-name metadata per the S2 outcome.
     - Add `CredentialEnv` and `credential_env(remote_url)`, reading the names from each definition's `env_auth` and `env_mapping` (never hard-coded in `worktree`).
     - Update the existing `Auth` assertions to the split variants. Add wiremock cases for 401 and 404 with and without a token, 403 as insufficient, 403 as a rate limit (GitHub), and 429. Assert that no variable **value** appears in any `Display` output.
-- [ ] **Spinner component** (`biscuit-terminal/lib/src/components/spinner.rs`, the prelude export, `biscuit-terminal/docs/components/spinner.md`, the `docs/components/index.md` entry)
+- [x] **Spinner component** (`biscuit-terminal/lib/src/components/spinner.rs`, the prelude export, `biscuit-terminal/docs/components/spinner.md`, the `docs/components/index.md` entry)
     - Implement Rule 17. L1 tests with an injected writer:
         - nothing is written before the delay;
         - nothing is written when the output is not a terminal;
@@ -293,7 +365,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - `finish` and `Drop` write the clear sequence exactly once;
         - frames are truncated to the width.
     - Add the skill entry in `.claude/skills/biscuit-terminal/`.
-- [ ] **API preference store** (`worktree/lib/src/api_preference.rs`)
+- [x] **API preference store** (`worktree/lib/src/api_preference.rs`)
     - Implement Rules 2 and 3: `RepoIdentity::from_origin`, `load(path) -> Preferences`, where a missing, corrupt, or unreadable file is empty for reading. Also `is_ignored(&identity)`, and `add(path, identity) -> Result<(), WorktreeError>`.
     - `add` refuses to overwrite an unreadable or corrupt file (it reports a write error), and uses the lock plus `atomic_write`.
     - Tests:
@@ -303,7 +375,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - two concurrent `add` threads both persist;
         - a corrupt file reads as empty, and `add` refuses it;
         - a Windows-only test resolves under `%USERPROFILE%`.
-- [ ] **Remote-head store format 2** (`worktree/lib/src/remote_head.rs`)
+- [x] **Remote-head store format 2** (`worktree/lib/src/remote_head.rs`)
     - Implement Rule 4 (schema, format-1 read, `ATTEMPT_MAX_AGE`) and Rule 8 (receipt types, path `<repo hash>.refresh-receipt.json`, load and validate).
     - Add store writers that preserve `answer` when only the attempt changes: `begin_attempt`, `set_phase`, `publish_answer`, and `finish_attempt`. They are called with the lock held.
     - Tests:
@@ -316,7 +388,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **sniff `branch_head`** (`sniff/lib/src/remote/blocking.rs`, a new `sniff/lib/tests/l1/branch_head.rs`)
+- [x] **sniff `branch_head`** (`sniff/lib/src/remote/blocking.rs`, a new `sniff/lib/tests/l1/branch_head.rs`)
     - Build it like `open_pull_requests` (`client_for_url`, `run_with_deadline`, the same anonymous fallback, `classify`), using the fetch URL identity. Validate the SHA as 40 or 64 lowercase hex. A 404 stays `NotFoundOrNotPermitted`.
     - Add wiremock tests per provider:
         - SHA parsing;
@@ -327,7 +399,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - every §5 status for that provider;
         - `credential_env` returns each definition's names.
     - Update the sniff skill's remote section and `sniff` docs.
-- [ ] **Typed PR failure in worktree** (`worktree/lib/src/pull_requests.rs`, a compile check of `remove/safety.rs`)
+- [x] **Typed PR failure in worktree** (`worktree/lib/src/pull_requests.rs`, a compile check of `remove/safety.rs`)
     - Implement Rule 14. Update the `pull_requests` tests that used string failures, and add a case per credentials variant.
 
 **Checkpoint 2:** `just test` and `just lint` pass in `schematic/`, `sniff/`, `biscuit-terminal/`, and `worktree/`. `cargo check -p worktree-cli` compiles.

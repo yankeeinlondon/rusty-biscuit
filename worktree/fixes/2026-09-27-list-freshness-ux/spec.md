@@ -30,36 +30,45 @@ related:
     - 2026-09-26-stale-remote-caption
 human_review: false
 message_to_agent: |-
-    Phase 1 (spikes and baseline) is done and changed no source code. Read the "Checkpoint 1" section of
-    implementation-log.md before starting Phase 2. Three plan rules were amended by the spikes, and the plan
-    marks each one "Amended in Phase 1":
+    Phase 2 is done: every foundation task is checked off, and tests and lint pass in all four areas.
+    Read "## Phase 2" in implementation-log.md for the exact APIs. The facts Phase 3 needs:
 
-    - Rule 10 (S3): the fetch argv is the spec's command plus `--no-recurse-submodules --refmap=`.
-      - Without `--refmap=`, a user's extra `remote.origin.fetch` entry makes git update other
-        tracking refs, for example a new `refs/remotes/mirror/main`.
-      - Without `--no-recurse-submodules`, `fetch.recurseSubmodules` fetches submodules.
-      - The git-failure classifier must include `unable to get password from user`. That is git's
-        401 text under the `-c credential.interactive=never` that `run_noninteractive` always passes.
-      - Make the deadline a typed error, not a string to pattern-match.
-      - `git reflog -1 --format=%ct` prints nothing with exit 0 when there is no reflog, and exits
-        128 when the ref is absent.
-    - Rule 13 (S2): `remote::blocking` uses `FocusedProviderClient` and sniff's
-      `credentials::provider_token`, not schematic. So key names follow provider_token's order
-      (GitHub: GH_TOKEN then GITHUB_TOKEN; Bitbucket: BITBUCKET_TOKEN). Change provider_token to
-      return the matched name.
-      - Today every 403 on that path becomes `Auth` without inspecting headers. Make the
-        RateLimited / CredentialsInsufficient / NotFoundOrNotPermitted split in focused.rs, where
-        the response is still available.
-      - The endpoints are confirmed. Use GitHub's singular `/git/ref/heads/{branch}` (the plural
-        prefix-matches and returns arrays) and Gitea's `/branches/{branch}`. Use an ordinary encoded
-        `{branch}` param; GitLab requires `%2F`.
-    - Rule 3 (S2): sniff's `parse_remote_identity` is pub(crate) and keeps the case of SSH hosts.
-      Add a public raw `remote_identity` in sniff, and keep the port policy in
-      `worktree::api_preference`.
-
-    S4's test inventory (the Phase 4 Wave 3 work list) and a proposal to make `--attempt` optional on
-    `internal-refresh` are in the log. So is a warning that the L2 DesignFixture does not isolate the
-    user's git config and must, before the ls-remote fallback lands.
+    - sniff: `sniff::remote::blocking::{branch_head, branch_head_with, BranchHead, credential_env,
+      CredentialEnv, PrUnavailable}`. `remote_identity` is at `sniff::filesystem::git::remote_identity`,
+      NOT `sniff::remote`.
+      - `PrUnavailable` is `CredentialsRequired { key: None }`, `CredentialsRejected { key }`,
+        `CredentialsInsufficient { key }`, `RateLimited { authenticated, key }`, `NotFoundOrNotPermitted`,
+        `Timeout`, `Network`, `Unsupported`, and `Other`.
+      - `branch_head` makes NO anonymous retry when a token is rejected; the Rule 9 fallback handles that.
+      - A rate-limit signal counts as `RateLimited` on every provider, not only GitHub.
+    - worktree::remote_head (format 2): `Answer`/`AnswerSource`, `Attempt::begin`,
+      `Phase`/`FallbackReason`, `Outcome` with `CheckFailure`/`FetchFailure`/`UnavailableReason`,
+      `ApiCondition`, `ApiNote { condition, key, fallback_answered }`, and `read_store`/`select_attempt`.
+      - Writers (the caller holds the lock): `begin_attempt`, `set_phase(store, id, phase, api)`,
+        `finish_attempt(store, id, outcome, api)`, and `publish_answer`. A writer refuses another
+        attempt's id with an Err and writes nothing.
+      - Receipt: `refresh_receipt_path`, `write_receipt`, `load_receipt(path, &attempt)`,
+        `Receipt { head: HeadStatus, prs: PrStatus }`. `new_attempt_id()` gives 32 hex characters.
+      - `ApiCondition` is worktree's own enum; map sniff's `PrUnavailable` onto it in remote_update.
+      - `refresh_remote_head` still has the `AlreadyFresh` recheck. Rule 7 says to remove it in
+        Phase 3.
+    - worktree::pull_requests:
+      - `OpenPrSource::fetch` returns `Result<_, PrFailure>`. `PrFailure` lives in
+        `remote_head.rs`, and `PrFailure::from_unavailable` maps sniff's reasons onto it.
+      - `fetch_and_publish` returns `Result<Option<PrListing>, PrFailure>`, where `Ok(None)` means
+        origin changed during the request.
+      - `RefreshOutcome::Failed` does NOT carry the `PrFailure` yet, because the enum is `Copy` and
+        `refresh_remote_head` shares it. Worker wiring must surface the failure for the receipt's
+        `prs: failed{PrFailure}`.
+    - worktree::api_preference: `preference_path()`, `RepoIdentity::from_origin`, `load(path)` →
+      `Preferences::is_ignored`, and `add(path, &identity)`. A new error variant,
+      `WorktreeError::PreferenceUnwritable`, exits 1.
+    - biscuit-terminal: `Spinner::new(t).with_delay(d).start_on_stderr()` → `SpinnerHandle`
+      (`set_text`, `finish`, `Drop`). It clears only if it drew a frame.
+    - lib.rs gained only `pub mod api_preference;`. Add `remote_update` (Phase 3) and `fast_forward`
+      (Phase 4) when you create them.
+    - `just cross-check` breaks on a quoted `-E` filterset. Run
+      `./scripts/cross-check.sh <pkg> --os windows <substring filters>` instead.
 ---
 
 # `wt list` should know, not guess, whether `origin/<default>` is current
