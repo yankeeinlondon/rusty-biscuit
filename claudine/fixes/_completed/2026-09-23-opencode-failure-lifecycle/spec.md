@@ -3,6 +3,8 @@ created: 2026-09-23
 status: implemented
 clarified: false
 reviewed: false
+review_iterations: 4
+completed: true
 implemented: true
 implemented_by: claude/opus-5.5
 $schema:
