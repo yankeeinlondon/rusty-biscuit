@@ -10,6 +10,7 @@ use sniff::filesystem::git::BehindStatus;
 use sniff::filesystem::repo::{DependencyEntry, MonorepoStandard, Package, RepoIdentity, RepoInfo};
 
 use super::language::render_framework_summary;
+use super::lockfile::render_lockfile_section;
 use super::packages::select_repo_packages;
 use super::{format_number, relative_path};
 
@@ -488,6 +489,7 @@ pub fn render_repo_section(
         ];
         let list = UnorderedList::new(items);
         writeln!(out, "{}", list.render(&terminal)).unwrap();
+        out.push_str(&render_lockfile_section(repo, &terminal));
 
         if let Some(summary) = summarize_repo_updates(repo, None, latest_versions_requested) {
             write!(
@@ -576,6 +578,7 @@ pub fn render_repo_section(
 
         let list = UnorderedList::from(outer_items).with_indent_children(Some(4));
         writeln!(out, "{}", list.render(&terminal)).unwrap();
+        out.push_str(&render_lockfile_section(repo, &terminal));
 
         if let Some(summary) = update_summary {
             write!(
@@ -617,6 +620,7 @@ pub fn render_repo_section(
             format_number(total_count),
         ));
         writeln!(out, "\n{}\n", title.render(&terminal)).unwrap();
+        out.push_str(&render_lockfile_section(repo, &terminal));
     }
 
     out
@@ -910,6 +914,7 @@ pub fn render_filesystem_section(
             writeln!(out, "Repository:").unwrap();
             writeln!(out, "  Type: Single-package").unwrap();
             writeln!(out, "  Root: {}", relative_path(&repo.root, repo_root)).unwrap();
+            out.push_str(&render_lockfile_section(repo, &Terminal::default()));
             if let Some(summary) = update_summary {
                 let terminal = Terminal::default();
                 write!(
@@ -970,6 +975,7 @@ pub fn render_filesystem_section(
             let list = UnorderedList::from(items);
             writeln!(out, "{}", list.render_optimistic(None)).unwrap();
         }
+        out.push_str(&render_lockfile_section(repo, &Terminal::default()));
 
         if let Some(summary) = update_summary {
             let terminal = Terminal::default();

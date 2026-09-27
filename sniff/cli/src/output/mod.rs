@@ -699,7 +699,11 @@ fn apply_filter_to_json(
     let value = match filter {
         OutputFilter::All => {
             // No filtering - serialize everything
-            serde_json::to_value(result).unwrap_or(Value::Null)
+            let mut value = serde_json::to_value(result).unwrap_or(Value::Null);
+            if let Some(repo) = value.pointer_mut("/filesystem/repo") {
+                repo_json::omit_empty_standalone_lockfiles(repo);
+            }
+            value
         }
         OutputFilter::Os => {
             // Flatten: return OS fields at top level (name, version, kernel, etc.)
@@ -728,7 +732,11 @@ fn apply_filter_to_json(
         OutputFilter::Filesystem => {
             // Flatten: return filesystem fields at top level (git, languages, repo, formatting)
             if let Some(ref fs) = result.filesystem {
-                serde_json::to_value(fs).unwrap_or(Value::Null)
+                let mut value = serde_json::to_value(fs).unwrap_or(Value::Null);
+                if let Some(repo) = value.get_mut("repo") {
+                    repo_json::omit_empty_standalone_lockfiles(repo);
+                }
+                value
             } else {
                 json!({})
             }
@@ -900,6 +908,91 @@ pub fn print_json(
 mod tests {
     use super::*;
     use sniff::{PerformanceReport, performance::PerformanceStage};
+
+    /// `sniff --json` and `sniff filesystem --json` serialize `RepoInfo`
+    /// inside a larger document; each omits an empty `standalone_lockfiles`
+    /// (ruling R2 of `2026-09-26-lockfile-corroboration`).
+    mod standalone_lockfiles {
+        use super::*;
+        use sniff::filesystem::FilesystemInfo;
+        use sniff::filesystem::repo::types::RepoInfo;
+        use sniff::filesystem::repo::{
+            LockfileObservation, LockfileReason, LockfileStatus, StandaloneLockfileObservation,
+            StandaloneLockfileTool,
+        };
+
+        fn repo_json(repo: RepoInfo) -> [(&'static str, serde_json::Value); 2] {
+            let result = SniffResult {
+                os: None,
+                hardware: None,
+                network: None,
+                filesystem: Some(FilesystemInfo {
+                    repo: Some(repo),
+                    ..Default::default()
+                }),
+                performance: None,
+            };
+            let project = |filter| {
+                apply_filter_to_json(
+                    &result,
+                    filter,
+                    &DocsFilter::default(),
+                    &FilesFilter::default(),
+                    None,
+                    None,
+                )
+                .0
+            };
+            [
+                ("all", project(OutputFilter::All)["filesystem"]["repo"].clone()),
+                ("filesystem", project(OutputFilter::Filesystem)["repo"].clone()),
+            ]
+        }
+
+        #[test]
+        fn an_empty_list_is_omitted() {
+            for (label, repo) in repo_json(RepoInfo::default()) {
+                assert!(repo.is_object(), "{label}: {repo}");
+                assert!(
+                    repo.get("standalone_lockfiles").is_none(),
+                    "{label}: {repo}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_populated_list_is_kept() {
+            let repo = RepoInfo {
+                standalone_lockfiles: vec![StandaloneLockfileObservation {
+                    root: String::new(),
+                    tool: StandaloneLockfileTool::Composer,
+                    observation: LockfileObservation {
+                        status: LockfileStatus::NotRequested,
+                        paths: vec!["composer.lock".to_string()],
+                        reason: Some(LockfileReason::RequestDisabled),
+                        extra: Vec::new(),
+                        missing: Vec::new(),
+                    },
+                }],
+                ..RepoInfo::default()
+            };
+            for (label, repo) in repo_json(repo) {
+                assert_eq!(
+                    repo["standalone_lockfiles"],
+                    serde_json::json!([{
+                        "root": "",
+                        "tool": "composer",
+                        "status": "not_requested",
+                        "paths": ["composer.lock"],
+                        "reason": "request_disabled",
+                        "extra": [],
+                        "missing": [],
+                    }]),
+                    "{label}: {repo}"
+                );
+            }
+        }
+    }
 
     mod docs_filter {
         use super::*;

@@ -76,6 +76,7 @@ mod deps;
 mod docs;
 mod files;
 mod language;
+mod lockfile;
 mod package_areas;
 mod packages;
 mod path_format;
