@@ -1,24 +1,33 @@
 ---
 source: worktree/cli/tests/list_table.rs
-expression: "labeled(vec![(\"diverged, matching\", with_caption(Some(&matched))),\n(\"diverged, differing\", with_caption(Some(&differs))),\n(\"diverged, absent\", with_caption(Some(&absent))),\n(\"diverged, no answer\", with_caption(None)),\n(\"diverged, answer for main is not trunk's\", with_caption(Some(&for_main))),\n(\"missing tracking tip, usable present answer\",\nparagraph_text(None, Some(trunk(None, Some(&matched))), NOW),),\n(\"missing tracking tip, no answer\",\nparagraph_text(None, Some(trunk(None, None)), NOW),),])"
+expression: labeled(cases)
 ---
-## diverged, matching
-trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind.  origin/trunk  matched the remote when checked 2 min ago.
+## checked this run, no variance
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (checked just now)
 
-## diverged, differing
-trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind.  origin/trunk  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs.
+## variance; the fetch succeeded
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (updated from origin just now)
 
-## diverged, absent
-trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind.  trunk  was absent on origin when checked 2 min ago.
+## variance; the fetch failed
+trunk  has diverged from local  origin/trunk  (2 commits ahead, 5 commits behind) (origin differed when checked just now; fetch didn't finish within 60 s)
 
-## diverged, no answer
-trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind. Remote state has not been verified.
+## still checking at 3 s
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
 
-## diverged, answer for main is not trunk's
-trunk  has diverged from local tracking ref  origin/trunk : 2 commits ahead, 5 commits behind. Remote state has not been verified.
+## still pulling at 3 s
+trunk  has diverged from local  origin/trunk  (2 commits ahead, 5 commits behind) (origin differed when checked just now; pulling remote updates in the background)
 
-## missing tracking tip, usable present answer
-No local tracking ref  origin/trunk ; the remote branch was present when checked 2 min ago.
+## check failed; an earlier answer exists
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (couldn't check origin; last checked with origin 2 h ago)
 
-## missing tracking tip, no answer
-No local tracking ref  origin/trunk ; remote state has not been verified.
+## check failed; no earlier answer; the tracking ref has a reflog
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (couldn't check origin; tracking ref last changed 3 h ago)
+
+## check failed; nothing known
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (couldn't check origin; never checked with origin)
+
+## branch absent on origin, tracking ref still exists
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (trunk was absent on origin when checked just now; origin/trunk is a local tracking ref)
+
+## pruned, absent
+trunk  was absent on origin when checked just now

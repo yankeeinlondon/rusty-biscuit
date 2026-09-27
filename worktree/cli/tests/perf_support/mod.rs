@@ -235,6 +235,11 @@ impl MixedFixture {
         &self.main
     }
 
+    /// The `HOME` every `wt` command runs with.
+    pub fn home(&self) -> &Path {
+        self.home.path()
+    }
+
     /// The linked worktrees, one per branch.
     pub fn worktrees(&self) -> &[PathBuf] {
         &self.worktrees
@@ -559,6 +564,27 @@ impl ProxyStub {
             std::thread::sleep(Duration::from_millis(10));
         }
         true
+    }
+
+    /// Accepts and counts every connection, and closes each one `hold`
+    /// after accepting it: a request with a shorter deadline runs into its
+    /// deadline, while a worker's requests fail soon after instead of holding
+    /// the listing's whole wait.
+    pub fn closing_after(hold: Duration) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy stub");
+        let port = listener.local_addr().expect("proxy stub address").port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&connections);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                counter.fetch_add(1, Ordering::SeqCst);
+                std::thread::spawn(move || {
+                    std::thread::sleep(hold);
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                });
+            }
+        });
+        Self { port, connections, held: Arc::default() }
     }
 
     /// A port with nothing listening: every connection is refused at once,

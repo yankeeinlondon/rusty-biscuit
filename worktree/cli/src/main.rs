@@ -43,11 +43,18 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
         return Ok(());
     }
 
+    reject_listing_flags(&cli);
+
     let width = cli.width.as_deref();
     let verbose = cli.verbose;
     let perf = cli.perf;
+    let flags = commands::ListFlags {
+        refresh: cli.refresh,
+        ignore_api: cli.ignore_api,
+        fast_forward: cli.fast_forward,
+    };
     match cli.command.unwrap_or(Commands::List) {
-        Commands::List => commands::list(width, verbose, perf, process_start),
+        Commands::List => commands::list(width, verbose, perf, flags, process_start),
         Commands::Create { branch, from, stay } => {
             commands::create(&branch, from.as_deref(), stay)
         }
@@ -73,5 +80,34 @@ fn run(process_start: std::time::Instant) -> Result<(), worktree::WorktreeError>
                 },
             ),
         },
+    }
+}
+
+/// Exits 2, as clap does, when a listing-only flag is given to another
+/// command. clap cannot express this itself: a global argument cannot
+/// conflict with a subcommand.
+fn reject_listing_flags(cli: &Cli) {
+    let given: Vec<&str> = [
+        (cli.refresh, "--refresh"),
+        (cli.ignore_api, "--ignore-api"),
+        (cli.fast_forward, "--fast-forward"),
+    ]
+    .into_iter()
+    .filter_map(|(set, flag)| set.then_some(flag))
+    .collect();
+    let command = match &cli.command {
+        None | Some(Commands::List) => return,
+        Some(Commands::Create { .. }) => "create",
+        Some(Commands::Go { .. }) => "go",
+        Some(Commands::Remove { .. }) => "remove",
+        Some(Commands::InternalRefresh { .. }) => commands::refresh_worker::SUBCOMMAND,
+    };
+    if let Some(flag) = given.first() {
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::ArgumentConflict,
+                format!("{flag} applies only to listing (`wt` or `wt list`), not to `wt {command}`"),
+            )
+            .exit();
     }
 }

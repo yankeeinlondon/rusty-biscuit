@@ -319,6 +319,15 @@ pub fn pr_lock_path(store: &Path) -> PathBuf {
     store.with_extension("lock")
 }
 
+/// Whether another process holds the refresh lock of the PR store at
+/// `store`; a lock file that cannot be opened reads as not held.
+///
+/// Like [`crate::remote_head::refresh_lock_held`], the probe takes the lock
+/// for an instant: probe only a worker that is already running.
+pub fn pr_lock_held(store: &Path) -> bool {
+    matches!(try_lock_sidecar(&pr_lock_path(store)), Ok(None))
+}
+
 /// Seconds since the Unix epoch.
 pub fn unix_now() -> u64 {
     SystemTime::now()

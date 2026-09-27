@@ -1,0 +1,48 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: labeled(cases)
+---
+## nothing to say
+(none)
+
+## fast-forward suggestion
+ - main is 3 commits behind origin/main; run wt --ff to fast-forward it.
+
+
+## fast-forward suggestion, one commit
+ - main is 1 commit behind origin/main; run wt --ff to fast-forward it.
+
+
+## fallback notice
+ - Git checked origin using `ls-remote`; this can take longer than the provider API.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+
+
+## suggestion before the notice
+ - main is 3 commits behind origin/main; run wt --ff to fast-forward it.
+ - Git checked origin using `ls-remote`; this can take longer than the provider API.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+
+
+## --ff refused: dirty checkout
+ - main wasn't fast-forwarded: the checkout has uncommitted changes to files the update touches.
+
+
+## --ff refused: diverged
+ - main has diverged from origin/main, so it can't be fast-forwarded.
+
+
+## --ff refused: missing local branch
+ - main wasn't fast-forwarded: main doesn't exist.
+
+
+## --ff refused: missing tracking ref
+ - main wasn't fast-forwarded: origin/main doesn't exist.
+
+
+## --ff refused: changed while waiting
+ - main wasn't fast-forwarded: it changed while wt was updating it.
+
+
+## --ff refused: git failed
+ - main wasn't fast-forwarded: Git couldn't complete the update.

@@ -1,5 +1,7 @@
-//! The `wt list` table rendered from listing facts: caption variants, every
-//! cell kind, badge placement, the legend, row emphasis, and the PR age line.
+//! The `wt list` output rendered from listing facts: caption variants, the
+//! credentials line, every cell kind, badge placement, the legend, row
+//! emphasis, the PR age line, the refresh hint, the closing notes, and the
+//! order of every section.
 //!
 //! The tree comes from the library's real `build_tree`; only the git answers
 //! (comparisons, dirty state, PRs) are scripted.
@@ -15,9 +17,12 @@ use worktree::listing::{
     BranchComparisons, Caption, Comparison, ParentComparison, TreeRow, build_tree,
 };
 use worktree::pull_requests::{OpenPullRequest, PrListing};
-use worktree::remote_head::RemoteHead;
+use worktree::remote_head::{CheckFailure, FetchFailure};
 use worktree::worktree::{DirtyStatus, WorktreeEntry, WorktreeStatus};
-use worktree_cli::commands::list_table::{self, RemoteFacts, TableFacts};
+use worktree_cli::commands::list_table::{
+    self, CredentialCondition, CredentialLine, FfNotice, FfSuggestion, LastKnown, RemoteFacts, RemoteStatus,
+    Sections, TableFacts,
+};
 
 const NOW: u64 = 1_790_000_000;
 
@@ -54,8 +59,6 @@ struct Example {
     target: DefaultTarget,
     caption: Caption,
     prs: PrListing,
-    /// The stored live head: `origin/main`'s tip, checked 2 minutes ago.
-    remote_head: RemoteHead,
 }
 
 fn status(dir: &str, branch: Option<&str>, is_main: bool, is_current: bool, dirty: DirtyStatus) -> WorktreeStatus {
@@ -172,11 +175,6 @@ impl Example {
                 ],
                 fetched_at: Some(NOW),
             },
-            remote_head: RemoteHead {
-                branch: "main".to_string(),
-                sha: Some("f".repeat(40)),
-                checked_at: NOW - 120,
-            },
         }
     }
 
@@ -192,8 +190,13 @@ impl Example {
             remote: Some(RemoteFacts {
                 default_branch: "main",
                 tracking_tip: Some(&self.caption.tracking_sha),
-                answer: Some(&self.remote_head),
+                status: RemoteStatus::CheckedNow,
             }),
+            credential_line: None,
+            unfinished: false,
+            ff_suggestion: None,
+            ff_notice: None,
+            fallback_notice: None,
         }
     }
 }
@@ -244,22 +247,21 @@ fn the_target_header_names_a_remote_or_local_target() {
 
 #[test]
 fn caption_variants_read_as_ruled() {
-    // The comparison alone, without the observation that follows it.
     let caption = |ahead, behind| {
         let mut example = Example::new();
         example.caption.ahead = ahead;
         example.caption.behind = behind;
-        let facts = TableFacts { remote: None, ..example.facts() };
+        let facts = example.facts();
         let rendered = list_table::render(&facts, &plain_terminal(), NOW);
         rendered.lines().nth(1).unwrap().trim().to_string()
     };
-    assert_eq!(caption(0, 7), "main  is 7 commits behind local tracking ref  origin/main .");
-    assert_eq!(caption(0, 1), "main  is 1 commit behind local tracking ref  origin/main .");
-    assert_eq!(caption(3, 0), "main  is 3 commits ahead of local tracking ref  origin/main .");
-    assert_eq!(caption(0, 0), "main  is in sync with local tracking ref  origin/main .");
+    assert_eq!(caption(0, 7), "main  is 7 commits behind  origin/main  (checked just now)");
+    assert_eq!(caption(0, 1), "main  is 1 commit behind  origin/main  (checked just now)");
+    assert_eq!(caption(3, 0), "main  is 3 commits ahead of  origin/main  (checked just now)");
+    assert_eq!(caption(0, 0), "main  is in sync with  origin/main  (checked just now)");
     assert_eq!(
         caption(3, 7),
-        "main  has diverged from local tracking ref  origin/main : 3 commits ahead, 7 commits behind."
+        "main  has diverged from  origin/main  (3 commits ahead, 7 commits behind) (checked just now)"
     );
 
     let example = Example::new();
@@ -270,7 +272,7 @@ fn caption_variants_read_as_ruled() {
     };
     let rendered = list_table::render(&facts, &plain_terminal(), NOW);
     assert!(!rendered.contains("behind"), "no remote, no caption:\n{rendered}");
-    assert!(!rendered.contains("remote"), "no remote, no observation:\n{rendered}");
+    assert!(!rendered.contains("origin ("), "no remote, no observation:\n{rendered}");
     assert!(rendered.starts_with("\n┌"), "{rendered:?}");
 }
 
@@ -280,7 +282,7 @@ fn only_the_caption_count_is_colored_yellow() {
     let colored = list_table::render(&example.facts(), &color_terminal(), NOW);
     let caption = colored.lines().nth(1).unwrap();
     assert!(caption.contains("\u{1b}[33m7 commits\u{1b}[0m"), "{caption:?}");
-    assert_eq!(caption.matches("\u{1b}[33m").count(), 1, "the observation has no yellow: {caption:?}");
+    assert_eq!(caption.matches("\u{1b}[33m").count(), 1, "the suffix has no yellow: {caption:?}");
     assert!(caption.contains(" is "), "{caption:?}");
     assert!(!caption.contains("\u{1b}[33m is"), "{caption:?}");
 }
@@ -564,97 +566,167 @@ fn no_color_counts_read_as_plain_text() {
     assert!(row(&rendered, "fix/wt-ux").contains("clean +2 -1"), "{rendered}");
 }
 
-/// The caption paragraph (comparison and observation), unwrapped, from a
-/// render of `example` with `remote` at `now`.
-fn caption_paragraph(example: &Example, remote: Option<RemoteFacts<'_>>, with_caption: bool, now: u64) -> String {
-    let facts = TableFacts {
-        caption: with_caption.then_some(&example.caption),
-        remote,
-        ..example.facts()
-    };
-    let rendered = list_table::render(&facts, &terminal_at(400, false), now);
-    let paragraph: Vec<&str> = rendered.lines().skip(1).take_while(|line| !line.trim().is_empty()).collect();
-    paragraph.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ")
+/// The caption paragraph (and any credentials line), unwrapped, from a
+/// render of `facts` at `now`; empty when the render has none.
+fn paragraph(facts: &TableFacts<'_>, now: u64) -> String {
+    let rendered = list_table::render(facts, &terminal_at(400, false), now);
+    if rendered.lines().nth(1).is_some_and(|line| line.starts_with('┌')) {
+        return String::new();
+    }
+    rendered
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
-fn head(sha: Option<&str>, age: u64) -> RemoteHead {
-    RemoteHead {
-        branch: "main".to_string(),
-        sha: sha.map(str::to_string),
-        checked_at: NOW - age,
+const TRACKING_TIP: &str = "ffffffffffffffffffffffffffffffffffffffff";
+
+fn comparison(ahead: usize, behind: usize) -> Caption {
+    Caption {
+        local: "main".to_string(),
+        remote: "origin/main".to_string(),
+        tracking_sha: TRACKING_TIP.to_string(),
+        ahead,
+        behind,
+    }
+}
+
+/// The caption for `caption` (none: no comparison) and `status`, with the
+/// tracking ref present or not.
+fn caption_for(caption: Option<&Caption>, tracking: bool, status: RemoteStatus) -> String {
+    caption_on("main", caption, tracking, status, NOW)
+}
+
+fn caption_on(default: &str, caption: Option<&Caption>, tracking: bool, status: RemoteStatus, now: u64) -> String {
+    let example = Example::new();
+    let facts = TableFacts {
+        caption,
+        remote: Some(RemoteFacts {
+            default_branch: default,
+            tracking_tip: tracking.then_some(TRACKING_TIP),
+            status,
+        }),
+        ..example.facts()
+    };
+    paragraph(&facts, now)
+}
+
+fn labeled(cases: Vec<(String, String)>) -> String {
+    cases
+        .into_iter()
+        .map(|(label, text)| format!("## {label}\n{text}"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+const TWO_HOURS: u64 = 2 * 3600;
+const THREE_HOURS: u64 = 3 * 3600;
+
+/// One status per §4 row, labeled.
+fn every_row() -> Vec<(&'static str, RemoteStatus)> {
+    vec![
+        ("checked this run, no variance", RemoteStatus::CheckedNow),
+        ("variance; the fetch succeeded", RemoteStatus::Fetched),
+        ("variance; the fetch failed", RemoteStatus::FetchFailed { reason: FetchFailure::Timeout }),
+        (
+            "still checking at 3 s",
+            RemoteStatus::StillChecking { last: LastKnown::Answer { checked_at: NOW - TWO_HOURS } },
+        ),
+        ("still pulling at 3 s", RemoteStatus::StillPulling),
+        (
+            "check failed; an earlier answer exists",
+            RemoteStatus::CheckFailed {
+                reason: CheckFailure::Other,
+                last: LastKnown::Answer { checked_at: NOW - TWO_HOURS },
+            },
+        ),
+        (
+            "check failed; no earlier answer; the tracking ref has a reflog",
+            RemoteStatus::CheckFailed {
+                reason: CheckFailure::Other,
+                last: LastKnown::TrackingRefChanged { at: NOW - THREE_HOURS },
+            },
+        ),
+        (
+            "check failed; nothing known",
+            RemoteStatus::CheckFailed { reason: CheckFailure::Other, last: LastKnown::Never },
+        ),
+        ("branch absent on origin, tracking ref still exists", RemoteStatus::Absent),
+    ]
+}
+
+#[test]
+fn the_caption_is_one_sentence_with_a_dim_italic_suffix() {
+    let example = Example::new();
+    let colored = list_table::render(&example.facts(), &color_terminal(), NOW);
+    let caption = colored.lines().nth(1).unwrap();
+    let suffix_at = caption.find("(checked just now)").expect("suffix");
+    let before = &caption[..suffix_at];
+    let styles = &before[before.rfind("origin/main").expect("badge")..];
+    assert!(styles.contains("\u{1b}[2m") && styles.contains("\u{1b}[3m"), "dim italic suffix: {caption:?}");
+    assert!(!caption[..caption.find("origin/main").unwrap()].contains("\u{1b}[3m"), "the comparison is not italic");
+
+    for (label, status) in every_row() {
+        let text = caption_for(Some(&comparison(0, 3)), true, status);
+        assert_eq!(text.matches(". ").count(), 0, "one sentence ({label}): {text}");
+        assert!(!text.contains("tracking ref origin/main."), "{label}: {text}");
+        assert!(!text.contains("local tracking ref  origin"), "no 'local tracking ref' ({label}): {text}");
     }
 }
 
 #[test]
-fn every_remote_observation_reads_as_ruled() {
-    let example = Example::new();
-    let tip = "f".repeat(40);
-    let other = "e".repeat(40);
-    let observe = |tracking_tip: Option<&str>, answer: Option<&RemoteHead>| {
-        let remote = RemoteFacts {
-            default_branch: "main",
-            tracking_tip,
-            answer,
-        };
-        let text = caption_paragraph(&example, Some(remote), false, NOW);
-        assert!(list_table::observation_markup(&remote, NOW).contains("<dim>"), "the observation is dim");
-        text
-    };
-
-    let matched = head(Some(&tip), 120);
-    let differs = head(Some(&other), 120);
-    let absent = head(None, 120);
-    assert_eq!(observe(Some(&tip), Some(&matched)), "origin/main  matched the remote when checked 2 min ago.");
-    assert_eq!(
-        observe(Some(&tip), Some(&differs)),
-        "origin/main  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs."
-    );
-    assert_eq!(observe(Some(&tip), Some(&absent)), "main  was absent on origin when checked 2 min ago.");
-    assert_eq!(observe(Some(&tip), None), "Remote state has not been verified.");
-    assert_eq!(
-        observe(None, Some(&matched)),
-        "No local tracking ref  origin/main ; the remote branch was present when checked 2 min ago."
-    );
-    assert_eq!(
-        observe(None, Some(&absent)),
-        "No local tracking ref  origin/main ; the remote branch was absent when checked 2 min ago."
-    );
-    assert_eq!(observe(None, None), "No local tracking ref  origin/main ; remote state has not been verified.");
-
-    // An answer dated after the render is no answer, and one for another
-    // branch is not this branch's.
-    let future = RemoteHead { checked_at: NOW + 1, ..matched.clone() };
-    assert_eq!(observe(Some(&tip), Some(&future)), "Remote state has not been verified.");
-    let trunk = RemoteHead { branch: "trunk".to_string(), ..matched.clone() };
-    assert_eq!(observe(Some(&tip), Some(&trunk)), "Remote state has not been verified.");
+fn only_rows_that_could_not_update_the_ref_call_it_local() {
+    for (label, status) in every_row() {
+        let text = caption_for(Some(&comparison(0, 3)), true, status);
+        let local = matches!(status, RemoteStatus::FetchFailed { .. } | RemoteStatus::StillPulling);
+        assert_eq!(text.contains("behind local  origin/main"), local, "{label}: {text}");
+    }
 }
 
 #[test]
-fn the_observation_follows_the_comparison_in_one_paragraph() {
-    let example = Example::new();
-    let text = caption_paragraph(&example, example.facts().remote, true, NOW);
+fn an_absent_branch_never_reads_as_in_sync_with_origin() {
+    let text = caption_for(Some(&comparison(0, 0)), true, RemoteStatus::Absent);
     assert_eq!(
         text,
-        "main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago."
+        "main  is in sync with  origin/main  (main was absent on origin when checked just now; origin/main is a local tracking ref)"
     );
+    // Pruned: only the observation is left.
+    assert_eq!(caption_for(None, false, RemoteStatus::Absent), "main  was absent on origin when checked just now");
 }
 
 #[test]
-fn a_stale_answer_keeps_past_tense_and_shows_its_age() {
+fn a_long_caption_wraps_between_words_within_the_terminal() {
     let example = Example::new();
-    let tip = "f".repeat(40);
-    let at = |answer: &RemoteHead, now: u64| {
-        let remote = RemoteFacts {
+    let facts = TableFacts {
+        remote: Some(RemoteFacts {
             default_branch: "main",
-            tracking_tip: Some(&tip),
-            answer: Some(answer),
-        };
-        caption_paragraph(&example, Some(remote), false, now)
+            tracking_tip: Some(TRACKING_TIP),
+            status: RemoteStatus::StillChecking { last: LastKnown::Answer { checked_at: NOW - TWO_HOURS } },
+        }),
+        ..example.facts()
     };
-    let absent = head(None, 0);
-    assert_eq!(at(&absent, NOW + 3 * 86_400), "main  was absent on origin when checked 3 days ago.");
-    let matched = head(Some(&tip), 0);
-    assert_eq!(at(&matched, NOW + 5 * 3600), "origin/main  matched the remote when checked 5 h ago.");
+    let rendered = list_table::render(&facts, &terminal_at(60, false), NOW);
+    let lines: Vec<&str> = rendered.lines().skip(1).take_while(|line| !line.trim().is_empty()).collect();
+
+    assert!(lines.len() > 1, "{rendered}");
+    for line in &lines {
+        assert!(line.chars().count() <= 60, "{line:?} is wider than the terminal");
+        assert!(line.starts_with(' '), "continuation lines keep the caption's indent: {line:?}");
+    }
+    let joined = lines.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ");
+    assert_eq!(joined, paragraph(&facts, NOW), "no word was split");
+}
+
+#[test]
+fn without_an_origin_leftover_tracking_refs_show_no_caption() {
+    let example = Example::new();
+    let facts = TableFacts { caption: None, remote: None, ..example.facts() };
+    let rendered = list_table::render(&facts, &plain_terminal(), NOW);
+    assert!(rendered.starts_with("\n┌"), "{rendered:?}");
+    assert_eq!(paragraph(&facts, NOW), "");
 }
 
 #[test]
@@ -672,210 +744,66 @@ fn ages_use_the_pr_age_units() {
     }
 }
 
-#[test]
-fn without_an_origin_leftover_tracking_refs_show_no_caption() {
-    let example = Example::new();
-    let rendered = list_table::render(
-        &TableFacts {
-            caption: None,
-            remote: None,
-            ..example.facts()
-        },
-        &plain_terminal(),
-        NOW,
-    );
-    assert!(rendered.starts_with("\n┌"), "{rendered:?}");
-}
-
-#[test]
-fn a_failed_comparison_still_shows_the_observation() {
-    let example = Example::new();
-    let text = caption_paragraph(&example, example.facts().remote, false, NOW);
-    assert_eq!(text, "origin/main  matched the remote when checked 2 min ago.");
-}
-
-#[test]
-fn a_long_caption_wraps_between_words_within_the_terminal() {
-    let example = Example::new();
-    let rendered = list_table::render(&example.facts(), &terminal_at(60, false), NOW);
-    let lines: Vec<&str> = rendered.lines().skip(1).take_while(|line| !line.trim().is_empty()).collect();
-
-    assert!(lines.len() > 1, "{rendered}");
-    for line in &lines {
-        assert!(line.chars().count() <= 60, "{line:?} is wider than the terminal");
-        assert!(line.starts_with(' '), "continuation lines keep the caption's indent: {line:?}");
-    }
-    let joined = lines.iter().map(|line| line.trim()).collect::<Vec<_>>().join(" ");
-    assert_eq!(joined, caption_paragraph(&example, example.facts().remote, true, NOW), "no word was split");
-}
-
-// Caption snapshots (acceptance 3). Each snapshot concatenates labeled cases
+// Caption snapshots (acceptance 5). Each snapshot concatenates labeled cases
 // of one group, rendered plain and unwrapped, so a reviewer reads one file per
 // group.
 
-const TRACKING_TIP: &str = "ffffffffffffffffffffffffffffffffffffffff";
-const OTHER_TIP: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
-
-/// The caption paragraph for `caption` and `remote` at `now`, or an empty
-/// string when the render has no caption paragraph at all.
-fn paragraph_text(caption: Option<&Caption>, remote: Option<RemoteFacts<'_>>, now: u64) -> String {
-    let example = Example::new();
-    let facts = TableFacts {
-        caption,
-        remote,
-        ..example.facts()
-    };
-    let rendered = list_table::render(&facts, &terminal_at(400, false), now);
-    if rendered.lines().nth(1).is_some_and(|line| line.starts_with('┌')) {
-        return String::new();
+#[test]
+fn caption_snapshot_every_row_in_every_comparison_state() {
+    let states = [
+        ("behind", comparison(0, 3)),
+        ("ahead", comparison(3, 0)),
+        ("in sync", comparison(0, 0)),
+        ("diverged", comparison(3, 2)),
+    ];
+    let mut cases = Vec::new();
+    for (row, status) in every_row() {
+        for (state, caption) in &states {
+            cases.push((format!("{row} / {state}"), caption_for(Some(caption), true, status)));
+        }
     }
-    rendered
-        .lines()
-        .skip(1)
-        .take_while(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn labeled(cases: Vec<(&str, String)>) -> String {
-    cases
-        .into_iter()
-        .map(|(label, text)| format!("## {label}\n{text}"))
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn answer_for(branch: &str, sha: Option<&str>, age: u64) -> RemoteHead {
-    RemoteHead {
-        branch: branch.to_string(),
-        sha: sha.map(str::to_string),
-        checked_at: NOW - age,
-    }
-}
-
-fn remote<'a>(tracking_tip: Option<&'a str>, answer: Option<&'a RemoteHead>) -> RemoteFacts<'a> {
-    RemoteFacts {
-        default_branch: "main",
-        tracking_tip,
-        answer,
-    }
-}
-
-fn comparison(ahead: usize, behind: usize) -> Caption {
-    Caption {
-        local: "main".to_string(),
-        remote: "origin/main".to_string(),
-        tracking_sha: TRACKING_TIP.to_string(),
-        ahead,
-        behind,
-    }
+    insta::assert_snapshot!("caption_every_row_in_every_comparison_state", labeled(cases));
 }
 
 #[test]
-fn caption_snapshot_observation_rows() {
-    let in_sync = comparison(0, 0);
-    let matched = head(Some(TRACKING_TIP), 120);
-    let differs = head(Some(OTHER_TIP), 120);
-    let absent = head(None, 120);
-    let other_branch = answer_for("develop", Some(TRACKING_TIP), 120);
-    let with_tip = |answer| paragraph_text(Some(&in_sync), Some(remote(Some(TRACKING_TIP), answer)), NOW);
-
-    insta::assert_snapshot!(
-        "caption_observation_rows",
-        labeled(vec![
-            ("usable SHA equals the local tracking tip", with_tip(Some(&matched))),
-            ("usable SHA differs from the local tracking tip", with_tip(Some(&differs))),
-            ("usable answer reports absence", with_tip(Some(&absent))),
-            ("miss", with_tip(None)),
-            ("unusable answer (another branch)", with_tip(Some(&other_branch))),
-            (
-                "usable SHA, no local tracking tip",
-                paragraph_text(None, Some(remote(None, Some(&matched))), NOW),
-            ),
-        ])
-    );
-}
-
-#[test]
-fn caption_snapshot_comparison_states() {
-    let matched = head(Some(TRACKING_TIP), 120);
-    let state = |ahead, behind| {
-        paragraph_text(
-            Some(&comparison(ahead, behind)),
-            Some(remote(Some(TRACKING_TIP), Some(&matched))),
-            NOW,
-        )
-    };
-
-    insta::assert_snapshot!(
-        "caption_comparison_states",
-        labeled(vec![
-            ("in sync", state(0, 0)),
-            ("behind by one", state(0, 1)),
-            ("behind", state(0, 7)),
-            ("ahead by one", state(1, 0)),
-            ("ahead", state(3, 0)),
-            ("diverged", state(3, 7)),
-        ])
-    );
-}
-
-#[test]
-fn caption_snapshot_fresh_and_stale_answers() {
-    let behind = comparison(0, 7);
-    let fresh = 30;
-    let stale = 3 * 86_400;
-    let observe = |sha: Option<&str>, age| {
-        let answer = head(sha, age);
-        paragraph_text(Some(&behind), Some(remote(Some(TRACKING_TIP), Some(&answer))), NOW)
-    };
-
-    insta::assert_snapshot!(
-        "caption_fresh_and_stale_answers",
-        labeled(vec![
-            ("fresh matching (30 s)", observe(Some(TRACKING_TIP), fresh)),
-            ("fresh differing (30 s)", observe(Some(OTHER_TIP), fresh)),
-            ("fresh absent (30 s)", observe(None, fresh)),
-            ("stale matching (3 days)", observe(Some(TRACKING_TIP), stale)),
-            ("stale differing (3 days)", observe(Some(OTHER_TIP), stale)),
-            ("stale absent (3 days)", observe(None, stale)),
-        ])
-    );
+fn caption_snapshot_reasons() {
+    let behind = comparison(0, 3);
+    let earlier = LastKnown::Answer { checked_at: NOW - TWO_HOURS };
+    let mut cases = Vec::new();
+    for (name, reason) in
+        [("timeout", CheckFailure::Timeout), ("credentials", CheckFailure::Credentials), ("other", CheckFailure::Other)]
+    {
+        cases.push((
+            format!("check failed: {name}"),
+            caption_for(Some(&behind), true, RemoteStatus::CheckFailed { reason, last: earlier }),
+        ));
+    }
+    for (name, reason) in [("timeout", FetchFailure::Timeout), ("other", FetchFailure::Other)] {
+        cases.push((format!("fetch failed: {name}"), caption_for(Some(&behind), true, RemoteStatus::FetchFailed { reason })));
+    }
+    for (name, last) in [
+        ("an earlier answer", earlier),
+        ("the reflog", LastKnown::TrackingRefChanged { at: NOW - THREE_HOURS }),
+        ("nothing", LastKnown::Never),
+    ] {
+        cases.push((
+            format!("still checking, last known from {name}"),
+            caption_for(Some(&behind), true, RemoteStatus::StillChecking { last }),
+        ));
+    }
+    insta::assert_snapshot!("caption_reasons", labeled(cases));
 }
 
 #[test]
 fn caption_snapshot_missing_refs_and_failed_comparison() {
-    let matched = head(Some(TRACKING_TIP), 120);
-    let differs = head(Some(OTHER_TIP), 120);
-    let absent = head(None, 120);
-    let future = RemoteHead {
-        checked_at: NOW + 1,
-        ..matched.clone()
-    };
-    // Without a local default the library has no comparison caption, but the
-    // tracking tip is still in the ref snapshot.
-    let no_local_default = |answer| paragraph_text(None, Some(remote(Some(TRACKING_TIP), answer)), NOW);
-    let no_tracking_tip = |answer| paragraph_text(None, Some(remote(None, answer)), NOW);
-
-    insta::assert_snapshot!(
-        "caption_missing_refs_and_failed_comparison",
-        labeled(vec![
-            ("missing local default, tracking tip, matching answer", no_local_default(Some(&matched))),
-            ("missing local default, tracking tip, differing answer", no_local_default(Some(&differs))),
-            ("missing local default, tracking tip, absent answer", no_local_default(Some(&absent))),
-            ("missing local default, tracking tip, no answer", no_local_default(None)),
-            ("missing tracking tip, usable present answer", no_tracking_tip(Some(&matched))),
-            ("missing tracking tip, usable absent answer", no_tracking_tip(Some(&absent))),
-            ("missing tracking tip, no answer", no_tracking_tip(None)),
-            ("missing tracking tip, future-dated answer", no_tracking_tip(Some(&future))),
-            ("failed comparison, differing observation", no_local_default(Some(&differs))),
-        ])
-    );
-
-    // No origin: `from_list` drops the caption and there is no observation,
-    // so leftover tracking refs render nothing.
-    assert_eq!(paragraph_text(None, None, NOW), "");
+    let mut cases = Vec::new();
+    for (row, status) in every_row() {
+        // Without a local default (or when git could not compare) the
+        // tracking tip is still in the ref snapshot.
+        cases.push((format!("no comparison, tracking ref present / {row}"), caption_for(None, true, status)));
+        cases.push((format!("no tracking ref / {row}"), caption_for(None, false, status)));
+    }
+    insta::assert_snapshot!("caption_missing_refs_and_failed_comparison", labeled(cases));
 }
 
 #[test]
@@ -887,55 +815,198 @@ fn caption_snapshot_trunk_default_branch() {
         ahead: 2,
         behind: 5,
     };
-    let trunk = |tracking_tip, answer| RemoteFacts {
-        default_branch: "trunk",
-        tracking_tip,
-        answer,
-    };
-    let matched = answer_for("trunk", Some(TRACKING_TIP), 120);
-    let differs = answer_for("trunk", Some(OTHER_TIP), 120);
-    let absent = answer_for("trunk", None, 120);
-    let for_main = answer_for("main", Some(TRACKING_TIP), 120);
-    let with_caption = |answer| paragraph_text(Some(&caption), Some(trunk(Some(TRACKING_TIP), answer)), NOW);
-
-    insta::assert_snapshot!(
-        "caption_trunk_default_branch",
-        labeled(vec![
-            ("diverged, matching", with_caption(Some(&matched))),
-            ("diverged, differing", with_caption(Some(&differs))),
-            ("diverged, absent", with_caption(Some(&absent))),
-            ("diverged, no answer", with_caption(None)),
-            ("diverged, answer for main is not trunk's", with_caption(Some(&for_main))),
-            (
-                "missing tracking tip, usable present answer",
-                paragraph_text(None, Some(trunk(None, Some(&matched))), NOW),
-            ),
-            (
-                "missing tracking tip, no answer",
-                paragraph_text(None, Some(trunk(None, None)), NOW),
-            ),
-        ])
-    );
+    let cases = every_row()
+        .into_iter()
+        .map(|(row, status)| (row.to_string(), caption_on("trunk", Some(&caption), true, status, NOW)))
+        .chain([(
+            "pruned, absent".to_string(),
+            caption_on("trunk", None, false, RemoteStatus::Absent, NOW),
+        )])
+        .collect();
+    insta::assert_snapshot!("caption_trunk_default_branch", labeled(cases));
 }
 
 #[test]
-fn caption_snapshot_age_boundaries_and_future_answers() {
-    let answer = head(Some(TRACKING_TIP), 0);
-    let checked_at = answer.checked_at;
-    let at = |now| paragraph_text(None, Some(remote(Some(TRACKING_TIP), Some(&answer))), now);
+fn caption_snapshot_age_boundaries_and_future_timestamps() {
+    let behind = comparison(0, 3);
+    let at = |last| {
+        caption_for(Some(&behind), true, RemoteStatus::CheckFailed { reason: CheckFailure::Other, last })
+    };
+    let mut cases = Vec::new();
+    for (label, age) in [
+        ("0 s", 0),
+        ("59 s", 59),
+        ("60 s", 60),
+        ("3599 s", 3599),
+        ("3600 s", 3600),
+        ("2 days - 1 min", 2 * 86_400 - 60),
+        ("2 days", 2 * 86_400),
+    ] {
+        cases.push((format!("answer {label}"), at(LastKnown::Answer { checked_at: NOW - age })));
+    }
+    cases.push(("answer future-dated by 1 s".into(), at(LastKnown::Answer { checked_at: NOW + 1 })));
+    cases.push(("reflog 3 days".into(), at(LastKnown::TrackingRefChanged { at: NOW - 3 * 86_400 })));
+    cases.push(("reflog future-dated by 1 day".into(), at(LastKnown::TrackingRefChanged { at: NOW + 86_400 })));
+    insta::assert_snapshot!("caption_age_boundaries_and_future_timestamps", labeled(cases));
+}
 
+// Credentials line (§5).
+
+const PROVIDERS: [(&str, &str); 4] = [
+    ("GitHub", "GH_TOKEN or GITHUB_TOKEN"),
+    ("GitLab", "GITLAB_TOKEN or GITLAB_PRIVATE_TOKEN"),
+    ("Gitea", "GITEA_TOKEN or FORGEJO_TOKEN or CODEBERG_TOKEN"),
+    ("Bitbucket", "BITBUCKET_TOKEN"),
+];
+
+fn with_credentials(line: CredentialLine) -> String {
+    let example = Example::new();
+    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
+    let rendered = list_table::render(&facts, &terminal_at(400, false), NOW);
+    rendered.lines().nth(2).expect("the line after the caption").trim().to_string()
+}
+
+#[test]
+fn credential_lines_snapshot_every_condition_for_every_provider() {
+    let conditions = [
+        ("no key, not visible, Git failed too", CredentialCondition::NotVisible, None),
+        ("the key was not accepted", CredentialCondition::Rejected, Some("used")),
+        ("the key lacks rights", CredentialCondition::Insufficient, Some("used")),
+        ("rate limited without a key", CredentialCondition::RateLimited { authenticated: false }, None),
+        ("rate limited with a key", CredentialCondition::RateLimited { authenticated: true }, Some("used")),
+    ];
+    let mut cases = Vec::new();
+    for (provider, accepted) in PROVIDERS {
+        for (label, condition, used) in conditions {
+            let key = match used {
+                Some(_) => accepted.split(" or ").next().unwrap().to_string(),
+                None => accepted.to_string(),
+            };
+            let line = CredentialLine { provider: provider.to_string(), key, condition };
+            cases.push((format!("{provider}: {label}"), with_credentials(line)));
+        }
+    }
+    insta::assert_snapshot!("credential_lines_every_condition_for_every_provider", labeled(cases));
+}
+
+#[test]
+fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
+    let example = Example::new();
+    let line = CredentialLine {
+        provider: "GitHub".into(),
+        key: "GITHUB_TOKEN".into(),
+        condition: CredentialCondition::Rejected,
+    };
+    let facts = TableFacts { credential_line: Some(line), ..example.facts() };
+    let colored = list_table::render(&facts, &color_terminal(), NOW);
+    let lines: Vec<&str> = colored.lines().collect();
+    assert!(lines[1].contains("checked just now"), "{colored}");
+    assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("didn't accept GITHUB_TOKEN"), "{colored}");
+    assert!(lines[3].trim().is_empty(), "then the blank line before the table: {colored}");
+
+    // Without a caption paragraph the line still opens the output.
+    let facts = TableFacts {
+        credential_line: facts.credential_line.clone(),
+        remote: None,
+        caption: None,
+        ..example.facts()
+    };
+    let plain = list_table::render(&facts, &plain_terminal(), NOW);
+    assert!(plain.lines().nth(1).unwrap().contains("didn't accept"), "{plain}");
+}
+
+// The hint (§6), the closing notes (§8, §9, `--ff`), and the order of all
+// sections.
+
+#[test]
+fn the_hint_appears_only_with_unfinished_work() {
+    let example = Example::new();
+    assert_eq!(list_table::render_hint(&example.facts(), &plain_terminal()), None);
+    let facts = TableFacts { unfinished: true, ..example.facts() };
+    let hint = list_table::render_hint(&facts, &plain_terminal()).expect("hint");
+    let words = hint.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(words, format!("- {}", list_table::REFRESH_HINT), "wrapped, never split: {hint:?}");
+    let colored = list_table::render_hint(&facts, &color_terminal()).expect("hint");
+    assert!(colored.contains("\u{1b}[2m"), "dim: {colored:?}");
+}
+
+#[test]
+fn closing_notes_snapshot() {
+    let example = Example::new();
+    let notes = |facts: TableFacts<'_>| {
+        list_table::render_notes(&facts, &terminal_at(400, false)).unwrap_or_else(|| "(none)".into())
+    };
+    let keys = || Some(vec!["GH_TOKEN".to_string(), "GITHUB_TOKEN".to_string()]);
+    let mut cases = vec![
+        ("nothing to say".to_string(), notes(example.facts())),
+        (
+            "fast-forward suggestion".to_string(),
+            notes(TableFacts { ff_suggestion: Some(FfSuggestion { behind: 3 }), ..example.facts() }),
+        ),
+        (
+            "fast-forward suggestion, one commit".to_string(),
+            notes(TableFacts { ff_suggestion: Some(FfSuggestion { behind: 1 }), ..example.facts() }),
+        ),
+        ("fallback notice".to_string(), notes(TableFacts { fallback_notice: keys(), ..example.facts() })),
+        (
+            "suggestion before the notice".to_string(),
+            notes(TableFacts {
+                ff_suggestion: Some(FfSuggestion { behind: 3 }),
+                fallback_notice: keys(),
+                ..example.facts()
+            }),
+        ),
+    ];
+    for (label, notice) in [
+        ("dirty checkout", FfNotice::DirtyCheckout),
+        ("diverged", FfNotice::Diverged),
+        ("missing local branch", FfNotice::Missing("main".into())),
+        ("missing tracking ref", FfNotice::Missing("origin/main".into())),
+        ("changed while waiting", FfNotice::Changed),
+        ("git failed", FfNotice::Failed),
+    ] {
+        cases.push((format!("--ff refused: {label}"), notes(TableFacts { ff_notice: Some(notice), ..example.facts() })));
+    }
+    insta::assert_snapshot!("closing_notes", labeled(cases));
+}
+
+#[test]
+fn output_order_snapshot() {
+    let example = Example::new();
+    let terminal = terminal_at(400, false);
+    let facts = TableFacts {
+        unfinished: true,
+        ff_suggestion: Some(FfSuggestion { behind: 7 }),
+        fallback_notice: Some(vec!["GH_TOKEN".to_string(), "GITHUB_TOKEN".to_string()]),
+        credential_line: Some(CredentialLine {
+            provider: "GitHub".into(),
+            key: "GITHUB_TOKEN".into(),
+            condition: CredentialCondition::RateLimited { authenticated: true },
+        }),
+        prs: &PrListing { fetched_at: Some(NOW - 600), ..example.prs.clone() },
+        ..example.facts()
+    };
+    let table = list_table::render(&facts, &terminal, NOW);
+    let hint = list_table::render_hint(&facts, &terminal);
+    let notes = list_table::render_notes(&facts, &terminal);
+    let graph = "<the git graph>\n";
+    let verbose = "<the verbose section>\n";
+    let assemble = |graph: Option<&str>, verbose: Option<&str>| {
+        list_table::assemble(Sections {
+            table: &table,
+            graph,
+            hint: hint.as_deref(),
+            verbose,
+            notes: notes.as_deref(),
+        })
+    };
     insta::assert_snapshot!(
-        "caption_age_boundaries_and_future_answers",
+        "output_order",
         labeled(vec![
-            ("0 s", at(checked_at)),
-            ("59 s", at(checked_at + 59)),
-            ("60 s", at(checked_at + 60)),
-            ("3599 s", at(checked_at + 3599)),
-            ("3600 s", at(checked_at + 3600)),
-            ("2 days - 1 min", at(checked_at + 2 * 86_400 - 60)),
-            ("2 days", at(checked_at + 2 * 86_400)),
-            ("future-dated by 1 s at render time", at(checked_at - 1)),
-            ("future-dated by 1 day at render time", at(checked_at - 86_400)),
+            ("with a graph".into(), assemble(Some(graph), None)),
+            ("without a graph".into(), assemble(None, None)),
+            ("with a graph and --verbose".into(), assemble(Some(graph), Some(verbose))),
+            ("without a graph, with --verbose".into(), assemble(None, Some(verbose))),
         ])
     );
 }

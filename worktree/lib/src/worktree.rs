@@ -410,9 +410,19 @@ impl WorktreeList {
         &self.entries
     }
 
-    /// Branch tips from the parse step; empty when `for-each-ref` failed.
+    /// Branch tips from the parse step, or from the last
+    /// [`WorktreeList::reread_refs`]; empty when `for-each-ref` failed.
     pub fn refs(&self) -> &RefTips {
         &self.refs
+    }
+
+    /// Takes a new ref snapshot, for a caller that may have moved refs since
+    /// [`parse_worktree_state`] (`wt list`'s fetch and fast-forward), so the
+    /// statuses [`fill_worktree_statuses`] computes describe one state.
+    pub fn reread_refs(&mut self) {
+        let refs = RefTips::read();
+        self.refs_read = refs.is_some();
+        self.refs = refs.unwrap_or_default();
     }
 
     /// Fork-origin records as loaded (pruned once statuses are filled).

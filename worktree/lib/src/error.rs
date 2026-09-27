@@ -97,6 +97,10 @@ pub enum WorktreeError {
     DetachedHeadWithoutFrom(String),
 
     /// `~/.wt.json` could not be updated; an existing file is left as it was.
+    /// `--ignore-api` needs an `origin` that identifies a repository.
+    #[error("--ignore-api needs an origin remote that names a repository on a host; {0}")]
+    NoRepositoryIdentity(String),
+
     #[error("cannot record the preference in {}: {reason}", path.display())]
     PreferenceUnwritable { path: std::path::PathBuf, reason: String },
 

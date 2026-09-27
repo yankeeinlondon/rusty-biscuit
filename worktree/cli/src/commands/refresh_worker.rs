@@ -14,7 +14,7 @@
 //! receipt the foreground waits for.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::Instant;
 
 use worktree::api_preference;
@@ -30,26 +30,30 @@ use worktree::remote_head::{
 use worktree::remote_update::{AttemptRequest, GitTransport, Seams, SniffBranchHeads, run_attempt};
 use worktree::worktree::default_branch_in;
 
+use super::list::{LaunchArgs, WorkerHandle};
+
 /// The hidden subcommand's name, shared by the launcher and `args.rs`.
 pub const SUBCOMMAND: &str = "internal-refresh";
 
-/// Starts the worker for the repository whose main checkout is `main`.
+/// Starts the worker for the repository whose main checkout is `main`, for
+/// attempt `args.attempt`.
 ///
 /// The worker runs from `main`, so it never holds a linked worktree open, and
 /// has no standard streams: on Windows an inherited pipe would make a caller
-/// capturing `wt list`'s output wait for the worker. A spawn failure is
-/// ignored; the stored answers stay shown.
-pub fn launch(main: &Path) {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = spawn_worker(&exe, main);
-    }
+/// capturing `wt list`'s output wait for the worker. The handle only reports
+/// whether it has exited; dropping it neither waits for nor kills the worker.
+pub fn launch(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+    let exe = std::env::current_exe()?;
+    spawn_worker(&exe, main, args).map(WorkerHandle::from_child)
 }
 
-fn spawn_worker(exe: &Path, main: &Path) -> std::io::Result<()> {
+fn spawn_worker(exe: &Path, main: &Path, args: &LaunchArgs) -> std::io::Result<Child> {
     let mut command = Command::new(exe);
+    command.arg(SUBCOMMAND).arg(main).arg("--attempt").arg(&args.attempt);
+    if args.force {
+        command.arg("--force");
+    }
     command
-        .arg(SUBCOMMAND)
-        .arg(main)
         .current_dir(main)
         .env_remove("WT_SHELL_WRAPPER")
         .env_remove("COMPLETE")
@@ -57,8 +61,7 @@ fn spawn_worker(exe: &Path, main: &Path) -> std::io::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     sniff::process::configure_detached_child(&mut command);
-    // Dropping the handle neither waits for nor kills the worker.
-    command.spawn().map(drop)
+    command.spawn()
 }
 
 /// The worker: runs attempt `attempt` (a new id when `None`) for `repo` when
@@ -251,7 +254,8 @@ mod tests {
         let root = tempfile::tempdir().expect("temp dir");
         let missing = root.path().join("no-such-wt");
 
-        let started = spawn_worker(&missing, root.path());
+        let args = LaunchArgs { attempt: ID.into(), force: false };
+        let started = spawn_worker(&missing, root.path(), &args);
 
         assert!(started.is_err(), "{started:?}");
     }

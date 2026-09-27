@@ -554,16 +554,14 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     let screen = fixture.list_in("15;0");
     let plain = screen.plain();
 
-    // Caption: the local and remote badges around a yellow count.
-    let caption = screen.row_with(&["main", "is", "behind", "local tracking ref"]);
-    assert!(
-        screen.text(caption).trim().starts_with("main  is 1 commit behind local tracking ref  origin/main ."),
-        "{plain}"
-    );
-    // The observation follows in the same paragraph, word-wrapped to the pane.
+    // Caption: the local and remote badges around a yellow count. The pane
+    // cannot reach origin, so the suffix dates the seeded answer.
+    let caption = screen.row_with(&["main", "is", "behind", "origin/main"]);
+    assert!(screen.text(caption).trim().starts_with("main  is 1 commit behind  origin/main  ("), "{plain}");
+    // The suffix is part of the same sentence, word-wrapped to the pane.
     let unwrapped = plain.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        unwrapped.contains("origin/main . origin/main matched the remote when checked less than 1 min ago."),
+        unwrapped.contains("origin/main (couldn't check origin; last checked with origin less than 1 min ago)"),
         "{plain}"
     );
     screen.assert_span(caption, " main ", "a local badge", |s| s.bg_is(LOCAL_BADGE) && s.fg_is(BADGE_TEXT));
