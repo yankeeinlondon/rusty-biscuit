@@ -347,6 +347,49 @@ fn a_root_only_lockfile_matches_an_empty_member_set() {
     );
 }
 
+/// Two layers whose roots name one directory through different spellings
+/// share the request's lockfile outcome: one probe, one read, and one parse,
+/// for a success and for a cached parse failure alike.
+#[test]
+fn layers_sharing_one_lockfile_read_and_parse_it_once() {
+    for (content, status, reason) in [
+        (
+            "lockfileVersion: '9.0'\nimporters:\n  .: {}\n",
+            LockfileStatus::Match,
+            None,
+        ),
+        (
+            "lockfileVersion: '9.0'\nimporters: [\n",
+            LockfileStatus::Unreadable,
+            Some(LockfileReason::ParseFailed),
+        ),
+    ] {
+        let dir = TempDir::new().expect("tempdir");
+        fs::create_dir(dir.path().join("sub")).expect("create sub");
+        fs::write(dir.path().join("pnpm-lock.yaml"), content).expect("write lockfile");
+        let respelled = dir.path().join("sub").join("..");
+        let store = ManifestStore::default();
+        let request = RepoRequest::full();
+
+        let (observations, counts) = testing::measure(|| {
+            [dir.path(), respelled.as_path()].map(|root| {
+                observe_layer_lockfile(
+                    &layer(root, MonorepoStandard::PnpmWorkspaces),
+                    Some(&[]),
+                    &request,
+                    &store,
+                )
+            })
+        });
+
+        let expected = expected(status, &["pnpm-lock.yaml"], reason);
+        assert_eq!(observations, [expected.clone(), expected], "{content}");
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PROBES), 1, "{content}");
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{content}");
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1, "{content}");
+    }
+}
+
 #[test]
 fn the_wire_names_are_the_frozen_snake_case_vocabulary() {
     let statuses = [

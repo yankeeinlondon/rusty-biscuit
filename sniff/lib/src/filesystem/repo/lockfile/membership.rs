@@ -297,6 +297,26 @@ mod tests {
         );
     }
 
+    /// Native Windows member paths, including a verbatim (`\\?\`) spelling
+    /// such as `canonicalize` returns, convert to the lockfile's `/` form.
+    #[cfg(windows)]
+    #[test]
+    fn manifest_member_converts_native_windows_paths() {
+        let root = Path::new(r"C:\repo");
+        assert_eq!(
+            manifest_member(root, Path::new(r"C:\repo\packages\.hidden")),
+            Ok("packages/.hidden".to_owned())
+        );
+        assert_eq!(
+            manifest_member(Path::new(r"\\?\C:\repo"), Path::new(r"\\?\C:\repo\packages\web")),
+            Ok("packages/web".to_owned())
+        );
+        assert_eq!(
+            manifest_member(root, Path::new(r"C:\sibling")),
+            Ok("../sibling".to_owned())
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn manifest_member_rejects_a_member_on_another_drive() {

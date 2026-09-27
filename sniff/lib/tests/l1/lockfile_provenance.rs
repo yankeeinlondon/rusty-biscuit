@@ -863,3 +863,699 @@ fn an_extra_lockfile_member_is_a_mismatch_for_pnpm_and_uv_but_invisible_to_cargo
         (serde_json::json!("mismatch"), vec!["py/lib-gone".to_owned()])
     );
 }
+
+// ---------------------------------------------------------------------------
+// Every other authority (`2026-09-26-lockfile-corroboration` AC1)
+// ---------------------------------------------------------------------------
+//
+// The matrix above crosses Cargo, pnpm, and uv with every lockfile state at
+// both request tiers. The cases below extend it to every other authority and
+// every status each one can reach, plus orchestrator-only roots, asserting the
+// complete serialized `RepoInfo` of a corroborating (or, where stated,
+// declining) structure request. Node and Rush cases start from the real-tool
+// fixtures under `tests/fixtures/lockfiles/`; the build-graph cases are
+// hand-written because their tools write no lockfile. `unknown_standard`,
+// `metadata_failed`, `ambiguous_membership`, `incomplete_manifest_discovery`,
+// and `invalid_member_path` are pinned by the library's `lockfile` unit tests:
+// `Unknown` never owns a layer (the orchestrator-only cases below show its
+// standard entry and the absent layer list), and the metadata seam is
+// crate-private (ruling R9).
+
+fn lockfile_fixture_root() -> PathBuf {
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/lockfiles")
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("create fixture copy directory");
+    for entry in fs::read_dir(from).expect("read fixture directory") {
+        let entry = entry.expect("fixture entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("fixture entry type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).expect("copy fixture file");
+        }
+    }
+}
+
+/// A disposable copy of one real-tool fixture, or an empty root when
+/// `fixture` is `None`.
+fn workspace(fixture: Option<&str>) -> Fixture {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("repo");
+    match fixture {
+        Some(fixture) => copy_tree(&lockfile_fixture_root().join(fixture), &root),
+        None => fs::create_dir_all(&root).expect("create root"),
+    }
+    Fixture { _dir: dir, root }
+}
+
+fn replace_in(root: &Path, relative: &str, from: &str, to: &str) {
+    let path = root.join(relative);
+    let content = fs::read_to_string(&path).expect("read fixture file");
+    assert!(content.contains(from), "{relative} lacks {from:?}");
+    fs::write(&path, content.replacen(from, to, 1)).expect("write fixture file");
+}
+
+/// One hand-written package entry of a structure-tier result.
+fn package_json(
+    relative: &str,
+    name: &str,
+    package_area: &str,
+    ecosystem: &str,
+    standard: &str,
+    provenance: &str,
+    version: Option<&str>,
+) -> serde_json::Value {
+    let mut package = serde_json::json!({
+        "path": under(ROOT, relative),
+        "relative": relative,
+        "package_area": package_area,
+        "name": name,
+        "ecosystem": ecosystem,
+        "standard": standard,
+        "provenance": provenance,
+        "primary_language": null,
+        "package_managers": [],
+    });
+    if let Some(version) = version {
+        package["version"] = serde_json::Value::from(version);
+    }
+    package
+}
+
+/// The three members every Node and Rush real-tool fixture declares, sorted
+/// by relative path. `local-lib` is a local dependency, never a member.
+fn fixture_node_packages(standard: &str, provenance: &str, version: &str) -> Vec<serde_json::Value> {
+    [
+        (".tools/hidden", "hidden-tool", ".tools"),
+        ("packages/alpha", "alpha", "packages"),
+        ("packages/beta", "@fixture/beta", "packages"),
+    ]
+    .iter()
+    .map(|&(relative, name, area)| {
+        package_json(relative, name, area, "node", standard, provenance, Some(version))
+    })
+    .collect()
+}
+
+fn lock_json(
+    status: &str,
+    paths: &[&str],
+    reason: Option<&str>,
+    extra: &[&str],
+    missing: &[&str],
+) -> serde_json::Value {
+    serde_json::json!({
+        "status": status,
+        "paths": paths,
+        "reason": reason,
+        "extra": extra,
+        "missing": missing,
+    })
+}
+
+fn layer_json(
+    authority: &str,
+    provenance: &str,
+    lockfile: serde_json::Value,
+    packages: &[&str],
+) -> serde_json::Value {
+    serde_json::json!({
+        "root": ROOT,
+        "authority": authority,
+        "orchestrators": [],
+        "provenance": provenance,
+        "lockfile": lockfile,
+        "root_is_package": false,
+        "packages": packages,
+    })
+}
+
+/// A detected standard; `marker` is the matched marker file, if any.
+fn standard_json(standard: &str, marker: Option<&str>, confidence: &str) -> serde_json::Value {
+    let markers: Vec<String> = marker.iter().map(|marker| under(ROOT, marker)).collect();
+    serde_json::json!({
+        "standard": standard,
+        "root": ROOT,
+        "matched_markers": markers,
+        "binary": HOST_BINARY,
+        "confidence": confidence,
+    })
+}
+
+/// A complete structure-tier `RepoInfo`. `layers` is `None` when the result
+/// has no layer, which omits the key.
+fn repo_json(
+    is_monorepo: bool,
+    packages: Vec<serde_json::Value>,
+    standards: Vec<serde_json::Value>,
+    layers: Option<Vec<serde_json::Value>>,
+) -> serde_json::Value {
+    let mut repo = serde_json::json!({
+        "is_monorepo": is_monorepo,
+        "root": ROOT,
+        "packages": packages,
+        "monorepo_standards": standards,
+    });
+    if let Some(layers) = layers {
+        repo["monorepo_layers"] = serde_json::Value::from(layers);
+    }
+    repo["standalone_lockfiles"] = serde_json::json!([]);
+    repo
+}
+
+/// A single-layer monorepo result.
+fn one_layer_json(
+    standard: serde_json::Value,
+    layer: serde_json::Value,
+    packages: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    repo_json(true, packages, vec![standard], Some(vec![layer]))
+}
+
+/// `repo` serialized with the temporary root replaced by [`ROOT`], `\`
+/// separators turned into `/`, and each standard's host `PATH` lookup
+/// replaced by [`HOST_BINARY`].
+fn normalized_any(repo: &RepoInfo, root: &Path) -> serde_json::Value {
+    fn normalize(value: &mut serde_json::Value, root: &str) {
+        match value {
+            serde_json::Value::String(text) => {
+                *text = text.replace(root, ROOT).replace('\\', "/");
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(|item| normalize(item, root)),
+            serde_json::Value::Object(fields) => {
+                fields.values_mut().for_each(|item| normalize(item, root));
+            }
+            _ => {}
+        }
+    }
+
+    let mut value = serde_json::to_value(repo).expect("RepoInfo serializes");
+    for standard in value["monorepo_standards"]
+        .as_array_mut()
+        .expect("monorepo_standards array")
+    {
+        let binary = standard["binary"].take();
+        assert!(binary.is_null() || binary["name"].is_string(), "{binary}");
+        standard["binary"] = serde_json::Value::from(HOST_BINARY);
+    }
+    normalize(&mut value, root.to_str().expect("temporary root is UTF-8"));
+    // A leaf-marker layer lists members in directory-walk order, which differs
+    // by filesystem (ext4 versus APFS and NTFS); every other order is pinned.
+    if let Some(layers) = value
+        .get_mut("monorepo_layers")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for layer in layers.iter_mut().filter(|layer| layer["provenance"] == "leaf-markers") {
+            let packages = layer["packages"].as_array_mut().expect("layer packages");
+            packages.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+        }
+    }
+    value
+}
+
+/// One every-authority case: the tree, whether the request corroborates, the
+/// complete expected result, and the lockfile reads and parses it costs.
+struct AuthorityCase {
+    label: &'static str,
+    fixture: Fixture,
+    corroborate: bool,
+    expected: serde_json::Value,
+    reads: u64,
+    parses: u64,
+}
+
+fn authority_cases() -> Vec<AuthorityCase> {
+    let npm_standard = || standard_json("npm-workspaces", Some("package.json"), "marker-confirmed");
+    let node_members: &[&str] = &[".tools/hidden", "packages/alpha", "packages/beta"];
+    let npm_case = |label, fixture: Fixture, corroborate, provenance, lockfile, reads, parses| {
+        AuthorityCase {
+            label,
+            fixture,
+            corroborate,
+            expected: one_layer_json(
+                npm_standard(),
+                layer_json("npm-workspaces", provenance, lockfile, node_members),
+                fixture_node_packages("npm-workspaces", provenance, "0.0.0"),
+            ),
+            reads,
+            parses,
+        }
+    };
+    const NPM_LOCK: &[&str] = &["package-lock.json"];
+
+    let without_npm_lockfile = |replacement: fn(&Path)| {
+        let fixture = workspace(Some("npm-11.6.4/workspace"));
+        let lockfile = fixture.root.join("package-lock.json");
+        fs::remove_file(&lockfile).expect("remove package-lock.json");
+        replacement(&lockfile);
+        fixture
+    };
+
+    let rush_lock: &[&str] = &["common/config/rush/pnpm-lock.yaml"];
+    let rush_members: &[&str] = &["packages/alpha", "packages/beta", ".tools/hidden"];
+    let rush_subspaces = workspace(Some("rush-5.179.0/pnpm-workspace"));
+    replace_in(
+        &rush_subspaces.root,
+        "common/config/rush/subspaces.json",
+        "\"subspacesEnabled\": false",
+        "\"subspacesEnabled\": true",
+    );
+
+    let go_absent = workspace(Some("go-1.27.1/workspace"));
+    fs::remove_file(go_absent.root.join("go.work.sum")).expect("remove go.work.sum");
+    let go_packages = |provenance| {
+        ["alpha", "beta"]
+            .iter()
+            .map(|name| {
+                package_json(
+                    &format!("packages/{name}"),
+                    &format!("example.com/fixture/{name}"),
+                    "packages",
+                    "go",
+                    "go-workspace",
+                    provenance,
+                    None,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let go_case = |label, fixture, lockfile| AuthorityCase {
+        label,
+        fixture,
+        corroborate: true,
+        expected: one_layer_json(
+            standard_json("go-workspace", Some("go.work"), "marker-confirmed"),
+            layer_json("go-workspace", "explicit", lockfile, &["packages/alpha", "packages/beta"]),
+            go_packages("explicit"),
+        ),
+        reads: 0,
+        parses: 0,
+    };
+
+    let bazel = workspace(Some("bazel-8.4.2/bzlmod"));
+    for package in ["app", "lib"] {
+        write(&bazel.root, &format!("{package}/BUILD.bazel"), "");
+    }
+
+    // Build graphs with no lockfile source: `(label, standard, marker,
+    // provenance, members as (relative, name, package_area), files)`.
+    type BuildGraph = (
+        &'static str,
+        &'static str,
+        Option<&'static str>,
+        &'static str,
+        [(&'static str, &'static str, &'static str); 2],
+        &'static [(&'static str, &'static str)],
+    );
+    const POM: &str = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId>";
+    let build_graphs: [BuildGraph; 4] = [
+        (
+            "Maven multi-module",
+            "maven-multi-module",
+            Some("pom.xml"),
+            "explicit",
+            [("alpha", "alpha", ""), ("beta", "beta", "")],
+            &[
+                (
+                    "pom.xml",
+                    "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId>\
+                     <artifactId>root</artifactId><version>1.0</version><packaging>pom</packaging>\
+                     <modules><module>alpha</module><module>beta</module></modules></project>",
+                ),
+                ("alpha/pom.xml", "ALPHA"),
+                ("beta/pom.xml", "BETA"),
+            ],
+        ),
+        (
+            ".NET solution",
+            "dot-net-solution",
+            // `*.sln` is a pattern, not a file name, so no marker is listed.
+            None,
+            "explicit",
+            [("src/Alpha", "src/Alpha", "src"), ("src/Beta", "src/Beta", "src")],
+            &[
+                (
+                    "App.sln",
+                    "Microsoft Visual Studio Solution File, Format Version 12.00\n\
+                     Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Alpha\", \
+                     \"src\\Alpha\\Alpha.csproj\", \"{11111111-1111-1111-1111-111111111111}\"\n\
+                     EndProject\n\
+                     Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"Beta\", \
+                     \"src\\Beta\\Beta.csproj\", \"{22222222-2222-2222-2222-222222222222}\"\n\
+                     EndProject\n",
+                ),
+                ("src/Alpha/Alpha.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"),
+                ("src/Beta/Beta.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"),
+            ],
+        ),
+        (
+            "Pants",
+            "pants",
+            Some("pants.toml"),
+            "leaf-markers",
+            [("src/app", "src/app", "src"), ("src/lib", "src/lib", "src")],
+            &[
+                ("pants.toml", "[GLOBAL]\npants_version = \"2.20.0\"\n"),
+                ("src/app/BUILD.pants", ""),
+                ("src/lib/BUILD.pants", ""),
+            ],
+        ),
+        (
+            "Buck2",
+            "buck2",
+            Some(".buckconfig"),
+            "leaf-markers",
+            [("app", "app", ""), ("lib", "lib", "")],
+            &[(".buckconfig", "[cells]\nroot = .\n"), ("app/BUCK", ""), ("lib/BUCK", "")],
+        ),
+    ];
+
+    let mut cases = vec![
+        npm_case(
+            "npm match",
+            workspace(Some("npm-11.6.4/workspace")),
+            true,
+            "lockfile",
+            lock_json("match", NPM_LOCK, None, &[], &[]),
+            1,
+            1,
+        ),
+        npm_case(
+            "npm stale extra member",
+            workspace(Some("npm-11.6.4/workspace-edited-stale-extra")),
+            true,
+            "globbed",
+            lock_json("mismatch", NPM_LOCK, None, &["packages/gamma"], &[]),
+            1,
+            1,
+        ),
+        npm_case(
+            "npm missing member",
+            workspace(Some("npm-11.6.4/workspace-edited-missing")),
+            true,
+            "globbed",
+            lock_json("mismatch", NPM_LOCK, None, &[], &["packages/beta"]),
+            1,
+            1,
+        ),
+        npm_case(
+            "npm malformed trailing content",
+            workspace(Some("npm-11.6.4/workspace-edited-malformed-trailing")),
+            true,
+            "globbed",
+            lock_json("unreadable", NPM_LOCK, Some("parse_failed"), &[], &[]),
+            1,
+            1,
+        ),
+        npm_case(
+            "npm unknown version",
+            workspace(Some("npm-11.6.4/workspace-edited-unknown-version")),
+            true,
+            "globbed",
+            lock_json("unverifiable", NPM_LOCK, Some("unsupported_version"), &[], &[]),
+            1,
+            1,
+        ),
+        npm_case(
+            "npm directory in place of the lockfile",
+            without_npm_lockfile(|lockfile| fs::create_dir(lockfile).expect("create directory")),
+            true,
+            "globbed",
+            lock_json("unreadable", NPM_LOCK, Some("read_failed"), &[], &[]),
+            1,
+            0,
+        ),
+        npm_case(
+            "npm absent",
+            without_npm_lockfile(|_| {}),
+            true,
+            "globbed",
+            lock_json("absent", &[], None, &[], &[]),
+            0,
+            0,
+        ),
+        npm_case(
+            "npm declined",
+            workspace(Some("npm-11.6.4/workspace")),
+            false,
+            "globbed",
+            lock_json("not_requested", NPM_LOCK, Some("request_disabled"), &[], &[]),
+            0,
+            0,
+        ),
+        AuthorityCase {
+            label: "Yarn match beside an overlapping lockfile-less npm layer",
+            fixture: workspace(Some("yarn-4.18.1/workspace")),
+            corroborate: true,
+            expected: repo_json(
+                true,
+                fixture_node_packages("yarn-workspaces", "lockfile", "1.0.0"),
+                vec![
+                    standard_json("yarn-workspaces", Some("package.json"), "marker-confirmed"),
+                    npm_standard(),
+                ],
+                Some(vec![
+                    layer_json(
+                        "yarn-workspaces",
+                        "lockfile",
+                        lock_json("match", &["yarn.lock"], None, &[], &[]),
+                        node_members,
+                    ),
+                    layer_json(
+                        "npm-workspaces",
+                        "globbed",
+                        lock_json("absent", &[], None, &[], &[]),
+                        node_members,
+                    ),
+                ]),
+            ),
+            reads: 1,
+            parses: 1,
+        },
+        AuthorityCase {
+            label: "Bun text lockfile match",
+            fixture: workspace(Some("bun-1.3.3/workspace")),
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json("bun-workspaces", Some("package.json"), "marker-confirmed"),
+                layer_json(
+                    "bun-workspaces",
+                    "lockfile",
+                    lock_json("match", &["bun.lock"], None, &[], &[]),
+                    node_members,
+                ),
+                fixture_node_packages("bun-workspaces", "lockfile", "1.0.0"),
+            ),
+            reads: 1,
+            parses: 1,
+        },
+        AuthorityCase {
+            label: "Bun binary lockfile",
+            fixture: workspace(Some("bun-1.3.3/workspace-binary")),
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json("bun-workspaces", Some("package.json"), "marker-confirmed"),
+                layer_json(
+                    "bun-workspaces",
+                    "globbed",
+                    lock_json("unverifiable", &["bun.lockb"], Some("no_membership_data"), &[], &[]),
+                    node_members,
+                ),
+                fixture_node_packages("bun-workspaces", "globbed", "1.0.0"),
+            ),
+            reads: 0,
+            parses: 0,
+        },
+        AuthorityCase {
+            label: "Rush pnpm workspace match",
+            fixture: workspace(Some("rush-5.179.0/pnpm-workspace")),
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json("rush-stack", Some("rush.json"), "marker-confirmed"),
+                layer_json(
+                    "rush-stack",
+                    "lockfile",
+                    lock_json("match", rush_lock, None, &[], &[]),
+                    rush_members,
+                ),
+                fixture_node_packages("rush-stack", "lockfile", "0.0.0"),
+            ),
+            reads: 1,
+            parses: 1,
+        },
+        AuthorityCase {
+            label: "Rush with subspaces enabled",
+            fixture: rush_subspaces,
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json("rush-stack", Some("rush.json"), "marker-confirmed"),
+                layer_json(
+                    "rush-stack",
+                    "explicit",
+                    lock_json("unverifiable", rush_lock, Some("unsupported_layout"), &[], &[]),
+                    rush_members,
+                ),
+                fixture_node_packages("rush-stack", "explicit", "0.0.0"),
+            ),
+            reads: 0,
+            parses: 0,
+        },
+        go_case(
+            "Go workspace sum",
+            workspace(Some("go-1.27.1/workspace")),
+            lock_json("unverifiable", &["go.work.sum"], Some("no_membership_data"), &[], &[]),
+        ),
+        go_case(
+            "Go workspace without a sum",
+            go_absent,
+            lock_json("absent", &[], None, &[], &[]),
+        ),
+        AuthorityCase {
+            label: "Gradle root lockfile",
+            fixture: workspace(Some("gradle-8.14.5/root-lockfile")),
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json("gradle-multi-project", Some("settings.gradle"), "marker-confirmed"),
+                layer_json(
+                    "gradle-multi-project",
+                    "explicit",
+                    lock_json("unverifiable", &["gradle.lockfile"], Some("no_membership_data"), &[], &[]),
+                    &["app", "lib"],
+                ),
+                ["app", "lib"]
+                    .iter()
+                    .map(|name| {
+                        package_json(name, name, "", "unknown", "gradle-multi-project", "explicit", None)
+                    })
+                    .collect(),
+            ),
+            reads: 0,
+            parses: 0,
+        },
+        AuthorityCase {
+            label: "Bazel module lockfile",
+            fixture: bazel,
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json("bazel", Some("MODULE.bazel"), "marker-confirmed"),
+                layer_json(
+                    "bazel",
+                    "leaf-markers",
+                    lock_json("unverifiable", &["MODULE.bazel.lock"], Some("no_membership_data"), &[], &[]),
+                    &["app", "lib"],
+                ),
+                ["app", "lib"]
+                    .iter()
+                    .map(|name| package_json(name, name, "", "unknown", "bazel", "leaf-markers", None))
+                    .collect(),
+            ),
+            reads: 0,
+            parses: 0,
+        },
+    ];
+
+    for (label, standard, marker, provenance, members, files) in build_graphs {
+        let fixture = workspace(None);
+        for &(relative, content) in files {
+            let content = match content {
+                "ALPHA" | "BETA" => format!(
+                    "{POM}<artifactId>{}</artifactId><version>1.0</version></project>",
+                    content.to_lowercase()
+                ),
+                other => other.to_owned(),
+            };
+            write(&fixture.root, relative, &content);
+        }
+        let relatives: Vec<&str> = members.iter().map(|&(relative, ..)| relative).collect();
+        cases.push(AuthorityCase {
+            label,
+            fixture,
+            corroborate: true,
+            expected: one_layer_json(
+                standard_json(standard, marker, "marker-confirmed"),
+                layer_json(
+                    standard,
+                    provenance,
+                    lock_json("not_applicable", &[], Some("no_lockfile_source"), &[], &[]),
+                    &relatives,
+                ),
+                members
+                    .iter()
+                    .map(|&(relative, name, area)| {
+                        package_json(relative, name, area, "unknown", standard, provenance, None)
+                    })
+                    .collect(),
+            ),
+            reads: 0,
+            parses: 0,
+        });
+    }
+
+    // Orchestrator-only roots define no membership: no layer is synthesized
+    // and the downgrade shows as an inferred `unknown` standard. The root's
+    // `package-lock.json` and `package.json` belong to no layer.
+    for (label, standard, marker, content) in [
+        ("Nx only", "nx", "nx.json", "{}"),
+        ("Turborepo only", "turborepo", "turbo.json", "{}"),
+        ("Lerna only", "lerna", "lerna.json", "{\"version\":\"0.0.0\"}"),
+    ] {
+        let fixture = workspace(None);
+        write(&fixture.root, marker, content);
+        write(&fixture.root, "package.json", r#"{"name":"solo","version":"1.0.0"}"#);
+        write(&fixture.root, "package-lock.json", "{\"lockfileVersion\": 3, \"packages\": {}}");
+        cases.push(AuthorityCase {
+            label,
+            fixture,
+            corroborate: true,
+            expected: repo_json(
+                false,
+                Vec::new(),
+                vec![
+                    standard_json(standard, Some(marker), "inferred"),
+                    standard_json("unknown", None, "inferred"),
+                ],
+                None,
+            ),
+            reads: 0,
+            parses: 0,
+        });
+    }
+    cases
+}
+
+#[test]
+fn every_other_authority_reports_its_complete_repository_result() {
+    let cases = authority_cases();
+    assert_eq!(cases.len(), 24);
+    for case in cases {
+        let root = case.fixture.root.as_path();
+        let request = RepoRequest::structure().with_lockfile_provenance(case.corroborate);
+        let (repo, counts) = measured(|| detect_repo_with_request(root, &request));
+        let repo = repo
+            .expect("detection succeeds")
+            .unwrap_or_else(|| panic!("{}: no repository", case.label));
+        let actual = normalized_any(&repo, root);
+        assert!(
+            actual == case.expected,
+            "{}\n--- expected\n{}\n--- actual\n{}",
+            case.label,
+            serde_json::to_string_pretty(&case.expected).expect("pretty expected"),
+            serde_json::to_string_pretty(&actual).expect("pretty actual"),
+        );
+        // The typed result round-trips through its own wire form.
+        let reparsed: RepoInfo = serde_json::from_value(serde_json::to_value(&repo).expect("serialize"))
+            .expect("RepoInfo deserializes");
+        assert_eq!(normalized_any(&reparsed, root), actual, "{}", case.label);
+        assert_eq!(
+            (
+                counter(&counts, counters::REPO_LOCKFILE_READS),
+                counter(&counts, counters::REPO_LOCKFILE_PARSES)
+            ),
+            (case.reads, case.parses),
+            "{}: {counts:?}",
+            case.label
+        );
+    }
+}
