@@ -3,11 +3,11 @@
 use std::path::Path;
 
 use biscuit_file::serde_yaml_ng;
+use serde::Deserialize;
+use serde::de::IgnoredAny;
 
 use crate::Result;
 use crate::package::{DependencyEntry, DependencyKind};
-use crate::performance;
-use crate::performance::counters;
 
 use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;
@@ -292,24 +292,25 @@ pub(super) fn detect_yarn_workspace(
     }))
 }
 
-pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_rush_workspace(
+    root: &Path,
+    manifests: &ManifestStore,
+) -> Result<Option<DetectorOutcome>> {
     let rush_json = root.join("rush.json");
     if !probe_exists(&rush_json) {
         return Ok(None);
     }
-
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(&rush_json)?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
-    let folders = parse_rush_project_folders(&content);
+    let Some(config) = manifests.rush_json(&rush_json)? else {
+        return Ok(None);
+    };
+    let folders = config.project_folders();
     if folders.is_empty() {
         return Ok(None);
     }
 
     let mut seeds = Vec::new();
     for folder in folders {
-        let member_path = root.join(&folder);
+        let member_path = root.join(folder);
         if !probe_exists(&member_path) {
             continue;
         }
@@ -332,30 +333,110 @@ pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcom
     }))
 }
 
-/// Parse the `projectFolder` of each entry in `rush.json#projects`.
+/// The parts of `rush.json` Sniff reads: the projects for membership, and
+/// the package manager and install settings that classify the lockfile
+/// layout (ruling R3 of `2026-09-26-lockfile-corroboration`).
 ///
-/// Rush's `projects` array lists `{ projectFolder, packageName }` objects whose
-/// `projectFolder` is a repo-relative directory. Entries without a string
-/// `projectFolder` are skipped.
-fn parse_rush_project_folders(content: &str) -> Vec<String> {
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) else {
-        return Vec::new();
-    };
-    parsed
-        .get("projects")
-        .and_then(|v| v.as_array())
-        .map(|projects| {
-            projects
-                .iter()
-                .filter_map(|project| {
-                    project
-                        .get("projectFolder")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+/// Real `rush.json` files are JSON with comments. A field of an unexpected
+/// type is kept as [`Lenient::Other`] rather than failing the document, so an
+/// odd setting never hides the projects.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RushJson {
+    #[serde(default)]
+    projects: Vec<Lenient<RushProject>>,
+    pnpm_version: Option<IgnoredAny>,
+    npm_version: Option<IgnoredAny>,
+    yarn_version: Option<IgnoredAny>,
+    pnpm_options: Option<Lenient<RushPnpmOptions>>,
+    variants: Option<Lenient<Vec<IgnoredAny>>>,
+}
+
+/// The package manager `rush.json` selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RushManager {
+    Pnpm,
+    Npm,
+    Yarn,
+}
+
+impl RushJson {
+    /// The `projectFolder` of each project; an entry without a string
+    /// `projectFolder` is skipped.
+    fn project_folders(&self) -> Vec<&str> {
+        self.projects
+            .iter()
+            .filter_map(|project| match project {
+                Lenient::Value(RushProject {
+                    project_folder: Some(Lenient::Value(folder)),
+                }) => Some(folder.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The manager, when exactly one of `pnpmVersion`, `npmVersion`, and
+    /// `yarnVersion` is set.
+    pub(crate) fn manager(&self) -> Option<RushManager> {
+        match (
+            self.pnpm_version.is_some(),
+            self.npm_version.is_some(),
+            self.yarn_version.is_some(),
+        ) {
+            (true, false, false) => Some(RushManager::Pnpm),
+            (false, true, false) => Some(RushManager::Npm),
+            (false, false, true) => Some(RushManager::Yarn),
+            _ => None,
+        }
+    }
+
+    /// The legacy `pnpmOptions.useWorkspaces`, for repositories without a
+    /// `pnpm-config.json`.
+    pub(crate) fn legacy_use_workspaces(&self) -> Option<bool> {
+        match &self.pnpm_options {
+            Some(Lenient::Value(options)) => options.use_workspaces.as_ref()?.value().copied(),
+            _ => None,
+        }
+    }
+
+    /// Whether `rush.json` declares installation variants, or declares them
+    /// in a shape Sniff cannot read.
+    pub(crate) fn declares_variants(&self) -> bool {
+        match &self.variants {
+            None => false,
+            Some(Lenient::Value(variants)) => !variants.is_empty(),
+            Some(Lenient::Other(_)) => true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RushProject {
+    project_folder: Option<Lenient<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RushPnpmOptions {
+    use_workspaces: Option<Lenient<bool>>,
+}
+
+/// A value of the expected type, or anything else.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum Lenient<T> {
+    Value(T),
+    Other(IgnoredAny),
+}
+
+impl<T> Lenient<T> {
+    pub(crate) fn value(&self) -> Option<&T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Other(_) => None,
+        }
+    }
 }
 
 /// Extract the `packages:` sequence from a parsed `pnpm-workspace.yaml`.
@@ -439,8 +520,12 @@ pub(super) fn resolve_js_package_manager(
 mod tests {
     use super::*;
 
+    fn rush_json(content: &str) -> RushJson {
+        crate::filesystem::repo::jsonc::from_str(content).expect("valid rush.json")
+    }
+
     #[test]
-    fn parse_rush_projects_reads_project_folders() {
+    fn rush_json_reads_project_folders() {
         let content = r#"{
             "projects": [
                 { "packageName": "@scope/app", "projectFolder": "apps/app" },
@@ -448,13 +533,61 @@ mod tests {
             ]
         }"#;
         assert_eq!(
-            parse_rush_project_folders(content),
-            vec!["apps/app".to_string(), "libraries/lib".to_string()]
+            rush_json(content).project_folders(),
+            vec!["apps/app", "libraries/lib"]
         );
     }
 
     #[test]
-    fn parse_rush_projects_empty_when_absent() {
-        assert!(parse_rush_project_folders(r#"{"rushVersion": "5.0.0"}"#).is_empty());
+    fn rush_json_without_projects_has_no_folders() {
+        assert!(rush_json(r#"{"rushVersion": "5.0.0"}"#).project_folders().is_empty());
+    }
+
+    #[test]
+    fn rush_json_skips_projects_without_a_string_folder() {
+        let content = r#"{"projects": [
+            {"packageName": "a"},
+            {"projectFolder": 3},
+            "not a project",
+            {"projectFolder": "apps/b"}
+        ], "pnpmOptions": 7, "variants": {}}"#;
+        let config = rush_json(content);
+        assert_eq!(config.project_folders(), vec!["apps/b"]);
+        assert_eq!(config.legacy_use_workspaces(), None);
+        assert!(config.declares_variants(), "an unreadable variants value");
+    }
+
+    /// Regression: `rush init` writes comments throughout `rush.json`, and the
+    /// former strict JSON parse found no projects in any real Rush repository.
+    #[test]
+    fn the_real_rush_json_is_read_through_its_comments() {
+        let content = include_str!(
+            "../../../tests/fixtures/lockfiles/rush-5.179.0/pnpm-workspace/rush.json"
+        );
+        assert!(serde_json::from_str::<serde_json::Value>(content).is_err());
+        let config = rush_json(content);
+        assert_eq!(
+            config.project_folders(),
+            vec!["packages/alpha", "packages/beta", ".tools/hidden"]
+        );
+        assert_eq!(config.manager(), Some(RushManager::Pnpm));
+        assert!(!config.declares_variants());
+    }
+
+    #[test]
+    fn exactly_one_version_field_selects_the_manager() {
+        for (content, expected) in [
+            (r#"{"pnpmVersion": "9.0.0"}"#, Some(RushManager::Pnpm)),
+            (r#"{"npmVersion": "6.0.0"}"#, Some(RushManager::Npm)),
+            (r#"{"yarnVersion": "1.22.0"}"#, Some(RushManager::Yarn)),
+            (r#"{}"#, None),
+            (r#"{"pnpmVersion": "9.0.0", "npmVersion": "6.0.0"}"#, None),
+        ] {
+            assert_eq!(rush_json(content).manager(), expected, "{content}");
+        }
+        assert_eq!(
+            rush_json(r#"{"pnpmOptions": {"useWorkspaces": true}}"#).legacy_use_workspaces(),
+            Some(true)
+        );
     }
 }

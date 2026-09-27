@@ -593,7 +593,7 @@ fn dispatch_detector_at(
         MonorepoStandard::GradleMultiProject => detect_gradle_workspace(target)?,
         MonorepoStandard::MavenMultiModule => detect_maven_workspace(target)?,
         MonorepoStandard::DotNetSolution => detect_dotnet_solution(target)?,
-        MonorepoStandard::RushStack => detect_rush_workspace(target)?,
+        MonorepoStandard::RushStack => detect_rush_workspace(target, manifests)?,
         MonorepoStandard::Nx => detect_nx(target, evidence, manifests)?,
         MonorepoStandard::Turborepo => detect_turborepo(target, evidence, manifests)?,
         MonorepoStandard::Lerna => detect_lerna(target, evidence, manifests)?,

@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use tracing::debug;
 
 use crate::filesystem::file_types::{
     FileAssociation, FileInventory, FrameworkAccumulator, FrameworkKind, LanguageAccumulator,
@@ -28,16 +29,18 @@ use super::lockfile::cargo::CargoLock;
 use super::lockfile::sources::Format;
 use super::lockfile::{
     LockfileFailure, LockfilePresence, LockfileStatus, ParsedLockfile, observe_layer_lockfile,
+    observe_standalone_lockfiles,
 };
 use super::manifest_index::{
     CargoLockVersions, ManifestIndex, discover_seeds_from_index,
     discover_seeds_with_optional_index as mi_discover_seeds_with_optional_index,
 };
+use super::jsonc;
 use super::maven::detect_maven_workspace;
 use super::nested::discover_nested_workspace_outcomes;
 use super::npm::{
-    detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
-    detect_yarn_workspace, npm_package_name, npm_package_version,
+    RushJson, detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace,
+    detect_rush_workspace, detect_yarn_workspace, npm_package_name, npm_package_version,
     package_json_dependencies_from_value, package_json_workspace_patterns_from_value,
     pnpm_workspace_patterns_from_value, resolve_js_package_manager,
 };
@@ -190,10 +193,17 @@ fn synthesize_root_package_repo_with_store(
         request,
         manifests,
     );
+    let standalone_lockfiles = observe_standalone_lockfiles(
+        root,
+        [],
+        request.wants_lockfile_provenance(),
+        manifests,
+    );
     Some(RepoInfo {
         is_monorepo: false,
         root: root.to_path_buf(),
         packages: Some(vec![package]),
+        standalone_lockfiles,
         ..RepoInfo::default()
     })
 }
@@ -211,6 +221,7 @@ pub(crate) struct ManifestStore {
     npm: RefCell<HashMap<PathBuf, ManifestOutcome<serde_json::Value>>>,
     pyproject: RefCell<HashMap<PathBuf, ManifestOutcome<toml_crate::Value>>>,
     pnpm_workspace: RefCell<HashMap<PathBuf, ManifestOutcome<serde_yaml_ng::Value>>>,
+    rush_json: RefCell<HashMap<PathBuf, ManifestOutcome<RushJson>>>,
     go_mod: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
     raw_text: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
     /// Keyed by the lexical [`normalize_path`], so a probe pays no hidden
@@ -377,6 +388,35 @@ impl ManifestStore {
         parsed.map_err(|error| error.to_sniff_error())
     }
 
+    /// Parse `rush.json` (JSON with comments) once per request, for both the
+    /// Rush detector and Rush lockfile corroboration.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(None)` when the file is not valid JSONC or does not have the
+    /// expected shape, which the detector treats as "not a Rush repository".
+    ///
+    /// ## Errors
+    ///
+    /// The read error, so an unreadable `rush.json` still fails detection.
+    pub(crate) fn rush_json(&self, path: &Path) -> Result<Option<Rc<RushJson>>> {
+        let key = normalized_key(path);
+        let cached = self.rush_json.borrow().get(&key).cloned();
+        let outcome = cached.unwrap_or_else(|| {
+            let parsed = read_counted_parsed_manifest(path, jsonc::from_str::<RushJson>);
+            self.rush_json.borrow_mut().insert(key, parsed.clone());
+            parsed
+        });
+        match outcome {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(ManifestFailure::Parse(message)) => {
+                debug!(path = %path.display(), %message, "rush.json is not valid JSONC");
+                Ok(None)
+            }
+            Err(failure) => Err(failure.to_sniff_error()),
+        }
+    }
+
     pub(crate) fn go_mod(&self, path: &Path) -> Option<Rc<String>> {
         let key = normalized_key(path);
         if let Some(cached) = self.go_mod.borrow().get(&key) {
@@ -516,6 +556,17 @@ fn read_counted_manifest(path: &Path) -> Option<String> {
     performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
     performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
     Some(content)
+}
+
+/// Read a configuration file that is not cached in the store, counting it as
+/// a manifest read and parse (Rush's `pnpm-config.json` and
+/// `subspaces.json`, ruling R8).
+pub(crate) fn read_counted_config(path: &Path) -> std::io::Result<String> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
+    let content = std::fs::read_to_string(path)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+    Ok(content)
 }
 
 /// Read a lockfile the store has already probed as present, counting the
@@ -694,7 +745,11 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     collect_outcome(detect_gradle_workspace(root)?, &mut seeds, &mut outcomes);
     collect_outcome(detect_maven_workspace(root)?, &mut seeds, &mut outcomes);
     collect_outcome(detect_dotnet_solution(root)?, &mut seeds, &mut outcomes);
-    collect_outcome(detect_rush_workspace(root)?, &mut seeds, &mut outcomes);
+    collect_outcome(
+        detect_rush_workspace(root, &manifests)?,
+        &mut seeds,
+        &mut outcomes,
+    );
 
     // Polyglot leaf-marker build systems contribute one outcome per workspace
     // root (Bazel segments nested `WORKSPACE` subtrees into their own layer).
@@ -878,6 +933,12 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     if request.wants_dependencies() {
         resolve_internal_deps(&mut packages);
     }
+    let standalone_lockfiles = observe_standalone_lockfiles(
+        root,
+        packages.iter().map(|package| package.path.as_path()),
+        request.wants_lockfile_provenance(),
+        &manifests,
+    );
 
     Ok((
         Some(RepoInfo {
@@ -890,6 +951,7 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
             monorepo_standards,
             monorepo_layers,
             packages: Some(packages),
+            standalone_lockfiles,
         }),
         repo_inventory,
         Some(ownership_index),
@@ -3031,8 +3093,10 @@ mod observation_index {
         let repo = repo.expect("fixture is a Cargo workspace");
 
         // `Cargo.lock`, plus the Yarn and Bun detectors' marker probes
-        // (`yarn.lock`, `bun.lock`, `bun.lockb`) sharing the same cache.
-        assert_eq!(counts.get(counters::REPO_LOCKFILE_PROBES), 4, "{:?}", counts.all());
+        // (`yarn.lock`, `bun.lock`, `bun.lockb`) sharing the same cache, plus
+        // the three standalone candidates (`composer.lock`, `pdm.lock`,
+        // `poetry.lock`) at the root and both member roots.
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PROBES), 13, "{:?}", counts.all());
         assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0, "{:?}", counts.all());
         assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 0, "{:?}", counts.all());
         assert_eq!(repo.monorepo_layers.len(), 1);
@@ -3234,11 +3298,13 @@ mod observation_index {
         // The three layer lockfiles, plus the Yarn and Bun detectors' marker
         // probes (`yarn.lock`, `bun.lock`, `bun.lockb`) at the root and at
         // both nested `package.json` directories. Those nine probes predate
-        // corroboration and now share its cache; only the three layer probes
-        // are new work.
+        // corroboration and now share its cache. The new work is the three
+        // layer probes and the three standalone candidates (`composer.lock`,
+        // `pdm.lock`, `poetry.lock`) at the root and each of the six package
+        // roots.
         assert_eq!(
             counts.get(counters::REPO_LOCKFILE_PROBES),
-            12,
+            33,
             "{:?}",
             counts.all()
         );

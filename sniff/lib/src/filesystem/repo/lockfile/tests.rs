@@ -87,8 +87,6 @@ fn an_absent_candidate_is_absent_whatever_the_request() {
         MonorepoStandard::CargoWorkspace,
         MonorepoStandard::GoWorkspace,
         MonorepoStandard::GradleMultiProject,
-        MonorepoStandard::Bazel,
-        MonorepoStandard::RushStack,
     ] {
         for wants in [true, false] {
             let (observation, counts) = observe(dir.path(), authority, wants);
@@ -117,6 +115,7 @@ fn a_present_candidate_is_not_requested_without_a_read_when_declined() {
         (MonorepoStandard::Bazel, "MODULE.bazel.lock"),
     ] {
         touch(dir.path(), lockfile);
+        touch(dir.path(), "MODULE.bazel");
         let (observation, counts) = observe(dir.path(), authority, false);
         assert_eq!(
             observation,
@@ -141,6 +140,7 @@ fn fallback_sources_are_unverifiable_from_metadata_alone() {
         (MonorepoStandard::Bazel, "MODULE.bazel.lock"),
     ] {
         touch(dir.path(), lockfile);
+        touch(dir.path(), "MODULE.bazel");
         let (observation, counts) = observe(dir.path(), authority, true);
         assert_eq!(
             observation,
@@ -229,6 +229,7 @@ fn a_metadata_failure_is_unreadable_even_when_declined() {
         (MonorepoStandard::GoWorkspace, "go.work.sum"),
         (MonorepoStandard::RushStack, "common/config/rush/pnpm-lock.yaml"),
     ] {
+        fs::write(dir.path().join("rush.json"), RUSH_PNPM).expect("write rush.json");
         let _failure = test_seam::fail_metadata(
             &dir.path().join(lockfile),
             std::io::ErrorKind::PermissionDenied,
@@ -246,14 +247,17 @@ fn a_metadata_failure_is_unreadable_even_when_declined() {
     }
 }
 
-/// Formats whose parser lands in a later phase can never yield `match` or
-/// `mismatch` in the meantime.
+/// An empty file is a parse failure for every text format, after exactly one
+/// read and one parse: never an empty member set.
 #[test]
-fn stubbed_formats_are_unverifiable_after_one_read() {
+fn an_empty_lockfile_is_a_parse_failure_after_one_read() {
     for (authority, lockfile) in [
+        (MonorepoStandard::PnpmWorkspaces, "pnpm-lock.yaml"),
         (MonorepoStandard::NpmWorkspaces, "package-lock.json"),
         (MonorepoStandard::YarnWorkspaces, "yarn.lock"),
         (MonorepoStandard::BunWorkspaces, "bun.lock"),
+        (MonorepoStandard::UvWorkspace, "uv.lock"),
+        (MonorepoStandard::CargoWorkspace, "Cargo.lock"),
     ] {
         let dir = TempDir::new().expect("tempdir");
         touch(dir.path(), lockfile);
@@ -263,13 +267,14 @@ fn stubbed_formats_are_unverifiable_after_one_read() {
         assert_eq!(
             observation,
             expected(
-                LockfileStatus::Unverifiable,
+                LockfileStatus::Unreadable,
                 &[lockfile],
-                Some(LockfileReason::UnsupportedVersion)
+                Some(LockfileReason::ParseFailed)
             ),
             "{authority:?}"
         );
         assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{authority:?}");
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1, "{authority:?}");
     }
 }
 
@@ -409,4 +414,340 @@ fn the_observation_serializes_every_field_and_round_trips() {
         round_tripped = serde_json::from_str(&text).expect("deserializes");
     }
     assert_eq!(round_tripped, observation);
+}
+
+const RUSH_PNPM: &str = "// comment\n{ \"pnpmVersion\": \"9.15.9\", \"projects\": [], }";
+const RUSH_LOCK: &str = "common/config/rush/pnpm-lock.yaml";
+const PNPM_CONFIG: &str = "common/config/rush/pnpm-config.json";
+const SUBSPACES: &str = "common/config/rush/subspaces.json";
+
+fn write(root: &Path, relative: &str, content: &str) {
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+    fs::write(path, content).expect("write file");
+}
+
+/// The ordinary layout: pnpm, `useWorkspaces`, subspaces off, no variants.
+fn rush_pnpm_workspace(importers: &str) -> TempDir {
+    let dir = TempDir::new().expect("tempdir");
+    write(dir.path(), "rush.json", RUSH_PNPM);
+    write(dir.path(), PNPM_CONFIG, "{ /* c */ \"useWorkspaces\": true, }");
+    write(dir.path(), SUBSPACES, "{ \"subspacesEnabled\": false }");
+    write(
+        dir.path(),
+        RUSH_LOCK,
+        &format!("lockfileVersion: '9.0'\nimporters:\n{importers}"),
+    );
+    dir
+}
+
+/// Importer keys resolve against `common/temp`, and its synthetic `.`
+/// project is not a member.
+#[test]
+fn rush_importers_resolve_against_common_temp() {
+    let dir = rush_pnpm_workspace("  .: {}\n  ../../apps/web: {}\n");
+
+    let (observation, counts) = observe(dir.path(), MonorepoStandard::RushStack, true);
+
+    assert_eq!(observation.status, LockfileStatus::Mismatch);
+    assert_eq!(observation.paths, [RUSH_LOCK]);
+    assert_eq!(observation.extra, ["apps/web"]);
+    assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1);
+    // rush.json, pnpm-config.json, and subspaces.json.
+    assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 3);
+
+    let dir = rush_pnpm_workspace("  .: {}\n");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::RushStack, true);
+    assert_eq!(observation, expected(LockfileStatus::Match, &[RUSH_LOCK], None));
+}
+
+/// A declining request reads no Rush configuration beyond the `rush.json`
+/// the detector already caches, and no lockfile.
+#[test]
+fn a_declined_rush_request_reads_no_configuration() {
+    let dir = rush_pnpm_workspace("  .: {}\n");
+
+    let (observation, counts) = observe(dir.path(), MonorepoStandard::RushStack, false);
+
+    assert_eq!(
+        observation,
+        expected(
+            LockfileStatus::NotRequested,
+            &[RUSH_LOCK],
+            Some(LockfileReason::RequestDisabled)
+        )
+    );
+    assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 1);
+    assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0);
+
+    fs::remove_file(dir.path().join(RUSH_LOCK)).expect("remove lockfile");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::RushStack, false);
+    assert_eq!(observation, expected(LockfileStatus::Absent, &[], None));
+}
+
+/// Every layout other than the ordinary pnpm workspace is unverifiable,
+/// with the lockfile listed when it exists, and its lockfile is never read.
+#[test]
+fn unsupported_rush_layouts_are_unverifiable_without_reading_the_lockfile() {
+    type Edit = fn(&Path);
+    let cases: [(&str, Edit); 8] = [
+        ("subspaces enabled", |root| {
+            write(root, SUBSPACES, "{ \"subspacesEnabled\": true }");
+        }),
+        ("unreadable subspaces.json", |root| {
+            write(root, SUBSPACES, "{ subspacesEnabled: true }");
+        }),
+        ("useWorkspaces false", |root| {
+            write(root, PNPM_CONFIG, "{ \"useWorkspaces\": false }");
+        }),
+        ("useWorkspaces omitted (Rush defaults to false)", |root| {
+            write(root, PNPM_CONFIG, "{}");
+        }),
+        ("no pnpm-config.json and no legacy option", |root| {
+            fs::remove_file(root.join(PNPM_CONFIG)).expect("remove pnpm-config.json");
+        }),
+        ("unreadable pnpm-config.json", |root| {
+            fs::create_dir_all(root.join(PNPM_CONFIG)).ok();
+        }),
+        ("variants directory", |root| {
+            fs::create_dir_all(root.join("common/config/rush/variants/v1")).expect("variant");
+        }),
+        ("variants in rush.json", |root| {
+            write(
+                root,
+                "rush.json",
+                "{ \"pnpmVersion\": \"9.15.9\", \"variants\": [{ \"variantName\": \"v1\" }] }",
+            );
+        }),
+    ];
+    for (label, edit) in cases {
+        let dir = rush_pnpm_workspace("  .: {}\n");
+        if label == "unreadable pnpm-config.json" {
+            fs::remove_file(dir.path().join(PNPM_CONFIG)).expect("remove pnpm-config.json");
+        }
+        edit(dir.path());
+
+        let (observation, counts) = observe(dir.path(), MonorepoStandard::RushStack, true);
+
+        assert_eq!(
+            observation,
+            expected(
+                LockfileStatus::Unverifiable,
+                &[RUSH_LOCK],
+                Some(LockfileReason::UnsupportedLayout)
+            ),
+            "{label}"
+        );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0, "{label}");
+    }
+}
+
+/// An unsupported layout is reported as such even without its lockfile,
+/// rather than guessed absent.
+#[test]
+fn an_unsupported_rush_layout_without_a_lockfile_is_not_absent() {
+    let dir = rush_pnpm_workspace("  .: {}\n");
+    fs::remove_file(dir.path().join(RUSH_LOCK)).expect("remove lockfile");
+    write(dir.path(), SUBSPACES, "{ \"subspacesEnabled\": true }");
+
+    let (observation, _) = observe(dir.path(), MonorepoStandard::RushStack, true);
+
+    assert_eq!(
+        observation,
+        expected(
+            LockfileStatus::Unverifiable,
+            &[],
+            Some(LockfileReason::UnsupportedLayout)
+        )
+    );
+
+    // A supported layout with no lockfile is absent.
+    write(dir.path(), SUBSPACES, "{ \"subspacesEnabled\": false }");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::RushStack, true);
+    assert_eq!(observation, expected(LockfileStatus::Absent, &[], None));
+}
+
+/// Without `pnpm-config.json`, the legacy `rush.json` `pnpmOptions` decides.
+#[test]
+fn the_legacy_rush_pnpm_option_enables_the_workspace_layout() {
+    let dir = rush_pnpm_workspace("  .: {}\n");
+    fs::remove_file(dir.path().join(PNPM_CONFIG)).expect("remove pnpm-config.json");
+    write(
+        dir.path(),
+        "rush.json",
+        "{ \"pnpmVersion\": \"9.15.9\", \"pnpmOptions\": { \"useWorkspaces\": true } }",
+    );
+
+    let (observation, _) = observe(dir.path(), MonorepoStandard::RushStack, true);
+
+    assert_eq!(observation, expected(LockfileStatus::Match, &[RUSH_LOCK], None));
+}
+
+/// npm and Yarn managers, and a `rush.json` naming no single manager, are
+/// never compared.
+#[test]
+fn rush_managers_other_than_pnpm_are_unsupported_layouts() {
+    for (rush_json, lockfile) in [
+        (
+            "{ \"npmVersion\": \"6.14.18\" }",
+            Some("common/config/rush/npm-shrinkwrap.json"),
+        ),
+        ("{ \"yarnVersion\": \"1.22.22\" }", Some("common/config/rush/yarn.lock")),
+        ("{ \"yarnVersion\": \"1.22.22\" }", None),
+        ("{ \"rushVersion\": \"5.179.0\" }", None),
+        ("{ \"pnpmVersion\": \"9.15.9\", \"npmVersion\": \"6.14.18\" }", None),
+    ] {
+        let dir = TempDir::new().expect("tempdir");
+        write(dir.path(), "rush.json", rush_json);
+        if let Some(lockfile) = lockfile {
+            touch(dir.path(), lockfile);
+        }
+        let paths: Vec<&str> = lockfile.into_iter().collect();
+
+        let (observation, counts) = observe(dir.path(), MonorepoStandard::RushStack, true);
+        assert_eq!(
+            observation,
+            expected(
+                LockfileStatus::Unverifiable,
+                &paths,
+                Some(LockfileReason::UnsupportedLayout)
+            ),
+            "{rush_json}"
+        );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0, "{rush_json}");
+
+        let (declined, _) = observe(dir.path(), MonorepoStandard::RushStack, false);
+        let expected_declined = if lockfile.is_some() {
+            expected(
+                LockfileStatus::NotRequested,
+                &paths,
+                Some(LockfileReason::RequestDisabled),
+            )
+        } else {
+            expected(
+                LockfileStatus::Unverifiable,
+                &[],
+                Some(LockfileReason::UnsupportedLayout),
+            )
+        };
+        assert_eq!(declined, expected_declined, "{rush_json} declined");
+    }
+}
+
+/// Bazel's module lockfile applies only under Bzlmod: without `MODULE.bazel`
+/// there is no lockfile source, even when a stray `MODULE.bazel.lock` exists.
+#[test]
+fn a_bazel_root_without_module_bazel_has_no_lockfile_source() {
+    let dir = TempDir::new().expect("tempdir");
+    touch(dir.path(), "WORKSPACE");
+    touch(dir.path(), "MODULE.bazel.lock");
+    for wants in [true, false] {
+        let (observation, counts) = observe(dir.path(), MonorepoStandard::Bazel, wants);
+        assert_eq!(
+            observation,
+            expected(
+                LockfileStatus::NotApplicable,
+                &[],
+                Some(LockfileReason::NoLockfileSource)
+            )
+        );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PROBES), 0);
+    }
+
+    touch(dir.path(), "MODULE.bazel");
+    fs::remove_file(dir.path().join("MODULE.bazel.lock")).expect("remove lockfile");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::Bazel, true);
+    assert_eq!(observation, expected(LockfileStatus::Absent, &[], None));
+}
+
+/// The legacy Gradle group lists each direct `*.lockfile` child of the root
+/// `gradle/dependency-locks/`, never a nested or non-lockfile entry, beside
+/// any root `gradle.lockfile`.
+#[test]
+fn legacy_gradle_locks_are_listed_one_level_deep() {
+    let dir = TempDir::new().expect("tempdir");
+    for file in [
+        "gradle/dependency-locks/compileClasspath.lockfile",
+        "gradle/dependency-locks/runtimeClasspath.lockfile",
+        "gradle/dependency-locks/README.md",
+        "gradle/dependency-locks/nested/deep.lockfile",
+        "app/gradle/dependency-locks/compileClasspath.lockfile",
+    ] {
+        touch(dir.path(), file);
+    }
+    fs::create_dir_all(dir.path().join("gradle/dependency-locks/dir.lockfile"))
+        .expect("directory named like a lockfile");
+    let legacy = [
+        "gradle/dependency-locks/compileClasspath.lockfile",
+        "gradle/dependency-locks/runtimeClasspath.lockfile",
+    ];
+
+    let (observation, counts) = observe(dir.path(), MonorepoStandard::GradleMultiProject, true);
+    assert_eq!(
+        observation,
+        expected(
+            LockfileStatus::Unverifiable,
+            &legacy,
+            Some(LockfileReason::NoMembershipData)
+        )
+    );
+    assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0);
+    assert_eq!(counts.get(counters::FS_READ_DIRS), 1);
+
+    let (declined, _) = observe(dir.path(), MonorepoStandard::GradleMultiProject, false);
+    assert_eq!(
+        declined,
+        expected(
+            LockfileStatus::NotRequested,
+            &legacy,
+            Some(LockfileReason::RequestDisabled)
+        )
+    );
+
+    touch(dir.path(), "gradle.lockfile");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::GradleMultiProject, true);
+    assert_eq!(
+        observation.paths,
+        [
+            "gradle.lockfile",
+            "gradle/dependency-locks/compileClasspath.lockfile",
+            "gradle/dependency-locks/runtimeClasspath.lockfile",
+        ]
+    );
+}
+
+/// An empty legacy lock directory, or a file in its place, holds no
+/// lockfiles.
+#[test]
+fn an_empty_or_misplaced_legacy_gradle_lock_directory_is_absent() {
+    let dir = TempDir::new().expect("tempdir");
+    fs::create_dir_all(dir.path().join("gradle/dependency-locks")).expect("empty lock dir");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::GradleMultiProject, true);
+    assert_eq!(observation, expected(LockfileStatus::Absent, &[], None));
+
+    let dir = TempDir::new().expect("tempdir");
+    touch(dir.path(), "gradle/dependency-locks");
+    let (observation, _) = observe(dir.path(), MonorepoStandard::GradleMultiProject, true);
+    assert_eq!(observation, expected(LockfileStatus::Absent, &[], None));
+}
+
+#[test]
+fn a_metadata_failure_on_the_legacy_gradle_directory_is_unreadable() {
+    let dir = TempDir::new().expect("tempdir");
+    touch(dir.path(), "gradle.lockfile");
+    let _failure = test_seam::fail_metadata(
+        &dir.path().join("gradle/dependency-locks"),
+        std::io::ErrorKind::PermissionDenied,
+    );
+
+    let (observation, _) = observe(dir.path(), MonorepoStandard::GradleMultiProject, false);
+
+    assert_eq!(
+        observation,
+        expected(
+            LockfileStatus::Unreadable,
+            &[],
+            Some(LockfileReason::MetadataFailed)
+        )
+    );
 }

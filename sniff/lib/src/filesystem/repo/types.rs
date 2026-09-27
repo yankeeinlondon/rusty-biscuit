@@ -9,6 +9,7 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
+use crate::filesystem::repo::lockfile::StandaloneLockfileObservation;
 use crate::filesystem::repo::ownership::{PackageAreaIndex, PackageOwnershipIndex};
 use crate::filesystem::repo::standard::{
     DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance,
@@ -144,6 +145,11 @@ pub struct RepoInfo {
     /// orchestrators riding on top. A forest, even for single-root repos.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monorepo_layers: Vec<MonorepoLayer>,
+    /// Poetry, PDM, and Composer lockfiles at the repository root or a
+    /// discovered package root, which no workspace layer covers. Always
+    /// serialized, `[]` when none exists.
+    #[serde(default)]
+    pub standalone_lockfiles: Vec<StandaloneLockfileObservation>,
 }
 
 /// A package within a monorepo.
@@ -623,6 +629,7 @@ mod tests {
                     ..Package::default()
                 },
             ]),
+            standalone_lockfiles: Vec::new(),
         };
 
         assert_eq!(
@@ -767,6 +774,7 @@ mod tests {
                     ..Package::default()
                 },
             ]),
+            standalone_lockfiles: Vec::new(),
         }
     }
 

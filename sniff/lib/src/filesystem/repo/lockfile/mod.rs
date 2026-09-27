@@ -15,6 +15,7 @@ mod npm;
 mod pnpm;
 mod rush;
 pub(crate) mod sources;
+mod standalone;
 mod uv;
 mod yarn;
 
@@ -29,6 +30,9 @@ use super::standard::MonorepoLayer;
 use crate::request::RepoRequest;
 
 use sources::Source;
+
+pub(crate) use standalone::observe_standalone_lockfiles;
+pub use standalone::{StandaloneLockfileObservation, StandaloneLockfileTool};
 
 /// What a layer's lockfile says about the layer's manifest-derived members.
 ///
@@ -250,7 +254,7 @@ pub(crate) fn observe_layer_lockfile(
     let candidates = match sources::source(layer.authority) {
         Source::NotApplicable(reason) => return LockfileObservation::not_applicable(reason),
         Source::Fallback(fallback) => return fallback::observe(fallback, root, wants, store),
-        Source::Configured => return rush::observe(root, wants, store),
+        Source::Configured => return rush::observe(layer, owned, wants, store),
         Source::Candidates(candidates) => candidates,
     };
 
@@ -292,7 +296,21 @@ pub(crate) fn observe_layer_lockfile(
             return failure.observation(paths);
         }
     };
-    match &*parsed {
+    classify(&parsed, &[], layer, owned, store, paths)
+}
+
+/// Turn a parsed lockfile into the layer's observation. `base` is the
+/// directory, relative to the layer root, that recorded member paths resolve
+/// against.
+fn classify(
+    parsed: &ParsedLockfile,
+    base: &[&str],
+    layer: &MonorepoLayer,
+    owned: Option<&[PackageSeed]>,
+    store: &ManifestStore,
+    paths: Vec<String>,
+) -> LockfileObservation {
+    match parsed {
         ParsedLockfile::UnsupportedVersion => {
             LockfileObservation::unverifiable(paths, LockfileReason::UnsupportedVersion)
         }
@@ -302,7 +320,7 @@ pub(crate) fn observe_layer_lockfile(
         ParsedLockfile::CargoPackages(sourceless) => {
             cargo::compare(sourceless, layer, owned, store, paths)
         }
-        ParsedLockfile::Members(recorded) => compare_members(recorded, &[], layer, owned, paths),
+        ParsedLockfile::Members(recorded) => compare_members(recorded, base, layer, owned, paths),
     }
 }
 

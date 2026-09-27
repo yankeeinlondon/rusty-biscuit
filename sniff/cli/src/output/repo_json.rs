@@ -1033,6 +1033,7 @@ mod tests {
             monorepo_standards: Vec::new(),
             monorepo_layers: Vec::new(),
             packages: None,
+            standalone_lockfiles: Vec::new(),
         };
         let filesystem = FilesystemInfo {
             repo: Some(repo),
@@ -1071,6 +1072,7 @@ mod tests {
             monorepo_standards: Vec::new(),
             monorepo_layers: Vec::new(),
             packages: None,
+            standalone_lockfiles: Vec::new(),
         };
         let filesystem = FilesystemInfo {
             repo: Some(repo),
@@ -1272,6 +1274,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: Some(packages),
+                standalone_lockfiles: Vec::new(),
             };
             let mut git = fixture_git_info();
             git.status.as_mut().unwrap().dirty = dirty_paths
@@ -1503,6 +1506,7 @@ mod tests {
                     make_package("alpha", "area-a"),
                     make_package("beta", "area-b"),
                 ]),
+                standalone_lockfiles: Vec::new(),
             };
             let mut git = fixture_git_info();
             git.status.as_mut().unwrap().dirty = dirty_paths
@@ -1921,6 +1925,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: Some(vec![alpha, beta]),
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2221,6 +2226,7 @@ mod tests {
                     make_package("alpha", "area-a"),
                     make_package("beta", "area-b"),
                 ]),
+                standalone_lockfiles: Vec::new(),
             };
             SniffResult {
                 os: None,
@@ -2385,6 +2391,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: None,
+                standalone_lockfiles: Vec::new(),
             };
             let request = sniff::request::FilesystemRequest::new()
                 .git(
@@ -2440,6 +2447,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: Some(packages),
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2792,6 +2800,7 @@ mod tests {
                     packages: vec!["pkg-a".to_string(), "pkg-b".to_string()],
                 }],
                 packages: None,
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2860,6 +2869,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: None,
+                standalone_lockfiles: Vec::new(),
             };
             let result = result_with_repo(repo);
             let action = RepoAction::Structure {

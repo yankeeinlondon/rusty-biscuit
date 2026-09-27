@@ -2536,6 +2536,7 @@ mod tests {
                 } else {
                     Some(packages)
                 },
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2724,6 +2725,7 @@ mod tests {
                 } else {
                     Some(packages)
                 },
+                standalone_lockfiles: Vec::new(),
             }
         }
 
