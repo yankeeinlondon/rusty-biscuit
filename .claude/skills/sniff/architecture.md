@@ -104,8 +104,14 @@ Committed-tree diffs have two paths:
   author) run first. Path filters (package, area, file type) use the cheap
   untracked file listing. A count selection stops at N *matches*.
 - Only survivors are enriched: the rename-aware diff with line counts,
-  structure-tier attribution through one `PackageOwnershipIndex`, and one
-  linking pass. The work counters prove this: `git.file_diffs` covers only
+  structure-tier attribution, and one linking pass. Filtering and
+  attribution share one per-path resolver in `PackageCatalog`: the owner
+  comes from `PackageOwnershipIndex`, and the area is the owner's
+  `package_area` or, for an unowned path, the deepest area directory
+  strictly containing it (`PackageAreaIndex`, also behind
+  `RepoInfo::package_area_for_dir`). Package and area boundaries are
+  independent: a shared file under `worktree/fixes/` has area `worktree` and
+  no package. The root area `""` is never a directory fallback. The work counters prove this: `git.file_diffs` covers only
   survivors, with zero inventory, doc, or enrichment counters.
 - `--branch` resolves in order: local branch, `refs/remotes/<name>`, then
   `<remote>/<name>` over *configured* remotes. Nothing is fetched.

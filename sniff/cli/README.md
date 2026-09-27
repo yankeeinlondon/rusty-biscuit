@@ -186,6 +186,13 @@ sniff repo recent-commits --package-area sniff
 sniff repo recent-commits --operation fix --author ada
 ```
 
+`--package` matches files owned by that package; `--package-area` matches any
+file inside the area's directory, including shared files such as fixes,
+specs, and the area README, which report `"packages": []` and the area in
+`package_areas`. Membership is by file location, never by commit scope. The
+count is the number of matching commits, and each one keeps all of its
+changed files.
+
 **Justfile Detection:**
 
 ```bash

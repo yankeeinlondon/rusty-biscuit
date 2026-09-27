@@ -127,7 +127,7 @@ sniff repo recent-commits 1w --branch origin/main
 
 ### Package Scoping
 
-In monorepos, `--package` and `--package-area` keep commits that changed at least one file owned by the given package or by a package in the given area:
+In monorepos, `--package` keeps commits that changed at least one file owned by the given package, and `--package-area` keeps commits that changed at least one file inside the given area's directory:
 
 ```bash
 sniff repo recent-commits 1w --package sniff-cli
@@ -135,7 +135,9 @@ sniff repo recent-commits --package-area homelab
 ```
 
 - Ownership comes from the repository's package catalog (the same one `sniff repo packages` uses), and a file belongs only to its deepest owning package.
-- A file inside a package area but outside every package (for example `sniff/README.md`) belongs to no package, so it matches neither filter.
+- A file inside a package area but outside every package (for example `sniff/README.md`, or a spec under `sniff/fixes/`) belongs to the area and to no package: `--package-area sniff` keeps it and `--package sniff` does not. Its JSON record reports `"packages": []` and `"package_areas": ["sniff"]`.
+- Membership is by file location only. A commit scope such as `planning(sniff)`, or a path elsewhere that mentions the area (`.claude/skills/sniff/SKILL.md`), does not match. An area also selects areas nested under it.
+- The count is the number of matching commits, and each kept commit lists all of its changed files.
 - Unknown package or area names are errors that list the valid names. Using either flag outside a monorepo is also an error.
 
 ### File Categories
