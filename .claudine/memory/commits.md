@@ -1240,6 +1240,26 @@ belong here.
     resolve within that one commit" applies), and the body should
     name which sibling commits the spec's
     `scripts/ci/test_inputs.py`-style references resolve against.
+- Multiple spike directories under one feature (each with its own
+    `src/`, `findings.md`, and data files) can ship as separate
+    `planning(<area>):` commits when the spec does not point at any
+    spike path by name and the directories are otherwise disjoint.
+    The "atomic spec/plan/spike combine" rule applies only when the
+    spec text references the spike's path or content (e.g. a
+    `message_to_agent` naming `spikes/s0-baseline.md`); when the spec
+    refers to a class of work ("a throwaway spike … is being
+    considered as part of risk assessment. This spec does not design
+    it." in `darkmatter/features/2026-09-21-schema-enhancements/spec.md`)
+    without naming a spike, each spike is an independent research
+    artifact with its own findings and can land (or be removed)
+    independently. Verified with `a518b7f0b` (`planning(darkmatter):
+    record coercion-baseline spike…`) and `5e3c0157c`
+    (`…single-engine spike…`) for `2026-09-21-schema-enhancements`:
+    the spec didn't reference either path, both spikes were
+    throwaway, and they landed as two commits with disjoint paths.
+    The journals "spec/spike cross-references must resolve within
+    that one commit" rule still binds when the cross-reference
+    exists; the absence of one is what licenses the split.
 - A terminal review (`review-N.md` with `ready: true` and no `next:`
     field) does NOT require the directory move to `_completed/` in the
     same planning commit when the spec's `message_to_agent` reserves
