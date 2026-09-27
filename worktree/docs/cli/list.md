@@ -9,22 +9,22 @@ The output is, in order: a caption, the worktree table, a two-line legend, an op
 ```text
   main  is 7 commits behind  origin/main
 
-┌───────────────────┬──────────────────────────────────┬──────────────────┬─────────────────────┐
-│ Worktree          │ Branch                           │ ->  origin/main  │ -> parent           │
-├───────────────────┼──────────────────────────────────┼──────────────────┼─────────────────────┤
-│ ○ base repo       │  main                            │ —                │ —                   │
-│ ● fix-wt-ux       │ ├─ fix/wt-ux                     │ clean  PR #99    │ —                   │
-│ ● feat-theme      │ ├─ feat/theme                    │ clean            │ —                   │
-│ ○ feat-dark-fixes │ │  └─ feat/dark-fixes            │ clean            │ conflicts  PR #104  │
-│ ○ old-cleanup     │ └─ chore/old-cleanup             │ already in       │ —                   │
-│ ○ release-prep    │ release/prep  PR #7 → release/2  │ clean            │ —                   │
-│                   │ experiments (deleted)            │                  │                     │
-│ ● spike-parser    │ └┄ spike/parser                  │ conflicts        │ parent deleted      │
-│ ● bisect          │ detached @ a1b2c3d               │ —                │ —                   │
-└───────────────────┴──────────────────────────────────┴──────────────────┴─────────────────────┘
+┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
+│ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
+├───────────────────┼──────────────────────────────────┼──────────────────────┼───────────────────────────┤
+│ ○ base repo       │  main                            │ —                    │ —                         │
+│ ● fix-wt-ux       │ ├─ fix/wt-ux                     │ clean +2 -1  PR #99  │ —                         │
+│ ● feat-theme      │ ├─ feat/theme                    │ clean +3             │ —                         │
+│ ○ feat-dark-fixes │ │  └─ feat/dark-fixes            │ clean +2 -1          │ conflicts +1 -3  PR #104  │
+│ ○ old-cleanup     │ └─ chore/old-cleanup             │ clean -4             │ —                         │
+│ ○ release-prep    │ release/prep  PR #7 → release/2  │ clean                │ —                         │
+│                   │ experiments (deleted)            │                      │                           │
+│ ● spike-parser    │ └┄ spike/parser                  │ conflicts +1 -3      │ parent deleted            │
+│ ● bisect          │ detached @ a1b2c3d               │ —                    │ —                         │
+└───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     ├─ merges cleanly into parent    ├─ conflicts with parent    └┄ parent deleted
+ Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted
 ```
 
 ### The default-branch target
@@ -40,7 +40,7 @@ When both the local default branch and `origin/<default>` exist, the caption com
 - **Worktree** -- a status dot and the directory name; the main checkout is `base repo`. The current worktree's name is bold and its whole row is highlighted.
     - `○` (dim): no uncommitted files
     - `●` (yellow): uncommitted files, none of them source code
-    - `●` (orange): at least one uncommitted source file
+    - `●` (red, the same red as `conflicts`): at least one uncommitted source file
 - **Branch** -- a tree built from the fork records `wt create` keeps (see `--from` in the [README](../../README.md)):
     - the default branch comes first, as a badge; branches forked from another branch nest under it
     - the connector (`├─`, `└─`) is gray when the branch merges cleanly into its parent and red when it conflicts
@@ -49,12 +49,12 @@ When both the local default branch and `origin/<default>` exist, the caption com
     - branches without a fork record sit at the root, in worktree order; siblings are ordered by creation time, then name
     - a detached worktree shows `detached @ <sha>` and comes last
 - **`-> {target}`** -- the header names the target as a remote (`origin/main`) or local (`main`) badge. The cell compares the branch with it:
-    - `already in` (dim italic): the branch has no commits the target lacks
-    - `clean` (dim italic): it would merge without conflicts
+    - `clean` (dim italic): it would merge without conflicts, including when it has nothing to merge
     - `conflicts` (red): it would not
+    - from 100 terminal columns, `clean` and `conflicts` are followed by `+N` (dim green, commits the branch has that the target lacks) and `-N` (dim red, commits the target has that the branch lacks); a zero side is left out, so equal tips read `clean` alone. Below 100 columns only the state word shows. The width is the terminal's; `-w` / `--width` sizes only the graph
     - `—`: the default branch's own row, and detached worktrees
     - `?`: git could not answer; `wt` never shows a guessed result
-- **`-> parent`** -- the same comparison against the recorded fork parent. `—` when there is no non-default parent; `parent deleted` when the recorded parent is gone.
+- **`-> parent`** -- the same comparison, counts included, against the recorded fork parent's local branch (never its `origin/*` copy). `—` when there is no non-default parent; `parent deleted` when the recorded parent is gone.
 
 Comparison results are cached by the pair of commit SHAs, so a warm `wt list` runs no `rev-list` or `merge-base`; see [performance-testing.md](../performance-testing.md). Uncommitted-file status is always checked live.
 
@@ -62,7 +62,7 @@ Comparison results are cached by the pair of commit SHAs, so a warm `wt list` ru
 
 Open pull requests on `origin` whose source is this repository show as a green `PR #n` badge:
 
-- in the `-> {target}` cell when the PR targets the default branch
+- in the `-> {target}` cell when the PR targets the default branch, after any counts
 - in the `-> parent` cell when it targets the branch's fork parent
 - beside the branch name, as `PR #n → <target>`, otherwise
 

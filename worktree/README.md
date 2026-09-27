@@ -29,8 +29,8 @@ The **worktree** package area, like many in this monorepo, is composed of both a
     - a table with one row per worktree; the current row is highlighted
         - **Worktree**: a dot for uncommitted files (none, other files, or source files) and the directory name (`base repo` for the main checkout)
         - **Branch**: a tree of which branch was forked from which (recorded by `wt create`); deleted parents are struck through
-        - **`-> {default}`**: `already in`, `clean`, or `conflicts` against the default branch (local or `origin/<default>`, whichever contains the other)
-        - **`-> parent`**: the same against the branch's fork parent
+        - **`-> {default}`**: `clean` or `conflicts` against the default branch (local or `origin/<default>`, whichever contains the other); from 100 columns, followed by `+ahead` and `-behind` commit counts
+        - **`-> parent`**: the same against the branch's fork parent (its local branch)
         - open PRs from this repository as badges, placed by the PR's target. A stored answer for the current `origin` is shown at once; once it is older than 60 s the dim `PRs as of N min ago` line appears and a background `wt` process refreshes it for the next run, so `wt list` never waits for it. Only the first run for an `origin` (no stored answer yet) makes the request itself, waiting at most 300 ms
     - a legend, then, on image-capable terminals, a branch graph (see [`docs/git-graph.md`](./docs/git-graph.md))
 
