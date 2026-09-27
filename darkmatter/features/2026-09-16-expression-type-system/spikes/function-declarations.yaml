@@ -1,3 +1,5 @@
+# Historical prototype; superseded by function-contracts.md in the parent directory.
+# Old conversion and default-zero examples are evidence, not current policy.
 # Proposed representation, not a production catalog or ratified syntax.
 # Type strings use SimplifiedSchema value definitions; presence belongs to
 # the ordered argument record, independently of accepted null values.

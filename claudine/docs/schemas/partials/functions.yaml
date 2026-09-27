@@ -1,153 +1,191 @@
 kind: schema
-# we're adding categories as a top level section as metadata
-# and when it's included than a schema that uses categories
-# must ONLY use the categories provided
+# Draft function contracts for review during 2026-09-16-expression-type-system.
+# These declarations target the shared argument-conversion layer, not today's
+# runtime. M1 adopts shared conversions; M2 rejects implicit null propagation.
+# Behavior metadata carries the settled exceptions shared by runtime and DMLS.
+# Parameters describe handler inputs. Shared conversion happens before invocation;
+# `any` preserves the original value. Optional `?:` permits omission, not null.
+# `fallible` means the operation can fail after valid arguments are supplied;
+# argument-count, type, and constraint errors do not alone require it.
+# When categories are declared, every category used below must be listed here.
 categories:
     - |-
         Type Predicates ->
-        Guard clauses that answer _“what is this value?”_. Each predicate accepts an
-        untyped `any` input and returns `true` or `false` based on the value's runtime
-        type or shape — a string, number, array, object, or null — or, for the numeric
-        predicates, its sign or integrality.
-    - Math -> description
-    - Collection -> description
-    - Type Conversion -> description
-    - String Predicates -> description
-    - String Mutations -> description
+        Guard clauses that answer _“what is this value?”_. Inspecting predicates accept `any` unchanged and test its original type or shape.
+        Sign predicates require a number and use the shared numeric conversion rules.
+    - Math -> Numeric comparisons, absolute values, and rounding.
+    - Collection -> Array selection, object membership, and size.
+    - Type Conversion -> Explicitly request a converted result.
+    - String Predicates -> Test string contents.
+    - String Mutations -> Change case, affixes, and literal substrings.
     - Rendering
     - Date Formatting
     - Date Validators
+    - Date Arithmetic
     - Logical
     - Filesystem
     - Context
     - List Formatting
     - Devops
+    - Git
+    - CI/CD
+    - Shell
+    - Agentic CLIs
+    - Repository
+    - Network
+    - Composition
+behavior:
+    number:
+        numeric_recovery: {argument: x, fallback: fallback}
+    round:
+        numeric_recovery: {argument: x, fallback: fallback}
+    length:
+        reject_sources: {x: [boolean]}
+    file_exists:
+        advisory_file: value
+        true_facts: [{argument: value, suitable_for: file}]
+    is_file_type:
+        true_facts: [{argument: value, suitable_for: file}]
+    is_string:
+        true_facts: [{argument: x, suitable_for: string}]
+    is_number:
+        true_facts: [{argument: x, suitable_for: number}]
+    is_integer:
+        true_facts: [{argument: val, suitable_for: number}]
+    is_array:
+        true_facts: [{argument: x, suitable_for: 'any[]'}]
+    is_object:
+        true_facts: [{argument: x, suitable_for: object}]
+    is_null:
+        true_facts: [{argument: x, suitable_for: 'null'}]
+    and:
+        evaluation: short-circuit-and
+    or:
+        evaluation: short-circuit-or
 types:
     is_string: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is a string.
+        ) -> Returns true when the original value is a string.
     is_number: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is a number.
+        ) -> Returns true when the original value is a number.
     is_array: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is an array.
+        ) -> Returns true when the original value is an array.
     is_null: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is null.
+        ) -> Returns true when the value is null.
     is_object: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is an object.
+        ) -> Returns true when the original value is an object.
     is_empty: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is null, empty string, empty array, or empty object.
+        ) -> Returns true for null, an empty string, an empty array, or an object with no keys.
     is_positive: |-
         function(
-            parameters(val: any);
+            parameters(val: number);
             returns(boolean);
             category(Type Predicates);
-            fallible;
-        ) -> Returns `true` when the coerced value is greater than zero.
+        ) -> Returns true when the number is greater than zero.
     is_negative: |-
         function(
-            parameters(val: any);
+            parameters(val: number);
             returns(boolean);
             category(Type Predicates);
-            fallible;
-        ) -> Returns `true` when the coerced value is less than zero.
+        ) -> Returns true when the number is less than zero.
     is_integer: |-
         function(
             parameters(val: any);
             returns(boolean);
             category(Type Predicates);
-        ) -> Returns `true` when the value is a JSON number with no fractional component.
+        ) -> Returns true when the original value is a number with no fractional part.
     min: |-
         function(
             parameters(a: number, b: number);
             returns(number);
             category(Math);
-            fallible;
+            example('min("4", 5)', '4');
         ) -> Returns the smaller of two numbers.
     max: |-
         function(
             parameters(a: number, b: number);
             returns(number);
             category(Math);
-            fallible;
         ) -> Returns the larger of two numbers.
     abs: |-
         function(
             parameters(x: number);
             returns(number);
             category(Math);
-            fallible;
         ) -> Returns the absolute value of a number.
+    # M14: Use the shared numeric conversion/fallback contract, then round.
     round: |-
         function(
-            parameters(x: number, default: number(optional));
+            parameters(x: numberlike, fallback?: number);
             returns(number);
             category(Math);
-        ) -> Rounds a value to the nearest integer, with an optional default.
+            example('round("pear", 2.7)', '3');
+        ) -> Converts the value to a number, using the supplied fallback if needed, then rounds to the nearest whole number. Halfway values round away from zero.
     first: |-
         function(
             parameters(x: any[]);
             returns(any);
             category(Collection);
-            fallible;
-        ) -> Returns the first element of an array, or null when empty.
+        ) -> Returns the first array element unchanged, or null for an empty array.
     last: |-
         function(
             parameters(x: any[]);
             returns(any);
             category(Collection);
-            fallible;
-        ) -> Returns the last element of an array, or null when empty.
+        ) -> Returns the last array element unchanged, or null for an empty array.
     has_key: |-
         function(
             parameters(obj: object, key: string);
             returns(boolean);
             category(Collection);
-            fallible;
-        ) -> Returns true when the object contains the given key.
+        ) -> Tests whether the object has the exact top-level key, including a key whose value is null. Dots in the key are literal; this does not traverse nested properties.
     contains: |-
         function(
-            parameters(haystack: any, needle: any);
+            parameters(haystack: string | any[] | object, needle: any);
             returns(boolean);
             category(Collection);
-            fallible;
-        ) -> Returns true when haystack contains needle (array, object, or string).
+        ) -> Searches strings for a case-sensitive substring, arrays for an element, and objects for a value, comparing rendered text. Thus [4] contains "4". Use has_key to test object keys.
+    # M11: Reject boolean source values before shared string conversion.
+    # The compiled contract must retain this explicit input exclusion.
     length: |-
         function(
-            parameters(x: string | number | any[]);
-            returns(number);
+            parameters(x: string | number | any[] | object);
+            returns(number(integer; min(0)));
             category(Collection);
-            fallible;
-        ) -> Returns the length of a string, array, or object.
+        ) -> Counts string characters, array elements, object keys, or characters in a number's displayed text. Booleans and null are rejected.
+    # M12: A valid supplied fallback handles any failure to use x as a number.
+    # Recovery consumes the shared coercion result; invalid x never reaches a handler.
+    # M13: Failed conversion without a fallback returns the coercion error.
     number: |-
         function(
-            parameters(x: any, def_val?: number);
+            parameters(x: numberlike, fallback?: number);
             returns(number);
             category(Type Conversion);
-            fallible;
-        ) -> Converts a value to a number, with an optional default. Is _fallible_ if no default value is provided.
+            example('number("pear", 7)', '7');
+        ) -> Converts a number or numeric text to a number, using the supplied fallback if conversion fails.
     starts_with: |-
         function(
             parameters(x: string, find: string);
@@ -165,195 +203,182 @@ types:
             parameters(x: string);
             returns(string);
             category(String Mutations);
-        ) -> Converts a string to a _lowercase_ variant.
+        ) -> Applies Unicode lowercase conversion to the string.
     upper: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-        ) -> Converts a string to uppercase.
+        ) -> Applies Unicode uppercase conversion to the string.
     capitalize: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-            fallible;
-        ) -> Capitalizes the first character of a string.
+        ) -> Uppercases the first Unicode character and leaves the remainder unchanged. An empty string stays empty.
     kebab_case: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-            fallible;
-        ) -> Converts a string to kebab-case.
+        ) -> Splits at separators and case boundaries, then produces lowercase words joined by hyphens.
     snake_case: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-            fallible;
-        ) -> Converts a string to snake_case.
+        ) -> Splits at separators and case boundaries, then produces lowercase words joined by underscores.
     camel_case: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-            fallible;
-        ) -> Converts a string to camelCase.
+        ) -> Splits at separators and case boundaries, then produces lower camelCase.
     pascal_case: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-            fallible;
-        ) -> Converts a string to PascalCase.
+        ) -> Splits at separators and case boundaries, then produces PascalCase.
     title_case: |-
         function(
             parameters(x: string);
             returns(string);
             category(String Mutations);
-            fallible;
-        ) -> Converts a string to Title Case.
+        ) -> Splits at separators and case boundaries, then produces capitalized words separated by spaces.
     without_date: |-
         function(
             parameters(string: string);
             returns(string);
             category(String Mutations);
-            fallible;
         ) -> Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched.
     ensure_leading: |-
         function(
-            parameters(var: any, prefix: any);
-            returns(string);
+            parameters(var: string | number, prefix: string | number);
+            returns(string | number);
             category(String Mutations);
-            fallible;
-        ) -> Ensures the string form of a value starts with a prefix.
+        ) -> Ensures the text form starts with prefix, preserving an already matching value. Added numeric affixes preserve a numeric value when the combined text is representable.
     ensure_trailing: |-
         function(
-            parameters(var: any, postfix: any);
-            returns(string);
+            parameters(var: string | number, postfix: string | number);
+            returns(string | number);
             category(String Mutations);
-            fallible;
-        ) -> Ensures the string form of a value ends with a postfix.
+        ) -> Ensures the text form ends with postfix, preserving an already matching value. Added numeric affixes preserve a numeric value when the combined text is representable.
     replace: |-
         function(
             parameters(x: string, find: string, replacement: string);
             returns(string);
             category(String Mutations);
-            fallible;
         ) -> Replaces every literal occurrence of a substring; empty find is a no-op.
     replace_first: |-
         function(
             parameters(x: string, find: string, replacement: string);
             returns(string);
             category(String Mutations);
-            fallible;
         ) -> Replaces the first literal occurrence of a substring; empty find is a no-op.
     replace_last: |-
         function(
             parameters(x: string, find: string, replacement: string);
             returns(string);
             category(String Mutations);
-            fallible;
         ) -> Replaces the last literal occurrence of a substring; empty find is a no-op.
     terminal: |-
         function(
             parameters(content: string);
             returns(string);
             category(Rendering);
-            fallible;
-        ) -> Converts Prose markup content to a terminal string with ANSI SGR sequences, OSC8 links, etc.
+        ) -> Renders Prose markup as styled terminal text with supported hyperlinks.
     date: |-
         function(
             parameters(iso: string, fmt: string);
             returns(string);
             category(Date Formatting);
             fallible;
-        ) -> Reformats an ISO date/datetime string into a named human format.
+        ) -> Formats an ISO date or datetime for display. Supported formats are "MMMM Do" (alias "short"), "MMMM Do [YYYY]" ("short-optional"), "MMMM Do YYYY", "D MMMM [YYYY]", "D MMMM YYYY", and "ddd, MMMM Do, YYYY" ("long"). [YYYY] omits the current local year. Invalid dates and unsupported formats are errors.
     is_date: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the string is a valid ISO date (YYYY-MM-DD).
+        ) -> Returns true for a string containing a valid YYYY-MM-DD date.
     is_date_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Same as is_date (the format itself is timezone-agnostic).
+        ) -> Returns true for a string containing a valid YYYY-MM-DD date.
     is_date_time: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns `true` when the string is a valid ISO datetime.
+        ) -> Returns true for a string containing a valid ISO datetime.
     is_date_time_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Same parse contract as is_date_time.
+        ) -> Returns true for a string containing a valid ISO datetime.
     is_today: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns `true` when the date/datetime is today (_local time_).
+        ) -> Tests whether an ISO date or datetime falls in today, using local time; invalid values return false.
     is_today_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns `true` when the date/datetime is today (_in UTC_).
+        ) -> Tests whether an ISO date or datetime falls in today, using UTC; invalid values return false.
     is_yesterday: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is yesterday (local).
+        ) -> Tests whether an ISO date or datetime falls in yesterday, using local time; invalid values return false.
     is_yesterday_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is yesterday (UTC).
+        ) -> Tests whether an ISO date or datetime falls in yesterday, using UTC; invalid values return false.
     is_tomorrow: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is tomorrow (local).
+        ) -> Tests whether an ISO date or datetime falls in tomorrow, using local time; invalid values return false.
     is_tomorrow_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is tomorrow (UTC).
+        ) -> Tests whether an ISO date or datetime falls in tomorrow, using UTC; invalid values return false.
     is_this_month: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is in the current month (local).
+        ) -> Tests whether an ISO date or datetime falls in the current month and year, using local time; invalid values return false.
     is_this_month_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is in the current month (UTC).
+        ) -> Tests whether an ISO date or datetime falls in the current month and year, using UTC; invalid values return false.
     is_this_year: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is in the current year (local).
+        ) -> Tests whether an ISO date or datetime falls in the current year, using local time; invalid values return false.
     is_this_year_utc: |-
         function(
             parameters(x: any);
             returns(boolean);
             category(Date Validators);
-        ) -> Returns true when the date/datetime is in the current year (UTC).
+        ) -> Tests whether an ISO date or datetime falls in the current year, using UTC; invalid values return false.
     date_delta: |-
         function(
             parameters(date1: string, date2: string, diff: string);
@@ -403,11 +428,11 @@ types:
         ) -> Returns a best-effort relative path from the document base directory.
     file_exists: |-
         function(
-            parameters(file: file);
+            parameters(value: string | file | null);
             returns(boolean);
             category(Filesystem);
             fallible;
-        ) -> Returns true when the file exists (local or remote URL).
+        ) -> Tests local existence or an allowed remote fetch. Null, unsupported inputs, and malformed references return false; remote evaluation requires a supported context.
     frontmatter:
         - |-
             function(
@@ -433,10 +458,10 @@ types:
     markdown_title: |-
         function(
             parameters(file: file);
-            returns(string);
+            returns(string | null);
             category(Filesystem);
             fallible;
-        ) -> Returns the title from frontmatter or the first H1 heading.
+        ) -> Returns the string-valued frontmatter title, otherwise the first H1, or null if neither exists. Multiple H1 headings produce a warning.
     validate_schema:
         - |-
             function(
@@ -444,14 +469,14 @@ types:
                 returns(boolean);
                 category(Filesystem);
                 fallible;
-            ) -> Validates a Markdown document against its declared schema.
+            ) -> Reads a Markdown document and validates its frontmatter against its declared schema. Returns false for validation failures and true when no schema is declared. File-loading and schema-processing failures are errors.
         - |-
             function(
                 parameters(file: file, obj: object);
                 returns(boolean);
                 category(Filesystem);
                 fallible;
-            ) -> Validates a Markdown document against its declared schema.
+            ) -> Merges obj into the page's frontmatter, then validates the combined frontmatter against its schema.
     is_indexed_file: |-
         function(
             parameters(file: file);
@@ -549,7 +574,7 @@ types:
             returns(string);
             category(Filesystem);
             fallible;
-        ) -> Joins two path strings with normalized separators.
+        ) -> Joins local path strings with normalized separators; HTTP(S) arguments are invalid.
     link:
         - |-
             function(
@@ -567,78 +592,72 @@ types:
             ) -> Creates a Markdown link to a local file or HTTP(S) URL with the given link text.
     has_command: |-
         function(
-            parameters(cmd: string);
+            parameters(cmd: any);
             returns(boolean);
             category(Filesystem);
-        ) -> Returns true when the command is found on PATH or is an existing executable absolute path.
+        ) -> Tests whether a string names a command on PATH or an executable absolute path; other values return false.
     has_skill: |-
         function(
             parameters(name: string);
             returns(boolean);
             category(Context);
+            fallible;
         ) -> Returns true when a skill directory exists in a user-scoped or local-scoped skill root.
     has_local_skill: |-
         function(
             parameters(name: string);
             returns(boolean);
             category(Context);
+            fallible;
         ) -> Returns true when a skill directory exists in a local-scoped skill root.
     as_line_separated: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
-        ) -> Joins a list into a newline-separated string, one element per line.
+        ) -> Joins the rendered array elements with newlines. Null elements render as empty text.
     as_csv: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
-        ) -> Joins a list into a comma-separated string.
+        ) -> Joins rendered array elements with a comma and space, without CSV escaping.
     as_tsv: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
-        ) -> Joins a list into a tab-separated string.
+        ) -> Joins rendered array elements with tabs, without escaping tabs or newlines.
     as_space_separated: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
-        ) -> Joins a list into a space-separated string.
+        ) -> Joins the rendered array elements with spaces. Null elements render as empty text.
     as_unordered_list: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
         ) -> Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists.
     as_ordered_list: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
         ) -> Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists.
     as_json: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
-        ) -> Renders a list as compact JSON — the explicit spelling of how a bare array renders in text. An empty list renders as `[]`.
+        ) -> Serializes the array as compact JSON.
     as_json5: |-
         function(
             parameters(list: any[]);
             returns(string);
             category(List Formatting);
-            fallible;
-        ) -> Renders a list as compact single-line JSON5, with single-quoted strings and unquoted object keys where they are valid identifiers. An empty list renders as `[]`.
+        ) -> Serializes the array as single-line JSON5 with single-quoted strings and unquoted identifier keys.
     predict_conflicts: |-
         function(
             parameters(branch: string);
@@ -649,7 +668,7 @@ types:
     branch_exists_on_remote:
         - |-
             function(
-                parameters();
+                parameters(void);
                 returns(boolean);
                 category(Git);
                 fallible;
@@ -670,18 +689,18 @@ types:
             ) -> Returns whether an exact branch exists in the named remote's live ref advertisement or authoritative provider API.
     remote_vendor: |-
         function(
-            parameters(remote: string(optional));
+            parameters(remote?: string);
             returns(enum("", github, gitlab, gitea, forgejo, bitbucket, azure_devops, aws_code_commit, source_hut));
             category(Git);
             fallible;
-        ) -> Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted.
+        ) -> Returns the configured remote's provider token, or an empty string if unknown. Omission selects the preferred remote; permitted discovery may probe ambiguous servers.
     pr: |-
         function(
-            parameters(id: any);
+            parameters(id: number(integer; min(1)) | string(min-length(1)));
             returns(string);
             category(Devops);
             fallible;
-        ) -> Returns one provider pull or merge request in canonical Markdown form.
+        ) -> Fetches a pull or merge request by positive number, decimal identifier text, or canonical HTTP(S) request URL, and renders Markdown.
     pr_list:
         - |-
             function(
@@ -692,30 +711,126 @@ types:
             ) -> Queries pull or merge requests with the canonical bounded filter vocabulary. See the Darkmatter provider query vocabulary for keys, enum values, defaults, and bounds.
         - |-
             function(
-                parameters(count: number(integer));
+                parameters(count: number(integer; min(1); max(100)));
                 returns(string[]);
                 category(Devops);
                 fallible;
             ) -> Returns the newest `count` open pull or merge requests.
     cicd: |-
         function(
-            parameters(id: any);
+            parameters(id: number(integer; min(1)) | string(min-length(1)));
             returns(string);
             category(CI/CD);
             fallible;
-        ) -> Returns one provider-addressable CI/CD job in canonical Markdown form.
+        ) -> Fetches a CI/CD job by positive number or nonempty, nonzero provider identifier, and renders Markdown.
     cicd_list:
         - |-
             function(
                 parameters(query: object);
                 returns(string[]);
-                category(Devops);
+                category(CI/CD);
                 fallible;
             ) -> Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the Darkmatter provider query vocabulary for keys, enum values, defaults, and bounds.
         - |-
             function(
-                parameters(count: number(integer));
+                parameters(count: number(integer; min(1); max(100)));
                 returns(string[]);
-                category(Devops);
+                category(CI/CD);
                 fallible;
             ) -> Returns the newest `count` CI/CD jobs of any status.
+    is_file_type: |-
+        function(
+            parameters(value: any);
+            returns(boolean);
+            category(Type Predicates);
+        ) -> Tests whether the original value is a structurally valid file reference, without resolving it or checking existence.
+    has_binary: |-
+        function(
+            parameters(name_or_path: any);
+            returns(boolean);
+            category(Filesystem);
+        ) -> Tests whether a string names a command on PATH or an executable absolute path; other values return false.
+    has_alias: |-
+        function(
+            parameters(name: any);
+            returns(boolean);
+            category(Shell);
+        ) -> Tests whether a string names a login-shell alias. Other values and probe failures return false.
+    has_builtin_function: |-
+        function(
+            parameters(name: any);
+            returns(boolean);
+            category(Shell);
+        ) -> Tests whether a string names a shell builtin or PowerShell cmdlet. Other values and probe failures return false.
+    has_user_function: |-
+        function(
+            parameters(name: any);
+            returns(boolean);
+            category(Shell);
+        ) -> Tests whether a string names a login-shell user function. Other values and probe failures return false.
+    can_execute: |-
+        function(
+            parameters(name: any);
+            returns(boolean);
+            category(Shell);
+        ) -> Tests whether a string names a binary, alias, builtin, or user function, without executing the named command.
+    has_agentic_cli: |-
+        function(
+            parameters(agent: agentic-cli);
+            returns(boolean);
+            category(Agentic CLIs);
+        ) -> Tests whether the named supported agentic CLI is installed on the captured PATH.
+    package_area: |-
+        function(
+            parameters(where: file);
+            returns(string);
+            category(Repository);
+            fallible;
+        ) -> Returns the package area containing a local path in the captured repository, or an empty string for no match.
+    package: |-
+        function(
+            parameters(where: file);
+            returns(string);
+            category(Repository);
+            fallible;
+        ) -> Returns the package containing a local path in the captured repository, or an empty string for no match.
+    recent_commits: |-
+        function(
+            parameters(count: number(integer; min(1); max(9007199254740991)));
+            returns(string[]);
+            category(Git);
+            fallible;
+        ) -> Reads recent repository history at call time and returns up to count formatted commit entries; returns an empty array outside a repository.
+    ipv4: |-
+        function(
+            parameters(filter?: string);
+            returns(string[]);
+            category(Network);
+        ) -> Returns captured IPv4 addresses. A CIDR selects its network; otherwise a substring filters the default set, excluding loopback and link-local addresses.
+    ipv6: |-
+        function(
+            parameters(filter?: string);
+            returns(string[]);
+            category(Network);
+        ) -> Returns captured IPv6 addresses with scope suffixes, using the same CIDR or substring filtering as ipv4.
+    ping: |-
+        function(
+            parameters(address: ip-address, timeout?: number);
+            returns(boolean | null);
+            category(Network);
+            fallible;
+        ) -> Sends one ICMP echo with a timeout in milliseconds (default 100). Returns null with a warning when access is denied, otherwise whether a reply arrived in time.
+    ping_under: |-
+        function(
+            parameters(address: ip-address, timeout: number, attempts?: number(integer; min(1); max(100)));
+            returns(boolean | literal("unstable") | null);
+            category(Network);
+            fallible;
+        ) -> Sends sequential ICMP echoes (default 3). Returns true if all reply in time, false if none do, "unstable" otherwise, or null with a warning when access is denied.
+    as_markdown: |-
+        function(
+            parameters(content: string);
+            returns(string);
+            category(Composition);
+            fallible;
+        ) -> Composes Markdown within the root request, preserving its context, base directory, access policy, and recursion budget.

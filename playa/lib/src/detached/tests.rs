@@ -635,24 +635,3 @@ fn missing_executable_identity_is_quarantined() {
         "journal must not carry path text: {journal}"
     );
 }
-
-#[cfg(unix)]
-#[test]
-fn detached_process_uses_a_new_process_group() {
-    let mut command = Command::new("sh");
-    command
-        .args(["-c", "printf '%s %s' \"$$\" \"$(ps -o pgid= -p $$ | tr -d ' ')\""])
-        .stdout(Stdio::piped());
-    configure_detached_child(&mut command);
-    let output = command.output().expect("process-group fixture should run");
-    assert!(output.status.success());
-    let ids = String::from_utf8(output.stdout).expect("fixture output should be UTF-8");
-    let mut ids = ids.split_whitespace();
-    assert_eq!(ids.next(), ids.next(), "child PID should equal its new PGID");
-}
-
-#[cfg(windows)]
-#[test]
-fn detached_process_combines_all_required_windows_flags() {
-    assert_eq!(detached_creation_flags(), 0x0800_0208);
-}

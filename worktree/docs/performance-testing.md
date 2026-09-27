@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-7b04bc36d9aed8f0
-last_updated: 2026-08-12
+hash: ef46db3751d8e999-69c75fec331d48c4
+last_updated: 2026-09-26
 ---
 
 # Performance Testing — Worktree
@@ -12,7 +12,7 @@ This document defines the worktree-owned performance surfaces for `wt list` and 
 The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktree.rs), which produces the status table.
 
 - It runs `git worktree list --porcelain`, resolves the default branch once, and reads every branch tip with one `git for-each-ref refs/heads refs/remotes`.
-- The caption compares the local default branch with `origin/<default>` (cached like any other pair). Its counts also choose the default-branch target, so a warm run makes no `merge-base` call.
+- The caption compares the local default branch with its local tracking ref `origin/<default>` (cached like any other pair) and records the tracking tip it read. Its counts also choose the default-branch target, so a warm run makes no `merge-base` call. The library listing path never touches the network.
 - Per-worktree `git status --porcelain` and per-branch comparisons (`git rev-list --left-right --count` plus a speculative `git merge-tree --write-tree`, against the target and, for a branch whose fork parent is another branch, against the parent) are dispatched in parallel via `std::thread::scope`.
 - `git status` is passed `-c core.untrackedCache=true`; benchmarks assume a warm untracked-cache so the measurement reflects steady-state behavior rather than the first cold walk.
 - The intended Criterion surface benchmarks `list_worktrees()` end-to-end in the `rusty-biscuit` monorepo, using the Phase 1 `count-git` recorder to assert subprocess counts in addition to wall-clock time.
@@ -29,9 +29,19 @@ The second owned cost center is graph data collection in [`worktree/cli/src/comm
 
 `wt list` makes one repository-wide open-PR request on its own thread, beside the git work ([`pull_requests.rs`](../lib/src/pull_requests.rs)).
 
-- Stored results younger than 60 s are used without a request (and without the `git remote get-url` call).
-- Otherwise the request has a 300 ms deadline. On failure or timeout the stored results are shown with their age; a failure is never stored.
-- The `--perf` stage is `pr gather`. It never adds to `list gather`, and it bounds how long the table can wait for the network.
+- Every stored answer is bound to a digest of the exact `git remote get-url origin` value, so every run pays that one git call, a cache hit included, before it may show stored badges.
+- A matching answer younger than 60 s is used as is. An older one is still shown at once, with its age, and `wt list` starts a detached `wt internal-refresh <main checkout>` worker and never waits for it. The worker holds a lock beside the store from its freshness recheck to publication, so concurrent workers make at most one request, and its answer is shown by the next run.
+- Only a miss (no store, another or no `origin`, an older format, a corrupt file, or a future fetch time) makes the request in the foreground, under a 300 ms deadline. A failure is never stored.
+- The `--perf` stage is `pr gather`: the origin lookup and, on a miss, the request. It never adds to `list gather`, and it bounds how long the table can wait for the network.
+
+## Live Remote Head
+
+The caption's remote observation is read from a store, never requested by `wt list` ([`remote_head.rs`](../lib/src/remote_head.rs)).
+
+- `<repo hash>.remote-head.json` sits beside the PR store and holds `{ origin_digest, branch, sha, checked_at }` for `origin`'s default branch; `sha: null` is a verified absence. An answer for another `origin` or default branch, a future `checked_at`, or an unreadable file is a miss.
+- The only request is `git ls-remote origin refs/heads/<default>` in the background worker, under a 10 s deadline, with credential prompts disabled and the whole process tree killed at the deadline ([`live_remote.rs`](../lib/src/live_remote.rs)). Only complete output without the exact ref is stored as an absence; a failure, deadline, or malformed line leaves the previous bytes untouched.
+- Listing makes one launch decision after any foreground PR request has settled: one `wt internal-refresh <main checkout>` when the PR answer is stale, or when there is an `origin` and the live-head answer is missing or at least 60 s old. A PR miss alone launches nothing. The worker runs its PR half and its live-head half on two threads, each with its own lock (`<repo hash>.prs.lock`, `<repo hash>.remote-head.lock`), freshness recheck, and publication, so neither delays or suppresses the other.
+- The `--perf` stage is `remote select`: the live-head store read and the launch. `perf_pr_request::perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh` asserts every sample stays under 300 ms while the worker's `ls-remote` is held by a loopback origin, and `list_prs::a_missing_or_stale_live_head_never_holds_up_the_listing` proves the captured `wt list` returns while that request is still held.
 
 ## Ahead/Behind + Merge Result Cache
 
@@ -146,6 +156,37 @@ Re-measured on 2026-09-25 after the list redesign (`2026-09-24-ux-improvements`)
 | PR request stalled until its 300 ms deadline: warm `list gather`, full `wt list` | `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` | 11.6 ms / 359.7 ms | 120 ms / 1 s |
 
 In the stalled case every run's `pr gather` stage was 309–317 ms, and the test asserts it is at least the deadline, which proves the request was made and waited for. A fresh store making no request is an L1 behavior test (`tests/list_prs.rs`), not a timing gate. The Criterion `list_status/warm` bench measured 79 ms per `list_worktrees()` on the ambient `rusty-biscuit` checkout.
+
+Re-measured on 2026-09-26 after stale answers stopped waiting for a request (`2026-09-25-list-remove-performance`), same fixture, on the macOS development host, with `just -d worktree test-perf` run on its own:
+
+| Surface | Test | Achieved best-of-5 | Asserted bound |
+| --- | --- | ---: | ---: |
+| Warm-cache `list gather` | `perf_cache_warm_list_gather_meets_sla` | 12.5 ms | 120 ms |
+| Cold-cache `list gather` | `perf_cache_cold_list_gather_meets_sla` | 25.3 ms | 300 ms |
+| Mixed fixture, non-image full `wt list` | `perf_full_command_non_image_meets_sla` | 63.0 ms | 1 s |
+| Network down (connection refused): cold / warm `list gather`, full `wt list` | `perf_list_meets_sla_with_the_network_down` | 25.8 ms / 12.8 ms / 63.5 ms | 300 ms / 120 ms / 1 s |
+| No stored answer, request stalled until its 300 ms deadline: warm `list gather`, full `wt list` | `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` | 12.7 ms / 366.2 ms | 120 ms / 1 s |
+| Stale matching answer, refresh blocked: full `wt list`; every sample's `pr gather` | `perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh` | 62.4 ms; 6.7–11.0 ms | 1 s; under 300 ms |
+
+- **The stalled case is now the miss path.** It seeds no store, so its request is a foreground one; `pr gather` was 310–326 ms.
+- **The stale gate** points `origin` at a hanging local proxy and seeds a 12-minute-old matching answer for every sample, then checks that the store is still stale afterwards, so a worker that succeeded cannot turn it into a fresh-cache measurement. Each sample must show the stored badge and `PRs as of 12 min ago`.
+- **Timing alone cannot prove the parent does not wait.** A 1 s ceiling would still pass a reintroduced 300 ms wait, so the gate also asserts every sample's `pr gather` stays under the request deadline. The L1 tests in `tests/list_prs.rs` prove it deterministically: `a_stale_store_shows_its_badges_at_once_and_a_detached_worker_makes_the_request` and `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` capture `wt list`'s output, which returns only once every holder of its pipes has exited, while the worker's request is still held unanswered and its lock still taken.
+- **Fresh and stale cost the same.** The same run measured a fresh answer at 63.3 ms full command and 6.9 ms `pr gather`, and the stale answer at 62.4 ms. The `pr gather` time is the added `git remote get-url origin` call that binds the stored answer to `origin`; before this change a fresh answer's `pr gather` took 0.03 ms. The spec's measurement before the change was 338 ms for a stale answer against 83 ms fresh on the ambient checkout.
+
+## `git status` Cost (Investigated, Not Changed)
+
+`wt list` runs one default `git status` per worktree, in parallel. On the ambient `rusty-biscuit` checkout (13,013 tracked files, APFS, 2026-09-25) each took about 30 ms of wall time but about 0.22 s of system CPU:
+
+| `git status` variant | Wall time | System CPU |
+| --- | ---: | ---: |
+| `--untracked-files=all` (used by `wt remove`, which must list every file) | 80 ms | 0.25 s |
+| default, untracked folders collapsed (used by `wt list`) | 30 ms | 0.22 s |
+| `--untracked-files=no` | 20 ms | 0.19 s |
+| default, with `core.preloadIndex=false` | 150 ms | 0.09 s |
+
+- The system CPU is the kernel checking every tracked file for changes. `core.preloadIndex` spreads that over threads, roughly doubling the CPU to cut the wait; turning it off trades 0.13 s of CPU for 120 ms of wall time, the wrong trade for an interactive command.
+- Only a file-system watcher avoids checking every file. Git's own (`core.fsmonitor`) runs a daemon per worktree and exists only on macOS and Windows; on Linux it needs Watchman plus a hook.
+- Ruled 2026-09-25: no watcher and no daemon. The wall time is already small, and the status flags are unchanged.
 
 The warm gate also asserts that warm `list gather` is below a cold reference measured in the same run, proving the cache collapses the divergent-branch recompute rather than the host merely being fast. Bounds are looser than the ratified measurements so ordinary host variance does not fail CI, yet tight enough to catch regressions that reintroduce serial branch comparison, skip the cache, or let the cold-path speculative `merge-tree` blow the budget. Deterministic subprocess-count assertions for cache hit/miss behavior live in the recorder-backed unit tests.
 

@@ -1,5 +1,10 @@
 # Coercion Design
 
+> Historical consolidation input. The authoritative successor is
+> `2026-09-16-expression-type-system`, particularly its `function-contracts.md`
+> and `number-contract.md` annexes. Proposed or unresolved wording below records
+> the earlier design and does not override the consolidated contract.
+
 This is the proposed function-binding contract for
 `2026-09-21-schema-enhancements`. It replaces the preliminary design; it does
 not describe implemented behavior. The companion `current-state-coercion.md`
@@ -7,14 +12,27 @@ is the compatibility baseline. The function catalog in
 `claudine/docs/schemas/partials/functions.yaml` is a draft to reconcile with
 this contract, not an authority for preserving its current broad types.
 
+This design was consolidated into `2026-09-16-expression-type-system`.
+Its confirmed merge decisions override conflicting proposals here: shared
+argument conversion is adopted, ordinary functions reject null unless their
+purpose requires it, and `number` takes `numberlike` with its fallback retained.
+Unresolved policies below remain proposals, not author decisions.
+
+The settled authoritative catalog location is
+`darkmatter/schemas/partials/functions.yaml`; the current Claudine file is
+migration material. Keep the live embedded catalog operational until the new
+grammar is implemented, then update consumers and retire duplicate authority.
+
 The central rule is:
 
 > Declare the types the function needs. Darkmatter binds caller values to those
 > types using one shared, deterministic coercion layer. Invalid arguments never
 > reach the function implementation.
 
-Standard coercion is default-on. No strict modifier, per-function conversion
-matrix, or new coercion syntax is proposed for the first implementation.
+Standard coercion is default-on. No strict modifier or per-function legacy
+conversion matrix is proposed. The author-confirmed `length` exception (M11)
+rejects boolean source values before string conversion; preserve that exclusion
+in the shared compiled contract rather than implementing a separate binder.
 Inspecting functions such as `is_number(x: any)` already preserve their input:
 `any` accepts the original value without conversion.
 
@@ -25,9 +43,9 @@ binder, and passive compatibility APIs. DMLS and Claudine consume these public
 library surfaces; they must not reproduce the matrix or parse signatures into
 separate semantic models.
 
-This design covers function arguments, including nested parameter types. It
-does not change arithmetic operators, comparison operators, truthiness, or
-frontmatter presence/default semantics. Share primitive conversion code with
+This design covers function arguments, including nested parameter types. M15–M16 additionally standardize numeric representation, arithmetic, and
+numeric comparisons on `f64`. Truthiness, non-numeric operator behavior, and
+frontmatter presence/default semantics remain unchanged. Share primitive conversion code with
 frontmatter coercion, but audit the different binding policies explicitly.
 Existing frontmatter root unions use ordered selection, for example; function
 unions below do not. Sharing helpers must not silently change either policy.
@@ -129,8 +147,8 @@ Handlers receive validated, normalized arguments. A `BoundArgs` representation
 is sufficient initially, provided it retains omission, nullable values, union
 values, and nested structure. Accessors must not parse or coerce again.
 Descriptor/handler type mismatches are implementation defects, not caller
-`InvalidType` errors. Generated argument structs are optional later work; do
-not force every number through `f64` merely to simplify accessor design.
+`InvalidType` errors. Generated argument structs are optional later work; use `f64` for numeric values under M16; integer constraints do not select
+a different accessor or storage representation.
 
 ## Standard Conversion Rules
 
@@ -161,21 +179,30 @@ types `json` and `yaml` is the stated exception for containers and null.
 
 ### Numeric and Boolean Boundaries
 
-Use the existing schema numeric shape with ASCII digits:
-`^-?[0-9]+(\.[0-9]+)?$`. This accepts `"4"`, `"04"`, `"-3.5"`, and `"4.0"`.
-It rejects `"+4"`, `"1e3"`, `".5"`, `"5."`, whitespace, separators, `NaN`, and
-infinity. Native JSON numbers are not subject to a string-spelling rule.
+M13 requires one canonical library function for numeric-string parsing, shared
+by coercion, `numberlike` consumers, and passive concrete-value checks. It owns
+spelling, finite-range validation, and typed errors; its numeric result is
+`f64` under M16. Reuse parsed results rather than duplicating parsing.
 
-Check integrality on the parsed numeric value: `"4.0"` can bind to
-`number(integer)`; `"4.2"` cannot. Never truncate, round, saturate, or use a
-fallback during argument conversion. Preserve native integer storage and parse
-integer-shaped strings through integer paths where representable. Reject
-integer overflow rather than silently switching to an imprecise float.
-Fractional forms follow Darkmatter's JSON-number precision policy; reject
-non-finite results and underflow to zero for a nonzero input. Before rollout,
-freeze fixtures for numeric range, large integral decimals, precision, and
-signed zero so both schema and function paths have the same documented limits.
-This proposal does not promise arbitrary-precision decimal arithmetic.
+Use ASCII decimal spelling `^-?[0-9]+(\.[0-9]+)?$`: `"4"`, `"04"`, `"-3.5"`,
+and `"4.0"` are accepted; `"+4"`, `"1e3"`, `".5"`, `"5."`, whitespace,
+separators, `NaN`, and infinity are not. Native numbers have no text-spelling
+restriction. Both sources use finite `f64` values and normal floating-point
+rounding, including underflow to zero; no separate exact decimal model is added.
+
+Integer constraints test the represented value: it must have no fractional
+part and be mathematically at most `u64::MAX`. Check the upper bound using
+`value < 2^64`, since casting `u64::MAX` to `f64` rounds it upward. Negative
+whole values remain allowed unless explicitly constrained. The decimal spelling
+of `u64::MAX` rounds to `2^64` and therefore fails this integer constraint but
+remains a valid unconstrained number. Never clamp or truncate to pass a
+constraint. Only declared explicit conversion recovery selects a fallback.
+
+Numeric presentation omits a redundant decimal suffix (`4.0` becomes `4`),
+preserves the represented value, and never narrows through an integer cast.
+Ordinary strings remain unchanged. Numeric arithmetic and comparisons use
+`f64`; non-finite arithmetic results error. Detailed acceptance cases are in
+the consolidated number contract.
 
 The six boolean spellings above deliberately pin the documented schema matrix.
 Do not infer arbitrary mixed-case acceptance from prose describing `boolish`
@@ -336,20 +363,28 @@ conversion. These are the justified exceptions to conversion-free handlers:
 |---|---|
 | `is_number`, `is_string`, `is_integer` | Accept `any`; inspect the original value. `is_number("4")` remains false. |
 | `is_positive`, `is_negative` | Propose `number`; the binder handles numeric strings. Booleans become invalid inputs under the standard matrix. |
-| `round` | Propose `number → number`; malformed inputs fail binding. The existing conversion fallback needs an explicit compatibility ruling. |
-| `number(value, fallback?)` | Accept `any` for the conversion subject and `number` for a supplied fallback. Conversion is the operation; reuse the shared value converter. |
-| `contains`, `length` | Declare their actual semantic input shapes, including `any` if every JSON shape has intended behavior. Do not narrow solely for appearance. |
+| `round` | `round(x: numberlike, fallback?: number) → number`: use the same conversion/recovery as `number`, then round the selected value; halfway values round away from zero (M14). |
+| `number(value, fallback?)` | Accept `numberlike` for the conversion subject and `number` for a supplied fallback. Retain the fallback; M12–M13 define recovery from any unsuccessful subject conversion and an error when fallback is omitted. Conversion is the operation; reuse the shared value converter. |
+| `contains` | Preserve text-based substring/element/value comparison (M10); the needle accepts `any` unchanged. |
+| `length` | Accept string, number, array, or object; reject booleans before shared string conversion (M11), and null under M2. |
 | List renderers | Accept `any[]` when rendering heterogeneous elements is the operation; rendering is not argument coercion. |
 | `ensure_leading`, `ensure_trailing` | Retain a string/number union if type-preserving concatenation remains intended behavior. |
 | Provider identifiers | Declare meaningful numeric/string alternatives and their passive constraints; contextual provider lookup remains domain logic. |
 
-For the proposed `number` operation, a failed conversion uses a valid supplied
-fallback; without one it returns a domain error. A malformed supplied fallback
-fails binding even if the primary value would convert. This removes the current
-silent-zero behavior and must be called out as a compatibility change. Mark a
-single signature with an optional fallback `fallible` because some valid calls
-can fail; use separate arity overloads only if precise per-overload fallibility
-is useful.
+M12 specifies that `number` uses a valid supplied fallback whenever its input
+cannot be used as a number. That includes malformed text, unsupported values,
+and representability failures. M7 still places numeric conversion and its
+errors in the shared coercion layer; explicit conversion recovery handles
+that result before invocation instead of passing an invalid value to the
+handler. The shared compiled contract must retain this recovery behavior so
+DMLS and runtime agree; the parameter type alone is insufficient. Ordinary
+functions do not gain this recovery policy. A supplied fallback is independently
+validated even when the subject converts. Missing the required subject is an
+arity error. Under M13, failed conversion with no supplied fallback returns
+the coercion error, not zero or null. The canonical numeric-string parser is
+shared by this operation and ordinary argument coercion. Keep the optional
+fallback. The catalog's final fallibility audit must distinguish unsuccessful
+binding from operation errors; input rejection alone does not imply `fallible`.
 
 Null propagation is also domain behavior, not a global shortcut. If retained,
 declare nullable parameters and returns, bind all arguments, then apply the
@@ -358,6 +393,12 @@ type. This intentionally differs from implementations that return null before
 checking the remaining arguments.
 
 ## Public Compatibility API and DMLS
+
+The confirmed `validate_schema(file, obj)` operation merges `obj` into the
+page's frontmatter using existing explicit override semantics, then validates
+the combined page in memory. It neither ignores `obj` nor validates it in
+isolation. This is runtime file/schema work with the existing access policy,
+not something the passive compatibility API or DMLS executes.
 
 The spec's boolean type-to-type API needs a precise meaning. Knowing only that
 an input is `string` cannot prove whether it contains `"4"` or `"pear"`.
@@ -415,18 +456,36 @@ for example, unconstrained `string[] → number[]` is conditional, and even
 `object[] → number[]` can succeed for an empty array. Element incompatibility
 alone is insufficient to prove the entire array type impossible.
 
-DMLS should report a hard error only when the call is proven invalid, including
-known arity errors, bad literals, and definite ambiguity. Unknown frontmatter
-values and conditional coercions should not generate default error noise;
-hover or an optional hint can explain that runtime binding remains necessary.
+DMLS reports an error when the call is proven invalid, including known arity
+errors, bad literals, and definite ambiguity. Preserve the destination
+specification's existing distinction: a known concrete union including null
+passed to a non-null parameter produces a warning; a permissive `unknown` type
+does not produce a blanket warning. Uncertain conversion is not itself proof
+of an invalid call. Hover or an optional hint can explain that runtime binding
+remains necessary. The earlier wording about avoiding default error noise does
+not supersede the established nullable-input warning or the explicit advisory
+rules for `file_exists`.
 Analyze whole signatures for overloaded calls. Per-argument booleans cannot
 prove that one consistent overload accepts the call. When different possible
 inputs select different overloads, retain the union of possible returns and
 fallibility rather than choosing one prematurely.
 
+Declared successful return types participate in that same analysis. If a
+function declares `number | null`, passing its result to a non-null numeric
+parameter receives the existing nullable-input warning, unless control flow
+has ruled out null. DMLS uses the declaration without invoking the function.
+A handler returning a value outside its declared result type is the separate
+implementation-contract defect described above, not a new caller diagnostic
+policy. `fallible` describes a possible operation error; it does not add null
+to the declared successful return type.
+
 Type predicates require trusted narrowing metadata; `returns(boolean)` and a
-category label do not express a type guard. Start with library-owned predicate
-facts tied to registered functions. A successful coercion of a variable at a
+category label do not express a type guard. Built-ins and host extensions use
+the same declared true-result facts, as already confirmed by the destination
+specification. Darkmatter interprets those declarations and DMLS consumes them
+without execution; hosts do not provide custom analysis callbacks. A first
+implementation slice may exercise built-ins, but completion includes host
+facts. A successful coercion of a variable at a
 call site does not narrow or rewrite the original variable: binding converts
 the argument copy. Narrow only facts justified by control flow.
 
@@ -544,9 +603,8 @@ quirk as a permanent union or strict mode:
 2. Normalize grammar: `number(integer)`, `?:`, `parameters(void)`, YAML overload
    lists, and the agreed rest syntax. Replace accommodation-only `any`,
    `numberlike`, and `boolish` parameters with handler types.
-3. Resolve remaining contract decisions before moving the affected function:
-   null propagation, `round` defaults, explicit `number` failure behavior,
-   numeric limits, string refinement inheritance, and lazy evaluation.
+3. Apply the confirmed numeric limits and `number`/`round` recovery contracts.
+   Audit string refinement inheritance and preserve lazy evaluation.
 4. Compile descriptors and introduce shared primitive conversions, passive
    checking, and transactional binding. Keep frontmatter policy differences
    explicit and covered by existing behavior fixtures.
@@ -557,12 +615,13 @@ quirk as a permanent union or strict mode:
    compatibility APIs. Close the migration only when every provided function
    is accounted for.
 
-The draft already needs reconciliation: `min` is marked fallible for what may
-only be argument rejection; `length` mentions objects but omits them from its
-signature; old `string(optional)` forms coexist with `?:`; zero-argument calls
-use `parameters()`; and `round` advertises a fallback that conflicts with a
-narrow numeric subject. These are catalog/spec issues, not reasons for the
-binder to infer undocumented exceptions.
+The catalog revision addresses earlier discrepancies in `min` fallibility,
+`length`'s object input, optional-argument spelling, and zero-argument syntax.
+Those edits remain subject to semantic review; YAML validity and an unchanged
+inventory do not validate the proposed function grammar. Review every changed
+contract against source, including entries without `REVIEW` comments. The
+M12–M14 settle numeric conversion, recovery, and rounding. Do not infer
+additional undocumented binder exceptions.
 
 ## Acceptance Criteria
 

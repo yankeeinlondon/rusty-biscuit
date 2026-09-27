@@ -3,24 +3,32 @@
 //! Verifies that the status table and verbose commit section render correctly
 //! in a real terminal (tmux), both on a plain terminal and when the
 //! image-capable graph path is exercised. The design test checks the table's
-//! colors and emphasis cell by cell in a styled tmux capture. The graph as an
-//! image-capable terminal draws it is tested in `level2_graph_in_kitty.rs`.
+//! colors and emphasis cell by cell in a styled tmux capture, and the stale
+//! scene checks the dim PR age line beneath the legend. Two scenes resize the
+//! pane to exactly 99 and 100 columns to prove the counts' width gate on the
+//! terminal's own width, including a `-> parent` cell against a non-default
+//! parent. The graph as an image-capable terminal draws it is tested in
+//! `level2_graph_in_kitty.rs`.
 
+mod perf_support;
 mod styled_capture;
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
+use perf_support::{NoRequest, ProxyStub, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore, fork_origin_path};
-use worktree::pull_requests::pr_store_path;
+use worktree::pull_requests::{RefreshOutcome, pr_lock_path, pr_store_path, refresh, unix_now};
+use worktree::remote_head::{refresh_remote_head, remote_head_store_path};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -232,10 +240,11 @@ fn level2_list_verbose_renders_with_graph_path_active() {
 /// the only signal `wt` reads before falling back to the host's appearance.
 const DARK_ROW_HIGHLIGHT: Color = Color::Rgb(38, 42, 54);
 const LIGHT_ROW_HIGHLIGHT: Color = Color::Rgb(234, 238, 246);
-/// Dirty dots and the conflict connector (`<orange>`, `<yellow>`, `<red>`).
-const ORANGE: Color = Color::Rgb(255, 165, 0);
+/// Dirty dots, the conflict connector, and the counts (`<yellow>`, `<red>`,
+/// `<green>`). Source dots, `conflicts`, and `-N` share the basic red.
 const YELLOW: Color = Color::Indexed(3);
 const RED: Color = Color::Indexed(1);
+const GREEN: Color = Color::Indexed(2);
 /// A clean child's connector (`<gray-500>`).
 const GRAY: Color = Color::Rgb(106, 114, 130);
 /// Badge backgrounds: local branch, remote branch, and PR.
@@ -250,8 +259,10 @@ const BADGE_TEXT: Color = Color::Indexed(7);
 ///   ahead, so the caption and target header carry badges of both kinds.
 /// - `wt-clash` (`clash`) conflicts with `main` (red connector).
 /// - `wt-docs` (`docs-work`) holds an uncommitted Markdown file (yellow dot).
-/// - `wt-feature` (`feature-test`) holds an uncommitted Rust file (orange
-///   dot), has an open PR in a fresh store, and is the current worktree.
+/// - `wt-feature` (`feature-test`) holds an uncommitted Rust file (red
+///   dot), has an open PR in the stored answer, and is the current worktree.
+///   Against `origin/main` it is one commit ahead and two behind, so its
+///   target cell carries both counts; `wt-docs` is only behind.
 ///
 /// All three branches have fork-origin records naming `main`, so they hang
 /// from it in the Branch column. The stores live under `home`, which the pane
@@ -259,11 +270,33 @@ const BADGE_TEXT: Color = Color::Indexed(7);
 struct DesignFixture {
     _parent: tempfile::TempDir,
     home: PathBuf,
+    main: PathBuf,
     feature: PathBuf,
 }
 
 impl DesignFixture {
+    /// A fixture whose stored PR answer was fetched just now.
     fn new() -> Self {
+        Self::with_pr_age(Duration::ZERO)
+    }
+
+    /// A fixture whose stored PR answer, bound to the current `origin`, was
+    /// fetched `pr_age` ago.
+    fn with_pr_age(pr_age: Duration) -> Self {
+        Self::build(pr_age, false)
+    }
+
+    /// [`Self::new`] plus `wt-child-work` (`child/long-descriptive-name`),
+    /// forked from `feature-test` and recorded with it as parent. It is one
+    /// commit ahead of `feature-test` and one behind, and its open PR #105
+    /// targets `feature-test`, so its `-> parent` cell carries counts and a
+    /// badge. The long branch name makes the table wider than 100 columns
+    /// once the counts show, so that cell wraps at exactly 100.
+    fn with_child() -> Self {
+        Self::build(Duration::ZERO, true)
+    }
+
+    fn build(pr_age: Duration, with_child: bool) -> Self {
         let parent = tempfile::tempdir().expect("create parent temp dir");
         let home = parent.path().join("home");
         let main = parent.path().join("main-repo");
@@ -303,15 +336,26 @@ impl DesignFixture {
         fs::write(sibling("wt-feature").join("feature.txt"), "feature work\n").unwrap();
         run_git(&sibling("wt-feature"), &["add", "."]);
         run_git(&sibling("wt-feature"), &["commit", "-m", "add feature work"]);
+        if with_child {
+            let child = sibling("wt-child-work");
+            run_git(&main, &["worktree", "add", child.to_str().unwrap(), "-b", "child/long-descriptive-name", "feature-test"]);
+            fs::write(child.join("child.txt"), "child work\n").unwrap();
+            run_git(&child, &["add", "child.txt"]);
+            run_git(&child, &["commit", "-m", "add child work"]);
+            fs::write(sibling("wt-feature").join("more.txt"), "more feature work\n").unwrap();
+            run_git(&sibling("wt-feature"), &["add", "more.txt"]);
+            run_git(&sibling("wt-feature"), &["commit", "-m", "more feature work"]);
+        }
         fs::write(sibling("wt-feature").join("lib.rs"), "fn uncommitted() {}\n").unwrap();
         fs::write(sibling("wt-docs").join("notes.md"), "uncommitted notes\n").unwrap();
 
         let fixture = Self {
             home,
             feature: sibling("wt-feature"),
+            main,
             _parent: parent,
         };
-        fixture.seed_stores(&main);
+        fixture.seed_stores(pr_age, with_child);
         fixture
     }
 
@@ -332,7 +376,12 @@ impl DesignFixture {
         path
     }
 
-    fn seed_stores(&self, main: &std::path::Path) {
+    fn pr_store(&self) -> PathBuf {
+        self.store_path(pr_store_path(&self.main).expect("PR store path"))
+    }
+
+    fn seed_stores(&self, pr_age: Duration, with_child: bool) {
+        let main = self.main.as_path();
         let base_sha = String::from_utf8(
             Command::new("git").current_dir(main).args(["rev-parse", "HEAD~1"]).output().unwrap().stdout,
         )
@@ -344,29 +393,62 @@ impl DesignFixture {
             let origin = ForkOrigin { base_branch: "main".to_string(), base_sha: base_sha.clone(), created_at };
             store.insert(branch, origin);
         }
+        if with_child {
+            let feature_sha = String::from_utf8(
+                Command::new("git").current_dir(main).args(["rev-parse", "feature-test~1"]).output().unwrap().stdout,
+            )
+            .unwrap()
+            .trim()
+            .to_string();
+            let origin = ForkOrigin { base_branch: "feature-test".to_string(), base_sha: feature_sha, created_at: 4 };
+            store.insert("child/long-descriptive-name", origin);
+        }
         store
             .save_atomic(&self.store_path(fork_origin_path(main).expect("fork-origin path")))
             .expect("write fork-origin store");
 
-        // Fetched just now, so `wt` makes no request.
-        let now = worktree::pull_requests::unix_now();
-        let prs = serde_json::json!({
-            "format_version": 1,
-            "fetched_at": now,
-            "source_repo": "owner/repo",
-            "pull_requests": [{
-                "number": 99,
-                "url": "https://github.com/owner/repo/pull/99",
+        // Bound to this origin; a fresh answer makes `wt` send no request.
+        let fetched_at = unix_now() - pr_age.as_secs();
+        let origin = worktree::pull_requests::origin_url(main).expect("the fixture has an origin");
+        let pr = |number: u32, source: &str, target: &str| {
+            serde_json::json!({
+                "number": number,
+                "url": format!("https://github.com/owner/repo/pull/{number}"),
                 "source_repo": "owner/repo",
-                "source_branch": "feature-test",
-                "target_branch": "main",
-            }],
+                "source_branch": source,
+                "target_branch": target,
+            })
+        };
+        let mut pull_requests = vec![pr(99, "feature-test", "main")];
+        if with_child {
+            pull_requests.push(pr(105, "child/long-descriptive-name", "feature-test"));
+        }
+        let prs = serde_json::json!({
+            "format_version": 2,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
+            "fetched_at": fetched_at,
+            "source_repo": "owner/repo",
+            "pull_requests": pull_requests,
         });
-        fs::write(
-            self.store_path(pr_store_path(main).expect("PR store path")),
-            serde_json::to_vec(&prs).unwrap(),
+        fs::write(self.pr_store(), serde_json::to_vec(&prs).unwrap()).expect("write PR store");
+
+        // A live head matching `origin/main`, checked just now, so `wt` starts
+        // no worker for the live head alone.
+        let tracking_tip = String::from_utf8(
+            Command::new("git").current_dir(main).args(["rev-parse", "origin/main"]).output().unwrap().stdout,
         )
-        .expect("write PR store");
+        .unwrap()
+        .trim()
+        .to_string();
+        let head = serde_json::json!({
+            "format_version": 1,
+            "origin_digest": worktree::pull_requests::origin_digest(&origin),
+            "branch": "main",
+            "sha": tracking_tip,
+            "checked_at": unix_now(),
+        });
+        let head_store = self.store_path(remote_head_store_path(main).expect("remote-head store path"));
+        fs::write(head_store, serde_json::to_vec(&head).unwrap()).expect("write remote-head store");
     }
 
     /// Runs `wt list` in the feature worktree with `COLORFGBG` set, and
@@ -376,31 +458,59 @@ impl DesignFixture {
     /// reliably empty a tmux pane, so a reused pane can still show an earlier
     /// run's legend and satisfy this run's wait.
     fn list_in(&self, colorfgbg: &str) -> StyledScreen {
+        // A refused proxy keeps any request off the network; the fresh store
+        // means none is made.
+        self.list_until("list", colorfgbg, "http://127.0.0.1:9", "parent deleted")
+    }
+
+    /// [`Self::list_in`] running `wt {args}` with every request sent to
+    /// `proxy`, returning the pane once it shows `ready`.
+    fn list_until(&self, args: &str, colorfgbg: &str, proxy: &str, ready: &str) -> StyledScreen {
+        self.list_in_pane(None, args, colorfgbg, proxy, ready)
+    }
+
+    /// `wt list` in a pane resized to exactly `cols` columns.
+    fn list_at(&self, cols: u32) -> StyledScreen {
+        self.list_in_pane(Some(cols), "list", "15;0", "http://127.0.0.1:9", "parent deleted")
+    }
+
+    /// Runs `wt {args}` in a fresh pane, `cols` wide when given. Without
+    /// `cols` the pane keeps its spawn width, which must be at least 100
+    /// because the counts in the comparison cells show only from there.
+    fn list_in_pane(&self, cols: Option<u32>, args: &str, colorfgbg: &str, proxy: &str, ready: &str) -> StyledScreen {
         let mut harness = TmuxHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
         let harness = &mut harness;
+        match cols {
+            Some(cols) => {
+                harness.resize(cols, 40).expect("resize the pane");
+                assert_eq!(harness.pane_cols().expect("pane width"), cols, "the pane took the requested width");
+            }
+            None => {
+                let cols = harness.pane_cols().expect("pane width");
+                assert!(cols >= 100, "the pane is {cols} columns; the counts need at least 100");
+            }
+        }
         let bin = cargo_bin("wt").display().to_string();
         let home = self.home.display().to_string();
         let cache = self.home.join("cache").display().to_string();
         harness
             .send_text(format!("cd '{}'\n", self.feature.display()).as_bytes())
             .expect("send cd failed");
-        // A refused proxy keeps any request off the network; the fresh store
-        // means none is made.
         harness
             .send_command_with_env(
-                &format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN {bin} list"),
+                &format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN {bin} {args}"),
                 &[
                     ("HOME", &home),
                     ("XDG_CACHE_HOME", &cache),
-                    ("HTTPS_PROXY", "http://127.0.0.1:9"),
+                    ("HTTPS_PROXY", proxy),
                     ("FORCE_COLOR", "1"),
                     ("COLORFGBG", colorfgbg),
                 ],
             )
             .expect("send wt list failed");
 
-        StyledScreen::parse(&wait_for_pane(harness, |plain| plain.contains("parent deleted")).raw)
+        StyledScreen::parse(&wait_for_pane(harness, |plain| plain.contains(ready)).raw)
     }
 }
 
@@ -432,8 +542,17 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     let plain = screen.plain();
 
     // Caption: the local and remote badges around a yellow count.
-    let caption = screen.row_with(&["main", "is", "behind", "origin/main"]);
-    assert_eq!(screen.text(caption).trim(), "main  is 1 commit behind  origin/main", "{plain}");
+    let caption = screen.row_with(&["main", "is", "behind", "local tracking ref"]);
+    assert!(
+        screen.text(caption).trim().starts_with("main  is 1 commit behind local tracking ref  origin/main ."),
+        "{plain}"
+    );
+    // The observation follows in the same paragraph, word-wrapped to the pane.
+    let unwrapped = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        unwrapped.contains("origin/main . origin/main matched the remote when checked less than 1 min ago."),
+        "{plain}"
+    );
     screen.assert_span(caption, " main ", "a local badge", |s| s.bg_is(LOCAL_BADGE) && s.fg_is(BADGE_TEXT));
     screen.assert_span(caption, " origin/main ", "a remote badge", |s| {
         s.bg_is(REMOTE_BADGE) && s.fg_is(BADGE_TEXT)
@@ -462,11 +581,11 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     }
     let [clash, docs, feature] = [base + 1, base + 2, base + 3];
 
-    // Worktree column: dim ring, yellow and orange dots, bold current name.
+    // Worktree column: dim ring, yellow and red dots, bold current name.
     screen.assert_span(base, "○", "dim", |s| s.dim);
     screen.assert_span(base, "base repo", "dim italic", |s| s.dim && s.italic);
     screen.assert_span(docs, "●", "yellow", |s| s.fg_is(YELLOW));
-    screen.assert_span(feature, "●", "orange", |s| s.fg_is(ORANGE));
+    screen.assert_span(feature, "●", "red", |s| s.fg_is(RED));
     screen.assert_span(feature, "wt-feature", "bold", |s| s.bold);
     screen.assert_span(docs, "wt-docs", "not bold", |s| !s.bold);
 
@@ -480,6 +599,22 @@ fn level2_list_styles_follow_the_design_in_tmux() {
 
     // The PR badge.
     screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+
+    // Counts: `+N` dim green and `-N` dim red after the state word, and before
+    // the PR badge.
+    let feature_text = screen.text(feature);
+    let cells: Vec<&str> = feature_text.split('│').map(str::trim).collect();
+    assert_eq!(cells[3], "clean +1 -2  PR #99", "{feature_text:?}\n{plain}");
+    screen.assert_span(feature, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(feature, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    // Behind only: the zero side is omitted.
+    screen.assert_span(docs, "clean -2 ", "", |_| true);
+    assert!(!screen.text(docs).contains('+'), "{:?}", screen.text(docs));
+    screen.assert_span(docs, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    screen.assert_span(clash, "conflicts +1 -2", "", |_| true);
+    screen.assert_span(clash, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(clash, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    screen.assert_span(clash, "conflicts", "red, not dim", |s| s.fg_is(RED) && !s.dim);
 
     // Row emphasis: every cell of the current row between the borders, and
     // no other row.
@@ -501,11 +636,22 @@ fn level2_list_styles_follow_the_design_in_tmux() {
         );
     }
 
-    // Legend: both dots, and the red conflict connector.
+    // Legend: the dim ring, both dots, and the Branch connectors.
     let legend = screen.row_with(&["Worktree", "uncommitted source files"]);
     screen.assert_span(legend, "○", "dim", |s| s.dim);
+    assert!(!plain.contains("PRs as of"), "a fresh answer has no age line:\n{plain}");
     let dots: Vec<_> = screen.rows[legend].iter().filter(|c| c.ch == '●').collect();
-    assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(ORANGE), "{dots:?}");
+    assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(RED), "{dots:?}");
+    let branch_legend = screen.row_with(&["Branch", "conflicts with parent"]);
+    let connectors: Vec<_> = screen.rows[branch_legend].iter().filter(|c| matches!(c.ch, '└' | '├')).collect();
+    assert!(
+        connectors.len() == 3
+            && connectors.iter().all(|c| c.ch == '└')
+            && connectors[0].style.fg_is(GRAY)
+            && connectors[1].style.fg_is(RED)
+            && connectors[2].style.dim,
+        "{connectors:?}"
+    );
 
     // A light background switches the highlight to its light variant.
     let light = fixture.list_in("0;15");
@@ -513,4 +659,160 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     light.assert_span(feature, "wt-feature", "on the light highlight", |s| {
         s.bold && s.bg_is(LIGHT_ROW_HIGHLIGHT)
     });
+}
+
+/// `-w` sizes only the graph: a narrow `-w` in a pane of at least 100 columns
+/// keeps the counts, because the gate reads the terminal's own width.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_width_flag_leaves_the_counts_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::new();
+    let screen = fixture.list_until("list -w 40", "15;0", "http://127.0.0.1:9", "parent deleted");
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    let feature_text = screen.text(feature);
+    let cells: Vec<&str> = feature_text.split('│').map(str::trim).collect();
+    assert_eq!(cells[3], "clean +1 -2  PR #99", "{feature_text:?}\n{plain}");
+    screen.assert_span(feature, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+}
+
+/// A stale stored answer in a real terminal: its badge still shows, and the
+/// dim age line follows the legend. The detached refresh `wt list` starts
+/// sends its request to a hanging local proxy, which the test then closes so
+/// the worker fails, stores nothing, and exits before the fixture is removed.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_pr_age(Duration::from_secs(12 * 60 + 5));
+    let seeded = fs::read(fixture.pr_store()).expect("seeded store");
+    let proxy = ProxyStub::hanging();
+
+    let screen = fixture.list_until("list", "15;0", &proxy.url(), "PRs as of");
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE));
+
+    let legend_end = screen.row_with(&["Branch", "parent deleted"]);
+    let age = screen.row_with(&["PRs as of"]);
+    assert_eq!(age, legend_end + 1, "the age line follows the legend:\n{plain}");
+    assert_eq!(screen.text(age).trim(), "PRs as of 12 min ago", "{plain}");
+    screen.assert_span(age, "PRs as of 12 min ago", "dim", |s| s.dim);
+
+    // The worker's request reached the stub, not the network. Unblock it and
+    // wait until it released its lock and exited.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    assert!(proxy.wait_for_connections(1, Duration::from_secs(20)), "the worker never made its request");
+    let lock = pr_lock_path(&fixture.pr_store());
+    while !lock.exists() || probe_refresh(&fixture) == RefreshOutcome::Contended {
+        proxy.close_held();
+        assert!(Instant::now() < deadline, "the worker never released its lock");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
+    assert!(left.is_empty(), "the worker outlived its request: {left:?}");
+    assert_ne!(probe_head_refresh(&fixture), RefreshOutcome::Contended, "the live-head lock is free");
+    assert_eq!(proxy.connections(), 1, "one worker request, none in the foreground");
+    assert_eq!(fs::read(fixture.pr_store()).expect("store"), seeded, "a failed refresh is never stored");
+}
+
+/// A refresh that makes no request: `Contended` while a worker holds the lock.
+fn probe_refresh(fixture: &DesignFixture) -> RefreshOutcome {
+    refresh(&fixture.pr_store(), &fixture.main, unix_now, |_| Box::new(NoRequest))
+}
+
+/// [`probe_refresh`] for the live-head lock.
+fn probe_head_refresh(fixture: &DesignFixture) -> RefreshOutcome {
+    let store = fixture.store_path(remote_head_store_path(&fixture.main).expect("remote-head store path"));
+    refresh_remote_head(&store, &fixture.main, unix_now, &NoRequest)
+}
+
+
+/// The child row of [`DesignFixture::with_child`] and its cells split on the
+/// column rules; the Branch cell's guide is `└─`, so no extra `│` appears.
+fn child_row(screen: &StyledScreen) -> (usize, Vec<String>) {
+    let row = screen.row_with(&["○ wt-child-work", "│"]);
+    let cells = screen.text(row).split('│').map(|cell| cell.trim().to_string()).collect();
+    (row, cells)
+}
+
+/// A real 99-column pane keeps state words and PR badges in both comparison
+/// cells but shows no counts, and nothing in the table is dim green.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_hides_the_counts_in_a_99_column_pane() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_child();
+    let screen = fixture.list_at(99);
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    let feature_text = screen.text(feature);
+    let feature_cells: Vec<&str> = feature_text.split('│').map(str::trim).collect();
+    assert_eq!(feature_cells[3..5], ["clean  PR #99", "—"], "{feature_text:?}\n{plain}");
+    screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+
+    let (child, cells) = child_row(&screen);
+    assert_eq!(cells[3..5], ["clean", "clean  PR #105"], "{cells:?}\n{plain}");
+    screen.assert_span(child, " PR #105 ", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+    let parent_rule = screen.text(child).rfind('│').unwrap();
+    assert!(screen.text(child).find("PR #105").unwrap() < parent_rule, "the badge sits in -> parent\n{plain}");
+    // No row wraps: the row after the child's is the table's bottom border.
+    assert!(screen.text(child + 1).trim_start().starts_with('└'), "{plain}");
+
+    let top = screen.row_with(&["Worktree", "Branch", "->", "-> parent"]);
+    for row in top..=child {
+        let text = screen.text(row);
+        for token in ["+1", "+2", "-1", "-2"] {
+            assert!(!text.contains(token), "no {token} at 99 columns: {text:?}\n{plain}");
+        }
+        assert!(screen.rows[row].iter().all(|c| !c.style.fg_is(GREEN)), "no green at 99 columns: {text:?}");
+    }
+}
+
+/// A real 100-column pane shows the counts in both comparison cells, dim
+/// green and dim red, before the PR badge. The child's `-> parent` cell
+/// compares against its recorded parent `feature-test`, and at exactly 100
+/// columns its badge wraps: `PR` stays on the row and `#105` continues on
+/// the next line of the same cell, both on the badge background.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_shows_target_and_parent_counts_in_a_100_column_pane() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_child();
+    let screen = fixture.list_at(100);
+    let plain = screen.plain();
+
+    let feature = screen.row_with(&["● wt-feature", "│"]);
+    let feature_text = screen.text(feature);
+    let feature_cells: Vec<&str> = feature_text.split('│').map(str::trim).collect();
+    assert_eq!(feature_cells[3..5], ["clean +2 -2  PR #99", "—"], "{feature_text:?}\n{plain}");
+    screen.assert_span(feature, "+2", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(feature, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+
+    let (child, cells) = child_row(&screen);
+    assert_eq!(cells[3..5], ["clean +2 -2", "clean +1 -1  PR"], "{cells:?}\n{plain}");
+    // The first `+1` and `-1` on the row are the parent cell's.
+    screen.assert_span(child, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(child, "-1", "dim red", |s| s.dim && s.fg_is(RED));
+    screen.assert_span(child, "+2", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(child, " PR", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+    let text = screen.text(child);
+    assert!(text.find("-1").unwrap() < text.find(" PR").unwrap(), "counts precede the badge: {text:?}");
+
+    // The wrapped line: only the parent cell has content, and it is the rest
+    // of the badge.
+    let wrapped = screen.text(child + 1);
+    let wrapped_cells: Vec<&str> = wrapped.split('│').map(str::trim).collect();
+    assert_eq!(wrapped_cells[1..5], ["", "", "", "#105"], "{wrapped:?}\n{plain}");
+    screen.assert_span(child + 1, "#105", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+    assert!(screen.text(child + 2).trim_start().starts_with('└'), "{plain}");
 }

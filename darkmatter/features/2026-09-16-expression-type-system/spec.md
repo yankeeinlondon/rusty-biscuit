@@ -5,34 +5,50 @@ clarified: true
 needs_rulings: false
 clarified_by: codex/gpt-6-astra
 references:
+  function-contracts.md: >-
+    Consolidated tuple/function grammar, behavior metadata, shared binding,
+    overloads, passive compatibility, and implementation acceptance criteria.
+  number-contract.md: >-
+    f64 representation, numeric limits, conversion recovery, arithmetic, and display.
+  catalog-audit.md: >-
+    Source review, complete built-in inventory, intended changes, and verification limits.
+  merge-decisions.md: >-
+    Confirmed decisions applied while absorbing
+    2026-09-21-schema-enhancements.
   spikes/function-declarations-findings.md: >-
     Findings from the completed passive function-declaration representation
     prototype, including parser evidence, compatibility gaps, and limits.
   spikes/function-declarations.yaml: >-
-    Proposed function declarations illustrating separate call presence,
-    schema value types, and shared behavior metadata; syntax is not ratified.
+    Historical prototype illustrating separate call presence and value types;
+    superseded by function-contracts.md, not evidence of implemented grammar.
 supersedes:
-  - ../2026-07-15-type-system/spec.md
-  - ../2026-07-22-explicit-null/spec.md
+  - 2026-07-15-type-system
+  - 2026-07-22-explicit-null
+  - 2026-09-21-schema-enhancements
 ---
 
 # Expression Type System
 
-Chartered by the dasherized-identifiers feature's ratified "ship now +
-charter" split ([2026-09-15-dasherized-identifiers](../2026-09-15-dasherized-identifiers/spec.md),
-Resolved Decision 16). This clarified document combines a phased charter, confirmed requirements,
-and implementation-planning details; it is ready for planning. The
-2026-09-16 clarification session settled the three-way disposition of the
-earlier drafts (see [Lineage](#lineage)) and re-homed the July draft's
-design into the [declarations annex](declarations-design.md), which now carries the Phase C/E detail.
+Chartered by `2026-09-15-dasherized-identifiers`' ratified “ship now + charter”
+split (Resolved Decision 16). This document consolidates that charter with
+`2026-09-21-schema-enhancements`, favoring the newer schema design where it
+fits the confirmed decisions. Earlier July designs are retained in the
+[declarations annex](declarations-design.md).
 
 ## Status
 
-Clarification and risk review are complete; no human rulings remain. The
-phases below are a charter, not an implementation plan;
-Phase C/E design detail lives in the
-[declarations annex](declarations-design.md). Splitting into per-increment
-specs is deferred until the first increment is scheduled.
+Specification consolidation is complete and ready for review; runtime
+implementation remains pending. The [merge decisions](merge-decisions.md)
+record the author's settled behavior choices. The [function contracts
+annex](function-contracts.md) owns tuple/function grammar, shared binding, and
+passive DMLS compatibility. The [numeric contract](number-contract.md) owns
+`f64` representation and conversion. The [catalog audit](catalog-audit.md)
+records source evidence and deliberate changes.
+
+The phases below are a charter, not a completed implementation or a detailed
+implementation plan. Per-increment planning remains deferred until scheduling.
+No successful historical prototype or YAML structure check proves that the
+new grammar, checker, or runtime exists.
 
 ## Summary & Motivation
 
@@ -63,7 +79,7 @@ Consequences:
   Union machinery already exists at property and root level; the `null`
   keyword is the missing piece. Its specced core, absorbed from the
   superseded
-  [2026-07-22-explicit-null](../2026-07-22-explicit-null/spec.md) draft: an
+  `2026-07-22-explicit-null` draft: an
   explicit `null` property type, so an arm can declare a property as
   deliberately absent —
 
@@ -83,7 +99,11 @@ Consequences:
   unknown values or remove existing runtime checks.
 - **Phase B — function schemas in SimplifiedSchema.** Express the
   expression-engine function catalog's signatures in SimplifiedSchema,
-  unifying the ad-hoc `ParamType` system; preserve the parity tests. Built-in
+  adding tuples with optional/rest elements, named optional/rest parameters,
+  nested unions, categories, examples, successful result types, and fallibility
+  as specified in the [function contracts annex](function-contracts.md). Unify the ad-hoc `ParamType` system. Retain coverage of the existing
+  catalog, updating behavioral expectations for explicitly approved changes
+  rather than requiring preservation of inconsistent legacy conversions. Built-in
   and caller-supplied functions share the full declaration contract below.
 - **Phase C — type-aware parsing/evaluation.** Untyped variables default to
   `unknown`; optional-but-typed properties carry `A | null`, with null as
@@ -337,6 +357,120 @@ verbs and diagnostic boundaries are defined below.
 
 ### One function contract for built-ins and host extensions
 
+**Merge decision M1 (2026-09-25):** adopt the newer shared argument-conversion
+rules, rather than preserving each function's historical conversion policy.
+Functions declare the values their implementations need; Darkmatter validates
+and performs permitted conversions before invocation. For example,
+`min("4", 5)` accepts a numeric-string conversion, while `is_positive(true)`
+rejects a boolean instead of treating it as one. Inspecting predicates such as
+`is_number` still receive their `unknown`/`any` argument unchanged. Do not add
+per-function legacy modes or a separate rule set for old functions.
+
+Every changed behavior must be documented and tested through normal dispatch.
+M1 does not itself settle null handling or explicit conversion fallbacks.
+M2 below settles null handling; subsequent decisions settle recovery and
+numeric representation. These decisions do not change frontmatter presence rules. M15–M16 below
+add the approved numeric representation and operator consistency work.
+
+**Merge decision M2 (2026-09-26):** ordinary math, string, and collection
+functions reject null unless accepting it is part of their declared purpose.
+`lower(null)`, `min(null, 5)`, and `first(null)` fail argument validation before
+the handler runs; no shared rule silently returns null for these calls.
+Authors handle optional inputs explicitly, for example
+`name ? lower(name) : null`. Inspecting predicates accepting `unknown`/`any`,
+`is_null`, and the explicitly nullable `file_exists` contract retain their
+declared behavior. Null is not implicitly converted to zero, false, an empty
+string, or an omitted argument. Optional argument presence does not imply
+acceptance of a supplied null, and all supplied arguments are checked.
+
+M2 changes input acceptance, not valid-input outcomes such as `first([])`.
+Record each affected signature's accepted inputs and possible results; do not
+make a return type non-null merely because its parameters reject null. Update
+shipped documents and examples relying on implicit null propagation, and test
+the new behavior through ordinary dispatch. Existing schema optionality,
+materialized document nulls, and short-circuit execution remain unchanged.
+
+**Merge decisions M3–M5 (2026-09-26):** `number` takes `numberlike` and retains
+its optional numeric fallback. M7 and M12 below settle conversion and recovery;
+M13 requires a coercion error when conversion fails without a supplied fallback.
+Numeric strings use the same destination
+range as native numbers: unconstrained `number` is bounded by finite `f64`
+range, while `number(integer)` has an upper limit of `u64::MAX`. This upper
+limit does not forbid negative integers or select a lower bound. M16 selects
+`f64` storage, including for integer-constrained values; do not clamp invalid
+represented values into range. This adds an upper bound to the existing
+whole-number constraint. See [number-contract.md](number-contract.md) for
+evidence and boundary cases.
+
+**Merge decision M6 (2026-09-26):** support large numbers where practical
+without undue complexity, with easily expressed rules. Numeric presentation
+omits a redundant decimal suffix: `4.0` displays as `4`. Preserve meaningful
+fractional digits of the represented value; formatting must not introduce
+narrowing integer casts. This does not rewrite ordinary strings or change
+declared types. M15–M16 settle arithmetic and representation in the number contract.
+
+**Merge decision M7 (2026-09-26):** both numbers and numeric strings must
+satisfy the same finite `f64` representability limit. A failure is an error in
+the coercion layer, before invocation. M12 defines explicit `number` recovery
+from an unsuccessful coercion when a valid fallback is supplied.
+The current regex-only `numberlike` string arm does not override this rule.
+
+**Merge decision M9 (2026-09-26):** `validate_schema(file, obj)` merges the
+supplied object into the page's frontmatter, then validates the combined page.
+Reuse explicit frontmatter override semantics on an in-memory copy; leave the
+file and caller inputs unchanged. The one-argument form validates the page's
+own frontmatter. Invalid combined frontmatter returns false; file-loading and
+schema-processing errors remain operation errors. The current implementation
+ignores `obj` and must change. Detailed acceptance cases are in the merge
+decision record.
+
+**Merge decision M10 (2026-09-26):** `contains` retains text-based comparison.
+Strings use case-sensitive substring search; arrays search elements and objects
+search values. `contains([4], "4")` remains true. The needle accepts `any`
+unchanged; null haystacks remain invalid under M2.
+
+**Merge decision M11 (2026-09-26):** `length` rejects boolean inputs before
+shared string conversion, rather than returning zero or measuring boolean
+text. Preserve this explicit source-type exclusion in the shared function
+contract used by runtime and DMLS. Strings, numbers, arrays, and objects retain
+their length operations; null rejection follows M2. The parameter union alone
+does not express the exclusion.
+
+**Merge decision M12 (2026-09-26):** `number` uses a valid supplied fallback
+whenever the input cannot be used as a number. Handle the shared coercion result;
+do not invent a separate function-body conversion failure. This recovery covers
+malformed text, unsupported values, and representability failures. Preserve
+the recovery policy in the shared function contract while retaining
+`x: numberlike`; validate every supplied fallback independently. Ordinary
+functions retain their coercion errors, and missing required arguments remain
+arity errors.
+
+**Merge decision M13 (2026-09-26):** failed conversion without a supplied
+fallback returns the coercion error, not zero or null. One canonical library
+function parses numeric strings for both shared coercion and functions that
+accept `numberlike`. It owns spelling, representability checks, and typed
+errors, returning `f64` under M16. Runtime and passive
+value checking reuse that function; handlers must not maintain a second parser.
+
+**Merge decision M14 (2026-09-26):**
+`round(x: numberlike, fallback?: number) -> number` uses the same conversion
+and recovery as `number`, then rounds the selected value. Halfway values round
+away from zero. `round("pear", 2.7)` returns 3; without a fallback, unsuccessful
+conversion errors. Retain the fallback, use the canonical numeric parser, and
+avoid narrowing whole values through `i64`. The result type is `number`, not
+the narrower integer constraint.
+
+**Merge decisions M15–M16 (2026-09-26):** all Darkmatter numbers use `f64`
+unless a compelling exception is explicitly justified. Parsing, coercion,
+calculations, numeric comparisons, and results share that representation.
+Integer is a value constraint, not a storage type. Accept ordinary `f64`
+rounding; non-finite results error. Numeric equality and ordering agree;
+remove saturating integer casts. The mathematical `u64::MAX` integer ceiling
+requires `value < 2^64` for represented floats. Consequently the decimal
+spelling of `u64::MAX` rounds above that ceiling and fails the integer
+constraint, while remaining a valid unconstrained number. See
+[number-contract.md](number-contract.md) for acceptance cases.
+
 Darkmatter's function declarations must describe parameter and result
 types, supported conversions, advisory handling of unsupported inputs, and
 any facts established when the function returns true. Built-ins and
@@ -570,6 +704,14 @@ silently become errors.
 
 ## Interface Seam
 
+The authoritative built-in function declarations belong at
+`darkmatter/schemas/partials/functions.yaml` (M8). Claudine consumes this
+Darkmatter-owned catalog through the shared library and schema surfaces.
+The draft currently under `claudine/docs/schemas/partials/functions.yaml`
+is migration material, not the selected permanent authority. Keep the live
+embedded catalog operational until the grammar migration, then retire its
+independent definitions and update references together.
+
 Darkmatter owns parsing, evaluation, and type safety end-to-end. Callers
 (e.g. claudine) ask Darkmatter to evaluate and extend the language by passing
 in functions plus type definitions (SimplifiedSchema) — never bespoke grammar
@@ -586,12 +728,12 @@ sanctioned third-party warning opt-in.
 
 Resolved 2026-09-16, as an **annex-absorb** consolidation (recorded as
 Resolved Decision 17 in
-[2026-09-15-dasherized-identifiers](../2026-09-15-dasherized-identifiers/spec.md));
+`2026-09-15-dasherized-identifiers`);
 this spec is the primary. Both earlier drafts are superseded **in place**
 — they remain where they are as the historical record, each carrying
 supersession frontmatter and a pointer:
 
-- [2026-07-15-type-system](../2026-07-15-type-system/spec.md) — the large
+- `2026-07-15-type-system` — the large
   July draft (schema-derived variable declarations, strict root
   validation). Its design body is re-homed, with dated corrections, into
   the [declarations annex](declarations-design.md) as Phase C/E detail.
@@ -601,14 +743,14 @@ supersession frontmatter and a pointer:
   optional `A` the effective runtime type `A | null`. Its stale ten-file
   `inputs` list and its "does not authorize changes" gating language were
   dropped rather than carried.
-- [2026-07-22-explicit-null](../2026-07-22-explicit-null/spec.md) — the
+- `2026-07-22-explicit-null` — the
   small null-type draft. Its specced core (the `null` keyword) and its XOR
   authoring idiom are folded into Phase A above, the idiom as a Phase A
   test case; nothing else was carried because nothing else was specified.
 
 ## Representation Prototype and Planning Outcome
 
-The completed [function-declaration prototype](spikes/function-declarations-findings.md)
+The historical [function-declaration prototype](spikes/function-declarations-findings.md)
 explored one shared representation for built-ins and host extensions. Its
 [candidate declarations](spikes/function-declarations.yaml) separate ordered
 call arguments and their presence requirements from schema value definitions
@@ -621,8 +763,9 @@ A required function argument must be supplied before its value is checked;
 an omitted argument is distinct from an explicitly supplied null. This
 call-presence rule must not be inferred from SimplifiedSchema property
 omission acceptance: `null(required)` and `unknown(required)` retain their
-confirmed schema meaning. Variadic minimum counts, lazy evaluation, and
-overload dispatch still need an audit against existing runtime behavior.
+confirmed schema meaning. The consolidated function contracts specify
+variadic minimum counts, lazy evaluation, and overload dispatch, with source
+evidence in the catalog audit.
 Arity alone cannot distinguish same-count overloads.
 
 The passive checker exited successfully for its versioned snapshot: the
@@ -630,9 +773,9 @@ candidate metadata envelope and nine representative value definitions were
 accepted by installed `md 0.1.0`; `unknown`, `null`, and `ip-address` were
 rejected. The installed binary is not proven to come from the current
 worktree. The first two types are Phase A additions; the `ip-address`
-refinement requires a current-source support check and a shared
-representation that preserves its constraints. Replacing it with plain
-string would not preserve catalog parity. Snapshot expectations for rejected
+refinement must use the current source's passive address parser as specified
+in the function contracts annex, preserving its constraints. Replacing it
+with plain string would not preserve catalog parity. Snapshot expectations for rejected
 types must change when those types are supported; they are not permanent
 regression requirements.
 
@@ -641,15 +784,20 @@ does not validate all nested definitions or the meaning of behavior
 metadata. No generic checker, editor integration, argument conversion,
 overload dispatcher, or function execution was proven. Catalog types alone
 also do not capture every runtime conversion and fallback: migration must
-preserve actual behavior rather than introduce stricter rejection from the
-displayed type. Full-catalog parity and metadata validation remain required
+inventory actual behavior rather than infer it from the displayed type.
+Preserve it except where merge decisions explicitly adopt a new contract;
+M1 replaces inconsistent per-function conversion with shared rules.
+Full-catalog coverage and metadata validation remain required
 implementation evidence.
 
 Independent clarity and risk review found no remaining blocking human
-rulings. The specification is ready for planning around the agreed type
+rulings for the original scope. That review established planning readiness
+around the agreed type
 vocabulary, shared declarations, guarded calls, passive diagnostics, and
-CLI policy migration. No further prototype is required; the limits above
-are explicit planning and validation work.
+CLI policy migration. The schema-enhancement merge resolves its additional
+conflicts in the merge decision record and replaces the prototype's syntax
+with the grammar annex. No further prototype is required by the original review; the limits above remain explicit planning
+and validation work.
 
 ## Performance and Completion Criteria
 
@@ -673,7 +821,7 @@ must hold on macOS, Linux, native Windows, and WSL2.
 | Phase | Required evidence |
 |---|---|
 | A — type vocabulary | Schema parser and validator cover `unknown`/`any`, null, required-null behavior, and inclusive/exclusive union cases above |
-| B — shared function declarations | Full catalog information and behavior parity, including parameter/result types, conversions, advisory behavior, and true-result facts; built-ins and host extensions use shared metadata without host-specific analysis |
+| B — shared function declarations | Full catalog coverage, including parameter/result types, conversions, advisory behavior, and true-result facts; preserved behavior and approved changes have explicit tests; built-ins and host extensions use shared metadata without host-specific analysis |
 | C — declarations and evaluation | All annex library and host-integration acceptance paths pass, including effective-schema projection and conservative raw JSON Schema coverage; any increment deferral is documented |
 | D — narrowing | Runtime and editor analysis agree for truthiness, conditional blocks, ternaries, guarded `&&` calls, and declared predicate facts, without stored-value mutation |
 | E — diagnostics and CLI | CLI/DMLS share diagnostic codes and source positions; null-admitting parameter handling replaces the interim suppression rule; all affected command surfaces, policies, output formats, and migration cases are covered |
@@ -707,9 +855,10 @@ approved or added by this clarification.
 
 ### Human rulings
 
-No human rulings remain after clarification, independent review, and the
-completed representation prototype. The details below are implementation
-planning work within the confirmed requirements.
+M1–M16 and the previously confirmed diagnostic, predicate, and ownership
+contracts are reflected throughout the consolidated specification. No behavior
+interview item remains open. Internal names, scheduling, migration mechanics,
+and implementation evidence below are planning work, not unresolved policy.
 
 ### Implementation-planning details
 
@@ -729,8 +878,8 @@ planning work within the confirmed requirements.
   codes, severity, messages, source positions, type information, and whether
   the failed document field is null or omitted. Preserve document-only
   `--output json` and the confirmed diagnostic privacy boundary.
-- Plan the concrete shared function-declaration format and migration,
-  including advisory behavior and true-result facts, and the corresponding
-  public Rust API compatibility work. Follow the prototype's separation of
-  call presence and schema value types; audit variadic minimums, overloads,
-  conversion/fallback behavior, and preservation of catalog refinements.
+- Implement the grammar and behavior metadata in `function-contracts.md`,
+  plan the public Rust API migration, and transfer the reviewed catalog to
+  Darkmatter's authoritative home together with its consumers. Required
+  dispatch, passive-analysis, refinement, and inventory evidence is specified
+  in the annexes; the historical prototype is not the replacement format.

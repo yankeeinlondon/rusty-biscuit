@@ -22,7 +22,12 @@ $schema:
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-25
-review_iterations: 0
+review_iterations: 2
+completed: true
+human_review: false
+status: implemented
+implemented: true
+implemented_by: codex/default
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance

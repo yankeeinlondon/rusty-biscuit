@@ -34,7 +34,10 @@ added, and what each supplies:
 | `Win32_System_Threading` | `GetCurrentProcess`, `OpenProcessToken` |
 
 `Win32_Foundation`, `Win32_System_Services`, and `Win32_System_Environment`
-predate this work and serve other detectors.
+predate this work and serve other detectors. `Win32_System_Console` supplies
+`GetStdHandle` for `process::configure_detached_child`, which clears
+`HANDLE_FLAG_INHERIT` on the caller's stdio (moved from `playa`, which had
+used `windows-sys`).
 
 Note that the Rendezvous daemon declares its **own** `windows` features for the
 DACL work (`Win32_Storage_FileSystem`, and `Win32_Security_Authorization` for

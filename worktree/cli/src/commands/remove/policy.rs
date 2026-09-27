@@ -18,7 +18,7 @@ pub struct Flags {
 /// The facts the decision depends on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Situation {
-    /// The worktree has dirty or ignored entries.
+    /// The worktree has dirty or protected included entries.
     pub needs_consent: bool,
     /// `None` for a detached worktree; otherwise whether the branch's tier is
     /// Safe or Pretty safe.
@@ -58,7 +58,7 @@ pub struct Actions {
 /// Why nothing was removed; `wt` exits 3 ([`crate::exit::REFUSED_TO_LOSE_WORK`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
-    /// Dirty or ignored entries, no terminal, no `--force-worktree`.
+    /// Dirty or protected included entries, no terminal, no `--force-worktree`.
     FilesNeedForce,
     /// `--force-branch` on a worktree with files, without `--force-worktree`.
     ForceBranchNeedsWorktree,
@@ -121,6 +121,7 @@ mod tests {
 
     use worktree::remove::safety::{Evidence, Tier};
     use worktree::remove::{DirtyEntry, Inventory};
+    use worktree::remove::included::Mark;
 
     use super::*;
 
@@ -138,22 +139,44 @@ mod tests {
                 Inventory {
                     dirty: vec![dirty("src/lib.rs"), dirty("notes.md"), dirty("a.txt")],
                     ignored: Vec::new(),
+                    included: Default::default(),
                 },
             ),
             (
-                "ignored .env",
+                "disposable .env",
                 Inventory {
                     dirty: Vec::new(),
                     ignored: vec![".env".into()],
+                    included: Default::default(),
                 },
             ),
             (
-                "ignored target/",
+                "disposable target/",
                 Inventory {
                     dirty: Vec::new(),
                     ignored: vec!["target/".into()],
+                    included: Default::default(),
                 },
             ),
+            ("included new", Inventory { included: worktree::remove::included::IncludedAssessment {
+                needs_consent: vec![(".env".into(), Mark::New)],
+                ..Default::default()
+            }, ..Default::default() }),
+            ("included changed and dirty", Inventory {
+                dirty: vec![dirty("notes.md")],
+                included: worktree::remove::included::IncludedAssessment {
+                    needs_consent: vec![(".env".into(), Mark::Changed)],
+                    ..Default::default()
+                }, ..Default::default()
+            }),
+            ("included unknown", Inventory { included: worktree::remove::included::IncludedAssessment {
+                needs_consent: vec![(".env".into(), Mark::Unknown("unreadable".into()))],
+                ..Default::default()
+            }, ..Default::default() }),
+            ("included unchanged", Inventory { included: worktree::remove::included::IncludedAssessment {
+                selected: vec![(".env".into(), Mark::Unchanged)],
+                ..Default::default()
+            }, ..Default::default() }),
         ]
     }
 
@@ -209,7 +232,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(cases, 7 * 4 * 8 * 4);
+        assert_eq!(cases, 7 * 8 * 8 * 4);
     }
 
     fn check_case(

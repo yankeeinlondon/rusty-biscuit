@@ -26,15 +26,17 @@ use worktree::remove::handoff::{
     self, Approvals, BranchAction, HandoffError, HandoffRecord, HandoffRefusal, HandoffState,
     RemoteApproval, canonical, is_within,
 };
-use worktree::remove::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
+use worktree::live_remote::{LIVE_CHECK_DEADLINE, LsRemote};
 use worktree::remove::remote::{
     Reinterpretation, RemoteState, delete_remote_branch, preflight_remote_deletion,
     remote_destination,
 };
 use worktree::remove::safety::{
-    BranchSafety, NoPrSource, PrSource, SafetyInput, SniffPrSource, assess,
+    BranchSafety, NoPrSource, PrSource, Reconfirmation, SafetyInput, SniffPrSource, Tier, assess,
+    reconfirm,
 };
 use worktree::remove::{Inventory, collect_inventory, remove_local_branch, remove_worktree};
+use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
 
 pub use policy::Flags;
@@ -56,53 +58,28 @@ struct Facts {
     /// The branch's full tip SHA (detached: HEAD).
     head: String,
     inventory: Inventory,
-    /// `None` for a detached worktree.
+    /// `None` for a detached worktree, and in a handoff's second run, which
+    /// never assesses the tiers (see [`run_handoff`]).
     safety: Option<BranchSafety>,
     has_origin: bool,
-    /// Gathered with `--force-remote` for an attached branch.
+    /// The live preflight for an attached branch: with `--force-remote` in
+    /// the first run, and when remote deletion was approved in the second.
     remote: Option<RemoteState>,
 }
 
 impl Facts {
-    fn gather(base: &Path, entry: WorktreeEntry, force_remote: bool) -> Result<Self, WorktreeError> {
-        let inventory = collect_inventory(base, &entry.path)?;
+    /// The local facts both runs read: the target's files, its tip, and its
+    /// include rules. No network.
+    fn local(base: &Path, entry: WorktreeEntry) -> Result<Self, WorktreeError> {
+        let mut inventory = collect_inventory(base, &entry.path)?;
+        inventory.included = classify_included(base, &entry.path, entry.branch.as_deref())?;
+        inventory.expand_mixed_ignored(base, &entry.path)?;
         let head = match &entry.branch {
             Some(branch) => git_command(&["rev-parse", &format!("refs/heads/{branch}")])?,
             None => entry
                 .head_sha
                 .clone()
                 .ok_or_else(|| WorktreeError::GitParse("worktree has no HEAD".into()))?,
-        };
-        let has_origin = git_command(&["remote", "get-url", "origin"]).is_ok();
-        let heads = LsRemote {
-            base,
-            deadline: LIVE_CHECK_DEADLINE,
-        };
-        let (safety, remote) = match &entry.branch {
-            None => (None, None),
-            Some(branch) => {
-                let sniff_prs = SniffPrSource::for_origin(base);
-                let source_repo = sniff_prs.as_ref().and_then(SniffPrSource::source_repo);
-                let prs: &dyn PrSource = match &sniff_prs {
-                    Some(prs) => prs,
-                    None => &NoPrSource,
-                };
-                let default_branch = default_branch().unwrap_or_default();
-                let remote_branch = remote_destination(base, branch);
-                let input = SafetyInput {
-                    base,
-                    branch,
-                    tip: &head,
-                    default_branch: &default_branch,
-                    remote_branch: remote_branch.as_deref(),
-                    force_remote,
-                    source_repo: source_repo.as_deref(),
-                };
-                let safety = assess(&input, prs, &heads);
-                let remote =
-                    force_remote.then(|| preflight_remote_deletion(base, branch, &head, &heads));
-                (Some(safety), remote)
-            }
         };
         let display_name = entry
             .path
@@ -115,10 +92,29 @@ impl Facts {
             display_name,
             head,
             inventory,
-            safety,
-            has_origin,
-            remote,
+            safety: None,
+            has_origin: false,
+            remote: None,
         })
+    }
+
+    /// The first run's report facts: the branch's tier (PR lookup and live
+    /// checks) and, with `--force-remote`, the remote preflight.
+    fn assess(&mut self, force_remote: bool) {
+        self.has_origin = git_command(&["remote", "get-url", "origin"]).is_ok();
+        let Some(branch) = self.entry.branch.clone() else {
+            return;
+        };
+        let base = self.base.as_path();
+        let heads = live_heads(base);
+        let sniff_prs = SniffPrSource::for_origin(base);
+        let prs: &dyn PrSource = match &sniff_prs {
+            Some(prs) => prs,
+            None => &NoPrSource,
+        };
+        let context = SafetyContext::read(base, &branch, sniff_prs.as_ref());
+        self.safety = Some(assess(&context.input(base, &branch, &self.head, force_remote), prs, &heads));
+        self.remote = force_remote.then(|| preflight_remote_deletion(base, &branch, &self.head, &heads));
     }
 
     fn branch(&self) -> Option<&str> {
@@ -156,6 +152,43 @@ impl Facts {
     }
 }
 
+/// The live-check transport both runs use.
+fn live_heads(base: &Path) -> LsRemote<'_> {
+    LsRemote {
+        base,
+        deadline: LIVE_CHECK_DEADLINE,
+    }
+}
+
+/// The locally read parts of a [`SafetyInput`].
+struct SafetyContext {
+    default_branch: String,
+    remote_branch: Option<String>,
+    source_repo: Option<String>,
+}
+
+impl SafetyContext {
+    fn read(base: &Path, branch: &str, prs: Option<&SniffPrSource>) -> Self {
+        Self {
+            default_branch: default_branch().unwrap_or_default(),
+            remote_branch: remote_destination(base, branch),
+            source_repo: prs.and_then(SniffPrSource::source_repo),
+        }
+    }
+
+    fn input<'a>(&'a self, base: &'a Path, branch: &'a str, tip: &'a str, force_remote: bool) -> SafetyInput<'a> {
+        SafetyInput {
+            base,
+            branch,
+            tip,
+            default_branch: &self.default_branch,
+            remote_branch: self.remote_branch.as_deref(),
+            force_remote,
+            source_repo: self.source_repo.as_deref(),
+        }
+    }
+}
+
 /// `wt remove <name>`.
 pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
@@ -187,7 +220,8 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
         )));
     }
 
-    let facts = Facts::gather(&base, entry, flags.force_remote)?;
+    let mut facts = Facts::local(&base, entry)?;
+    facts.assess(flags.force_remote);
     eprintln!("{}", facts.render_report(&terminal));
     if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
         return Err(WorktreeError::RefusedToLoseWork(refusal));
@@ -265,7 +299,7 @@ fn refusal_markup(refusal: Refusal, display: &str) -> String {
     match refusal {
         Refusal::FilesNeedForce => format!(
             "\n<red><b>Nothing was removed.</b></red> Worktree <blue>{}</blue> has uncommitted or \
-            ignored files (listed above), and there is no terminal to confirm discarding them.\n  \
+            protected included files (listed above), and there is no terminal to confirm discarding them.\n  \
             <dim>Add <i>--force-worktree</i> to discard them.</dim>",
             esc(display)
         ),
@@ -281,9 +315,12 @@ fn ask(terminal: &Terminal, facts: &Facts, question: Question) -> Result<bool, W
     match question {
         Question::DiscardFiles => {
             eprintln!();
+            let included = facts.inventory.included.needs_consent.iter()
+                .map(|(path, _)| report::visible_include_path(path)).collect::<Vec<_>>();
+            let names = if included.is_empty() { "the files listed above".to_string() }
+                else { format!("the files listed above, including {}", included.join(", ")) };
             let label = Prose::new(format!(
-                "Discard the files listed above and remove worktree <blue>{}</blue>?",
-                esc(&facts.display_name)
+                "Discard {names} and remove worktree <blue>{}</blue>?", esc(&facts.display_name)
             ))
             .render(terminal);
             Confirm::new(&label)
@@ -334,6 +371,9 @@ fn map_inquire_err(e: InquireError) -> WorktreeError {
 /// branch on origin.
 fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), WorktreeError> {
     remove_worktree(&facts.base, &facts.entry.path, actions.discard_files)?;
+    if let Some(warning) = worktree::copy_record::delete_for(&facts.base, &facts.entry.path) {
+        print(terminal, format!("<yellow>Warning:</yellow> could not delete copy record: {}", esc(&warning)));
+    }
     let mut removed = vec![format!("worktree {}", facts.display_name)];
     print(
         terminal,
@@ -349,17 +389,16 @@ fn execute(terminal: &Terminal, facts: &Facts, actions: Actions) -> Result<(), W
             BranchStep::Delete { .. } => {
                 remove_local_branch(&facts.base, branch)?;
                 removed.push(format!("branch {branch}"));
-                let unsafe_deleted = !facts
-                    .safety
-                    .as_ref()
-                    .is_some_and(|s| s.tier.allows_deletion());
-                let lost = if unsafe_deleted && facts.lost_commit_count() > 0 {
-                    format!(
-                        " <dim>({} lost)</dim>",
-                        report::commit_count(facts.lost_commit_count())
-                    )
-                } else {
-                    String::new()
+                // Without assessed safety (a handoff's second run) there is
+                // no count to claim; the first run's report named the commits.
+                let lost = match &facts.safety {
+                    Some(safety) if !safety.tier.allows_deletion() && facts.lost_commit_count() > 0 => {
+                        format!(
+                            " <dim>({} lost)</dim>",
+                            report::commit_count(facts.lost_commit_count())
+                        )
+                    }
+                    _ => String::new(),
                 };
                 print(
                     terminal,
@@ -497,6 +536,8 @@ fn hand_off(terminal: &Terminal, facts: &Facts, cwd: &Path, actions: Actions) ->
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
         fingerprint: fingerprint(facts)?,
+        rules: facts.inventory.included.rules.clone(),
+        baseline: facts.inventory.included.baseline.clone(),
         landing: canonical(&landing),
     };
     let token = handoff::new_token()?;
@@ -597,7 +638,79 @@ fn start_again(reason: &str) -> String {
     )
 }
 
+/// [`reconfirm`] for the second run: local proof first, then a PR or a live
+/// `origin/*` head. With remote deletion approved, the destination and its
+/// open PR are about to go, so neither counts.
+fn reconfirm_branch(base: &Path, branch: &str, tip: &str, force_remote: bool) -> Reconfirmation {
+    let sniff_prs = SniffPrSource::for_origin(base);
+    let prs: &dyn PrSource = match &sniff_prs {
+        Some(prs) => prs,
+        None => &NoPrSource,
+    };
+    let context = SafetyContext::read(base, branch, sniff_prs.as_ref());
+    reconfirm(&context.input(base, branch, tip, force_remote), prs, &live_heads(base))
+}
+
+/// The refusal for a branch whose safety no longer holds, with the evidence
+/// that was tried. The first run's report is not repeated: its facts were not
+/// gathered again.
+fn no_longer_safe(reconfirmation: &Reconfirmation) -> String {
+    let mut reason = "The branch is no longer safe to delete.".to_string();
+    if let Tier::Unknown(why) = &reconfirmation.tier {
+        reason.push_str(&format!(" Where its commits live could not be checked ({}).", esc(why)));
+    }
+    for note in &reconfirmation.notes {
+        reason.push_str(&format!("\n  <dim>{}</dim>", esc(note)));
+    }
+    start_again(&reason)
+}
+
+/// Why the second run must not delete on origin, or `None` when the fresh
+/// preflight matches the approval.
+///
+/// The destination and endpoint are recomputed from configuration, and two
+/// branches or repositories can share a head, so the SHA alone cannot tell
+/// that `execute` would delete a branch the caller never saw. The live head
+/// must be a verified answer equal to the approved one: an approved head
+/// that is now absent, a head that appeared, and an unreachable origin all
+/// refuse. The lease stays the approved SHA, which the match makes equal to
+/// the fresh one.
+fn remote_changed(approval: &RemoteApproval, state: Option<&RemoteState>) -> Option<String> {
+    let current = remote_approval(state);
+    if current.destination != approval.destination {
+        return Some(start_again("The branch on origin to delete changed since you confirmed."));
+    }
+    if current.endpoint != approval.endpoint {
+        return Some(start_again("The repository origin pushes to changed since you confirmed."));
+    }
+    // A rewrite rule or a remote named like the endpoint, added since the
+    // first run, leaves the endpoint's spelling unchanged but would redirect
+    // the deletion.
+    if let Some(refusal) = unprovable_remote(state) {
+        return Some(refusal);
+    }
+    match (state, approval.observed_sha.as_deref()) {
+        (Some(RemoteState::Present { sha, .. }), Some(approved)) if sha == approved => None,
+        (Some(RemoteState::Absent { .. }), None) => None,
+        // No origin (or a detached worktree) in both runs: nothing to delete.
+        (Some(RemoteState::NoRemote) | None, None) => None,
+        (Some(RemoteState::Unavailable { reason, .. }), _) => Some(start_again(&format!(
+            "Origin could not be reached, so the branch on origin cannot be shown unchanged \
+            since you confirmed.\n  <dim>{}</dim>",
+            esc(reason.trim())
+        ))),
+        _ => Some(start_again("The branch on origin changed since you confirmed.")),
+    }
+}
+
 /// `wt remove --handoff <token>`, run by the wrapper after its `cd`.
+///
+/// Every local fact the approval covered is read again and compared before
+/// anything is removed. The network is asked only for what the approved
+/// actions still depend on: a branch deleted because it was safe is proved
+/// again by [`reconfirm_branch`], and an approved remote deletion needs the
+/// live head. Keeping the branch or deleting it by explicit approval needs
+/// neither.
 pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
     let terminal = Terminal::default();
     let cwd = std::env::current_dir()?;
@@ -623,13 +736,15 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
     std::env::set_current_dir(&base)?;
 
     let remote_approval = record.approvals.remote.clone();
-    let facts = Facts::gather(&base, entry, remote_approval.is_some())?;
+    let mut facts = Facts::local(&base, entry)?;
     let fresh = HandoffState {
         repo: canonical(&base),
         target: canonical(&facts.entry.path),
         head: facts.head.clone(),
         branch: facts.entry.branch.clone(),
         fingerprint: fingerprint(&facts)?,
+        rules: facts.inventory.included.rules.clone(),
+        baseline: facts.inventory.included.baseline.clone(),
         landing: canonical(&cwd),
     };
     match handoff::verify(&record, &fresh, &cwd) {
@@ -647,50 +762,22 @@ pub fn run_handoff(token: &str) -> Result<(), WorktreeError> {
         }
     }
 
-    // Re-check the tiers without prompts: a branch approved only because it
-    // was safe must still be safe.
+    // Only a branch approved because it was safe needs its safety proved
+    // again; a kept or explicitly approved branch needs no PR or live answer.
     if record.approvals.branch == Some(BranchAction::DeleteIfSafe)
-        && !facts.safety.as_ref().is_some_and(|s| s.tier.allows_deletion())
+        && let Some(branch) = facts.branch()
     {
-        eprintln!("{}", facts.render_report(&terminal));
-        return Err(WorktreeError::RefusedToLoseWork(start_again(
-            "The branch is no longer safe to delete.",
-        )));
+        let reconfirmation = reconfirm_branch(&base, branch, &facts.head, remote_approval.is_some());
+        if !reconfirmation.tier.allows_deletion() {
+            return Err(WorktreeError::RefusedToLoseWork(no_longer_safe(&reconfirmation)));
+        }
     }
     if let Some(approval) = &remote_approval {
-        // The destination and endpoint are recomputed from configuration,
-        // and two branches or repositories can share a head, so the SHA alone
-        // cannot tell that `execute` would delete a branch the caller never
-        // saw.
-        let current = self::remote_approval(facts.remote.as_ref());
-        if current.destination != approval.destination {
-            eprintln!("{}", facts.render_report(&terminal));
-            return Err(WorktreeError::RefusedToLoseWork(start_again(
-                "The branch on origin to delete changed since you confirmed.",
-            )));
+        if let Some(branch) = facts.branch() {
+            facts.remote = Some(preflight_remote_deletion(&base, branch, &facts.head, &live_heads(&base)));
         }
-        if current.endpoint != approval.endpoint {
-            eprintln!("{}", facts.render_report(&terminal));
-            return Err(WorktreeError::RefusedToLoseWork(start_again(
-                "The repository origin pushes to changed since you confirmed.",
-            )));
-        }
-        // A rewrite rule or a remote named like the endpoint, added since
-        // the first run, leaves the endpoint's spelling unchanged but would
-        // redirect the deletion.
-        if let Some(refusal) = unprovable_remote(facts.remote.as_ref()) {
-            eprintln!("{}", facts.render_report(&terminal));
+        if let Some(refusal) = remote_changed(approval, facts.remote.as_ref()) {
             return Err(WorktreeError::RefusedToLoseWork(refusal));
-        }
-        let now_sha = match &facts.remote {
-            Some(RemoteState::Present { sha, .. }) => Some(sha.clone()),
-            _ => None,
-        };
-        if now_sha.is_some() && now_sha != approval.observed_sha {
-            eprintln!("{}", facts.render_report(&terminal));
-            return Err(WorktreeError::RefusedToLoseWork(start_again(
-                "The branch on origin changed since you confirmed.",
-            )));
         }
     }
 

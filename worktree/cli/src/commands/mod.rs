@@ -4,6 +4,7 @@ mod git_graph;
 mod go;
 mod list;
 pub mod list_table;
+pub mod refresh_worker;
 pub mod remove;
 
 pub use create::run as create;

@@ -275,6 +275,13 @@ All subprocesses go through `process::run_with_timeout` or
 pipe draining, process-tree termination, and reaping on macOS, Linux, and
 Windows. Preserve caller cwd and environment when using the builder form.
 
+`process` is public only for `configure_detached_child`, which other packages
+(`playa`, `biscuit-speaks`, `worktree-cli`) use to set up an intentionally
+detached, unbounded child. It sets a new process group on Unix and, on Windows,
+clears `HANDLE_FLAG_INHERIT` on this process's stdio before setting the
+detached creation flags. The caller still sets null stdio. Sniff's own spawns
+never use it.
+
 Batch service enrichment with bounded chunks. A failed or timed-out chunk
 degrades only its own services; it must not discard healthy chunks.
 

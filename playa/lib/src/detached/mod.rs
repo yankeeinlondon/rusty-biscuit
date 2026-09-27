@@ -681,66 +681,11 @@ fn spawn_scheduler(root: &Path) -> Result<(), PlaybackError> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    configure_detached_child(&mut command);
+    sniff::process::configure_detached_child(&mut command);
     command
         .spawn()
         .map(|_| ())
         .map_err(|source| PlaybackError::DetachedWorkerSpawn { source })
-}
-
-/// Configure a command so its child outlives the caller and shares neither its
-/// process group nor the pipes a parent may be reading from.
-///
-/// Callers must still give the child `Stdio::null()` (or their own handles);
-/// this only prevents the caller's inherited stdio from leaking into it.
-pub fn configure_detached_child(command: &mut Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        command.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        stop_inheriting_std_handles();
-        command.creation_flags(detached_creation_flags());
-    }
-}
-
-/// Windows children inherit every inheritable handle in the parent, and the
-/// stdio handles a parent handed this process stay inheritable even when the
-/// child is given `Stdio::null()`. A caller capturing this process's output
-/// would then wait for the detached worker to exit before its read returned,
-/// which is the blocking behavior the spool exists to avoid. Clearing the flag
-/// on this process's own copies is safe because `Stdio::inherit()` duplicates
-/// the handle with inheritance re-enabled.
-#[cfg(windows)]
-fn stop_inheriting_std_handles() {
-    use windows_sys::Win32::Foundation::{
-        HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
-    };
-    use windows_sys::Win32::System::Console::{
-        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    };
-    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-        // SAFETY: both calls only inspect or flag a handle this process owns;
-        // a null or invalid handle is skipped rather than passed through.
-        unsafe {
-            let handle = GetStdHandle(id);
-            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-                continue;
-            }
-            SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
-        }
-    }
-}
-
-#[cfg(windows)]
-const fn detached_creation_flags() -> u32 {
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
 }
 
 fn run_scheduler(root: &Path) -> Result<(), PlaybackError> {

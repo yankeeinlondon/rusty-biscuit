@@ -1,15 +1,16 @@
 //! The facts and primitives behind `wt remove`: what removing a worktree
 //! would delete ([`inventory`]), whether deleting its branch would lose
-//! commits ([`safety`]), the live remote checks ([`live_remote`], [`remote`]),
-//! and the move-first handoff record ([`handoff`]).
+//! commits ([`safety`]), the live remote checks ([`remote`], over the shared
+//! [`crate::live_remote`] transport), and the move-first handoff record
+//! ([`handoff`]).
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
 //! item 3 of `2026-09-24-ux-improvements`.
 
 pub mod handoff;
+pub mod included;
 pub mod inventory;
-pub mod live_remote;
 pub mod remote;
 pub mod safety;
 
@@ -21,7 +22,7 @@ use std::path::Path;
 use crate::error::WorktreeError;
 use crate::git::git_from;
 
-pub use inventory::{DirtyEntry, IgnoredGroup, Inventory, collect_inventory};
+pub use inventory::{DirtyEntry, Inventory, collect_inventory};
 
 /// Removes the worktree at `path` (`git worktree remove`, with `--force` when
 /// its files may be discarded).
