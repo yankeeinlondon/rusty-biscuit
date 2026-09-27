@@ -30,6 +30,15 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/level2_dirty_tree.rs
+docs_updated_during_phase_4:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
 ---
 
 # Implementation Log for 2026-09-26-more-info-on-list (5 phases)
@@ -267,3 +276,81 @@ Then I restored it.
   finds only the L2 files (Phase 4), `styled_capture_parse.rs` (excluded), and the
   two absence assertions in `list_table.rs`.
 - No pre-existing failures.
+
+## Phase 4
+
+### Changes
+
+- **`cli/tests/level2_list_verbose.rs`**
+    - `ORANGE` is gone and `GREEN = Color::Indexed(2)` sits beside `RED`. The
+      `wt-feature` source dot is asserted red, in the row and in the legend.
+    - `list_until` asserts `harness.pane_cols() >= 100` before `wt list`
+      runs (the default `spawn_shell` pane is 120), so a narrower shared pane
+      fails loudly instead of silently dropping the counts.
+    - New count assertions in `level2_list_styles_follow_the_design_in_tmux`:
+      the `feature-test` target cell is exactly `clean +1 -2  PR #99` (counts
+      before the badge), `+1` dim green, `-2` dim red; `clash` reads
+      `conflicts +1 -2` with `conflicts` red and not dim and the counts dim
+      green / dim red; `docs-work` is behind only (`clean -2`, no `+`).
+    - The Branch legend line is now asserted: three `└` connectors (no `├`),
+      gray, red, and dim. The old comment promised a legend connector check
+      that the test never made; it now matches.
+    - Doc comments updated (constants, fixture description, section comments).
+- **`cli/tests/level2_dirty_tree.rs`**: `ORANGE` replaced by `RED`
+  (`Color::Indexed(1)`); `lib.rs` asserted red; module doc and section comment
+  say red.
+- **`docs/cli/list.md`**: the example is the reviewed 120-column snapshot
+  (counts, no `already in`, `└─` legend). The red source dot, `clean`
+  including nothing-to-merge, the `+N`/`-N` counts and the 100-column gate
+  (independent of `-w`), the parent's local tip, and badge-after-counts are
+  documented. The graph's "already in the default branch" tag rule stays (R11).
+- **`README.md`**: the `-> {default}` states are `clean` or `conflicts`, plus
+  counts from 100 columns; `-> parent` notes the local branch.
+- **`.claude/skills/worktree/SKILL.md`**: one `wt list` bullet (two-state
+  `MergeState`, `METRICS_MIN_WIDTH`, width from the render `Terminal` and not
+  `--width`, the S1 stderr/stdin fallback fact, local parent tip, shared red),
+  and the L2 styling bullet names the count colors and the ≥ 100 pane.
+- **`os` skill not changed.** S1's fact (the `terminal_size` stdout, then
+  stderr, then stdin fallback) is the same on Unix and Windows, so it is not an
+  OS variance; it went into the worktree skill instead.
+
+### Fixture finding
+
+In the L2 design fixture every branch's fork parent is `main`, which is the
+default branch, so the `-> parent` column is `—` on every row. The counts are
+proven there on the `-> {default}` column only (ahead and behind, behind only,
+and conflicts with counts). The parent-column counts share `merge_markup` with
+the target column and are proven at L1 (`counts_follow_the_state_word_and_precede_the_badge_from_100_columns`
+covers `conflicts +1 -3  PR #104` in the parent cell). I did not grow the
+fixture with a nested branch, because it would change the row layout that the
+other assertions pin, for no new rendering path.
+
+### Requirement-to-test mapping
+
+| Requirement | Test |
+| --- | --- |
+| Source dot red in a real terminal (row and legend) | `level2_list_verbose::level2_list_styles_follow_the_design_in_tmux` |
+| `+N` dim green, `-N` dim red, before the PR badge, at ≥ 100 columns | same test (`clean +1 -2  PR #99`, span styles) |
+| Zero side omitted in a real terminal | same test (`docs-work` reads `clean -2`, no `+`) |
+| `conflicts` stays red, not dim, with counts beside it | same test (`clash`) |
+| Branch legend `└─ └─ └┄`, gray/red/dim | same test (legend connectors) |
+| Dirty-tree source names red | `level2_dirty_tree::level2_dirty_tree_renders_in_tmux` |
+
+**Mutation check.** I removed `<dim>` from the `+N` markup in `merge_markup`.
+The styles test failed with `"+1" should be dim green, but '+' has … dim:
+false`. I then restored the file, and `git diff` shows no change to
+`list_table.rs`.
+
+### Gates
+
+- `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_list_verbose) | binary(level2_dirty_tree)'`:
+  7 passed, 0 skipped.
+- `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2` in `worktree/`: 17 passed (2 slow).
+- `just test` in `worktree/`: 465 passed, 18 skipped (tier-gated L2+), none failed.
+- `just lint` in `worktree/`: clean, with no warnings.
+- `just check-tier-coverage worktree`: 0 stranded.
+- `grep -rn orange worktree/cli/src worktree/cli/tests` now finds only
+  `styled_capture_parse.rs` (excluded by the plan) and the Phase 3 absence
+  assertion's message in `list_table.rs` (`"no orange left"`).
+- No pre-existing failures. The change is test and docs only, with no OS-specific
+  code, so no cross-check was run.

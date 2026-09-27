@@ -28,22 +28,23 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 3 is done. `list_table.rs` has `METRICS_MIN_WIDTH = 100`,
-    `merge_markup(comparison, show_metrics)` (dim green `+N`, dim red `-N`, zero side
-    omitted, before PR badges), a `<red>` source dot, and a `└─ … └─ … └┄` Branch
-    legend. L1 is green (`just test` 465 passed). Phase 4 notes:
-    (1) BOTH L2 files are now expected to fail under tmux until you update them:
-    `level2_dirty_tree` (lib.rs asserted ORANGE) and `level2_list_verbose` (source dot
-    asserted ORANGE at ~491 and in the legend at ~527-530; its Branch legend reader may
-    match `├─`). The red to assert is basic ANSI 31, the same `RED` constant the
-    `conflicts` checks use.
-    (2) At exactly 100 columns the table may wrap a PR badge onto a second line
-    (the spec allows it). An L2 assertion that reads a badge on the same line as the
-    counts should use a 120-column pane (the default `spawn_shell` size) or read the
-    next line.
-    (3) `cli/tests/list_output.rs` (real binary, no TTY, so width 80 and no counts)
-    was updated for the new legend; it was not in the plan's touch points.
-    (4) `docs/cli/list.md` line 27 still shows the old `├─` legend.
+    Phase 4 is done: both L2 files assert red (no ORANGE left), the styles test
+    asserts the counts (`clean +1 -2  PR #99`, `+1` dim green, `-2` dim red,
+    `docs-work` behind-only `clean -2`, `clash` `conflicts +1 -2`) and the
+    `└─ └─ └┄` legend connectors, and `list_until` asserts the pane is >= 100
+    columns. `just test` (465 passed), `just lint`, and
+    `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2` (17 passed) are green.
+    Docs (`docs/cli/list.md`, README) and the worktree skill are updated.
+    Phase 5 notes:
+    (1) Definition-of-done grep for "orange" also hits the Phase 3 absence
+    assertion message `"no orange left"` in `cli/tests/list_table.rs:381`;
+    that is intended, not a leftover.
+    (2) In the L2 fixture every parent is the default branch, so the
+    `-> parent` column is `—` at L2; parent-column counts are proven at L1 only
+    (logged in Phase 4 with the reason).
+    (3) `docs/cli/list.md` line ~80 keeps "already in the default branch": it
+    describes the graph's tag rule (R11), not the table state.
+    (4) Nothing OS-specific changed in Phases 2-4; no cross-check has been run.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance

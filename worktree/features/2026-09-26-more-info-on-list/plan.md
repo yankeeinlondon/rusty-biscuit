@@ -31,6 +31,15 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/level2_dirty_tree.rs
+docs_updated_during_phase_4:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
 ---
 
 # Plan: More Info on `wt list`
@@ -253,7 +262,7 @@ Wave 3 is one agent, because every change is in `list_table.rs` and its integrat
 
 Wave 4 runs three parallel tasks on disjoint files.
 
-- [ ] **L2 list styling** (`cli/tests/level2_list_verbose.rs`)
+- [x] **L2 list styling** (`cli/tests/level2_list_verbose.rs`)
     - Make sure the pane is at least 100 columns wide (S2 finding). The fixture's
       `feature-test` branch needs a nonzero ahead and/or behind so a metric renders.
       Add a commit on main after the fork if needed.
@@ -266,10 +275,10 @@ Wave 4 runs three parallel tasks on disjoint files.
       exists; the parser already exposes `dim` and `fg_is`). Assert `harness.pane_cols() >= 100`
       before the metric checks, since a shared broker session may not be 120 wide.
     - Test windows or panes must never take focus. tmux is detached by construction.
-- [ ] **L2 dirty tree** (`cli/tests/level2_dirty_tree.rs`)
+- [x] **L2 dirty tree** (`cli/tests/level2_dirty_tree.rs`)
     - `lib.rs` is asserted red instead of `ORANGE`. Delete the `ORANGE` constant if it is now unused,
       and update the comments on lines ~5, ~17, and ~53.
-- [ ] **Docs and skill**
+- [x] **Docs and skill**
     - `worktree/docs/cli/list.md`: redraw the example table with metrics and no
       `already in`. Update the legend sample to `└─`, change the `●` source-dot bullet to red, and in the target-column
       bullets remove `already in`, define `clean` as "would merge without conflicts",
@@ -282,7 +291,7 @@ Wave 4 runs three parallel tasks on disjoint files.
       red dirty-source color shared with `conflicts`, and that `MergeState` is two-state.
       Update the L2 styling bullet to mention the metric colors.
     - If S1 found a non-obvious OS fact about width detection, add it to the `os` skill (CLAUDE.md rule).
-- [ ] **Checkpoint 4**: run `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli
+- [x] **Checkpoint 4**: run `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli
   --features terminal-tests -E 'binary(level2_list_verbose) | binary(level2_dirty_tree)'`
   and confirm it is green. Run it as a single command, since a quoted filterset breaks the `just test-l2`
   recipe. `just test-l2` in `worktree/` is green overall.
