@@ -708,24 +708,27 @@ line becomes `skip`, and the lifecycle guide notes that `stop` inside
    Also cover recurrence, missing/stale/malformed review files, and cap
    exhaustion. Assert no repair, staging, or commit after a ready or recurring
    review, including a review on the last allowed pass.
-10. **Shipped prompt contract.** The existing `shipped_prompt_contract`,
+10. **Step status names the provider that ran.** A sequence whose steps
+    resolve to different providers reports each step under its own provider,
+    not the sequence document's hint.
+11. **Shipped prompt contract.** The existing `shipped_prompt_contract`,
     `compose_caller_file_provenance`, `compose_initialize_acceptance`, and
     `shipped_prompt_route_drift` tests pass after migration, and the claudine
     skill's composition and lifecycle pages describe the new primitives.
-11. **Docs are the record.** Reconcile changed flow-control, looping,
+12. **Docs are the record.** Reconcile changed flow-control, looping,
     sequence, composition, and state pages with the approved design; remove
     planned markers only for shipped pieces. Keep `defer` planned. A search of
     every page this feature touches for `features/`, `fixes/`, and date-named
     directories returns nothing; unrelated existing documentation debt, such
     as the error-architecture catalog link, is not an acceptance blocker for
     this feature.
-12. **Boundary coverage.** Test condition success on the final permitted pass,
+13. **Boundary coverage.** Test condition success on the final permitted pass,
     invalid/default/overridden caps, no mutation after exhaustion, failed
     iterations with both fail-fast settings, skip then run on a later outer
     pass, inner count reset and outer-state restoration, loop-condition access
     to runtime state, and output publication after failed teardown. Include
     guard parse/evaluation failures and false guards over invalid static tasks.
-13. **Bounded rehearsal and shared limits.** Dry-run a condition depending on
+14. **Bounded rehearsal and shared limits.** Dry-run a condition depending on
     an agent-created file and prove it terminates after one preview pass;
     verify no lifecycle/prep side effects and explicit shell opt-in. Test
     budget exhaustion inside a loop and helper, interruption during helper
@@ -870,6 +873,13 @@ every later review and repair step skipped without launching. With the spec
 already implemented: the plan step skipped, review 1 was ready, and the loop
 closed. In both runs every commit step after closure launched a provider that
 found nothing staged.
+
+A follow-up probe with three stub providers showed that a sequence honors
+each prompt task's own `agent:` and a step's `params: { agent: … }` when no
+provider flag is given, and that a command-line `--<provider>` overrides every
+step. The step status lines report the sequence document's agent hint rather
+than the provider that actually ran, so a mixed-provider sequence prints the
+wrong name on every step.
 
 The rehearsal also surfaced the reserved-key collision on `previous`, the
 `loop` parameter colliding with the lifecycle key, the doc-relative anchor of
