@@ -6097,6 +6097,152 @@ fn test_recent_commits_package_filters_and_attribution_in_a_monorepo() {
     assert_eq!(headings(&area), ["b2", "initial monorepo"]);
 }
 
+/// A workspace with `worktree/lib` (`worktree`), `worktree/cli`
+/// (`worktree-cli`), and `other/lib` (`other`), and commits touching shared
+/// area files, look-alike paths, and a misleading scope. Returns the commit
+/// ids oldest first, labeled `C0`..=`C9` in the assertions.
+fn create_area_membership_repo() -> (tempfile::TempDir, PathBuf, Vec<String>) {
+    const BASE: i64 = 1_763_158_400;
+    const PACKAGE: &str = "[package]\nversion = \"0.1.0\"\nedition = \"2024\"\nname = ";
+    let dir = tempfile::tempdir().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    let path = dir.path().to_path_buf();
+    let worktree_manifest = format!("{PACKAGE}\"worktree\"\n");
+    let cli_manifest = format!("{PACKAGE}\"worktree-cli\"\n");
+    let other_manifest = format!("{PACKAGE}\"other\"\n");
+    let history: [(&[(&str, &str)], &str); 10] = [
+        (
+            &[
+                ("Cargo.toml", "[workspace]\nmembers = [\"worktree/lib\", \"worktree/cli\", \"other/lib\"]\n"),
+                ("worktree/lib/Cargo.toml", &worktree_manifest),
+                ("worktree/lib/src/lib.rs", "pub fn worktree() {}\n"),
+                ("worktree/cli/Cargo.toml", &cli_manifest),
+                ("worktree/cli/src/main.rs", "fn main() {}\n"),
+                ("other/lib/Cargo.toml", &other_manifest),
+                ("other/lib/src/lib.rs", "pub fn other() {}\n"),
+                ("worktree/README.md", "# worktree\n"),
+            ],
+            "chore: initial workspace",
+        ),
+        (&[("worktree/lib/src/lib.rs", "pub fn worktree() { /* 1 */ }\n")], "feat(worktree): lib change"),
+        (&[("other/lib/src/lib.rs", "pub fn other() { /* 2 */ }\n")], "chore: other change"),
+        (
+            &[
+                ("worktree/fixes/2026-09-25-worktree-file/plan.md", "# plan\n"),
+                ("worktree/fixes/2026-09-25-worktree-file/spec.md", "# spec\n"),
+            ],
+            "planning(worktree): record execution plan for 2026-09-25-worktree-file",
+        ),
+        (&[(".claude/skills/worktree/SKILL.md", "# skill\n")], "planning(worktree): skill note"),
+        (&[("worktree-other/README.md", "# sibling\n")], "docs: sibling readme"),
+        (&[("worktree/README.md", "# worktree v2\n")], "docs: refresh readme"),
+        (&[("worktree/fixes/2026-09-25-worktree-file/review-1.md", "# review\n")], "review: first review"),
+        (&[("worktree/cli/src/main.rs", "fn main() { /* 8 */ }\n")], "fix(cli): cli change"),
+        (
+            &[
+                ("worktree/features/x/spec.md", "# x\n"),
+                ("other/lib/src/lib.rs", "pub fn other() { /* 9 */ }\n"),
+            ],
+            "chore: mixed",
+        ),
+    ];
+    let ids = history
+        .iter()
+        .zip(0..)
+        .map(|((files, message), minute)| {
+            commit_files_at(&path, files, message, BASE + 60 * minute).to_string()
+        })
+        .collect();
+    (dir, path, ids)
+}
+
+/// The 2026-09-25-recent-commits regression through the shipped binary: a
+/// planning-only commit under `worktree/fixes/` belongs to the `worktree`
+/// area but to no package.
+#[test]
+fn test_recent_commits_package_area_selects_shared_area_files_by_location() {
+    let (_dir, path, ids) = create_area_membership_repo();
+    let hashes = |commits: &[Value]| -> Vec<String> {
+        commits
+            .iter()
+            .map(|commit| commit["hash"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let pick = |indices: &[usize]| -> Vec<String> { indices.iter().map(|i| ids[*i].clone()).collect() };
+
+    let area = run_commit_json(&path, &["recent-commits", "5", "--package-area", "worktree", "--json"]);
+    assert_eq!(hashes(&area), pick(&[9, 8, 7, 6, 3]), "count 5 fills with area matches");
+    let all_area = run_commit_json(&path, &["recent-commits", "50", "--package-area", "worktree", "--json"]);
+    assert_eq!(hashes(&all_area), pick(&[9, 8, 7, 6, 3, 1, 0]), "C4 and C5 are outside the area");
+
+    let package = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree", "--json"]);
+    assert_eq!(hashes(&package), pick(&[1, 0]), "the planning commit touches no package");
+    let cli = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree-cli", "--json"]);
+    assert_eq!(hashes(&cli), pick(&[8, 0]));
+
+    // Attribution comes from the files, not from the filter being present.
+    let unfiltered = run_commit_json(&path, &["recent-commits", "50", "--json"]);
+    let record = |hash: &str| unfiltered.iter().find(|c| c["hash"] == hash).unwrap().clone();
+    let planning = record(&ids[3]);
+    assert_eq!(planning["packages"], serde_json::json!([]));
+    assert_eq!(planning["package_areas"], serde_json::json!(["worktree"]));
+    assert_eq!(
+        file_paths(&planning),
+        [
+            "worktree/fixes/2026-09-25-worktree-file/plan.md",
+            "worktree/fixes/2026-09-25-worktree-file/spec.md"
+        ]
+    );
+    let mixed = record(&ids[9]);
+    assert_eq!(mixed["packages"], serde_json::json!(["other"]));
+    assert_eq!(mixed["package_areas"], serde_json::json!(["other", "worktree"]));
+    assert_eq!(file_paths(&mixed), ["other/lib/src/lib.rs", "worktree/features/x/spec.md"]);
+    for commit in &area {
+        assert_eq!(commit, &record(commit["hash"].as_str().unwrap()), "filtered record differs");
+    }
+
+    let plain = run_repo(&path, &["recent-commits", "--package-area", "worktree", "--plain"]);
+    assert!(plain.status.success());
+    let stdout = String::from_utf8(plain.stdout).unwrap();
+    let stderr = String::from_utf8(plain.stderr).unwrap();
+    assert!(
+        stdout.contains("record execution plan for 2026-09-25-worktree-file"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("skill note"), "{stdout}");
+    assert!(!stderr.contains("record execution plan"), "result data on stderr: {stderr}");
+}
+
+/// The aggregate collects recent commits through the caller-observed catalog
+/// (`collect_observed`), so a shared area file must be attributed there
+/// exactly as the focused command attributes it.
+#[test]
+fn test_repo_aggregate_attributes_shared_area_files_like_the_focused_command() {
+    let (_dir, path, ids) = create_area_membership_repo();
+
+    let aggregate = run_aggregate_json(&path);
+    let focused = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(aggregate["recent_commits"], Value::Array(focused));
+
+    let planning = aggregate["recent_commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|commit| commit["hash"] == ids[3].as_str())
+        .expect("the planning commit is inside the last 10");
+    assert_eq!(planning["packages"], serde_json::json!([]));
+    assert_eq!(planning["package_areas"], serde_json::json!(["worktree"]));
+    // The documentation projection prunes files but keeps whole-commit
+    // attribution.
+    let documentation = aggregate["documentation_changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|commit| commit["hash"] == ids[3].as_str())
+        .expect("the planning commit changes documentation");
+    assert_eq!(documentation["package_areas"], serde_json::json!(["worktree"]));
+}
+
 #[test]
 fn test_recent_commits_no_change_commit_is_reported_with_no_files() {
     let (_dir, path) = create_test_repo();
