@@ -4,11 +4,23 @@ created: 2026-09-26
 phase: 1
 agent: claude/opus
 yolo: true
-packages: []
+packages:
+    - worktree
+    - worktree-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - worktree/lib/src/listing.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/dirty_tree.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Plan: More Info on `wt list`
@@ -167,7 +179,7 @@ production edits.
 
 Wave 2 has two parallel tasks that touch disjoint files.
 
-- [ ] **Remove `AlreadyIn`** (lib, plus one line in the CLI)
+- [x] **Remove `AlreadyIn`** (lib, plus one line in the CLI)
     - `lib/src/listing.rs`: delete the variant, apply the R5 rule and doc, and update
       `merge_state_reads_ahead_first` (`state(0,5,false)` and `state(0,0,true)` become `Clean`).
     - Rename and update the repo test per R8.
@@ -175,15 +187,15 @@ Wave 2 has two parallel tasks that touch disjoint files.
       workspace compiles. This is the only CLI edit in this task, and the metrics come in Phase 3.
     - Update `ALREADY_IN` usages in `cli/tests/list_table.rs` just enough to compile
       and pass: the line-284 assertion now expects `clean`. The full test rework is in Phase 3.
-- [ ] **Parent-local test** (lib, same file, so the same agent runs it after the task above)
+- [x] **Parent-local test** (lib, same file, so the same agent runs it after the task above)
     - Add the R10 test and run it alone first
       (`cargo nextest run -p worktree -E 'test(parent)'`).
-- [ ] **Dirty-tree red** (CLI, disjoint files)
+- [x] **Dirty-tree red** (CLI, disjoint files)
     - `cli/src/commands/dirty_tree.rs`: `<orange>{name}</orange>` becomes `<red>{name}</red>`.
       Update its unit tests (lines ~131–132) and any doc comment that says orange.
     - `cli/src/commands/remove/report.rs` unit test (~405): `<orange>f09.rs</orange>` becomes
       `<red>…</red>`.
-- [ ] **Checkpoint 2**: `just test` in `worktree/` is green. The first grep in the Definition
+- [x] **Checkpoint 2**: `just test` in `worktree/` is green. The first grep in the Definition
   of done is clean for `lib/`.
 
 ## Phase 3 — Table Rendering (metrics, gate, red dot, legend)

@@ -28,14 +28,16 @@ clarified: false
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 1 (spikes) overturned no ruling. S1: `Terminal::default().width()` reports the
-    real pane width when the shell wrapper captures stdout (terminal_size 0.4.4 falls back
-    stdout -> stderr -> stdin on Unix and Windows; verified at 99/100/120 columns in tmux),
-    so no `list.rs` change is needed. S2: for L1 color assertions use the substrings
-    `\u{1b}[2m\u{1b}[32m+N` (dim green) and `\u{1b}[2m\u{1b}[31m-N` (dim red); `<dim>`
-    emits `\u{1b}[2m` twice, so do not assert the whole prefix. ColorDepth::None renders
-    the plain `+N -N`. The L2 tmux pane is 120x40 by default; Phase 4 adds a `GREEN`
-    constant (Color::Indexed(2)). Details are in implementation-log.md.
+    Phase 2 is done: `MergeState` is two-state (`Clean`/`Conflicts`), the parent-local
+    test `the_parent_column_measures_against_the_parents_local_tip` is in `listing.rs`,
+    and dirty-tree source names are `<red>`. In `list_table.rs` only the `AlreadyIn` arm
+    was deleted; `merge_markup` still takes one argument and `dirty_dot(DirtySource)` is
+    still `<orange>` (both Phase 3). In `cli/tests/list_table.rs` the const is still named
+    `ALREADY_IN` (rename to `NOTHING_TO_MERGE` in Phase 3); the `chore/old-cleanup`
+    assertion now expects `clean` and the absence of `already in`, and the spec-example
+    snapshot was re-accepted (one line: `already in` -> `clean`). Known break until
+    Phase 4: the L2 test `level2_dirty_tree` still asserts `lib.rs` is ORANGE, so it will
+    fail under tmux now; `just test` (L1) is unaffected.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance
