@@ -212,9 +212,11 @@ fn save(path: &Path, file: &StoreFile) -> Result<(), WorktreeError> {
 mod tests {
     use std::sync::Mutex;
     use std::sync::mpsc;
+    use std::time::Instant;
 
     use super::*;
     use crate::live_remote::LsRemote;
+    use crate::live_remote::tests::{FAST, Loopback, http_origin};
     use crate::remove::test_support::TestRepo;
 
     const NOW: u64 = 1_790_000_000;
@@ -616,6 +618,31 @@ mod tests {
         repo.git_in(&repo.origin_path(), &["update-ref", "-d", "refs/heads/main"]);
         assert_eq!(refresh(NOW + 120), RefreshOutcome::Refreshed);
         assert_eq!(select(&repo, NOW + 120), CachedRemoteHead::Fresh(head(None, NOW + 120)));
+    }
+
+    #[test]
+    fn an_unauthorized_origin_fails_fast_and_leaves_the_store_alone() {
+        let server = Loopback::unauthorized();
+        let repo = http_origin(&server);
+        seed(&repo, Some(SHA), NOW);
+        let before = fs::read(store(&repo)).unwrap();
+        let path = repo.path();
+        let heads = LsRemote { base: &path, deadline: REMOTE_HEAD_REFRESH_DEADLINE };
+
+        let started = Instant::now();
+        let outcome = refresh_remote_head(&store(&repo), &path, || NOW + 600, &heads);
+        let elapsed = started.elapsed();
+        assert_eq!(outcome, RefreshOutcome::Failed);
+        assert!(elapsed < FAST, "took {elapsed:?}");
+        assert!(server.accepted() >= 1, "git never reached the server");
+        assert_eq!(fs::read(store(&repo)).unwrap(), before);
+
+        // With no previous answer, nothing is stored, least of all absence.
+        let empty = http_origin(&server);
+        let path = empty.path();
+        let heads = LsRemote { base: &path, deadline: REMOTE_HEAD_REFRESH_DEADLINE };
+        assert_eq!(refresh_remote_head(&store(&empty), &path, || NOW, &heads), RefreshOutcome::Failed);
+        assert!(!store(&empty).exists());
     }
 
     #[test]

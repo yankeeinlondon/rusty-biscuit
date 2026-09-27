@@ -231,9 +231,121 @@ fn batch_ssh_command(base: &Path) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::io::{Read as _, Write as _};
+    use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::thread::JoinHandle;
+
     use super::*;
     use crate::remove::test_support::TestRepo;
+
+    /// Bounds every wait on a loopback event, far above what git needs (S1
+    /// measured tens of milliseconds) and far below the 10 s deadline.
+    pub(crate) const FAST: Duration = Duration::from_secs(5);
+
+    /// The minimal response S1 found makes git fail at once without asking.
+    const UNAUTHORIZED: &[u8] = b"HTTP/1.1 401 Unauthorized\r\n\
+        WWW-Authenticate: Basic realm=\"r\"\r\n\
+        Content-Length: 0\r\n\
+        Connection: close\r\n\r\n";
+
+    /// A loopback HTTP origin that hands every accepted connection to a
+    /// handler on its own thread, and stops that thread when dropped.
+    pub(crate) struct Loopback {
+        addr: SocketAddr,
+        accepted: Arc<AtomicUsize>,
+        stop: Arc<AtomicBool>,
+        thread: Option<JoinHandle<()>>,
+    }
+
+    impl Loopback {
+        fn serve(handler: impl Fn(TcpStream) + Send + 'static) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+            let addr = listener.local_addr().unwrap();
+            let accepted = Arc::new(AtomicUsize::new(0));
+            let stop = Arc::new(AtomicBool::new(false));
+            let thread = std::thread::spawn({
+                let (accepted, stop) = (accepted.clone(), stop.clone());
+                move || {
+                    for stream in listener.incoming() {
+                        if stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        if let Ok(stream) = stream {
+                            accepted.fetch_add(1, Ordering::SeqCst);
+                            handler(stream);
+                        }
+                    }
+                }
+            });
+            Self { addr, accepted, stop, thread: Some(thread) }
+        }
+
+        /// Answers every request `401` with a Basic challenge (Rule 14).
+        pub(crate) fn unauthorized() -> Self {
+            Self::serve(|mut stream| {
+                // Read the whole request head first: closing with unread
+                // input would reset the connection on some platforms.
+                let _ = stream.set_read_timeout(Some(FAST));
+                let mut head = Vec::new();
+                let mut buffer = [0_u8; 1024];
+                while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => return,
+                        Ok(read) => head.extend_from_slice(&buffer[..read]),
+                    }
+                }
+                let _ = stream.write_all(UNAUTHORIZED);
+                let _ = stream.shutdown(Shutdown::Write);
+            })
+        }
+
+        /// Accepts and never answers (Rule 13); each held connection is sent
+        /// to the receiver, which keeps it open until the test drops it.
+        pub(crate) fn holding() -> (Self, mpsc::Receiver<TcpStream>) {
+            let (sender, receiver) = mpsc::channel();
+            let server = Self::serve(move |stream| {
+                let _ = sender.send(stream);
+            });
+            (server, receiver)
+        }
+
+        pub(crate) fn url(&self) -> String {
+            format!("http://{}/r.git", self.addr)
+        }
+
+        pub(crate) fn accepted(&self) -> usize {
+            self.accepted.load(Ordering::SeqCst)
+        }
+    }
+
+    impl Drop for Loopback {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::SeqCst);
+            // Wakes the blocked `accept` so the thread sees the flag.
+            let _ = TcpStream::connect(self.addr);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
+    /// A repository whose `origin` is `server`, with no proxy and no
+    /// credential helper whatever the user's global or system config says:
+    /// an empty `http.proxy` makes git disable proxying outright (it also
+    /// overrides `*_proxy` in the inherited environment), and an empty
+    /// `credential.helper` resets the helper list, so no keychain is asked or
+    /// written. A global `url.*.insteadOf` for `http://127.0.0.1` would still
+    /// apply; none exists on the build hosts or in CI.
+    pub(crate) fn http_origin(server: &Loopback) -> TestRepo {
+        let repo = TestRepo::new();
+        repo.git(&["remote", "add", "origin", &server.url()]);
+        repo.git(&["config", "http.proxy", ""]);
+        repo.git(&["config", "credential.helper", ""]);
+        repo
+    }
 
     #[test]
     fn reads_live_heads_and_reports_absent_branches() {
@@ -368,5 +480,64 @@ mod tests {
         let elapsed = started.elapsed();
         assert!(result.unwrap_err().contains("did not answer"));
         assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
+    }
+
+    #[test]
+    fn an_unauthorized_origin_fails_fast_without_a_prompt() {
+        let server = Loopback::unauthorized();
+        let repo = http_origin(&server);
+        let heads = LsRemote { base: &repo.path(), deadline: Duration::from_secs(10) };
+
+        // stdin is null in the transport and nextest gives no TTY, so a
+        // prompt could only show up as a hang until the deadline.
+        let started = Instant::now();
+        let error = heads.live_head("origin", "main").unwrap_err();
+        let elapsed = started.elapsed();
+
+        assert!(elapsed < FAST, "took {elapsed:?}: {error}");
+        assert!(!error.contains("did not answer"), "{error}");
+        assert!(server.accepted() >= 1, "git never reached the server: {error}");
+    }
+
+    /// Reads `stream` until the peer closes it, or fails after [`FAST`].
+    fn wait_for_close(mut stream: TcpStream) -> Duration {
+        let started = Instant::now();
+        stream.set_read_timeout(Some(FAST)).unwrap();
+        let mut buffer = [0_u8; 1024];
+        loop {
+            match stream.read(&mut buffer) {
+                Ok(0) => return started.elapsed(),
+                // The request itself, still buffered.
+                Ok(_) => {}
+                Err(e) if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                ) => return started.elapsed(),
+                Err(e) => panic!("the connection stayed open after the deadline: {e}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_deadline_kills_the_http_transport_and_closes_its_connection() {
+        let (server, held) = Loopback::holding();
+        let repo = http_origin(&server);
+
+        let started = Instant::now();
+        let result = run_noninteractive(
+            &repo.path(),
+            &["ls-remote", "origin", "refs/heads/main"],
+            Duration::from_millis(500),
+        );
+        let elapsed = started.elapsed();
+        assert!(result.unwrap_err().contains("did not answer"));
+        assert!(elapsed < FAST, "took {elapsed:?}");
+
+        // `git-remote-http` holds the socket, not `git`: only a tree kill
+        // closes it (S1).
+        let connection = held.recv_timeout(FAST).expect("git connected to the origin");
+        let closed_after = wait_for_close(connection);
+        assert!(closed_after < FAST, "closed after {closed_after:?}");
+        assert_eq!(server.accepted(), 1);
     }
 }
