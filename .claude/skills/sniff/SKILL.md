@@ -87,6 +87,11 @@ Every `MonorepoLayer` carries a required `lockfile: LockfileObservation`
 are always probed through `ManifestStore::lockfile_presence`, and contents
 are read only when corroboration is on. Only an exact `match` upgrades
 provenance; Cargo reports `members_present`/`members_missing`.
+Standalone Poetry, PDM, and Composer lockfiles are repository-level
+`RepoInfo.standalone_lockfiles` entries, never layers. `rush.json`,
+`bun.lock`, and Rush configuration are JSON with comments: parse them only
+through `filesystem::repo::jsonc` (strict `jsonc-parser` options), never
+`serde_json`.
 `GitMetadataRequest` narrows legacy coarse requests; it never widens them.
 `metadata: None` derives legacy behavior and is required for serialized-plan
 compatibility.

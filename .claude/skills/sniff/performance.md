@@ -91,6 +91,16 @@ request that reads no lockfile shows neither counter. The only lockfile read
 site is `read_counted_lockfile`, behind `ManifestStore::lockfile` and
 `ManifestStore::cargo_lock`.
 
+Standalone lockfiles (`RepoInfo.standalone_lockfiles`) add three probes
+(`composer.lock`, `pdm.lock`, `poetry.lock`) at the root and at each
+discovered package root, on every request, and never a read. Exact
+`lockfile_probes` assertions must count them. Metadata-only sources are never
+read either; the one extra listing is Gradle's legacy
+`gradle/dependency-locks/`, which counts one `FS_READ_DIRS`. Rush reuses the
+detector's cached `rush.json` (JSONC, via `repo::jsonc`). A corroborating
+request also reads `pnpm-config.json` and `subspaces.json`, each counted as
+`REPO_MANIFEST_PARSES`.
+
 ## Known baseline boundaries
 
 - Early filesystem baselines undercount manifest-index file opens and bytes.
