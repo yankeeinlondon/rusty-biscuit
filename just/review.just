@@ -323,3 +323,77 @@ implement-feature-review filter="" review="" spec="" design="" agent="":
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
     @: {{ bold }} {{ italic }} {{ reset }} {{ red }} {{ green }} {{ yellow }} {{ blue }} {{ magenta }} {{ cyan }} {{ dim }}  >/dev/null || true
+
+# Loop review -> implement with no prompts until ready, a recurring finding class, or `max` repairs
+[arg("design")]
+review-loop spec agent max="5" design="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    spec="{{ spec }}"
+    design="{{ design }}"
+    use_agent="{{ agent }}"
+    max="{{ max }}"
+
+    if [[ ! -f "${spec}" ]]; then
+        echo -e "{{ red }}ERROR:{{ reset }} Spec file not found: ${spec}" >&2
+        exit 1
+    fi
+    if [[ -n "${design}" && ! -f "${design}" ]]; then
+        echo -e "{{ red }}ERROR:{{ reset }} Design file not found: ${design}" >&2
+        exit 1
+    fi
+
+    dir="$(dirname "${spec}")"
+    full_dir="$(sniff repo package-area)/${dir}"
+    spec_name="$(basename "${spec}")"
+    design_name=""
+    [[ -n "${design}" ]] && design_name="$(basename "${design}")"
+
+    repairs=0
+    while true; do
+        iteration=1
+        while [[ -f "${dir}/review-${iteration}.md" ]]; do
+            (( iteration++ ))
+        done
+        review="${dir}/review-${iteration}.md"
+
+        echo -e "🏃‍♂️ review {{ bold }}#${iteration}{{ reset }} of $(just _link "${spec}") with {{ yellow }}${use_agent}{{ reset }}"
+        claudine compose "@prompts/review-feature.md" -y dir="${full_dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}" --${use_agent}
+
+        ready="$(md get --raw "${review}" ready 2>/dev/null || true)"
+        recurrence="$(md get --raw "${review}" recurrence 2>/dev/null || true)"
+        if [[ "${ready}" == "true" ]]; then
+            just _play small-group-cheer
+            echo -e "👍 review #${iteration} marked $(just _link "${review}") {{ green }}production ready{{ reset }}"
+            exit 0
+        fi
+        if [[ "${ready}" != "false" ]]; then
+            echo -e "{{ red }}ERROR:{{ reset }} ${review} did not set the ready frontmatter property" >&2
+            exit 1
+        fi
+        if [[ "${recurrence}" == "true" ]]; then
+            just _play two-tone
+            echo -e "{{ yellow }}STOP:{{ reset }} review #${iteration} reports a finding class that an earlier review already raised." >&2
+            echo -e "       The class sweep is missing; read $(just _link "${review}") before running another cycle." >&2
+            exit 2
+        fi
+        if (( repairs >= max )); then
+            echo -e "{{ red }}ERROR:{{ reset }} reached the maximum of ${max} repair cycles without a ready review" >&2
+            exit 1
+        fi
+
+        (( repairs++ ))
+        echo -e "🛠  implementing the findings of review #${iteration} (repair ${repairs}/${max})"
+        claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}"
+    done
+
+# Run the review-loop sequence (prompts/review-loop.md): review -> repair -> commit until ready or a recurring finding class
+review-sequence spec agent:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -f "{{ spec }}" ]]; then
+        echo -e "{{ red }}ERROR:{{ reset }} Spec file not found: {{ spec }}" >&2
+        exit 1
+    fi
+    claudine sequence "@prompts/review-loop.md" -y spec="{{ spec }}" agent="{{ agent }}" --{{ agent }}

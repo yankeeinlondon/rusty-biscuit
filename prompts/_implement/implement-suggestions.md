@@ -6,6 +6,7 @@ $schema:
     iteration: number(required;default(1)) -> what _iteration_ of the review/implement cycle that we are on
     log: file -> the log file we're writing to while working on the implementation
     retry: string -> if you're retrying this prompt after a failure then pass in what you know about prior progress
+    in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the review it would implement has ended the loop
 description: |-
     Implements the findings in a review which was conducted to determine the drift between
     what was actually implemented versus the specification that was being targetted in that
@@ -22,6 +23,17 @@ feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 
 initialize:
     stack:
+        # Inside the review-loop sequence the step list is static; a repair
+        # whose review is ready, or reports a recurring finding class, opts out
+        # here instead of launching an agent to write one log line.
+        - when: "in_loop && ready == true"
+          action:
+              - message: "repair of review #{{iteration}} skipped: `{{parent_dir(spec)}}` is production ready"
+              - skip
+        - when: "in_loop && frontmatter(review, 'recurrence') == true"
+          action:
+              - message: "repair of review #{{iteration}} skipped: the review reports a recurring finding class"
+              - skip
         - action:
             - ensure_file: '{{log}}'
 
@@ -136,11 +148,44 @@ From this point on in the task be sure to log progress on the task:
 >    - this allows you to report back to the caller in a coherent way by grouping the log messages by the various subagents
 >    - Note: this does mean you'll need to accumulate the list of log items of any given subagent until it completes so you can log that subagent's log items as one group.
 
+### Fix the class, not the instance
+
+A review finding is almost always one instance of a defect class. When one
+instance is fixed and its siblings are left, the next review finds the next
+sibling and the cycle repeats. For example: a review reports that one parser
+reads a missing field as an empty list; the fix corrects that parser and notes
+that a sibling parser does the same "for the reviewer"; the next review's only
+finding is that sibling. Each such deferral costs a full review/fix cycle.
+
+For every finding, before any code changes:
+
+- name the defect class in the log, in one sentence that does not mention the
+  file the review named (for example: "a load-bearing field's absent, null,
+  wrong-type, and invalid-element shapes are coerced to a permissive default")
+- grep for every sibling site: every parser, reader, detector, or projection
+  that handles the same kind of input or makes the same kind of decision
+- fix every instance you find in this cycle and add a test case for each,
+  whether or not the review named it
+- log the sweep as one entry:
+  `- class sweep: {class}; sites checked: {list}; fixed here: {list}; clean: {list}`
+
+The following are not permitted for anything that is itself a defect against
+the specification: "flagged for the reviewer", "left unchanged", "deliberately
+left tolerant", "out of scope for this finding", "possible follow-up". Either
+fix it in this cycle, or list it as **deferred** under `### Successful
+Completion` with the reason. A deferred defect counts as deferred, not fixed.
+
+The repository's surgical-changes rule bounds each change to the defect class.
+It does not bound it to the sentence in the review.
+
+::file "../_input-robustness.md"
+
 Now your task is to:
 
 1. Act as an orchestrator and iterate over each suggestion (serially)
 2. For each suggestion call a subagent to:
-    - implement the suggestion,
+    - name the defect class and sweep every sibling site (see "Fix the class, not the instance" above),
+    - implement the suggestion at every site the sweep found,
     - add and/or update tests to provide full test coverage for the suggestion,
     - and make sure that the implementation passes all tests (just test)
     - and has no lints (just lint)
