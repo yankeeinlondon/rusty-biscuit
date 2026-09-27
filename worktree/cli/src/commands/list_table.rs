@@ -21,6 +21,10 @@ use worktree::listing::{
 use worktree::pull_requests::{OpenPullRequest, PrListing, PrPlacement, placement};
 use worktree::worktree::{DirtyStatus, WorktreeList, WorktreeStatus};
 
+/// The narrowest terminal that shows ahead/behind counts in the two target
+/// columns; `--width` sizes only the graph and does not move this gate.
+const METRICS_MIN_WIDTH: u32 = 100;
+
 /// Everything the table shows.
 pub struct TableFacts<'a> {
     pub default_branch: &'a str,
@@ -98,8 +102,8 @@ pub fn legend_markup() -> [String; 2] {
         ),
         format!(
             "Branch     {} <dim>merges cleanly into parent</dim>    {} <dim>conflicts with parent</dim>    {} <dim>parent deleted</dim>",
-            connector_markup("├─", Some(MergeState::Clean), false),
-            connector_markup("├─", Some(MergeState::Conflicts), false),
+            connector_markup("└─", Some(MergeState::Clean), false),
+            connector_markup("└─", Some(MergeState::Conflicts), false),
             connector_markup("└┄", None, true),
         ),
     ]
@@ -121,7 +125,8 @@ pub fn pr_age_markup(prs: &PrListing, now: u64) -> Option<String> {
 }
 
 /// The table, one row per tree row, with the current worktree's row
-/// highlighted.
+/// highlighted. The target columns carry ahead/behind counts only when
+/// `terminal` is at least [`METRICS_MIN_WIDTH`] columns wide.
 pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     let prose_cell = |markup: String| -> TableCellContent { Prose::new(markup).render(terminal).into() };
     let target_header = match facts.target {
@@ -137,13 +142,14 @@ pub fn table(facts: &TableFacts<'_>, terminal: &Terminal) -> Table {
     ];
     let mut table = Table::new().with_columns(columns).prefer_cursor_alignment();
 
+    let show_metrics = terminal.width() >= METRICS_MIN_WIDTH;
     let mut current_row = None;
     for (index, row) in facts.tree.iter().enumerate() {
         let status = row.worktree.and_then(|worktree| facts.statuses.get(worktree));
         if status.is_some_and(|status| status.entry.is_current) {
             current_row = Some(index);
         }
-        let cells = RowCells::new(facts, row, status, terminal.osc_link_support);
+        let cells = RowCells::new(facts, row, status, terminal.osc_link_support, show_metrics);
         table.add_row(vec![
             prose_cell(cells.worktree()),
             prose_cell(cells.branch()),
@@ -173,6 +179,7 @@ struct RowCells<'f, 'a> {
     comparisons: Option<&'f BranchComparisons>,
     prs: Vec<&'f OpenPullRequest>,
     links: bool,
+    show_metrics: bool,
 }
 
 impl<'f, 'a> RowCells<'f, 'a> {
@@ -181,6 +188,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
         row: &'f TreeRow,
         status: Option<&'f WorktreeStatus>,
         links: bool,
+        show_metrics: bool,
     ) -> Self {
         let branch = row.branch();
         let prs = match (branch, status) {
@@ -196,6 +204,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
             comparisons: branch.and_then(|branch| facts.comparisons.get(branch)),
             prs,
             links,
+            show_metrics,
         }
     }
 
@@ -301,7 +310,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
         }
         let cell = match (self.facts.target, self.comparisons.and_then(|c| c.target)) {
             (None, _) => "<dim>—</dim>".to_string(),
-            (Some(_), Some(comparison)) => merge_markup(comparison),
+            (Some(_), Some(comparison)) => merge_markup(comparison, self.show_metrics),
             (Some(_), None) => "<dim>?</dim>".to_string(),
         };
         with_badges(cell, self.badges(PrPlacement::Default))
@@ -315,7 +324,7 @@ impl<'f, 'a> RowCells<'f, 'a> {
             return String::new();
         }
         let cell = match self.comparisons.map(|c| c.parent) {
-            Some(ParentComparison::Compared(Some(comparison))) => merge_markup(comparison),
+            Some(ParentComparison::Compared(Some(comparison))) => merge_markup(comparison, self.show_metrics),
             Some(ParentComparison::Compared(None)) => "<dim>?</dim>".to_string(),
             Some(ParentComparison::Deleted) => "<gray-400>parent deleted</gray-400>".to_string(),
             Some(ParentComparison::NotApplicable) | None => "<dim>—</dim>".to_string(),
@@ -328,11 +337,23 @@ fn with_badges(cell: String, badges: String) -> String {
     if badges.is_empty() { cell } else { format!("{cell} {badges}") }
 }
 
-fn merge_markup(comparison: Comparison) -> String {
-    match comparison.merge_state() {
+/// The merge state word, then `+ahead` and `-behind` when `show_metrics`;
+/// a zero side is omitted.
+fn merge_markup(comparison: Comparison, show_metrics: bool) -> String {
+    let mut out = match comparison.merge_state() {
         MergeState::Clean => "<dim><i>clean</i></dim>".to_string(),
         MergeState::Conflicts => "<red>conflicts</red>".to_string(),
+    };
+    if show_metrics {
+        if comparison.ahead > 0 {
+            out.push_str(&format!(" <dim><green>+{}</green></dim>", comparison.ahead));
+        }
+        if comparison.behind > 0 {
+            // ASCII hyphen-minus, so plain output stays greppable.
+            out.push_str(&format!(" <dim><red>-{}</red></dim>", comparison.behind));
+        }
     }
+    out
 }
 
 /// Colors a tree connector by the row's merge state; a deleted parent
@@ -352,7 +373,7 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
     match dirty {
         DirtyStatus::Clean => "<dim>○</dim>",
         DirtyStatus::DirtyNonSource => "<yellow>●</yellow>",
-        DirtyStatus::DirtySource => "<orange>●</orange>",
+        DirtyStatus::DirtySource => "<red>●</red>",
     }
 }
 

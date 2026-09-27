@@ -20,26 +20,28 @@ use worktree_cli::commands::list_table::{self, TableFacts};
 
 const NOW: u64 = 1_790_000_000;
 
+fn terminal_at(width: u32, color: bool) -> Terminal {
+    let builder = Terminal::builder().osc_link_support(color).is_tty(color).width(width);
+    if color {
+        builder.color_depth(ColorDepth::TrueColor).color_mode(ColorMode::Dark).build()
+    } else {
+        builder.color_depth(ColorDepth::None).build()
+    }
+}
+
 fn plain_terminal() -> Terminal {
-    Terminal::builder()
-        .color_depth(ColorDepth::None)
-        .osc_link_support(false)
-        .is_tty(false)
-        .width(120)
-        .build()
+    terminal_at(120, false)
 }
 
 fn color_terminal() -> Terminal {
-    Terminal::builder()
-        .color_depth(ColorDepth::TrueColor)
-        .color_mode(ColorMode::Dark)
-        .osc_link_support(true)
-        .is_tty(true)
-        .width(120)
-        .build()
+    terminal_at(120, true)
 }
 
-const ALREADY_IN: Comparison = Comparison { ahead: 0, behind: 4, is_clean: true };
+/// The two tips are the same commit.
+const EQUAL_TIPS: Comparison = Comparison { ahead: 0, behind: 0, is_clean: true };
+/// Nothing to merge; the target has moved on.
+const NOTHING_TO_MERGE: Comparison = Comparison { ahead: 0, behind: 4, is_clean: true };
+const AHEAD_ONLY: Comparison = Comparison { ahead: 3, behind: 0, is_clean: true };
 const CLEAN: Comparison = Comparison { ahead: 2, behind: 1, is_clean: true };
 const CONFLICTS: Comparison = Comparison { ahead: 1, behind: 3, is_clean: false };
 
@@ -121,7 +123,7 @@ impl Example {
         };
         let comparisons = HashMap::from([
             ("fix/wt-ux".to_string(), target_only(CLEAN)),
-            ("feat/theme".to_string(), target_only(CLEAN)),
+            ("feat/theme".to_string(), target_only(AHEAD_ONLY)),
             (
                 "feat/dark-fixes".to_string(),
                 BranchComparisons {
@@ -129,7 +131,7 @@ impl Example {
                     parent: ParentComparison::Compared(Some(CONFLICTS)),
                 },
             ),
-            ("chore/old-cleanup".to_string(), target_only(ALREADY_IN)),
+            ("chore/old-cleanup".to_string(), target_only(NOTHING_TO_MERGE)),
             (
                 "spike/parser".to_string(),
                 BranchComparisons {
@@ -137,7 +139,7 @@ impl Example {
                     parent: ParentComparison::Deleted,
                 },
             ),
-            ("release/prep".to_string(), target_only(CLEAN)),
+            ("release/prep".to_string(), target_only(EQUAL_TIPS)),
         ]);
 
         Self {
@@ -282,7 +284,8 @@ fn every_cell_kind_renders_as_ruled() {
     assert!(dark.contains("conflicts"), "{dark}");
 
     let old_cleanup = row(&rendered, "chore/old-cleanup");
-    assert!(old_cleanup.contains("clean") && !old_cleanup.contains("already in"), "{old_cleanup}");
+    assert!(old_cleanup.contains("clean -4"), "{old_cleanup}");
+    assert!(!rendered.contains("already in"), "{rendered}");
 
     let deleted = row(&rendered, "experiments");
     assert!(deleted.contains("experiments (deleted)"));
@@ -320,10 +323,10 @@ fn pr_badges_follow_the_prs_target_and_skip_forks() {
     let rendered = plain(&Example::new());
 
     let current = row(&rendered, "fix/wt-ux");
-    assert!(current.contains("clean  PR #99"), "badge after the default column's cell: {current}");
+    assert!(current.contains("clean +2 -1  PR #99"), "badge after the default column's cell: {current}");
 
     let dark = row(&rendered, "feat/dark-fixes");
-    assert!(dark.contains("conflicts  PR #104"), "badge after the parent cell: {dark}");
+    assert!(dark.contains("conflicts +1 -3  PR #104"), "badge after the parent cell: {dark}");
     assert!(!dark.contains("PR #104 →"), "{dark}");
 
     let release = row(&rendered, "release/prep");
@@ -372,9 +375,10 @@ fn styles_follow_the_design() {
     // A deleted parent is struck through.
     assert!(row(&colored, "experiments").contains("\u{1b}[9mexperiments"));
 
-    // Dots: yellow for other files, orange for source files.
+    // Dots: yellow for other files, the `conflicts` red for source files.
     assert!(row(&colored, "spike-parser").contains("\u{1b}[33m●"));
-    assert!(row(&colored, "feat-theme").contains("\u{1b}[38;2;255;165;0m●"));
+    assert!(row(&colored, "feat-theme").contains("\u{1b}[31m●"));
+    assert!(!colored.contains("\u{1b}[38;2;255;165;0m"), "no orange left: {colored:?}");
 }
 
 #[test]
@@ -391,7 +395,7 @@ fn the_legend_explains_both_columns() {
     );
     assert_eq!(
         lines[legend + 1].trim_end(),
-        " Branch     ├─ merges cleanly into parent    ├─ conflicts with parent    └┄ parent deleted"
+        " Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted"
     );
 }
 
@@ -425,4 +429,118 @@ fn a_stored_empty_answer_shows_no_badges_but_keeps_its_age() {
     example.prs = Default::default();
     let rendered = plain(&example);
     assert!(!rendered.contains("PR #") && !rendered.contains("PRs as of"), "{rendered}");
+}
+
+fn plain_at(width: u32, example: &Example) -> String {
+    list_table::render(&example.facts(), &terminal_at(width, false), NOW)
+}
+
+/// The target and parent cells of a table line, trimmed. They are the last two
+/// columns, counted from the right because a Branch cell's tree guide is also
+/// a `│`.
+fn target_cells(line: &str) -> (String, String) {
+    let cells: Vec<&str> = line.split('│').map(str::trim).collect();
+    let n = cells.len();
+    (cells[n - 3].to_string(), cells[n - 2].to_string())
+}
+
+/// The line after the one containing `needle`, where a wrapped cell continues.
+fn next_line<'a>(rendered: &'a str, needle: &str) -> &'a str {
+    let mut lines = rendered.lines();
+    lines.find(|line| line.contains(needle)).expect("row");
+    lines.next().expect("a following line")
+}
+
+#[test]
+fn the_table_at_99_columns_shows_no_counts() {
+    insta::assert_snapshot!(plain_at(99, &Example::new()));
+}
+
+#[test]
+fn the_table_at_100_columns_shows_counts() {
+    insta::assert_snapshot!(plain_at(100, &Example::new()));
+}
+
+#[test]
+fn counts_follow_the_state_word_and_precede_the_badge_from_100_columns() {
+    let rendered = plain_at(100, &Example::new());
+    let cells = |needle| target_cells(row(&rendered, needle));
+
+    // Still the four columns: five vertical rules on the header and a row.
+    assert_eq!(row(&rendered, "Worktree  ").matches('│').count(), 5, "{rendered}");
+    assert_eq!(row(&rendered, "fix/wt-ux").matches('│').count(), 5, "{rendered}");
+
+    assert_eq!(cells("fix/wt-ux"), ("clean +2 -1  PR #99".into(), "—".into()));
+    assert_eq!(cells("feat/theme"), ("clean +3".into(), "—".into()));
+    assert_eq!(cells("chore/old-cleanup"), ("clean -4".into(), "—".into()));
+    assert_eq!(cells("release/prep"), ("clean".into(), "—".into()), "equal tips show no count");
+    // At exactly 100 the parent cell's badge wraps under its counts; the
+    // gate promises the counts, not that every row fits on one line.
+    assert_eq!(cells("feat/dark-fixes"), ("clean +2 -1".into(), "conflicts +1 -3".into()));
+    assert_eq!(target_cells(next_line(&rendered, "feat/dark-fixes")).1, "PR #104");
+    assert_eq!(cells("spike/parser"), ("conflicts +1 -3".into(), "parent deleted".into()));
+    assert_eq!(cells("base repo"), ("—".into(), "—".into()));
+    assert_eq!(cells("detached @"), ("—".into(), "—".into()));
+    assert_eq!(cells("experiments"), (String::new(), String::new()));
+}
+
+#[test]
+fn up_to_99_columns_cells_keep_state_and_badges_without_counts() {
+    let rendered = plain_at(99, &Example::new());
+    let cells = |needle| target_cells(row(&rendered, needle));
+    assert_eq!(cells("fix/wt-ux").0, "clean  PR #99", "{rendered}");
+    assert_eq!(cells("feat/theme").0, "clean");
+    assert_eq!(cells("chore/old-cleanup").0, "clean");
+    assert_eq!(cells("release/prep").0, "clean");
+    assert_eq!(cells("feat/dark-fixes"), ("clean".into(), "conflicts  PR #104".into()));
+    assert_eq!(cells("spike/parser"), ("conflicts".into(), "parent deleted".into()));
+
+    // Narrower terminals wrap badges but never gain counts.
+    for width in [99, 80] {
+        let rendered = plain_at(width, &Example::new());
+        for token in ["+1", "+2", "+3", "-1", "-3", "-4"] {
+            assert!(!rendered.contains(token), "no {token} at {width}:\n{rendered}");
+        }
+    }
+}
+
+#[test]
+fn an_unknown_comparison_never_gets_counts() {
+    let mut example = Example::new();
+    example.comparisons.insert(
+        "fix/wt-ux".to_string(),
+        BranchComparisons {
+            target: None,
+            parent: ParentComparison::Compared(None),
+        },
+    );
+    let rendered = plain_at(100, &example);
+    assert_eq!(target_cells(row(&rendered, "fix/wt-ux")), ("?  PR #99".into(), "?".into()));
+}
+
+#[test]
+fn counts_are_dim_green_and_dim_red_in_color() {
+    let colored = list_table::render(&Example::new().facts(), &terminal_at(100, true), NOW);
+    let current = row(&colored, "fix-wt-ux");
+    assert!(current.contains("\u{1b}[2m\u{1b}[32m+2"), "{current:?}");
+    assert!(current.contains("\u{1b}[2m\u{1b}[31m-1"), "{current:?}");
+    let ahead = current.find("+2").unwrap();
+    let behind = current.find("-1").unwrap();
+    let badge = current.find("PR #99").unwrap();
+    assert!(ahead < behind && behind < badge, "{current:?}");
+
+    let dark = row(&colored, "feat/dark-fixes");
+    assert!(dark.contains("\u{1b}[31mconflicts"), "{dark:?}");
+    assert!(dark.contains("\u{1b}[2m\u{1b}[32m+1"), "{dark:?}");
+    assert!(dark.contains("\u{1b}[2m\u{1b}[31m-3"), "{dark:?}");
+
+    let narrow = list_table::render(&Example::new().facts(), &terminal_at(99, true), NOW);
+    assert!(!narrow.contains("\u{1b}[32m"), "no green count at 99: {narrow:?}");
+}
+
+#[test]
+fn no_color_counts_read_as_plain_text() {
+    let rendered = plain_at(100, &Example::new());
+    assert!(!rendered.contains('\u{1b}'), "{rendered:?}");
+    assert!(row(&rendered, "fix/wt-ux").contains("clean +2 -1"), "{rendered}");
 }

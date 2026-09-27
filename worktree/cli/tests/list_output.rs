@@ -91,7 +91,7 @@ fn list_output_is_the_redesigned_table() {
 └─────────────┴───────────┴───────────┴───────────┘\n\
 \n\
 \x20Worktree   ○ clean    ● uncommitted files    ● uncommitted source files\n\
-\x20Branch     ├─ merges cleanly into parent    ├─ conflicts with parent    └┄ parent deleted\n"
+\x20Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted\n"
     );
 }
 
