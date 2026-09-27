@@ -63,10 +63,46 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/sniff/SKILL.md
     - .claude/skills/sniff/performance.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/repo/jsonc.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/src/filesystem/repo/detection.rs
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/npm.rs
+    - sniff/lib/src/filesystem/repo/types.rs
+    - sniff/lib/src/filesystem/repo/lockfile/mod.rs
+    - sniff/lib/src/filesystem/repo/lockfile/npm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/yarn.rs
+    - sniff/lib/src/filesystem/repo/lockfile/bun.rs
+    - sniff/lib/src/filesystem/repo/lockfile/rush.rs
+    - sniff/lib/src/filesystem/repo/lockfile/fallback.rs
+    - sniff/lib/src/filesystem/repo/lockfile/standalone.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/tests/l1/lockfile_fixtures.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/tests/l1/cli.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+docs_updated_during_phase_3:
+    - sniff/lib/README.md
+    - sniff/docs/dependencies.md
+    - docs/dependencies.md
+    - sniff/features/2026-09-26-lockfile-corroboration/accepted-versions.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/performance.md
 packages:
     - sniff
     - sniff-cli
     - claudine
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-09-26-lockfile-corroboration (5 phases)
@@ -399,4 +435,207 @@ test-input narrowing sees them.
   (2073, including the Windows-only
   `manifest_member_rejects_a_member_on_another_drive`), wsl pass (archive
   mode). No receipt was published because the tree is uncommitted.
+- Skipped: nothing. No pre-existing failures.
+
+## Phase 3
+
+All six Wave 1 tasks were done sequentially by one agent. Each format stayed
+in its own `lockfile/*.rs` file. The engine (`lockfile/mod.rs`) changed in
+two small ways only: its parsed-outcome `match` became a shared `classify`
+helper, which Rush reuses with the `common/temp` base, and `rush::observe` now
+receives the layer and its owned seeds.
+
+### New dependency
+
+- `jsonc-parser` 0.33.2 (`serde` feature), per spike S2. The new
+  `filesystem::repo::jsonc` module is its only caller. It passes a literal
+  strict `ParseOptions` (comments and trailing commas only). Dependency docs
+  were updated now rather than in Phase 5, because the repo's drift rule ties
+  them to the change that adds the crate: `sniff/docs/dependencies.md` and
+  root `docs/dependencies.md` (a catalog entry plus a recent-notes line).
+
+### Parsers
+
+- **npm** (`lockfile/npm.rs`): typed `serde_json` with a `packages` map
+  visitor.
+  - The visitor keeps only the root record's `workspaces`, every record path
+    without a `node_modules` component, and the `resolved` target of each
+    `link: true` record.
+  - The locked set is the paths and link targets that the locked declarations
+    match, through a pure string `globset` matcher. `*` stops at `/`, `**`
+    spans it, and a leading `!` excludes, as in the manifest-side expander.
+    `./` prefixes and trailing `/` are normalized away.
+  - A duplicate `packages` key is `parse_failed`, and so is a missing
+    `packages` object or root record at v2/v3.
+  - v1 and any other version is `unsupported_version`. A non-integer version
+    counts as a recognizable unsupported version.
+  - A root record without `workspaces` is `ambiguous_membership` when any
+    local package path exists, and an empty set otherwise. An invalid
+    declaration glob is also `ambiguous_membership`.
+  - When the typed body parse fails, the version is re-read from a header
+    struct, as uv does. So an unsupported version with an unfamiliar body is
+    `unsupported_version`, not `parse_failed`. Yarn and Bun follow the same
+    pattern.
+- **Yarn** (`lockfile/yarn.rs`):
+  - The Classic signature is checked in the leading comment block, before
+    parsing.
+  - Berry `__metadata.version` 6, 8, and 10 are accepted.
+  - Each entry's `resolution` is split at the last `@workspace:`. A name
+    containing `:` (a protocol such as `patch:`) is rejected, so `link:`,
+    `portal:`, and patch descriptors never count.
+  - Two entries resolving to one path collapse. Two names for one path, a
+    duplicate entry key, a missing or mistyped `resolution`, and no `.` root
+    workspace are `parse_failed`.
+- **Bun** (`lockfile/bun.rs`): `jsonc` into a typed struct with a
+  `workspaces` key visitor. `lockfileVersion` 1 is accepted. A missing or
+  non-object `workspaces`, or a duplicate key, is `parse_failed`. `bun.lockb`
+  was already metadata-only from Phase 2.
+
+### Rush (ruling R3)
+
+- **Pre-existing bug fixed:** `parse_rush_project_folders` (strict JSON) is
+  replaced by a typed `RushJson` model (`npm.rs`) parsed through `jsonc`.
+  Fields of an unexpected type are kept as `Lenient::Other`, so an odd
+  setting never hides the projects. The model is cached in `ManifestStore`
+  (`rush_json`), so detection and corroboration share one read and one
+  manifest parse. `detect_rush_workspace` now takes the store. That touched
+  its two call sites (`detection.rs` and `nested.rs`). An unreadable
+  `rush.json` still fails detection, as before; an unparseable one still
+  means "no Rush layer". Regression tests: `npm::tests::the_real_rush_json_is_read_through_its_comments`
+  and L1 `rush_tool_fixture_reports_the_accepted_version_matrix` (before the
+  fix, the real fixture produced no layer).
+- **`lockfile/rush.rs`:**
+  - Exactly one of `pnpmVersion`/`npmVersion`/`yarnVersion` picks the manager
+    and its `common/config/rush/*` lockfile. None or several is
+    `unverifiable` + `unsupported_layout` with `paths: []`.
+  - Precedence:
+    1. A metadata failure is `unreadable`.
+    2. npm and Yarn managers are `not_requested` when their lockfile is
+       present and the request declines, and `unverifiable` +
+       `unsupported_layout` otherwise.
+    3. For pnpm with a declining request, `not_requested` or `absent`.
+    4. For pnpm with a corroborating request, the layout is classified first:
+       variants in `rush.json`, a `common/config/rush/variants` directory,
+       `subspacesEnabled: true`, or `useWorkspaces` not `true` makes it
+       `unverifiable` + `unsupported_layout`, with the lockfile listed when
+       present. Only then is a missing lockfile `absent`.
+  - `pnpm-config.json` wins. Without it, `rush.json`'s legacy
+    `pnpmOptions.useWorkspaces` decides, and Rush's default is `false`.
+  - Configuration that cannot be read or parsed is `unsupported_layout`, not
+    `unreadable`, because the lockfile is not what failed. That decision is
+    recorded in `accepted-versions.md`.
+  - The supported layout parses through `Format::Pnpm` (the store cache) and
+    drops the synthetic `.` importer. It then compares with the base
+    `["common", "temp"]`, so `../../packages/alpha` becomes `packages/alpha`.
+  - Config reads go through the new `detection::read_counted_config`, which
+    counts `FS_FILE_OPENS`, `FS_BYTES_READ`, and `REPO_MANIFEST_PARSES` (R8).
+    They happen only on a corroborating request. `rush.json` costs nothing
+    extra, because the detector already cached it.
+
+### Fallback sources
+
+- **Gradle:** reports the root `gradle.lockfile` plus the direct `*.lockfile`
+  children of the root `gradle/dependency-locks/`. That is one `read_dir`
+  (`FS_READ_DIRS`), with no recursion. Directories named `*.lockfile` are
+  skipped; a symlink counts when it resolves to a file. Both groups are listed
+  when both exist.
+  - A file where the directory should be holds no lockfiles. This is decided
+    by a metadata check on the error path only, because `read_dir`'s error
+    kind for a file differs by OS.
+  - A metadata failure on the directory is `unreadable` + `metadata_failed`.
+- **Bazel:** without `MODULE.bazel`, Bzlmod does not apply, so there is no
+  lockfile source: `not_applicable` + `no_lockfile_source`, with no lockfile
+  probe. The Phase 2 "absent for every sourced authority" test dropped Bazel
+  for this reason. It is covered by the new
+  `a_bazel_root_without_module_bazel_has_no_lockfile_source`.
+- The Maven, .NET, Pants, Buck2, and `Unknown` `not_applicable` table tests
+  already existed from Phase 2
+  (`sources::tests::every_standard_has_the_specified_source` and
+  `tests::standards_without_a_lockfile_source_are_not_applicable_without_probing`).
+
+### Standalone observations (ruling R2)
+
+- New public `StandaloneLockfileObservation { root, tool, #[serde(flatten)]
+  observation }` and `StandaloneLockfileTool` (`composer`, `pdm`, `poetry`),
+  re-exported from `filesystem::repo`.
+- `RepoInfo.standalone_lockfiles` is always serialized. It has
+  `#[serde(default)]`, so older `RepoInfo` JSON without the field still
+  deserializes. Only the replaced `lockfile_match` was meant to break.
+- It is filled on both result paths: the workspace path (root plus every
+  final package root) and the root-package path (root only).
+- Cost: three cached `lockfile_presence` probes per unique root, on every
+  request, and never a read. That is `3 × (1 + packages)` extra
+  `lockfile_probes`.
+- **Expectation changes:** two Phase 2 unit tests pin exact probe counts.
+  `absent_cargo_lock_is_one_probe_and_no_read` went from 4 to 13 (three
+  roots). `declining_structure_request_probes_but_reads_and_parses_no_lockfile`
+  went from 12 to 33 (seven roots). Their comments now itemize the standalone
+  probes.
+- The L1 complete-result matrix (`lockfile_provenance.rs`) gained
+  `"standalone_lockfiles": []`.
+- **CLI (Phase 4 handoff):** `sniff repo structure --json` serializes
+  `RepoInfo` directly, so it now emits `"standalone_lockfiles": []`.
+  `cli::repo_structure_json_reports_cargo_subset_evidence_for_matching_lockfile`'s
+  expected JSON was updated to pin today's output. R2 says the CLI omits an
+  empty list; that projection belongs to the Phase 4 "JSON projection" task,
+  which must also flip this expectation. No CLI source changed in this phase
+  except test-only `RepoInfo` literals.
+- **Constructor fallout:** 16 test-only `RepoInfo` literals gained
+  `standalone_lockfiles: Vec::new()`: `types.rs` (2),
+  `cli/src/output/filesystem/mod.rs` (2), `cli/src/output/repo_json.rs`
+  (10), and
+  `claudine/cli/src/commands/wrap/env/tests.rs` (1). Claudine lib and
+  Darkmatter already used `..Default::default()`.
+- **Composer gap (pre-existing, not changed):** Sniff recognizes no PHP-only
+  package, so a Composer-only project has no `RepoInfo` and no observation.
+  The L1 test adds a `package.json` to the Composer fixture.
+
+### Requirement-to-test mapping
+
+| Behavior | Tests |
+|---|---|
+| Strict JSONC: comments and trailing commas only; rejects quotes, unquoted keys, missing commas, hex, unary plus, trailing content, an unterminated comment, empty input | `repo::jsonc::tests::*` |
+| npm membership from the locked declarations, `file:` dependency excluded, link records, negation, `./` and trailing `/`, object-form declarations, `node_modules` exclusion | `lockfile::npm::tests::*` (corpus over every npm fixture, parity with a generic `serde_json::Value` reference) |
+| npm v1, unknown, and odd versions never yield membership; malformed, duplicate, missing, and mistyped documents are `parse_failed`; `ambiguous_membership` cases | `npm::tests::{unsupported_versions_never_yield_membership, rejects_malformed_documents, undeclared_local_paths_are_ambiguous_but_an_empty_lock_is_not, an_invalid_declaration_glob_is_ambiguous}` |
+| Yarn Berry 6/8/10, Classic by signature, scoped names split at the last marker, `link:`/`portal:`/`patch:` excluded, conflicting identities, a missing root, duplicate keys | `lockfile::yarn::tests::*` (corpus plus a generic `Value` reference) |
+| Bun JSONC with comments and trailing commas (strict JSON rejects real output), version 1, duplicate or missing `workspaces` | `lockfile::bun::tests::*` (corpus) |
+| Real-tool fixtures end to end (corroborating and declined, 1 read and 1 parse, provenance only on `match`) | L1 `lockfile_fixtures::{npm,yarn,bun}_tool_fixtures_report_the_accepted_version_matrix` |
+| npm v1 through detection; shrinkwrap beats a disagreeing `package-lock.json` (R6) | L1 `an_npm_v1_lockfile_is_an_unsupported_version_through_detection`, `npm_shrinkwrap_takes_precedence_over_package_lock` |
+| `bun.lockb` never read (both request kinds); `bun.lock` wins over `bun.lockb` | L1 `a_binary_bun_lockfile_is_unverifiable_without_a_read`; `precedence-both` row |
+| `rush.json` comments regression (the pre-existing bug), lenient fields, manager selection | `repo::npm::tests::*`; L1 `rush_tool_fixture_reports_the_accepted_version_matrix` |
+| Rush importer base translation, synthetic `.` excluded, config reads only when corroborating (manifest parse counts 3 vs 1) | `lockfile::tests::{rush_importers_resolve_against_common_temp, a_declined_rush_request_reads_no_configuration}` |
+| Every R3 unsupported layout (subspaces, unreadable configs, `useWorkspaces` false/omitted/absent, variants directory and declaration, npm/Yarn/no/several managers), never reading the lockfile; unsupported-without-lockfile is not `absent`; legacy `pnpmOptions` | `lockfile::tests::{unsupported_rush_layouts_are_unverifiable_without_reading_the_lockfile, an_unsupported_rush_layout_without_a_lockfile_is_not_absent, the_legacy_rush_pnpm_option_enables_the_workspace_layout, rush_managers_other_than_pnpm_are_unsupported_layouts}`; L1 `rush_tool_fixture_variants_follow_ruling_r3` (a renamed importer gives `mismatch`; subspaces, `useWorkspaces`, and variants give `unsupported_layout`) |
+| Gradle legacy group one level deep, sorted beside the root lockfile, empty or misplaced directory, metadata failure | `lockfile::tests::{legacy_gradle_locks_are_listed_one_level_deep, an_empty_or_misplaced_legacy_gradle_lock_directory_is_absent, a_metadata_failure_on_the_legacy_gradle_directory_is_unreadable}` |
+| Bazel gate | `lockfile::tests::a_bazel_root_without_module_bazel_has_no_lockfile_source` |
+| Fallback real fixtures (Go, Gradle root, 14-file legacy group, subproject-only `absent` ×2, Bazel), both request kinds, 0 reads and 0 parses | L1 `fallback_tool_fixtures_are_reported_from_metadata_alone` |
+| An empty text lockfile is `parse_failed` after exactly one read and one parse, for all six text formats (replaces the Phase 2 stub test) | `lockfile::tests::an_empty_lockfile_is_a_parse_failure_after_one_read` |
+| Standalone: root and package roots only (no `vendor/` or `.venv` search), dedupe, sorting, probe count, declined, absent, metadata failure, flat wire shape with a repeated round trip | `lockfile::standalone::tests::*` |
+| Standalone on real Poetry/PDM/Composer fixtures, both request kinds, 0 reads, JSON `tool`; a workspace package root; `[]` always serialized | L1 `standalone_tool_fixtures_are_repository_level_observations`, `standalone_lockfiles_at_workspace_package_roots_are_reported`, `an_empty_standalone_list_is_still_serialized` |
+
+Every new test is L1: no tier marker appears in any path segment. Unit tests
+are in the lib target. `lockfile_fixtures` was already declared in
+`tests/l1/main.rs`. Fixture reads use `include_str!` (unit) or
+`manifest_dir!().join("tests/fixtures/lockfiles")` (L1).
+
+### Gates
+
+- `just test` (sniff): 3024 passed, 32 skipped. The first run failed only on
+  `cli::repo_structure_json_reports_cargo_subset_evidence_for_matching_lockfile`
+  (the new `"standalone_lockfiles": []`; see the Phase 4 handoff above).
+- `just lint` (sniff): clean.
+- `cargo clippy -p sniff -p sniff-cli --all-targets -- -D warnings`: clean,
+  and also clean with `--all-features`.
+- `cargo check --all-targets` on all 23 direct reverse dependencies of
+  `sniff` (`cargo tree -i sniff --depth 1`): clean after the one
+  `claudine-cli` test literal. I did not run a workspace-wide check.
+  Claudine's `from_sniff_result_populates_monorepo_topology` and
+  `claudine-cli`'s `wrap::env` tests (28) pass.
+- `just cross-check sniff --os all`: linux pass (2138), windows pass (2127),
+  wsl pass (2138, archive mode). One warning appeared on Windows, an unused
+  `KEY_ALL_ACCESS` import at `sniff/lib/src/programs/windows_apps.rs:291`. It
+  predates this change, which does not touch that file.
+- Validation checkpoint 3: every accepted-version row, including the Phase 2
+  rows, has a passing real-fixture L1 test. Every edited variant produces its
+  specified status. Every unknown-version fixture and generated case is
+  `unverifiable`, never `mismatch`.
 - Skipped: nothing. No pre-existing failures.

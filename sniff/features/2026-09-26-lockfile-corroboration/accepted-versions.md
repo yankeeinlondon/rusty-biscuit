@@ -110,6 +110,29 @@ produce no entry.
 | `pdm` | `pdm.lock` | `pdm-2.29.2/single-project` (PDM 2.29.2; `[metadata].lock_version = "4.5.1"`) | `root` `""`, `unverifiable` + `no_membership_data`, `paths` `["pdm.lock"]` |
 | `composer` | `composer.lock` | `composer-2.10.3/single-project` (Composer 2.10.3) | `root` `""`, `unverifiable` + `no_membership_data`, `paths` `["composer.lock"]` |
 
+### Detection notes from Phase 3
+
+- **Composer:** Sniff recognizes no PHP-only package, so a project with only
+  `composer.json` yields no repository result, and no observation. The L1 test
+  adds a `package.json` to the Composer fixture (a common PHP-plus-JS
+  layout).
+- **Bazel:** the Bazel detector needs leaf `BUILD` packages, which the
+  `bazel-8.4.2/bzlmod` fixture does not ship. The L1 test adds two empty
+  `BUILD.bazel` files to its temporary copy. A Bazel root without
+  `MODULE.bazel` has no lockfile source: `not_applicable` +
+  `no_lockfile_source`, even beside a stray `MODULE.bazel.lock`.
+- **Rush configuration that cannot be read or parsed** (`pnpm-config.json`,
+  `subspaces.json`) cannot be classified, so the layer is `unverifiable` +
+  `unsupported_layout`, not `unreadable`: the lockfile itself is fine. An
+  omitted `useWorkspaces` is Rush's default, `false`, which is the legacy
+  install. Without `pnpm-config.json`, the legacy `rush.json`
+  `pnpmOptions.useWorkspaces` decides.
+- **npm without locked declarations:** a root record with no `workspaces` is
+  `ambiguous_membership` when the lockfile records any local package path
+  (it could be a workspace or a `file:` dependency), and an empty member set
+  otherwise. A declaration that is not a valid glob is also
+  `ambiguous_membership`.
+
 ## JSONC parser choice (spike S2)
 
 `bun.lock`, `rush.json`, and `pnpm-config.json` are parsed with

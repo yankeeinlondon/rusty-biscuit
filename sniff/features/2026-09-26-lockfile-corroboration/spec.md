@@ -34,46 +34,41 @@ related:
     - 2026-09-21-lockfile-provenance-cost
 human_review: false
 message_to_agent: |-
-    Phase 2 (engine, types, pnpm/uv/Cargo) is complete. Read the "## Phase 2" section of
-    implementation-log.md first. Key facts for Phases 3-5:
+    Phases 2 and 3 are complete (every format parser, Rush, fallbacks, standalone lockfiles).
+    Read the "## Phase 3" section of implementation-log.md first. Key facts for Phases 4-5:
 
-    1. ENGINE CONTRACT. Each format module exposes `parse(content: &str) -> Outcome`
-       (`Result<ParsedLockfile, String>`; Err = parse_failed). Return
-       `ParsedLockfile::Members(raw paths as written, root allowed)`,
-       `AmbiguousMembership`, or `UnsupportedVersion`. The engine (lockfile/mod.rs) does
-       normalization, root exclusion, comparison, and provenance. npm.rs, yarn.rs, and bun.rs
-       are stubs returning UnsupportedVersion; replace their bodies only. Format selection and
-       precedence live solely in lockfile/sources.rs.
-    2. RUSH. lockfile/rush.rs is a placeholder: it probes the three
-       common/config/rush/<manager lockfile> paths and reports absent / not_requested /
-       unverifiable+unsupported_layout without reading config. Phase 3 replaces `observe`.
-       To compare, call `compare_members(recorded, &["common", "temp"], layer, owned, paths)`
-       in mod.rs (make it pub(super)) and drop the synthetic "." importer first.
-       Config reads must count as manifest parses (R3/R8). The rush.json JSONC detection bug
-       from Phase 1 is still open.
-    3. FALLBACK. lockfile/fallback.rs handles Go/Gradle-root/Bazel single files. Still to do in
-       Phase 3: the Gradle legacy `gradle/dependency-locks/*.lockfile` group, and the Bazel
-       "only when MODULE.bazel exists" gate.
-    4. STORE. Use `ManifestStore::lockfile_presence` for any lockfile probe (it counts
-       filesystem.repo.lockfile_probes + one metadata probe, cached, lexical key) and
-       `ManifestStore::lockfile(path, format)` for reads. Never call `probe_exists` or
-       `std::fs` for a lockfile. The Yarn and Bun detectors already probe through
-       lockfile_presence, so lockfile_probes includes their marker probes (tests pin exact
-       counts with that explanation).
-    5. TEST SEAM. `lockfile::test_seam::fail_metadata(path, kind)` is a #[cfg(test)]
-       per-thread metadata-failure injector that works through full detection.
-    6. UNREACHABLE ROW. A uv workspace with `members = []` gets no layer from the uv detector,
-       so accepted-versions' root-only uv row is proven only at the parser/engine level
-       (annotated in accepted-versions.md). Do not change the uv detector for it without an
-       owner decision.
-    7. R10(c) (glob expander bound) has no signal to use: the expander is unbounded. Its
-       silently dropped walk errors are still an owner decision (S4 §3c); nothing flags them.
-    8. COMMIT. The breaking change needs the `!` marker (R11). The commit message must call
-       out the changed expectations listed in the log (Cargo -> members_present/globbed, uv real
-       layout with the root excluded, absent lockfile = probe not read, CLI test renames, the
-       aggregate snapshot).
-    9. Fixtures stay hidden from rg by `.ignore`. The L1 test lockfile_fixtures.rs copies each
-       fixture into a tempdir; extend its `assert_rows` tables for npm/Yarn/Bun/Rush in Phase 3.
+    1. CLI JSON (Phase 4, must do). `RepoInfo` gained `standalone_lockfiles`
+       (Vec<StandaloneLockfileObservation>, always serialized by the library, `#[serde(default)]`).
+       `sniff repo structure --json` serializes RepoInfo directly, so it currently emits
+       `"standalone_lockfiles": []`. Ruling R2 says the CLI omits an empty list under the same rule it
+       applies to `monorepo_layers`. Implement that in the CLI projection and flip the expectation in
+       sniff/cli/tests/l1/cli.rs `expected_lockfile_structure_json()` (it pins today's `[]` with no
+       comment). Check the aggregate/consolidated projections too.
+    2. WIRE SHAPE for standalone entries is flat: root, tool (composer|pdm|poetry), status, paths,
+       reason, extra, missing (`#[serde(flatten)] observation: LockfileObservation`). Types are
+       re-exported from sniff::filesystem::repo.
+    3. HUMAN OUTPUT reasons to explain (Phase 4): Rush uses `unsupported_layout` for npm/Yarn managers,
+       subspaces, variants, useWorkspaces off, AND for Rush config files it cannot read/parse; Bazel
+       without MODULE.bazel is `not_applicable` + `no_lockfile_source`; npm can report
+       `ambiguous_membership`; Gradle legacy locks list many paths (14 in the fixture), so render paths
+       as a list, not one line.
+    4. COUNTERS (Phase 5). Every request now adds 3 lockfile probes per unique root (repo root plus each
+       final package root) for standalone candidates, never a read. Tests that pin exact
+       `filesystem.repo.lockfile_probes` must count them (see the two updated detection.rs tests).
+       Gradle's legacy dir costs one `filesystem.io.read_dirs`. Rush config reads count as
+       `REPO_MANIFEST_PARSES` and happen only when corroborating.
+    5. JSONC. `filesystem::repo::jsonc::from_str` is the only way to read bun.lock / rush.json / Rush
+       config (strict jsonc-parser options). Dependency docs for jsonc-parser are ALREADY updated
+       (sniff/docs/dependencies.md and root docs/dependencies.md); Phase 5 only needs to verify them.
+    6. Carried over from Phase 2: engine contract (`parse(content) -> Outcome`; engine does
+       normalization and comparison), store rules (`ManifestStore::lockfile_presence` /
+       `lockfile(path, format)`, never `probe_exists`/`std::fs` for a lockfile),
+       `lockfile::test_seam::fail_metadata` (R9), the unreachable root-only uv row, and R10(c)
+       having no signal. The breaking-change commit needs the `!` marker (R11) and must list the
+       changed expectations from both phase logs.
+    7. Fixtures stay hidden from rg by `.ignore` (use --no-ignore). L1 tests copy each fixture into a
+       tempdir. The Bazel fixture needs BUILD files added in the copy, and the Composer fixture needs
+       a package.json (Sniff has no PHP-only package detection); both are done in lockfile_fixtures.rs.
 ---
 
 # Lockfile corroboration for every workspace standard

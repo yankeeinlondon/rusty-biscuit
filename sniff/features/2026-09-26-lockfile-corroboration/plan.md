@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 2
+phase: 3
 agent: "claude/opus"
 yolo: "true"
 feature: 2026-09-26-lockfile-corroboration
@@ -73,10 +73,46 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/sniff/SKILL.md
     - .claude/skills/sniff/performance.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/repo/jsonc.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/src/filesystem/repo/detection.rs
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/npm.rs
+    - sniff/lib/src/filesystem/repo/types.rs
+    - sniff/lib/src/filesystem/repo/lockfile/mod.rs
+    - sniff/lib/src/filesystem/repo/lockfile/npm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/yarn.rs
+    - sniff/lib/src/filesystem/repo/lockfile/bun.rs
+    - sniff/lib/src/filesystem/repo/lockfile/rush.rs
+    - sniff/lib/src/filesystem/repo/lockfile/fallback.rs
+    - sniff/lib/src/filesystem/repo/lockfile/standalone.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/tests/l1/lockfile_fixtures.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/tests/l1/cli.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+docs_updated_during_phase_3:
+    - sniff/lib/README.md
+    - sniff/docs/dependencies.md
+    - docs/dependencies.md
+    - sniff/features/2026-09-26-lockfile-corroboration/accepted-versions.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/performance.md
 packages:
     - sniff
     - sniff-cli
     - claudine
+    - claudine-cli
 ---
 
 # Lockfile corroboration for every workspace standard: implementation plan
@@ -582,7 +618,7 @@ them edits the Phase 2 engine except to register one table entry.
 
 **Wave 1** (all concurrent)
 
-- [ ] **npm parser** (`lockfile/npm.rs`)
+- [x] **npm parser** (`lockfile/npm.rs`)
   - Select `npm-shrinkwrap.json` before `package-lock.json`, typed `serde_json`
     with `IgnoredAny`.
   - Build the locked workspace set from the root `packages[""].workspaces`
@@ -599,7 +635,7 @@ them edits the Phase 2 engine except to register one table entry.
     glob matcher; `glob.rs` walks the filesystem and cannot be reused as is.
     Duplicate `packages` keys need a seen-set visitor (`serde_json` is
     last-wins).
-- [ ] **Yarn parser** (`lockfile/yarn.rs`)
+- [x] **Yarn parser** (`lockfile/yarn.rs`)
   - Detect Berry by `__metadata.version`. Classic, identified by its
     `# yarn lockfile v1` signature, → `unsupported_version`.
   - Take workspace paths from `resolution: "<name>@workspace:<path>"`, parsing
@@ -611,13 +647,13 @@ them edits the Phase 2 engine except to register one table entry.
     (Classic is not YAML and would otherwise be `parse_failed`). Accept
     `__metadata.version` 6, 8, and 10. No `@workspace:.` root resolution →
     `parse_failed`.
-- [ ] **Bun parser** (`lockfile/bun.rs`)
+- [x] **Bun parser** (`lockfile/bun.rs`)
   - Parse `bun.lock` with the JSONC crate chosen in S2 using a typed partial
     struct that reads `lockfileVersion` and the `workspaces` keys.
   - The `""` key is the root and is excluded.
   - `bun.lockb` → `unverifiable` + `no_membership_data` from metadata alone,
     with no read. Never invoke Bun.
-- [ ] **Rush layout** (`lockfile/rush.rs`)
+- [x] **Rush layout** (`lockfile/rush.rs`)
   - **Prerequisite (pre-existing bug found in Phase 1):** real `rush.json`
     files contain comments, and `parse_rush_project_folders` (`npm.rs`) uses
     strict `serde_json`, so Sniff detects no Rush layer for any real Rush repo
@@ -631,7 +667,7 @@ them edits the Phase 2 engine except to register one table entry.
     `apps/x`).
   - Every other layout → `unsupported_layout` with the known paths.
   - Test against the S1 Rush fixture.
-- [ ] **Fallback sources** (`lockfile/fallback.rs`)
+- [x] **Fallback sources** (`lockfile/fallback.rs`)
   - Go `go.work.sum`, Gradle, and Bazel `MODULE.bazel.lock` (only when
     `MODULE.bazel` exists). Each is metadata-only `unverifiable` +
     `no_membership_data`.
@@ -639,7 +675,7 @@ them edits the Phase 2 engine except to register one table entry.
     `*.lockfile` children of `gradle/dependency-locks/`, never recursively.
   - Add explicit `not_applicable` table tests for Maven, .NET, Pants, Buck2,
     and `Unknown`.
-- [ ] **Standalone observations** (`lockfile/standalone.rs`)
+- [x] **Standalone observations** (`lockfile/standalone.rs`)
   - Add `RepoInfo.standalone_lockfiles` and `StandaloneLockfileObservation`
     per R2.
   - Probe the root and discovered package roots through the Phase 2 store,
@@ -648,7 +684,7 @@ them edits the Phase 2 engine except to register one table entry.
 
 **Wave 2**
 
-- [ ] **Validation checkpoint 3**
+- [x] **Validation checkpoint 3**
   - Every accepted-version row has a passing real-fixture test.
   - Every edited negative variant produces its specified status.
   - Every unknown-version fixture yields `unverifiable`, never `mismatch`.
