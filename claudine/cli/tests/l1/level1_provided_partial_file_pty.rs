@@ -45,7 +45,7 @@ use test_toolkit::{Level, expect_level};
 
 use crate::common;
 use common::pty::*;
-use common::{CliProcessFixture, pty_available};
+use common::{CliProcessFixture, pty_available, write_executable};
 
 /// Seed a workspace whose only `**/*spec*.md` files are two specs, exactly
 /// one of which carries `everywhere` in its path.
@@ -268,5 +268,89 @@ fn level1_pty_provided_partial_file_array_array_confirms_and_launches() {
         "provider stub should have launched after the file[] confirmation dialog \
          resolved `[\"everywhere\"]`.\ntranscript:\n{}",
         common::strip_ansi(&transcript)
+    );
+}
+
+/// A root-union plan in the shape of `prompts/clarify.md`: both arms declare
+/// `doc: file`, the frontmatter fills `doc` from a template over the arms'
+/// discriminants, and the document authors a shell-free `initialize` stack.
+///
+/// The template makes `doc` a `file`-typed value that is only decidable after
+/// composition; arm selection must not rule an arm out on it
+/// (`2026-09-27-union-partial-file-completion`, C1).
+fn plan_with_union_templated_sibling(root: &Path) -> PathBuf {
+    let md_file = root.join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  - spec: 'file(required;match(**/*spec*.md);eager)'\n",
+            "    doc: file\n",
+            "  - design: 'file(required;match(**/*design*.md))'\n",
+            "    doc: file\n",
+            "doc: \"{{spec || design}}\"\n",
+            "initialize:\n",
+            "  stack:\n",
+            "    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "---\n",
+            "Spec document: {{spec}}\n",
+        ),
+    )
+    .unwrap();
+    md_file
+}
+
+/// Stage a `goose` stub that records its argv, and its stdin when stdin is not
+/// the terminal, so the test can see which path the composed prompt carried.
+fn stage_recording_goose_stub(bin_dir: &Path, marker_file: &Path) {
+    write_executable(
+        &bin_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {marker}\n[ -t 0 ] || cat >> {marker}\nexit 0\n",
+            marker = marker_file.display()
+        ),
+    );
+}
+
+#[test]
+fn union_partial_with_templated_file_sibling_reaches_chooser() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let fixture = CliProcessFixture::named("level1-provided-partial-union-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_recording_goose_stub(fixture.bin_dir(), &marker);
+    seed_specs(fixture.cwd());
+    let md_file = plan_with_union_templated_sibling(fixture.cwd());
+
+    let cmd = compose_command(&fixture, &md_file, "spec", "everywhere");
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    // Exactly one `**/*spec*.md` path contains `everywhere`, so the union's
+    // `spec` arm must drive the single-match confirmation dialog.
+    let pre = wait_for_marker(&mut session, "Use this file", Duration::from_secs(10));
+    assert!(
+        !marker.exists(),
+        "provider launched before the confirmation dialog was answered; \
+         transcript so far:\n{}",
+        common::strip_ansi(&pre)
+    );
+
+    let transcript = confirm_and_drain(&mut session, &marker, pre);
+    let plain = common::strip_ansi(&transcript);
+    assert!(
+        marker.exists(),
+        "provider stub should have launched after the union's `spec` arm \
+         resolved `everywhere`.\ntranscript:\n{plain}"
+    );
+    assert!(
+        !plain.contains("no existing file matched reference"),
+        "the resolved partial must not fail validation; transcript:\n{plain}"
+    );
+    let launched_with = fs::read_to_string(&marker).expect("read stub record");
+    assert!(
+        launched_with.contains("features/2026-06-30-style-everywhere/spec.md"),
+        "the composed prompt should carry the chosen spec path; stub \
+         saw:\n{launched_with}\ntranscript:\n{plain}"
     );
 }
