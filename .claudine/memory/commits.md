@@ -1325,4 +1325,23 @@ move decision; when the author has decoupled it ("do not move it to
     surface in captured output; without `--no-capture` the printer's
     carriage-return progress lines hide SKIPs. Same caveat applies to any
     other just recipe that wraps a remote-shell `cargo nextest run`.
+- A `planning(<area>):` "phase-recorded" commit for a feature's first
+  phase (or any phase whose next step is owner-gated) ships Phase N's
+  planning artifacts and deliverables in one tree but does NOT bump
+  `phase:` in `plan.md` (it stays at `N`) because Phase N+1 is gated
+  on owner confirmation of rulings or other human review. Distinct
+  from a mid-phase close (which DOES bump `phase:` to N — see entry
+  above) and from a final phase close (which sets `completed_phase:
+  "<N>"` and `implemented: true`). Spec stays `draft-spec` and
+  `implemented: false`, no `review-1.md` flips in, and the active
+  feature directory stays in place. The `implementation-log.md` body
+  documents the work as "Phase N complete" in prose while the plan
+  frontmatter still says current phase is N — this is intentional
+  when the next phase is owner-gated. See `01797e1ce` for the
+  2026-09-26-lockfile-corroboration Phase 1 example (11 owner rulings
+  R1-R11, 67 real-tool lockfile fixtures with PROVENANCE.md, spike
+  S2-S4, accepted-versions matrix, and a `fixes/_unscheduled/` spec
+  created by ruling R4 — all atomic in one `planning(sniff):` commit;
+  spec stays `draft-spec`, plan stays at `phase: 1`, awaiting owner
+  confirmation of the rulings before Phase 2 begins).
 
