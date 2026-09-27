@@ -80,6 +80,8 @@ mod level1_provided_partial_file_pty;
 #[cfg(unix)]
 mod level1_provider_overlay_home;
 #[cfg(unix)]
+mod level1_provider_picker_pty;
+#[cfg(unix)]
 mod level1_pty_wrapper_summary;
 #[cfg(unix)]
 mod level1_review_router_partial_pty;

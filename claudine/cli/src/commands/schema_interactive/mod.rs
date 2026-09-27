@@ -442,8 +442,9 @@ fn prompt_for_property(
                 .iter()
                 .map(|m| ChoiceOption::new(m.as_str(), m.as_str(), m.clone()))
                 .collect();
+            let height = chooser_height(options.len());
             let state = ChooseOneState::from_options(options).with_label(label);
-            let selected: Option<String> = run_standalone(ChooseOne::new(), state, inline_height(8))?;
+            let selected: Option<String> = run_standalone(ChooseOne::new(), state, height)?;
             match selected {
                 Some(s) => Ok(serde_json::Value::String(s)),
                 None => Err(io::Error::new(
@@ -459,8 +460,9 @@ fn prompt_for_property(
                 .iter()
                 .map(|m| ChoiceOption::new(m.as_str(), m.as_str(), m.clone()))
                 .collect();
+            let height = chooser_height(options.len());
             let state = ChooseManyState::from_options(options).with_label(label);
-            let selected: Vec<String> = run_standalone(ChooseMany::new(), state, inline_height(8))?;
+            let selected: Vec<String> = run_standalone(ChooseMany::new(), state, height)?;
             Ok(serde_json::Value::Array(
                 selected.into_iter().map(serde_json::Value::String).collect(),
             ))
@@ -603,6 +605,32 @@ fn parse_number(
 
 fn inline_height(rows: u16) -> Option<HeightSpec> {
     Some(HeightSpec::Cells(rows))
+}
+
+/// Rows a `ChooseOne`/`ChooseMany` inline viewport needs besides its option
+/// rows: the `LabelPosition::Above` label line and the help-hint row, which
+/// `run_standalone` overlays on the viewport's last row (it reserves nothing).
+///
+/// The choosers' other conditional rows cannot appear for these callers:
+/// the fuzzy-filter search line needs `with_filter_enabled(true)` and the
+/// validation-error line needs a `required` or `min_selections` input, and
+/// the `from_options` states set neither. The unlabeled provider picker
+/// leaves the label row blank.
+const CHOOSER_CHROME_ROWS: usize = 2;
+
+/// Cap on a chooser's inline viewport; a longer option list scrolls.
+const CHOOSER_MAX_ROWS: usize = 8;
+
+/// Inline viewport height for a `ChooseOne`/`ChooseMany` prompt with
+/// `option_count` options: one row per option plus [`CHOOSER_CHROME_ROWS`],
+/// capped at [`CHOOSER_MAX_ROWS`]. Always `Some`, so the prompt never enters
+/// the alternate screen.
+pub(crate) fn chooser_height(option_count: usize) -> Option<HeightSpec> {
+    let rows = option_count
+        .saturating_add(CHOOSER_CHROME_ROWS)
+        .min(CHOOSER_MAX_ROWS);
+    // `rows <= CHOOSER_MAX_ROWS`, which fits in a `u16`.
+    inline_height(rows as u16)
 }
 
 fn collect_file(

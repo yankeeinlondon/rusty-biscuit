@@ -357,3 +357,11 @@ fn resolve_file_value_portably_renders_missing_windows_shaped_path() {
         "file not found: missing/schema/definitely-not-present.json"
     );
 }
+
+#[test]
+fn chooser_height_fits_short_lists_and_caps_long_ones() {
+    assert_eq!(chooser_height(2), Some(HeightSpec::Cells(4)));
+    assert_eq!(chooser_height(6), Some(HeightSpec::Cells(8)));
+    assert_eq!(chooser_height(7), Some(HeightSpec::Cells(8)));
+    assert_eq!(chooser_height(usize::MAX), Some(HeightSpec::Cells(8)));
+}

@@ -16,19 +16,20 @@ use claudine::provider::Provider;
 
 /// Prompt the user to select a single provider from a picker plan.
 ///
-/// Built on [`biscuit_tui::ChooseOne`] + [`biscuit_tui::run_standalone`].
-/// Maps each [`ProviderPickerOption`] to a [`ChoiceOption`], honours
-/// `plan.default_index` as the initial selection, and translates
-/// [`EventOutcome::Submitted`] into the selected [`Provider`] and
-/// [`EventOutcome::Cancelled`] into an abort error.
+/// The picker runs inline below the cursor, never on the alternate screen,
+/// in a viewport bounded by
+/// [`chooser_height`](crate::commands::schema_interactive::chooser_height),
+/// the same sizing the schema choosers use. The prior scrollback survives
+/// submit and cancel. `plan.default_index` is the initial selection.
 ///
 /// ## Errors
 ///
-/// Returns an `io::Error` with kind [`ABORTED_KIND`] when the user
-/// presses `Esc`, and [`CANCELLED_KIND`] on `Ctrl-C`.
+/// Returns an `io::Error` with kind [`CANCELLED_KIND`] on `Ctrl-C`. `Esc`
+/// is not an error: `ChooseOne` restores the initial selection and submits.
 pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider> {
     let options: Vec<ChoiceOption<Provider>> =
         plan.options.iter().map(provider_option_to_choice).collect();
+    let height = crate::commands::schema_interactive::chooser_height(options.len());
 
     let mut state = ChooseOneState::from_options(options);
 
@@ -37,7 +38,7 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
         state = state.with_initial_selection(default_opt.provider.as_slug());
     }
 
-    let selected: Option<Provider> = run_standalone(ChooseOne::new(), state, None)?;
+    let selected: Option<Provider> = run_standalone(ChooseOne::new(), state, height)?;
 
     selected.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no provider selected"))
 }
