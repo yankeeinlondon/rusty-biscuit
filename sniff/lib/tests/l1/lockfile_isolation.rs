@@ -867,3 +867,592 @@ fn a_cargo_workspace_exclude_is_not_a_missing_member() {
         )
     );
 }
+
+// ---------------------------------------------------------------------------
+// Incomplete manifest discovery (ruling R10)
+// ---------------------------------------------------------------------------
+
+fn incomplete(lockfile: &str) -> LockfileObservation {
+    observation(
+        LockfileStatus::Unverifiable,
+        &[lockfile],
+        Some(LockfileReason::IncompleteManifestDiscovery),
+        &[],
+        &[],
+    )
+}
+
+/// Asserts the layer at `root` is `unverifiable` for incomplete discovery
+/// under both a corroborating structure request and a full request, and that
+/// neither the layer nor any package is upgraded to lockfile provenance.
+fn assert_incomplete(
+    root: &Path,
+    authority: MonorepoStandard,
+    lockfile: &str,
+    provenance: PackageProvenance,
+) {
+    for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {
+        let (repo, _) = detect(root, &request);
+        let layer = layer_at(&repo, authority, root);
+        assert_eq!(layer.lockfile, incomplete(lockfile), "{label}: {layer:?}");
+        assert_eq!(layer.provenance, provenance, "{label}");
+        for (relative, standard, package_provenance) in package_provenance(&repo) {
+            if standard == authority {
+                assert_eq!(package_provenance, provenance, "{label}: {relative}");
+            }
+        }
+    }
+}
+
+/// A malformed member `package.json` leaves the manifest side incomplete,
+/// even though the lockfile records exactly the discovered members: the
+/// layer is `unverifiable` with manifest-derived provenance, and detection
+/// still reports the layer, its members (`members`, sorted), and its
+/// lockfile path.
+///
+/// The control repairs the member and expects `match`, so the malformed
+/// manifest was the only thing blocking comparison.
+fn assert_malformed_js_member_is_incomplete(
+    root: &Path,
+    authority: MonorepoStandard,
+    lockfile: &str,
+    provenance: PackageProvenance,
+    member: &str,
+    members: &[&str],
+) {
+    let manifest = format!("{member}/package.json");
+    let name = member.rsplit('/').next().expect("member has a name");
+    write(root, &manifest, &format!(r#"{{"name":"{name}","#));
+
+    assert_incomplete(root, authority, lockfile, provenance);
+    for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {
+        let (repo, _) = detect(root, &request);
+        let layer = layer_at(&repo, authority, root);
+        let mut layer_members = layer.packages.clone();
+        layer_members.sort();
+        assert_eq!(layer_members, members, "{label}: {layer:?}");
+        let catalog: Vec<String> = package_provenance(&repo)
+            .into_iter()
+            .filter(|(_, standard, _)| *standard == authority)
+            .map(|(relative, _, _)| relative)
+            .collect();
+        assert_eq!(catalog, members, "{label}");
+    }
+
+    write(
+        root,
+        &manifest,
+        &format!(r#"{{"name":"{name}","version":"1.0.0"}}"#),
+    );
+    let (repo, _) = detect(root, &corroborating());
+    let layer = layer_at(&repo, authority, root);
+    assert_eq!(layer.lockfile, matched(lockfile), "control: {layer:?}");
+    assert_eq!(layer.provenance, PackageProvenance::Lockfile, "control");
+}
+
+#[test]
+fn a_malformed_pnpm_member_manifest_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    pnpm_workspace(root, Some(PNPM_MATCHING));
+
+    assert_malformed_js_member_is_incomplete(
+        root,
+        MonorepoStandard::PnpmWorkspaces,
+        "pnpm-lock.yaml",
+        PackageProvenance::Globbed,
+        "packages/ui",
+        &["packages/ui", "packages/web"],
+    );
+}
+
+#[test]
+fn a_malformed_npm_member_manifest_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    npm_workspace(root);
+    write(root, "package-lock.json", NPM_MATCHING);
+
+    assert_malformed_js_member_is_incomplete(
+        root,
+        MonorepoStandard::NpmWorkspaces,
+        "package-lock.json",
+        PackageProvenance::Globbed,
+        "packages/web",
+        &["packages/ui", "packages/web"],
+    );
+}
+
+#[test]
+fn a_malformed_yarn_member_manifest_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    npm_workspace(root);
+    write(
+        root,
+        "yarn.lock",
+        "__metadata:\n  version: 8\n  cacheKey: 10c0\n\n\
+         \"root@workspace:.\":\n  version: 0.0.0-use.local\n  resolution: \"root@workspace:.\"\n  languageName: unknown\n  linkType: soft\n\n\
+         \"ui@workspace:packages/ui\":\n  version: 0.0.0-use.local\n  resolution: \"ui@workspace:packages/ui\"\n  languageName: unknown\n  linkType: soft\n\n\
+         \"web@workspace:packages/web\":\n  version: 0.0.0-use.local\n  resolution: \"web@workspace:packages/web\"\n  languageName: unknown\n  linkType: soft\n",
+    );
+
+    assert_malformed_js_member_is_incomplete(
+        root,
+        MonorepoStandard::YarnWorkspaces,
+        "yarn.lock",
+        PackageProvenance::Globbed,
+        "packages/ui",
+        &["packages/ui", "packages/web"],
+    );
+}
+
+#[test]
+fn a_malformed_bun_member_manifest_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    npm_workspace(root);
+    write(
+        root,
+        "bun.lock",
+        r#"{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": { "name": "root" },
+    "packages/ui": { "name": "ui", "version": "1.0.0" },
+    "packages/web": { "name": "web", "version": "1.0.0" },
+  },
+  "packages": {},
+}
+"#,
+    );
+
+    assert_malformed_js_member_is_incomplete(
+        root,
+        MonorepoStandard::BunWorkspaces,
+        "bun.lock",
+        PackageProvenance::Globbed,
+        "packages/web",
+        &["packages/ui", "packages/web"],
+    );
+}
+
+#[test]
+fn a_malformed_rush_member_manifest_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "rush.json",
+        r#"{ "pnpmVersion": "9.15.9", "projects": [
+            { "packageName": "web", "projectFolder": "apps/web" },
+            { "packageName": "ui", "projectFolder": "apps/ui" }
+        ] }"#,
+    );
+    for name in ["web", "ui"] {
+        write(
+            root,
+            &format!("apps/{name}/package.json"),
+            &format!(r#"{{"name":"{name}","version":"1.0.0"}}"#),
+        );
+    }
+    write(
+        root,
+        "common/config/rush/pnpm-config.json",
+        r#"{ "useWorkspaces": true }"#,
+    );
+    write(
+        root,
+        "common/config/rush/pnpm-lock.yaml",
+        "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  ../../apps/ui: {}\n  ../../apps/web: {}\n",
+    );
+
+    assert_malformed_js_member_is_incomplete(
+        root,
+        MonorepoStandard::RushStack,
+        "common/config/rush/pnpm-lock.yaml",
+        PackageProvenance::Explicit,
+        "apps/ui",
+        &["apps/ui", "apps/web"],
+    );
+}
+
+/// Unlike a member, a malformed workspace root `package.json` still fails
+/// detection: it is the authority's own declaration, so there is no layer
+/// whose observation could carry the failure.
+#[test]
+fn a_malformed_workspace_root_manifest_fails_detection() {
+    for (label, setup) in [
+        ("npm", npm_workspace as fn(&Path)),
+        ("pnpm", |root: &Path| pnpm_workspace(root, Some(PNPM_MATCHING))),
+    ] {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        setup(root);
+        write(root, "package.json", r#"{"name":"root","#);
+
+        for request in [corroborating(), RepoRequest::full()] {
+            let error = detect_repo_with_request(root, &request)
+                .expect_err(&format!("{label}: a malformed root manifest fails detection"));
+            assert!(
+                error.to_string().contains("EOF while parsing"),
+                "{label}: unexpected error {error}"
+            );
+        }
+    }
+}
+
+/// A member `pyproject.toml` that fails to parse leaves the manifest side
+/// incomplete, even though the lockfile records exactly the discovered
+/// members and would otherwise be a `match`.
+#[test]
+fn a_malformed_uv_member_pyproject_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "pyproject.toml",
+        "[project]\nname = \"root-py\"\nversion = \"0.1.0\"\n\n\
+         [tool.uv.workspace]\nmembers = [\"py/*\"]\n",
+    );
+    write(
+        root,
+        "py/lib-a/pyproject.toml",
+        "[project]\nname = \"lib-a\"\nversion = \"0.1.0\"\n",
+    );
+    write(root, "py/lib-b/pyproject.toml", "[project\nname = \n");
+    write(
+        root,
+        "uv.lock",
+        "version = 1\nrevision = 3\n\n[manifest]\nmembers = [\"lib-a\", \"lib-b\", \"root-py\"]\n\n\
+         [[package]]\nname = \"lib-a\"\nversion = \"0.1.0\"\nsource = { editable = \"py/lib-a\" }\n\n\
+         [[package]]\nname = \"lib-b\"\nversion = \"0.1.0\"\nsource = { editable = \"py/lib-b\" }\n\n\
+         [[package]]\nname = \"root-py\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n",
+    );
+
+    assert_incomplete(
+        root,
+        MonorepoStandard::UvWorkspace,
+        "uv.lock",
+        PackageProvenance::Globbed,
+    );
+}
+
+/// An unparseable membership glob is dropped by the expander, which reports
+/// the set incomplete: the lockfile recording exactly the members the other
+/// pattern found is not a `match`.
+#[test]
+fn a_dropped_workspace_glob_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    pnpm_workspace(root, Some(PNPM_MATCHING));
+    write(
+        root,
+        "pnpm-workspace.yaml",
+        "packages:\n  - \"packages/*\"\n  - \"tools/[\"\n",
+    );
+
+    assert_incomplete(
+        root,
+        MonorepoStandard::PnpmWorkspaces,
+        "pnpm-lock.yaml",
+        PackageProvenance::Globbed,
+    );
+}
+
+/// Cargo's subset check respects the same signal: a member pattern outside
+/// Cargo's glob subset, or a literal member that does not exist (Cargo
+/// rejects both), never reports `members_present`.
+#[test]
+fn an_unresolved_cargo_member_pattern_is_incomplete_manifest_discovery() {
+    let lockfile = "version = 3\n\n[[package]]\nname = \"alpha\"\nversion = \"0.1.0\"\n\n\
+                    [[package]]\nname = \"beta\"\nversion = \"0.1.0\"\n";
+    for members in [
+        r#"["crates/*", "tools/{a,b}"]"#,
+        r#"["crates/*", "crates/missing"]"#,
+    ] {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        cargo_workspace(root);
+        write(
+            root,
+            "Cargo.toml",
+            &format!("[workspace]\nmembers = {members}\nresolver = \"2\"\n"),
+        );
+        write(root, "Cargo.lock", lockfile);
+
+        assert_incomplete(
+            root,
+            MonorepoStandard::CargoWorkspace,
+            "Cargo.lock",
+            PackageProvenance::Globbed,
+        );
+    }
+}
+
+/// Patterns that legitimately resolve to nothing are not incompleteness: a
+/// glob matching no directory, and, for the Node tools that expand every
+/// entry as a glob, a literal member path that does not exist.
+#[test]
+fn patterns_matching_nothing_still_match_the_lockfile() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    pnpm_workspace(root, Some(PNPM_MATCHING));
+    write(
+        root,
+        "pnpm-workspace.yaml",
+        "packages:\n  - \"packages/*\"\n  - \"tools/*\"\n  - \"apps/missing\"\n",
+    );
+
+    let (repo, _) = detect(root, &corroborating());
+    let layer = layer_at(&repo, MonorepoStandard::PnpmWorkspaces, root);
+    assert_eq!(layer.lockfile, matched("pnpm-lock.yaml"));
+    assert_eq!(layer.provenance, PackageProvenance::Lockfile);
+}
+
+/// Rush requires every declared project folder to exist, so a missing one
+/// leaves the member set incomplete even when the lockfile records exactly
+/// the projects that do exist.
+#[test]
+fn a_missing_rush_project_folder_is_incomplete_manifest_discovery() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "rush.json",
+        r#"{ "pnpmVersion": "9.15.9", "projects": [
+            { "packageName": "web", "projectFolder": "apps/web" },
+            { "packageName": "gone", "projectFolder": "apps/gone" }
+        ] }"#,
+    );
+    write(root, "apps/web/package.json", r#"{"name":"web","version":"1.0.0"}"#);
+    write(
+        root,
+        "common/config/rush/pnpm-config.json",
+        r#"{ "useWorkspaces": true }"#,
+    );
+    write(
+        root,
+        "common/config/rush/pnpm-lock.yaml",
+        "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  ../../apps/web: {}\n",
+    );
+
+    assert_incomplete(
+        root,
+        MonorepoStandard::RushStack,
+        "common/config/rush/pnpm-lock.yaml",
+        PackageProvenance::Explicit,
+    );
+
+    // The control: once the folder exists, the same lockfile is a mismatch
+    // naming it, so the missing folder was the only thing blocking comparison.
+    write(root, "apps/gone/package.json", r#"{"name":"gone","version":"1.0.0"}"#);
+    let (repo, _) = detect(root, &corroborating());
+    assert_eq!(
+        layer_at(&repo, MonorepoStandard::RushStack, root).lockfile,
+        observation(
+            LockfileStatus::Mismatch,
+            &["common/config/rush/pnpm-lock.yaml"],
+            None,
+            &[],
+            &["apps/gone"]
+        )
+    );
+}
+
+/// A Rush pnpm workspace whose lockfile records both members, plus one
+/// importer key that no member path can have: an absolute path, a drive
+/// path, or a name containing NUL. Only the synthetic `.` importer is
+/// Rush's own; the invalid key reaches the shared validator, so the layer is
+/// `invalid_member_path` rather than a `match` over the valid keys. A decoy
+/// copy of the lockfile at `common/temp`, where `rush install` places one,
+/// is never read in its place.
+#[test]
+fn an_invalid_rush_importer_is_an_invalid_member_path() {
+    const LOCKFILE: &str = "common/config/rush/pnpm-lock.yaml";
+    const VALID: &str =
+        "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  ../../apps/web: {}\n  ../../apps/ui: {}\n";
+    for (label, invalid) in [
+        ("absolute", "'/opt/elsewhere/pkg': {}"),
+        ("drive", "'C:/elsewhere/pkg': {}"),
+        ("nul", "\"../../apps/a\\0b\": {}"),
+    ] {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        write(
+            root,
+            "rush.json",
+            r#"{ "pnpmVersion": "9.15.9", "projects": [
+                { "packageName": "web", "projectFolder": "apps/web" },
+                { "packageName": "ui", "projectFolder": "apps/ui" }
+            ] }"#,
+        );
+        for name in ["web", "ui"] {
+            write(
+                root,
+                &format!("apps/{name}/package.json"),
+                &format!(r#"{{"name":"{name}","version":"1.0.0"}}"#),
+            );
+        }
+        write(
+            root,
+            "common/config/rush/pnpm-config.json",
+            r#"{ "useWorkspaces": true }"#,
+        );
+        write(root, LOCKFILE, &format!("{VALID}  {invalid}\n"));
+        write(root, "common/temp/pnpm-lock.yaml", VALID);
+
+        let (repo, counts) = detect(root, &corroborating());
+
+        let layer = layer_at(&repo, MonorepoStandard::RushStack, root);
+        assert_eq!(
+            layer.lockfile,
+            observation(
+                LockfileStatus::Unverifiable,
+                &[LOCKFILE],
+                Some(LockfileReason::InvalidMemberPath),
+                &[],
+                &[]
+            ),
+            "{label}"
+        );
+        assert_eq!(layer.provenance, PackageProvenance::Explicit, "{label}");
+        for (relative, standard, provenance) in package_provenance(&repo) {
+            if standard == MonorepoStandard::RushStack {
+                assert_eq!(provenance, PackageProvenance::Explicit, "{label}: {relative}");
+            }
+        }
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 1, "{label}: {counts:?}");
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1, "{label}: {counts:?}");
+
+        // The control: without the invalid key the same lockfile matches,
+        // so that key was the only thing blocking the upgrade.
+        write(root, LOCKFILE, VALID);
+        let (repo, _) = detect(root, &corroborating());
+        let layer = layer_at(&repo, MonorepoStandard::RushStack, root);
+        assert_eq!(layer.lockfile, matched(LOCKFILE), "{label} control");
+        assert_eq!(layer.provenance, PackageProvenance::Lockfile, "{label} control");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// uv membership records that are absent or incomplete
+// ---------------------------------------------------------------------------
+
+/// A uv workspace at `root` whose `py/*` members are `members`; with none,
+/// the discovered member set is empty once the root is excluded. `lockfile`
+/// is written as its `uv.lock`.
+fn uv_workspace(root: &Path, members: &[&str], lockfile: &str) {
+    write(
+        root,
+        "pyproject.toml",
+        "[project]\nname = \"root-py\"\nversion = \"0.1.0\"\n\n\
+         [tool.uv.workspace]\nmembers = [\"py/*\"]\n",
+    );
+    for name in members {
+        write(
+            root,
+            &format!("py/{name}/pyproject.toml"),
+            &format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+        );
+    }
+    write(root, "uv.lock", lockfile);
+}
+
+const UV_ROOT_PACKAGE: &str =
+    "[[package]]\nname = \"root-py\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n";
+const UV_LIB_A_PACKAGE: &str =
+    "[[package]]\nname = \"lib-a\"\nversion = \"0.1.0\"\nsource = { editable = \"py/lib-a\" }\n";
+
+/// Asserts the uv layer at `root` reports `expected` under a corroborating
+/// structure request and a full request, with `provenance` on the layer and
+/// on every uv package.
+fn assert_uv_layer(root: &Path, expected: &LockfileObservation, provenance: PackageProvenance) {
+    for (label, request) in [("structure", corroborating()), ("full", RepoRequest::full())] {
+        let (repo, _) = detect(root, &request);
+        let layer = layer_at(&repo, MonorepoStandard::UvWorkspace, root);
+        assert_eq!(&layer.lockfile, expected, "{label}: {layer:?}");
+        assert_eq!(layer.provenance, provenance, "{label}");
+        for (relative, standard, package_provenance) in package_provenance(&repo) {
+            if standard == MonorepoStandard::UvWorkspace {
+                assert_eq!(package_provenance, provenance, "{label}: {relative}");
+            }
+        }
+    }
+}
+
+/// A `[manifest]` table without `members` is an invalid required membership
+/// field, not an empty member list: with no discovered members an empty list
+/// would be a false `match`, and with one it would be a `mismatch`.
+#[test]
+fn a_uv_manifest_without_members_is_a_parse_failure() {
+    for members in [&[][..], &["lib-a"][..]] {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        uv_workspace(
+            root,
+            members,
+            &format!(
+                "version = 1\nrevision = 3\n\n[manifest]\n\
+                 constraints = [{{ name = \"idna\", specifier = \"<4\" }}]\n\n\
+                 {UV_ROOT_PACKAGE}\n{UV_LIB_A_PACKAGE}"
+            ),
+        );
+
+        assert_uv_layer(
+            root,
+            &observation(
+                LockfileStatus::Unreadable,
+                &["uv.lock"],
+                Some(LockfileReason::ParseFailed),
+                &[],
+                &[],
+            ),
+            PackageProvenance::Globbed,
+        );
+    }
+}
+
+/// Without `[manifest]`, a local package other than the root means the
+/// membership record is gone rather than root-only: never a false `match`
+/// against an empty discovered set, nor a `mismatch` against a real one.
+#[test]
+fn an_absent_uv_manifest_beside_other_local_packages_has_no_membership_data() {
+    for members in [&[][..], &["lib-a"][..]] {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        uv_workspace(
+            root,
+            members,
+            &format!("version = 1\nrevision = 3\n\n{UV_ROOT_PACKAGE}\n{UV_LIB_A_PACKAGE}"),
+        );
+
+        assert_uv_layer(
+            root,
+            &observation(
+                LockfileStatus::Unverifiable,
+                &["uv.lock"],
+                Some(LockfileReason::NoMembershipData),
+                &[],
+                &[],
+            ),
+            PackageProvenance::Globbed,
+        );
+    }
+}
+
+/// The root-only shape uv writes (no `[manifest]`, the root as the sole
+/// local package) establishes the empty set, so it matches an empty
+/// discovered set.
+#[test]
+fn an_absent_uv_manifest_with_only_the_root_package_matches_an_empty_member_set() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    uv_workspace(
+        root,
+        &[],
+        &format!("version = 1\nrevision = 3\n\n{UV_ROOT_PACKAGE}"),
+    );
+
+    assert_uv_layer(root, &matched("uv.lock"), PackageProvenance::Lockfile);
+}

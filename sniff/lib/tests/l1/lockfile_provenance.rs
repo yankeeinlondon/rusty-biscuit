@@ -874,9 +874,10 @@ fn an_extra_lockfile_member_is_a_mismatch_for_pnpm_and_uv_but_invisible_to_cargo
 // complete serialized `RepoInfo` of a corroborating (or, where stated,
 // declining) structure request. Node and Rush cases start from the real-tool
 // fixtures under `tests/fixtures/lockfiles/`; the build-graph cases are
-// hand-written because their tools write no lockfile. `unknown_standard`,
-// `metadata_failed`, `ambiguous_membership`, `incomplete_manifest_discovery`,
-// and `invalid_member_path` are pinned by the library's `lockfile` unit tests:
+// hand-written because their tools write no lockfile. `incomplete_manifest_discovery`
+// has its own public-API cases in `lockfile_isolation`. `unknown_standard`,
+// `metadata_failed`, `ambiguous_membership`, and `invalid_member_path` are
+// pinned by the library's `lockfile` unit tests:
 // `Unknown` never owns a layer (the orchestrator-only cases below show its
 // standard entry and the absent layer list), and the metadata seam is
 // crate-private (ruling R9).

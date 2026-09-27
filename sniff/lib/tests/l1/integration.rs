@@ -1327,14 +1327,14 @@ fn test_uv_workspace_counts_root_as_member() {
 #[test]
 fn test_degenerate_uv_workspace_is_not_a_monorepo() {
     let (_dir, path) = fixtures::create_degenerate_uv_workspace();
-    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
-    match repo {
-        None => {}
-        Some(repo) => {
-            assert!(!repo.is_monorepo);
-            assert!(repo.monorepo_layers.is_empty());
-        }
-    }
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("a declared uv workspace is detected");
+
+    assert!(!repo.is_monorepo);
+    // `members = []` still declares a workspace: one root-only layer.
+    assert_eq!(repo.monorepo_layers.len(), 1);
+    assert_eq!(repo.monorepo_layers[0].packages, vec![String::new()]);
 }
 
 #[test]
