@@ -21,6 +21,7 @@
 //! - `GetIssue` - Get a single issue by ID
 //! - `ListIssueComments` - List comments on an issue
 //! - `ListIssueChanges` - List change history for an issue
+//! - `GetBranch` - Get a single branch by name (target.hash is the branch head commit)
 //! - `ListTags` - List repository tags
 //! - `GetTag` - Get a single tag by name
 //! - `ListDownloads` - List repository downloads (release artifacts)

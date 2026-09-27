@@ -896,6 +896,62 @@
         }
       ]
     },
+    "/repos/{owner}/{repo}/git/ref/heads/{branch}": {
+      "get": {
+        "summary": "Get branch reference (object.sha is the branch head commit)",
+        "description": "Get branch reference (object.sha is the branch head commit)",
+        "operationId": "GetBranchReference",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitRef"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "GitRef"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "branch",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
     "/repos/{owner}/{repo}/git/tags/{tag_sha}": {
       "get": {
         "summary": "Get annotated tag object details (message, tagger, verification)",
@@ -2039,7 +2095,7 @@
       },
       "GitRef": {
         "title": "GitRef",
-        "description": "A Git reference from `GET /repos/{owner}/{repo}/git/ref/tags/{tag}`.",
+        "description": "A Git reference from `GET /repos/{owner}/{repo}/git/ref/tags/{tag}` or\n`GET /repos/{owner}/{repo}/git/ref/heads/{branch}`.",
         "type": "object",
         "properties": {
           "node_id": {
@@ -2050,7 +2106,7 @@
             "description": "Object the ref points to."
           },
           "ref": {
-            "description": "Full ref name (e.g., \"refs/tags/v1.0.0\").",
+            "description": "Full ref name (e.g., \"refs/tags/v1.0.0\" or \"refs/heads/main\").",
             "type": "string"
           },
           "url": {
@@ -2073,7 +2129,7 @@
             "type": "string"
           },
           "type": {
-            "description": "Object type: \"commit\" (lightweight tag) or \"tag\" (annotated tag).",
+            "description": "Object type: \"commit\" (a branch or lightweight tag) or \"tag\" (annotated tag).",
             "type": "string"
           },
           "url": {
