@@ -39,6 +39,31 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - worktree/lib/src/listing.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/dirty_tree.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/level2_dirty_tree.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+documentation:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - .claude/skills/worktree/SKILL.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-26-more-info-on-list (5 phases)
@@ -354,3 +379,74 @@ false`. I then restored the file, and `git diff` shows no change to
   assertion's message in `list_table.rs` (`"no orange left"`).
 - No pre-existing failures. The change is test and docs only, with no OS-specific
   code, so no cross-check was run.
+
+## Phase 5
+
+### Acceptance audit
+
+| # | Acceptance | Evidence |
+| --- | --- | --- |
+| 1 | No `already in`; no `MergeState::AlreadyIn` | grep (below) finds only the absence assertion `list_table.rs:288`; `list_table::every_cell_kind_renders_as_ruled`; `listing::merge_state_reads_ahead_first` |
+| 2 | ≥ 100 columns: nonzero `+ahead`/`-behind`, none when tips are equal, before the PR badge, four columns | `list_table::counts_follow_the_state_word_and_precede_the_badge_from_100_columns`, snapshots `the_table_at_100_columns_shows_counts` and `the_spec_example_renders_as_ruled`, `level2_list_verbose::level2_list_styles_follow_the_design_in_tmux` |
+| 3 | ≤ 99 columns: no counts, states and badges kept; `--width` does not move the gate | `list_table::up_to_99_columns_cells_keep_state_and_badges_without_counts`, snapshot `the_table_at_99_columns_shows_no_counts`; **new** `list_output::a_wide_width_flag_does_not_show_the_counts` (real binary, captured below 100, `-w 200` and `-w 100%`) and **new** `level2_list_verbose::level2_list_width_flag_leaves_the_counts_in_tmux` (120-column pane, `-w 40`, counts still shown) |
+| 4 | `-> parent` follows 1–3 against the parent's local tip | `listing::the_parent_column_measures_against_the_parents_local_tip`; the parent cell `conflicts +1 -3  PR #104` in the L1 100-column test |
+| 5 | L1 snapshots at 99/100 cover zero, one-sided, two-sided, conflicts, unavailable, badges, `NO_COLOR`; L2 asserts dim green/red | the Phase 3 tests, `list_table::an_unknown_comparison_never_gets_counts`, `no_color_counts_read_as_plain_text`, `counts_are_dim_green_and_dim_red_in_color`; `level2_list_styles_follow_the_design_in_tmux` |
+| 6 | Red source dot (table and legend) and red source names; no orange | `list_table::styles_follow_the_design`, `level2_list_styles_follow_the_design_in_tmux`, `level2_dirty_tree::level2_dirty_tree_renders_in_tmux`, the `dirty_tree.rs` and `remove/report.rs` unit tests; grep below |
+| 7 | Legend samples `└─ └─ └┄`, no `├─` | `list_table::the_legend_explains_both_columns`, `list_output::list_output_is_the_redesigned_table`, the L2 styles test; `legend_markup` has no `├` |
+| 8 | Skill, README, `docs/cli/list.md` updated | Phase 4 edits; Phase 5 adds the `--width` proof to the skill |
+
+### Gap closed
+
+Acceptance 3's "`--width` does not change this threshold" held by construction
+(`list.rs` passes the parsed width only to `to_git_graph`), but no test proved
+it. I added both directions:
+
+- **L1** `list_output::a_wide_width_flag_does_not_show_the_counts` runs the
+  real `wt` binary with captured stderr (below 100 columns, as the existing
+  `list_output_is_the_redesigned_table` already relies on). The feature branch
+  is one commit ahead, and `list`, `list -w 200`, and `-w 100% list` all read
+  `clean`.
+- **L2** `level2_list_verbose::level2_list_width_flag_leaves_the_counts_in_tmux`
+  runs `wt list -w 40` in the ≥ 100-column tmux pane and asserts
+  `clean +1 -2  PR #99` with `+1` dim green. `DesignFixture::list_until` now
+  takes the `wt` arguments. Its two existing callers pass `"list"`.
+
+**Mutation checks.** With `METRICS_MIN_WIDTH = 0`, the new L1 test failed, along
+with the two existing `list_output` tests. With `METRICS_MIN_WIDTH = 200`, the new
+L2 test failed. The constant was restored each time, and `git diff` of
+`list_table.rs` is empty.
+
+### Incident: one edit landed in the main checkout
+
+One shell call ran with the main checkout (`/Volumes/coding/personal/rusty-biscuit`)
+as its working directory, not this worktree. My relative-path edit to
+`list_output.rs` was written there, and one earlier read of
+`level2_list_verbose.rs` also came from the main checkout's older copy. I found
+the mistake when the test count dropped. I moved the exact 26-line hunk from the
+main checkout into this worktree. `git status -- worktree/` in the main checkout
+is clean again, and it had no other changes. Every later command used absolute
+paths, and every result above comes from this worktree.
+
+### Greps
+
+- `grep -rn "AlreadyIn\|already in" worktree/lib/src worktree/cli`: only
+  `cli/tests/list_table.rs:288`, the Acceptance-1 absence assertion.
+- `grep -rn orange worktree/cli/src worktree/cli/tests`: only
+  `styled_capture_parse.rs:25`, which the plan excludes, and the absence
+  assertion message `list_table.rs:381`.
+- `legend_markup` contains no `├`.
+
+### Gates
+
+- `just test` in `worktree/`: 466 passed and 18 skipped (the tier-gated L2+ tests). None failed.
+- `just lint` in `worktree/`: clean.
+- `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2` in `worktree/`: 18 passed and
+  0 failed. That is the 17 from Phase 4 plus the new `-w` test.
+- `just check-tier-coverage worktree`: 0 stranded.
+- **Cross-OS.** The feature is platform-neutral rendering. S1 required no
+  change to `list.rs`, and no `#[cfg]` code changed, so no cross-check was
+  required or run. The new L1 test depends on captured output rendering below
+  100 columns. `list_output_is_the_redesigned_table` already makes that
+  assumption on every OS in CI. The PR's Linux and macOS cells cover it, and
+  Windows runs it on `main`.
+- There were no pre-existing failures.

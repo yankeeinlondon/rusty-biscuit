@@ -19,32 +19,28 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-26
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
+implemented_by: claude/opus
 human_review: false
 message_to_agent: |-
-    Phase 4 is done: both L2 files assert red (no ORANGE left), the styles test
-    asserts the counts (`clean +1 -2  PR #99`, `+1` dim green, `-2` dim red,
-    `docs-work` behind-only `clean -2`, `clash` `conflicts +1 -2`) and the
-    `└─ └─ └┄` legend connectors, and `list_until` asserts the pane is >= 100
-    columns. `just test` (465 passed), `just lint`, and
-    `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2` (17 passed) are green.
-    Docs (`docs/cli/list.md`, README) and the worktree skill are updated.
-    Phase 5 notes:
-    (1) Definition-of-done grep for "orange" also hits the Phase 3 absence
-    assertion message `"no orange left"` in `cli/tests/list_table.rs:381`;
-    that is intended, not a leftover.
-    (2) In the L2 fixture every parent is the default branch, so the
-    `-> parent` column is `—` at L2; parent-column counts are proven at L1 only
-    (logged in Phase 4 with the reason).
-    (3) `docs/cli/list.md` line ~80 keeps "already in the default branch": it
-    describes the graph's tag rule (R11), not the table state.
-    (4) Nothing OS-specific changed in Phases 2-4; no cross-check has been run.
+    All five phases are implemented; this is ready for review. Phase 5 found
+    one untested acceptance clause: "`--width` does not change the
+    100-column threshold". It held by construction, and it now has two tests:
+    `list_output::a_wide_width_flag_does_not_show_the_counts` (L1, real binary)
+    and `level2_list_verbose::level2_list_width_flag_leaves_the_counts_in_tmux`
+    (L2). `DesignFixture::list_until` in that L2 file now takes the `wt`
+    arguments as its first parameter. The acceptance-to-test map is in the
+    implementation log's Phase 5 section. Known intentional grep hits: the
+    absence assertions at `cli/tests/list_table.rs:288` ("already in") and
+    `:381` ("no orange left"), plus `styled_capture_parse.rs:25`. Parent-column
+    counts are proven at L1 only (the L2 fixture's parents are all the default
+    branch). No cross-OS check was run, because nothing OS-specific changed.
 related:
     - 2026-09-24-ux-improvements
     - 2026-09-25-list-remove-performance

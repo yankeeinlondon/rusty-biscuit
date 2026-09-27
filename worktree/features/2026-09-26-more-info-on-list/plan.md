@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 1
+phase: 5
 agent: claude/opus
 yolo: true
 packages:
@@ -40,6 +40,31 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - worktree/lib/src/listing.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/dirty_tree.rs
+    - worktree/cli/src/commands/remove/report.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_output.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/level2_dirty_tree.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+documentation:
+    - worktree/docs/cli/list.md
+    - worktree/README.md
+    - .claude/skills/worktree/SKILL.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: More Info on `wt list`
@@ -300,15 +325,15 @@ Wave 4 runs three parallel tasks on disjoint files.
 
 Wave 5 is sequential.
 
-- [ ] **Acceptance audit**: walk spec Acceptance 1–8 and map each one to a test
+- [x] **Acceptance audit**: walk spec Acceptance 1–8 and map each one to a test
   name or grep result in `implementation-log.md`.
-- [ ] **Greps**: run the two greps from the Definition of done, and grep for `├─` in `legend_markup`.
-- [ ] **Full local gates**: `just test`, `just test-l2`, and `just lint` in `worktree/`.
+- [x] **Greps**: run the two greps from the Definition of done, and grep for `├─` in `legend_markup`.
+- [x] **Full local gates**: `just test`, `just test-l2`, and `just lint` in `worktree/`.
   Run `just test worktree-cli` from the repo root if a dependent needs it.
-- [ ] **Cross-OS note**: the change is platform-neutral rendering. The CI plan
+- [x] **Cross-OS note**: the change is platform-neutral rendering. The CI plan
   (Linux and macOS on the PR) covers it. There is no Windows-specific code, and if S1 needed an R2
   change in `list.rs`, `./scripts/cross-check.sh --os windows worktree-cli` must pass.
-- [ ] **Spec status**: set the spec's frontmatter `status: implemented`,
+- [x] **Spec status**: set the spec's frontmatter `status: implemented`,
   `implemented: true`, and `implemented_by: claude/opus`. Do not move the directory to
   `_completed` and do not commit, because the author does both.
-- [ ] **Checkpoint 5**: the implementation is complete and ready for review.
+- [x] **Checkpoint 5**: the implementation is complete and ready for review.
