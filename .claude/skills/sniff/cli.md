@@ -122,3 +122,15 @@ The aggregate's `recent_commits`, `source_code_changes`, and
 `documentation_changes` keys are exactly the three commit-family commands'
 default `--json` arrays; `cli.rs::test_repo_aggregate_commit_families_match_the_focused_commands`
 pins that equality.
+
+## Lockfile observations
+
+The library always serializes `RepoInfo.standalone_lockfiles`; the CLI omits
+it when empty, as `RepoInfo` omits empty `monorepo_layers`. Every CLI site
+that serializes a `RepoInfo` (directly or inside `sniff --json` /
+`sniff filesystem --json`) goes through `repo_json::repo_info_value` or
+`repo_json::omit_empty_standalone_lockfiles`; a new site must too. The bare
+aggregate's `structure` always carries both lists. Human output renders both
+in a "Lockfiles" section (`output/filesystem/lockfile.rs`) that only projects
+library observations. Every CLI command that displays layers corroborates, so
+none shows `not_requested`; there is no flag to toggle corroboration.
