@@ -17,11 +17,15 @@ conflicts, and provider queries.
 
 `RepoInfo.monorepo_standards` lists detected standards with resolved binaries
 and confidence. `RepoInfo.monorepo_layers` lists membership layers. Every layer
-has one authority, optional orchestrators, provenance, and paths into the
-canonical `RepoInfo.packages` catalog.
+has one authority, optional orchestrators, provenance, a required `lockfile`
+observation, and paths into the canonical `RepoInfo.packages` catalog.
+Standalone Poetry, PDM, and Composer lockfiles sit beside the layers in
+`RepoInfo.standalone_lockfiles`. See the lockfile pipeline in
+[architecture.md](architecture.md#lockfile-observation-pipeline).
 
-The removed `MonorepoTool`, `workspace_tools`, and `discovery_sources` surfaces
-must not return. CLI labels use each standard's stable `spec().label`.
+The removed `MonorepoTool`, `workspace_tools`, `discovery_sources`, and
+`lockfile_match` surfaces must not return. CLI labels use each standard's
+stable `spec().label`.
 
 ### The empty top-level area
 

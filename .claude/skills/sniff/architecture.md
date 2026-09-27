@@ -9,6 +9,7 @@ subprocesses, host capabilities, or request cost.
 - [Filesystem observation](#filesystem-observation)
 - [Change classification and committed diffs](#change-classification-and-committed-diffs)
 - [Package topology](#package-topology)
+- [Lockfile observation pipeline](#lockfile-observation-pipeline)
 - [Programs and subprocesses](#programs-and-subprocesses)
 - [Network defaults](#network-defaults)
 
@@ -173,6 +174,64 @@ Structure requests collect membership and minimum identity only and read no
 lockfile, so provenance stays manifest-derived. Use a focused request for
 selected manifest facts and full mode for inventory-backed enrichment and
 lockfile corroboration; `with_lockfile_provenance` opts any tier in or out.
+
+## Lockfile observation pipeline
+
+Every `MonorepoLayer` carries a required `lockfile: LockfileObservation`
+(`filesystem/repo/lockfile/`), which replaced `lockfile_match` and must not
+return. The manifest stays the membership authority: an observation never adds
+or removes packages or changes ownership. Its only side effect is provenance,
+and only an exact `match` upgrades the layer and the seeds it owns
+(`upgrade_owned_seed_provenance`). Cargo reports `members_present` /
+`members_missing` with `subset_only`, never `match`, so it never upgrades.
+The detector's raw Cargo seeds hold an included *and* an excluded seed for a
+directory matched by both `members` and `[workspace].exclude` (they merge only
+later), so `lockfile::cargo::compare` skips every path with an excluded seed;
+checking `is_excluded` per seed reports a false `members_missing`.
+
+`lockfile::sources::source` is the single authority-to-lockfile table:
+
+| `Source` | Standards | Behavior |
+|---|---|---|
+| `Candidates` | pnpm, npm, Yarn, Bun, uv, Cargo | First present file in precedence order is selected (`npm-shrinkwrap.json` > `package-lock.json`, `bun.lock` > `bun.lockb`); never retry a lower-priority file after the selected one fails |
+| `Configured` | Rush | `lockfile/rush.rs` picks the manager's lockfile from `rush.json`; only the single pnpm workspace layout compares (importer base `common/temp`) |
+| `Fallback` | Go, Gradle, Bazel | Metadata only, never opened: `unverifiable` + `no_membership_data`; Bazel without `MODULE.bazel` is `not_applicable` |
+| `NotApplicable` | Maven, .NET, Pants, Buck2, orchestrators, `Unknown` | `no_lockfile_source`, or `unknown_standard` for `Unknown` |
+
+Adding a standard means adding its row; the `sources` test pins all 18.
+`observe_layer_lockfile` applies the spec's precedence in order: no source,
+metadata failure, absence, declined request (`not_requested`), metadata-only
+fallback, then parse and classify. Only the last step reads content.
+
+`ManifestStore` owns every lockfile touch for the request:
+
+- `lockfile_presence` probes each normalized path once and caches
+  `Present`/`Absent`/`Failed(kind)`. A missing file or parent is absence; any
+  other metadata error is `unreadable` + `metadata_failed`, never absence.
+- `lockfile(path, format)` gates on presence, then reads and parses at most
+  once, caching typed `LockfileFailure`s (absent, metadata, read, parse) as
+  well as successes. A directory in place of the file is a read failure.
+- `Cargo.lock` goes through `cargo_lock`, one shared parse serving both
+  dependency-version enrichment (`CargoLockVersions`, byte-for-byte legacy
+  results) and corroboration.
+- The metadata-failure test seam is `lockfile::test_seam::fail_metadata`;
+  Unix mode bits are not a portable way to inject one.
+
+Membership comparison (`lockfile/membership.rs`) is lexical: both sides become
+`/`-separated paths relative to the layer root, the root is excluded from both
+sets, `..` resolves against the format's base, and no lockfile path is ever
+opened or canonicalized. Do not intersect lockfile paths with manifest members
+first; that erases `extra`. A layer with no matching detector outcome, or a
+member whose identity cannot be resolved, is `incomplete_manifest_discovery`.
+
+Standalone Poetry, PDM, and Composer lockfiles are repository-level
+`RepoInfo.standalone_lockfiles` entries (`lockfile/standalone.rs`), never
+layers: one probe per tool at the repository root and each unique package
+root, no walk, no read, and no entry for an absent file.
+
+`bun.lock`, `rush.json`, and Rush configuration are JSON with comments. Parse
+them only through `filesystem::repo::jsonc::from_str` (strict `jsonc-parser`
+options: comments and trailing commas, nothing looser), never `serde_json`.
 
 ## Programs and subprocesses
 

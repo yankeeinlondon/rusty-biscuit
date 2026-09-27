@@ -81,7 +81,8 @@ Declining keeps provenance manifest-derived and reports a present lockfile as
 `Cargo.lock` for versions, through the same request cache.
 
 Every layer's lockfile candidates are probed even when corroboration is
-declined. `REPO_LOCKFILE_PROBES` (`filesystem.repo.lockfile_probes`) counts
+declined, in precedence order until one is present (a lower-priority
+candidate after it is not probed). `REPO_LOCKFILE_PROBES` (`filesystem.repo.lockfile_probes`) counts
 unique probed lockfile paths through `ManifestStore::lockfile_presence`,
 including the Yarn and Bun detectors' marker probes, which share the cache.
 Reads are gated on presence: `REPO_LOCKFILE_READS` counts content-read
