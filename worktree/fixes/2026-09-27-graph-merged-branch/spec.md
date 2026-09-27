@@ -19,14 +19,24 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: draft-spec
-reviewed: false
+status: finalized-spec
+reviewed: true
+reviewed_by: codex/gpt-6-astra
+reviewed_on: 2026-09-27
 review_iterations: 0
-clarified: false
+clarified: true
+clarified_by: codex/gpt-6-astra
+needs_rulings: false
+review_note: the clarification process served as a review
 implemented: false
 related:
     - 2026-09-27-list-freshness-ux
 human_review: false
+references:
+    renderer-spike.md: >-
+        Isolated renderer feasibility experiment covering measured label spacing,
+        exact merge identity and parent restoration, and compressed historical connections.
+        Records results, reproduction steps, and limits on production applicability.
 ---
 
 # `wt list` graph hides a merged branch and overlaps neighboring tags
@@ -98,15 +108,27 @@ Combining labels by moving one to a different commit is excluded, because it wou
 
 Preserve existing default-branch handling and command behavior outside the graph corrections. This fix introduces no new graph-specific network requests, persistent branch-history logging, command flags, or migration. Existing `--perf` timing provides review evidence; no operational telemetry is added.
 
-## Ownership and implementation proposals
+## Ownership and implementation directions
 
-The functional requirements above are confirmed. The following are implementation directions to evaluate, not human-approved algorithms or API contracts.
+Design for reuse: improvements that benefit callers generally belong in the shared layer, either `biscuit-terminal` or `biscuit-visualized`, according to the existing interfaces and responsibilities. Do not confine a shared fix to a worktree-specific workaround. Exact placement, algorithms, and API contracts remain planning details, not outstanding human rulings. Address the actual shared need without speculative abstractions.
 
 - **`worktree-cli`:** its `commands::git_graph` module gathers Git facts and selects branches. It should provide sufficient ancestry and merge information for the selected branches without taking over layout. First-parent traversal is a candidate for keeping merged branch commits out of the default lane. Finding the merge that introduced a branch, and choosing its fork, need to handle the supported histories above; simple default-lane traversal has not yet been shown sufficient for non-default parents.
 - **`biscuit-terminal`:** its `GitGraph` component owns lanes, labels, omitted-history compression, and sizing. Extending its `GraphLine` input with a merge destination, such as a `merged_into` builder method accepting a commit identifier, is a candidate. No public API spelling is settled.
-- **Renderer integration:** Mermaid merge statements are a candidate for drawing the connection. Existing renderer limitations around attributes on merge statements may require a workaround. Commit spacing or label layout changes are candidates for preventing collisions, but must be evaluated against exact attachment, full labels, compression, and shrinking.
+- **`biscuit-visualized` (potentially affected):** its Mermaid rendering backend already parses, lays out, and renders diagrams through the dependency's public interfaces. It is a candidate location when the existing rendering interfaces make it the appropriate shared owner. Planning must determine whether label layout and merge correctness are best addressed here, in `biscuit-terminal`, or across their existing boundary. No backend modification is mandated, and Git discovery remains in `worktree-cli`.
 
-Changing `mermaid-rs-renderer`, adding a dependency, or changing the shared component's public input contract may have effects beyond `wt list`. The acceptable boundary for those changes, and whether a focused rendering experiment is needed, remain open.
+A reusable explicit graph input or verified merge metadata may help convey the topology accurately, but neither is a required API. Choose the repair mechanism during planning; do not mandate a worktree-only or opt-in path for a shared rendering problem. Any explicit parent information must refer to verified existing nodes, with invalid input rejected rather than silently fabricating edges. Avoid duplicating the Mermaid parser. Measurement and rendering must use the same effective graph and layout configuration, and artifact-cache identity must account for every additional rendering input.
+
+The experiment demonstrates a feasible route with the current dependency, not that its fixture repair is the production design. No dependency change is established as necessary or pre-authorized. If planning selects a materially broader dependency change, justify its scope and tradeoffs as part of that plan; this is not an outstanding specification ruling.
+
+## Renderer experiment findings
+
+The authorized and completed [renderer experiment](renderer-spike.md) used installed `mermaid-rs-renderer` 0.3.1 in an isolated harness, with no dependency modification:
+
+- Measuring tag width and increasing commit spacing removed the tested neighboring-label overlap while preserving full labels on their original commit objects.
+- The parser retained a labeled merge's identity and tags but lost its second parent. Restoring the fixture's known second parent through the public parsed graph preserved the exact merge identity, its tags, and the following commit's relationship.
+- An eight-node compressed fixture represented 8,997 omitted commits while retaining fork and merge identities, correct merge parents, and nonoverlapping tags.
+
+These are feasibility results, not production acceptance evidence. The compressed fixture was constructed by hand and did not exercise actual gathering or component compression. Arbitrary layouts, fonts, cross-lane collisions, final terminal fitting, operating systems, and production performance remain unproven. Wider spacing increases natural image width, so production validation must cover the agreed compression and shrinking behavior. The experiment's spacing margin is not a product constant.
 
 ## Acceptance criteria and validation
 
@@ -142,11 +164,12 @@ Implementation is complete and ready for review when the acceptance cases pass, 
 
 - `worktree/docs/git-graph.md`: replace the documented collapse of merged branches into tags and describe preserved selection, parent relationships, historical connections, and any agreed limits.
 - `biscuit-terminal/docs/components/git_graph.md`: update lane and label behavior and document the final shared-component contract and renderer constraints.
+- Update API documentation and package skills for whichever shared package interfaces or behavior change. If `biscuit-visualized` is affected, document its final contract and correct the stale renderer-version guidance identified by the experiment.
 
 The existing documentation describes the current implementation; the implementation change must update it alongside the code.
 
-## Remaining risk assessment
+## Settled scope and planning details
 
-The user-visible scope and fallback behavior above are settled. Before finalizing this specification, assess whether a focused rendering experiment is warranted to resolve label-collision avoidance and merge-label feasibility. If an experiment would help, present its purpose and obtain the user's choice before running it.
+No required human rulings remain. The confirmed boundary favors reuse in `biscuit-terminal` or `biscuit-visualized` according to their existing interfaces and responsibilities, with Git discovery in `worktree-cli`. Exact shared-package placement, concrete API spelling, the merge-repair mechanism, spacing policy, fixture dimensions, and implementation sequencing remain planning details constrained by the requirements above.
 
-Any proposed dependency change, renderer modification, or shared-component API change must identify its effects beyond `wt list`. The permitted preparatory scope and whether such a change needs another human decision remain to be established. No spike or dependency change has been authorized in the clarification batches. Concrete API spelling, test dimensions, and fixture construction are implementation-planning details, not additional human rulings.
+The renderer experiment is complete; production implementation has not begun. This finalized specification is ready for planning and implementation, with the experiment's limits carried forward into validation rather than treated as completed product evidence.
