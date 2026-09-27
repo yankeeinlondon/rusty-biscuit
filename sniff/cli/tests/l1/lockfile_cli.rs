@@ -1,8 +1,8 @@
 //! The shipped CLI's projection of lockfile observations
 //! (`2026-09-26-lockfile-corroboration`, AC5).
 //!
-//! Each case copies a real pnpm 10.32.1 fixture from the library's
-//! `tests/fixtures/lockfiles` into a temporary directory: in place, this
+//! Each case copies a real pnpm 10.32.1 or Composer 2.10.3 fixture from the
+//! library's `tests/fixtures/lockfiles` into a temporary directory: in place, this
 //! monorepo's `.git` and workspaces would take over. No package-manager binary
 //! runs. No CLI command displays a layer from a request that declines
 //! corroboration, so `not_requested` is covered by the renderer's unit tests.
@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use crate::common;
 
 fn lockfile_fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    biscuit_test_harness::manifest_dir!()
         .parent()
         .expect("the sniff package area")
         .join("lib/tests/fixtures/lockfiles")
@@ -59,6 +59,18 @@ fn lockfile_removed(root: &Path) {
 fn lockfile_replaced_by_directory(root: &Path) {
     lockfile_removed(root);
     fs::create_dir(root.join("pnpm-lock.yaml")).expect("directory where the lockfile goes");
+}
+
+fn non_string_member_declared(root: &Path) {
+    let manifest = root.join("pnpm-workspace.yaml");
+    let content = fs::read_to_string(&manifest).expect("read pnpm-workspace.yaml");
+    fs::write(&manifest, format!("{content}  - 123\n")).expect("write pnpm-workspace.yaml");
+}
+
+/// Review 5's reproduction: a present `packages` field that is not a list.
+fn wrong_type_members_declared(root: &Path) {
+    fs::write(root.join("pnpm-workspace.yaml"), "packages: 123\n")
+        .expect("write pnpm-workspace.yaml");
 }
 
 fn run(root: &Path, args: &[&str]) -> Output {
@@ -165,6 +177,38 @@ fn cases() -> Vec<Case> {
             lockfile_replaced_by_directory,
             observation("unreadable", &["pnpm-lock.yaml"], json!("read_failed"), &[], &[]),
             &["pnpm workspaces (.): unreadable — the lockfile could not be read"],
+        ),
+        (
+            "unverifiable-invalid-member",
+            "workspace",
+            non_string_member_declared,
+            observation(
+                "unverifiable",
+                &["pnpm-lock.yaml"],
+                json!("incomplete_manifest_discovery"),
+                &[],
+                &[],
+            ),
+            &[
+                "pnpm workspaces (.): unverifiable — the manifest's member list may be incomplete, so it was not compared",
+                "- lockfile: pnpm-lock.yaml",
+            ],
+        ),
+        (
+            "unverifiable-wrong-type-members",
+            "workspace",
+            wrong_type_members_declared,
+            observation(
+                "unverifiable",
+                &["pnpm-lock.yaml"],
+                json!("incomplete_manifest_discovery"),
+                &[],
+                &[],
+            ),
+            &[
+                "pnpm workspaces (.): unverifiable — the manifest's member list may be incomplete, so it was not compared",
+                "- lockfile: pnpm-lock.yaml",
+            ],
         ),
         (
             "absent",
@@ -287,4 +331,49 @@ fn aggregate_json_carries_the_layer_lockfile_and_standalone_list() {
         "{json}"
     );
     assert_eq!(structure["standalone_lockfiles"], json!([]), "{json}");
+}
+
+/// A PHP-only project (`composer.json` and `composer.lock`, nothing else) is a
+/// single-package repository whose Composer lockfile is a repository-level
+/// observation (ruling R2), in JSON and in the human section.
+#[test]
+fn a_php_only_project_reports_its_composer_lockfile() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().join("repo");
+    copy_tree(&lockfile_fixtures().join("composer-2.10.3/single-project"), &root);
+
+    let output = run(&root, &["repo", "structure", "--json"]);
+    assert_quiet_success(&output, "json");
+    let json = json_stdout(&output, "json");
+    assert_eq!(json["is_monorepo"], false, "{json}");
+    assert!(
+        json.get("monorepo_layers").is_none(),
+        "an empty layer list is omitted: {json}"
+    );
+    assert_eq!(
+        json["standalone_lockfiles"],
+        json!([{
+            "root": "",
+            "tool": "composer",
+            "status": "unverifiable",
+            "paths": ["composer.lock"],
+            "reason": "no_membership_data",
+            "extra": [],
+            "missing": [],
+        }]),
+        "{json}"
+    );
+    assert_eq!(json["packages"][0]["name"], "fixture/fixture-root", "{json}");
+
+    let output = run(&root, &["--plain", "repo", "structure"]);
+    assert_quiet_success(&output, "human");
+    let stdout = human_stdout(&output, "human");
+    for line in [
+        "Type: Single-package",
+        "Composer (.): unverifiable — this lockfile does not record which packages are workspace members",
+        "- lockfile: composer.lock",
+    ] {
+        assert!(stdout.contains(line), "missing `{line}` in: {stdout}");
+    }
+    assert!(!stdout.contains("workspaces"), "no layer is rendered: {stdout}");
 }
