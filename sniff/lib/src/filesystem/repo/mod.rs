@@ -8,6 +8,7 @@ pub mod glob;
 pub mod go;
 pub mod gradle;
 pub mod identity;
+pub(crate) mod lockfile;
 pub mod manifest_index;
 pub mod maven;
 pub(crate) mod nested;
@@ -38,6 +39,7 @@ pub use aggregate_view::{
 };
 pub use area::{AreaError, detect_area};
 pub use identity::{RepoIdentity, detect_repo_identity, detect_repo_identity_with_repo};
+pub use lockfile::{LockfileObservation, LockfileReason, LockfileStatus};
 pub use standard::{
     BinarySource, BinarySpec, DetectedStandard, DetectionConfidence, GlobDialect,
     InvocationTemplate, Marker, MarkerConfidence, MarkerContent, MembershipModel, MonorepoLayer,

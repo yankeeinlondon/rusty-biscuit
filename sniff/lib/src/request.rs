@@ -781,13 +781,14 @@ pub struct RepoRequest {
     /// not inventory-backed full repository detail.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<RepoDetailRequest>,
-    /// Corroborate each workspace layer's membership against its lockfile
-    /// (`Cargo.lock`, `pnpm-lock.yaml`, or `uv.lock`).
+    /// Corroborate each workspace layer's membership against its lockfile.
     ///
-    /// When false, no layer's lockfile is read for corroboration: layer and
-    /// package provenance stay manifest-derived and
-    /// [`MonorepoLayer::lockfile_match`](crate::filesystem::repo::MonorepoLayer::lockfile_match)
-    /// is `None`. This controls corroboration only; a request that
+    /// When false, each layer's lockfile is only probed for presence, never
+    /// read for corroboration: layer and package provenance stay
+    /// manifest-derived and a present lockfile reports
+    /// [`LockfileStatus::NotRequested`](crate::filesystem::repo::LockfileStatus::NotRequested)
+    /// in [`MonorepoLayer::lockfile`](crate::filesystem::repo::MonorepoLayer::lockfile).
+    /// This controls corroboration only; a request that
     /// [wants dependencies](Self::wants_dependencies) still reads `Cargo.lock`
     /// to resolve versions.
     ///

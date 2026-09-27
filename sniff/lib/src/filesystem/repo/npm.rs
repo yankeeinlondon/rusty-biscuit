@@ -155,8 +155,16 @@ pub(super) fn detect_pnpm_workspace(
 ///
 /// Bun and npm/yarn all declare members via `package.json#workspaces`; the
 /// lockfile is what disambiguates Bun so it wins the membership authority.
-fn has_bun_lockfile(root: &Path) -> bool {
-    probe_exists(&root.join("bun.lock")) || probe_exists(&root.join("bun.lockb"))
+///
+/// Probed through the store, so the Bun layer's lockfile observation reuses
+/// these answers. A failed probe reads as absent here, as `Path::exists` did.
+fn has_bun_lockfile(root: &Path, manifests: &ManifestStore) -> bool {
+    manifests
+        .lockfile_presence(&root.join("bun.lock"))
+        .is_present()
+        || manifests
+            .lockfile_presence(&root.join("bun.lockb"))
+            .is_present()
 }
 
 pub(super) fn detect_bun_workspace(
@@ -164,7 +172,7 @@ pub(super) fn detect_bun_workspace(
     evidence: RepoEvidence<'_>,
     manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
-    if !has_bun_lockfile(root) {
+    if !has_bun_lockfile(root, manifests) {
         return Ok(None);
     }
 
@@ -211,7 +219,7 @@ pub(super) fn detect_npm_workspace(
 
     // Bun reuses `package.json#workspaces`; when a Bun lockfile is present, the
     // Bun detector owns membership and npm must not also claim this root.
-    if has_bun_lockfile(root) {
+    if has_bun_lockfile(root, manifests) {
         return Ok(None);
     }
 
@@ -246,7 +254,10 @@ pub(super) fn detect_yarn_workspace(
     evidence: RepoEvidence<'_>,
     manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
-    if !probe_exists(&root.join("yarn.lock")) {
+    if !manifests
+        .lockfile_presence(&root.join("yarn.lock"))
+        .is_present()
+    {
         return Ok(None);
     }
 

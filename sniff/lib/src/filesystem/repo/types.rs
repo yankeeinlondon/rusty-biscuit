@@ -510,7 +510,8 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
 /// Runs [`RepoRequest::structure`]: package managers, dependencies, test
 /// runners, features, languages, frameworks, and file lists are empty, and no
 /// lockfile is read, so layer and package provenance stay manifest-derived and
-/// [`MonorepoLayer::lockfile_match`] is `None`. Call
+/// a present lockfile reports [`LockfileStatus::NotRequested`] in
+/// [`MonorepoLayer::lockfile`]. Call
 /// [`detect_repo_with_request`] with [`RepoRequest::focused`] for selected
 /// manifest-backed details or with
 /// [`RepoRequest::with_lockfile_provenance`] for lockfile corroboration, or
@@ -519,7 +520,8 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
 /// [`RepoRequest::structure`]: crate::request::RepoRequest::structure
 /// [`RepoRequest::focused`]: crate::request::RepoRequest::focused
 /// [`RepoRequest::with_lockfile_provenance`]: crate::request::RepoRequest::with_lockfile_provenance
-/// [`MonorepoLayer::lockfile_match`]: crate::filesystem::repo::MonorepoLayer::lockfile_match
+/// [`LockfileStatus::NotRequested`]: crate::filesystem::repo::LockfileStatus::NotRequested
+/// [`MonorepoLayer::lockfile`]: crate::filesystem::repo::MonorepoLayer::lockfile
 #[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, true).map(|(info, _inventory)| info)
@@ -911,7 +913,9 @@ mod tests {
             authority,
             orchestrators: Vec::new(),
             provenance: crate::filesystem::repo::standard::PackageProvenance::Globbed,
-            lockfile_match: None,
+            lockfile: crate::filesystem::repo::LockfileObservation::not_applicable(
+                crate::filesystem::repo::LockfileReason::NoLockfileSource,
+            ),
             root_is_package: false,
             packages: Vec::new(),
         }

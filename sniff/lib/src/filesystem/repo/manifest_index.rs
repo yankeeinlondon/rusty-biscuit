@@ -9,10 +9,10 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use biscuit_file::toml_crate;
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use tracing::debug;
 
 use crate::performance;
 use crate::performance::counters;
@@ -22,52 +22,46 @@ use super::seed::PackageSeed;
 use super::standard::{MonorepoStandard, PackageProvenance};
 
 /// Resolved versions from Cargo.lock.
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub(crate) struct CargoLockVersions {
     versions: HashMap<String, Vec<String>>,
 }
 
 impl CargoLockVersions {
-    /// Parse a Cargo.lock file and extract package versions.
+    /// Build the version index from a typed `Cargo.lock` document.
     ///
     /// Only `package[].name` and `package[].version` are retained, with every
     /// version of a name kept in lockfile order. Entries that are not tables,
     /// or whose `name` or `version` is absent or not a string, are skipped; a
     /// missing or non-array `package` yields an empty index.
+    pub(crate) fn from_document(document: &CargoLockDocument) -> Self {
+        let mut versions: HashMap<String, Vec<String>> = HashMap::new();
+        for entry in &document.package.entries {
+            if let (Some(name), Some(version)) = (&entry.name, &entry.version) {
+                versions
+                    .entry(name.clone())
+                    .or_default()
+                    .push(version.clone());
+            }
+        }
+        Self { versions }
+    }
+
+    /// Parse `Cargo.lock` content into a version index.
     ///
     /// ## Returns
     ///
-    /// `None` only when the file cannot be read or is not valid TOML.
-    pub fn parse(lock_path: &Path) -> Option<Self> {
-        performance::increment_counter(counters::REPO_LOCKFILE_READS, 1);
-        performance::increment_counter(counters::FS_FILE_OPENS, 1);
-        let content = std::fs::read_to_string(lock_path)
-            .map_err(|e| {
-                debug!(path = %lock_path.display(), error = %e, "could not read file");
-                e
-            })
-            .ok()?;
-        performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-        performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
-        Self::from_lock_str(&content)
-    }
-
+    /// `None` only when `content` is not valid TOML.
+    #[cfg(test)]
     fn from_lock_str(content: &str) -> Option<Self> {
         let lock: CargoLockDocument = toml_crate::from_str(content).ok()?;
-
-        let mut versions: HashMap<String, Vec<String>> = HashMap::new();
-        for entry in lock.package.0 {
-            if let (Some(name), Some(version)) = (entry.name, entry.version) {
-                versions.entry(name).or_default().push(version);
-            }
-        }
-
-        Some(Self { versions })
+        Some(Self::from_document(&lock))
     }
 
     /// The generic `toml::Value` parser that [`Self::from_lock_str`] replaced,
     /// kept as the parity oracle.
     #[cfg(test)]
-    fn parse_reference(content: &str) -> Option<Self> {
+    pub(crate) fn parse_reference(content: &str) -> Option<Self> {
         let parsed: toml_crate::Value = toml_crate::from_str(content).ok()?;
 
         let mut versions: HashMap<String, Vec<String>> = HashMap::new();
@@ -97,31 +91,106 @@ impl CargoLockVersions {
     }
 }
 
-/// The part of a `Cargo.lock` document that [`CargoLockVersions`] retains.
+/// The part of a `Cargo.lock` document that [`CargoLockVersions`] and lockfile
+/// corroboration retain.
 ///
-/// Every other key (`version`, `metadata`, and each entry's `source`,
-/// `checksum`, and `dependencies`) is skipped through `IgnoredAny` rather than
-/// allocated. Each level is lenient, matching the generic parser this replaced:
-/// a value of the wrong shape becomes an absent value instead of an error.
+/// Every other key (each entry's `checksum` and `dependencies`, and the
+/// contents of `metadata` and `source`) is skipped through `IgnoredAny` rather
+/// than allocated. Each level is lenient, matching the generic parser this
+/// replaced: a value of the wrong shape becomes an absent value instead of an
+/// error, and [`LockedPackages`] records that it happened so corroboration can
+/// be strict where the version index is not.
 #[derive(Deserialize)]
-struct CargoLockDocument {
+pub(crate) struct CargoLockDocument {
+    #[serde(default, deserialize_with = "lock_version")]
+    pub(crate) version: LockVersion,
+    /// Present only in v1 lockfiles, which kept checksums there.
     #[serde(default)]
-    package: LockedPackages,
+    pub(crate) metadata: Option<IgnoredAny>,
+    #[serde(default)]
+    pub(crate) package: LockedPackages,
 }
 
+/// The top-level `version` key of a `Cargo.lock`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LockVersion {
+    /// v1 and v2 lockfiles have no `version` key.
+    #[default]
+    Absent,
+    Integer(i64),
+    /// Present but not an integer.
+    Other,
+}
+
+/// The `package` array.
 #[derive(Default)]
-struct LockedPackages(Vec<LockedPackage>);
+pub(crate) struct LockedPackages {
+    pub(crate) entries: Vec<LockedPackage>,
+    /// Whether `package` was an array. A missing key or a value of another
+    /// shape is an empty, non-array index.
+    pub(crate) is_array: bool,
+    /// Array elements dropped because they were not tables.
+    pub(crate) skipped: usize,
+}
 
 #[derive(Deserialize)]
-struct LockedPackage {
+pub(crate) struct LockedPackage {
     #[serde(default, deserialize_with = "string_or_none")]
-    name: Option<String>,
+    pub(crate) name: Option<String>,
     #[serde(default, deserialize_with = "string_or_none")]
-    version: Option<String>,
+    pub(crate) version: Option<String>,
+    /// Whether the entry names a `source`; a workspace member never does.
+    #[serde(default)]
+    pub(crate) source: Option<IgnoredAny>,
 }
 
 /// One `package` array element; `None` when the element is not a table.
 struct LockedPackageEntry(Option<LockedPackage>);
+
+fn lock_version<'de, D: Deserializer<'de>>(deserializer: D) -> Result<LockVersion, D::Error> {
+    struct LockVersionVisitor;
+
+    impl<'de> Visitor<'de> for LockVersionVisitor {
+        type Value = LockVersion;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("any TOML value")
+        }
+
+        fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+            Ok(LockVersion::Integer(value))
+        }
+
+        fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+            Ok(i64::try_from(value).map_or(LockVersion::Other, LockVersion::Integer))
+        }
+
+        fn visit_str<E: de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Ok(LockVersion::Other)
+        }
+
+        fn visit_bool<E: de::Error>(self, _: bool) -> Result<Self::Value, E> {
+            Ok(LockVersion::Other)
+        }
+
+        fn visit_f64<E: de::Error>(self, _: f64) -> Result<Self::Value, E> {
+            Ok(LockVersion::Other)
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+            IgnoredAny.visit_seq(seq)?;
+            Ok(LockVersion::Other)
+        }
+
+        // Also reached by TOML datetimes, which serde sees as a map.
+        fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            IgnoredAny.visit_map(map)?;
+            Ok(LockVersion::Other)
+        }
+    }
+
+    deserializer.deserialize_any(LockVersionVisitor)
+}
 
 fn string_or_none<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
     struct StringOrNone;
@@ -230,11 +299,18 @@ impl<'de> Deserialize<'de> for LockedPackages {
             }
 
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut packages = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                let mut packages = LockedPackages {
+                    entries: Vec::with_capacity(seq.size_hint().unwrap_or(0)),
+                    is_array: true,
+                    skipped: 0,
+                };
                 while let Some(LockedPackageEntry(entry)) = seq.next_element()? {
-                    packages.extend(entry);
+                    match entry {
+                        Some(entry) => packages.entries.push(entry),
+                        None => packages.skipped += 1,
+                    }
                 }
-                Ok(LockedPackages(packages))
+                Ok(packages)
             }
 
             fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {

@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::detection::{ManifestStore, probe_exists};
+use super::lockfile::{LockfileObservation, LockfileReason};
 use super::seed::PackageSeed;
 use super::standard::{
     DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership,
@@ -74,7 +75,8 @@ pub(crate) fn build_monorepo_layers(
                 authority: outcome.standard,
                 orchestrators: orchestrators.clone(),
                 provenance,
-                lockfile_match: None,
+                // Replaced by the detection's lockfile observation.
+                lockfile: LockfileObservation::not_applicable(LockfileReason::NoLockfileSource),
                 root_is_package,
                 packages,
             });

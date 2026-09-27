@@ -565,7 +565,9 @@ mod tests {
                 authority: MonorepoStandard::CargoWorkspace,
                 orchestrators: vec![MonorepoStandard::Nx],
                 provenance: PackageProvenance::Globbed,
-                lockfile_match: None,
+                lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                    sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                ),
                 root_is_package: true,
                 packages: vec![],
             }],

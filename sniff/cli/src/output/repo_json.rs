@@ -1671,7 +1671,9 @@ mod tests {
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
                     root: PathBuf::from("/repo"),
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: true,
                     packages: vec!["pkg-a".to_string()],
                 }],
@@ -1713,7 +1715,9 @@ mod tests {
                     orchestrators: vec![],
                     provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
                     root: PathBuf::from("/repo"),
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: true,
                     packages: vec!["pkg-a".to_string()],
                 }],
@@ -1745,7 +1749,9 @@ mod tests {
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
                     root: PathBuf::from("/repo"),
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: true,
                     packages: vec!["pkg-a".to_string()],
                 }],
@@ -2779,7 +2785,9 @@ mod tests {
                     authority: MonorepoStandard::CargoWorkspace,
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: PackageProvenance::Globbed,
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: false,
                     packages: vec!["pkg-a".to_string(), "pkg-b".to_string()],
                 }],

@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use crate::executable_index::ExecutableIndex;
 use crate::filesystem::file_types::ProgrammingLanguage;
 
+use super::lockfile::LockfileObservation;
+
 // TODO(swift): see spec § "How should SwiftPM be represented?". The
 // `SwiftPackage` variant is intentionally absent until option 2
 // (`.package(path:)` local-package detection) lands; a multi-target
@@ -330,8 +332,8 @@ pub enum PackageProvenance {
     LeafMarkers,
     /// Parsed local path dependencies as package links.
     LocalPathDependencies,
-    /// Parsed the committed lockfile's resolved member set. High fidelity,
-    /// still filesystem-only.
+    /// The working-tree lockfile records exactly the manifest-derived member
+    /// set. High fidelity, still filesystem-only.
     Lockfile,
     /// Discovered by walking for per-directory manifests without a confirming
     /// membership authority. This is the fallback provenance for packages found
@@ -377,23 +379,25 @@ pub struct MonorepoLayer {
     pub authority: MonorepoStandard,
     /// Orchestrators riding on top (role [`Role::OrchestratesTasks`] only).
     pub orchestrators: Vec<MonorepoStandard>,
-    /// How this layer's package list was derived. Packages inherit it.
+    /// How this layer's package list was derived. The packages this layer
+    /// owns inherit it.
     ///
     /// [`PackageProvenance::Lockfile`] appears only when the request
     /// [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance)
-    /// and the lockfile corroborates the manifest; otherwise this stays
-    /// manifest-derived.
+    /// and [`MonorepoLayer::lockfile`] is an exact
+    /// [`LockfileStatus::Match`](super::LockfileStatus::Match); every other
+    /// status keeps this manifest-derived.
     pub provenance: PackageProvenance,
-    /// Whether the committed lockfile agrees with the manifest-derived package
-    /// set.
+    /// What the layer's lockfile, as it exists in the working tree, says
+    /// about [`MonorepoLayer::packages`].
     ///
-    /// `None` means no lockfile answer: corroboration was not requested (the
+    /// Always present. A request that declines corroboration (the
     /// [`RepoRequest::structure`](crate::request::RepoRequest::structure) and
     /// [`RepoRequest::focused`](crate::request::RepoRequest::focused)
-    /// defaults), the lockfile is absent or unparseable, or the authority has
-    /// no lockfile corroboration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lockfile_match: Option<bool>,
+    /// defaults) still probes whether the lockfile exists but reads none, so
+    /// a present lockfile reports
+    /// [`LockfileStatus::NotRequested`](super::LockfileStatus::NotRequested).
+    pub lockfile: LockfileObservation,
     /// Whether the layer's root manifest also declares a package, when the
     /// standard's [`RootMembership`] is [`RootMembership::WhenManifestDeclaresPackage`].
     ///
@@ -2051,7 +2055,9 @@ mod tests {
             authority,
             orchestrators: Vec::new(),
             provenance: PackageProvenance::Globbed,
-            lockfile_match: None,
+            lockfile: LockfileObservation::not_applicable(
+                super::super::lockfile::LockfileReason::NoLockfileSource,
+            ),
             root_is_package: false,
             packages,
         }

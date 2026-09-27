@@ -167,8 +167,8 @@ fn aggregate_request() -> FilesystemRequest {
                 .commit_count(10)
                 .metadata(GitMetadataRequest::none().remotes(true).config(true)),
         )
-        // The aggregate serializes each layer's `provenance` and
-        // `lockfile_match`; opting in keeps them lockfile-corroborated.
+        // The aggregate serializes each layer's `provenance` and `lockfile`
+        // observation; opting in keeps them lockfile-corroborated.
         .repo(RepoRequest::focused(RepoDetailRequest::all()).with_lockfile_provenance(true))
         .without_file_inventory()
         // The aggregate renders neither the Markdown inventory nor the
