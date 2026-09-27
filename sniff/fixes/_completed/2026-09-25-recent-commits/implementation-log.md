@@ -1,4 +1,5 @@
 ---
+implementation_1: "2026-09-26T17:39:12-07:00"
 spec: /Volumes/coding/wt/rusty-biscuit/fix-sniff/sniff/fixes/2026-09-25-recent-commits/spec.md
 plan: sniff/fixes/2026-09-25-recent-commits/plan.md
 implemented_by: claude/opus
@@ -285,3 +286,37 @@ by this fix.
 - State: implementation complete, ready for review. The spec stays in its
   current lifecycle location.
 
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-26T17:39:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-sniff/sniff/fixes/2026-09-25-recent-commits/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review contains one finding (High): 'Files in overlapping package and area directories miss the nested area'
+- starting the work on 'Files in overlapping package and area directories miss the nested area' at 17:39:21
+        - **Library change:** `PackageCatalog::resolve` (`sniff/lib/src/filesystem/git/recent_commits/collect.rs`) now resolves a file's area from the deepest area directory containing it, independent of package ownership. It falls back to the owning package's area only when no area directory contains the path, which is how a top-level package's files still reach the root area `""`. Package ownership (`--package`, `packages`) is unchanged and still uses the deepest owning package. Filtering and JSON attribution share this resolver, so they agree.
+        - **Decision:** each file still reports exactly one area, the deepest. The parent area is not added. A parent selector (for example `--package-area crates`) still matches, because an area selector already includes areas nested under it.
+        - **Visible consequence:** files owned by a package whose directory is also a nested area now report the nested area. In this repository, `dmls` files report `darkmatter/dmls` (previously `darkmatter`) and `tabby` files report `tabby` (previously `""`). This follows the spec's location rule.
+        - **Library test** (`sniff/lib/tests/l1/recent_commits.rs`): the overlap test was renamed to `a_package_owned_file_inside_a_nested_area_directory_belongs_to_that_area`. It now expects `crates/alpha/README.md` to report `["alpha"]` / `["crates/alpha"]`, to be included under `--package-area crates/alpha` and `crates`, and it checks exact commit sequences for `--package alpha` and `--package nested`.
+        - **CLI regression** (`sniff/cli/tests/l1/cli.rs`): added `test_recent_commits_package_area_selects_files_in_a_package_directory_that_is_also_an_area`. It uses a disposable repository with `dm/lib`, `dm/dmls`, `dm/dmls/zed`, and the sibling `dm/dmls-extra`. It checks exact hash sequences for both area filters and both package filters, the JSON attribution, and that each filtered record equals its unfiltered record.
+        - **Regression proof:** with the old owner-first line restored, both new tests failed. With the fix, both pass.
+        - **Docs:** corrected the owner-first wording in `sniff/docs/topics/repo/recent-commits.md`, `sniff/docs/topics/repo/recent-commits-schema.md`, and `.claude/skills/sniff/architecture.md`. Added a bullet on overlapping directories to `sniff/docs/cli/repo_recent-commits.md`. The `resolve` doc comment was rewritten. `sniff/lib/README.md` and `sniff/cli/README.md` already described location-based membership and needed no change.
+        - **Tier placement:** both tests are in files compiled by the declared `l1` targets, and no `::` segment carries a tier-excluding prefix.
+        - **Results (macOS):**
+                - `recent_commits::` library tests with `--features remote`: 110/110 passed
+                - CLI recent-commits and aggregate tests: 12/12 passed
+                - `just test` (sniff): 2909 run, 2909 passed, 32 skipped
+                - `just lint`: passed, 0 warnings
+                - `cargo clippy --all-targets -- -D warnings`: clean for `sniff` (with `--features remote`) and for `sniff-cli`
+        - **Not done in this cycle:** no commits were made, and `cargo fmt` was not run.
+- work completed for 'Files in overlapping package and area directories miss the nested area' at 17:44:59
+- OS risk assessment: the change only reorders two existing lookups (`areas.lookup_normalized` before the owner fallback). It uses the same component-based path normalization that the Phase 2 `just cross-check` runs already verified on build-linux, build-win-native, and build-win (WSL2). No new cross-check was run; CI provides the per-OS proof.
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in about 7 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+
+The files changed in this cycle are `sniff/lib/src/filesystem/git/recent_commits/collect.rs`, `sniff/lib/tests/l1/recent_commits.rs`, `sniff/cli/tests/l1/cli.rs`, `sniff/docs/topics/repo/recent-commits.md`, `sniff/docs/topics/repo/recent-commits-schema.md`, `sniff/docs/cli/repo_recent-commits.md`, and `.claude/skills/sniff/architecture.md`.
