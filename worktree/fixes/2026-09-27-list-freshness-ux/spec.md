@@ -30,45 +30,33 @@ related:
     - 2026-09-26-stale-remote-caption
 human_review: false
 message_to_agent: |-
-    Phase 2 is done: every foundation task is checked off, and tests and lint pass in all four areas.
-    Read "## Phase 2" in implementation-log.md for the exact APIs. The facts Phase 3 needs:
+    Phase 3 is done: every Phase 3 task is checked off; `just test` (590 passed) and `just lint` pass in
+    worktree/, and `just test-l2` passes on macOS (20). Read "## Phase 3" in implementation-log.md for the
+    exact APIs and deviations. What Phase 4 needs:
 
-    - sniff: `sniff::remote::blocking::{branch_head, branch_head_with, BranchHead, credential_env,
-      CredentialEnv, PrUnavailable}`. `remote_identity` is at `sniff::filesystem::git::remote_identity`,
-      NOT `sniff::remote`.
-      - `PrUnavailable` is `CredentialsRequired { key: None }`, `CredentialsRejected { key }`,
-        `CredentialsInsufficient { key }`, `RateLimited { authenticated, key }`, `NotFoundOrNotPermitted`,
-        `Timeout`, `Network`, `Unsupported`, and `Other`.
-      - `branch_head` makes NO anonymous retry when a token is rejected; the Rule 9 fallback handles that.
-      - A rate-limit signal counts as `RateLimited` on every provider, not only GitHub.
-    - worktree::remote_head (format 2): `Answer`/`AnswerSource`, `Attempt::begin`,
-      `Phase`/`FallbackReason`, `Outcome` with `CheckFailure`/`FetchFailure`/`UnavailableReason`,
-      `ApiCondition`, `ApiNote { condition, key, fallback_answered }`, and `read_store`/`select_attempt`.
-      - Writers (the caller holds the lock): `begin_attempt`, `set_phase(store, id, phase, api)`,
-        `finish_attempt(store, id, outcome, api)`, and `publish_answer`. A writer refuses another
-        attempt's id with an Err and writes nothing.
-      - Receipt: `refresh_receipt_path`, `write_receipt`, `load_receipt(path, &attempt)`,
-        `Receipt { head: HeadStatus, prs: PrStatus }`. `new_attempt_id()` gives 32 hex characters.
-      - `ApiCondition` is worktree's own enum; map sniff's `PrUnavailable` onto it in remote_update.
-      - `refresh_remote_head` still has the `AlreadyFresh` recheck. Rule 7 says to remove it in
-        Phase 3.
-    - worktree::pull_requests:
-      - `OpenPrSource::fetch` returns `Result<_, PrFailure>`. `PrFailure` lives in
-        `remote_head.rs`, and `PrFailure::from_unavailable` maps sniff's reasons onto it.
-      - `fetch_and_publish` returns `Result<Option<PrListing>, PrFailure>`, where `Ok(None)` means
-        origin changed during the request.
-      - `RefreshOutcome::Failed` does NOT carry the `PrFailure` yet, because the enum is `Copy` and
-        `refresh_remote_head` shares it. Worker wiring must surface the failure for the receipt's
-        `prs: failed{PrFailure}`.
-    - worktree::api_preference: `preference_path()`, `RepoIdentity::from_origin`, `load(path)` →
-      `Preferences::is_ignored`, and `add(path, &identity)`. A new error variant,
-      `WorktreeError::PreferenceUnwritable`, exits 1.
-    - biscuit-terminal: `Spinner::new(t).with_delay(d).start_on_stderr()` → `SpinnerHandle`
-      (`set_text`, `finish`, `Drop`). It clears only if it drew a frame.
-    - lib.rs gained only `pub mod api_preference;`. Add `remote_update` (Phase 3) and `fast_forward`
-      (Phase 4) when you create them.
-    - `just cross-check` breaks on a quoted `-E` filterset. Run
-      `./scripts/cross-check.sh <pkg> --os windows <substring filters>` instead.
+    - The worker is `wt internal-refresh <main> [--attempt <id>] [--force]`. `refresh_worker::launch(main)`
+      still passes neither; Phase 4 replaces it with the Rule 18 `LaunchArgs` launcher. `--attempt` must be
+      32 lowercase hex (`remote_head::new_attempt_id()`); an invalid id makes `begin_attempt` fail, so the
+      head half ends `WriteFailed` and writes nothing.
+    - `remote_update::run_attempt` has NO `force` parameter (Rule 7 gives the head half no freshness skip).
+      `--force` only makes the PR half ignore its 60 s window and makes the worker write the receipt.
+    - `remote_head::refresh_remote_head` is GONE. `pull_requests::RefreshOutcome` is PR-only,
+      `Failed(PrFailure)`, and not `Copy`; `pull_requests::refresh` takes `force: bool` before `connect`.
+    - Receipt `prs` has a new `PrStatus::Ignored` (repository in ~/.wt.json: no PR request, no badges).
+      `api_preference::Preferences::ignores_origin(origin)` is the check.
+    - `remote_head::refresh_lock_held(store)` exists for the Rule 6 "contended" test, BUT it takes the
+      lock for an instant: a worker that tries to lock at that moment exits as `Contended` and writes
+      nothing. In the foreground wait, never probe before the launched worker's own attempt record
+      (`attempt.id == token`) has appeared or its `Child` has exited; otherwise the probe can make your own
+      worker lose its lock. Prefer reading the attempt record; probe only to decide adoption.
+    - `live_remote::tracking_ref_changed_at(base, branch)` is ready for the caption's reflog row.
+    - Tests already migrated (so skip them in Wave 3): `list_prs` (all), `list_remote_head` (all),
+      `level2_list_verbose::level2_list_stale_pr_answer…`, and S4's `DesignFixture` git-config isolation.
+      `FakeGitea` now answers `/branches/` 404 at once and counts it in `branch_requests()`, so
+      `requests()` is PR-only. Through `ProxyStub` (HTTPS) each worker is 2 connections (one per half).
+      Still unmigrated: every test whose expectation depends on `wt list` launching or waiting (the launch
+      rule itself is unchanged in Phase 3), and perf_* bounds.
+    - Cross-OS: the new lib tests pass on native Windows (99/99 of the touched modules); see the log.
 ---
 
 # `wt list` should know, not guess, whether `origin/<default>` is current

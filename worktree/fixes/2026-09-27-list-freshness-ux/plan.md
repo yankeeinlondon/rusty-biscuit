@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -82,6 +82,28 @@ skills_files_updated_during_phase_2:
     - .claude/skills/sniff/architecture.md
     - .claude/skills/sniff/remote-and-repository.md
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remote_update.rs
+    - worktree/lib/src/remote_update/tests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/api_preference.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+docs_updated_during_phase_3:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - schematic-definitions
     - schematic-schema
@@ -136,8 +158,8 @@ Code locations this plan relies on (verified 2026-09-27):
 ### Definition of done
 
 - [ ] Every `wt list` with an `origin` and a resolvable default branch launches, or adopts, one worker attempt. It waits for a terminal outcome for at most 3 s, then gathers refs, counts, and the graph *after* the wait.
-- [ ] The worker checks through the provider API (or `ls-remote` when the remote is unsupported, the API call fails, or the repository is ignored), all within one 10 s budget. It publishes the check before fetching, and fetches only `refs/remotes/origin/<default>` with the exact spec command and a 60 s deadline. `FETCH_HEAD`, tags, and other refs stay unchanged.
-- [ ] A 404 is never treated as absence. Only a complete `ls-remote` answer that lacks the ref proves absence. No failure erases the last successful answer, and a fetch failure keeps the newly checked answer.
+- [x] The worker checks through the provider API (or `ls-remote` when the remote is unsupported, the API call fails, or the repository is ignored), all within one 10 s budget. It publishes the check before fetching, and fetches only `refs/remotes/origin/<default>` with the exact spec command and a 60 s deadline. `FETCH_HEAD`, tags, and other refs stay unchanged.
+- [x] A 404 is never treated as absence. Only a complete `ls-remote` answer that lacks the ref proves absence. No failure erases the last successful answer, and a fetch failure keeps the newly checked answer.
 - [ ] The caption is one sentence in every §4 row, with a dim italic suffix. §5 warnings, the §6 hint, the §9 suggestion, and the §8 notice appear only under their stated conditions and in their stated positions.
 - [ ] `-r`, `--ignore-api`, and `--ff` work as `wt …` and `wt list …`, are rejected with `create`, `go`, and `remove`, and appear in help and in the completion snapshot.
 - [ ] The spinner is never written when stderr is not a terminal, and its line is cleared before the caption is drawn (L2).
@@ -408,7 +430,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **Git transport additions** (`worktree/lib/src/live_remote.rs`)
+- [x] **Git transport additions** (`worktree/lib/src/live_remote.rs`)
     - Add `LC_ALL=C` to `run_noninteractive`'s environment. Confirm that removal's parsers do not read localized text; S3 reads the transport.
     - Add `fetch_tracking_ref(base, branch, deadline)`, which returns the exact Rule 10 argv as one refspec argument after `check-ref-format --branch`. Add `classify_git_failure(stderr) -> GitFailure` with S3's patterns, and `tracking_ref_changed_at(base, branch) -> Option<u64>` (the reflog; `None` when missing or disabled).
     - Tests use a real bare origin:
@@ -418,7 +440,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - an invalid branch name is refused before any spawn;
         - the classifier maps each S3 sample and defaults to `other`;
         - reflog present and absent.
-- [ ] **Update-flow core** (`worktree/lib/src/remote_update.rs`)
+- [x] **Update-flow core** (`worktree/lib/src/remote_update.rs`)
     - Implement `run_attempt(main, token, force, seams) -> Outcome` per Rules 5, 7, 9, 11, and 12, using the Phase 2 store writers, `BranchHeadSource`, `GitRemote`, and an injected clock.
     - Unit tests with stub sources and a real bare origin with a `pusher` clone:
         - no variance → `in-sync`, with no fetch;
@@ -438,7 +460,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Worker wiring** (`worktree/cli/src/commands/refresh_worker.rs`, `worktree/cli/src/args.rs` for the hidden subcommand's `--attempt`/`--force`)
+- [x] **Worker wiring** (`worktree/cli/src/commands/refresh_worker.rs`, `worktree/cli/src/args.rs` for the hidden subcommand's `--attempt`/`--force`)
     - The head half calls `remote_update::run_attempt` with the production seams. The PR half honors `--force` (Rule 7) and the ignored-repository rule (it skips the PR request entirely, so no badges appear).
     - After both halves join, write the receipt when `--force` is set (Rule 8).
     - The existing independence and panic tests must still pass. Add: a receipt is written only after both halves finish, and a panicking half is recorded as `failed`.

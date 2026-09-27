@@ -81,6 +81,28 @@ skills_files_updated_during_phase_2:
     - .claude/skills/sniff/architecture.md
     - .claude/skills/sniff/remote-and-repository.md
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remote_update.rs
+    - worktree/lib/src/remote_update/tests.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/api_preference.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+docs_updated_during_phase_3:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - schematic-definitions
     - schematic-schema
@@ -604,3 +626,114 @@ The orchestrator added only `pub mod api_preference;` to `worktree/lib/src/lib.r
 - All seven Phase 2 tasks are done, and `just test` and `just lint` pass in all four areas.
 - `cargo check -p worktree-cli` compiles.
 - The worktree skill's `remote_head`, `pull_requests`, and new `api_preference` entries are updated.
+
+## Phase 3
+
+Phase 3 builds the worker's update flow: the typed Git transport, `remote_update::run_attempt`, and the worker wiring (attempt id, `--force`, completion receipt). One agent did all three tasks in order, since Wave 2 depends on both Wave 1 APIs.
+
+### Git transport (`worktree::live_remote`)
+
+- `run_noninteractive` now sets `LC_ALL=C`. Removal's callers only display git's stderr as a reason; none parses it, so the change is safe for them (their reasons are now always English).
+- **Typed failure (S3's recommendation):** `run_transport(base, args, deadline) -> Result<String, TransportError>`, where `TransportError { failure: GitFailure, reason }` and `GitFailure` is `Timeout | Credentials | Other`. The deadline is `Timeout` by construction, never matched from text. `run_noninteractive` is now a wrapper that keeps the `String` error for removal, and `LsRemote::head` is the typed form of `RemoteHeads::live_head`.
+- `classify_git_failure(stderr)` uses exactly S3's six credential patterns; everything else is `Other`.
+- `is_valid_branch_name(base, branch)`: `git check-ref-format --branch`, and the printed name must equal the input. This refuses names git would *expand* (`@{-1}`) as well as invalid ones. A leading `-` is refused before git runs.
+- `fetch_argv(branch)` is the amended Rule 10 argv; `fetch_tracking_ref(base, branch, deadline)` validates first and never spawns the fetch for an invalid name.
+- `tracking_ref_changed_at(base, branch)`: `git reflog -1 --format=%ct <ref> --`; `None` for a missing ref, a missing reflog (empty stdout, exit 0), or unparsable output.
+- **Tests (8 new):** `an_unauthorized_origin_is_a_typed_credentials_failure` (loopback 401, both `ls-remote` and the fetch), `the_classifier_maps_each_recorded_sample_and_defaults_to_other` (every S3 sample), `the_fetch_argv_is_the_ruled_command_with_one_refspec_argument`, `a_fetch_updates_only_the_one_tracking_ref` (extra `remote.origin.fetch` mirror refspec, `fetch.prune=true`, a pushed tag, another branch moved, `FETCH_HEAD` sentinel; only `origin/main` changes), `a_remote_rewind_is_applied`, `an_invalid_branch_name_is_refused_before_any_request` (7 names, zero loopback connections), `a_fetch_past_its_deadline_is_a_typed_timeout`, and `the_tracking_ref_reflog_dates_its_last_change_or_is_none`.
+
+### Update-flow core (`worktree::remote_update`)
+
+- **API:** `run_attempt(AttemptRequest { store, main, id, ignore_api }, &Seams { api, git, now, monotonic }) -> AttemptEnd`.
+    - `AttemptEnd` is `Finished(Outcome)`, `Contended` (nothing written), `NotStarted` (no origin, no default branch, or a lock file that cannot be opened), or `WriteFailed`. `AttemptEnd::head_status()` maps it to the receipt's `HeadStatus`.
+    - Seams: `BranchHeadSource` (`branch_head`, `key_in_use`; production `SniffBranchHeads`), `GitRemote` (`live_head`, `fetch`; production `GitTransport { main }`), a Unix clock, and a monotonic clock for the budget.
+    - `FETCH_DEADLINE` = 60 s. The check budget is the existing `REMOTE_HEAD_REFRESH_DEADLINE` (10 s), whose doc now says so.
+- **Deviation: no `force` parameter.** The plan's sketch was `run_attempt(main, token, force, seams)`. Rule 7 gives the head half no freshness skip at all, so `force` would change nothing there; it lives in the PR half and the receipt instead.
+- **Deviation: `refresh_remote_head` is removed**, not trimmed. With the `AlreadyFresh` recheck gone (Rule 7), it was a second, attempt-less writer of the same store. Its tests moved to `remote_update` (non-main default branch, digest-only storage, no origin/default, lock failure, contention, origin/branch change during the request, loopback 401) or became obsolete (`a_fresh_answer_skips_the_request`, `a_refresh_keeps_the_stored_attempt`). `select_cached_head` tests now seed with `publish_answer`.
+- **Order:** lock → origin and default branch (none: `NotStarted`, nothing written) → `begin_attempt` → branch-name validation (invalid: `check-failed{other}`, no request) → check → re-read origin/branch → publish → `absent` / `in-sync` / `fetching` → fetch → re-read → publish the fetched tip → outcome.
+- **Fallback mapping (Rule 9):** `CredentialsRequired` → `no-key`; `NotFoundOrNotPermitted` → `not-visible` without a key, `other` with one; `RateLimited` → `rate-limited`; `CredentialsRejected`/`Insufficient` → `rejected`; `Timeout`/`Network`/`Other` → `other` with no note; `Unsupported` → Git in phase `checking`, no note. The note's `fallback_answered` becomes `true` when `ls-remote` answers.
+- **"Key set" for a 404** comes from `SniffBranchHeads::key_in_use`: the first of `credential_env`'s variables that is set and non-empty. It cannot see sniff's host-bound `SNIFF_*_TOKEN`, so a 404 sent with only that token reads as `not-visible`. Documented at the method.
+- **Failed fetch (Rule 11):** when the tracking ref moved anyway, one recheck runs (own budget, no phase writes). Only when the recheck equals the new tip is the outcome `fetched`, and the recheck is published; otherwise `fetch-failed` and the first check stays. A fetch reason is `timeout` or `other` (a Git credentials failure during a fetch is `other`, since `FetchFailure` has no credentials reason).
+- **Tests (24, `lib/src/remote_update/tests.rs`):** real bare origin and `pusher` (`TestRepo`), a scripted `Api`, Git real unless scripted, and a test clock.
+    - `no_variance_is_in_sync_with_no_fetch`
+    - `variance_fetches_and_publishes_the_fetched_tip` (FETCH_HEAD absent, local `main` unmoved, answer stamped at the fetch's start)
+    - `a_remote_move_between_check_and_fetch_is_reported_from_the_fetched_tip`
+    - `a_fetch_timeout_keeps_the_new_answer_and_the_tracking_ref`
+    - `a_check_that_uses_the_whole_budget_fails_as_a_timeout_and_keeps_the_old_answer`
+    - `the_api_call_and_the_fallback_share_one_budget` (API takes 7 s on the test clock; `ls-remote` gets exactly 3 s)
+    - `an_unsupported_remote_is_checked_by_ls_remote_in_phase_checking` (real `SniffBranchHeads` on a local path)
+    - `each_fallback_reason_and_condition_is_recorded` (10 cases; the phase is observed in the store *when `ls-remote` starts*)
+    - `an_ignored_repository_makes_no_provider_request`
+    - `only_ls_remote_proves_absence` (404 → `ls-remote` absence; 404 + Git failure → `check-failed{other}` with the old answer kept; Git credentials → `check-failed{credentials}`)
+    - `an_origin_or_default_branch_change_during_the_check_publishes_nothing`, `an_origin_change_during_the_fetch_keeps_the_check_and_ends_unavailable`
+    - `a_concurrent_fetch_that_reached_the_current_remote_head_counts_as_fetched`, `a_concurrent_fetch_of_an_older_head_is_not_labeled_current`
+    - `the_attempt_is_recorded_before_any_request`, `a_contended_lock_writes_nothing_and_asks_nothing`, `a_lock_that_cannot_be_taken_records_nothing`, `without_an_origin_or_a_default_branch_nothing_is_recorded`, `an_invalid_default_branch_name_fails_the_check_without_a_request`, `a_store_that_cannot_be_written_ends_the_attempt_before_any_request`
+    - `a_non_main_default_branch_is_checked_and_fetched`, `the_store_records_only_a_digest_of_the_origin`, `successive_attempts_replace_the_answer_read_write_read`, `an_unauthorized_origin_fails_the_check_fast_as_credentials_and_keeps_the_answer` (real loopback 401)
+
+### Worker wiring (`worktree-cli`)
+
+- `wt internal-refresh <main> [--attempt <id>] [--force]` (S4's proposal: `--attempt` is optional; without it the worker makes its own id).
+- `run_halves` now returns each half's result (`None` for a panic). `run_and_record` writes the receipt after both halves join, only for `--force`, bound to the origin digest and default branch read **before** the halves start. A panicked PR half is `failed{other}`; a panicked head half is `failed`.
+- PR half: `pr_status` maps `RefreshOutcome` to `PrStatus`; an ignored repository returns `PrStatus::Ignored` without any request.
+- Head half: `run_attempt` with the production seams.
+- **Lib changes this needed:**
+    - `pull_requests::refresh` gains `force: bool` (skips only the freshness recheck, never the lock). `RefreshOutcome` is PR-only now: `NoDefaultBranch` and `DefaultBranchChanged` are gone, `Failed(PrFailure)` carries the failure (the Phase 2 handoff item), and it is no longer `Copy`.
+    - `remote_head::PrStatus::Ignored` (new receipt value).
+    - `api_preference::Preferences::ignores_origin(origin)`.
+    - `remote_head::refresh_lock_held(store)`: a lock probe for tests and for Phase 4's "contended" check. **It takes the lock for an instant**, so a worker that tries to take it at that moment exits as `Contended`. See the message to Phase 4.
+- **Tests:** the 7 existing worker unit tests now drive `run_attempt` with a scripted provider; new: `a_receipt_is_written_only_after_both_halves_finish`, `a_panicking_half_is_recorded_as_failed_in_the_receipt`, `an_unforced_run_writes_no_receipt`, `a_forced_pr_half_asks_even_when_the_answer_is_fresh`, `an_ignored_repository_makes_no_pr_request`; lib: `a_forced_refresh_asks_even_when_the_answer_is_fresh`, `an_added_repository_is_ignored_by_any_of_its_origin_spellings`, `the_lock_probe_sees_a_holder_and_releases_its_own_hold`.
+
+### Existing tests migrated now (from S4's Phase 4 Wave 3 list)
+
+The worker changed in this phase, so Checkpoint 3 ("L1 green") required migrating the tests it broke. `wt list`'s launch rule is unchanged, so this touches only tests that run a worker.
+
+- `perf_support::FakeGitea` recognizes the branch-head path (`/branches/`): it answers 404 at once, counts it in `branch_requests()`, and never holds it, so `requests()`/`waiting()` count PR requests only (S4's "count by path"). This fixed 4 of the 7 `list_prs` failures with no assertion changes. `a_detached_workers_answer…` now also asserts one branch-head request.
+- `list_prs::a_stale_store_shows_its_badges_at_once…`: through `ProxyStub` (HTTPS CONNECT) the two halves cannot be told apart, so the worker is 2 connections, the next list 4.
+- `list_prs::the_worker_command_prints_nothing…` and `a_missing_or_stale_live_head_never_holds_up_the_listing`: the byte-equality of the live-head store became "the `answer` half is unchanged" plus the attempt record (`check-failed{other}`, resp. `checking` with no outcome while held).
+- `list_remote_head`: `a_push_elsewhere_reads_as_a_difference…` became `a_push_elsewhere_is_fetched_by_the_worker_and_then_reads_as_behind_and_matched`; the recreated-branch half of `a_deleted_then_recreated…` now expects the tracking ref fetched back. New: `an_in_sync_check_fetches_nothing`, `a_forced_worker_records_the_given_attempt_and_a_receipt_for_both_halves`.
+- `perf_support`: `probe_head_refresh` → `head_lock_held`; `NoRequest` lost its `RemoteHeads` impl.
+- **L2 (S4's third proposal, done now):** `level2_list_verbose::DesignFixture` panes now run with `GIT_CONFIG_NOSYSTEM=1`, an empty `GIT_CONFIG_GLOBAL`, and `protocol.http(s).allow=never`. Before this, the worker's `ls-remote` fallback went through the hanging proxy as a third connection (and, with a user `insteadOf`, could have reached github.com). `level2_list_stale_pr_answer…` now waits for 2 connections and both locks; it dropped from 12.4 s to 1.8 s.
+
+### Checkpoint 3 — by hand (macOS, isolated `HOME`, local bare origin)
+
+| Run | `answer` | `attempt` | Refs |
+|---|---|---|---|
+| `wt internal-refresh <main> --attempt 0011…eeff`, in sync | `source: git`, sha = tip | `phase: checking`, `outcome: in-sync`, `api: null` | unchanged |
+| after a push: `… --attempt ffee…1100 --force` | `source: fetch`, sha = pushed | `phase: fetching`, `outcome: fetched` | `origin/main` = pushed, `main` unmoved, no `FETCH_HEAD` |
+
+The forced run's receipt: `{ attempt_id: ffee…1100, branch: main, head: ok, prs: { kind: failed, failure: { kind: other } } }` (a local origin is no PR provider).
+
+### Requirement → test mapping (Phase 3 scope)
+
+| Requirement | Tests |
+|---|---|
+| `LC_ALL=C`, typed deadline, classifier | `the_classifier_maps_each_recorded_sample_and_defaults_to_other`, `a_fetch_past_its_deadline_is_a_typed_timeout`, `an_unauthorized_origin_is_a_typed_credentials_failure` |
+| Fetch touches only `origin/<default>`, no `FETCH_HEAD`, rewind | `a_fetch_updates_only_the_one_tracking_ref`, `a_remote_rewind_is_applied`, `variance_fetches_and_publishes_the_fetched_tip` |
+| Branch validated before any request | `an_invalid_branch_name_is_refused_before_any_request`, `an_invalid_default_branch_name_fails_the_check_without_a_request` |
+| Reflog present/absent | `the_tracking_ref_reflog_dates_its_last_change_or_is_none` |
+| No variance / variance / move between check and fetch | `no_variance_is_in_sync_with_no_fetch`, `variance_fetches…`, `a_remote_move_between_check_and_fetch…` |
+| Fetch failure keeps the new answer; check failure keeps the old | `a_fetch_timeout_keeps_the_new_answer…`, `a_check_that_uses_the_whole_budget…`, `only_ls_remote_proves_absence` |
+| One 10 s budget | `the_api_call_and_the_fallback_share_one_budget`, `a_check_that_uses_the_whole_budget…` |
+| Unsupported → `ls-remote` in `checking`; fallback phases | `an_unsupported_remote_is_checked_by_ls_remote_in_phase_checking`, `each_fallback_reason_and_condition_is_recorded` |
+| Ignored repository: no provider request (both halves) | `an_ignored_repository_makes_no_provider_request`, `an_ignored_repository_makes_no_pr_request`, `an_added_repository_is_ignored_by_any_of_its_origin_spellings` |
+| Absence only from `ls-remote` | `only_ls_remote_proves_absence` |
+| Origin/branch change → `unavailable` | `an_origin_or_default_branch_change_during_the_check…`, `an_origin_change_during_the_fetch…` |
+| Concurrent fetch rules | `a_concurrent_fetch_that_reached_the_current_remote_head…`, `a_concurrent_fetch_of_an_older_head_is_not_labeled_current` |
+| Contended lock writes nothing | `a_contended_lock_writes_nothing_and_asks_nothing` |
+| Receipt after both halves; panics recorded; force | `a_receipt_is_written_only_after_both_halves_finish`, `a_panicking_half_is_recorded_as_failed_in_the_receipt`, `an_unforced_run_writes_no_receipt`, `a_forced_*`, `a_forced_worker_records_the_given_attempt_and_a_receipt_for_both_halves` (real binary) |
+| Independence and panic isolation still hold | the 7 migrated `refresh_worker` tests |
+
+### Gates
+
+| Gate | Result |
+|---|---|
+| `just test` (worktree, macOS) | 590 passed, 21 skipped |
+| `just lint` (worktree) | pass; `cargo clippy -p worktree -p worktree-cli --all-targets --all-features -- -D warnings` also clean |
+| `just test-l2` (worktree, macOS) | 20 passed |
+| `just check-tier-coverage worktree` | nothing stranded |
+| Native Windows, lib (`live_remote remote_update remote_head api_preference pull_requests`) | 99 of 99 |
+| Native Windows, CLI (worker, `list_prs`, `list_remote_head` filters) | 41 of 42; the one failure passes alone (below) |
+| WSL2 (Ubuntu), same lib and CLI filters | 99 of 99, 42 of 42 |
+| build-linux | not run: the standing clone's `target/release/deps/*.rmeta` are not writable (host environment; nothing compiled). WSL2 stands in for Linux here |
+
+- **Windows flake, not a regression:** `list_prs::an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin` failed once in the parallel run (`requests() == 1`, expected 2: the second list's 300 ms foreground PR request never reached the server under load; the test took 9.6 s) and passed alone (4.6 s). The test is unchanged in this phase, and the foreground path is unchanged. It is the same 300 ms-under-Windows-load fragility the stale-store test already documents; Phase 4/5 should keep it in mind when the foreground wait lands.
+- No pre-existing failure was skipped.
