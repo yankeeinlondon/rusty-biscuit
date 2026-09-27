@@ -7,7 +7,12 @@
 //! scene checks the dim PR age line beneath the legend. Two scenes resize the
 //! pane to exactly 99 and 100 columns to prove the counts' width gate on the
 //! terminal's own width, including a `-> parent` cell against a non-default
-//! parent. The graph as an image-capable terminal draws it is tested in
+//! parent. Two scenes point `origin` at a local Gitea stand-in: one proves the
+//! dim credentials warning beneath the caption, the other holds the check
+//! past the 3 s wait to prove the spinner is drawn and then cleared before
+//! the caption, and that the dim refresh hint follows the legend. The caption
+//! suffix's dim italic is checked in the design test. The graph as an
+//! image-capable terminal draws it is tested in
 //! `level2_graph_in_kitty.rs`.
 
 mod perf_support;
@@ -22,7 +27,7 @@ use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
-use perf_support::{NoRequest, ProxyStub, wait_for_refresh_workers};
+use perf_support::{FakeGitea, GiteaReply, NoRequest, ProxyStub, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
@@ -253,6 +258,8 @@ const REMOTE_BADGE: Color = Color::Rgb(93, 14, 192);
 const PR_BADGE: Color = Color::Rgb(0, 96, 69);
 const BADGE_TEXT: Color = Color::Indexed(7);
 
+const GITHUB_ORIGIN: &str = "https://github.com/owner/repo.git";
+
 /// A repository exercising every styled element of the table:
 ///
 /// - `main-repo` on `main`, clean (dim ring), with `origin/main` one commit
@@ -283,7 +290,14 @@ impl DesignFixture {
     /// A fixture whose stored PR answer, bound to the current `origin`, was
     /// fetched `pr_age` ago.
     fn with_pr_age(pr_age: Duration) -> Self {
-        Self::build(pr_age, false)
+        Self::build(pr_age, false, GITHUB_ORIGIN)
+    }
+
+    /// [`Self::new`] with `origin` at [`FakeGitea::ORIGIN`]; pair it with a
+    /// pane whose proxy is a [`FakeGitea`]. The stored PR answer names no
+    /// branch of `o/r`, so no badge shows.
+    fn with_gitea_origin() -> Self {
+        Self::build(Duration::ZERO, false, FakeGitea::ORIGIN)
     }
 
     /// [`Self::new`] plus `wt-child-work` (`child/long-descriptive-name`),
@@ -293,10 +307,10 @@ impl DesignFixture {
     /// badge. The long branch name makes the table wider than 100 columns
     /// once the counts show, so that cell wraps at exactly 100.
     fn with_child() -> Self {
-        Self::build(Duration::ZERO, true)
+        Self::build(Duration::ZERO, true, GITHUB_ORIGIN)
     }
 
-    fn build(pr_age: Duration, with_child: bool) -> Self {
+    fn build(pr_age: Duration, with_child: bool, origin: &str) -> Self {
         let parent = tempfile::tempdir().expect("create parent temp dir");
         let home = parent.path().join("home");
         let main = parent.path().join("main-repo");
@@ -330,7 +344,7 @@ impl DesignFixture {
         commit(&main, "4\n", "fourth commit, pushed only");
         run_git(&main, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         run_git(&main, &["reset", "--hard", "HEAD~1"]);
-        run_git(&main, &["remote", "add", "origin", "https://github.com/owner/repo.git"]);
+        run_git(&main, &["remote", "add", "origin", origin]);
 
         commit(&sibling("wt-clash"), "clash\n", "clash with main");
         fs::write(sibling("wt-feature").join("feature.txt"), "feature work\n").unwrap();
@@ -478,9 +492,16 @@ impl DesignFixture {
     /// `cols` the pane keeps its spawn width, which must be at least 100
     /// because the counts in the comparison cells show only from there.
     fn list_in_pane(&self, cols: Option<u32>, args: &str, colorfgbg: &str, proxy: &str, ready: &str) -> StyledScreen {
+        let mut harness = self.start_in_pane(cols, args, colorfgbg, proxy);
+        StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains(ready)).raw)
+    }
+
+    /// Starts `wt {args}` in a fresh pane, `cols` wide when given, with every
+    /// HTTP and HTTPS request sent to `proxy`, and returns the pane without
+    /// waiting for it.
+    fn start_in_pane(&self, cols: Option<u32>, args: &str, colorfgbg: &str, proxy: &str) -> TmuxHarness {
         let mut harness = TmuxHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
-        let harness = &mut harness;
         match cols {
             Some(cols) => {
                 harness.resize(cols, 40).expect("resize the pane");
@@ -505,11 +526,15 @@ impl DesignFixture {
             .expect("send cd failed");
         harness
             .send_command_with_env(
-                &format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN {bin} {args}"),
+                &format!(
+                    "env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN -u GITEA_TOKEN \
+                     -u FORGEJO_TOKEN -u CODEBERG_TOKEN {bin} {args}"
+                ),
                 &[
                     ("HOME", &home),
                     ("XDG_CACHE_HOME", &cache),
                     ("HTTPS_PROXY", proxy),
+                    ("HTTP_PROXY", proxy),
                     ("FORCE_COLOR", "1"),
                     ("COLORFGBG", colorfgbg),
                     ("GIT_CONFIG_NOSYSTEM", "1"),
@@ -522,8 +547,7 @@ impl DesignFixture {
                 ],
             )
             .expect("send wt list failed");
-
-        StyledScreen::parse(&wait_for_pane(harness, |plain| plain.contains(ready)).raw)
+        harness
     }
 }
 
@@ -569,6 +593,10 @@ fn level2_list_styles_follow_the_design_in_tmux() {
         s.bg_is(REMOTE_BADGE) && s.fg_is(BADGE_TEXT)
     });
     screen.assert_span(caption, "1 commit", "yellow", |s| s.fg_is(YELLOW));
+    // Everything after the comparison is dim italic, and only that.
+    screen.assert_span(caption, "behind", "neither dim nor italic", |s| !s.dim && !s.italic);
+    screen.assert_span(caption, "(couldn't", "dim italic", |s| s.dim && s.italic);
+    screen.assert_span(screen.row_with(&["ago)"]), "ago)", "dim italic", |s| s.dim && s.italic);
 
     // Header: the target is the remote badge.
     let header = screen.row_with(&["Worktree", "Branch", "->", "-> parent"]);
@@ -827,4 +855,99 @@ fn level2_list_shows_target_and_parent_counts_in_a_100_column_pane() {
     assert_eq!(wrapped_cells[1..5], ["", "", "", "#105"], "{wrapped:?}\n{plain}");
     screen.assert_span(child + 1, "#105", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
     assert!(screen.text(child + 2).trim_start().starts_with('└'), "{plain}");
+}
+
+/// The whole sentence of a pane, with the word wrap undone.
+fn unwrapped(plain: &str) -> String {
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Waits up to 20 s until no worker runs for the fixture and its live-head
+/// lock is free.
+fn assert_worker_gone(fixture: &DesignFixture) {
+    let left = wait_for_refresh_workers(&fixture.main, 0, Duration::from_secs(20));
+    assert!(left.is_empty(), "the worker outlived the test: {left:?}");
+    assert!(!head_lock_held(fixture), "the live-head lock is free");
+}
+
+/// A confirmed credentials condition this run observed prints one dim line
+/// directly beneath the caption, not italic like the caption's suffix. The
+/// worker's branch-head request gets a 404 without a key, and git's fallback
+/// is refused, so Gitea "did not show this repository".
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_credentials_warning_is_a_dim_line_beneath_the_caption_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+
+    let screen = fixture.list_until("list", "15;0", &gitea.url(), "parent deleted");
+    let plain = screen.plain();
+    let sentences = unwrapped(&plain);
+
+    assert!(
+        sentences.contains("origin/main (couldn't check origin; last checked with origin less than 1 min ago)"),
+        "{plain}"
+    );
+    assert!(
+        sentences.contains(
+            "Gitea did not show this repository, and Git could not check it. If it is private, set GITEA_TOKEN"
+        ),
+        "{plain}"
+    );
+    let suffix_end = screen.row_with(&["ago)"]);
+    let warning = screen.row_with(&["did not show this repository"]);
+    assert_eq!(warning, suffix_end + 1, "the warning follows the caption:\n{plain}");
+    screen.assert_span(warning, "did not show this repository", "dim, not italic", |s| s.dim && !s.italic);
+    assert!(warning < screen.row_with(&["Worktree", "Branch"]), "the warning precedes the table:\n{plain}");
+    assert!(!sentences.contains("running this command again"), "the worker finished, so no hint:\n{plain}");
+    assert!(!plain.contains("GITEA_TOKEN="), "a variable is named, never assigned:\n{plain}");
+
+    assert_worker_gone(&fixture);
+    assert!(gitea.branch_requests() >= 1, "the worker asked Gitea for the branch head");
+    assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
+}
+
+/// With `origin`'s answer held past the 3 s wait, the spinner draws on the
+/// pane while `wt list` waits, and its line is cleared before the caption:
+/// the finished pane has no spinner glyph or text, the caption starts its
+/// own row, and the dim refresh hint follows the legend.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmux() {
+    use biscuit_terminal::components::spinner::FRAMES;
+
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_origin();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.hold_branch_heads();
+
+    let mut harness = fixture.start_in_pane(None, "list", "15;0", &gitea.url());
+    let during = wait_for_pane(&mut harness, |plain| plain.contains("updating"));
+    assert!(FRAMES.iter().any(|glyph| during.plain.contains(glyph)), "the spinner drew a frame:\n{}", during.plain);
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    let plain = screen.plain();
+    let sentences = unwrapped(&plain);
+
+    for glyph in FRAMES {
+        assert!(!plain.contains(glyph), "a spinner frame is left on the pane:\n{plain}");
+    }
+    assert!(!plain.contains("updating"), "the spinner's text is left on the pane:\n{plain}");
+    let caption = screen.row_with(&["main", "is", "behind", "origin/main"]);
+    assert!(screen.text(caption).trim().starts_with("main  is 1 commit behind"), "the caption starts its row:\n{plain}");
+    assert!(
+        sentences.contains("(origin hasn't answered yet; still checking in the background;"),
+        "the held check is still running:\n{plain}"
+    );
+
+    let hint = screen.row_with(&["running this command again"]);
+    assert!(hint > screen.row_with(&["Branch", "parent deleted"]), "the hint follows the legend:\n{plain}");
+    screen.assert_span(hint, "running this command again", "dim, not italic", |s| s.dim && !s.italic);
+    assert!(sentences.contains("use the --refresh / -r flags to force refresh immediately"), "{plain}");
+
+    gitea.release(GiteaReply::Open(Vec::new()));
+    assert_worker_gone(&fixture);
+    assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
 }
