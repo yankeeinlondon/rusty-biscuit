@@ -1,21 +1,28 @@
 //! `wt list` performance with the network down, with a PR request that hits
-//! its deadline, with a stale stored answer whose refresh fails, and with a
-//! live-head check held by `origin`, against the targets in
+//! its deadline, with a stale stored answer whose refresh fails, with a
+//! live-head check or a fetch held by `origin`, and with `-r` and `--ff`
+//! against a held `origin`, against the targets in
 //! `worktree/docs/performance-testing.md` (warm `list gather` 120 ms, cold
-//! 300 ms, full non-image `wt list` 1 s when the worker answers at once, and
-//! 3 s plus that when it stalls). Every request goes to a local stand-in, so
+//! 300 ms, full non-image `wt list` 1 s when the worker answers at once, 3 s
+//! plus that when it stalls, and the worker's 10 s check and 60 s fetch
+//! deadlines for `-r` and `--ff`). Every request goes to a local stand-in, so
 //! nothing leaves the host.
 
 mod perf_support;
+mod remote_fixture;
 
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use perf_support::{
-    HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, list_gather_from_perf, stage_from_perf,
+    HoldingOrigin, MixedFixture, ProxyStub, RemoveOnDrop, list_gather_from_perf, refresh_workers,
+    stage_from_perf,
 };
+use remote_fixture::{Fixture, UploadPackGate, assert_no_spinner};
 use serial_test::serial;
 use worktree::pull_requests::{CachedPrs, origin_url, select_cached, unix_now};
+use worktree::remote_head::REMOTE_HEAD_REFRESH_DEADLINE;
+use worktree::remote_update::FETCH_DEADLINE;
 
 const WARM_LIST_GATHER_BOUND: Duration = Duration::from_millis(120);
 const COLD_LIST_GATHER_BOUND: Duration = Duration::from_millis(300);
@@ -23,6 +30,9 @@ const FULL_COMMAND_BOUND: Duration = Duration::from_millis(1000);
 const PR_DEADLINE: Duration = Duration::from_millis(300);
 /// Ordinary listing's wait for a stalled worker (spec §3).
 const REMOTE_WAIT: Duration = Duration::from_secs(3);
+/// What a forced listing may add to the worker's own deadline: launching it,
+/// killing the held transport, publishing, and the local gather and render.
+const FORCED_SLACK: Duration = Duration::from_secs(3);
 
 /// `(list gather, pr gather)` from one `wt list --perf`.
 fn stages(fixture: &MixedFixture, proxy: &ProxyStub) -> (Duration, Duration) {
@@ -246,4 +256,91 @@ fn perf_a_held_live_head_check_costs_the_listing_only_its_wait() {
         assert!(*wait >= REMOTE_WAIT && *wait < REMOTE_WAIT + PR_DEADLINE, "remote wait {wait:?}");
         assert!(*full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
     }
+}
+
+/// `wt <args> --perf` from the fixture's main checkout: its elapsed time, its
+/// `remote wait` stage, and its stderr with whitespace collapsed.
+fn timed_listing(fixture: &Fixture, args: &[&str]) -> (Duration, Duration, String) {
+    let t0 = Instant::now();
+    let output = fixture.wt(&fixture.main).args(args).arg("--perf").output().expect("wt runs");
+    let elapsed = t0.elapsed();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "wt {args:?} failed:\n{stderr}");
+    assert_no_spinner(&stderr);
+    let wait = stage_from_perf(&stderr, "remote wait").expect("remote wait stage");
+    (elapsed, wait, stderr.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// A fetch that `origin` holds costs a listing its 3 s wait and no more: the
+/// check answered, so the row is "still pulling", and `.output()` returns
+/// while the worker is still held in the fetch.
+#[test]
+#[serial]
+fn perf_a_held_fetch_costs_the_listing_only_its_wait() {
+    let fixture = Fixture::new();
+    fixture.commit_and_push("second");
+    let gate = UploadPackGate::install(&fixture, 1);
+
+    let (full, wait, stderr) = timed_listing(&fixture, &["list"]);
+    let still_held = gate.runs() == 2 && refresh_workers(&fixture.main).len() == 1;
+
+    eprintln!("held fetch: remote wait {wait:.2?}, full {full:.2?}");
+    assert!(stderr.contains("pulling remote updates in the background"), "still pulling:\n{stderr}");
+    assert!(still_held, "the worker was still held in its fetch after the listing returned");
+    assert!(wait >= REMOTE_WAIT && wait < REMOTE_WAIT + PR_DEADLINE, "remote wait {wait:?}");
+    assert!(full < REMOTE_WAIT + FULL_COMMAND_BOUND, "full wt list {full:?}");
+}
+
+/// `-r` against an `origin` that holds the check waits for the worker, which
+/// gives up at its 10 s check deadline; the listing then reports the failure.
+#[test]
+#[serial]
+fn perf_refresh_against_a_held_check_reports_within_the_check_deadline() {
+    let origin = HoldingOrigin::new();
+    let fixture = MixedFixture::new().with_origin(&origin.url());
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    fixture.seed_empty_pr_store(Duration::ZERO);
+    fixture.warm_untracked_cache();
+
+    let t0 = Instant::now();
+    let output = fixture.wt_command_direct().args(["list", "-r"]).env("NO_COLOR", "1").output().expect("wt list -r runs");
+    let full = t0.elapsed();
+    let stderr = String::from_utf8_lossy(&output.stderr).split_whitespace().collect::<Vec<_>>().join(" ");
+    let released = fixture.wait_until_unlocked(Duration::from_secs(20), || origin.close_held());
+
+    eprintln!("-r, held check: full {full:.2?}");
+    assert!(output.status.success(), "wt list -r failed:\n{stderr}");
+    assert!(origin.wait_for_requests(1, Duration::ZERO), "the worker's check reached origin");
+    assert!(
+        stderr.contains(&format!("origin didn't answer within {} s", REMOTE_HEAD_REFRESH_DEADLINE.as_secs())),
+        "the check's deadline is reported:\n{stderr}"
+    );
+    assert!(released, "the worker exited and released its locks");
+    assert!(
+        full >= REMOTE_HEAD_REFRESH_DEADLINE && full < REMOTE_HEAD_REFRESH_DEADLINE + FORCED_SLACK,
+        "wt list -r {full:?}"
+    );
+}
+
+/// `--ff` against an `origin` that holds the fetch waits for the worker, which
+/// gives up at its 60 s fetch deadline; the listing reports the failed fetch
+/// and moves nothing, since the local tracking ref did not change.
+#[test]
+#[serial]
+fn perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline() {
+    let fixture = Fixture::new();
+    let before = fixture.git(&fixture.main, &["rev-parse", "main"]);
+    fixture.commit_and_push("second");
+    let gate = UploadPackGate::install(&fixture, 1);
+
+    let (full, wait, stderr) = timed_listing(&fixture, &["--ff"]);
+
+    eprintln!("--ff, held fetch: remote wait {wait:.2?}, full {full:.2?}");
+    assert_eq!(gate.runs(), 2, "one check and one fetch");
+    assert!(
+        stderr.contains(&format!("fetch didn't finish within {} s", FETCH_DEADLINE.as_secs())),
+        "the fetch's deadline is reported:\n{stderr}"
+    );
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "main"]), before, "main did not move");
+    assert!(full >= FETCH_DEADLINE && full < FETCH_DEADLINE + FORCED_SLACK, "wt --ff {full:?}");
 }
