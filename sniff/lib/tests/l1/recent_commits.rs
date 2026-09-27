@@ -842,9 +842,11 @@ mod attribution {
     }
 
     /// `crates/alpha` is both a package directory and the `nested` package's
-    /// area. A file owned by `alpha` stays in `alpha`'s declared area.
+    /// area. Area membership follows location, so a file owned by `alpha`
+    /// belongs to the deepest containing area, `crates/alpha`, rather than
+    /// `alpha`'s declared `crates`; package ownership is unchanged.
     #[test]
-    fn a_package_owned_file_keeps_its_package_area_even_inside_another_area_directory() {
+    fn a_package_owned_file_inside_a_nested_area_directory_belongs_to_that_area() {
         let fixture = monorepo();
         fixture.write("crates/alpha/README.md", "# alpha\n").commit("alpha readme");
 
@@ -852,10 +854,25 @@ mod attribution {
 
         assert_eq!(
             packages_of(&commits),
-            [("alpha readme".into(), json!(["alpha"]), json!(["crates"]))]
+            [("alpha readme".into(), json!(["alpha"]), json!(["crates/alpha"]))]
         );
-        assert!(selected(&fixture, RecentCommitsOptions::new().package_area("crates")).contains(&"alpha readme".to_string()));
-        assert!(!selected(&fixture, RecentCommitsOptions::new().package_area("crates/alpha")).contains(&"alpha readme".to_string()));
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package_area("crates/alpha")),
+            ["alpha readme", "nested only", "initial workspace"]
+        );
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package_area("crates")),
+            ["alpha readme", "beta and root readme", "area root file", "nested only", "initial workspace"]
+        );
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package("alpha")),
+            ["alpha readme", "initial workspace"]
+        );
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package("nested")),
+            ["nested only", "initial workspace"],
+            "the nested area does not make its package own the parent's files"
+        );
     }
 
     /// An unowned file inside nested areas belongs to the deepest one, every
