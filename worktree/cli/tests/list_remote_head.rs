@@ -121,16 +121,21 @@ impl Fixture {
         isolated_cache_file(&self.root.path().join("home"), &self.root.path().join("cache"), &real)
     }
 
-    fn stored_head(&self) -> serde_json::Value {
+    fn stored_document(&self) -> serde_json::Value {
         serde_json::from_slice(&fs::read(self.head_store()).expect("a stored live head")).expect("json")
+    }
+
+    /// The store's `answer` half.
+    fn stored_head(&self) -> serde_json::Value {
+        self.stored_document()["answer"].clone()
     }
 
     /// Moves the stored answer's `checked_at` back by `seconds`, as if it had
     /// been recorded that long ago; a refresh only asks once it is stale.
     fn age_head(&self, seconds: u64) {
-        let mut stored = self.stored_head();
-        let checked_at = stored["checked_at"].as_u64().expect("checked_at");
-        stored["checked_at"] = (checked_at - seconds).into();
+        let mut stored = self.stored_document();
+        let checked_at = stored["answer"]["checked_at"].as_u64().expect("checked_at");
+        stored["answer"]["checked_at"] = (checked_at - seconds).into();
         fs::write(self.head_store(), serde_json::to_vec(&stored).expect("json")).expect("write store");
     }
 }

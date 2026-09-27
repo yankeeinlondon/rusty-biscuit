@@ -1,32 +1,41 @@
 //! The last live answer for `origin`'s default branch, for the `wt list`
-//! caption's remote observation.
+//! caption's remote observation, and the state of the attempt refreshing it.
 //!
 //! `wt list` compares the local default branch with its local tracking ref
 //! `origin/<default>`, which is only as new as the last fetch. This store
-//! records what `git ls-remote origin refs/heads/<default>` answered, so the
+//! records what `origin` last answered for `refs/heads/<default>`, so the
 //! caption can say whether that tracking ref still matched the remote and how
-//! long ago that was checked. Listing only reads it; [`refresh_remote_head`]
-//! runs in the detached `wt internal-refresh` worker.
+//! long ago that was checked. Listing only reads it; the detached
+//! `wt internal-refresh` worker writes it.
 //!
 //! Contracts:
 //!
 //! - The file is `<repo hash>.remote-head.json` beside the comparison cache
-//!   (see [`crate::cache::repo_cache_file`]), bound to the
-//!   [`origin_digest`] of `origin`'s exact URL and to the default branch. The
-//!   URL itself is never stored or logged.
+//!   (see [`crate::cache::repo_cache_file`]). Format 2 holds two independent
+//!   halves, `answer` and `attempt`, each bound to the [`origin_digest`] of
+//!   `origin`'s exact URL and to the default branch. The URL itself is never
+//!   stored or logged. A format-1 file (a bare answer) reads as an `answer`
+//!   from [`AnswerSource::Git`] with no attempt.
+//! - Each half is validated on its own: an invalid half is dropped and the
+//!   other is kept. Only an unreadable document or an unknown
+//!   `format_version` loses both. A discarded attempt never touches `answer`,
+//!   and an attempt's failure never replaces it.
 //! - `checked_at` is read before the request, so a slow request errs old.
 //! - `sha: null` is a verified absence: only a complete, successful answer
 //!   without the exact ref (see [`crate::live_remote`]). A failure, a deadline,
-//!   or malformed output leaves the previous bytes untouched.
+//!   or malformed output leaves the previous answer untouched.
 //! - A stored SHA that differs from this listing's tracking tip says only that
 //!   they differ. It is not chronology: the fetch may be newer than the check,
 //!   and the remote may have rewound or been recreated.
-//! - The refresh holds a nonblocking lock on the persistent sidecar
-//!   `<repo hash>.remote-head.lock` from the freshness recheck through
-//!   publication, and never unlinks it. Publication is an atomic rename, so
+//! - Writers hold a nonblocking lock on the persistent sidecar
+//!   `<repo hash>.remote-head.lock` and never unlink it; each writer is a
+//!   read-modify-write of one half. Publication is an atomic rename, so
 //!   readers take no lock and never see a partial document.
+//! - The completion receipt `<repo hash>.refresh-receipt.json` ([`Receipt`])
+//!   is bound to one attempt id; last writer wins, and readers key on the id.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -38,22 +47,209 @@ use crate::live_remote::{RemoteHeads, is_object_id};
 use crate::pull_requests::{FRESHNESS_WINDOW, RefreshOutcome, origin_digest, origin_url};
 use crate::worktree::default_branch_in;
 
-pub const REMOTE_HEAD_FORMAT_VERSION: u32 = 1;
+pub const REMOTE_HEAD_FORMAT_VERSION: u32 = 2;
+
+/// The bare-answer format, still read so an upgrade keeps its evidence.
+const LEGACY_FORMAT_VERSION: u64 = 1;
+
+pub const RECEIPT_FORMAT_VERSION: u32 = 1;
 
 /// How long a background live-head request may take; nothing waits on it.
 pub const REMOTE_HEAD_REFRESH_DEADLINE: Duration = Duration::from_secs(10);
 
-#[derive(Serialize, Deserialize)]
-struct StoreFile {
-    format_version: u32,
-    origin_digest: String,
+/// Past this age an attempt is abandoned: the 10 s check, the 60 s fetch,
+/// and a 5 s publication allowance.
+pub const ATTEMPT_MAX_AGE: Duration = Duration::from_secs(10 + 60 + 5);
+
+/// Which request produced an [`Answer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AnswerSource {
+    /// The provider's branch-head API.
+    Api,
+    /// `git ls-remote`.
+    Git,
+    /// The tracking tip read back after a successful fetch.
+    Fetch,
+}
+
+/// The last successful answer, whatever the attempt that produced it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Answer {
+    pub origin_digest: String,
     /// The default branch, without `refs/heads/`.
-    branch: String,
+    pub branch: String,
     // `deserialize_with` makes the field required: a document without `sha`
     // is corrupt, not a verified absence.
     #[serde(deserialize_with = "Option::deserialize")]
-    sha: Option<String>,
+    pub sha: Option<String>,
     /// Unix seconds, read immediately before the request.
+    pub checked_at: u64,
+    pub source: AnswerSource,
+}
+
+impl Answer {
+    fn is_valid(&self) -> bool {
+        !self.origin_digest.is_empty() && !self.branch.is_empty() && self.sha.as_deref().is_none_or(is_object_id)
+    }
+
+    /// The answer as the caption shows it.
+    pub fn head(&self) -> RemoteHead {
+        RemoteHead { branch: self.branch.clone(), sha: self.sha.clone(), checked_at: self.checked_at }
+    }
+}
+
+/// Why a check left the provider API for `git ls-remote`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FallbackReason {
+    NoKey,
+    RateLimited,
+    /// The provider did not show the repository, and no key was set.
+    NotVisible,
+    /// The provider refused the key that was set.
+    Rejected,
+    Other,
+}
+
+/// Where an unfinished attempt is. Serialized as `{"kind": "checking"}`,
+/// `{"kind": "checking-fallback", "reason": "no-key"}`, `{"kind": "fetching"}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Phase {
+    Checking,
+    CheckingFallback { reason: FallbackReason },
+    Fetching,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CheckFailure {
+    Timeout,
+    Credentials,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FetchFailure {
+    Timeout,
+    Other,
+}
+
+/// Why an attempt discarded its answer instead of publishing it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UnavailableReason {
+    OriginChanged,
+    BranchChanged,
+}
+
+/// How an attempt ended. Serialized as `{"kind": "in-sync"}`, or with a
+/// `reason` for the last three, e.g. `{"kind": "fetch-failed", "reason": "timeout"}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Outcome {
+    InSync,
+    Fetched,
+    Absent,
+    FetchFailed { reason: FetchFailure },
+    CheckFailed { reason: CheckFailure },
+    Unavailable { reason: UnavailableReason },
+}
+
+/// A provider API condition from spec §5, mirrored from sniff's
+/// `PrUnavailable` so the store does not depend on sniff's enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ApiCondition {
+    CredentialsRequired,
+    CredentialsRejected,
+    CredentialsInsufficient,
+    RateLimited { authenticated: bool },
+    NotFoundOrNotPermitted,
+}
+
+/// What this attempt's provider API request observed, for the foreground's
+/// §5 credentials line and §8 fallback notice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiNote {
+    pub condition: ApiCondition,
+    /// The name of the variable the request used; never its value.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub key: Option<String>,
+    /// Whether the `git ls-remote` fallback then answered.
+    pub fallback_answered: bool,
+}
+
+impl ApiNote {
+    fn is_valid(&self) -> bool {
+        self.key.as_deref().is_none_or(is_variable_name)
+    }
+}
+
+/// One worker's refresh, from its first write to its outcome.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attempt {
+    /// 32 lowercase hex characters; see [`new_attempt_id`].
+    pub id: String,
+    pub origin_digest: String,
+    pub branch: String,
+    /// Unix seconds at which the worker took the lock.
+    pub started_at: u64,
+    pub phase: Phase,
+    /// `None` while the attempt is running.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outcome: Option<Outcome>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub api: Option<ApiNote>,
+}
+
+impl Attempt {
+    /// A new attempt in phase [`Phase::Checking`], with no outcome yet.
+    pub fn begin(id: String, origin_digest: String, branch: String, started_at: u64) -> Self {
+        Self { id, origin_digest, branch, started_at, phase: Phase::Checking, outcome: None, api: None }
+    }
+
+    fn is_valid(&self) -> bool {
+        is_attempt_id(&self.id)
+            && !self.origin_digest.is_empty()
+            && !self.branch.is_empty()
+            && self.api.as_ref().is_none_or(ApiNote::is_valid)
+    }
+
+    /// Whether the attempt still speaks for `origin_digest` and `branch` at
+    /// `now`: not dated in the future, and at most [`ATTEMPT_MAX_AGE`] old.
+    pub fn is_current_for(&self, origin_digest: &str, branch: &str, now: u64) -> bool {
+        self.origin_digest == origin_digest
+            && self.branch == branch
+            && self.started_at <= now
+            && now - self.started_at <= ATTEMPT_MAX_AGE.as_secs()
+    }
+}
+
+/// The two halves of the store, each independently valid or absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StoreState {
+    pub answer: Option<Answer>,
+    /// Only intrinsically valid: see [`select_attempt`] for one that still
+    /// applies to the current `origin` and default branch.
+    pub attempt: Option<Attempt>,
+}
+
+#[derive(Serialize)]
+struct StoreFile<'a> {
+    format_version: u32,
+    answer: Option<&'a Answer>,
+    attempt: Option<&'a Attempt>,
+}
+
+#[derive(Deserialize)]
+struct LegacyStoreFile {
+    origin_digest: String,
+    branch: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    sha: Option<String>,
     checked_at: u64,
 }
 
@@ -106,6 +302,30 @@ pub fn remote_head_lock_path(store: &Path) -> PathBuf {
     store.with_extension("lock")
 }
 
+/// The completion receipt for the repository whose main worktree is
+/// `repo_root`: `<repo hash>.refresh-receipt.json`.
+pub fn refresh_receipt_path(repo_root: &Path) -> Result<PathBuf, WorktreeError> {
+    repo_cache_file(repo_root, "refresh-receipt.json")
+}
+
+/// A fresh attempt id: 128 bits from the OS random source, the same generator
+/// as `wt remove`'s hand-off tokens.
+pub fn new_attempt_id() -> Result<String, WorktreeError> {
+    crate::remove::handoff::new_token()
+}
+
+fn is_attempt_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// A name is all a note may hold, so anything else is rejected rather than
+/// risk storing a secret.
+fn is_variable_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes.next().is_some_and(|b| b == b'_' || b.is_ascii_alphabetic())
+        && bytes.all(|b| b == b'_' || b.is_ascii_alphanumeric())
+}
+
 /// What the store at `store` offers for `origin` (the current
 /// [`origin_url`]) and `default_branch`.
 pub fn select_cached_head(
@@ -117,17 +337,13 @@ pub fn select_cached_head(
     let (Some(origin), Some(default_branch)) = (origin, default_branch) else {
         return CachedRemoteHead::Miss;
     };
-    let Some(file) = load(store) else {
+    let Some(answer) = read_store(store).answer else {
         return CachedRemoteHead::Miss;
     };
-    if file.origin_digest != origin_digest(origin) || file.branch != default_branch {
+    if answer.origin_digest != origin_digest(origin) || answer.branch != default_branch {
         return CachedRemoteHead::Miss;
     }
-    let head = RemoteHead {
-        branch: file.branch,
-        sha: file.sha,
-        checked_at: file.checked_at,
-    };
+    let head = answer.head();
     if head.is_future_at(now) {
         CachedRemoteHead::Miss
     } else if head.is_stale_at(now) {
@@ -137,13 +353,129 @@ pub fn select_cached_head(
     }
 }
 
-/// Asks `origin` for its default branch through `heads` and stores the
-/// answer, unless another process is refreshing it or already has.
+/// The stored attempt, if it is valid and still current for `origin` (the
+/// current [`origin_url`]) and `default_branch` at `now`
+/// ([`Attempt::is_current_for`]).
+pub fn select_attempt(
+    store: &Path,
+    origin: Option<&str>,
+    default_branch: Option<&str>,
+    now: u64,
+) -> Option<Attempt> {
+    let (origin, default_branch) = (origin?, default_branch?);
+    let digest = origin_digest(origin);
+    read_store(store).attempt.filter(|attempt| attempt.is_current_for(&digest, default_branch, now))
+}
+
+/// Both halves of the store at `store`, validated independently; a missing or
+/// unreadable file, or another format, is empty.
+pub fn read_store(store: &Path) -> StoreState {
+    let Some(document) = fs::read(store).ok().and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+    else {
+        return StoreState::default();
+    };
+    match document.get("format_version").and_then(serde_json::Value::as_u64) {
+        Some(LEGACY_FORMAT_VERSION) => StoreState { answer: legacy_answer(document), attempt: None },
+        Some(version) if version == u64::from(REMOTE_HEAD_FORMAT_VERSION) => StoreState {
+            answer: half::<Answer>(&document, "answer").filter(Answer::is_valid),
+            attempt: half::<Attempt>(&document, "attempt").filter(Attempt::is_valid),
+        },
+        _ => StoreState::default(),
+    }
+}
+
+fn legacy_answer(document: serde_json::Value) -> Option<Answer> {
+    let file = serde_json::from_value::<LegacyStoreFile>(document).ok()?;
+    let answer = Answer {
+        origin_digest: file.origin_digest,
+        branch: file.branch,
+        sha: file.sha,
+        checked_at: file.checked_at,
+        source: AnswerSource::Git,
+    };
+    answer.is_valid().then_some(answer)
+}
+
+fn half<T: serde::de::DeserializeOwned>(document: &serde_json::Value, key: &str) -> Option<T> {
+    document.get(key).and_then(|value| T::deserialize(value).ok())
+}
+
+/// Records `attempt` as the current one, replacing any other, and keeps the
+/// answer. Call with the lock held.
+pub fn begin_attempt(store: &Path, attempt: &Attempt) -> Result<(), WorktreeError> {
+    if !attempt.is_valid() {
+        return Err(invalid("an invalid attempt"));
+    }
+    let mut state = read_store(store);
+    state.attempt = Some(attempt.clone());
+    save(store, &state)
+}
+
+/// Moves attempt `id` to `phase`. `api`, when given, replaces the attempt's
+/// note; `None` keeps it. Call with the lock held.
+///
+/// ## Errors
+///
+/// Fails without writing when the stored attempt is not `id`.
+pub fn set_phase(store: &Path, id: &str, phase: Phase, api: Option<ApiNote>) -> Result<(), WorktreeError> {
+    update_attempt(store, id, api, |attempt| attempt.phase = phase)
+}
+
+/// Records attempt `id`'s outcome, keeping its phase as last reached. `api`
+/// is as for [`set_phase`]. Call with the lock held.
+///
+/// ## Errors
+///
+/// Fails without writing when the stored attempt is not `id`.
+pub fn finish_attempt(store: &Path, id: &str, outcome: Outcome, api: Option<ApiNote>) -> Result<(), WorktreeError> {
+    update_attempt(store, id, api, |attempt| attempt.outcome = Some(outcome))
+}
+
+/// Replaces the answer and keeps the attempt. Call with the lock held.
+pub fn publish_answer(store: &Path, answer: &Answer) -> Result<(), WorktreeError> {
+    if !answer.is_valid() {
+        return Err(invalid("an invalid answer"));
+    }
+    let mut state = read_store(store);
+    state.answer = Some(answer.clone());
+    save(store, &state)
+}
+
+fn update_attempt(
+    store: &Path,
+    id: &str,
+    api: Option<ApiNote>,
+    change: impl FnOnce(&mut Attempt),
+) -> Result<(), WorktreeError> {
+    if api.as_ref().is_some_and(|note| !note.is_valid()) {
+        return Err(invalid("an invalid API note"));
+    }
+    let mut state = read_store(store);
+    let Some(attempt) = state.attempt.as_mut().filter(|attempt| attempt.id == id) else {
+        return Err(WorktreeError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "the stored attempt is not this worker's",
+        )));
+    };
+    change(attempt);
+    if api.is_some() {
+        attempt.api = api;
+    }
+    save(store, &state)
+}
+
+fn invalid(what: &str) -> WorktreeError {
+    WorktreeError::Io(io::Error::new(io::ErrorKind::InvalidInput, format!("refusing to store {what}")))
+}
+
+/// Asks `origin` for its default branch through `heads` and publishes the
+/// answer (from [`AnswerSource::Git`]), unless another process is refreshing
+/// it or already has.
 ///
 /// `repo_root` is the main checkout; `origin` and the default branch are read
 /// from it before the request and again after it, and any change discards the
 /// answer. `origin` is addressed by name, since the tracking ref comes from
-/// its fetch URL.
+/// its fetch URL. The stored attempt, if any, is left as it was.
 pub fn refresh_remote_head(
     store: &Path,
     repo_root: &Path,
@@ -179,33 +511,146 @@ pub fn refresh_remote_head(
     if default_branch_in(repo_root).ok().as_deref() != Some(branch.as_str()) {
         return RefreshOutcome::DefaultBranchChanged;
     }
-    let file = StoreFile {
-        format_version: REMOTE_HEAD_FORMAT_VERSION,
-        origin_digest: origin_digest(&origin),
-        branch,
-        sha,
-        checked_at,
-    };
-    match save(store, &file) {
+    let answer = Answer { origin_digest: origin_digest(&origin), branch, sha, checked_at, source: AnswerSource::Git };
+    match publish_answer(store, &answer) {
         Ok(()) => RefreshOutcome::Refreshed,
         Err(_) => RefreshOutcome::PublishFailed,
     }
 }
 
-fn load(path: &Path) -> Option<StoreFile> {
-    let bytes = fs::read(path).ok()?;
-    serde_json::from_slice::<StoreFile>(&bytes).ok().filter(|file| {
-        file.format_version == REMOTE_HEAD_FORMAT_VERSION
-            && !file.branch.is_empty()
-            && file.sha.as_deref().is_none_or(is_object_id)
-    })
+fn save(path: &Path, state: &StoreState) -> Result<(), WorktreeError> {
+    let file = StoreFile {
+        format_version: REMOTE_HEAD_FORMAT_VERSION,
+        answer: state.answer.as_ref(),
+        attempt: state.attempt.as_ref(),
+    };
+    write_json(path, &file)
 }
 
-fn save(path: &Path, file: &StoreFile) -> Result<(), WorktreeError> {
+fn write_json(path: &Path, value: &impl Serialize) -> Result<(), WorktreeError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    atomic_write(path, &serde_json::to_vec_pretty(file)?)
+    atomic_write(path, &serde_json::to_vec_pretty(value)?)
+}
+
+/// A PR request's failure, typed so this run's failure can produce a spec §5
+/// line: a mirror of sniff's credentials variants plus `Other`. It lives here
+/// for the receipt; `pull_requests` reuses it for the foreground request.
+/// Serialized as `{"kind": "credentials-rejected", "key": "GITHUB_TOKEN"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PrFailure {
+    CredentialsRequired,
+    CredentialsRejected {
+        /// The name of the variable used; never its value.
+        key: Option<String>,
+    },
+    CredentialsInsufficient {
+        key: Option<String>,
+    },
+    RateLimited {
+        authenticated: bool,
+        key: Option<String>,
+    },
+    NotFoundOrNotPermitted,
+    Other,
+}
+
+impl PrFailure {
+    fn is_valid(&self) -> bool {
+        match self {
+            Self::CredentialsRejected { key } | Self::CredentialsInsufficient { key } | Self::RateLimited { key, .. } => {
+                key.as_deref().is_none_or(is_variable_name)
+            }
+            Self::CredentialsRequired | Self::NotFoundOrNotPermitted | Self::Other => true,
+        }
+    }
+}
+
+/// How the live-head half of a forced refresh ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HeadStatus {
+    Ok,
+    Failed,
+    /// Another worker held the lock; its attempt carries the result.
+    AdoptedElsewhere,
+}
+
+/// How the PR half of a forced refresh ended. Serialized as
+/// `{"kind": "ok"}`, `{"kind": "failed", "failure": {..}}`, and so on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PrStatus {
+    Ok,
+    Failed { failure: PrFailure },
+    SkippedFresh,
+    /// Another worker held the PR lock.
+    Contended,
+}
+
+/// Written by the worker after both halves of an `--refresh`/`--ff` attempt
+/// have finished.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Receipt {
+    pub attempt_id: String,
+    pub origin_digest: String,
+    pub branch: String,
+    /// Unix seconds.
+    pub finished_at: u64,
+    pub head: HeadStatus,
+    pub prs: PrStatus,
+}
+
+#[derive(Serialize)]
+struct ReceiptFileOut<'a> {
+    format_version: u32,
+    #[serde(flatten)]
+    receipt: &'a Receipt,
+}
+
+#[derive(Deserialize)]
+struct ReceiptFileIn {
+    format_version: u32,
+    #[serde(flatten)]
+    receipt: Receipt,
+}
+
+impl Receipt {
+    fn is_valid(&self) -> bool {
+        is_attempt_id(&self.attempt_id)
+            && !self.origin_digest.is_empty()
+            && !self.branch.is_empty()
+            && match &self.prs {
+                PrStatus::Failed { failure } => failure.is_valid(),
+                PrStatus::Ok | PrStatus::SkippedFresh | PrStatus::Contended => true,
+            }
+    }
+}
+
+/// Publishes `receipt` at `path` atomically, replacing any other.
+pub fn write_receipt(path: &Path, receipt: &Receipt) -> Result<(), WorktreeError> {
+    if !receipt.is_valid() {
+        return Err(invalid("an invalid receipt"));
+    }
+    write_json(path, &ReceiptFileOut { format_version: RECEIPT_FORMAT_VERSION, receipt })
+}
+
+/// The receipt at `path` for `attempt`: `None` when missing, unreadable,
+/// invalid, for another attempt id, origin, or branch, or finished before
+/// the attempt started.
+pub fn load_receipt(path: &Path, attempt: &Attempt) -> Option<Receipt> {
+    let bytes = fs::read(path).ok()?;
+    let file = serde_json::from_slice::<ReceiptFileIn>(&bytes).ok()?;
+    let receipt = file.receipt;
+    (file.format_version == RECEIPT_FORMAT_VERSION
+        && receipt.is_valid()
+        && receipt.attempt_id == attempt.id
+        && receipt.origin_digest == attempt.origin_digest
+        && receipt.branch == attempt.branch
+        && receipt.finished_at >= attempt.started_at)
+        .then_some(receipt)
 }
 
 #[cfg(test)]
@@ -305,9 +750,10 @@ mod tests {
         fs::write(store(repo), serde_json::to_vec(&document).unwrap()).unwrap();
     }
 
+    /// A format-1 document: a bare answer, read as one from Git.
     fn document(repo: &TestRepo) -> serde_json::Value {
         serde_json::json!({
-            "format_version": REMOTE_HEAD_FORMAT_VERSION,
+            "format_version": 1,
             "origin_digest": origin_digest(&origin(repo)),
             "branch": "main",
             "sha": SHA,
@@ -657,5 +1103,502 @@ mod tests {
             remote_head_lock_path(&store).file_name().unwrap().to_string_lossy(),
             format!("{stem}.remote-head.lock")
         );
+        let receipt = refresh_receipt_path(dir.path()).unwrap();
+        assert_eq!(receipt.file_name().unwrap().to_string_lossy(), format!("{stem}.refresh-receipt.json"));
+        assert_eq!(cache.parent(), receipt.parent());
+    }
+
+    // Format 2: the answer and attempt halves, and the completion receipt.
+
+    const ID: &str = "0123456789abcdef0123456789abcdef";
+    const OTHER_ID: &str = "fedcba9876543210fedcba9876543210";
+    const DIGEST: &str = "digest-of-origin";
+
+    fn temp_store() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("abc.remote-head.json");
+        (dir, store)
+    }
+
+    fn answer(sha: Option<&str>, checked_at: u64, source: AnswerSource) -> Answer {
+        Answer {
+            origin_digest: DIGEST.into(),
+            branch: "main".into(),
+            sha: sha.map(str::to_string),
+            checked_at,
+            source,
+        }
+    }
+
+    fn attempt(started_at: u64) -> Attempt {
+        Attempt::begin(ID.into(), DIGEST.into(), "main".into(), started_at)
+    }
+
+    fn note() -> ApiNote {
+        ApiNote {
+            condition: ApiCondition::RateLimited { authenticated: false },
+            key: Some("GITHUB_TOKEN".into()),
+            fallback_answered: true,
+        }
+    }
+
+    fn write_raw(store: &Path, document: &serde_json::Value) {
+        fs::write(store, serde_json::to_vec(document).unwrap()).unwrap();
+    }
+
+    fn raw_json(path: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    }
+
+    /// A store holding a Git answer checked at `NOW` and a running attempt
+    /// started at `NOW`.
+    fn seeded_store() -> (tempfile::TempDir, PathBuf) {
+        let (dir, store) = temp_store();
+        publish_answer(&store, &answer(Some(SHA), NOW, AnswerSource::Git)).unwrap();
+        begin_attempt(&store, &attempt(NOW)).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn a_format_1_file_reads_as_a_git_answer_and_a_write_keeps_it() {
+        let repo = TestRepo::with_origin();
+        raw(&repo, document(&repo));
+        let expected = Answer {
+            origin_digest: origin_digest(&origin(&repo)),
+            branch: "main".into(),
+            sha: Some(SHA.into()),
+            checked_at: NOW,
+            source: AnswerSource::Git,
+        };
+        assert_eq!(
+            read_store(&store(&repo)),
+            StoreState { answer: Some(expected.clone()), attempt: None }
+        );
+        assert_eq!(select(&repo, NOW + 1), CachedRemoteHead::Fresh(head(Some(SHA), NOW)));
+
+        let started = Attempt::begin(ID.into(), expected.origin_digest.clone(), "main".into(), NOW + 5);
+        begin_attempt(&store(&repo), &started).unwrap();
+        assert_eq!(raw_json(&store(&repo))["format_version"], 2);
+        assert_eq!(read_store(&store(&repo)), StoreState { answer: Some(expected), attempt: Some(started) });
+        assert_eq!(select(&repo, NOW + 1), CachedRemoteHead::Fresh(head(Some(SHA), NOW)));
+    }
+
+    #[test]
+    fn the_store_round_trips_with_its_documented_spellings() {
+        let (_dir, store) = seeded_store();
+        set_phase(&store, ID, Phase::CheckingFallback { reason: FallbackReason::RateLimited }, Some(note())).unwrap();
+        finish_attempt(&store, ID, Outcome::FetchFailed { reason: FetchFailure::Timeout }, None).unwrap();
+
+        assert_eq!(
+            raw_json(&store),
+            serde_json::json!({
+                "format_version": 2,
+                "answer": {
+                    "origin_digest": DIGEST, "branch": "main", "sha": SHA,
+                    "checked_at": NOW, "source": "git",
+                },
+                "attempt": {
+                    "id": ID, "origin_digest": DIGEST, "branch": "main", "started_at": NOW,
+                    "phase": { "kind": "checking-fallback", "reason": "rate-limited" },
+                    "outcome": { "kind": "fetch-failed", "reason": "timeout" },
+                    "api": {
+                        "condition": { "kind": "rate-limited", "authenticated": false },
+                        "key": "GITHUB_TOKEN",
+                        "fallback_answered": true,
+                    },
+                },
+            })
+        );
+
+        // Read, write, read: stable in value and in bytes.
+        let first = read_store(&store);
+        let bytes = fs::read(&store).unwrap();
+        begin_attempt(&store, first.attempt.as_ref().unwrap()).unwrap();
+        assert_eq!(read_store(&store), first);
+        assert_eq!(fs::read(&store).unwrap(), bytes);
+    }
+
+    #[test]
+    fn every_phase_and_outcome_survives_a_round_trip() {
+        let (_dir, store) = seeded_store();
+        let phases = [
+            Phase::Checking,
+            Phase::Fetching,
+            Phase::CheckingFallback { reason: FallbackReason::NoKey },
+            Phase::CheckingFallback { reason: FallbackReason::RateLimited },
+            Phase::CheckingFallback { reason: FallbackReason::NotVisible },
+            Phase::CheckingFallback { reason: FallbackReason::Rejected },
+            Phase::CheckingFallback { reason: FallbackReason::Other },
+        ];
+        for phase in phases {
+            set_phase(&store, ID, phase, None).unwrap();
+            assert_eq!(read_store(&store).attempt.unwrap().phase, phase);
+        }
+        let outcomes = [
+            Outcome::InSync,
+            Outcome::Fetched,
+            Outcome::Absent,
+            Outcome::FetchFailed { reason: FetchFailure::Timeout },
+            Outcome::FetchFailed { reason: FetchFailure::Other },
+            Outcome::CheckFailed { reason: CheckFailure::Timeout },
+            Outcome::CheckFailed { reason: CheckFailure::Credentials },
+            Outcome::CheckFailed { reason: CheckFailure::Other },
+            Outcome::Unavailable { reason: UnavailableReason::OriginChanged },
+            Outcome::Unavailable { reason: UnavailableReason::BranchChanged },
+        ];
+        for outcome in outcomes {
+            finish_attempt(&store, ID, outcome, None).unwrap();
+            assert_eq!(read_store(&store).attempt.unwrap().outcome, Some(outcome));
+        }
+        let conditions = [
+            ApiCondition::CredentialsRequired,
+            ApiCondition::CredentialsRejected,
+            ApiCondition::CredentialsInsufficient,
+            ApiCondition::RateLimited { authenticated: true },
+            ApiCondition::NotFoundOrNotPermitted,
+        ];
+        for condition in conditions {
+            let note = ApiNote { condition, key: None, fallback_answered: false };
+            set_phase(&store, ID, Phase::Checking, Some(note.clone())).unwrap();
+            assert_eq!(read_store(&store).attempt.unwrap().api, Some(note));
+        }
+        for source in [AnswerSource::Api, AnswerSource::Git, AnswerSource::Fetch] {
+            let published = answer(None, NOW, source);
+            publish_answer(&store, &published).unwrap();
+            assert_eq!(read_store(&store).answer, Some(published));
+        }
+    }
+
+    #[test]
+    fn an_attempt_is_current_through_attempt_max_age_and_not_one_second_beyond() {
+        let (_dir, store) = seeded_store();
+        let origin = "https://heads.example.invalid/o/r.git";
+        // `select_attempt` digests the URL; bind the seeded attempt to it.
+        let bound = Attempt { origin_digest: origin_digest(origin), ..attempt(NOW) };
+        begin_attempt(&store, &bound).unwrap();
+        let before = fs::read(&store).unwrap();
+        let max = ATTEMPT_MAX_AGE.as_secs();
+        assert_eq!(max, 75);
+
+        for (now, current) in [(NOW, true), (NOW + max, true), (NOW + max + 1, false), (NOW - 1, false)] {
+            assert_eq!(select_attempt(&store, Some(origin), Some("main"), now).is_some(), current, "at {now}");
+        }
+        assert_eq!(select_attempt(&store, Some("https://heads.example.invalid/o/other.git"), Some("main"), NOW), None);
+        assert_eq!(select_attempt(&store, Some(origin), Some("trunk"), NOW), None);
+        assert_eq!(select_attempt(&store, None, Some("main"), NOW), None);
+        assert_eq!(select_attempt(&store, Some(origin), None, NOW), None);
+
+        // Discarding is a reading: the answer and the bytes stay.
+        assert_eq!(fs::read(&store).unwrap(), before);
+        assert_eq!(
+            read_store(&store),
+            StoreState { answer: Some(answer(Some(SHA), NOW, AnswerSource::Git)), attempt: Some(bound) }
+        );
+    }
+
+    #[test]
+    fn an_invalid_attempt_field_drops_the_attempt_and_keeps_the_answer() {
+        let (_dir, store) = seeded_store();
+        let valid = raw_json(&store);
+        let expected_answer = Some(answer(Some(SHA), NOW, AnswerSource::Git));
+        let with = |key: &str, value: serde_json::Value| {
+            let mut document = valid.clone();
+            document["attempt"][key] = value;
+            document
+        };
+        let without = |key: &str| {
+            let mut document = valid.clone();
+            document["attempt"].as_object_mut().unwrap().remove(key);
+            document
+        };
+        for document in [
+            with("id", ID[..31].into()),
+            with("id", format!("{ID}0").into()),
+            with("id", ID.to_uppercase().into()),
+            with("id", "../../etc/passwd-0123456789abcdef".into()),
+            with("origin_digest", "".into()),
+            with("branch", "".into()),
+            with("started_at", "now".into()),
+            with("started_at", (-1).into()),
+            with("phase", "checking".into()),
+            with("phase", serde_json::json!({ "kind": "waiting" })),
+            with("phase", serde_json::json!({ "kind": "checking-fallback" })),
+            with("phase", serde_json::json!({ "kind": "checking-fallback", "reason": "bored" })),
+            with("outcome", serde_json::json!({ "kind": "fetch-failed", "reason": "credentials" })),
+            with("outcome", serde_json::json!({ "kind": "unavailable" })),
+            with("outcome", serde_json::json!({ "kind": "done" })),
+            with("api", serde_json::json!({ "condition": { "kind": "rate-limited" }, "key": null, "fallback_answered": false })),
+            with("api", serde_json::json!({ "condition": { "kind": "credentials-required" }, "key": "ghp_x y", "fallback_answered": false })),
+            with("api", serde_json::json!({ "condition": { "kind": "credentials-required" }, "key": "1TOKEN", "fallback_answered": false })),
+            with("api", serde_json::json!({ "condition": { "kind": "credentials-required" }, "fallback_answered": false })),
+            without("id"),
+            without("phase"),
+            without("outcome"),
+            without("api"),
+            without("started_at"),
+        ] {
+            write_raw(&store, &document);
+            assert_eq!(
+                read_store(&store),
+                StoreState { answer: expected_answer.clone(), attempt: None },
+                "{document}"
+            );
+        }
+        // A key that names a variable, and no note at all, are both valid.
+        write_raw(&store, &with("api", serde_json::Value::Null));
+        assert!(read_store(&store).attempt.is_some());
+    }
+
+    #[test]
+    fn an_invalid_answer_drops_the_answer_and_keeps_the_attempt() {
+        let (_dir, store) = seeded_store();
+        let valid = raw_json(&store);
+        let with = |key: &str, value: serde_json::Value| {
+            let mut document = valid.clone();
+            document["answer"][key] = value;
+            document
+        };
+        let mut without_sha = valid.clone();
+        without_sha["answer"].as_object_mut().unwrap().remove("sha");
+        for document in [
+            with("sha", SHA[..39].into()),
+            with("sha", SHA.to_uppercase().into()),
+            with("branch", "".into()),
+            with("origin_digest", "".into()),
+            with("source", "cache".into()),
+            with("checked_at", "yesterday".into()),
+            without_sha,
+        ] {
+            write_raw(&store, &document);
+            assert_eq!(read_store(&store), StoreState { answer: None, attempt: Some(attempt(NOW)) }, "{document}");
+        }
+
+        // Only an unreadable document or an unknown format loses both halves.
+        for version in [serde_json::json!(3), serde_json::json!("2")] {
+            let mut document = valid.clone();
+            document["format_version"] = version;
+            write_raw(&store, &document);
+            assert_eq!(read_store(&store), StoreState::default(), "{document}");
+        }
+        let mut no_version = valid.clone();
+        no_version.as_object_mut().unwrap().remove("format_version");
+        write_raw(&store, &no_version);
+        assert_eq!(read_store(&store), StoreState::default());
+        fs::write(&store, b"{not json").unwrap();
+        assert_eq!(read_store(&store), StoreState::default());
+    }
+
+    #[test]
+    fn writers_keep_the_answer_while_the_attempt_moves() {
+        let (_dir, store) = seeded_store();
+        let kept = Some(answer(Some(SHA), NOW, AnswerSource::Git));
+
+        set_phase(&store, ID, Phase::CheckingFallback { reason: FallbackReason::NoKey }, Some(note())).unwrap();
+        assert_eq!(read_store(&store).answer, kept);
+        set_phase(&store, ID, Phase::Fetching, None).unwrap();
+        let state = read_store(&store);
+        assert_eq!(state.answer, kept);
+        let running = state.attempt.unwrap();
+        assert_eq!((running.phase, running.outcome, running.api), (Phase::Fetching, None, Some(note())));
+
+        finish_attempt(&store, ID, Outcome::Fetched, None).unwrap();
+        let state = read_store(&store);
+        assert_eq!(state.answer, kept);
+        let finished = state.attempt.unwrap();
+        assert_eq!(
+            (finished.phase, finished.outcome, finished.api),
+            (Phase::Fetching, Some(Outcome::Fetched), Some(note())),
+            "the phase stays as last reached and the note is kept"
+        );
+
+        // A new attempt replaces the old one and still keeps the answer.
+        let next = Attempt::begin(OTHER_ID.into(), DIGEST.into(), "main".into(), NOW + 100);
+        begin_attempt(&store, &next).unwrap();
+        assert_eq!(read_store(&store), StoreState { answer: kept, attempt: Some(next) });
+    }
+
+    #[test]
+    fn publishing_an_answer_keeps_the_attempt() {
+        let (_dir, store) = seeded_store();
+        set_phase(&store, ID, Phase::Fetching, None).unwrap();
+        let running = read_store(&store).attempt;
+        let fetched = answer(Some(OTHER_SHA), NOW + 3, AnswerSource::Fetch);
+        publish_answer(&store, &fetched).unwrap();
+        assert_eq!(read_store(&store), StoreState { answer: Some(fetched), attempt: running });
+
+        // Into an empty store, too.
+        let (_empty_dir, empty) = temp_store();
+        let checked = answer(None, NOW, AnswerSource::Api);
+        publish_answer(&empty, &checked).unwrap();
+        assert_eq!(read_store(&empty), StoreState { answer: Some(checked), attempt: None });
+    }
+
+    #[test]
+    fn a_failed_or_stale_attempt_never_replaces_the_answer() {
+        let (_dir, store) = seeded_store();
+        let kept = Some(answer(Some(SHA), NOW, AnswerSource::Git));
+        for outcome in [
+            Outcome::CheckFailed { reason: CheckFailure::Credentials },
+            Outcome::FetchFailed { reason: FetchFailure::Other },
+            Outcome::Unavailable { reason: UnavailableReason::OriginChanged },
+        ] {
+            finish_attempt(&store, ID, outcome, Some(note())).unwrap();
+            assert_eq!(read_store(&store).answer, kept, "{outcome:?}");
+        }
+
+        // An abandoned attempt is discarded on read; the answer is still shown.
+        let origin = "https://heads.example.invalid/o/r.git";
+        let answered = Answer { origin_digest: origin_digest(origin), ..answer(Some(SHA), NOW, AnswerSource::Git) };
+        publish_answer(&store, &answered).unwrap();
+        begin_attempt(&store, &Attempt { origin_digest: origin_digest(origin), ..attempt(NOW) }).unwrap();
+        let late = NOW + ATTEMPT_MAX_AGE.as_secs() + 1;
+        assert_eq!(select_attempt(&store, Some(origin), Some("main"), late), None);
+        assert_eq!(
+            select_cached_head(&store, Some(origin), Some("main"), late),
+            CachedRemoteHead::Stale(head(Some(SHA), NOW))
+        );
+    }
+
+    #[test]
+    fn writers_refuse_another_attempt_and_invalid_values_without_writing() {
+        let (_dir, store) = seeded_store();
+        let before = fs::read(&store).unwrap();
+        assert!(set_phase(&store, OTHER_ID, Phase::Fetching, None).is_err());
+        assert!(finish_attempt(&store, OTHER_ID, Outcome::InSync, None).is_err());
+        let bad_note = ApiNote { key: Some("ghp_secret value".into()), ..note() };
+        assert!(set_phase(&store, ID, Phase::Fetching, Some(bad_note)).is_err());
+        assert!(begin_attempt(&store, &Attempt { id: "not-an-id".into(), ..attempt(NOW) }).is_err());
+        assert!(publish_answer(&store, &answer(Some("abc"), NOW, AnswerSource::Git)).is_err());
+        assert_eq!(fs::read(&store).unwrap(), before);
+
+        let (_empty_dir, empty) = temp_store();
+        assert!(set_phase(&empty, ID, Phase::Fetching, None).is_err());
+        assert!(!empty.exists());
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_stored_attempt() {
+        let repo = TestRepo::with_origin();
+        let running = Attempt::begin(ID.into(), origin_digest(&origin(&repo)), "main".into(), NOW);
+        begin_attempt(&store(&repo), &running).unwrap();
+        seed(&repo, Some(SHA), NOW);
+        let state = read_store(&store(&repo));
+        assert_eq!(state.attempt, Some(running));
+        assert_eq!(state.answer.map(|answer| answer.source), Some(AnswerSource::Git));
+    }
+
+    #[test]
+    fn attempt_ids_are_32_random_hex_characters() {
+        let first = new_attempt_id().unwrap();
+        let second = new_attempt_id().unwrap();
+        assert!(is_attempt_id(&first) && is_attempt_id(&second), "{first} {second}");
+        assert_ne!(first, second);
+    }
+
+    fn receipt() -> Receipt {
+        Receipt {
+            attempt_id: ID.into(),
+            origin_digest: DIGEST.into(),
+            branch: "main".into(),
+            finished_at: NOW + 30,
+            head: HeadStatus::Ok,
+            prs: PrStatus::Failed { failure: PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) } },
+        }
+    }
+
+    #[test]
+    fn a_receipt_round_trips_with_its_documented_spellings() {
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        write_receipt(&path, &receipt()).unwrap();
+        assert_eq!(
+            raw_json(&path),
+            serde_json::json!({
+                "format_version": 1,
+                "attempt_id": ID, "origin_digest": DIGEST, "branch": "main", "finished_at": NOW + 30,
+                "head": "ok",
+                "prs": { "kind": "failed", "failure": { "kind": "credentials-rejected", "key": "GITHUB_TOKEN" } },
+            })
+        );
+        assert_eq!(load_receipt(&path, &attempt(NOW)), Some(receipt()));
+
+        let heads = [HeadStatus::Ok, HeadStatus::Failed, HeadStatus::AdoptedElsewhere];
+        let failures = [
+            PrFailure::CredentialsRequired,
+            PrFailure::CredentialsRejected { key: None },
+            PrFailure::CredentialsInsufficient { key: Some("GH_TOKEN".into()) },
+            PrFailure::RateLimited { authenticated: true, key: Some("GITHUB_TOKEN".into()) },
+            PrFailure::NotFoundOrNotPermitted,
+            PrFailure::Other,
+        ];
+        let prs = [PrStatus::Ok, PrStatus::SkippedFresh, PrStatus::Contended]
+            .into_iter()
+            .chain(failures.into_iter().map(|failure| PrStatus::Failed { failure }));
+        for (head, prs) in heads.into_iter().cycle().zip(prs) {
+            let written = Receipt { head, prs, ..receipt() };
+            write_receipt(&path, &written).unwrap();
+            assert_eq!(load_receipt(&path, &attempt(NOW)), Some(written));
+        }
+    }
+
+    #[test]
+    fn a_receipt_for_another_attempt_or_older_than_the_attempt_is_ignored() {
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        write_receipt(&path, &receipt()).unwrap();
+        let ours = attempt(NOW);
+        assert!(load_receipt(&path, &ours).is_some(), "control");
+
+        for other in [
+            Attempt { id: OTHER_ID.into(), ..ours.clone() },
+            Attempt { origin_digest: "another-digest".into(), ..ours.clone() },
+            Attempt { branch: "trunk".into(), ..ours.clone() },
+            Attempt { started_at: NOW + 31, ..ours.clone() },
+        ] {
+            assert_eq!(load_receipt(&path, &other), None, "{other:?}");
+        }
+        // Finishing in the second it started is not older.
+        assert!(load_receipt(&path, &Attempt { started_at: NOW + 30, ..ours }).is_some());
+    }
+
+    #[test]
+    fn a_malformed_or_missing_receipt_is_ignored() {
+        let (dir, _) = temp_store();
+        let path = dir.path().join("abc.refresh-receipt.json");
+        assert_eq!(load_receipt(&path, &attempt(NOW)), None);
+
+        write_receipt(&path, &receipt()).unwrap();
+        let valid = raw_json(&path);
+        let with = |key: &str, value: serde_json::Value| {
+            let mut document = valid.clone();
+            document[key] = value;
+            document
+        };
+        let without = |key: &str| {
+            let mut document = valid.clone();
+            document.as_object_mut().unwrap().remove(key);
+            document
+        };
+        for document in [
+            with("format_version", 2.into()),
+            with("attempt_id", ID.to_uppercase().into()),
+            with("branch", "".into()),
+            with("finished_at", "later".into()),
+            with("head", "moved".into()),
+            with("prs", "ok".into()),
+            with("prs", serde_json::json!({ "kind": "failed" })),
+            with("prs", serde_json::json!({ "kind": "failed", "failure": { "kind": "credentials-rejected", "key": "a token" } })),
+            without("format_version"),
+            without("head"),
+            without("prs"),
+        ] {
+            write_raw(&path, &document);
+            assert_eq!(load_receipt(&path, &attempt(NOW)), None, "{document}");
+        }
+        fs::write(&path, b"{not json").unwrap();
+        assert_eq!(load_receipt(&path, &attempt(NOW)), None);
+
+        let refused = Receipt { attempt_id: "short".into(), ..receipt() };
+        assert!(write_receipt(&path, &refused).is_err());
     }
 }
