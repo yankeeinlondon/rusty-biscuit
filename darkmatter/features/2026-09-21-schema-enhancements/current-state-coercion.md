@@ -1,9 +1,5 @@
 # Current-State Function Argument Coercion
 
-> Historical implementation baseline retained for the consolidated
-> `2026-09-16-expression-type-system` specification. This describes legacy
-> behavior, not the replacement conversion or numeric policy.
-
 This addendum records how Darkmatter's expression functions currently fit
 caller-supplied values to their parameters. It is a baseline for
 `2026-09-21-schema-enhancements`, not a proposed coercion policy. The function
@@ -250,7 +246,7 @@ example, schema coercion can turn `"4"` into a number when a property declares
 number check.
 
 The current schema behavior is documented in
-[schema definition](../../docs/topics/schemas/definition.md#type-coercion).
+[`definition.md`](../../docs/topics/schemas/definition.md#type-coercion).
 The current expression-level contract is documented in
 [`darkmatter-expressions.md`](../../docs/topics/darkmatter-expressions.md#function-contracts),
 although that document does not yet contain the full function-level inventory
@@ -283,8 +279,9 @@ three questions separate:
 3. **Failure behavior:** does a failed conversion produce `null`, an error, a
    caller-supplied default, or a built-in fallback?
 
-This baseline originally suggested retaining strict parameters unless a schema
-explicitly declared a union or conversion. That proposal is superseded by M1
-in `2026-09-16-expression-type-system`: shared argument conversions apply by
-default, with deliberate behavior changes documented and tested. The inventory
-above remains evidence of current behavior, not a requirement to preserve it.
+A useful default rule for the proposed schema system is therefore available
+from the code: parameters are strict unless their schema explicitly declares a
+union or conversion. The exceptional behavior above then needs an explicit
+representation rather than being inferred from broad types such as `any` or
+from a function's implementation.
+

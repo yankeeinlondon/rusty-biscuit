@@ -1,6 +1,5 @@
 ---
-consolidated-into: 2026-09-16-expression-type-system
-consolidated: 2026-09-26
+status: draft-spec
 parent: ../2026-09-16-expression-type-system/spec.md
 peers: ./coercion-design.md
 research:
@@ -13,12 +12,6 @@ related:
 
 # Schema Enhancements
 
-> Historical consolidation input. The authoritative specification is
-> [2026-09-16-expression-type-system](../2026-09-16-expression-type-system/spec.md),
-> especially its function and numeric contract annexes. Conflicting decisions
-> below are superseded by that specification; this document does not describe
-> implemented behavior.
-
 The current `SimplifiedSchema` is very helpful but it has some constraints that make it less capable and ergonomic than it could be. This specification tries to address that as well as some impacts to how Darkmatter and DMLS (Darkmatter's language server) build their internal model for function types.
 
 > For reference, here is the most authoritative document we currently have for our schema support:
@@ -27,7 +20,7 @@ The current `SimplifiedSchema` is very helpful but it has some constraints that 
 
 ## Summary and Goals
 
-This was the detail proposal for **Phase B** ("function schemas in SimplifiedSchema") of [2026-09-16-expression-type-system](../2026-09-16-expression-type-system/spec.md). The consolidated parent and its annexes now govern Phase B.
+This is the detail spec for **Phase B** ("function schemas in SimplifiedSchema") of the parent spec [2026-09-16-expression-type-system](../2026-09-16-expression-type-system/spec.md). Where the parent's Phase B prototype and this spec differ, this spec wins.
 
 The goals are:
 
@@ -40,11 +33,13 @@ Three documents in this directory work together:
 
 | Document | Role |
 |---|---|
-| `spec.md` (this file) | Historical proposal, superseded by the consolidated parent specification. |
-| [coercion-design.md](./coercion-design.md) | Historical design input; the parent's function and numeric contracts govern. |
+| `spec.md` (this file) | **Normative.** Its requirements, decisions, and rulings govern. |
+| [coercion-design.md](./coercion-design.md) | Supporting design detail for the coercion engine. It must conform to this spec; where they conflict, this spec wins. It is not itself a confirmed contract. |
 | [current-state-coercion.md](./current-state-coercion.md) | A record of how functions treat their inputs today. It is a baseline, not a proposal. |
 
 Nothing in this spec is implemented yet.
+
+> **Reconciliation pending (2026-09-27).** On 2026-09-26, `main` consolidated the original 236-line draft of this proposal into the parent specification, recording merge decisions M1–M16 and the `function-contracts.md`, `number-contract.md`, and `catalog-audit.md` annexes there, without sight of the six 2026-09-25 clarification rounds recorded below. Where those annexes and this spec disagree, neither side has been chosen yet: each conflict is to be reconciled in a dated round and recorded in the [Decisions Log](#decisions-log). Until then this spec remains normative for Phase B and the parent's annexes are input.
 
 ## Terminology
 
