@@ -1405,3 +1405,424 @@ fn an_empty_standalone_list_is_still_serialized() {
     let json = serde_json::to_value(&repo).expect("RepoInfo serializes");
     assert_eq!(json["standalone_lockfiles"], serde_json::json!([]));
 }
+
+/// The input-robustness matrix, walked through the public result: every
+/// load-bearing membership field, on the manifest side and the lockfile side,
+/// under each shape a permissive reader would coerce (explicit null, wrong
+/// type for the whole field, wrong type for one element, wrong type for every
+/// element). No cell may corroborate: the layer survives, its status is
+/// `unverifiable` or `unreadable`, and nothing gains lockfile provenance.
+///
+/// One row per format keeps the sweep in one place; the hand-written cases
+/// above are the review-by-review history of the same property.
+#[test]
+fn no_membership_field_shape_corroborates_when_it_cannot_be_understood() {
+    // (fixture, authority, lockfile, file, anchor, [replacement, ...])
+    type Cell = (
+        &'static str,
+        MonorepoStandard,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static [&'static str],
+    );
+    use MonorepoStandard::*;
+    const UV_MEMBERS: &str = r#"members = ["packages/alpha", "packages/beta", ".tools/hidden"]"#;
+    const PNPM_PACKAGES: &str = "  - \"packages/*\"\n  - \".tools/hidden\"";
+    const CARGO_MEMBERS: &str = r#"members = ["crates/alpha", "crates/beta", ".tools/hidden"]"#;
+    const JSON_WORKSPACES_OPEN: &str = "\"workspaces\": [";
+    // Each JSON replacement parks the original array under an unread key so
+    // the document stays valid.
+    const JSON_WORKSPACES_SHAPES: &[&str] = &[
+        "\"workspaces\": null, \"unread\": [",
+        "\"workspaces\": 123, \"unread\": [",
+        "\"workspaces\": \"packages/*\", \"unread\": [",
+        "\"workspaces\": {\"packages\": 123}, \"unread\": [",
+        "\"workspaces\": {\"packages\": null}, \"unread\": [",
+        "\"workspaces\": [123], \"unread\": [",
+        "\"workspaces\": [null], \"unread\": [",
+    ];
+    const JSON_FIRST_PATTERN: &str = "\"packages/*\",";
+    const BUN_ALPHA_RECORD: &str = "\"packages/alpha\": {\n      \"name\": \"alpha\",\n      \"version\": \"1.0.0\",\n      \"dependencies\": {\n        \"@fixture/beta\": \"workspace:*\",\n      },\n    },";
+    const JSON_ELEMENT_SHAPES: &[&str] = &["123,", "null,", "{},"];
+
+    let cells: &[Cell] = &[
+        // ---- manifest side ------------------------------------------------
+        (
+            "uv-0.9.5/workspace",
+            UvWorkspace,
+            "uv.lock",
+            "pyproject.toml",
+            UV_MEMBERS,
+            &[
+                r#"members = "packages/*""#,
+                "members = 123",
+                r#"members = ["packages/alpha", "packages/beta", ".tools/hidden", 123]"#,
+                r#"members = ["packages/alpha", {}]"#,
+                "members = [123]",
+            ],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            "pnpm-workspace.yaml",
+            PNPM_PACKAGES,
+            &[
+                "  null",
+                "  123",
+                "  \"packages/*\"",
+                "  - \"packages/*\"\n  - \".tools/hidden\"\n  - 123",
+                "  - \"packages/*\"\n  - null",
+                "  - 123",
+            ],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "yarn-4.18.1/workspace",
+            YarnWorkspaces,
+            "yarn.lock",
+            "package.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "yarn-4.18.1/workspace",
+            YarnWorkspaces,
+            "yarn.lock",
+            "package.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "package.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "package.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.toml",
+            CARGO_MEMBERS,
+            &[
+                r#"members = "crates/*""#,
+                "members = 123",
+                r#"members = ["crates/alpha", "crates/beta", ".tools/hidden", 123]"#,
+                "members = [123]",
+            ],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.toml",
+            r#"exclude = ["local-lib"]"#,
+            &[
+                r#"exclude = "local-lib""#,
+                r#"exclude = ["local-lib", 7]"#,
+                "exclude = [7]",
+            ],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            "rush.json",
+            "\"projects\": [",
+            &[
+                "\"projects\": null, \"unread\": [",
+                "\"projects\": 123, \"unread\": [",
+                "\"projects\": [123], \"unread\": [",
+                "\"projects\": [null], \"unread\": [",
+            ],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            "rush.json",
+            r#""projectFolder": "packages/alpha""#,
+            &[
+                r#""projectFolder": null"#,
+                r#""projectFolder": 1"#,
+                r#""projectFolder": ["packages/alpha"]"#,
+            ],
+        ),
+        // ---- lockfile side ------------------------------------------------
+        (
+            "uv-0.9.5/workspace",
+            UvWorkspace,
+            "uv.lock",
+            "uv.lock",
+            "[manifest]\nmembers = [",
+            &[
+                "[manifest]\nmembers = 1\nunread = [",
+                "[manifest]\nmembers = \"alpha\"\nunread = [",
+                "[manifest]\nmembers = [\n    1,",
+                "[manifest]\nmembers = [\n    {},",
+            ],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            "pnpm-lock.yaml",
+            "importers:\n",
+            &[
+                "importers: null\nunread:\n",
+                "importers: 123\nunread:\n",
+                "importers:\n  123: {}\n",
+                "importers:\n  null: {}\n",
+                "importers:\n  packages/alpha: 123\n",
+            ],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            r#""resolved": "packages/beta","#,
+            &[
+                r#""resolved": null,"#,
+                r#""resolved": 7,"#,
+                r#""resolved": ["packages/beta"],"#,
+            ],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            r#""resolved": "packages/beta",
+      "link": true"#,
+            &[
+                r#""resolved": "packages/beta",
+      "link": null"#,
+                r#""resolved": "packages/beta",
+      "link": 1"#,
+                r#""resolved": "packages/beta",
+      "link": "true""#,
+            ],
+        ),
+        (
+            "yarn-4.18.1/workspace",
+            YarnWorkspaces,
+            "yarn.lock",
+            "yarn.lock",
+            r#"resolution: "alpha@workspace:packages/alpha""#,
+            &["resolution: null", "resolution: 123", "resolution: [alpha]"],
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "bun.lock",
+            "\"workspaces\": {",
+            &[
+                "\"workspaces\": null, \"unread\": {",
+                "\"workspaces\": 123, \"unread\": {",
+                "\"workspaces\": [], \"unread\": {",
+            ],
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "bun.lock",
+            BUN_ALPHA_RECORD,
+            &[
+                "\"packages/alpha\": null,",
+                "\"packages/alpha\": 123,",
+                "\"packages/alpha\": [],",
+            ],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.lock",
+            "name = \"alpha\"",
+            &["name = 1", "name = [\"alpha\"]"],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.lock",
+            "name = \"alpha\"\nversion = \"0.3.0\"",
+            &[
+                "name = \"alpha\"\nversion = 1",
+                "name = \"alpha\"\nversion = [\"0.3.0\"]",
+            ],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            "common/config/rush/pnpm-lock.yaml",
+            "importers:\n",
+            &[
+                "importers: null\nunread:\n",
+                "importers: 123\nunread:\n",
+                "importers:\n  123: {}\n",
+            ],
+        ),
+    ];
+
+    // Control: every unedited fixture corroborates, so each edit below is
+    // known to remove a positive result rather than a neutral one.
+    let mut controlled = std::collections::BTreeSet::new();
+    for &(fixture, authority, _, _, _, _) in cells {
+        if !controlled.insert(fixture) {
+            continue;
+        }
+        let (_dir, root) = copied(fixture);
+        let (repo, _) = measured(&root, &RepoRequest::full());
+        let status = layer_lockfile(&repo, authority, fixture).status;
+        let positive = matches!(
+            status,
+            LockfileStatus::Match | LockfileStatus::MembersPresent
+        );
+        assert!(positive, "{fixture} control: {status:?}");
+    }
+
+    // Cells this matrix found open when it was written (2026-09-27). Each is a
+    // recorded gap, not an accepted behavior: the cell must keep failing until
+    // its fix removes it from this list, so the list can only shrink.
+    // `(file, replacement)` identifies the cell across fixtures.
+    const KNOWN_GAPS: &[(&str, &str)] = &[
+        // Manifest side: an explicit null member field reads as "no declaration",
+        // so the workspace is not detected at all (no repository result).
+        ("pnpm-workspace.yaml", "  null"),
+        ("package.json", "\"workspaces\": null, \"unread\": ["),
+        (
+            "package.json",
+            "\"workspaces\": {\"packages\": null}, \"unread\": [",
+        ),
+        ("rush.json", "\"projects\": null, \"unread\": ["),
+        // Yarn: an integer `resolution` is dropped, so the member goes missing
+        // and the lockfile reports `mismatch`.
+        ("yarn.lock", "resolution: 123"),
+        // Bun: a workspace record of the wrong type is accepted by key alone
+        // and reports an exact `match` that upgrades provenance.
+        ("bun.lock", "\"packages/alpha\": null,"),
+        ("bun.lock", "\"packages/alpha\": 123,"),
+        ("bun.lock", "\"packages/alpha\": [],"),
+    ];
+
+    /// Why one edited cell is not an honest non-corroboration, or empty.
+    fn cell_failures(
+        root: &Path,
+        authority: MonorepoStandard,
+        lockfile: &str,
+        label: &str,
+    ) -> Vec<String> {
+        let repo = match detect_repo_with_request(root, &RepoRequest::full()) {
+            Ok(Some(repo)) => repo,
+            Ok(None) => return vec![format!("{label}: no repository result")],
+            Err(error) => return vec![format!("{label}: detection failed: {error}")],
+        };
+        let Some(layer) = repo
+            .monorepo_layers
+            .iter()
+            .find(|layer| layer.authority == authority)
+        else {
+            return vec![format!("{label}: the layer disappeared")];
+        };
+        let observation = &layer.lockfile;
+        let understood = matches!(
+            observation.status,
+            LockfileStatus::Unverifiable | LockfileStatus::Unreadable
+        );
+        if !understood {
+            return vec![format!("{label}: corroborated as {observation:?}")];
+        }
+        let mut failures = Vec::new();
+        if observation.paths != vec![lockfile.to_owned()] {
+            failures.push(format!("{label}: paths {:?}", observation.paths));
+        }
+        if layer.provenance == PackageProvenance::Lockfile {
+            failures.push(format!("{label}: layer provenance upgraded"));
+        }
+        for package in repo.packages.as_deref().unwrap_or(&[]) {
+            if package.provenance == PackageProvenance::Lockfile {
+                failures.push(format!(
+                    "{label}: {} provenance upgraded",
+                    package.path.display()
+                ));
+            }
+        }
+        failures
+    }
+
+    let mut failures = Vec::new();
+    let mut closed_gaps = Vec::new();
+    for &(fixture, authority, lockfile, file, anchor, shapes) in cells {
+        for &shape in shapes {
+            let label = format!("{fixture} {file}: {anchor:?} -> {shape:?}");
+            let (_dir, root) = copied(fixture);
+            edit(&root, file, anchor, shape);
+            let cell = cell_failures(&root, authority, lockfile, &label);
+            match (KNOWN_GAPS.contains(&(file, shape)), cell.is_empty()) {
+                (false, false) => failures.extend(cell),
+                (true, true) => closed_gaps.push(label),
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} cell(s) corroborated or lost the observation:\n  {}",
+        failures.len(),
+        failures.join("\n  ")
+    );
+    assert!(
+        closed_gaps.is_empty(),
+        "{} KNOWN_GAPS cell(s) now pass; remove them from the list:\n  {}",
+        closed_gaps.len(),
+        closed_gaps.join("\n  ")
+    );
+}
