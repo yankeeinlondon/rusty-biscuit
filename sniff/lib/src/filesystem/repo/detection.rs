@@ -74,6 +74,9 @@ pub(crate) struct RepoEvidence<'a> {
     /// membership globs resolve a boundary by marker presence alone and have
     /// never applied the index's generated/fixture exclusions.
     pub(crate) manifest_dirs: Option<&'a [PathBuf]>,
+    /// Where the observation walk failed to read an entry; see
+    /// `FilesystemSystemView::manifest_walk_errors`.
+    pub(crate) manifest_walk_errors: Option<&'a [PathBuf]>,
     pub(crate) nested_markers: Option<&'a [PathBuf]>,
     pub(crate) inventory: Option<&'a FileInventory>,
 }
@@ -89,6 +92,7 @@ impl<'a> RepoEvidence<'a> {
         Self {
             manifest_index: view.manifest_index.as_ref(),
             manifest_dirs: view.manifest_dirs.as_deref(),
+            manifest_walk_errors: view.manifest_walk_errors.as_deref(),
             nested_markers: view.nested_markers.as_deref(),
             inventory: view.inventory.as_ref(),
         }
@@ -151,11 +155,13 @@ pub(crate) fn detect_repo_inner_with_request(
 /// `root`, or `None` when `root` declares no recognizable package.
 ///
 /// [`detect_repo_inner_with_shared`] returns `None` for an ordinary
-/// single-package project — a `Cargo.toml` with `[package]` but no
-/// `[workspace]`, or a lone `package.json` / `pyproject.toml` / `go.mod` —
-/// because every workspace detector requires a membership marker. The
-/// package-manager, dependency, and aggregate reporting paths still need that
-/// root package's facts, so this builds the one-package catalog they consume.
+/// single-package project — a root `Cargo.toml`, `package.json`,
+/// `pyproject.toml`, `requirements.txt`, `go.mod`, or `composer.json` that
+/// declares no workspace members — because every workspace detector requires
+/// a membership marker. A degenerate workspace manifest therefore also
+/// becomes one root package. The package-manager, dependency,
+/// and aggregate reporting paths still need that root package's facts, so this
+/// builds the one-package catalog they consume.
 pub(crate) fn synthesize_root_package_repo(root: &Path) -> Option<RepoInfo> {
     synthesize_root_package_repo_with_request(root, &RepoRequest::structure())
 }
@@ -176,7 +182,11 @@ fn synthesize_root_package_repo_with_store(
     request: &RepoRequest,
     manifests: &ManifestStore,
 ) -> Option<RepoInfo> {
-    if detect_package_ecosystem(root) == PackageEcosystem::Unknown {
+    let composer_json = root.join("composer.json");
+    let ecosystem = detect_package_ecosystem(root);
+    // A PHP-only root has no `PackageEcosystem` of its own, but it is still
+    // the one package whose `composer.lock` ruling R2 reports.
+    if ecosystem == PackageEcosystem::Unknown && !probe_exists(&composer_json) {
         return None;
     }
     let lock_versions = if request.wants_dependencies() {
@@ -184,7 +194,7 @@ fn synthesize_root_package_repo_with_store(
     } else {
         None
     };
-    let package = create_package_with_request(
+    let mut package = create_package_with_request(
         root,
         root,
         MonorepoStandard::Unknown,
@@ -193,6 +203,15 @@ fn synthesize_root_package_repo_with_store(
         request,
         manifests,
     );
+    // `composer.json` is read only when no other root manifest exists to
+    // name the package.
+    if ecosystem == PackageEcosystem::Unknown
+        && let Some(name) = manifests
+            .raw_text(&composer_json)
+            .and_then(|content| composer_package_name(&content))
+    {
+        package.name = name;
+    }
     let standalone_lockfiles = observe_standalone_lockfiles(
         root,
         [],
@@ -206,6 +225,16 @@ fn synthesize_root_package_repo_with_store(
         standalone_lockfiles,
         ..RepoInfo::default()
     })
+}
+
+/// The `name` of a `composer.json`, absent when the document is not valid
+/// JSON or declares none (a root project need not).
+fn composer_package_name(content: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()?
+        .get("name")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Request-scoped store for manifest outcomes, lockfiles, and root configuration.
@@ -344,6 +373,41 @@ impl ManifestStore {
         parsed.map_err(|error| error.to_sniff_error())
     }
 
+    /// Parse a Node manifest that is only a candidate workspace root, sharing
+    /// the cache with [`Self::npm`] and [`Self::required_npm`].
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(None)` when the file is not valid JSON: it cannot declare a
+    /// workspace, and if it is a workspace member, lockfile corroboration
+    /// reports that member as incomplete discovery (ruling R10).
+    ///
+    /// ## Errors
+    ///
+    /// The read error, so an unreadable manifest still fails detection.
+    pub(crate) fn npm_unless_malformed(
+        &self,
+        path: &Path,
+    ) -> Result<Option<Rc<serde_json::Value>>> {
+        let key = normalized_key(path);
+        let cached = self.npm.borrow().get(&key).cloned();
+        let outcome = cached.unwrap_or_else(|| {
+            let parsed = read_counted_parsed_manifest(path, |content| {
+                serde_json::from_str::<serde_json::Value>(content)
+            });
+            self.npm.borrow_mut().insert(key, parsed.clone());
+            parsed
+        });
+        match outcome {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(ManifestFailure::Parse(message)) => {
+                debug!(path = %path.display(), %message, "package.json is not valid JSON");
+                Ok(None)
+            }
+            Err(failure) => Err(failure.to_sniff_error()),
+        }
+    }
+
     pub(crate) fn pyproject(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
         let key = normalized_key(path);
         if let Some(cached) = self.pyproject.borrow().get(&key) {
@@ -431,7 +495,8 @@ impl ManifestStore {
     /// in the cache yet (composer.json, Gemfile, pom.xml, build.gradle,
     /// mix.exs, *.csproj, *.gemspec, requirements.txt). Used by test-runner
     /// repo detection to do substring searches over the declared dependency
-    /// keys without re-reading the file per runner.
+    /// keys without re-reading the file per runner, and to name a PHP-only
+    /// root package.
     pub(crate) fn raw_text(&self, path: &Path) -> Option<Rc<String>> {
         let key = normalized_key(path);
         if let Some(cached) = self.raw_text.borrow().get(&key) {
@@ -850,14 +915,18 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     // a request that declines corroboration reads no lockfile content here
     // and keeps manifest-derived provenance.
     for layer in &mut monorepo_layers {
-        let owned = outcomes
+        let outcome = outcomes
             .iter()
-            .find(|outcome| outcome.root == layer.root && outcome.standard == layer.authority)
+            .find(|outcome| outcome.root == layer.root && outcome.standard == layer.authority);
+        // An incomplete outcome is passed as no outcome: both leave the
+        // manifest-side set unknown, so neither is ever compared.
+        let complete = outcome
+            .filter(|outcome| !outcome.incomplete)
             .map(|outcome| outcome.seeds.as_slice());
-        layer.lockfile = observe_layer_lockfile(layer, owned, request, &manifests);
+        layer.lockfile = observe_layer_lockfile(layer, complete, request, &manifests);
         if layer.lockfile.status == LockfileStatus::Match {
             layer.provenance = PackageProvenance::Lockfile;
-            upgrade_owned_seed_provenance(layer, owned.unwrap_or_default(), &mut seeds);
+            upgrade_owned_seed_provenance(layer, complete.unwrap_or_default(), &mut seeds);
         }
     }
 
@@ -1038,14 +1107,14 @@ pub(crate) fn collect_default_workspace_patterns(
         .required_npm(&root.join("package.json"))
         .map(|parsed| package_json_workspace_patterns_from_value(&parsed))
     {
-        patterns.extend(package_json_patterns);
+        patterns.extend(package_json_patterns.patterns);
     }
 
     if let Ok(pnpm_patterns) = manifests
         .required_pnpm_workspace(&root.join("pnpm-workspace.yaml"))
         .map(|parsed| pnpm_workspace_patterns_from_value(&parsed))
     {
-        patterns.extend(pnpm_patterns);
+        patterns.extend(pnpm_patterns.patterns);
     }
 
     if let Some(lerna_patterns) = parse_lerna_workspace_patterns(&root.join("lerna.json")) {
@@ -2288,6 +2357,37 @@ mod tests {
 
         assert_eq!(counts.get(counters::FS_FILE_OPENS), 1);
         assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 0);
+    }
+
+    #[test]
+    fn npm_unless_malformed_declines_only_a_parse_failure() {
+        use crate::performance::testing;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let malformed = dir.path().join("malformed/package.json");
+        let valid = dir.path().join("valid/package.json");
+        let missing = dir.path().join("missing/package.json");
+        std::fs::create_dir_all(malformed.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(valid.parent().unwrap()).unwrap();
+        std::fs::write(&malformed, r#"{"name":"#).unwrap();
+        std::fs::write(&valid, r#"{"name":"valid"}"#).unwrap();
+        let manifests = ManifestStore::default();
+
+        let (_, counts) = testing::measure(|| {
+            assert!(manifests.npm_unless_malformed(&malformed).unwrap().is_none());
+            assert!(manifests.required_npm(&malformed).is_err());
+            let parsed = manifests.npm_unless_malformed(&valid).unwrap().unwrap();
+            assert_eq!(npm_package_name(&parsed).as_deref(), Some("valid"));
+            assert!(manifests.required_npm(&valid).is_ok());
+            assert!(matches!(
+                manifests.npm_unless_malformed(&missing),
+                Err(SniffError::Io(_))
+            ));
+        });
+
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 3);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
     }
 
     #[test]

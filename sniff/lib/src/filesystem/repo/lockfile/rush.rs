@@ -21,7 +21,6 @@ use super::super::jsonc;
 use super::super::npm::{RushJson, RushManager};
 use super::super::seed::PackageSeed;
 use super::super::standard::MonorepoLayer;
-use super::membership::normalize_member;
 use super::sources::Format;
 use super::{LockfileObservation, LockfilePresence, LockfileReason, ParsedLockfile, classify};
 
@@ -110,14 +109,15 @@ pub(super) fn observe(
 
 /// Drop the `.` importer: it is Rush's synthetic `common/temp` project, not
 /// the repository root, and would otherwise read as a member `common/temp`.
+///
+/// Only the key spelled exactly `.`, as pnpm writes it, is removed. Every
+/// other key, including an absolute or otherwise invalid one, stays for the
+/// shared validator, which makes the layer `invalid_member_path`.
 fn without_synthetic_project(parsed: &ParsedLockfile) -> ParsedLockfile {
     match parsed {
-        ParsedLockfile::Members(keys) => ParsedLockfile::Members(
-            keys.iter()
-                .filter(|key| normalize_member(key, &[]).is_ok_and(|key| !key.is_empty()))
-                .cloned()
-                .collect(),
-        ),
+        ParsedLockfile::Members(keys) => {
+            ParsedLockfile::Members(keys.iter().filter(|key| *key != ".").cloned().collect())
+        }
         other => other.clone(),
     }
 }
@@ -183,6 +183,63 @@ fn read_config<T: DeserializeOwned>(path: &Path) -> Config<T> {
         Err(message) => {
             debug!(path = %path.display(), %message, "Rush configuration is unreadable");
             Config::Failed
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn members(keys: &[&str]) -> ParsedLockfile {
+        ParsedLockfile::Members(keys.iter().map(|key| (*key).to_owned()).collect())
+    }
+
+    #[test]
+    fn only_the_synthetic_dot_importer_is_dropped() {
+        let parsed = members(&[".", "../../packages/alpha", "../../.tools/hidden"]);
+
+        assert_eq!(
+            without_synthetic_project(&parsed),
+            members(&["../../packages/alpha", "../../.tools/hidden"])
+        );
+    }
+
+    #[test]
+    fn invalid_importers_survive_for_the_shared_validator() {
+        for invalid in [
+            "/opt/elsewhere/pkg",
+            "C:/elsewhere/pkg",
+            "\\\\server\\share",
+            "a\0b",
+        ] {
+            let parsed = members(&[".", "../../packages/alpha", invalid]);
+
+            assert_eq!(
+                without_synthetic_project(&parsed),
+                members(&["../../packages/alpha", invalid]),
+                "{invalid:?}"
+            );
+        }
+    }
+
+    /// Only the exact `.` is synthetic: another spelling that resolves to
+    /// `common/temp` is compared as a member rather than silently dropped.
+    #[test]
+    fn other_root_spellings_are_not_synthetic() {
+        let parsed = members(&["./", ""]);
+
+        assert_eq!(without_synthetic_project(&parsed), parsed);
+    }
+
+    #[test]
+    fn non_member_parses_pass_through() {
+        for parsed in [
+            ParsedLockfile::UnsupportedVersion,
+            ParsedLockfile::AmbiguousMembership,
+            ParsedLockfile::NoMembershipData,
+        ] {
+            assert_eq!(without_synthetic_project(&parsed), parsed);
         }
     }
 }

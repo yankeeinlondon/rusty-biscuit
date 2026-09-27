@@ -306,6 +306,85 @@ fn a_layer_without_its_detector_outcome_is_incomplete() {
     );
 }
 
+/// Ruling R10: a member whose manifest fails to parse, or is missing, is not
+/// a resolved package, so the lockfile recording exactly the discovered
+/// members is still not a `match`. The public-API uv case is in the L1
+/// `lockfile_isolation` suite.
+#[test]
+fn a_member_without_a_parseable_manifest_is_incomplete() {
+    let cases = [
+        (
+            MonorepoStandard::PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  packages/a: {}\n  packages/b: {}\n",
+        ),
+        (
+            MonorepoStandard::NpmWorkspaces,
+            "package-lock.json",
+            r#"{"lockfileVersion":3,"packages":{"":{"workspaces":["packages/*"]},
+                "node_modules/a":{"resolved":"packages/a","link":true},
+                "node_modules/b":{"resolved":"packages/b","link":true},
+                "packages/a":{"name":"a"},"packages/b":{"name":"b"}}}"#,
+        ),
+    ];
+    for (authority, lockfile, content) in cases {
+        for broken in [Some("{ not json"), None] {
+            let dir = TempDir::new().expect("tempdir");
+            let root = dir.path();
+            write(root, lockfile, content);
+            write(root, "packages/a/package.json", r#"{"name":"a"}"#);
+            fs::create_dir_all(root.join("packages/b")).expect("create member");
+            if let Some(broken) = broken {
+                write(root, "packages/b/package.json", broken);
+            }
+            let owned: Vec<PackageSeed> = ["a", "b"]
+                .iter()
+                .map(|name| {
+                    PackageSeed::new(
+                        &root.join("packages").join(name),
+                        root,
+                        authority,
+                        PackageProvenance::Globbed,
+                    )
+                })
+                .collect();
+            let store = ManifestStore::default();
+
+            let observation = observe_layer_lockfile(
+                &layer(root, authority),
+                Some(&owned),
+                &RepoRequest::full(),
+                &store,
+            );
+
+            assert_eq!(
+                observation,
+                expected(
+                    LockfileStatus::Unverifiable,
+                    &[lockfile],
+                    Some(LockfileReason::IncompleteManifestDiscovery)
+                ),
+                "{authority:?}, broken manifest {broken:?}"
+            );
+
+            // The control: with both manifests valid the same lockfile matches.
+            write(root, "packages/b/package.json", r#"{"name":"b"}"#);
+            let store = ManifestStore::default();
+            let observation = observe_layer_lockfile(
+                &layer(root, authority),
+                Some(&owned),
+                &RepoRequest::full(),
+                &store,
+            );
+            assert_eq!(
+                observation,
+                expected(LockfileStatus::Match, &[lockfile], None),
+                "{authority:?}"
+            );
+        }
+    }
+}
+
 /// A lockfile path that is absolute is `invalid_member_path`, never a
 /// silently dropped entry.
 #[test]
@@ -502,6 +581,25 @@ fn rush_importers_resolve_against_common_temp() {
     let dir = rush_pnpm_workspace("  .: {}\n");
     let (observation, _) = observe(dir.path(), MonorepoStandard::RushStack, true);
     assert_eq!(observation, expected(LockfileStatus::Match, &[RUSH_LOCK], None));
+}
+
+/// Only the exact `.` importer is synthetic: an absolute importer beside it
+/// is an invalid member path, never dropped.
+#[test]
+fn an_absolute_rush_importer_is_an_invalid_member_path() {
+    let dir = rush_pnpm_workspace("  .: {}\n  /opt/elsewhere/pkg: {}\n");
+
+    let (observation, counts) = observe(dir.path(), MonorepoStandard::RushStack, true);
+
+    assert_eq!(
+        observation,
+        expected(
+            LockfileStatus::Unverifiable,
+            &[RUSH_LOCK],
+            Some(LockfileReason::InvalidMemberPath)
+        )
+    );
+    assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1);
 }
 
 /// A declining request reads no Rush configuration beyond the `rush.json`

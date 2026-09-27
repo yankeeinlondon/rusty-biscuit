@@ -63,6 +63,7 @@ pub(super) fn detect_dotnet_solution(root: &Path) -> Result<Option<DetectorOutco
         standard: MonorepoStandard::DotNetSolution,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 

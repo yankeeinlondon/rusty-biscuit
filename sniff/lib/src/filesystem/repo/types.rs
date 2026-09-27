@@ -549,7 +549,8 @@ pub fn detect_repo_with_request(
 ///
 /// [`detect_repo_structure`] returns `Ok(None)` for an ordinary single-package
 /// project (a `Cargo.toml` with `[package]` but no `[workspace]`, or a lone
-/// `package.json`, `pyproject.toml`, or `go.mod`). This function preserves the
+/// `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, or
+/// `composer.json`). This function preserves the
 /// shallow semantics of [`detect_repo_structure`], which reads no lockfile
 /// for corroboration. Use [`detect_repo_with_request_or_root_package`]
 /// when selected package details or lockfile corroboration are required.

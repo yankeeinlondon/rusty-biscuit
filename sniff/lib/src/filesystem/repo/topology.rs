@@ -29,6 +29,12 @@ pub(crate) struct DetectorOutcome {
     pub(crate) standard: MonorepoStandard,
     pub(crate) root: PathBuf,
     pub(crate) seeds: Vec<PackageSeed>,
+    /// Discovery knows `seeds` omit a declared member (ruling R10): a pattern
+    /// was dropped, a walk failed, or a declared member the standard requires
+    /// to exist is missing. A layer built from an incomplete outcome is never
+    /// compared with its lockfile. Detectors whose authority has no comparable
+    /// lockfile leave it `false`.
+    pub(crate) incomplete: bool,
 }
 
 /// Build the membership layers from detector outcomes.
@@ -217,6 +223,7 @@ mod tests {
             standard,
             root: PathBuf::from("/repo"),
             seeds,
+            incomplete: false,
         }
     }
 
@@ -229,6 +236,7 @@ mod tests {
             standard,
             root: PathBuf::from(root),
             seeds,
+            incomplete: false,
         }
     }
 

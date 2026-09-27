@@ -3,8 +3,11 @@
 //! `[manifest].members` lists workspace member **names**, the root's
 //! included. Each name maps to a path through its package's local `editable`
 //! or `virtual` source. uv omits `[manifest]` when the root is the only
-//! member. uv does not promise a stable lockfile format, so only the version
-//! and revision with a real-tool fixture are accepted.
+//! member, so an absent `[manifest]` is read as "root only" only when the
+//! document's sole local package is the root itself; anything else there is
+//! a membership record gone missing, not an empty set. uv does not promise a
+//! stable lockfile format, so only the version and revision with a real-tool
+//! fixture are accepted.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,13 +28,19 @@ const ACCEPTED: (i64, i64) = (1, 3);
 ///   accepted shape.
 /// - [`ParsedLockfile::AmbiguousMembership`] when a member name has no local
 ///   package path, or more than one.
-/// - Otherwise the member paths; an absent `[manifest]` is the root alone,
-///   which is the empty set once the root is excluded.
+/// - [`ParsedLockfile::NoMembershipData`] when `[manifest]` is absent and the
+///   document does not establish root-only membership: its local packages
+///   (`editable`, `virtual`, or `directory` sources) are anything other than
+///   exactly one package at `.`.
+/// - Otherwise the member paths; an absent `[manifest]` with the root as the
+///   sole local package is the root alone, which is the empty set once the
+///   root is excluded.
 ///
 /// ## Errors
 ///
 /// Invalid TOML, a missing or non-integer `version`, and, for the accepted
-/// version, fields of the wrong type or a package without a name.
+/// version, fields of the wrong type, a package without a name, or a
+/// `[manifest]` without `members`.
 pub(super) fn parse(content: &str) -> Outcome {
     let document: UvLockDocument = match toml_crate::from_str(content) {
         Ok(document) => document,
@@ -55,6 +64,13 @@ pub(super) fn parse(content: &str) -> Outcome {
         return Ok(ParsedLockfile::UnsupportedVersion);
     }
 
+    let Some(manifest) = &document.manifest else {
+        return Ok(root_only_or_unknown(&document.package));
+    };
+    let Some(member_names) = &manifest.members else {
+        return Err("uv.lock [manifest] has no members".to_owned());
+    };
+
     let mut local_paths: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for package in &document.package {
         let Some(source) = &package.source else {
@@ -68,11 +84,7 @@ pub(super) fn parse(content: &str) -> Outcome {
         }
     }
 
-    let names: BTreeSet<&str> = document
-        .manifest
-        .iter()
-        .flat_map(|manifest| manifest.members.iter().map(String::as_str))
-        .collect();
+    let names: BTreeSet<&str> = member_names.iter().map(String::as_str).collect();
     let mut members = Vec::with_capacity(names.len());
     for name in names {
         match local_paths.get(name) {
@@ -83,6 +95,24 @@ pub(super) fn parse(content: &str) -> Outcome {
         }
     }
     Ok(ParsedLockfile::Members(members))
+}
+
+/// Classify a document without `[manifest]`. uv writes that shape for a
+/// root-only project, whose one local package is the root; any other local
+/// package could be a member whose record was removed, so the set is unknown.
+fn root_only_or_unknown(packages: &[UvPackage]) -> ParsedLockfile {
+    let mut local = packages
+        .iter()
+        .filter_map(|package| package.source.as_ref())
+        .flat_map(|source| {
+            [&source.editable, &source.virtual_path, &source.directory]
+                .into_iter()
+                .flatten()
+        });
+    match (local.next(), local.next()) {
+        (Some(path), None) if path == "." => ParsedLockfile::Members(Vec::new()),
+        _ => ParsedLockfile::NoMembershipData,
+    }
 }
 
 fn is_accepted(version: Option<i64>, revision: Option<i64>) -> bool {
@@ -108,8 +138,7 @@ struct UvLockHeader {
 
 #[derive(Deserialize)]
 struct UvManifest {
-    #[serde(default)]
-    members: Vec<String>,
+    members: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -119,12 +148,14 @@ struct UvPackage {
 }
 
 /// A package's source. Only local workspace-style sources carry a member
-/// path; `directory`, `registry`, `git`, and `url` sources never do.
+/// path; `directory`, `registry`, `git`, and `url` sources never do, though a
+/// `directory` source still rules out root-only membership.
 #[derive(Deserialize)]
 struct UvSource {
     editable: Option<String>,
     #[serde(rename = "virtual")]
     virtual_path: Option<String>,
+    directory: Option<String>,
 }
 
 #[cfg(test)]
@@ -198,7 +229,7 @@ mod tests {
             (
                 "workspace-edited-missing-required-field",
                 include_str!("../../../../tests/fixtures/lockfiles/uv-0.9.5/workspace-edited-missing-required-field/uv.lock"),
-                members(&[]),
+                Some(ParsedLockfile::NoMembershipData),
             ),
         ];
         for (fixture, content, expected) in cases {
@@ -251,6 +282,59 @@ mod tests {
     }
 
     #[test]
+    fn an_absent_manifest_is_root_only_only_when_the_root_is_the_sole_local_package() {
+        for (label, root) in [("virtual", "virtual"), ("editable", "editable")] {
+            let content = format!(
+                "{HEADER}[[package]]\nname = \"root\"\nsource = {{ {root} = \".\" }}\n\n\
+                 [[package]]\nname = \"dep\"\nsource = {{ registry = \"https://pypi.org/simple\" }}\n"
+            );
+            assert_eq!(parse(&content).ok(), members(&[]), "{label} root");
+        }
+    }
+
+    #[test]
+    fn an_absent_manifest_with_other_local_packages_has_no_membership_data() {
+        for (label, packages) in [
+            ("no packages", String::new()),
+            (
+                "registry only",
+                "[[package]]\nname = \"dep\"\nsource = { registry = \"https://pypi.org/simple\" }\n"
+                    .to_owned(),
+            ),
+            (
+                "no root record",
+                "[[package]]\nname = \"alpha\"\nsource = { editable = \"packages/alpha\" }\n"
+                    .to_owned(),
+            ),
+            (
+                "root and editable",
+                "[[package]]\nname = \"root\"\nsource = { virtual = \".\" }\n\n\
+                 [[package]]\nname = \"alpha\"\nsource = { editable = \"packages/alpha\" }\n"
+                    .to_owned(),
+            ),
+            (
+                "root and virtual",
+                "[[package]]\nname = \"root\"\nsource = { editable = \".\" }\n\n\
+                 [[package]]\nname = \"alpha\"\nsource = { virtual = \"packages/alpha\" }\n"
+                    .to_owned(),
+            ),
+            (
+                "root and directory",
+                "[[package]]\nname = \"root\"\nsource = { virtual = \".\" }\n\n\
+                 [[package]]\nname = \"lib\"\nsource = { directory = \"local-lib\" }\n"
+                    .to_owned(),
+            ),
+        ] {
+            let content = format!("{HEADER}{packages}");
+            assert_eq!(
+                parse(&content),
+                Ok(ParsedLockfile::NoMembershipData),
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
     fn only_version_one_revision_three_is_accepted() {
         for header in [
             "version = 2\nrevision = 3\n",
@@ -287,6 +371,11 @@ mod tests {
             (
                 "non-string member",
                 "version = 1\nrevision = 3\n[manifest]\nmembers = [1]\n",
+            ),
+            (
+                "manifest without members",
+                "version = 1\nrevision = 3\n[manifest]\n\n\
+                 [[package]]\nname = \"root\"\nsource = { virtual = \".\" }\n",
             ),
             (
                 "package without a name",

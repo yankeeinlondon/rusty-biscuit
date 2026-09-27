@@ -30,15 +30,19 @@ const ACCEPTED_VERSIONS: [u64; 2] = [2, 3];
 ///
 /// [`ParsedLockfile::UnsupportedVersion`] for any version outside the
 /// accepted matrix, [`ParsedLockfile::AmbiguousMembership`] when the lockfile
-/// records local package paths but no workspace declarations (or a
-/// declaration that is not a valid glob), and otherwise the locked member
-/// paths.
+/// records local package paths or link targets but no workspace declarations
+/// (or a declaration that is not a valid glob),
+/// [`ParsedLockfile::NoMembershipData`] when it records neither declarations
+/// nor local records, and otherwise the locked member paths. A present but
+/// empty `workspaces` declaration is a recorded empty member set.
 ///
 /// ## Errors
 ///
 /// Invalid JSON, trailing content, a missing `lockfileVersion`, and, for an
 /// accepted version, a missing `packages` object or root record, a duplicate
-/// `packages` key, or a mistyped membership field.
+/// `packages` key, or a mistyped membership field. An explicit `null` is
+/// mistyped, never an omitted field; that includes a `link: true` record's
+/// `resolved` target, which is otherwise an ignored field.
 pub(super) fn parse(content: &str) -> Outcome {
     let document = match serde_json::from_str::<NpmLockDocument>(content) {
         Ok(document) => document,
@@ -69,10 +73,12 @@ pub(super) fn parse(content: &str) -> Outcome {
         return Err("npm lockfile has no root package record".to_owned());
     };
     let Some(declarations) = root.workspaces else {
-        // Without locked declarations a local package path could be either a
-        // workspace or a `file:` dependency.
-        return Ok(if packages.paths.is_empty() {
-            ParsedLockfile::Members(Vec::new())
+        // Without locked declarations a local package path or link target
+        // could be either a workspace or a `file:` dependency, and a lockfile
+        // with neither has not recorded an empty workspace: npm copies the
+        // manifest's declarations into every workspace lockfile it writes.
+        return Ok(if packages.paths.is_empty() && packages.links.is_empty() {
+            ParsedLockfile::NoMembershipData
         } else {
             ParsedLockfile::AmbiguousMembership
         });
@@ -133,6 +139,7 @@ struct Packages {
 
 #[derive(Deserialize)]
 struct RootRecord {
+    #[serde(default, deserialize_with = "present")]
     workspaces: Option<Declarations>,
 }
 
@@ -154,8 +161,24 @@ impl Declarations {
 
 #[derive(Deserialize)]
 struct PackageRecord {
+    #[serde(default, deserialize_with = "present")]
     link: Option<bool>,
-    resolved: Option<String>,
+    /// `Some(None)` is an explicit `null`: malformed on a `link: true`
+    /// record, but tolerated on any other record, where it is not evidence.
+    #[serde(default, deserialize_with = "present")]
+    resolved: Option<Option<String>>,
+}
+
+/// An optional field whose value, when present, must be a `T`. A bare
+/// `Option<T>` also reads an explicit `null` as absent, which would turn a
+/// malformed membership field into missing evidence. With `T = Option<_>`
+/// an explicit `null` stays distinguishable as `Some(None)`.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: de::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 impl<'de> Deserialize<'de> for Packages {
@@ -182,10 +205,16 @@ impl<'de> Deserialize<'de> for Packages {
                         continue;
                     }
                     let record = map.next_value::<PackageRecord>()?;
-                    if record.link == Some(true)
-                        && let Some(resolved) = record.resolved
-                    {
-                        packages.links.push(resolved);
+                    // Checked once the whole record is read, because JSON key
+                    // order puts `link` before or after `resolved`.
+                    if record.link == Some(true) {
+                        match record.resolved {
+                            Some(Some(resolved)) => packages.links.push(resolved),
+                            Some(None) => {
+                                packages.invalid.get_or_insert("null link target");
+                            }
+                            None => {}
+                        }
                     }
                     if !is_installed(&key) {
                         packages.paths.push(key);
@@ -410,13 +439,50 @@ mod tests {
     }
 
     #[test]
-    fn undeclared_local_paths_are_ambiguous_but_an_empty_lock_is_not() {
+    fn undeclared_local_paths_and_link_targets_are_ambiguous() {
         let with_local = r#"{"lockfileVersion": 3, "packages": {"": {}, "local-lib": {}}}"#;
         assert_eq!(parse(with_local), Ok(ParsedLockfile::AmbiguousMembership));
 
-        let installed_only =
-            r#"{"lockfileVersion": 3, "packages": {"": {}, "node_modules/x": {"version": "1.0.0"}}}"#;
-        assert_eq!(parse(installed_only), Ok(ParsedLockfile::Members(Vec::new())));
+        let with_link = r#"{"lockfileVersion": 3, "packages": {"": {},
+            "node_modules/web": {"resolved": "packages/web", "link": true}}}"#;
+        assert_eq!(parse(with_link), Ok(ParsedLockfile::AmbiguousMembership));
+    }
+
+    #[test]
+    fn a_missing_root_declaration_without_local_records_has_no_membership_data() {
+        for content in [
+            r#"{"lockfileVersion": 3, "packages": {"": {"name": "fixture-root"}}}"#,
+            r#"{"lockfileVersion": 3, "packages": {"": {}, "node_modules/x": {"version": "1.0.0"}}}"#,
+            r#"{"lockfileVersion": 2, "packages": {"": {}}, "dependencies": {}}"#,
+        ] {
+            assert_eq!(parse(content), Ok(ParsedLockfile::NoMembershipData), "{content}");
+        }
+    }
+
+    #[test]
+    fn an_empty_root_declaration_records_an_empty_member_set() {
+        let content = r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": []}, "local-lib": {}}}"#;
+        assert_eq!(parse(content).ok(), members(&[]));
+    }
+
+    #[test]
+    fn an_explicit_null_declaration_is_malformed_not_missing() {
+        for (omitted, expected) in [
+            (r#"{"": {}}"#, ParsedLockfile::NoMembershipData),
+            (r#"{"": {}, "packages/a": {}}"#, ParsedLockfile::AmbiguousMembership),
+        ] {
+            let omitted = format!(r#"{{"lockfileVersion": 3, "packages": {omitted}}}"#);
+            assert_eq!(parse(&omitted), Ok(expected), "{omitted}");
+            let null = omitted.replace(r#""": {}"#, r#""": {"workspaces": null}"#);
+            assert!(parse(&null).is_err(), "{null}");
+        }
+    }
+
+    #[test]
+    fn a_null_resolved_outside_a_link_record_is_ignored() {
+        let content = r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": ["packages/*"]},
+            "packages/web": {"resolved": null}, "node_modules/x": {"resolved": null, "link": false}}}"#;
+        assert_eq!(parse(content).ok(), members(&["packages/web"]));
     }
 
     #[test]
@@ -462,6 +528,32 @@ mod tests {
             (
                 "mistyped workspaces",
                 r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": [1]}}}"#,
+            ),
+            (
+                "null workspaces",
+                r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": null}}}"#,
+            ),
+            (
+                "null workspaces with a local package",
+                r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": null}, "packages/a": {}}}"#,
+            ),
+            (
+                "null workspaces object packages",
+                r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": {"packages": null}}}}"#,
+            ),
+            (
+                "null link",
+                r#"{"lockfileVersion": 3, "packages": {"": {}, "a": {"link": null}}}"#,
+            ),
+            (
+                "null link target",
+                r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": ["packages/*"]},
+                    "node_modules/web": {"resolved": null, "link": true}}}"#,
+            ),
+            (
+                "null link target masked by its member path",
+                r#"{"lockfileVersion": 3, "packages": {"": {"workspaces": ["packages/*"]},
+                    "node_modules/web": {"link": true, "resolved": null}, "packages/web": {}}}"#,
             ),
             (
                 "duplicate root record",

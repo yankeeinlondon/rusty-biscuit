@@ -471,15 +471,17 @@ impl MonorepoStandard {
     /// single non-root member when its [`RootMembership`] also lets the root
     /// count. `WhenManifestDeclaresPackage` consults
     /// [`MonorepoLayer::root_is_package`] so a virtual Cargo workspace with a
-    /// single member (no `[package]` at the root) is honestly degenerate. A
-    /// `PackageBoundaryOnly` standard never resolves non-degenerately on its
-    /// own — targets and products are not packages.
+    /// single member (no `[package]` at the root) is honestly degenerate. An
+    /// `Always` layer (uv) lists its root among `packages`, so one package is
+    /// the root alone and is degenerate. A `PackageBoundaryOnly` standard
+    /// never resolves non-degenerately on its own — targets and products are
+    /// not packages.
     pub fn membership_resolves_non_degenerately(self, layer: &MonorepoLayer) -> bool {
         match self.spec().multiplicity {
             WorkspaceMultiplicity::MemberCount => match layer.packages.len() {
                 0 => false,
                 1 => match self.spec().root_membership {
-                    RootMembership::Always => true,
+                    RootMembership::Always => false,
                     RootMembership::WhenManifestDeclaresPackage => layer.root_is_package,
                     RootMembership::Never => false,
                 },
@@ -2127,8 +2129,11 @@ mod tests {
         assert!(
             MonorepoStandard::CargoWorkspace.membership_resolves_non_degenerately(&cargo_root_pkg)
         );
-        // uv counts the root unconditionally.
-        let uv = layer_with(MonorepoStandard::UvWorkspace, 1);
+        // A uv layer lists its root among its packages, so a lone package is
+        // a root-only workspace (`members = []`) and a second is a real member.
+        let uv_root_only = layer_with(MonorepoStandard::UvWorkspace, 1);
+        assert!(!MonorepoStandard::UvWorkspace.membership_resolves_non_degenerately(&uv_root_only));
+        let uv = layer_with(MonorepoStandard::UvWorkspace, 2);
         assert!(MonorepoStandard::UvWorkspace.membership_resolves_non_degenerately(&uv));
     }
 

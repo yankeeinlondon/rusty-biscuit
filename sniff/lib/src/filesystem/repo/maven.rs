@@ -50,6 +50,7 @@ pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<DetectorOutco
         standard: MonorepoStandard::MavenMultiModule,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 

@@ -582,6 +582,22 @@ fn dispatch_detector_at(
     seeds: &mut Vec<PackageSeed>,
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
+    // A nested `package.json` is most often a workspace member. When it is
+    // malformed it declares no workspace, so it is not a root here; the
+    // enclosing layer's corroboration reports the member as incomplete
+    // discovery instead of the whole detection failing.
+    if matches!(
+        standard,
+        MonorepoStandard::NpmWorkspaces
+            | MonorepoStandard::YarnWorkspaces
+            | MonorepoStandard::BunWorkspaces
+    ) && manifests
+        .npm_unless_malformed(&target.join("package.json"))?
+        .is_none()
+    {
+        return Ok(());
+    }
+
     let outcome = match standard {
         MonorepoStandard::CargoWorkspace => detect_cargo_workspace(target, evidence, manifests)?,
         MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target, evidence, manifests)?,

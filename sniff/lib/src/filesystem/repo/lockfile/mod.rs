@@ -182,6 +182,9 @@ pub(crate) enum ParsedLockfile {
     CargoPackages(Vec<(String, String)>),
     /// A member name maps to no local package path, or to more than one.
     AmbiguousMembership,
+    /// A supported document that records no membership and does not
+    /// establish the empty set either; never compared as `[]`.
+    NoMembershipData,
     /// A recognized version or signature outside the accepted matrix.
     UnsupportedVersion,
 }
@@ -238,11 +241,12 @@ pub(crate) fn probe_presence(path: &Path) -> LockfilePresence {
 /// Observe `layer`'s lockfile under `request`.
 ///
 /// `owned` is the seed list of the detector outcome that built the layer, or
-/// `None` when no outcome matched, which makes the manifest-side set
-/// incomplete. Presence is always probed; contents are read only when the
-/// request wants lockfile provenance. The steps follow the spec's precedence:
-/// no source, metadata failure, absence, disabled request, metadata-only
-/// fallback, then parse.
+/// `None` when no outcome matched or discovery reported it incomplete; the
+/// manifest-side set is then incomplete. Incompleteness only blocks the
+/// comparison step, so every earlier status still wins. Presence is always
+/// probed; contents are read only when the request wants lockfile provenance.
+/// The steps follow the spec's precedence: no source, metadata failure,
+/// absence, disabled request, metadata-only fallback, then parse.
 pub(crate) fn observe_layer_lockfile(
     layer: &MonorepoLayer,
     owned: Option<&[PackageSeed]>,
@@ -317,10 +321,15 @@ fn classify(
         ParsedLockfile::AmbiguousMembership => {
             LockfileObservation::unverifiable(paths, LockfileReason::AmbiguousMembership)
         }
+        ParsedLockfile::NoMembershipData => {
+            LockfileObservation::unverifiable(paths, LockfileReason::NoMembershipData)
+        }
         ParsedLockfile::CargoPackages(sourceless) => {
             cargo::compare(sourceless, layer, owned, store, paths)
         }
-        ParsedLockfile::Members(recorded) => compare_members(recorded, base, layer, owned, paths),
+        ParsedLockfile::Members(recorded) => {
+            compare_members(recorded, base, layer, owned, store, paths)
+        }
     }
 }
 
@@ -332,9 +341,15 @@ fn compare_members(
     base: &[&str],
     layer: &MonorepoLayer,
     owned: Option<&[PackageSeed]>,
+    store: &ManifestStore,
     paths: Vec<String>,
 ) -> LockfileObservation {
-    let Some(owned) = owned else {
+    let complete = owned.filter(|owned| {
+        owned
+            .iter()
+            .all(|seed| member_manifest_resolves(layer, seed, store))
+    });
+    let Some(owned) = complete else {
         return LockfileObservation::unverifiable(
             paths,
             LockfileReason::IncompleteManifestDiscovery,
@@ -349,6 +364,38 @@ fn compare_members(
         Err(reason) => return LockfileObservation::unverifiable(paths, reason),
     };
     membership::compare(&manifest, &locked, paths)
+}
+
+/// Whether `seed` resolves to a package of the layer's authority: its member
+/// manifest exists and parses (ruling R10). The root is the authority's own
+/// manifest, which detection already parsed.
+///
+/// ## Notes
+///
+/// Parses through the request's store, so full detection's enrichment reuses
+/// the result; a structure request that opts into corroboration pays one parse
+/// per member here.
+fn member_manifest_resolves(
+    layer: &MonorepoLayer,
+    seed: &PackageSeed,
+    store: &ManifestStore,
+) -> bool {
+    use super::standard::MonorepoStandard as S;
+
+    if membership::manifest_member(&layer.root, &seed.path).is_ok_and(|member| member.is_empty()) {
+        return true;
+    }
+    match layer.authority {
+        S::NpmWorkspaces
+        | S::PnpmWorkspaces
+        | S::YarnWorkspaces
+        | S::BunWorkspaces
+        | S::RushStack => store.npm(&seed.path.join("package.json")).is_some(),
+        S::UvWorkspace => store.pyproject(&seed.path.join("pyproject.toml")).is_some(),
+        // No other authority reaches a member-path comparison; Cargo resolves
+        // each member's identity in `cargo::compare`.
+        _ => true,
+    }
 }
 
 /// A per-thread `#[cfg(test)]` seam that makes chosen lockfile metadata probes
