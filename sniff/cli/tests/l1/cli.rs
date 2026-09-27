@@ -6243,6 +6243,77 @@ fn test_repo_aggregate_attributes_shared_area_files_like_the_focused_command() {
     assert_eq!(documentation["package_areas"], serde_json::json!(["worktree"]));
 }
 
+/// Review 1 of 2026-09-25-recent-commits through the shipped binary:
+/// `dm/dmls` is both the `dmls` package directory and the area of the nested
+/// `zed` package, as `darkmatter/dmls` is in this repository. Area membership
+/// follows location, so a `dmls`-owned file belongs to the `dm/dmls` area
+/// rather than `dmls`'s declared `dm`, while package ownership is unchanged.
+#[test]
+fn test_recent_commits_package_area_selects_files_in_a_package_directory_that_is_also_an_area() {
+    const BASE: i64 = 1_763_158_400;
+    const PACKAGE: &str = "[package]\nversion = \"0.1.0\"\nedition = \"2024\"\nname = ";
+    let dir = tempfile::tempdir().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    let path = dir.path();
+    let lib_manifest = format!("{PACKAGE}\"dm\"\n");
+    let dmls_manifest = format!("{PACKAGE}\"dmls\"\n");
+    let zed_manifest = format!("{PACKAGE}\"zed\"\n");
+    let history: [(&[(&str, &str)], &str); 4] = [
+        (
+            &[
+                ("Cargo.toml", "[workspace]\nmembers = [\"dm/lib\", \"dm/dmls\", \"dm/dmls/zed\"]\n"),
+                ("dm/lib/Cargo.toml", &lib_manifest),
+                ("dm/lib/src/lib.rs", "pub fn dm() {}\n"),
+                ("dm/dmls/Cargo.toml", &dmls_manifest),
+                ("dm/dmls/src/main.rs", "fn main() {}\n"),
+                ("dm/dmls/zed/Cargo.toml", &zed_manifest),
+                ("dm/dmls/zed/src/lib.rs", "pub fn zed() {}\n"),
+            ],
+            "chore: initial workspace",
+        ),
+        (&[("dm/dmls/README.md", "# dmls\n")], "docs: dmls readme"),
+        (&[("dm/lib/src/lib.rs", "pub fn dm() { /* 2 */ }\n")], "feat: lib change"),
+        (&[("dm/dmls-extra/README.md", "# sibling\n")], "docs: sibling readme"),
+    ];
+    let ids: Vec<String> = history
+        .iter()
+        .zip(0..)
+        .map(|((files, message), minute)| {
+            commit_files_at(path, files, message, BASE + 60 * minute).to_string()
+        })
+        .collect();
+    let hashes = |commits: &[Value]| -> Vec<String> {
+        commits
+            .iter()
+            .map(|commit| commit["hash"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let pick = |indices: &[usize]| -> Vec<String> { indices.iter().map(|i| ids[*i].clone()).collect() };
+
+    let nested = run_commit_json(path, &["recent-commits", "--package-area", "dm/dmls", "--json"]);
+    assert_eq!(hashes(&nested), pick(&[1, 0]), "the sibling `dm/dmls-extra` is outside the area");
+    let parent = run_commit_json(path, &["recent-commits", "--package-area", "dm", "--json"]);
+    assert_eq!(hashes(&parent), pick(&[3, 2, 1, 0]), "a parent area selects its nested areas");
+    let package = run_commit_json(path, &["recent-commits", "--package", "dmls", "--json"]);
+    assert_eq!(hashes(&package), pick(&[1, 0]));
+    let zed = run_commit_json(path, &["recent-commits", "--package", "zed", "--json"]);
+    assert_eq!(hashes(&zed), pick(&[0]), "the nested area confers no ownership of `dmls` files");
+
+    let unfiltered = run_commit_json(path, &["recent-commits", "--json"]);
+    let record = |index: usize| unfiltered.iter().find(|c| c["hash"] == ids[index].as_str()).unwrap().clone();
+    let readme = record(1);
+    assert_eq!(readme["packages"], serde_json::json!(["dmls"]));
+    assert_eq!(readme["package_areas"], serde_json::json!(["dm/dmls"]));
+    assert_eq!(file_paths(&readme), ["dm/dmls/README.md"]);
+    assert_eq!(nested[0], readme, "filtered record differs");
+    let initial = record(0);
+    assert_eq!(initial["packages"], serde_json::json!(["dm", "dmls", "zed"]));
+    assert_eq!(initial["package_areas"], serde_json::json!(["dm", "dm/dmls"]));
+    let sibling = record(3);
+    assert_eq!(sibling["packages"], serde_json::json!([]));
+    assert_eq!(sibling["package_areas"], serde_json::json!(["dm"]));
+}
+
 #[test]
 fn test_recent_commits_no_change_commit_is_reported_with_no_files() {
     let (_dir, path) = create_test_repo();
