@@ -153,6 +153,17 @@ impl MixedFixture {
         self
     }
 
+    /// Points `origin` at a bare copy of the repository beside `HOME` and
+    /// fetches it, so the worker's check answers at once from local Git and
+    /// finds nothing to fetch. Pair it with [`MixedFixture::wt_command_direct`].
+    pub fn with_local_origin(self) -> Self {
+        let bare = self.home.path().join("origin.git");
+        run_git(&self.main, &["clone", "--bare", "--quiet", ".", bare.to_str().unwrap()]);
+        run_git(&self.main, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        run_git(&self.main, &["fetch", "--quiet", "origin"]);
+        self
+    }
+
     /// Points `origin` at `url`, such as a [`HoldingOrigin`]. Pair it with
     /// [`MixedFixture::wt_command_direct`].
     pub fn with_origin(self, url: &str) -> Self {
@@ -700,6 +711,7 @@ struct GiteaState {
     branch_requests: usize,
     waiting: usize,
     held: bool,
+    branches_held: bool,
     reply: GiteaReply,
 }
 
@@ -712,9 +724,10 @@ struct GiteaState {
 /// held. Dropping the server answers every waiting request with 503.
 ///
 /// The worker's live-head half asks for the default branch's head
-/// (`/branches/`); that request is answered 404 at once and counted apart
-/// ([`FakeGitea::branch_requests`]), so it never holds or counts as a PR
-/// request. Its `ls-remote` fallback is refused by the fixture's git config.
+/// (`/branches/`); that request is answered 404 at once (or, after
+/// [`FakeGitea::hold_branch_heads`], once released) and counted apart
+/// ([`FakeGitea::branch_requests`]), so it never counts as a PR request. Its
+/// `ls-remote` fallback is refused by the fixture's git config.
 pub struct FakeGitea {
     port: u16,
     shared: Arc<(Mutex<GiteaState>, Condvar)>,
@@ -733,7 +746,7 @@ impl FakeGitea {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake gitea");
         let port = listener.local_addr().expect("fake gitea address").port();
         let shared = Arc::new((
-            Mutex::new(GiteaState { requests: 0, branch_requests: 0, waiting: 0, held: false, reply }),
+            Mutex::new(GiteaState { requests: 0, branch_requests: 0, waiting: 0, held: false, branches_held: false, reply }),
             Condvar::new(),
         ));
         let before_reply: BeforeReply = Arc::new(Mutex::new(None));
@@ -758,6 +771,13 @@ impl FakeGitea {
         self.state().held = true;
     }
 
+    /// Makes every branch-head request from now on wait until
+    /// [`FakeGitea::release`], holding the worker's check without a connect
+    /// timeout racing it (the request reaches this plain-HTTP server at once).
+    pub fn hold_branch_heads(&self) {
+        self.state().branches_held = true;
+    }
+
     /// Runs `action` for every later request after it is received and before
     /// it is answered, while the requester waits.
     ///
@@ -772,6 +792,7 @@ impl FakeGitea {
     pub fn release(&self, reply: GiteaReply) {
         let mut state = self.state();
         state.held = false;
+        state.branches_held = false;
         state.reply = reply;
         self.shared.1.notify_all();
     }
@@ -828,8 +849,17 @@ fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_re
     let request_line = head.split(|byte| *byte == b'\r').next().unwrap_or_default();
     if request_line.windows(10).any(|window| window == b"/branches/") {
         let (lock, changed) = shared;
-        lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).branch_requests += 1;
+        let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.branch_requests += 1;
         changed.notify_all();
+        let deadline = Instant::now() + GITEA_HOLD_LIMIT;
+        while state.branches_held {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            state = changed.wait_timeout(state, left).unwrap_or_else(|poisoned| poisoned.into_inner()).0;
+        }
+        drop(state);
         let body = r#"{"message":"branch not found"}"#;
         let response = format!(
             "HTTP/1.1 404 Fake\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
