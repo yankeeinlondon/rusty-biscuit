@@ -655,6 +655,7 @@ fn expected_json(
             "confidence": "marker-confirmed",
         }],
         "monorepo_layers": [layer],
+        "standalone_lockfiles": [],
     })
 }
 
