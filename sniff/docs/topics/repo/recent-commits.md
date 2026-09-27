@@ -86,9 +86,10 @@ In a monorepo, each commit is attributed to the packages and package areas its c
 Package directories and area directories are separate boundaries:
 
 - a file belongs to its **deepest** owning package only, so a nested package does not also attribute its parent
-- a file owned by a package belongs to that package's declared area
-- a file inside an area directory but outside every package (for example `sniff/README.md` or a plan under `sniff/fixes/`) belongs to that area and to **no** package; when areas nest (`claudine` and `claudine/rendezvous`), it belongs to the deepest one
-- the root area `""` has no directory: only a top-level package's files carry it, and a repository-root file such as `README.md` is unattributed
+- a file belongs to the **deepest** area directory containing it, whether or not a package owns it; when areas nest (`claudine` and `claudine/rendezvous`), it belongs to the deepest one
+- a file inside an area directory but outside every package (for example `sniff/README.md` or a plan under `sniff/fixes/`) belongs to that area and to **no** package
+- where a package directory is also a nested package's area directory (`darkmatter/dmls`), that package's own files belong to the nested area: a change to `darkmatter/dmls/README.md` is attributed to the package `dmls` and the area `darkmatter/dmls`, so `--package-area darkmatter/dmls` keeps it (and `--package-area darkmatter` still does, since an area selects its nested areas)
+- the root area `""` has no directory: only a top-level package's files outside every area directory carry it, and a repository-root file such as `README.md` is unattributed
 - membership is by location only: a conventional-commit scope such as `planning(worktree)`, or a path that merely mentions an area (`.claude/skills/worktree/SKILL.md`, `worktree-other/README.md`), confers none
 - paths resolve lexically against the current package catalog, so deleted files and both ends of a moved file count
 - outside a monorepo there is no attribution, and a package or package-area filter is an error

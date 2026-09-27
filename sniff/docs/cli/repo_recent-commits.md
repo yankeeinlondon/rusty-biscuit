@@ -136,6 +136,7 @@ sniff repo recent-commits --package-area homelab
 
 - Ownership comes from the repository's package catalog (the same one `sniff repo packages` uses), and a file belongs only to its deepest owning package.
 - A file inside a package area but outside every package (for example `sniff/README.md`, or a spec under `sniff/fixes/`) belongs to the area and to no package: `--package-area sniff` keeps it and `--package sniff` does not. Its JSON record reports `"packages": []` and `"package_areas": ["sniff"]`.
+- Where a package directory is also a nested area's directory (`darkmatter/dmls`), the package's own files belong to that nested area, so `--package-area darkmatter/dmls` keeps a change to `darkmatter/dmls/README.md`.
 - Membership is by file location only. A commit scope such as `planning(sniff)`, or a path elsewhere that mentions the area (`.claude/skills/sniff/SKILL.md`), does not match. An area also selects areas nested under it.
 - The count is the number of matching commits, and each kept commit lists all of its changed files.
 - Unknown package or area names are errors that list the valid names. Using either flag outside a monorepo is also an error.

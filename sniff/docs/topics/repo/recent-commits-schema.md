@@ -24,7 +24,7 @@ $schema:
         configuration: boolean(required;eager) -> whether any configuration files were touched in this commit
         cicd: boolean(required;eager) -> whether any CI/CD definitions were touched in this commit
     packages: string[] -> the packages owning at least one changed file, sorted (**monorepo only:** always present in a monorepo, possibly empty; omitted everywhere else)
-    package_areas: string[] -> the package areas of the changed files, sorted; a file owned by a package takes that package's area, and an unowned file inside an area directory takes the deepest such area (**monorepo only:** always present in a monorepo, possibly empty; omitted everywhere else)
+    package_areas: string[] -> the package areas of the changed files, sorted; each file takes the deepest area directory containing it, whether or not a package owns it; a top-level package's file outside every area directory takes the root area `""` (**monorepo only:** always present in a monorepo, possibly empty; omitted everywhere else)
     remote: boolean|null(required;eager) -> `true` when a locally recorded remote-tracking ref contains the commit, `false` when every remote-tracking walk completed without finding it, `null` when that could not be determined
     commit_url: url -> the commit's page on the preferred containing remote; present only when `remote` is `true` and that remote's provider yields a browser URL
 types:
@@ -43,7 +43,7 @@ types:
 
 - **Optional keys are omitted, not `null`.** `commit_url`, `original_path`, `added`, `removed`, `packages`, and `package_areas` are left out when absent. `operation`, `scope`, and `remote` are always present and use `null`.
 - **`file_types` describes the whole commit.** A flag is set when any changed file, or the original path of a `moved` file, falls in that category. Every path belongs to exactly one category, and files in the `other` category set no flag. A projection (such as `sniff repo source-code-changes --json`) prunes `files` but leaves `file_types`, `packages`, `package_areas`, `remote`, and `commit_url` unchanged.
-- **Package and area attribution are separate.** `packages` lists each changed file's deepest owning package. `package_areas` lists each file's area: its owner's area, or, for a file inside an area directory but outside every package (a spec under `worktree/fixes/`, an area README), the deepest area directory containing it, with no package added. A repository-root file has neither. The original path of a `moved` file counts.
+- **Package and area attribution are separate.** `packages` lists each changed file's deepest owning package. `package_areas` lists each file's area by location: the deepest area directory containing it, even when its owning package declares a shallower area (a file in `darkmatter/dmls/`, both the `dmls` package and a nested area, reports `darkmatter/dmls`). A file inside an area directory but outside every package (a spec under `worktree/fixes/`, an area README) reports that area with no package added. A top-level package's file outside every area directory reports the root area `""`, and a repository-root file has neither. The original path of a `moved` file counts.
 - **Non-UTF-8 bytes** in the message, author name, or author email are replaced with U+FFFD rather than rejected.
 - **The heading can end early.** Because it stops at the first `.`, a subject such as `fix: use e.g. foo` has the heading `use e`.
 
