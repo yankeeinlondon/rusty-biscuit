@@ -1,0 +1,338 @@
+---
+spec: /Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+plan: worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+implemented_by: claude/opus
+started_phase: 1
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+docs_created_during_phase_1:
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+skills_files_updated_during_phase_1: []
+packages: []
+---
+
+# Implementation Log for 2026-09-27-list-freshness-ux (5 phases)
+
+## Phase 1
+
+Phase 1 is rulings, spikes, and a baseline. It changes no source code.
+
+- Rulings 1–20 in `plan.md` are accepted as written unless amended below.
+
+### S3 — Fetch side-effect and platform audit (macOS, git 2.55.0)
+
+Method: a scripted local bare `origin`, a `pusher` clone, and a `local` clone, with `HOME` isolated and `GIT_CONFIG_NOSYSTEM=1`. Between the snapshots the pusher advanced `main`, pushed tag `v2`, advanced `feature`, and deleted `old`. `FETCH_HEAD` was pre-seeded with a sentinel. Each case diffed `for-each-ref` and `FETCH_HEAD` around the spec's command, `git -c maintenance.auto=false -c gc.auto=0 fetch --no-write-fetch-head --no-tags origin +refs/heads/main:refs/remotes/origin/main`.
+
+| Configuration | Refs changed by the spec argv | Verdict |
+|---|---|---|
+| defaults | `refs/remotes/origin/main` only (`origin/HEAD` is its symref) | ok |
+| `fetch.prune=true`, `fetch.pruneTags=true` | `origin/main` only; `origin/old` **not** pruned (prune is limited to the command-line refspec's destination) | ok |
+| `fetch.recurseSubmodules=true` + `submodule.recurse=true`, with a submodule | superproject: `origin/main` only; **but the fetch printed "Fetching submodule sub" and updated the submodule repository's `refs/remotes/origin/main`** | **side effect** |
+| extra `remote.origin.fetch = +refs/heads/*:refs/remotes/mirror/*` | `origin/main` **and a new `refs/remotes/mirror/main`** (git's "opportunistic remote-tracking update" from the configured refspecs) | **side effect** |
+| `core.logAllRefUpdates=false` | `origin/main` only | ok |
+
+In every case `FETCH_HEAD` kept its sentinel, no tag arrived (`v2` absent), and `origin/feature` did not move.
+
+Additional flags `--no-recurse-submodules --refmap=` re-run against the same two repositories:
+- The submodule's refs were unchanged, and no submodule fetch happened.
+- `refs/remotes/mirror/*` was not created.
+- A remote rewind (`push -f HEAD~1:main`) updated `origin/main` as `(forced update)` through the leading `+`.
+
+**Rule 10 decision (amended).** The fetch argv is:
+
+```text
+git -c maintenance.auto=false -c gc.auto=0 fetch --no-write-fetch-head --no-tags --no-recurse-submodules --refmap= origin +refs/heads/<default>:refs/remotes/origin/<default>
+```
+
+`--no-recurse-submodules` is the deviation Rule 10 anticipated. `--refmap=` is a second deviation that Rule 10 did not anticipate: without it, a user's extra `remote.origin.fetch` entry makes the fetch update refs other than `origin/<default>`, which breaks the spec's "touches only `refs/remotes/origin/<default>`" guarantee. `--refmap=` is passed as one argv element with an empty value (no shell is involved on any OS). Both flags only *narrow* the spec's command, so the spec's intent is kept. The spec text should be updated to match in Phase 5's docs pass.
+
+**Minimum Git.** `--no-write-fetch-head` needs Git 2.29 (2020-10). `--refmap` needs 2.1 and `--no-recurse-submodules` is older still. The WSL2 leg is Ubuntu 24.04 (`.github/workflows/_wsl-ci.yml`), which ships Git 2.43, and the hosted `ubuntu-latest`, `macos-latest`, and `windows-latest` images carry current Git. No supported environment is below 2.29. An older Git would fail with `error: unknown option` → `check-failed`/`fetch-failed{other}`, which is truthful.
+
+**`git reflog -1 --format=%ct refs/remotes/origin/<default>`:**
+
+| State | stdout | exit |
+|---|---|---|
+| reflog present | Unix seconds, e.g. `1790526093` | 0 |
+| reflog file absent (deleted, or `core.logAllRefUpdates=false` after clone) | empty | 0 |
+| ref itself absent | empty (stderr `fatal: ambiguous argument …`) | 128 |
+
+So `tracking_ref_changed_at` must treat **empty stdout with exit 0** as "no reflog" (→ `LastKnown::Never`), not as a parse error, and exit 128 as "no tracking ref".
+
+**`git check-ref-format --branch`:** `feat/x` → prints `feat/x`, exit 0. `ma..in` and `-x` → `fatal: '…' is not a valid branch name`, exit 128.
+
+**`LC_ALL=C` stderr samples** (with `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never`, `-c credential.interactive=never`, and an empty `credential.helper` unless noted):
+
+| Case | stderr (first line; URLs are never rendered) | exit |
+|---|---|---|
+| ref lock held (`origin/main.lock` exists; concurrent fetch) | `error: cannot lock ref 'refs/remotes/origin/main': Unable to create '…/main.lock': File exists.` then ` ! a..b  main -> origin/main  (unable to update local ref)` | 1 |
+| HTTP 401, no credentials, **with** `credential.interactive=never` (what `run_noninteractive` passes) | `fatal: unable to get password from user` | 128 |
+| HTTP 401, no credentials, without that flag | `fatal: could not read Username for '<url>': terminal prompts disabled` | 128 |
+| HTTP 401, wrong credentials (URL userinfo or helper) | `fatal: Authentication failed for '<url>'` | 128 |
+| HTTP 403 | `fatal: unable to access '<url>': The requested URL returned error: 403` | 128 |
+| HTTP 404 | `fatal: repository '<url>' not found` | 128 |
+| connection refused | `fatal: unable to access '<url>': Failed to connect to … Couldn't connect to server` | 128 |
+| DNS failure | `fatal: unable to access '<url>': Could not resolve host: …` | 128 |
+| SSH key refused (`BatchMode`; stub `GIT_SSH_COMMAND` emitting OpenSSH's text) | `git@github.com: Permission denied (publickey).` then `fatal: Could not read from remote repository.` | 128 |
+| SSH unknown host key (stub) | `Host key verification failed.` then `fatal: Could not read from remote repository.` | 128 |
+| deadline | git is killed, so there is no stderr. `run_noninteractive` returns its own `origin did not answer within N s` string | — |
+| `ls-remote` HTTP 401 with `credential.interactive=never` | `fatal: unable to get password from user` (same as fetch) | 128 |
+
+The SSH rows used a stub `GIT_SSH_COMMAND` that prints OpenSSH's own messages, because this session may not run `ssh`. Git's wrapping line (`Could not read from remote repository.`) is real.
+
+**Classifier pattern list (Rule 10, amended):**
+- `credentials`:
+    - `Authentication failed for`
+    - `could not read Username`
+    - `could not read Password`
+    - `unable to get password from user` (**added**; this is the text under `credential.interactive=never`, which every call passes)
+    - `Permission denied (publickey`
+    - `The requested URL returned error: 401`
+- `timeout`: never pattern-matched from stderr. The deadline branch of `run_noninteractive` should return a typed error (for example `Err(GitFailure::Deadline)`, or a distinct variant beside the message) rather than a string the classifier re-parses. Phase 2/3 should make that change in `live_remote.rs`. The current `Result<String, String>` loses the distinction.
+- `other`: everything else, including 403 (ambiguous between rate limiting and missing permissions), 404 (ambiguous, never absence), `Host key verification failed`, lock contention (handled by Rule 11's re-read, not by the classifier), refused connections, and DNS failures.
+
+### S1 — Provider branch-head endpoints and path encoding
+
+I sent about 45 anonymous `GET`s to public repositories (GitHub `cli/cli`, GitLab `gitlab-org/gitlab-runner`, Codeberg `forgejo/forgejo`, Bitbucket `atlassian/aui`). Each probe used the plain default branch and a branch with `/` sent as `%2F`.
+
+| Provider | Endpoint to add | Plain | `%2F` | Raw `/` | SHA field | Missing or private repo (anonymous) | Bad token | Rate limit |
+|---|---|---|---|---|---|---|---|---|
+| GitHub | `GetBranchReference` `GET /repos/{owner}/{repo}/git/ref/heads/{branch}` → `GitRef` | 200 | 200 | 200 | `object.sha` | 404 `Not Found` (a missing branch looks the same) | 401 `Bad credentials` | `x-ratelimit-{limit,remaining,used,reset}` (anonymous 60/h). Exceeded: **403 or 429** with `x-ratelimit-remaining: 0` |
+| GitLab | `GetBranch` `GET /projects/{id}/repository/branches/{branch}` | 200 | 200 | **404** | `commit.id` | 404 `Project Not Found` (a missing branch says `Branch Not Found`) | 401 | `ratelimit-*`. Exceeded: 429 + `retry-after` |
+| Gitea/Forgejo | `GetBranch` `GET /repos/{owner}/{repo}/branches/{branch}` | 200 | 200 | 200 | `commit.id` | 404 (a missing branch looks the same) | 401 | `ratelimit`/`ratelimit-policy` (IETF draft). Exceeded: 429; a proxy may return 403, which is ambiguous |
+| Bitbucket | `GetBranch` `GET /2.0/repositories/{workspace}/{repo_slug}/refs/branches/{name}` | 200 | 200 | 200 | `target.hash` | 404 "may not have access … or no longer exists" | 401 | `x-ratelimit-*` (reset is seconds-until). Exceeded: 429 |
+
+Verdict:
+- **Every provider accepts `%2F`, and GitLab *requires* it.** Declare the branch as an ordinary encoded `{branch}` path parameter (not `{+branch}`). No URL is hand-rolled. `schematic/gen/src/codegen/request_structs/shared.rs:131-146` confirms that every non-`{+…}` path parameter goes through `urlencoding::encode`.
+- **GitHub must use the singular `/git/ref/`.** The plural `/git/refs/heads/{b}` prefix-matches and returns a JSON *array* for a name like `af` when `af/*` branches exist. `GetTagReference` (`github/mod.rs:375-385`) is the template. The id lists in `github/mod.rs` tests (around lines 744 and 823) must gain the new id.
+- **Gitea should use `/branches/{branch}`,** not its `git/refs/{ref}` array endpoint. It returns one object.
+- **A 404 is never absence** on any provider. Anonymous private and missing repositories are identical, which confirms Rule 13's `NotFoundOrNotPermitted`.
+- **Rate limit.** A 429 is unambiguous everywhere. GitHub's 403 is `RateLimited` only with `x-ratelimit-remaining: 0` or a rate-limit body. Otherwise a 403 is `CredentialsInsufficient` when a token was sent and the body says so, and `NotFoundOrNotPermitted` in any other case. This matches Rule 13.
+- A bad token yields 401 on all four → `CredentialsRejected`.
+
+Rule 13 is confirmed. No ruling is amended by S1. Full notes are kept outside the repository (`/tmp/lfux/s1.md`, not committed).
+
+### S2 — Credential key metadata and identity parsing
+
+Findings (file:line references from a read-only survey):
+
+- **Schematic never reports which variable it used.** Generated clients resolve with `find_map(|n| std::env::var(n).ok())` and drop the name (`schematic/gen/src/codegen/client/helpers.rs:126-175`, `api_struct/request_method.rs:62-76`).
+- **`remote::blocking` does not use schematic at all.** It goes through `FocusedProviderClient` (`sniff/lib/src/remote/focused.rs`), which reads tokens with sniff's own `credentials::provider_token` (`sniff/lib/src/credentials.rs:52-67`, `pub(crate)`, two call sites). That function also loses the matched name: it returns `names.first()` whatever variable was set (line 65). Its order and variable set **differ from schematic's `env_auth`**:
+
+| Provider | Focused client (what `branch_head` will send) | Schematic `env_auth` |
+|---|---|---|
+| GitHub | `GH_TOKEN`, `GITHUB_TOKEN` | `GITHUB_TOKEN`, `GH_TOKEN` |
+| GitLab | `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN` | same |
+| Gitea/Forgejo | `GITEA_TOKEN`, `FORGEJO_TOKEN`, `CODEBERG_TOKEN` | `GITEA_TOKEN` (Codeberg: `CODEBERG_TOKEN`, `GITEA_TOKEN`) |
+| Bitbucket | `BITBUCKET_TOKEN` (Bearer) | `BITBUCKET_USERNAME` + `BITBUCKET_APP_PASSWORD` (Basic) |
+
+- **Today's status mapping on the blocking path** (`focused.rs:836-866` → `classify`, `blocking.rs:292-319`) is identical for every provider:
+    - 401 with no token → `MissingCredentials` → `Auth`
+    - 401 with a token → `InvalidCredentials` → `Auth`
+    - **403 → `RemoteForbidden` → `Auth`, with no rate-limit inspection**
+    - 404 on a list endpoint → `NotFoundOrNotPermitted`
+    - 429 → `RateLimited`
+    - There is **no anonymous retry** on this path. The schematic-backed `github.rs`/`gitea.rs`/`gitlab.rs`/`bitbucket.rs` do retry anonymously (only when no credential is set, in `list_pull_requests`), but none of that is on the blocking path.
+- `PrUnavailable` (`blocking.rs:77-106`) is `#[non_exhaustive]`, with variants `Timeout`, `Network`, `Auth { message }`, `NotFoundOrNotPermitted`, `RateLimited`, `Unsupported`, and `Other`. `classify`, `client_for_url`, and `run_with_deadline` are private. `FocusedProviderClient` and its constructors are public.
+- `Auth` sites: `blocking.rs:92` (definition), `:181` (a doc comment), `:300` (the **only constructor**, in `classify`), and `:431` (a unit test). L1 tests: `sniff/lib/tests/l1/pr_for_branch.rs:403` and `sniff/lib/tests/l1/open_pull_requests.rs:327`. Each covers (401, no token), (401, token), and (403, token) on every provider. **worktree never matches variants.** It only calls `.to_string()` (`worktree/lib/src/pull_requests.rs:69-70`, `remove/safety.rs:132-150`).
+- **Identity parsing.** `parse_remote_identity` (`sniff/lib/src/filesystem/git/commit_links.rs:59-100`) is **`pub(crate)`** and cannot be reached from worktree. It returns `(Option<RemoteEndpoint { scheme, host, port }>, namespace, repository)`.
+    - For HTTPS it drops userinfo, lowercases the host, and gives a port only when it is not the default.
+    - For SCP-style and `ssh://` it keeps the host's case as typed. `ssh://…:22` keeps `Some(22)`, while the SCP form gives `None`.
+    - The public `remote::parse_remote_url` strips ports and hides the host, so it does not fit.
+- **Features.** `worktree/lib/Cargo.toml:24` already enables sniff `remote` (→ `network`). No Cargo change is needed.
+- Drift noticed and left alone (sniff docs, out of scope):
+    - `sniff/lib/src/remote/bitbucket.rs:162` says every 403 is `RateLimited`, but the code does that only for a rate-limit body.
+    - `github.rs:26,42` describe schematic's token order.
+
+**Rule 13 amended (key name).** sniff resolves the key name **in `credentials::provider_token`'s order** (the variables the focused client actually sends), not in schematic's `env_auth` order. Copying `env_auth` would get GitHub's order and Bitbucket's variable wrong. Implementation: change `provider_token` to return the name that matched (and `credential_env` lists the same candidates in the same order).
+
+**Rule 13 addendum (403).** The blocking path maps every 403 to `Auth` today. Phase 2 must make the 403 split (`RateLimited` versus `CredentialsInsufficient` versus `NotFoundOrNotPermitted`) inside `focused.rs`'s error mapping, where the response headers and body are still available (GitHub: `x-ratelimit-remaining: 0` or a rate-limit body; see S1). `classify` receives only a `SniffError`.
+
+**Rule 3 amended (identity).** Add to sniff a small public `remote_identity(url) -> Option<RemoteIdentity { scheme, host, port: Option<u16>, path }>` wrapping `parse_remote_identity`. It carries the raw facts: host ASCII-lowercased with no userinfo, `path` = `namespace/repository` with case kept, `.git` and slashes trimmed. Re-export it beside `repository_link`. Rule 3's *policy* (the effective port: 443 for HTTPS, 443 for SSH to a known provider host via `GitHostingProvider::from_url`, otherwise the explicit port or the scheme default) stays in `worktree::api_preference::RepoIdentity::from_origin`. So sniff gains no worktree-specific normalization, and `ssh://host:22/o/r` and `git@host:o/r` agree after worktree's step.
+
+### S4 — Affected-test inventory (work list for Phase 4 Wave 3)
+
+Counts:
+- 40 test functions run `wt list` or the worker with an origin: 25 process-level and 15 unit.
+- 3 sniff tests assert `PrUnavailable::Auth`.
+- `worktree/cli/Cargo.toml` has no `autotests = false`, so each `tests/*.rs` is its own target. The six `level2_*` files are `[[test]]` entries with `required-features = ["terminal-tests"]`.
+
+Ruling proposals arising from S4 (not changes to the numbered rules, but gaps they left open):
+- **`--attempt` is optional on `wt internal-refresh`.** Without it the worker generates its own token (same generator) and runs the flow unchanged. Three direct callers pass none today (`perf_support::refresh_worker_via_gitea`, `list_prs::the_worker_command_prints_nothing…`, `list_remote_head::Fixture::refresh`), and nothing but `wt list` needs to follow a specific attempt. `--force` stays opt-in.
+- **Test isolation for the new branch-head request.** It goes through the same `ProxyStub`/`FakeGitea` as PR requests, so every request-count assertion must count by path (`FakeGitea` records request lines), not in total.
+- **The L2 fixture (`level2_list_verbose::DesignFixture`) does not isolate the user's or system's git config.** With the new `ls-remote` fallback, a user `insteadOf` rule could send it to the real github.com. Phase 4/5 must add `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_NOSYSTEM` isolation and `protocol.https.allow=never` there before the flow lands.
+#### Section A: tests that run `wt list` / bare `wt` / `internal-refresh` with an origin
+
+Legend for **Asserts**: **NW** = asserts no worker launched or no lock taken; **RC** = request or connection count; **CAP** = specific caption or age-line text; **T** = timing bound; **STORE** = byte-equality or absence of a store.
+
+##### `worktree/cli/tests/list_prs.rs` (12 of 13 tests affected; all `#[serial]`)
+
+| Test | Origin kind | Invokes | New wait | Asserts | Notes |
+|---|---|---|---|---|---|
+| `a_fresh_pr_store_makes_no_request_and_shows_its_badges` | github + **hanging** ProxyStub | `wt list --perf` | **stalls 3 s** | **NW** (`refresh_workers` empty), **RC** (`connections()==0`), CAP (no "PRs as of") | Both NW and RC break. No cleanup, so the held worker outlives the test |
+| `a_stale_store_shows_its_badges_at_once_and_a_detached_worker_makes_the_request` | github + **hanging** | `wt list --perf` ×2, worker | **stalls 3 s** per list | **RC** (`connections()==1`, then 2), lock `Contended`, CAP "PRs as of 12 min ago", STORE (PR) | Connection counts double because branch-head and PR requests share the proxy |
+| `a_changed_origin_hides_the_stored_badges_and_starts_no_worker` | github (set-url to another repo) + refusing | `wt list --perf` | fast failure | **NW** (`!pr_lock_path.exists()`), CAP (no PR badges) | NW breaks: the worker's PR half takes the PR lock |
+| `the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout` | github + refusing | `internal-refresh <dir>` ×4 directly | fast failure | locks exist or not, **STORE** (PR and head bytes unchanged), empty stdout/stderr | Head-store byte equality breaks (attempt record). Needs a `--attempt` decision |
+| `with_the_network_down_the_table_shows_without_badges_and_nothing_is_stored` | github + refusing | `wt list --perf` ×2 | fast failure | CAP (no badges, then "PRs as of 5 min ago"), **STORE** (no PR store) | Probably still passes, but the first run now also launches a worker. The "worker never ran" loop passes trivially |
+| `a_detached_workers_answer_replaces_the_stale_one_on_the_next_list` | gitea + FakeGitea **held** | `wt list --perf` from a linked worktree, twice | **stalls 3 s** (first list) | **RC** (`requests()==1` twice), `wait_for_waiting(1)`, worker cwd, **NW** after the fresh answer, CAP | The second list launches a worker again, so NW and RC break. The released `Open` reply is fed to the branch-head request too (parse failure) |
+| `concurrent_lists_and_workers_make_one_request_and_a_fresh_answer_stops_the_next` | gitea **held** | 4 concurrent `wt list`, 3 direct workers | **stalls 3 s** (all 4 lists) | **RC** (`requests()==1` ×2), worker count ==1, STORE | Becomes about 2 requests (PR + branch head) |
+| `a_killed_worker_releases_its_lock_and_a_later_worker_refreshes` | gitea **held**, then released | direct worker (killed), direct worker, `wt list` | worker held; the final list is fast | **RC** (`requests()==2`), lock release, STORE, CAP | Becomes about 4 or more requests |
+| `a_failed_or_unauthorized_refresh_keeps_the_stored_answer` | gitea, FakeGitea `Status(500)` / `Status(401)` | direct worker + `wt list` per status | fast failure | RC (`>=1`, tolerant), STORE (PR), CAP "PRs as of 12 min ago" | Probably survives; 401 on branch head goes to the `ls-remote` fallback, which is blocked |
+| `an_origin_change_during_a_workers_request_discards_its_answer` | gitea **held** | direct worker, then `wt list` | worker held; list fast | **RC** (`requests()==1`), STORE, CAP (no badges) | `wait_for_waiting(1)` may fire on the branch-head request rather than the PR request, and RC breaks |
+| `an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin` | gitea (then `gitea.example.invalid`, still proxied to FakeGitea), FakeGitea `Open`, not held, with `before_reply` | `wt list --perf` ×2 | fast (no hold) | **RC** (`requests()==2`), **NW** ("a PR miss alone starts no worker"), **STORE** (`!pr_store().exists()`), CAP | Breaks three ways: worker requests add to RC, NW is false, and the worker's PR half can **publish** the PR store on a miss |
+| `a_missing_or_stale_live_head_never_holds_up_the_listing` | **HoldingOrigin** (×2 iterations: head missing, head 12 min stale) | `wt list --perf` via `wt_command_direct` | **stalls 3 s** per iteration | lock `Contended`, one worker, **CAP** ("Remote state has not been verified." / "differs from the remote head observed 12 min ago"), RC (exactly one `GET /r.git/info/refs?service=git-upload-pack`), **STORE** (head unchanged) | Its premise ("never holds up") is inverted and needs rewriting as the "still checking at 3 s" row. RC probably survives because a non-provider origin gets no API call |
+| `the_worker_command_is_hidden_from_help_and_completion` | none | `wt --help`, completion | none | — | Unaffected (listed for completeness) |
+
+##### `worktree/cli/tests/list_remote_head.rs` (4 of 5 affected; local bare origin; all `#[serial]`)
+
+The fixture isolates the user and system git config. `Fixture::refresh()` runs `wt internal-refresh <main>` directly and waits for it. Drop runs `wait_for_refresh_workers(main, 0, 20 s)`.
+
+| Test | Origin kind | Invokes | New wait | Asserts | Notes |
+|---|---|---|---|---|---|
+| `a_push_elsewhere_reads_as_a_difference_until_the_fetch_then_as_behind_and_matched` | file-path bare | `internal-refresh`, `wt list` ×2 | fast answer, **real fetch** | **CAP** (the old two-sentence caption, "differs … run git fetch origin"), **STORE** (head bytes unchanged by list), **NW** (`refresh_workers` empty) | The first list now fetches, giving the "updated from origin just now" wording. Every assertion needs rewriting |
+| `a_fetch_newer_than_the_observation_is_a_difference_never_a_move` | file-path bare | `internal-refresh`, `wt list` | fast answer | **CAP** ("differs from the remote head observed"), **STORE** (`sha == observed`, the old observation kept) | The list re-checks and replaces the observation |
+| `a_deleted_then_recreated_remote_branch_is_reported_absent_then_present` | file-path bare | `internal-refresh` ×2, `wt list` ×3 | fast answer | **CAP** ×3 (absent, then "No local tracking ref…absent", then "…present") | The caption table's wording changes, and each list re-checks. After re-creation, a list could fetch and recreate `origin/main` |
+| `the_main_checkout_and_a_linked_worktree_share_one_live_head_store` | file-path bare | `wt list` from linked, then from main and linked | fast answer | **CAP** ("Remote state has not been verified.", "matched the remote when checked"), **NW** (empty at the end) | The first list now shows a checked result. NW at the end is racy or breaks |
+| `without_an_origin_leftover_tracking_refs_show_no_caption_and_start_no_worker` | **none** (removed) | `wt list` | none | NW, no head lock, no store | Remains a valid guard; unaffected |
+
+##### `worktree/cli/tests/perf_pr_request.rs` (4 of 4 affected; all `#[serial]`; **timing**)
+
+`FULL_COMMAND_BOUND` is 1 s and `PR_DEADLINE` is 300 ms. The spec retires the 1 s full-command contract.
+
+| Test | Origin kind | Invokes | New wait | Asserts | Notes |
+|---|---|---|---|---|---|
+| `perf_list_meets_sla_with_the_network_down` | github + refusing | 15 × `wt list` (5 cold, 5 warm `--perf`, 5 full) | fast failure | **T** (cold `list gather` < 300 ms, warm < 120 ms, full < 1 s) | Full time grows by the worker spawn plus a fast failure; probably still under 1 s. `list gather` holds if it is still measured separately after the wait |
+| `perf_list_meets_sla_when_the_pr_request_hits_its_deadline` | github + **hanging** | 10 × `wt list` | **stalls 3 s each** (about 30 s total) | **T** (full < 1 s, warm < 120 ms, `pr gather` ≥ 300 ms), RC (`>= runs`) | Full < 1 s breaks. No worker cleanup |
+| `perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh` | github + **hanging** | about 17 × `wt list` | **stalls 3 s each** | **T** (full < 1 s, stale `pr gather` < 300 ms), **RC** (`connections()==0` after the fresh-answer runs), STORE (stays stale) | RC == 0 breaks, because fresh answers now launch too. Full < 1 s breaks |
+| `perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh` | **HoldingOrigin** | 5 × `wt list --perf` | **stalls 3 s each** | **T** (`remote select` < 300 ms, best full < 1 s), a worker made the request | Premise inverted: `remote select` (or a new wait stage) now contains the wait |
+
+##### `worktree/cli/tests/level2_list_verbose.rs` (5 of 7 affected; L2, tmux, `#[serial(level2_terminal)]`)
+
+`DesignFixture` sets origin to `https://github.com/owner/repo.git` and seeds a PR store plus a fresh live head at `origin/main`. It sets `refs/remotes/origin/main` one commit ahead of `main`. The pane env unsets only `GH_TOKEN`/`GITHUB_TOKEN`; git config is not isolated. `wait_for_pane` has a 15 s cap.
+
+| Test | Origin kind | New wait | Asserts | Notes |
+|---|---|---|---|---|
+| `level2_list_styles_follow_the_design_in_tmux` (2 panes) | github, proxy `127.0.0.1:9` (refused) | fast failure (see the SSH `insteadOf` caveat above) | **CAP** ("main is 1 commit behind local tracking ref origin/main." + "origin/main matched the remote when checked less than 1 min ago."), styles, no "PRs as of" | Caption wording changes (§4 check-failed row). A spinner in the TTY pane may briefly appear |
+| `level2_list_width_flag_leaves_the_counts_in_tmux` | same | fast failure | cells and counts only | Probably survives |
+| `level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux` | github + **hanging** ProxyStub | **stalls 3 s** (the pane waits for "PRs as of", within 15 s) | **RC** (`connections()==1`), lock release, head lock free, STORE (PR), CAP "PRs as of 12 min ago" | RC becomes 2. The §6 refresh-hint line would follow the age line; the test asserts the age line directly follows the legend, so check its adjacency |
+| `level2_list_hides_the_counts_in_a_99_column_pane` | github, refused | fast failure | cells, no-wrap row adjacency (`child + 1` is the bottom border) | Probably survives. The caption above the table is not asserted |
+| `level2_list_shows_target_and_parent_counts_in_a_100_column_pane` | github, refused | fast failure | cells and wrap | Probably survives |
+| `level2_list_verbose_renders_table_and_verbose_in_tmux`, `level2_list_verbose_renders_with_graph_path_active` | **none** | none | — | Unaffected |
+
+##### `worktree/cli/src/commands/list/tests.rs` (unit; seam-driven, no real worker)
+
+The `gather_remote` module (`ORIGIN = https://prs.example.invalid/owner/repo.git`) uses `ListSeams { connect, launch: counting_launch }`. No network is involved; these tests pin the **launch decision**, which the change replaces. All are `#[serial_test::serial]`.
+
+| Test | Origin | Current launch assertion | After "always launch + wait" |
+|---|---|---|---|
+| `a_stale_answer_is_shown_at_once_and_refreshed_in_the_background` | example.invalid | launches == [main], 0 requests, git calls == origin lookup only | Survives if the launch seam stays; the new wait seam must be stubbed |
+| `a_stale_empty_answer_is_still_an_answer` | example.invalid | launches == 1 | survives |
+| `two_fresh_answers_neither_request_nor_refresh` | example.invalid | **events empty (NW)** | **breaks** |
+| `a_stale_pr_answer_and_a_missing_head_launch_exactly_once` | example.invalid | events == [Launch] | survives |
+| `a_missing_or_stale_head_launches_without_any_foreground_request` | example.invalid | events == [Launch]; git calls == origin lookup | Survives, unless the foreground adds a reflog or default-branch git call (§4 "tracking-ref age" runs reflog when there is no stored answer) |
+| `a_pr_miss_with_a_fresh_head_requests_in_the_foreground_and_launches_nothing` | example.invalid | events == [Connect, Fetch] (**NW**) | **breaks** |
+| `a_pr_miss_settles_before_the_worker_is_launched` | example.invalid | order [Connect, Fetch, Launch] | Ordering must be re-decided (launch-first vs. PR-miss-first) |
+| `a_failed_miss_shows_no_badges_and_stores_nothing` | example.invalid | **launches empty (NW)** | **breaks** |
+| `a_changed_origin_never_shows_the_old_answers` | example.invalid | launches == 1, requests == 1 | survives |
+| `without_an_origin_stored_answers_are_ignored_and_nothing_is_requested_or_launched` | none (removed) | events empty | survives (valid guard) |
+
+The 8 `run_pipeline` / overlap / perf-count tests in the same file (`list_worktrees_resolves_default_branch_once`, `run_skips_graph_git_calls_when_image_unavailable`, `run_pipeline_without_perf_produces_no_collector`, `run_pipeline_non_image_verbose_includes_verbose_gather_stage`, `run_pipeline_gathers_the_graph_while_list_gather_is_unfinished`, `run_pipeline_gathers_the_graph_on_a_narrow_image_terminal`, `run_pipeline_without_image_support_or_verbose_gathers_no_graph`, `perf_subprocess_counts_meet_sla`) use `NO_PRS` seams whose `launch` **panics**. Their repositories have **no origin**, so they are unaffected as long as the no-origin rule stays. If the PR stage and launch are restructured to gather local facts after the wait, the overlap tests (`tests::overlap::arrive`) need re-checking.
+
+##### `worktree/cli/src/commands/refresh_worker.rs` `mod tests` (unit; injected halves)
+
+`ORIGIN = https://refresh.example.invalid/owner/repo.git`. There are 7 tests: `a_worker_that_cannot_start_is_an_error_launch_discards` (spawns a missing exe), plus `the_head_half_publishes_while_the_pr_half_is_blocked`, `the_pr_half_publishes_while_the_head_half_is_blocked`, `a_failing_or_unsupported_pr_half_leaves_the_head_half_publishing`, `a_contended_pr_half_leaves_the_head_half_publishing`, `a_failing_head_half_leaves_the_pr_half_publishing`, and `only_the_top_level_of_a_main_checkout_is_accepted`. They make no network calls. They break only if `run_halves`, `refresh_remote_head`, or the `RemoteHeads` trait change shape, for example with attempt tokens, format 2, or a completion receipt.
+
+##### Files checked and found unaffected (no origin, or no listing)
+
+| File | Tests | Why unaffected |
+|---|---|---|
+| `tests/list_output.rs` | 3 | `wt list` without an origin (note: `list_output_is_the_redesigned_table` is an exact-output snapshot, so any new always-printed line would break it) |
+| `tests/perf_command_sla.rs` | 1 (`perf_full_command_non_image_meets_sla`, bare `wt`, < 1 s) | `MixedFixture::new()` with no origin |
+| `tests/cache_cold_path.rs` / `cache_warm_path.rs` | 1 + 1 | no origin; `list gather` timing only |
+| `tests/perf_flag.rs` | 5 | no origin |
+| `tests/list_table.rs` | pure renderer, no `wt` process | Not in scope for A, but its caption tests (`every_remote_observation_reads_as_ruled`, the `caption(…)` assertions around lines 250–630) encode the old wording and change with §4 |
+| `tests/remove.rs` | 21 tests use `Fixture::with_origin()` (bare origin) | Only `wt remove` / `create` run; `remove` never renders a listing |
+| `tests/wrapper_protocol.rs`, `shell_wrapper_exec.rs`, `powershell_wrapper_exec.rs`, `create_include.rs`, `styled_capture_parse.rs`, `level2_create.rs`, `level2_dirty_tree.rs`, `level2_graph_in_kitty.rs`, `level2_remove.rs`, `level2_powershell_remove.rs` | — | no origin, or no listing |
+
+##### Section A counts
+
+| File | Tests with origin that list or run the worker | Would stall about 3 s | Fast (answer or failure) | Assert NW | Assert RC | Assert CAP | Assert T |
+|---|---|---|---|---|---|---|---|
+| `list_prs.rs` | 12 | 5 listings stall (`a_fresh…`, `a_stale_store…`, `a_detached…`, `concurrent…`, `a_missing_or_stale_live_head…`); 2 more hold only a directly-run worker (`a_killed…`, `an_origin_change_during_a_workers_request…`) | 5 | 4 | 7 | 8 | 0 |
+| `list_remote_head.rs` | 4 (+1 no-origin guard) | 0 | 4 (real local fetch) | 2 (+guard) | 0 | 4 | 0 |
+| `perf_pr_request.rs` | 4 | 3 | 1 | 0 | 2 | 0 (1 checks "PRs as of") | 4 |
+| `level2_list_verbose.rs` | 5 | 1 | 4 | 0 | 1 | 2 | 0 |
+| `list/tests.rs` (seams) | 9 (+1 no-origin guard) | n/a (no real worker) | n/a | 3 break (+1 ordering) | — | — | — |
+| `refresh_worker.rs` (injected) | 6 (+1 spawn) | n/a | n/a | — | — | — | — |
+| **Total** | **40 test functions** (25 real-process integration + 15 unit) | **9 integration tests put a `wt list` into the 3 s stall** (5 in `list_prs.rs`, 3 in `perf_pr_request.rs`, 1 in L2), plus 2 with held direct workers | | | | | |
+
+---
+
+#### Section B: sniff tests asserting `PrUnavailable::Auth`
+
+Variant definition: `sniff/lib/src/remote/blocking.rs:92` (`Auth { message: String }`, Display text "provider denied the query: {message}"). The producer is `classify` at `blocking.rs:292–300`: `MissingCredentials | InvalidCredentials | RemoteForbidden | RemoteApi{401|403}` all become `Auth`. The doc reference is at `blocking.rs:181`.
+
+| File:line | Test | What it asserts | Cases |
+|---|---|---|---|
+| `sniff/lib/tests/l1/open_pull_requests.rs:327` (fn at :308) | `auth_failures_are_unavailable_not_empty_on_every_provider` | `matches!(result, Err(PrUnavailable::Auth { .. }))` | For every `FLAVORS` provider: `(401, no token)`, `(401, token "rejected")`, `(403, token "scoped")`; the token variable is `GITHUB_TOKEN`/`GITLAB_TOKEN`/`GITEA_TOKEN`/`BITBUCKET_TOKEN`. Under the split these become **CredentialsRequired / CredentialsRejected / CredentialsInsufficient** respectively. The bare 403 needs the "response establishes insufficiency" rule |
+| `sniff/lib/tests/l1/pr_for_branch.rs:403` (fn at :384) | `auth_failures_are_unavailable_on_every_provider` | same `matches!` on `lookup(TARGET)` | the same three cases × every provider |
+| `sniff/lib/src/remote/blocking.rs:431` (fn at :418, in-crate `mod tests`) | `a_denial_is_never_classified_as_an_answer` | `classify(RemoteForbidden{…}, None)` is `PrUnavailable::Auth { .. }` (plus 404 is `NotFoundOrNotPermitted`) | 1 case, which becomes `CredentialsInsufficient` |
+
+**Count: 3 tests (2 L1 integration and 1 unit), 3 assertion sites.**
+
+Related sites that do not assert `Auth` but are touched by the same split:
+- `RateLimited { message }` becomes `RateLimited { authenticated: bool }`. No test currently asserts `PrUnavailable::RateLimited` (searched `sniff/lib/tests`, `sniff/lib/src`).
+- `NotFoundOrNotPermitted` is kept, and is asserted at `pr_for_branch.rs:421, :441` and `open_pull_requests.rs:345`. The `Timeout` assertions at `pr_for_branch.rs:464` and `open_pull_requests.rs:369` are unaffected.
+- Non-`sniff` consumers only stringify: `worktree/lib/src/pull_requests.rs:69` (`reason.to_string()`) and `worktree/lib/src/remove/safety.rs` (`PrLookup::Unavailable(reason.to_string())`). Two `worktree/lib/src/pull_requests.rs` unit tests hard-code the old Display text `"provider denied the query: 401"` (lines 554 and 679) as stub strings. They do not break, but the literal goes stale.
+- `sniff/lib/src/remote/focused.rs:852` has a `"provider denied the query"` message literal (a `SniffError`, not `PrUnavailable`).
+- `sniff/cli` has no reference to `PrUnavailable`.
+#### How each origin kind behaves after the change
+
+Assumes the new worker calls `branch_head` for a provider sniff supports (github.com, `gitea.*`, and similar). It falls back to `git ls-remote` on 404, credentials, or rate-limit errors, and possibly on other errors. For any other origin it runs `ls-remote` directly.
+
+| Origin kind | Fixture | Provider API call? | Expected new wait |
+|---|---|---|---|
+| Local bare repository (file path) | `list_remote_head::Fixture`, `remove.rs::with_origin` | no (Unsupported) | **Fast answer.** Local `ls-remote`; a variance triggers a real local `fetch`, which **changes `origin/main`** |
+| `https://github.com/owner/repo.git` + `ProxyStub::refusing()` | `MixedFixture::with_github_origin` + `wt_command_via` | yes, refused at once | **Fast failure.** The `ls-remote` fallback is blocked by `protocol.https.allow=never` |
+| `https://github.com/...` + `ProxyStub::hanging()` | same | yes, **held** | **Stalls about 3 s.** The API check hangs until its 10 s deadline, and each run adds one more held proxy connection |
+| `http://gitea.test/o/r.git` + `FakeGitea` (not held) | `with_gitea_origin` + `wt_command_via_gitea` | yes, answered at once | **Fast failure.** The server answers every path with its PR reply: `Open` is a JSON array, which is the wrong shape for a branch; `Status(500/401)` is an error. The fallback is blocked by `protocol.http.allow=never`. **The request is counted in `gitea.requests()`** |
+| `gitea.test` + `FakeGitea::hold()` | same | yes, **held** | **Stalls about 3 s.** The branch-head request also shows up in `requests()`/`waiting()` |
+| `HoldingOrigin` loopback (`http://127.0.0.1:P/r.git`) | `with_origin` + `wt_command_direct` | no (not a provider) | **Stalls about 3 s.** `ls-remote` is held |
+| `https://github.com/...` + `HTTPS_PROXY=http://127.0.0.1:9` (in a tmux pane) | `level2_list_verbose::DesignFixture` | yes, refused | **Fast failure, with a caveat.** The user's and system git config are **not** isolated and `protocol.*.allow` is not set. An `insteadOf` rule that rewrites `https://github.com/` to SSH would send the `ls-remote` fallback to the **real github.com**. `SNIFF_*_TOKEN` is not cleared. Stderr is a TTY, so the spinner appears after 150 ms |
+| `*.example.invalid` | `list/tests.rs` (seams), `refresh_worker.rs` unit tests | never reaches the network (seams or injected halves) | none |
+| none | many | — | none; no worker is launched |
+
+Cross-cutting breakages, for Phase planning:
+- **Seeding a fresh live head no longer isolates a test.** Most PR tests rely on `seed_fresh_head` / `seed_remote_head_store(ZERO, …)` so that no worker starts (see `list_prs.rs` module docs and `perf_pr_request::seed_fresh_head`). After the change a worker starts on every listing with an origin.
+- **Worker requests now show up in PR-request counters.** Assertions on `ProxyStub::connections()` and `FakeGitea::requests()`/`waiting()` count the branch-head request alongside PR requests.
+- **"Nothing stored" byte-equality on the live-head store breaks.** Format 2 writes an `attempt` record even when the check fails.
+- **The worker's PR half now runs on a PR miss.** On a miss with an answering source, the worker can publish the PR store. Today a miss launches nothing.
+- **Direct `internal-refresh <main>` calls pass no `--attempt`.** Affected callers: `perf_support::refresh_worker_via_gitea`, `list_prs::the_worker_command_prints_nothing…`, and `list_remote_head::Fixture::refresh`. They need an optional attempt argument, or updating.
+- **Shared `perf_support` helpers need updating.** `wait_until_unlocked` and `probe_head_refresh` call `refresh_remote_head(…, &NoRequest)`, and `seed_remote_head_store` writes `format_version: 1`. Both need to track the new store and lock API.
+
+
+### Baseline (unmodified branch `fix/wt-ux` at `5ed279dd9`, macOS)
+
+| Area | `just test` | `just lint` |
+|---|---|---|
+| `schematic/` | pass: 1700 run, 1700 passed, 5 skipped | pass |
+| `sniff/` | pass: 2858 run, 2858 passed (13 slow), 31 skipped | pass |
+| `biscuit-terminal/` | pass: 3315 run, 3315 passed, 55 skipped | pass |
+| `worktree/` | pass: 527 run, 527 passed (3 slow), 21 skipped | pass |
+
+There are no pre-existing failures. `just test-l2` was not part of the Phase 1 baseline; it is required only for `worktree/` at the end (Phase 5).
+
+### Follow-ups recorded (out of scope)
+
+- **Two user files.** `~/.worktree.json` (`WorktreeConfig`, `base_dir`, setup flow) and the new `~/.wt.json` (API preference, Rule 2) will coexist. Merging them into one file is a separate decision, not part of this fix.
+- **sniff doc drift** noted in S2 (`bitbucket.rs:162`, `github.rs:26,42`).
+
+### Checkpoint 1
+
+- S1–S4 are recorded above.
+- **Rule 10 is amended** (S3). The fetch argv adds `--no-recurse-submodules` and `--refmap=`. The classifier adds `unable to get password from user`. The deadline becomes a typed error rather than a matched string. `tracking_ref_changed_at` must handle empty-stdout/exit-0 (no reflog) and exit 128 (no ref).
+- **Rule 13 is amended** (S2). Key names follow `credentials::provider_token`'s order. The 403 split is made in `focused.rs` where headers are available. S1 confirms the endpoints and `%2F`.
+- **Rule 3 is amended** (S2). sniff exposes a raw `remote_identity`, and worktree keeps the port policy.
+- An open gap is closed by a proposal (S4): `--attempt` is optional on `internal-refresh`.
+- The baseline is green in all four areas.
+- No source files were changed in Phase 1.
