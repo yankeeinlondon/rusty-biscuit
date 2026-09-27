@@ -71,8 +71,9 @@ pub(crate) fn render_terminal_code_block(
     let mut output = String::with_capacity(code.len() * 2);
 
     // Determine line number width
+    let first_line = meta.first_line();
     let line_number_width = if options.include_line_numbers || meta.line_numbering {
-        format!("{}", lines.len()).len()
+        format!("{}", (first_line + lines.len()).saturating_sub(1)).len()
     } else {
         0
     };
@@ -84,7 +85,7 @@ pub(crate) fn render_terminal_code_block(
     let mut hl = HighlightLines::new(syntax, theme);
 
     for (idx, line) in lines.iter().enumerate() {
-        let line_number = idx + 1;
+        let line_number = first_line + idx;
 
         // Determine if this line should be highlighted
         let is_highlighted = meta.highlight.contains(line_number);
@@ -249,7 +250,7 @@ pub(crate) fn render_html_code_block(
         let lines: Vec<&str> = LinesWithEndings::from(code).collect();
 
         for (idx, line) in lines.iter().enumerate() {
-            let line_num = idx + 1;
+            let line_num = meta.first_line() + idx;
             let is_highlighted = meta.highlight.contains(line_num);
 
             let _ = write!(
@@ -665,5 +666,154 @@ mod tests {
                 "expected exactly 20 visible chars on line: {line:?}"
             );
         }
+    }
+
+    /// Renders `line_count` numbered lines with `meta` and returns the raw
+    /// output rows, excluding the top and bottom padding rows.
+    fn numbered_terminal_rows(meta: &CodeBlockMeta, line_count: usize) -> Vec<String> {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
+        let code = (0..line_count).map(|i| format!("k{i}: v")).collect::<Vec<_>>().join("\n");
+        let meta = CodeBlockMeta {
+            line_numbering: true,
+            ..meta.clone()
+        };
+        let output = render_terminal_code_block(
+            &code,
+            &LanguageGrammar::yaml(),
+            &highlighter,
+            &test_options(),
+            &meta,
+            ColorMode::Dark,
+            None,
+            None,
+        )
+        .unwrap();
+        let rows: Vec<String> = output.lines().map(str::to_string).collect();
+        rows[1..rows.len() - 1].to_vec()
+    }
+
+    fn highlight_bg_sgr() -> String {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
+        let bg = highlighter.theme().settings.background.unwrap_or(Color::BLACK);
+        let hl = compute_highlight_bg(bg, ColorMode::Dark);
+        format!("\x1b[48;2;{};{};{}m", hl.r, hl.g, hl.b)
+    }
+
+    #[test]
+    fn terminal_start_line_numbers_first_line() {
+        let meta = CodeBlockMeta {
+            start_line: Some(12),
+            ..Default::default()
+        };
+        let rows = numbered_terminal_rows(&meta, 3);
+        let plain: Vec<String> = rows.iter().map(|r| strip_ansi_codes(r)).collect();
+        assert!(plain[0].starts_with("12 │ k0: v"), "{plain:?}");
+        assert!(plain[2].starts_with("14 │ k2: v"), "{plain:?}");
+    }
+
+    #[test]
+    fn terminal_highlight_uses_absolute_line_numbers() {
+        let mut meta = CodeBlockMeta {
+            start_line: Some(12),
+            ..Default::default()
+        };
+        meta.highlight.add_line(14);
+        let rows = numbered_terminal_rows(&meta, 4);
+        let sgr = highlight_bg_sgr();
+        let highlighted: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.contains(&sgr))
+            .map(|(idx, _)| idx)
+            .collect();
+        assert_eq!(highlighted, vec![2], "only the third line (absolute 14) is highlighted");
+    }
+
+    #[test]
+    fn terminal_gutter_width_covers_last_absolute_line() {
+        let meta = CodeBlockMeta {
+            start_line: Some(98),
+            ..Default::default()
+        };
+        let plain: Vec<String> = numbered_terminal_rows(&meta, 5)
+            .iter()
+            .map(|r| strip_ansi_codes(r))
+            .collect();
+        assert!(plain[0].starts_with(" 98 │ "), "{plain:?}");
+        assert!(plain[4].starts_with("102 │ "), "{plain:?}");
+    }
+
+    #[test]
+    fn terminal_default_start_line_numbers_from_one() {
+        let mut meta = CodeBlockMeta::default();
+        meta.highlight.add_line(2);
+        let default_rows = numbered_terminal_rows(&meta, 10);
+        let explicit_rows = numbered_terminal_rows(
+            &CodeBlockMeta {
+                start_line: Some(1),
+                ..meta.clone()
+            },
+            10,
+        );
+        assert_eq!(default_rows, explicit_rows);
+        let plain: Vec<String> = default_rows.iter().map(|r| strip_ansi_codes(r)).collect();
+        assert!(plain[0].starts_with(" 1 │ k0: v"), "{plain:?}");
+        assert!(plain[9].starts_with("10 │ k9: v"), "{plain:?}");
+        assert!(default_rows[1].contains(&highlight_bg_sgr()));
+    }
+
+    fn numbered_html(meta: &CodeBlockMeta) -> String {
+        let highlighter = CodeHighlighter::new(
+            crate::markdown::highlighting::ThemePair::Github,
+            ColorMode::Dark,
+        );
+        let meta = CodeBlockMeta {
+            line_numbering: true,
+            ..meta.clone()
+        };
+        render_html_code_block(
+            "a: 1\nb: 2\nc: 3",
+            &LanguageGrammar::yaml(),
+            &meta,
+            &highlighter,
+            &HtmlOptions::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn html_start_line_and_absolute_highlight() {
+        let mut meta = CodeBlockMeta {
+            start_line: Some(12),
+            ..Default::default()
+        };
+        meta.highlight.add_line(14);
+        let html = numbered_html(&meta);
+        let rows: Vec<&str> = html.lines().filter(|l| l.starts_with("<tr")).collect();
+        assert_eq!(rows.len(), 3);
+        assert!(rows[0].contains(r#"<span class="ln">12</span>"#), "{html}");
+        assert!(!rows[0].contains("highlighted"), "{html}");
+        assert!(rows[2].starts_with(r#"<tr class="highlighted">"#), "{html}");
+        assert!(rows[2].contains(r#"<span class="ln">14</span>"#), "{html}");
+    }
+
+    #[test]
+    fn html_default_start_line_numbers_from_one() {
+        let meta = CodeBlockMeta::default();
+        let html = numbered_html(&meta);
+        assert_eq!(
+            html,
+            numbered_html(&CodeBlockMeta {
+                start_line: Some(1),
+                ..Default::default()
+            })
+        );
+        assert!(html.contains(r#"<span class="ln">1</span>"#), "{html}");
     }
 }

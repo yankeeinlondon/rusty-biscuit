@@ -23,7 +23,7 @@ use renderable::browser::fragment::{BrowserFragment, Ready};
 use renderable::color::{
     ColorDepth as RenderableColorDepth, ColorMode as RenderableColorMode, TerminalCodeContext,
 };
-use renderable::tree::{CodeRenderer, NodeAttrs};
+use renderable::tree::{CodeRenderer, HintNamespace, NodeAttrs};
 
 use crate::markdown::{
     dsl::{CodeBlockMeta, parse_code_info},
@@ -384,6 +384,30 @@ fn build_code_meta(lang: &str, meta: Option<&str>) -> CodeBlockMeta {
     })
 }
 
+/// Extension-hint namespace carrying [`CodeBlockMeta::start_line`] across the
+/// render tree. The fence info string deliberately has no start-line key, so
+/// a [`CodeBlock`](crate::markdown::code_block::CodeBlock) projects the value
+/// here instead of into its serialized meta.
+pub(crate) const CODE_HINTS: HintNamespace = HintNamespace("darkmatter.code");
+
+/// Hint key under [`CODE_HINTS`] for the block's first line number.
+pub(crate) const START_LINE_HINT: &str = "start_line";
+
+/// Parses the fence meta and applies any [`START_LINE_HINT`] carried on
+/// `attrs`.
+fn build_node_code_meta(lang: &str, meta: Option<&str>, attrs: &NodeAttrs) -> CodeBlockMeta {
+    let mut code_meta = build_code_meta(lang, meta);
+    // Skip the bag lookup for the common hint-less node so default code
+    // blocks perform no extension-bag access (see `structural_gate`).
+    if !attrs.data.is_empty() {
+        code_meta.start_line = attrs
+            .get_hint(CODE_HINTS, START_LINE_HINT)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok());
+    }
+    code_meta
+}
+
 /// Env-derived code theme for the *direct*, page-less render surfaces
 /// (`CodeBlock` / `md code-block`).
 ///
@@ -479,7 +503,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         let color_mode = surface.header_mode;
         let code_theme = surface.code_theme;
         let page_mode = surface.page_mode;
-        let code_meta = build_code_meta(lang.unwrap_or(""), meta);
+        let code_meta = build_node_code_meta(lang.unwrap_or(""), meta, attrs);
         let language = lang.unwrap_or("");
         let grammar = LanguageGrammar::from_token_or_plain_text(language);
         let options = TerminalOptions {
@@ -550,7 +574,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         lang: Option<&str>,
         value: &str,
         meta: Option<&str>,
-        _attrs: &NodeAttrs,
+        attrs: &NodeAttrs,
     ) -> Option<BrowserFragment<Ready>> {
         // Mermaid is intentionally NOT handled here. The render tree routes
         // `lang="mermaid"` to `render_browser_mermaid`, whose `None` return is
@@ -562,7 +586,7 @@ impl CodeRenderer for TerminalCodeRenderer {
         // (finding 23).
         let surface = self.browser_surface();
         let highlighter = CodeHighlighter::from_theme(surface.theme, surface.panel_mode);
-        let code_meta = build_code_meta(lang.unwrap_or(""), meta);
+        let code_meta = build_node_code_meta(lang.unwrap_or(""), meta, attrs);
         let grammar = LanguageGrammar::from_token_or_plain_text(lang.unwrap_or(""));
 
         // `code_meta` carries any `title` / `line-numbering` / `highlight`
