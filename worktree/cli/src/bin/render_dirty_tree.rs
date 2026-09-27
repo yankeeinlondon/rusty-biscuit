@@ -9,11 +9,14 @@ use biscuit_terminal::terminal::Terminal;
 use std::path::PathBuf;
 
 fn main() {
+    // Source and non-source files, and a non-last directory, so every
+    // connector glyph and both file colors appear.
     let paths = vec![
         PathBuf::from("src/lib.rs"),
+        PathBuf::from("docs/guide.md"),
         PathBuf::from("README.md"),
     ];
     let markup = worktree_cli::commands::dirty_tree::render_markup(&paths);
     let terminal = Terminal::default();
-    print!("{}", Prose::new(markup).render(&terminal));
+    println!("{}", Prose::new(markup).render(&terminal));
 }

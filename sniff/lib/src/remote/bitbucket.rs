@@ -508,6 +508,26 @@ impl RemoteRepoProvider for BitbucketRemote {
                 let is_merged = pr.is_merged();
                 let updated_at = pr.updated_on.clone();
                 let merged_at = if is_merged { updated_at.clone() } else { None };
+                let source_repo = pr
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.repository.as_ref())
+                    .and_then(|repository| repository.full_name.clone());
+                let source_repo_is_target = source_repo
+                    .as_ref()
+                    .zip(
+                        pr.destination
+                            .as_ref()
+                            .and_then(|destination| destination.repository.as_ref())
+                            .and_then(|repository| repository.full_name.as_ref()),
+                    )
+                    .map(|(source, target)| source.eq_ignore_ascii_case(target));
+                let source_head_sha = pr
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.commit_hash())
+                    .filter(|sha| !sha.is_empty())
+                    .map(str::to_string);
 
                 PullRequestInfo {
                     number: pr.id.unwrap_or(0),
@@ -537,6 +557,9 @@ impl RemoteRepoProvider for BitbucketRemote {
                     updated_at,
                     merged_at,
                     html_url,
+                    source_repo,
+                    source_repo_is_target,
+                    source_head_sha,
                 }
             })
             .collect();

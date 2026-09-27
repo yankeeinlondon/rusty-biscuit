@@ -51,8 +51,8 @@ use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::ImageSupport;
 use crate::components::table::cell::pad_cell;
 use crate::components::table::table::{
-    BG_RESET, FG_RESET, apply_vertical_padding, build_border, stripe_bg_escape, stripe_fg_escape,
-    wrap_cell_content,
+    BG_RESET, FG_RESET, apply_vertical_padding, build_border, highlight_bg_escape, row_paint,
+    stripe_bg_escape, stripe_fg_escape, wrap_cell_content,
 };
 use crate::components::table::{
     ColumnType, Conditional, Table, TableCellContent, TableColumn, TableWidthPlan, VerticalAlign,
@@ -2000,6 +2000,7 @@ impl Writer<'_> {
             .alternate_text_color
             .then(|| stripe_fg_escape(terminal_hints.stripe_text, mode, depth))
             .flatten();
+        let highlight = highlight_bg_escape(terminal_hints.highlight_row, depth);
 
         // The table's body slot style rides on every data cell node; resolve
         // it once to an SGR run so `emit_table` paints data cells visibly.
@@ -2020,6 +2021,7 @@ impl Writer<'_> {
             &plan,
             stripe_bg.as_deref(),
             stripe_fg.as_deref(),
+            highlight.as_ref().map(|(row, bg)| (*row, bg.as_str())),
             body_sgr.as_deref(),
         ))
     }
@@ -2625,14 +2627,17 @@ fn currency_from_token(token: &str) -> Option<crate::components::table::Currency
 /// Emits the table body from a resolved [`TableWidthPlan`] (pass 2).
 ///
 /// Mirrors the bespoke `Table::render_content` emit logic — borders, a
-/// multi-line header, vertically aligned data rows, and striping that
-/// survives SGR resets inside cells — without calling `Table::render`.
+/// multi-line header, vertically aligned data rows, and striping plus the
+/// row highlight (`highlight` is the data row index and its background
+/// escape) that survive SGR resets inside cells — without calling
+/// `Table::render`.
 fn emit_table(
     columns: &[TableColumn],
     data: &[Vec<TableCellContent>],
     plan: &TableWidthPlan,
     stripe_bg: Option<&str>,
     stripe_fg: Option<&str>,
+    highlight: Option<(usize, &str)>,
     body_sgr: Option<&str>,
 ) -> String {
     let widths: Vec<usize> = plan.columns.iter().map(|c| c.resolved_width).collect();
@@ -2743,9 +2748,8 @@ fn emit_table(
             })
             .collect();
 
-        let is_striped = (stripe_bg.is_some() || stripe_fg.is_some()) && row_idx % 2 == 1;
-        let active_bg = if is_striped { stripe_bg } else { None };
-        let active_fg = if is_striped { stripe_fg } else { None };
+        let (active_bg, active_fg) = row_paint(row_idx, stripe_bg, stripe_fg, highlight);
+        let is_striped = active_bg.is_some() || active_fg.is_some();
 
         for line_idx in 0..row_height {
             let mut row_str = String::new();

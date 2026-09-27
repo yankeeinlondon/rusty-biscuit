@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::error::WorktreeError;
@@ -119,6 +119,45 @@ pub fn git_command_in(dir: &std::path::Path, args: &[&str]) -> Result<String, Wo
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Run `git -C <dir> <args>` with `base` as the process's working directory,
+/// returning trimmed stdout.
+///
+/// Removal code addresses a worktree only through `-C` and runs from the base
+/// repository, so no git process (or orphan of one) holds the worktree as its
+/// current directory; on Windows that would block deleting it.
+pub fn git_from(base: &Path, dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+    git_from_raw(base, dir, args).map(|out| out.trim().to_string())
+}
+
+/// [`git_from`] without trimming, for NUL-separated (`-z`) output.
+///
+/// Invalid UTF-8 becomes U+FFFD, so distinct paths can read as one; use
+/// [`git_from_bytes`] where a path's identity matters.
+pub fn git_from_raw(base: &Path, dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
+    git_from_bytes(base, dir, args).map(|out| String::from_utf8_lossy(&out).into_owned())
+}
+
+/// [`git_from`]'s stdout exactly as git wrote it.
+pub fn git_from_bytes(base: &Path, dir: &Path, args: &[&str]) -> Result<Vec<u8>, WorktreeError> {
+    #[cfg(any(test, feature = "count-git"))]
+    recorder::record(args);
+
+    let output = Command::new("git")
+        .current_dir(base)
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(WorktreeError::GitCommand(stderr));
+    }
+
+    Ok(output.stdout)
 }
 
 #[cfg(any(test, feature = "count-git"))]

@@ -107,8 +107,8 @@ pub fn parse_column_width(spec: &str) -> color_eyre::Result<ColumnWidth> {
     match width {
         ImageWidth::Percent(percent) => Ok(ColumnWidth::Percent(percent)),
         ImageWidth::Characters(chars) => Ok(ColumnWidth::Fixed(chars)),
-        ImageWidth::Fill => Err(color_eyre::eyre::eyre!(
-            "Column width does not support 'fill'. Use a percentage (e.g., 40%) or a character width (e.g., 24 or 24ch)."
+        ImageWidth::Fill | ImageWidth::Scale(_) => Err(color_eyre::eyre::eyre!(
+            "Column width does not support '{spec}'. Use a percentage (e.g., 40%) or a character width (e.g., 24 or 24ch)."
         )),
     }
 }

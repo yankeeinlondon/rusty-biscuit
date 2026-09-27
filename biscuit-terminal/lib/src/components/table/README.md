@@ -55,6 +55,7 @@ println!("{}", table.render_optimistic(Some(120)));
 | `prefer_cursor_alignment()` | Enable ANSI cursor-based cell alignment |
 | `alternate_background_color()` | Enable row striping via background color |
 | `alternate_text_color()` | Enable row striping via text color |
+| `highlight_row(row, color)` | Paint one data row's background (0-based data row index, header excluded; out-of-range is a no-op). Wins over striping on its row; terminal-only |
 
 All layout-level builders (margins, alignment, word-wrap, row-fill) are inherited from the `Renderable` trait's default implementations and operate on the owned `Layout`.
 

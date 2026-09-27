@@ -709,6 +709,9 @@ mod tests {
             updated_at: None,
             merged_at,
             html_url: format!("https://github.com/owner/repo/pull/{number}"),
+            source_repo: None,
+            source_repo_is_target: None,
+            source_head_sha: None,
         }
     }
 
@@ -727,6 +730,9 @@ mod tests {
             updated_at: None,
             merged_at: None,
             html_url: format!("https://github.com/owner/repo/pull/{number}"),
+            source_repo: None,
+            source_repo_is_target: None,
+            source_head_sha: None,
         }
     }
 

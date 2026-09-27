@@ -476,6 +476,11 @@ impl RemoteRepoProvider for GiteaRemote {
                     .unwrap_or_else(|| "unknown".to_string());
                 let created_at = pr.created_at.unwrap_or_default();
                 let html_url = pr.html_url.unwrap_or_default();
+                let source_head_sha = pr
+                    .head
+                    .as_ref()
+                    .and_then(|head| head.sha.clone())
+                    .filter(|sha| !sha.is_empty());
 
                 Some(PullRequestInfo {
                     number,
@@ -496,6 +501,11 @@ impl RemoteRepoProvider for GiteaRemote {
                     updated_at: pr.updated_at,
                     merged_at: pr.merged_at,
                     html_url,
+                    // The schematic `PullRef` does not deserialize `head.repo`,
+                    // so this path cannot name the source repository.
+                    source_repo: None,
+                    source_repo_is_target: None,
+                    source_head_sha,
                 })
             })
             .collect();

@@ -10,6 +10,7 @@ All components implement the [`Renderable`](../../lib/src/components/renderable.
 | [Compose](./compose.md) | Combines multiple renderable parts into a single output |
 | [Csv](./csv.md) | Renders CSV data into a Table for the terminal |
 | [FileSystem](./file_system.md) | File/directory tree rendering with icons and gitignore awareness |
+| [GitGraph](./git_graph.md) | Git branch topology as a Mermaid `gitGraph`, fitted to the terminal by trimming |
 | [GraphExpression](./graph_expression.md) | Graph diagrams via biscuit-visualized with terminal image display |
 | [InlineContent](./inline_content.md) | Inline concatenation of items without newlines |
 | [OrderedList / UnorderedList](./list.md) | Numbered and bullet-point lists with nested renderable support |

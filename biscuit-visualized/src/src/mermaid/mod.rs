@@ -4,4 +4,4 @@ pub mod render;
 
 pub use config::{MermaidConfig, MermaidTheme, QuadrantTheme};
 pub use error::MermaidError;
-pub use render::MermaidDiagram;
+pub use render::{MermaidDiagram, NaturalSize};

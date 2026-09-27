@@ -1,0 +1,60 @@
+---
+source: worktree/cli/tests/wrapper_protocol.rs
+expression: "wrapper(Shell::PowerShell, exe).unwrap()"
+---
+function wt {
+    $wtExe = '/opt/bin/wt'
+    $previousWrapper = $env:WT_SHELL_WRAPPER
+    $previousEncoding = [Console]::OutputEncoding
+    $env:WT_SHELL_WRAPPER = '1'
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    try {
+        $out = & $wtExe @args
+        $rc = $LASTEXITCODE
+    } finally {
+        [Console]::OutputEncoding = $previousEncoding
+        if ($null -eq $previousWrapper) {
+            Remove-Item Env:WT_SHELL_WRAPPER -ErrorAction SilentlyContinue
+        } else {
+            $env:WT_SHELL_WRAPPER = $previousWrapper
+        }
+    }
+    $dest = $null
+    $token = $null
+    foreach ($line in @($out)) {
+        $text = [string]$line
+        if ($text.StartsWith('cd:')) {
+            $dest = $text.Substring(3)
+        } elseif ($text.StartsWith('remove-handoff:')) {
+            $token = $text.Substring(15)
+        } else {
+            Write-Output $text
+        }
+    }
+    if ($rc -ne 0) {
+        $global:LASTEXITCODE = $rc
+        return
+    }
+    if ($dest) {
+        try {
+            Set-Location -LiteralPath $dest -ErrorAction Stop
+        } catch {
+            Write-Error $_
+            $global:LASTEXITCODE = 1
+            return
+        }
+        [Environment]::CurrentDirectory = (Get-Location -PSProvider FileSystem).ProviderPath
+    }
+    if ($token) {
+        $env:WT_SHELL_WRAPPER = '1'
+        try {
+            & $wtExe remove --handoff $token
+        } finally {
+            if ($null -eq $previousWrapper) {
+                Remove-Item Env:WT_SHELL_WRAPPER -ErrorAction SilentlyContinue
+            } else {
+                $env:WT_SHELL_WRAPPER = $previousWrapper
+            }
+        }
+    }
+}

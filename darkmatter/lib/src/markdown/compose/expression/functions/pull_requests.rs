@@ -213,6 +213,9 @@ mod tests {
                 updated_at: None,
                 merged_at: None,
                 html_url: "https://github.example/acme/widgets/pull/123".to_string(),
+                source_repo: None,
+                source_repo_is_target: None,
+                source_head_sha: None,
             },
         }
     }

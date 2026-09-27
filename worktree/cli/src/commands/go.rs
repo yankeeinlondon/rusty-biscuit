@@ -1,5 +1,3 @@
-use std::io::IsTerminal as _;
-
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
@@ -66,19 +64,28 @@ pub fn run(name: &str) -> Result<(), WorktreeError> {
         }
     };
 
-    // If stdout is a TTY the shell wrapper is not active — the cd: line would
-    // print raw to the terminal and the directory would never change.
-    if std::io::stdout().is_terminal() {
-        let warn = "\n<red><b>Shell wrapper not active.</b></red> The directory cannot be changed.\n\
-            Run this to activate it, then try again:\n\n\
-            <dim>source <(wt --completions zsh)</dim>\n\n\
-            Add that line to <dim>~/.zshrc</dim> to make it permanent.";
-        eprintln!("{}", Prose::new(warn).render(&terminal));
-        return Ok(());
+    if !crate::env::shell_wrapper_active() {
+        return Err(WorktreeError::BlockedByEnvironment(format!(
+            "\n<red><b>Shell wrapper not active.</b></red> The directory cannot be changed.\n{}",
+            wrapper_setup_help()
+        )));
     }
 
     eprintln!("{}", Prose::new(msg).render(&terminal));
     println!("cd:{}", target.display());
 
     Ok(())
+}
+
+/// How to activate the shell wrapper, for every shell `wt --completions`
+/// supports. Shared by every command that moves the caller's shell.
+pub(crate) fn wrapper_setup_help() -> String {
+    "Run the line for your shell to activate it, then try again:\n\n\
+    <dim>bash</dim>        source <(wt --completions bash)\n\
+    <dim>zsh</dim>         source <(wt --completions zsh)\n\
+    <dim>fish</dim>        wt --completions fish | source\n\
+    <dim>PowerShell</dim>  wt --completions powershell | Out-String | Invoke-Expression\n\n\
+    Add it to your shell's startup file (<dim>~/.bashrc</dim>, <dim>~/.zshrc</dim>, \
+    <dim>config.fish</dim>, or <dim>$PROFILE</dim>) to make it permanent."
+        .to_string()
 }

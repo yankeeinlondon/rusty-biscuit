@@ -412,20 +412,32 @@ impl RemoteRepoProvider for GitLabRemote {
 
         let mut mrs: Vec<PullRequestInfo> = mrs
             .into_iter()
-            .map(|mr| PullRequestInfo {
-                number: mr.iid,
-                title: mr.title,
-                state: mr.state,
-                author: mr.author.username,
-                draft: mr.draft || mr.work_in_progress,
-                source_branch: Some(mr.source_branch),
-                target_branch: Some(mr.target_branch),
-                labels: mr.labels,
-                body: mr.description,
-                created_at: mr.created_at,
-                updated_at: Some(mr.updated_at),
-                merged_at: mr.merged_at,
-                html_url: mr.web_url.unwrap_or_default(),
+            .map(|mr| {
+                let source_repo_is_target = mr
+                    .source_project_id
+                    .zip(mr.target_project_id)
+                    .map(|(source, target)| source == target);
+                PullRequestInfo {
+                    number: mr.iid,
+                    title: mr.title,
+                    state: mr.state,
+                    author: mr.author.username,
+                    draft: mr.draft || mr.work_in_progress,
+                    source_branch: Some(mr.source_branch),
+                    target_branch: Some(mr.target_branch),
+                    labels: mr.labels,
+                    body: mr.description,
+                    created_at: mr.created_at,
+                    updated_at: Some(mr.updated_at),
+                    merged_at: mr.merged_at,
+                    html_url: mr.web_url.unwrap_or_default(),
+                    // The payload names the source project only by ID, so its path
+                    // is known without another request only when it is this project.
+                    source_repo: (source_repo_is_target == Some(true))
+                        .then(|| format!("{owner}/{repo}")),
+                    source_repo_is_target,
+                    source_head_sha: mr.sha.filter(|sha| !sha.is_empty()),
+                }
             })
             .collect();
 

@@ -104,6 +104,7 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | `TmuxHarness` | `tmux` on `$PATH`. Nothing else. |
 | `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
+| `KittyInstance` (macOS) | `can_launch()`: macOS with `kitty`, `open`, `screencapture`. No host Kitty session needed. |
 | `AppleTerminalHarness` | macOS, `CI` not truthy, `osascript` can reach Terminal.app. |
 | `cliclick` (L3, macOS) | `cliclick` on `$PATH` — checks neither platform nor permission. Gate *additionally* on `cliclick::accessibility_trusted()`, which covers both. |
 | `xdotool` (L3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland reports unavailable and skips. |
@@ -166,7 +167,17 @@ export WEZTERM_UNIX_SOCKET="$(ls "$HOME/.local/share/wezterm/gui-sock-"* | head 
 cargo test -p biscuit-terminal-cli --features terminal-tests --test level2 level2_prose_styling::
 ```
 
-Kitty (no daemon; start an instance with remote control):
+Kitty, per test and without any host session: `KittyInstance::launch(cols,
+lines)` (macOS) starts a private Kitty through `open -g` at exactly that
+cell size, never focused, and `screenshot()` captures what it drew via
+`screencapture -l`. Its window is visible (a `--start-as=hidden` window is
+never drawn: black screenshots). `open` hands the pane the test's env, so
+unset the host's `TERM_PROGRAM` before detection-sensitive programs, and
+`get-text` returns soft-wrapped lines whole. Details and the pixel geometry:
+`biscuit-test-harness/README.md`, "A private Kitty per test"; worked example:
+`worktree/cli/tests/level2_graph_in_kitty.rs`.
+
+Kitty against the host's own instance (no daemon; start one with remote control):
 
 ```bash
 kitty -o allow_remote_control=yes --listen-on unix:/tmp/kitty-l2 --start-as=minimized &
