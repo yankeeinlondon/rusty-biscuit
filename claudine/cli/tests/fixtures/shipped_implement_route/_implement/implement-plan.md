@@ -173,6 +173,8 @@ behavior:
 invocation path
 - include a repeated read/write/read round trip when values are persisted
 
+::file "../_input-robustness.md"
+
 A broad test suite passing does not substitute for a targeted regression test.
 Before declaring the phase complete, report the requirement-to-test mapping,
 the exact targeted tests added, the broader gates run, and every skipped or
