@@ -236,10 +236,11 @@ fn level2_list_verbose_renders_with_graph_path_active() {
 /// the only signal `wt` reads before falling back to the host's appearance.
 const DARK_ROW_HIGHLIGHT: Color = Color::Rgb(38, 42, 54);
 const LIGHT_ROW_HIGHLIGHT: Color = Color::Rgb(234, 238, 246);
-/// Dirty dots and the conflict connector (`<orange>`, `<yellow>`, `<red>`).
-const ORANGE: Color = Color::Rgb(255, 165, 0);
+/// Dirty dots, the conflict connector, and the counts (`<yellow>`, `<red>`,
+/// `<green>`). Source dots, `conflicts`, and `-N` share the basic red.
 const YELLOW: Color = Color::Indexed(3);
 const RED: Color = Color::Indexed(1);
+const GREEN: Color = Color::Indexed(2);
 /// A clean child's connector (`<gray-500>`).
 const GRAY: Color = Color::Rgb(106, 114, 130);
 /// Badge backgrounds: local branch, remote branch, and PR.
@@ -254,8 +255,10 @@ const BADGE_TEXT: Color = Color::Indexed(7);
 ///   ahead, so the caption and target header carry badges of both kinds.
 /// - `wt-clash` (`clash`) conflicts with `main` (red connector).
 /// - `wt-docs` (`docs-work`) holds an uncommitted Markdown file (yellow dot).
-/// - `wt-feature` (`feature-test`) holds an uncommitted Rust file (orange
+/// - `wt-feature` (`feature-test`) holds an uncommitted Rust file (red
 ///   dot), has an open PR in the stored answer, and is the current worktree.
+///   Against `origin/main` it is one commit ahead and two behind, so its
+///   target cell carries both counts; `wt-docs` is only behind.
 ///
 /// All three branches have fork-origin records naming `main`, so they hang
 /// from it in the Branch column. The stores live under `home`, which the pane
@@ -403,6 +406,9 @@ impl DesignFixture {
         let mut harness = TmuxHarness::new();
         harness.spawn_shell().expect("spawn_shell failed");
         let harness = &mut harness;
+        // The counts in the comparison cells show only from 100 columns.
+        let cols = harness.pane_cols().expect("pane width");
+        assert!(cols >= 100, "the pane is {cols} columns; the counts need at least 100");
         let bin = cargo_bin("wt").display().to_string();
         let home = self.home.display().to_string();
         let cache = self.home.join("cache").display().to_string();
@@ -484,11 +490,11 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     }
     let [clash, docs, feature] = [base + 1, base + 2, base + 3];
 
-    // Worktree column: dim ring, yellow and orange dots, bold current name.
+    // Worktree column: dim ring, yellow and red dots, bold current name.
     screen.assert_span(base, "○", "dim", |s| s.dim);
     screen.assert_span(base, "base repo", "dim italic", |s| s.dim && s.italic);
     screen.assert_span(docs, "●", "yellow", |s| s.fg_is(YELLOW));
-    screen.assert_span(feature, "●", "orange", |s| s.fg_is(ORANGE));
+    screen.assert_span(feature, "●", "red", |s| s.fg_is(RED));
     screen.assert_span(feature, "wt-feature", "bold", |s| s.bold);
     screen.assert_span(docs, "wt-docs", "not bold", |s| !s.bold);
 
@@ -502,6 +508,22 @@ fn level2_list_styles_follow_the_design_in_tmux() {
 
     // The PR badge.
     screen.assert_span(feature, " PR #99 ", "a PR badge", |s| s.bg_is(PR_BADGE) && s.fg_is(BADGE_TEXT));
+
+    // Counts: `+N` dim green and `-N` dim red after the state word, and before
+    // the PR badge.
+    let feature_text = screen.text(feature);
+    let cells: Vec<&str> = feature_text.split('│').map(str::trim).collect();
+    assert_eq!(cells[3], "clean +1 -2  PR #99", "{feature_text:?}\n{plain}");
+    screen.assert_span(feature, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(feature, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    // Behind only: the zero side is omitted.
+    screen.assert_span(docs, "clean -2 ", "", |_| true);
+    assert!(!screen.text(docs).contains('+'), "{:?}", screen.text(docs));
+    screen.assert_span(docs, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    screen.assert_span(clash, "conflicts +1 -2", "", |_| true);
+    screen.assert_span(clash, "+1", "dim green", |s| s.dim && s.fg_is(GREEN));
+    screen.assert_span(clash, "-2", "dim red", |s| s.dim && s.fg_is(RED));
+    screen.assert_span(clash, "conflicts", "red, not dim", |s| s.fg_is(RED) && !s.dim);
 
     // Row emphasis: every cell of the current row between the borders, and
     // no other row.
@@ -523,12 +545,22 @@ fn level2_list_styles_follow_the_design_in_tmux() {
         );
     }
 
-    // Legend: both dots, and the red conflict connector.
+    // Legend: the dim ring, both dots, and the Branch connectors.
     let legend = screen.row_with(&["Worktree", "uncommitted source files"]);
     screen.assert_span(legend, "○", "dim", |s| s.dim);
     assert!(!plain.contains("PRs as of"), "a fresh answer has no age line:\n{plain}");
     let dots: Vec<_> = screen.rows[legend].iter().filter(|c| c.ch == '●').collect();
-    assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(ORANGE), "{dots:?}");
+    assert!(dots.len() == 2 && dots[0].style.fg_is(YELLOW) && dots[1].style.fg_is(RED), "{dots:?}");
+    let branch_legend = screen.row_with(&["Branch", "conflicts with parent"]);
+    let connectors: Vec<_> = screen.rows[branch_legend].iter().filter(|c| matches!(c.ch, '└' | '├')).collect();
+    assert!(
+        connectors.len() == 3
+            && connectors.iter().all(|c| c.ch == '└')
+            && connectors[0].style.fg_is(GRAY)
+            && connectors[1].style.fg_is(RED)
+            && connectors[2].style.dim,
+        "{connectors:?}"
+    );
 
     // A light background switches the highlight to its light variant.
     let light = fixture.list_in("0;15");
