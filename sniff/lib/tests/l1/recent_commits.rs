@@ -735,8 +735,11 @@ mod attribution {
             .collect()
     }
 
+    /// A file under an area directory but outside every package reports that
+    /// area and no package; before 2026-09-25-recent-commits it reported
+    /// neither.
     #[test]
-    fn monorepo_commits_carry_deepest_package_arrays_and_area_files_stay_unattributed() {
+    fn monorepo_commits_carry_deepest_package_arrays_and_shared_area_files_report_only_their_area() {
         let fixture = monorepo();
 
         let commits = fixture.collect(&RecentCommitsOptions::new()).unwrap();
@@ -745,7 +748,7 @@ mod attribution {
             packages_of(&commits),
             [
                 ("beta and root readme".into(), json!(["beta"]), json!(["crates"])),
-                ("area root file".into(), json!([]), json!([])),
+                ("area root file".into(), json!([]), json!(["crates"])),
                 ("nested only".into(), json!(["nested"]), json!(["crates/alpha"])),
                 (
                     "initial workspace".into(),
@@ -772,7 +775,7 @@ mod attribution {
     }
 
     #[test]
-    fn package_and_area_filters_use_the_same_deepest_owner_as_attribution() {
+    fn package_filters_use_the_deepest_owner_and_area_filters_use_the_attributed_area() {
         let fixture = monorepo();
         let select = |options: RecentCommitsOptions| {
             let commits = fixture.collect(&options).unwrap();
@@ -786,7 +789,7 @@ mod attribution {
         );
         assert_eq!(
             select(RecentCommitsOptions::new().package_area("crates")),
-            ["beta and root readme", "nested only", "initial workspace"]
+            ["beta and root readme", "area root file", "nested only", "initial workspace"]
         );
         assert_eq!(
             select(RecentCommitsOptions::new().package_area("crates/alpha")),
@@ -832,6 +835,150 @@ mod attribution {
         assert!(matches!(error, SniffError::NotAMonorepo(_)), "{error:?}");
     }
 
+    /// Selected areas for `options`, as headings newest first.
+    fn selected(fixture: &Fixture, options: RecentCommitsOptions) -> Vec<String> {
+        let commits = fixture.collect(&options.count(50)).unwrap();
+        headings(&commits).iter().map(|h| h.to_string()).collect()
+    }
+
+    /// `crates/alpha` is both a package directory and the `nested` package's
+    /// area. A file owned by `alpha` stays in `alpha`'s declared area.
+    #[test]
+    fn a_package_owned_file_keeps_its_package_area_even_inside_another_area_directory() {
+        let fixture = monorepo();
+        fixture.write("crates/alpha/README.md", "# alpha\n").commit("alpha readme");
+
+        let commits = fixture.collect(&RecentCommitsOptions::new().count(1)).unwrap();
+
+        assert_eq!(
+            packages_of(&commits),
+            [("alpha readme".into(), json!(["alpha"]), json!(["crates"]))]
+        );
+        assert!(selected(&fixture, RecentCommitsOptions::new().package_area("crates")).contains(&"alpha readme".to_string()));
+        assert!(!selected(&fixture, RecentCommitsOptions::new().package_area("crates/alpha")).contains(&"alpha readme".to_string()));
+    }
+
+    /// An unowned file inside nested areas belongs to the deepest one, every
+    /// time: the resolver must not depend on hash iteration order.
+    #[test]
+    fn unowned_files_in_nested_areas_resolve_to_the_deepest_area_deterministically() {
+        let fixture = Fixture::new();
+        fixture
+            .write("Cargo.toml", "[workspace]\nmembers = [\"apps/tool\", \"apps/web/site\"]\n")
+            .write("apps/tool/Cargo.toml", "[package]\nname = \"tool\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+            .write("apps/tool/src/lib.rs", "pub fn tool() {}\n")
+            .write("apps/web/site/Cargo.toml", "[package]\nname = \"site\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+            .write("apps/web/site/src/lib.rs", "pub fn site() {}\n")
+            .commit("initial apps");
+        fixture.write("apps/web/NOTES.md", "notes\n").commit("web notes");
+        fixture.write("apps/NOTES.md", "notes\n").commit("apps notes");
+
+        for _ in 0..8 {
+            let commits = fixture.collect(&RecentCommitsOptions::new().count(2)).unwrap();
+            assert_eq!(
+                packages_of(&commits),
+                [
+                    ("apps notes".into(), json!([]), json!(["apps"])),
+                    ("web notes".into(), json!([]), json!(["apps/web"])),
+                ]
+            );
+        }
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package_area("apps")),
+            ["apps notes", "web notes", "initial apps"]
+        );
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package_area("APPS/WEB")),
+            ["web notes", "initial apps"]
+        );
+    }
+
+    /// A historical file whose path equals an area directory is beside the
+    /// area, not inside it; neither is a sibling sharing its name as a prefix.
+    #[test]
+    fn a_file_named_like_an_area_directory_or_a_prefix_sibling_is_outside_the_area() {
+        let fixture = Fixture::new();
+        fixture
+            .write("Cargo.toml", "[workspace]\nmembers = [\"other/lib\"]\n")
+            .write("other/lib/Cargo.toml", "[package]\nname = \"other\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+            .write("other/lib/src/lib.rs", "pub fn other() {}\n")
+            .commit("initial workspace");
+        fixture.write("worktree", "a file, not a directory\n").commit("root file named worktree");
+        fixture.write("worktree-other/README.md", "# sibling\n").commit("sibling readme");
+        fixture
+            .remove("worktree")
+            .write("Cargo.toml", "[workspace]\nmembers = [\"other/lib\", \"worktree/lib\"]\n")
+            .write("worktree/lib/Cargo.toml", "[package]\nname = \"worktree\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+            .write("worktree/lib/src/lib.rs", "pub fn worktree() {}\n")
+            .commit("replace file with area");
+
+        let commits = fixture.collect(&RecentCommitsOptions::new()).unwrap();
+        assert_eq!(
+            packages_of(&commits),
+            [
+                ("replace file with area".into(), json!(["worktree"]), json!(["worktree"])),
+                ("sibling readme".into(), json!([]), json!([])),
+                ("root file named worktree".into(), json!([]), json!([])),
+                ("initial workspace".into(), json!(["other"]), json!(["other"])),
+            ]
+        );
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package_area("worktree")),
+            ["replace file with area"]
+        );
+    }
+
+    /// The root area `""` has no directory: only a top-level package's files
+    /// carry it, and a repository-root file stays unattributed.
+    #[test]
+    fn the_empty_root_area_is_reached_only_through_a_top_level_package() {
+        let fixture = Fixture::new();
+        fixture
+            .write("Cargo.toml", "[workspace]\nmembers = [\"tool\", \"crates/lib\"]\n")
+            .write("tool/Cargo.toml", "[package]\nname = \"tool\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+            .write("tool/src/lib.rs", "pub fn tool() {}\n")
+            .write("crates/lib/Cargo.toml", "[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2024\"\n")
+            .write("crates/lib/src/lib.rs", "pub fn lib() {}\n")
+            .commit("initial workspace");
+        fixture.write("tool/src/lib.rs", "pub fn tool() { /* v2 */ }\n").commit("tool change");
+        fixture.write("README.md", "# root\n").commit("root readme");
+        fixture.write("crates/NOTES.md", "notes\n").commit("crates notes");
+
+        let commits = fixture.collect(&RecentCommitsOptions::new()).unwrap();
+        assert_eq!(
+            packages_of(&commits),
+            [
+                ("crates notes".into(), json!([]), json!(["crates"])),
+                ("root readme".into(), json!([]), json!([])),
+                ("tool change".into(), json!(["tool"]), json!([""])),
+                ("initial workspace".into(), json!(["lib", "tool"]), json!(["", "crates"])),
+            ]
+        );
+        assert_eq!(
+            selected(&fixture, RecentCommitsOptions::new().package_area("")),
+            ["tool change", "initial workspace"]
+        );
+    }
+
+    /// Area resolution is lexical against the once-canonicalized root: an
+    /// area filter, which resolves every walked commit's paths, canonicalizes
+    /// no more than an unfiltered collection.
+    #[test]
+    fn area_filtering_adds_no_per_path_canonicalization() {
+        let fixture = monorepo();
+
+        let (unfiltered, unfiltered_counts) = fixture.collect_counted(&RecentCommitsOptions::new().count(50));
+        let (filtered, filtered_counts) =
+            fixture.collect_counted(&RecentCommitsOptions::new().count(50).package_area("crates"));
+        assert_eq!(unfiltered.unwrap().commits().len(), filtered.unwrap().commits().len());
+
+        assert_eq!(
+            counter(&filtered_counts, counters::FS_CANONICALIZATIONS),
+            counter(&unfiltered_counts, counters::FS_CANONICALIZATIONS),
+            "filtered {filtered_counts:?}\nunfiltered {unfiltered_counts:?}"
+        );
+    }
+
     #[test]
     fn attribution_uses_the_structure_tier_without_inventory_language_or_doc_walks() {
         let fixture = monorepo();
@@ -857,6 +1004,183 @@ mod attribution {
         with_current_collector(Some(Arc::clone(&collector)), || detect_repo(fixture.path()).unwrap());
         let full = collector.snapshot(StdDuration::ZERO).counters;
         assert!(counter(&full, counters::REPO_PACKAGE_ENRICHMENTS) > 0, "{full:?}");
+    }
+}
+
+/// The 2026-09-25-recent-commits regression: area membership comes from a
+/// file's location inside the area directory, independently of package
+/// ownership and of conventional-commit scopes.
+mod area_membership {
+    use super::*;
+
+    const PACKAGE: &str = "[package]\nversion = \"0.1.0\"\nedition = \"2024\"\nname = ";
+    const SHARED_DOC: &str = "# Shared\n\nline one\nline two\nline three\nline four\nline five\n";
+
+    /// `worktree/lib` (`worktree`), `worktree/cli` (`worktree-cli`), and
+    /// `other/lib` (`other`), with commits `C0`..=`C13` returned oldest first.
+    fn area_workspace() -> (Fixture, Vec<Oid>) {
+        let fixture = Fixture::new();
+        let mut ids = Vec::new();
+        ids.push(
+            fixture
+                .write("Cargo.toml", "[workspace]\nmembers = [\"worktree/lib\", \"worktree/cli\", \"other/lib\"]\n")
+                .write("worktree/lib/Cargo.toml", format!("{PACKAGE}\"worktree\"\n"))
+                .write("worktree/lib/src/lib.rs", "pub fn worktree() {}\n")
+                .write("worktree/cli/Cargo.toml", format!("{PACKAGE}\"worktree-cli\"\n"))
+                .write("worktree/cli/src/main.rs", "fn main() {}\n")
+                .write("other/lib/Cargo.toml", format!("{PACKAGE}\"other\"\n"))
+                .write("other/lib/src/lib.rs", "pub fn other() {}\n")
+                .write("worktree/README.md", "# worktree\n")
+                .write("worktree/docs/a.md", SHARED_DOC)
+                .commit("chore: initial workspace"),
+        );
+        ids.push(fixture.write("worktree/lib/src/lib.rs", "pub fn worktree() { /* 1 */ }\n").commit("feat(worktree): lib change"));
+        ids.push(fixture.write("other/lib/src/lib.rs", "pub fn other() { /* 2 */ }\n").commit("chore: other change"));
+        ids.push(
+            fixture
+                .write("worktree/fixes/2026-09-25-worktree-file/plan.md", "# plan\n")
+                .write("worktree/fixes/2026-09-25-worktree-file/spec.md", "# spec\n")
+                .commit("planning(worktree): record execution plan for 2026-09-25-worktree-file"),
+        );
+        ids.push(fixture.write(".claude/skills/worktree/SKILL.md", "# skill\n").commit("planning(worktree): skill note"));
+        ids.push(fixture.write("worktree-other/README.md", "# sibling\n").commit("docs: sibling readme"));
+        ids.push(fixture.write("worktree/README.md", "# worktree v2\n").commit("docs: refresh readme"));
+        ids.push(fixture.write("worktree/fixes/2026-09-25-worktree-file/review-1.md", "# review\n").commit("review: first review"));
+        ids.push(fixture.write("worktree/cli/src/main.rs", "fn main() { /* 8 */ }\n").commit("fix(cli): cli change"));
+        ids.push(fixture.write("other/lib/src/lib.rs", "pub fn other() { /* 9 */ }\n").commit("chore: other again"));
+        ids.push(
+            fixture
+                .write("worktree/features/x/spec.md", "# x\n")
+                .write("other/lib/src/lib.rs", "pub fn other() { /* 10 */ }\n")
+                .commit("chore: mixed"),
+        );
+        ids.push(fixture.remove("worktree/docs/a.md").write("docs/a.md", SHARED_DOC).commit("chore: move shared doc"));
+        ids.push(fixture.remove("worktree/fixes/2026-09-25-worktree-file/spec.md").commit("chore: drop spec"));
+        ids.push(fixture.write("other/lib/src/lib.rs", "pub fn other() { /* 13 */ }\n").commit("chore: newest other"));
+        (fixture, ids)
+    }
+
+    fn hashes(commits: &RecentCommits) -> Vec<String> {
+        commits.commits().iter().map(|commit| commit.hash.clone()).collect()
+    }
+
+    fn expected(ids: &[Oid], picks: &[usize]) -> Vec<String> {
+        picks.iter().map(|index| ids[*index].to_string()).collect()
+    }
+
+    fn select(fixture: &Fixture, options: RecentCommitsOptions) -> Vec<String> {
+        hashes(&fixture.collect(&options).unwrap())
+    }
+
+    #[test]
+    fn planning_only_commit_matches_its_area_but_not_its_package() {
+        let (fixture, ids) = area_workspace();
+        let planning = ids[3].to_string();
+
+        let area = select(&fixture, RecentCommitsOptions::new().count(50).package_area("worktree"));
+        let package = select(&fixture, RecentCommitsOptions::new().count(50).package("worktree"));
+
+        assert!(area.contains(&planning), "{area:?}");
+        assert!(!package.contains(&planning), "{package:?}");
+        assert_eq!(package, expected(&ids, &[1, 0]));
+        assert_eq!(
+            select(&fixture, RecentCommitsOptions::new().count(50).package("worktree-cli")),
+            expected(&ids, &[8, 0])
+        );
+    }
+
+    #[test]
+    fn count_is_filled_with_area_matches_across_nonmatching_commits() {
+        let (fixture, ids) = area_workspace();
+
+        let (result, counts) =
+            fixture.collect_counted(&RecentCommitsOptions::new().count(5).package_area("worktree"));
+        let commits = result.unwrap();
+        assert_eq!(hashes(&commits), expected(&ids, &[12, 11, 10, 8, 7]));
+        // The walk resolves the nonmatching C13 and C9 paths without
+        // content-diffing them. The survivors change six files, but C11's
+        // content-identical move needs no content diff, leaving five.
+        assert_eq!(commits.commits().iter().map(|commit| commit.files.len()).sum::<usize>(), 6);
+        assert_eq!(counter(&counts, counters::GIT_FILE_DIFFS), 5, "{counts:?}");
+        assert_eq!(
+            select(&fixture, RecentCommitsOptions::new().count(50).package_area("WORKTREE")),
+            expected(&ids, &[12, 11, 10, 8, 7, 6, 3, 1, 0]),
+            "a count beyond the matches exhausts history; the selector ignores ASCII case"
+        );
+        assert_eq!(
+            select(&fixture, RecentCommitsOptions::new().count(50).package_area("other")),
+            expected(&ids, &[13, 10, 9, 2, 0])
+        );
+    }
+
+    #[test]
+    fn commit_scopes_and_path_name_matches_confer_no_area_membership() {
+        let (fixture, ids) = area_workspace();
+
+        let area = select(&fixture, RecentCommitsOptions::new().count(50).package_area("worktree"));
+        for excluded in [4, 5] {
+            assert!(!area.contains(&ids[excluded].to_string()), "C{excluded} in {area:?}");
+        }
+        assert_eq!(
+            select(&fixture, RecentCommitsOptions::new().count(50).scope("worktree").package_area("worktree")),
+            expected(&ids, &[3, 1]),
+            "the misleading `planning(worktree)` skill commit is excluded by the area, not the scope"
+        );
+    }
+
+    #[test]
+    fn package_and_area_filters_and_together_even_when_different_files_satisfy_them() {
+        let (fixture, ids) = area_workspace();
+
+        assert_eq!(
+            select(&fixture, RecentCommitsOptions::new().count(50).package("other").package_area("worktree")),
+            expected(&ids, &[10, 0])
+        );
+    }
+
+    #[test]
+    fn shared_area_files_are_attributed_to_the_area_and_filtering_keeps_whole_records() {
+        let (fixture, ids) = area_workspace();
+        let unfiltered = fixture.collect(&RecentCommitsOptions::new().count(50)).unwrap().to_json();
+        let by_hash: BTreeMap<String, serde_json::Value> = unfiltered
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|commit| (commit["hash"].as_str().unwrap().to_string(), commit.clone()))
+            .collect();
+        let attribution = |index: usize| {
+            let commit = &by_hash[&ids[index].to_string()];
+            (commit["packages"].clone(), commit["package_areas"].clone())
+        };
+
+        for shared in [3, 6, 7, 11, 12] {
+            assert_eq!(attribution(shared), (json!([]), json!(["worktree"])), "C{shared}");
+        }
+        for outside in [4, 5] {
+            assert_eq!(attribution(outside), (json!([]), json!([])), "C{outside}");
+        }
+        assert_eq!(attribution(1), (json!(["worktree"]), json!(["worktree"])));
+        assert_eq!(attribution(8), (json!(["worktree-cli"]), json!(["worktree"])));
+        assert_eq!(attribution(10), (json!(["other"]), json!(["other", "worktree"])));
+        let mixed_paths: Vec<&str> = by_hash[&ids[10].to_string()]["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|file| file["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(mixed_paths, ["other/lib/src/lib.rs", "worktree/features/x/spec.md"]);
+        let moved = &by_hash[&ids[11].to_string()]["files"];
+        assert_eq!(moved[0]["kind"], "moved", "{moved}");
+        assert_eq!(moved[0]["original_path"], "worktree/docs/a.md", "{moved}");
+
+        let filtered = fixture
+            .collect(&RecentCommitsOptions::new().count(50).package_area("worktree"))
+            .unwrap()
+            .to_json();
+        for commit in filtered.as_array().unwrap() {
+            let hash = commit["hash"].as_str().unwrap();
+            assert_eq!(commit, &by_hash[hash], "filtered record {hash} differs from its unfiltered record");
+        }
     }
 }
 
