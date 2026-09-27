@@ -23,9 +23,10 @@ status: draft-spec
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-26
-review_iterations: 0
+review_iterations: 1
 clarified: false
 implemented: true
+completed: true
 related:
     - 2026-09-25-list-remove-performance
     - 2026-09-24-ux-improvements
