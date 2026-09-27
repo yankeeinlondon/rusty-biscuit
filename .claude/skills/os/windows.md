@@ -24,6 +24,14 @@ helper that resolves it is named so it is not re-derived.
    `canonical_path` that strips the prefix for a drive-qualified path under 260
    characters and leaves a long or UNC one alone. Anywhere else, use
    `biscuit_file`.
+
+   Git for Windows also rejects a verbatim absolute path passed to
+   `ls-files --exclude-from=`. The include resolver uses
+   `biscuit_file::canonicalize_simplified` for that argument. Raw canonical
+   paths remain inside the copy record's identity comparison.
+   `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
+   shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
+   The worktree copy fallback recognizes that form and byte-copies instead.
 2. **`dirs::home_dir()` on Windows uses the known-folder API and ignores
    `USERPROFILE` and `HOME`.** Hermetic test homes silently do not apply, so
    a Windows test reads the machine's real `~/.claudine`. Use
@@ -142,10 +150,10 @@ Compare against that, never against `to_string_lossy()`.
   still passes the *parent's* pipe write ends along, and the parent's
   `.output()` waits for every holder to close. Symptom: Windows-only failure
   whose elapsed time equals some child's timeout while the exit status is
-  success. Fix: `playa::detached::configure_detached_child` clears
+  success. Fix: `sniff::process::configure_detached_child` clears
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
-  detached creation flags (needs `windows-sys` features `Win32_Foundation`
-  and `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+  detached creation flags (`windows` crate features `Win32_Foundation` and
+  `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
 - **`python3` is an App Execution Alias, not an interpreter.** Windows ships a
   stub at `python3.exe` that *spawns successfully* and then exits non-zero with
   "Python was not found; run without arguments to install from the Microsoft
@@ -422,3 +430,25 @@ because overlapping host-network detections fail-fast the test process
 
 A cross-compile is compile evidence. Behavioral evidence comes from
 `just cross-check <pkg> --os windows` or the `windows-latest` CI leg.
+# Worktree include links and junctions
+
+For `.worktreeinclude` traversal, treat any directory with
+`FILE_ATTRIBUTE_REPARSE_POINT` (`0x400`) as a boundary. A native Windows probe
+created a junction whose attributes were `Directory, ReparsePoint`; Git for
+Windows **traversed it** during `ls-files` and returned a file underneath.
+Check every candidate ancestor, not only the final file. A file
+symlink reported `Archive, ReparsePoint`. `std::os::windows::fs::FileTypeExt`
+distinguishes file and directory symlinks, while
+`std::os::windows::fs::MetadataExt::file_attributes()` exposes the reparse bit
+needed to catch junctions too. Check `symlink_metadata` before entering an
+ancestor. The stable Windows metadata API does not expose file index; do not
+use it as a copy-record registration ID.
+
+The native build host allowed `mklink` to create a file symlink, so it does
+not exercise the denial path. A machine without symlink privilege can return
+Win32 `ERROR_PRIVILEGE_NOT_HELD` (1314); match `raw_os_error() == Some(1314)`
+for the warning-and-skip path instead of assuming a particular Rust
+`ErrorKind`. Developer Mode can permit unprivileged creation. Git reused the
+same worktree admin-directory name after remove, prune, and re-add, but removed
+a marker stored inside the old admin directory. See the runnable
+`worktree/fixes/2026-09-25-worktree-file/spike_windows.ps1` probe.

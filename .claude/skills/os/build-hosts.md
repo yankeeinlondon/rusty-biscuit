@@ -246,8 +246,8 @@ On 2026-09-25 the `fix-wt-ux` standing clone on `build-linux` still carried such
 archive mode failed while compiling the release `ci-build` tool
 (`target/release/deps/librenderable-*.rmeta is not writeable`). Passing a build flag
 (`--features image`, `--all-features`) takes the native path, which builds only the debug
-profile, and that ran green. The stale links are still there until someone clears that clone's
-`target/release`.
+profile, and that ran green. The links were still there on 2026-09-26 (same error, same
+workaround), and remain until someone clears that clone's `target/release`.
 
 `unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
 `RUSTC_WRAPPER=""` does (measured 2026-09-21):
