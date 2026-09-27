@@ -2,10 +2,11 @@
 //! caption's remote observation, and the state of the attempt refreshing it.
 //!
 //! `wt list` compares the local default branch with its local tracking ref
-//! `origin/<default>`, which is only as new as the last fetch. This store
-//! records what `origin` last answered for `refs/heads/<default>`, so the
-//! caption can say whether that tracking ref still matched the remote and how
-//! long ago that was checked. Listing only reads it; the detached
+//! `origin/<default>`, which the worker fetches when `origin` differs. This
+//! store records what `origin` last answered for `refs/heads/<default>` and
+//! how the current attempt is going, so the listing can follow its own
+//! attempt to an outcome and, when that attempt has no answer, say when
+//! `origin` last answered. Listing only reads it; the detached
 //! `wt internal-refresh` worker writes it ([`crate::remote_update`]).
 //!
 //! Contracts:
