@@ -25,29 +25,20 @@ reviewed_by: codex/default
 reviewed_on: 2026-09-26
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
 related:
     - 2026-09-25-list-remove-performance
     - 2026-09-24-ux-improvements
 human_review: false
 message_to_agent: |-
-    Phase 4 (integration tests and test migration) is complete; see implementation-log.md "## Phase 4" for the
-    requirement-to-test mapping. No product code changed in Phase 4.
-    For Phase 5:
-    - Drift left for you: docs/dependencies.md (repo root, ~L212) and worktree/docs/performance-testing.md (~L33)
-      still name `wt internal-refresh-prs`. The worktree skill has not yet been updated for the store/worker/caption
-      (Phase 5's skill task); also document the new test helpers there:
-      perf_support::HoldingOrigin (loopback origin that holds git's ls-remote), MixedFixture::with_origin,
-      wt_command_direct (no proxies, no user/system git config), seed_empty_pr_store, isolated_cache_file,
-      and the new real-git test file cli/tests/list_remote_head.rs (bare origin + pusher clone, worker run as a
-      direct child).
-    - Test counts after Phase 4 (macOS): just test 527 passed / 21 skipped; just test-perf 21/21 (the new
-      perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh lives there, not in just test);
-      L2 tmux level2_list_verbose + level2_remove 18/18. Cross-check worktree-cli: Windows 284, WSL2 297;
-      worktree: Windows 211, WSL2 231. build-linux still has the rig permission problem from Phase 2.
-    - Any stored live-head answer >= 60 s old launches a worker from `wt list`; tests asserting "no request/no
-      worker" must seed a fresh answer.
-    - live_remote.rs's test module is now `pub(crate) mod tests` so remote_head tests reuse its Loopback server.
+    All five phases are implemented; the state is "implementation complete, ready for review".
+    Phase 5 changed only docs and `///` comments; see implementation-log.md "## Phase 5" for the
+    drift fixed and the Definition of Done / acceptance walk-through with test names.
+    Notes for a reviewer:
+    - worktree/docs/cli/list.md also described the old caption and was updated, though the plan did not name it.
+    - cargo doc shows 3 rustdoc warnings that come from other work on this branch or main, not this spec
+      (resolve_base_dir, METRICS_MIN_WIDTH, reconfirm_branch).
+    - build-linux was not used in any phase (rig permission problem since Phase 2); WSL2 stood in for Linux.
 ---
 
 # `wt list` caption trusts a stale `origin/<default>`

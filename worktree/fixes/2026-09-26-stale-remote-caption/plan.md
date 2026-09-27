@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: true
 packages:
@@ -77,6 +77,69 @@ docs_updated_during_phase_4:
     - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/list_table.rs
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remove/live_remote.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap
+documentation:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: `wt list` caption trusts a stale `origin/<default>`
@@ -117,16 +180,16 @@ Code locations this plan relies on (verified 2026-09-26):
 
 ### Definition of done
 
-- [ ] `wt list` makes **no** foreground network wait for the live head. A PR miss keeps its existing 300 ms foreground request.
-- [ ] Each comparison sentence names the "local tracking ref". Remote-status text follows the spec's five-row table and uses the PR-age units ("less than 1 min ago", N min, N h, N days).
-- [ ] With no `origin`, neither a comparison nor an observation is shown, even when leftover `origin/*` refs exist.
-- [ ] One `wt list` launches at most one `wt internal-refresh <main>`. The worker's two halves publish independently, and neither suppresses the other.
-- [ ] Failures, deadline expiry, truncated or malformed output, and origin/default changes during a request all leave the previous store bytes unchanged. Only a complete, successful response without the exact ref is stored as absence.
-- [ ] `internal-refresh` is hidden from help and completions. No active code, test, doc, or skill still uses `internal-refresh-prs`. Historical specs are not rewritten.
-- [ ] Removal's deadlines (`LIVE_CHECK_DEADLINE` 3 s, `PUSH_DEADLINE` 30 s) and safety rules are unchanged, and all existing removal tests pass.
-- [ ] `just test` and `just lint` in `worktree/` pass. No detached worker survives any test fixture.
-- [ ] The skill, `docs/performance-testing.md`, and the README describe the store, worker, and caption.
-- [ ] The spec's frontmatter is left for the author. The terminal state is "implementation complete, ready for review".
+- [x] `wt list` makes **no** foreground network wait for the live head. A PR miss keeps its existing 300 ms foreground request.
+- [x] Each comparison sentence names the "local tracking ref". Remote-status text follows the spec's five-row table and uses the PR-age units ("less than 1 min ago", N min, N h, N days).
+- [x] With no `origin`, neither a comparison nor an observation is shown, even when leftover `origin/*` refs exist.
+- [x] One `wt list` launches at most one `wt internal-refresh <main>`. The worker's two halves publish independently, and neither suppresses the other.
+- [x] Failures, deadline expiry, truncated or malformed output, and origin/default changes during a request all leave the previous store bytes unchanged. Only a complete, successful response without the exact ref is stored as absence.
+- [x] `internal-refresh` is hidden from help and completions. No active code, test, doc, or skill still uses `internal-refresh-prs`. Historical specs are not rewritten.
+- [x] Removal's deadlines (`LIVE_CHECK_DEADLINE` 3 s, `PUSH_DEADLINE` 30 s) and safety rules are unchanged, and all existing removal tests pass.
+- [x] `just test` and `just lint` in `worktree/` pass. No detached worker survives any test fixture.
+- [x] The skill, `docs/performance-testing.md`, and the README describe the store, worker, and caption.
+- [x] The spec's frontmatter is left for the author. The terminal state is "implementation complete, ready for review".
 
 ## Phase 1 — Rulings, Spikes, and Baseline
 
@@ -319,20 +382,20 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
 
 ### Wave 1 (parallel)
 
-- [ ] **Skill update** (`.claude/skills/worktree/SKILL.md`)
+- [x] **Skill update** (`.claude/skills/worktree/SKILL.md`)
     - `wt list` section: the `remote_head` store and lock, the `internal-refresh` worker with two concurrent halves, the single launch decision, the caption wording rules, the no-origin suppression, and the new test helpers and cleanup rule.
     - `wt remove` section: the transport path is now `worktree::live_remote`, plus the complete-output contract.
     - Replace every `internal-refresh-prs` and `pr_refresh.rs` reference.
-- [ ] **Docs** (`worktree/docs/performance-testing.md`, the worktree README's `wt list` description)
+- [x] **Docs** (`worktree/docs/performance-testing.md`, the worktree README's `wt list` description)
     - Describe the new stage measurement, the live-head refresh (background only, 10 s deadline), and the caption semantics.
     - Confirm that no new crate was added. If one was, update `docs/dependencies.md` and the area's `docs/dependencies.md`.
 
 ### Wave 2
 
-- [ ] **Drift sweep**
+- [x] **Drift sweep**
     - `grep -rn "internal-refresh-prs\|pr_refresh\|remove::live_remote" worktree .claude` finds matches only under `fixes/_completed/**` and other historical specs.
     - Review `///` and `//!` docs on every changed symbol (`Caption`, `TableFacts`, `caption_markup`, `PrSeams`→`ListSeams`, `run_noninteractive`, `LsRemote`, `default_branch`) for drift, and record any drift that was fixed.
-- [ ] **Final validation**
+- [x] **Final validation**
     - Run `just test` and `just lint` in `worktree/`, and `just test worktree` / `just test worktree-cli` from the root if those recipes apply.
     - Walk through every Definition of Done item and every acceptance criterion (1–7), recording where each is proven (test name) in `implementation-log.md`.
     - Set the log's final state to "implementation complete, ready for review". Do not move the spec to `_completed` and do not commit unless told to.

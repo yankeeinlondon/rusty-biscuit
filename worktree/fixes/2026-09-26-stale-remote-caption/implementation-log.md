@@ -76,6 +76,69 @@ docs_updated_during_phase_4:
     - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/commands/list_table.rs
+docs_updated_during_phase_5:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+source_code:
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remove/live_remote.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/pr_refresh.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap
+documentation:
+    - worktree/README.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/SKILL.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-26-stale-remote-caption (5 phases)
@@ -429,3 +492,67 @@ Findings while writing the tests (test-side only, no product change):
 ### Checkpoint 4
 
 Met: `just test` and `just lint` pass, the L2 runs for `level2_list_verbose` and `level2_remove` pass, no worker lingers, and the optional Windows cross-check was run for both packages.
+
+## Phase 5
+
+Phase 5 covers documentation, drift, and final validation. No behavior changed. The only source edits are to `///` doc comments.
+
+### Documentation
+
+- `.claude/skills/worktree/SKILL.md`, `wt list` section:
+    - New `remote_head` bullet: the store's shape and format, `select_cached_head` states, the refresh lock and its recheck-through-publication rule, `checked_at` taken before the request, the origin/default re-read, the "differs, never moved" rule, and `observation_markup` / `TableFacts::from_list` no-origin suppression.
+    - New live-head test-helper bullet: `HoldingOrigin`, `MixedFixture::with_origin`, `wt_command_direct`, `seed_empty_pr_store`, `isolated_cache_file`, the `ReleaseOnDrop` cleanup rule, `list_remote_head.rs`, and the reuse of `live_remote::tests::Loopback`.
+    - The `wt remove` section already named `worktree::live_remote` and the complete-output contract (Phase 2/3). The worker, launch-decision, and caption bullets were also written in Phase 3.
+- `worktree/docs/cli/list.md`:
+    - The example caption now uses the new wording.
+    - The "Caption" section now covers the local-tracking-ref comparison, the five-row observation table, age units, the no-origin rule, and the background check.
+    - The PR section says the same worker also checks the live head. This file was drifted: it still described the old unqualified caption. The plan did not list it.
+- `worktree/docs/performance-testing.md`:
+    - `internal-refresh-prs` became `internal-refresh`.
+    - The caption bullet now says "local tracking ref".
+    - The `pr gather` stage no longer claims the stale-answer spawn; since Phase 3 that is in `remote select`.
+    - New "Live Remote Head" section: the store, the 10 s background-only request, the single launch decision, the two locks, and the `remote select` stage with its proving tests.
+    - The frontmatter `hash` was refreshed with `md hash`. It was current before the edit.
+- `worktree/README.md`: the `wt list` caption bullet now describes the local tracking ref, the aged observation, the background check, and "no origin, no caption".
+- `docs/dependencies.md` (repo root): the `sysinfo` note now names `wt internal-refresh`.
+- No crate was added in any phase. `git diff main -- '*Cargo.toml' Cargo.lock` shows only the Phase 4 comment change, so no dependency docs needed updating beyond that name.
+
+### Drift sweep
+
+- `grep -rn "internal-refresh-prs\|pr_refresh\|remove::live_remote\|PrSeams\|InternalRefreshPrs" worktree .claude docs` now matches only `fixes/_completed/2026-09-25-list-remove-performance/**` and this spec's own directory, both historical.
+- Doc drift found and fixed (the code is correct; the comments were wrong):
+    - `listing::Caption`: "the one line above the table". The caption is now a wrapped paragraph that also carries the observation. It now says "the comparison that opens the caption above the table".
+    - `live_remote::LIVE_CHECK_DEADLINE` / `PUSH_DEADLINE`: now in a shared module, so they are marked as removal's deadlines, with a link to `REMOTE_HEAD_REFRESH_DEADLINE` for the list refresh. `RemoteHeads`' "tier logic" note now also names the live-head refresh.
+    - `worktree::default_branch`: said "(main or master)", but resolution tries `origin/HEAD` first. It now points to `default_branch_in`.
+    - `list_table::TableFacts`: said "Everything the table shows", but it also feeds the caption, legend, and PR age line.
+- Reviewed with no drift: `caption_markup`, `observation_markup`, `RemoteFacts`, `ListSeams`, `gather_remote`, `run_noninteractive`, `LsRemote`, `refresh_worker` module and `launch`, and `args::InternalRefresh`.
+
+### Final validation
+
+- `just test` (worktree/): **527 passed, 21 skipped, 0 failed**, the same as Phase 4. The skips are the perf-tier and level-2 tests, which run under their own recipes.
+- `just lint` (worktree/): clean.
+- `just test worktree` / `just test worktree-cli` from the root were not run separately. They select the same nextest packages as the area's `just test`, which already covers both.
+- `cargo doc -p worktree -p worktree-cli --no-deps` gives 3 warnings, all pre-existing and from other work on this branch or on main, none added by this spec: `worktree::config::resolve_base_dir` unresolved, `table` → private `METRICS_MIN_WIDTH`, and `run_handoff` → private `reconfirm_branch`. The new links (`REMOTE_HEAD_REFRESH_DEADLINE`, `default_branch_in`, `render`) resolve.
+- Manual smoke test (Checkpoint 3), `NO_COLOR=1 wt list` in this checkout:
+    - The first run shows "main is in sync with local tracking ref origin/main. origin/main matched the remote when checked 33 min ago." That stale answer launches the worker.
+    - 15 s later the same line reads "less than 1 min ago".
+    - `ps` shows no `internal-refresh` process afterwards.
+- Cross-OS: not re-run. This phase changed only comments and Markdown. The Phase 4 Windows and WSL2 cross-checks stand.
+
+### Definition of Done and acceptance walk-through
+
+| Item | Where it is proven |
+|---|---|
+| DoD 1 / Acc. 5: `wt list` makes no foreground wait for the live head; a PR miss keeps its 300 ms request | `list_prs::a_missing_or_stale_live_head_never_holds_up_the_listing`, `perf_pr_request::perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh`, `perf_pr_request::perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh`, `commands::list::tests::a_pr_miss_with_a_fresh_head_requests_in_the_foreground_and_launches_nothing` |
+| DoD 2 / Acc. 3: "local tracking ref" wording, five rows, age units | `list_table::caption_snapshot_*` (6 snapshots), `caption_variants_read_as_ruled`, `only_the_caption_count_is_colored_yellow` |
+| DoD 3: no origin means no comparison or observation | `list_remote_head::without_an_origin_leftover_tracking_refs_show_no_caption_and_start_no_worker`, `list_table` missing-origin case |
+| DoD 4 / Acc. 4: at most one launch; the halves are independent | `commands::list::tests::a_stale_pr_answer_and_a_missing_head_launch_exactly_once`, `a_missing_or_stale_head_launches_without_any_foreground_request`, `a_pr_miss_with_a_fresh_head_requests_in_the_foreground_and_launches_nothing`, `a_pr_miss_settles_before_the_worker_is_launched`; `commands::refresh_worker::tests::the_pr_half_publishes_while_the_head_half_is_blocked`, `a_panicking_half_does_not_stop_the_other`, `a_failing_or_unsupported_pr_half_leaves_the_head_half_publishing`, `the_head_half_publishes_while_the_pr_half_is_blocked` |
+| DoD 5 / Acc. 1 and 6: failures preserve bytes; only complete output proves absence | `remote_head::tests` (freshness boundaries, origin/default change mid-request, contention, `failures_leave_the_previous_bytes_untouched`, `an_unauthorized_origin_fails_fast_and_leaves_the_store_alone`); `live_remote::tests` (`unreadable_or_unfinished_output_is_an_error`, `a_malformed_line_is_an_error_not_an_absent_branch`, `the_deadline_kills_the_http_transport_and_closes_its_connection`, `an_unauthorized_origin_fails_fast_without_a_prompt`) |
+| DoD 6 / Acc. 7: `internal-refresh` is hidden and validates its path; no active `internal-refresh-prs` | `list_prs::the_worker_command_is_hidden_from_help_and_completion`, `list_prs::the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout`, `refresh_worker::tests::only_the_top_level_of_a_main_checkout_is_accepted`; the drift grep above |
+| DoD 7 / Acc. 7: removal deadlines and safety unchanged | `LIVE_CHECK_DEADLINE` 3 s and `PUSH_DEADLINE` 30 s unchanged; `cli/tests/remove.rs`, lib `remove::` suites (in `just test`), `level2_remove` 9/9 (Phase 4) |
+| DoD 8: `just test` and `just lint` pass; no worker survives | this phase's run; `MixedFixture::wait_until_unlocked`, `ReleaseOnDrop`, smoke `ps` check |
+| DoD 9: skill, performance doc, and README updated | this phase (plus `docs/cli/list.md`) |
+| DoD 10: spec left for the author | spec not moved; no commit |
+| Acc. 2: real-Git detection | `list_remote_head::*` (5 tests; see the Phase 4 table) |
+
+**State: implementation complete, ready for review.**
