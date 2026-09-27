@@ -221,13 +221,44 @@ Membership comparison (`lockfile/membership.rs`) is lexical: both sides become
 `/`-separated paths relative to the layer root, the root is excluded from both
 sets, `..` resolves against the format's base, and no lockfile path is ever
 opened or canonicalized. Do not intersect lockfile paths with manifest members
-first; that erases `extra`. A layer with no matching detector outcome, or a
-member whose identity cannot be resolved, is `incomplete_manifest_discovery`.
+first; that erases `extra`. A layer is `incomplete_manifest_discovery` (R10)
+when it has no matching detector outcome, when the outcome's `incomplete` flag
+is set, or when a member's own manifest is missing or fails to parse (Cargo:
+its identity cannot be resolved). The flag comes from `glob.rs`'s
+`MembershipExpansion`: a dropped unsupported or unparseable pattern, a walk
+failure under a glob's walk root (the shared walk records its failures in
+`manifest_walk_errors`), or, for Cargo and Rush only, a declared literal
+member that does not exist. The Node tools and uv expand literals as globs, so
+a missing one matches nothing. Detectors also set it when a declared member
+entry is not a string, or when a present member field is not a list at all
+(`DeclaredPatterns::has_invalid`, `DeclaredPatterns::invalid()`: Cargo
+`members` and `exclude`, uv `members`, pnpm `packages`, `package.json`
+`workspaces` in both forms, Rush `projects` and a project without a string
+`projectFolder`); never filter such an entry out silently, and keep the layer
+even when every entry is invalid or the field has the wrong type. An absent
+field, a null pnpm `packages`/`package.json` `workspaces`, and the object form
+without a `packages` key still declare nothing. The npm lockfile parser is
+stricter: its root-record `workspaces: null`, and `resolved: null` on a
+`link: true` record, are `unreadable` + `parse_failed`, because only an
+omitted field means "no locked declarations" or "no link target". An explicit uv `members = []` still forms a
+root-only layer (empty sets can `match`); only an absent `members` array forms
+none. A uv layer lists its root among `packages`, so
+`membership_resolves_non_degenerately` treats one uv package as degenerate and
+the root-only workspace is not a monorepo. Incompleteness blocks only the comparison
+step; every earlier status wins. Nested dispatch treats a malformed
+`package.json` as no npm/Yarn/Bun root (`ManifestStore::npm_unless_malformed`),
+so a malformed member reaches its layer's corroboration as incomplete; a
+malformed workspace root manifest, or an unreadable one anywhere, still fails
+detection.
 
 Standalone Poetry, PDM, and Composer lockfiles are repository-level
 `RepoInfo.standalone_lockfiles` entries (`lockfile/standalone.rs`), never
 layers: one probe per tool at the repository root and each unique package
-root, no walk, no read, and no entry for an absent file.
+root, no walk, no read, and no entry for an absent file. A single-package root
+reaches the probe only through root-package synthesis
+(`synthesize_root_package_repo_with_store`), which accepts a lone
+`composer.json` as well as the `PackageEcosystem` markers; filesystem
+detection synthesizes only when the repo request carries `details`.
 
 `bun.lock`, `rush.json`, and Rush configuration are JSON with comments. Parse
 them only through `filesystem::repo::jsonc::from_str` (strict `jsonc-parser`

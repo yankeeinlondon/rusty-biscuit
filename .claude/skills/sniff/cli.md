@@ -130,7 +130,10 @@ it when empty, as `RepoInfo` omits empty `monorepo_layers`. Every CLI site
 that serializes a `RepoInfo` (directly or inside `sniff --json` /
 `sniff filesystem --json`) goes through `repo_json::repo_info_value` or
 `repo_json::omit_empty_standalone_lockfiles`; a new site must too. The bare
-aggregate's `structure` always carries both lists. Human output renders both
+aggregate's `structure` always carries both lists. `repo structure` adds
+`RepoDetailRequest::all()` to its full request solely so a single-package
+root (PHP-only included) has a `RepoInfo` whose standalone lockfile it can
+show. Human output renders both
 in a "Lockfiles" section (`output/filesystem/lockfile.rs`) that only projects
 library observations. Every CLI command that displays layers corroborates, so
 none shows `not_requested`; there is no flag to toggle corroboration.
