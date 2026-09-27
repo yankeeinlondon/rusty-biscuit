@@ -173,6 +173,17 @@ belong here.
 - Under zsh, prefer `git cat-file -p "${rev}":path` over `git show "$rev:$path"`
   (`:` after a parameter is parsed as a modifier), and avoid the variable
   names `status` and `path`.
+- zsh does NOT word-split unquoted parameter expansions, so a multi-path
+  invocation from a zsh shell collapses to a single argument and dies with
+  `pathspec '<space-joined paths>' did not match any file(s) known to git`.
+  Constructing the paths list via `PATHS=$(cat paths.txt | tr '\n' ' ')` and
+  passing `git commit --only -F msg -- $PATHS` directly fails for the same
+  reason — zsh sees one space-joined string, not N separate paths. Fix by
+  invoking through `bash -c "git commit --only -F msg -- $PATHS"` so bash's
+  word-splitting handles the expansion; the message file path stays outside
+  the bash subshell (passed verbatim to git), and the working directory is
+  inherited. The OpenCode bash tool defaults to zsh on macOS hosts, so this
+  trap fires on every multi-path commit dispatched from this monorepo.
 
 - A staged `R` is display-time similarity, not an index fact: the index holds
   an independent `D` + `A`, `git ls-files -s <new>` hides the old path's `D`,
