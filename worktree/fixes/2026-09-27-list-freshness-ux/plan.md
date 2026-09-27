@@ -478,7 +478,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - each is rejected with `create`, `go`, and `remove` (exit 2);
         - help lists them;
         - the completion snapshot is updated in `cli/tests/wrapper_protocol.rs` or wherever it lives (not a unit snapshot; see the skill's twin-target note).
-- [ ] **Fast-forward** (`worktree/lib/src/fast_forward.rs`)
+- [x] **Fast-forward** (`worktree/lib/src/fast_forward.rs`)
     - `fast_forward_default(main, default) -> FfResult` implements the spec's §9 table:
         - it re-reads both refs and verifies ancestry immediately before the move;
         - when the default branch is not checked out, it runs `update-ref refs/heads/<d> <new> <old>`;
@@ -492,7 +492,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - the branch moved to another worktree → re-resolved, or refused;
         - diverged, in sync, and ahead → no change;
         - a missing default branch or tracking ref → names the missing ref, and nothing is created.
-- [ ] **Rendering** (`worktree/cli/src/commands/list_table.rs`, `cli/tests/list_table.rs`, snapshots)
+- [x] **Rendering** (`worktree/cli/src/commands/list_table.rs`, `cli/tests/list_table.rs`, snapshots)
     - Implement Rule 16:
         - one-sentence captions without "local tracking ref";
         - a dim italic suffix;
@@ -510,7 +510,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - every §5 row × four provider names, asserting that no variable value appears;
         - the hint/notice/suggestion placement with and without a graph and with `--verbose`.
     - Replace the old caption snapshots rather than keeping both.
-- [ ] **Wait and spinner** (`worktree/cli/src/commands/list/wait.rs`)
+- [x] **Wait and spinner** (`worktree/cli/src/commands/list/wait.rs`)
     - Implement Rule 6 over `ListSeams`: launch, adopt, poll, the budget, and `try_wait` early exit. The spinner (Rule 17) starts only when stderr is a terminal, and its text follows the phase.
     - Unit tests with a stub launcher, a fake clock, and a scripted store:
         - ours → outcome;
