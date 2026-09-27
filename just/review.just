@@ -388,12 +388,13 @@ review-loop spec agent max="5" design="":
         claudine compose "@prompts/implement-feature-review-suggestions.md" -y --${use_agent} dir="${dir}" spec="${spec_name}" design="${design_name}" iteration="${iteration}"
     done
 
-# Run the review-loop sequence (prompts/review-loop.md): review -> repair -> commit until ready or a recurring finding class
-review-sequence spec agent:
+# Run the review-loop sequence (prompts/review-loop.md): reviews under codex, implementation and repairs under claude
+review-sequence spec:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! -f "{{ spec }}" ]]; then
         echo -e "{{ red }}ERROR:{{ reset }} Spec file not found: {{ spec }}" >&2
         exit 1
     fi
-    claudine sequence "@prompts/review-loop.md" -y spec="{{ spec }}" agent="{{ agent }}" --{{ agent }}
+    # No --<provider> flag: each step selects its own agent through params.
+    claudine sequence "@prompts/review-loop.md" -y spec="{{ spec }}"
