@@ -977,7 +977,8 @@ fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
 }
 
 /// [`create_cli_monorepo`] plus a committed `Cargo.lock` that names both
-/// members, so a corroborating request reports lockfile provenance.
+/// members, so a corroborating request reports `members_present` subset
+/// evidence (Cargo never upgrades provenance).
 fn create_cli_monorepo_with_matching_cargo_lock() -> (tempfile::TempDir, PathBuf) {
     let (dir, path) = create_cli_monorepo();
     test_commit_file(

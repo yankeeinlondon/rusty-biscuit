@@ -148,6 +148,11 @@ All constructors return a builder, so you can further adjust with methods like `
 and file lists empty. Callers that need only one manifest-backed fact can use
 `RepoRequest::focused(RepoDetailRequest::…)` without enabling the inventory-backed work in `full()`.
 
+Lockfile corroboration is a separate switch: `full()` enables it, `structure()` and `focused(..)`
+disable it, and `with_lockfile_provenance(bool)` overrides any tier. A serialized request without
+the `lockfile_provenance` field keeps the legacy behavior and corroborates. See
+[Lockfile Corroboration](#lockfile-corroboration).
+
 ### FilesystemRequest
 
 Composes sub-requests for git, repo, file inventory, formatting, and document discovery. Each sub-domain can be individually included or excluded.
@@ -248,6 +253,39 @@ boundary in, because Cargo `version.workspace = true`, npm's root-version fallba
 resolution all resolve against the owning workspace's root — not the repo root. Only `relative` and
 `package_area` are re-framed to the repo-root catalog view. A nested Cargo workspace enriched
 against the outer root would report the wrong inherited versions.
+
+### Lockfile Corroboration
+
+After layers are built, each one gets a `LockfileObservation` (`repo/lockfile/`) that compares the
+authority's lockfile with the manifest-derived member set. The manifest stays the membership
+authority: the observation never adds or removes packages. The only side effect is provenance, and
+only an exact `match` upgrades a layer and the seeds it owns to `PackageProvenance::Lockfile`.
+Cargo reports `members_present` / `members_missing` instead, because `Cargo.lock` cannot
+distinguish workspace members from other local crates, and never upgrades provenance. The library
+README documents the wire vocabulary; this section covers how the work is shaped.
+
+- **One source table.** `lockfile::sources::source` maps every `MonorepoStandard` to either
+  candidate files in precedence order, a metadata-only fallback (Go, Gradle, Bazel), Rush's
+  configuration-selected lockfile, or `not_applicable`. Only the first present candidate is
+  selected, and a lower-priority file is never tried after the selected one fails.
+- **Precedence of outcomes.** No source, then metadata failure, then absence, then a request that
+  declines corroboration (`not_requested`), then metadata-only fallback (`unverifiable`), then a
+  parse. The first four never open the file.
+- **Request-scoped cache.** `ManifestStore::lockfile_presence` probes each path once per request,
+  and `ManifestStore::lockfile` reads and parses a selected file at most once, caching typed
+  failures (absent, metadata, read, parse) as well as successes. `Cargo.lock` has one shared parse
+  that serves both dependency-version enrichment and corroboration. Nothing is cached across
+  requests, so an edited lockfile is always seen.
+- **Standalone lockfiles.** Poetry, PDM, and Composer have no workspace authority, so their
+  lockfiles are reported beside the layers in `RepoInfo.standalone_lockfiles` from one metadata
+  probe per tool at the repository root and each discovered package root. They are never read.
+- **JSON with comments.** `bun.lock`, `rush.json`, and Rush's other configuration files go through
+  `repo::jsonc::from_str` only, which allows comments and trailing commas and nothing else looser
+  than JSON. `serde_json` rejects them; `jsonc-parser`'s defaults accept too much.
+
+Presence probes run even when corroboration is declined, a deliberate bounded cost that adds no
+walk. `filesystem.repo.lockfile_probes` counts them; `filesystem.repo.lockfile_reads` and
+`filesystem.repo.lockfile_parses` stay at zero for a structure request.
 
 ### File Inventory Projection
 

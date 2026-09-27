@@ -63,8 +63,10 @@ pub const REPO_MANIFEST_PARSES: &str = "filesystem.repo.manifest_parses";
 
 /// Unique lockfile paths whose presence was probed (one metadata probe each).
 ///
-/// Every layer's lockfile candidates are probed, even when the request
-/// declines corroboration.
+/// Probes run even when the request declines corroboration: each layer's
+/// candidates in precedence order until one is present, plus `composer.lock`,
+/// `pdm.lock`, and `poetry.lock` at the repository root and every unique
+/// package root.
 pub const REPO_LOCKFILE_PROBES: &str = "filesystem.repo.lockfile_probes";
 
 /// Lockfile content-read attempts.

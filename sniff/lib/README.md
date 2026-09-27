@@ -637,6 +637,8 @@ Detects monorepo standards, package structure, and acting binaries.
 - `RepoInfo` - Repository metadata and packages
 - `MonorepoStandard` - Standard-based monorepo descriptor
 - `MonorepoLayer` - One membership layer: authority + orchestrators + packages
+- `LockfileObservation` - What a layer's lockfile says about its members (`LockfileStatus` + `LockfileReason`)
+- `StandaloneLockfileObservation` - A Poetry, PDM, or Composer lockfile outside any workspace layer
 - `DetectedStandard` - A matched standard with its resolved binary and confidence
 - `Package` - Package path, languages, managers, dependencies
 - `DependencyEntry` - Dependency with version requirements
@@ -678,12 +680,87 @@ if let Some(info) = repo {
 
 **Topology JSON:**
 
-When `RepoInfo` is serialized, the new keys appear only when populated:
+When `RepoInfo` is serialized, `monorepo_standards` and `monorepo_layers` appear only when populated; `standalone_lockfiles` is always present:
 
 - `monorepo_standards` — array of detected standards with resolved binary metadata.
-- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, `packages`, and a required `lockfile` object (`status`, `paths`, `reason`, `extra`, `missing`). **Breaking:** `lockfile` replaces the removed `lockfile_match`; result JSON without it no longer deserializes.
-  Lockfile corroboration runs only when the `RepoRequest` asks for it: `RepoRequest::full()` and `detect_repo` do; `RepoRequest::structure()`, `RepoRequest::focused(..)`, and `detect_repo_structure` only probe whether the lockfile exists, report a present one as `not_requested`, and keep manifest-derived provenance. Opt in with `RepoRequest::with_lockfile_provenance(true)`. Member paths compare relative to the layer root, with the root excluded. Only an exact `match` upgrades provenance to `lockfile`; Cargo reports `members_present`/`members_missing` subset evidence and never upgrades it.
+- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, `packages`, and a required `lockfile` object (`status`, `paths`, `reason`, `extra`, `missing`). **Breaking:** `lockfile` replaces the removed `lockfile_match`; result JSON without it no longer deserializes. See [Lockfile Corroboration](#lockfile-corroboration) below.
 - `standalone_lockfiles` — always present (`[]` when empty). One entry per `poetry.lock`, `pdm.lock`, or `composer.lock` found at the repository root or a discovered package root, with `root` (repository-relative, `""` for the root), `tool` (`poetry`, `pdm`, `composer`), and the same five fields as a layer's `lockfile`. These files are never read: an entry is `not_requested` when corroboration is declined, `unverifiable` + `no_membership_data` otherwise, and `unreadable` + `metadata_failed` when the probe fails. An absent file produces no entry.
+
+#### Lockfile Corroboration
+
+A workspace manifest says which packages *should* be members; the lockfile records which members the package manager last resolved. Comparing the two catches a stale lockfile, and an exact agreement is stronger evidence of membership than the manifest alone. The manifest stays the membership authority: reading a lockfile never adds or removes packages or changes which layer owns them. Sniff reads the lockfile as it exists in the working tree, uncommitted edits included, and never runs a package manager, reads Git blobs, or searches below the layer root for lockfiles.
+
+> **Breaking change:** `MonorepoLayer::lockfile_match: Option<bool>` has been removed with no deprecation period. It was `None` both when Sniff never checked an ecosystem and when the lockfile was absent or unparseable, so a consumer could not tell "not supported" from "your lockfile is missing". The required `MonorepoLayer::lockfile: LockfileObservation` replaces it and is always serialized. `RepoInfo` JSON written before the change fails to deserialize by design; `RepoRequest` JSON is unaffected.
+
+A pnpm lockfile that omits one current member reports:
+
+```json
+{
+  "status": "mismatch",
+  "paths": ["pnpm-lock.yaml"],
+  "reason": null,
+  "extra": [],
+  "missing": ["packages/ui"]
+}
+```
+
+| Field | Contract |
+|---|---|
+| `status` | One of the statuses below |
+| `paths` | Sorted lockfile paths relative to the layer root; `[]` when none is known to exist. Only the selected file appears: `npm-shrinkwrap.json` beats `package-lock.json` and `bun.lock` beats `bun.lockb`. Legacy Gradle is the one multi-file group |
+| `reason` | One of the reasons below; `null` for `match`, `mismatch`, and `absent` |
+| `extra` | Sorted member paths only the lockfile records; `[]` unless `mismatch` |
+| `missing` | Sorted member paths only the manifest declares; `[]` unless `mismatch` or `members_missing` |
+
+The `status` and `reason` values are a frozen snake_case wire vocabulary:
+
+| Status | Meaning |
+|---|---|
+| `match` | The lockfile's complete member set equals the manifest-derived set |
+| `mismatch` | The lockfile's complete member set differs; `extra` and `missing` say how |
+| `members_present` | Cargo only: every manifest member has a matching `Cargo.lock` entry; set equality is not claimed |
+| `members_missing` | Cargo only: at least one manifest member has no matching `Cargo.lock` entry |
+| `unverifiable` | The file or configuration cannot establish a complete member set |
+| `unreadable` | A metadata probe, read, or supported-format parse failed |
+| `absent` | Every applicable candidate was probed and is missing |
+| `not_applicable` | The authority has no applicable lockfile source |
+| `not_requested` | A candidate exists, but the request declined corroboration |
+
+| Reason | Used with |
+|---|---|
+| `request_disabled` | `not_requested` |
+| `no_lockfile_source` | `not_applicable`: the authority writes no membership lockfile |
+| `unknown_standard` | `not_applicable`: no known membership authority |
+| `unsupported_version` | `unverifiable`: a recognized lockfile version outside the accepted set |
+| `unsupported_layout` | `unverifiable`: a configuration Sniff does not compare (for example, Rush with subspaces) |
+| `no_membership_data` | `unverifiable`: the format records dependencies, not members (fallback formats and binary `bun.lockb`) |
+| `ambiguous_membership` | `unverifiable`: a member name maps to no local package path, or to more than one |
+| `incomplete_manifest_discovery` | `unverifiable`: the manifest-derived member set is not known to be complete |
+| `invalid_member_path` | `unverifiable`: an absolute or unrepresentable member path |
+| `metadata_failed` | `unreadable` |
+| `read_failed` | `unreadable`, including a directory where a file is expected |
+| `parse_failed` | `unreadable`: invalid syntax or invalid required membership fields |
+| `subset_only` | `members_present` and `members_missing`, so neither reads as equality |
+
+Each authority uses a fixed set of candidate files at its layer root:
+
+| Authority | Lockfile | With corroboration on |
+|---|---|---|
+| pnpm, npm, Yarn, Bun, uv | `pnpm-lock.yaml`, `npm-shrinkwrap.json` / `package-lock.json`, `yarn.lock`, `bun.lock` / `bun.lockb`, `uv.lock` | Compared: `match` or `mismatch` for accepted versions. Other versions, including npm v1 and Yarn Classic, are `unverifiable` + `unsupported_version`; binary `bun.lockb` is `unverifiable` + `no_membership_data` |
+| Cargo | `Cargo.lock` | `members_present` or `members_missing` |
+| Rush | Selected by `rush.json` | Compared only for the ordinary single pnpm workspace layout; every other layout is `unverifiable` + `unsupported_layout` |
+| Go, Gradle, Bazel (Bzlmod) | `go.work.sum`, `gradle.lockfile` or `gradle/dependency-locks/*.lockfile`, `MODULE.bazel.lock` | `unverifiable` + `no_membership_data`, from metadata alone |
+| Maven, .NET, Pants, Buck2 | None | `not_applicable` + `no_lockfile_source` |
+
+Nx, Turborepo, and Lerna never own a layer, so the underlying membership authority supplies the observation.
+
+**Comparison.** Member paths are compared relative to the layer root with `/` separators, and the root itself is excluded from both sets. A uv project whose root is also a package therefore compares only its other members; the root package stays in `RepoInfo.packages`. Paths are normalized lexically, never through the filesystem, so a stale member that no longer exists still shows up in `extra`.
+
+**Cargo.** `Cargo.lock` records packages, not workspace paths, and local crates outside the workspace are also recorded without a `source`, so exact membership cannot be recovered. A member counts as present when a `[[package]]` entry has its name, its resolved manifest version (including `version.workspace = true`), and no `source`. `extra` is always `[]`: extra lockfile entries, whether stale members or unrelated local crates, are invisible. `missing` lists the members with no matching entry. A directory listed in `[workspace].exclude` is not a member, even when a `members` glob also matches it, so it is never reported as missing.
+
+**Provenance.** Only an exact `match` upgrades the layer, and the packages that layer owns, to `lockfile` provenance. Every other status, including Cargo's `members_present`, keeps the manifest-derived provenance. A package owned by a different, nested layer keeps its own provenance.
+
+**Request cost.** Corroboration runs only when the `RepoRequest` asks for it: `RepoRequest::full()` and `detect_repo` do; `RepoRequest::structure()`, `RepoRequest::focused(..)`, and `detect_repo_structure` do not. Opt in or out on any tier with `RepoRequest::with_lockfile_provenance(bool)`. Without corroboration, Sniff still probes whether each candidate exists but reads none, so a present lockfile reports `not_requested`. With it, each selected file is read and parsed at most once per request, even when several layers or dependency-version enrichment use it.
 
 #### Language Analysis
 
@@ -1056,6 +1133,7 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 | `gix` | =0.84.0 | Pure-Rust Git repository inspection (status, diff, history, refs, remotes, config, worktrees) |
 | `biscuit-hash` | workspace | xxHash content hashing for document fingerprinting |
 | `biscuit-file` | workspace | TOML/YAML file parsing |
+| `jsonc-parser` | 0.33.2 | Strict JSON-with-comments parsing for `bun.lock` and Rush configuration |
 | `getifaddrs` | 0.6 | Network interface enumeration |
 | `hyperpolyglot` | 0.1 | Language detection |
 | `rayon` | 1.11 | Parallel iteration for program detection |
