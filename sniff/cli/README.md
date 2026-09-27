@@ -488,7 +488,7 @@ table summarises the contract; see the per-subcommand docs under
 | Subcommand | JSON shape |
 |---|---|
 | `repo` (bare, `--json`) | Consolidated `SniffRepo` aggregate with snake_case keys, grouped `context`, top-level `branches`/`worktrees`, and `dirty`/`staged`/`unstaged`/`untracked` scope buckets; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
-| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo; layers are corroborated against their lockfiles (`provenance`, `lockfile_match`), as in bare `repo --json`. Commands that run the structure tier read no lockfile for this. |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo; each layer carries a `lockfile` object (which replaces the removed `lockfile_match`) and is corroborated against its lockfile, as in bare `repo --json`. Commands that run the structure tier read no lockfile for this. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
 | `repo is-monorepo` | `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |

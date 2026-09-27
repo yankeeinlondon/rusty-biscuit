@@ -681,8 +681,8 @@ if let Some(info) = repo {
 When `RepoInfo` is serialized, the new keys appear only when populated:
 
 - `monorepo_standards` — array of detected standards with resolved binary metadata.
-- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, `packages`, and, when a lockfile answered, `lockfile_match`.
-  Lockfile corroboration (`provenance: "lockfile"`, `lockfile_match`) runs only when the `RepoRequest` asks for it: `RepoRequest::full()` and `detect_repo` do; `RepoRequest::structure()`, `RepoRequest::focused(..)`, and `detect_repo_structure` read no lockfile for it and report manifest-derived provenance. Opt in with `RepoRequest::with_lockfile_provenance(true)`.
+- `monorepo_layers` — array of layers, each with `authority`, `orchestrators`, `provenance`, `packages`, and a required `lockfile` object (`status`, `paths`, `reason`, `extra`, `missing`). **Breaking:** `lockfile` replaces the removed `lockfile_match`; result JSON without it no longer deserializes.
+  Lockfile corroboration runs only when the `RepoRequest` asks for it: `RepoRequest::full()` and `detect_repo` do; `RepoRequest::structure()`, `RepoRequest::focused(..)`, and `detect_repo_structure` only probe whether the lockfile exists, report a present one as `not_requested`, and keep manifest-derived provenance. Opt in with `RepoRequest::with_lockfile_provenance(true)`. Member paths compare relative to the layer root, with the root excluded. Only an exact `match` upgrades provenance to `lockfile`; Cargo reports `members_present`/`members_missing` subset evidence and never upgrades it.
 
 #### Language Analysis
 
