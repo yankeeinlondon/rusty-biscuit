@@ -281,7 +281,8 @@ fn every_cell_kind_renders_as_ruled() {
     assert!(dark.contains("│  └─ feat/dark-fixes"), "{dark}");
     assert!(dark.contains("conflicts"), "{dark}");
 
-    assert!(row(&rendered, "chore/old-cleanup").contains("already in"));
+    let old_cleanup = row(&rendered, "chore/old-cleanup");
+    assert!(old_cleanup.contains("clean") && !old_cleanup.contains("already in"), "{old_cleanup}");
 
     let deleted = row(&rendered, "experiments");
     assert!(deleted.contains("experiments (deleted)"));

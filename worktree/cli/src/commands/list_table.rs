@@ -330,7 +330,6 @@ fn with_badges(cell: String, badges: String) -> String {
 
 fn merge_markup(comparison: Comparison) -> String {
     match comparison.merge_state() {
-        MergeState::AlreadyIn => "<dim><i>already in</i></dim>".to_string(),
         MergeState::Clean => "<dim><i>clean</i></dim>".to_string(),
         MergeState::Conflicts => "<red>conflicts</red>".to_string(),
     }

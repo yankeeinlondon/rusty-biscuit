@@ -12,7 +12,7 @@ expression: "plain(&Example::new())"
 │ ● fix-wt-ux       │ ├─ fix/wt-ux                     │ clean  PR #99    │ —                   │
 │ ● feat-theme      │ ├─ feat/theme                    │ clean            │ —                   │
 │ ○ feat-dark-fixes │ │  └─ feat/dark-fixes            │ clean            │ conflicts  PR #104  │
-│ ○ old-cleanup     │ └─ chore/old-cleanup             │ already in       │ —                   │
+│ ○ old-cleanup     │ └─ chore/old-cleanup             │ clean            │ —                   │
 │ ○ release-prep    │ release/prep  PR #7 → release/2  │ clean            │ —                   │
 │                   │ experiments (deleted)            │                  │                     │
 │ ● spike-parser    │ └┄ spike/parser                  │ conflicts        │ parent deleted      │
