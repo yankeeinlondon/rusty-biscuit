@@ -462,6 +462,27 @@ belong here.
   Contrast with the existing 5-file consolidation at `4616e9aec`, where
   the superseded specs were already tracked at HEAD and only their
   `status:` flipped.
+- A cross-package-area spec consolidation where BOTH specs already exist
+  at HEAD — only their frontmatter cross-references change — splits
+  safely into per-area commits, even though the same-area multi-spec
+  consolidation rule above is one atomic commit. The test is whether
+  the cross-references resolve at HEAD (or in a prior commit) vs within
+  the commit's tree: the new spec's `supersedes:` references paths
+  tracked at HEAD (the old spec exists), so its commit is
+  self-contained; the old spec's `consolidated-into:` references a path
+  that exists in a prior commit (the new spec ships first). Distinct
+  from the supersede-banner rule above (NEW files where neither path
+  exists at HEAD) and from the cross-area enum-variant coupling rule in
+  Concurrency (must compile atomically, drop scope). Apply only when the
+  OLD side has no structural references — markdown links, frontmatter
+  cross-references — to the NEW side's new annexes; prose mentions of
+  annex filenames are fine because they don't break link checkers, but a
+  `[text](../path.md)` link from the OLD side forces that commit to
+  land after the annex does. Verified with `8a9bd7a9e` (claudine
+  `consolidated-into:` back-pointer) following `78eb141d1` (darkmatter
+  consolidation with new annexes `function-contracts.md`,
+  `number-contract.md`, `catalog-audit.md`) for the cross-area,
+  both-exist-at-HEAD shape.
 - `planning(<area>): close <fix> as invalidated` is distinct from
     `close <fix>` (completed/implemented) or `close <fix> with <deferral>`
     (`773bbac93`). The diff adds `status: invalidated` + `reviewed_on:
@@ -1311,4 +1332,59 @@ belong here.
     "cycle close into _completed/ is valid even when the moved spec
     still shows `implemented: false`" rule governs the canonical
     pattern; this entry governs the deferred-move variant.
+- A phase-based fix's **terminal** close (Phase N of N) transforms spec.md
+    in a way the canonical "mid-phase close rewrites message_to_agent"
+    rule does not cover. Because there is no Phase N+1, `message_to_agent`
+    is REMOVED entirely rather than rewritten — its forward-pointing
+    narrative is folded into the `## Phase N` block of
+    implementation-log.md, and spec.md's frontmatter gains
+    `status: implemented`, `implemented: true`, and `implemented_by: <agent>`.
+    plan.md gains the matching `completed_phase: "<N>"` and
+    `implemented: true`. Earlier phases that DID point at later work kept
+    `message_to_agent` and appended to it (Phase 4 of
+    2026-09-25-worktree-file ended with "Phase 5 still owns ..."); the
+    terminal Phase 5 removed it because the hand-off was complete. See
+    `ed0db5743` for the 2026-09-25-worktree-file Phase 5 of 5 close.
+- A phase-based terminal close can keep `message_to_agent` (rewritten
+    for reviewer notes) and leave `status:` unchanged (still
+    `draft-spec`) when the author reserves both the spec status
+    transition AND the directory move. The canonical terminal close
+    removes `message_to_agent` and sets `status: implemented`; this
+    variant signals "implementation complete, awaiting review" without
+    claiming the spec has reached its terminal-implemented status. The
+    new `message_to_agent` body carries reviewer notes (e.g. "Run
+    perf gates serially only", "Phase 4 had no log section of its own
+    (commits X, Y, Z)"), not the forward-pointing phase narrative the
+    canonical rule expects to fold into `## Phase N`. `implemented:
+    true` IS set on spec.md (work landed) and `completed_phase: "<N>"`
+    plus `implemented: true` are set on plan.md (implementation
+    signal); only `status:` and the move are author-controlled. The
+    spec body explicitly says "The spec status is still draft-spec;
+    this phase did not change it" so reviewers see the reservation.
+    See `1aa7ce95b` for the 2026-09-25-list-remove-performance Phase 5
+    of 5 example.
+- A parallel wave's plan.md ticks can ship FEWER ticks than tests in
+    the wave's commits. When a Wave has N parallel tasks committed as N
+    separate `test(<area>):` commits, the implementer may stage plan.md
+    with only N-1 box ticks — leaving one (or more) intentionally
+    unchecked because the author reserves that tick for the
+    post-implementation verification cycle ("the Wave 5 plan checkbox
+    stays unchecked in this commit because the author reserves it for
+    the post-implementation verification cycle per the Wave 5 plan
+    language"). The planning commit's body MUST name which sibling test
+    commits cover the ticked boxes AND explicitly call out the unchecked
+    boxes with the reason, so reviewers know the unchecked state is
+    intentional and not drift. The body becomes the bridge between the
+    implementer's parallel batch and the author's review cycle; without
+    the callout, the unchecked box looks like a missed task in
+    `git diff -- plan.md`. The rule is distinct from
+    "blocked on human input" (no progress at all, no ticks) and from
+    "closed-with-rationale" (measurement-disproved, ticks with "not
+    built" inline rationale): here the work IS in HEAD and the wave IS
+    complete, the author just prefers the tick to follow a verification
+    step. See `b76e3893a` for the 2026-09-25-list-remove-performance
+    Wave 5 partial-tick example (refresh-lifecycle and stale-latency
+    ticked, handoff-safety deliberately left unchecked despite its
+    sibling `test(worktree): prove handoff safety` commit landing in the
+    same batch).
 
