@@ -1,6 +1,6 @@
 ---
 area: sniff
-status: draft-spec
+status: implemented
 $schema:
     status: |-
         enum(
@@ -26,7 +26,8 @@ reviewed_by: codex/default
 reviewed_on: 2026-09-26
 review_iterations: 0
 clarified: false
-implemented: false
+implemented: true
+implemented_by: claude/opus
 created: 2026-09-26
 owner: Ken Snyder <ken@ken.net>
 origin: review 3 of 2026-09-21-lockfile-provenance-cost
@@ -34,39 +35,27 @@ related:
     - 2026-09-21-lockfile-provenance-cost
 human_review: false
 message_to_agent: |-
-    Phases 2, 3, and 4 are complete. Read the "## Phase 3" and "## Phase 4" sections of
-    implementation-log.md first. Key facts for Phase 5:
+    All five phases are implemented; the terminal state is "implementation complete, ready for
+    review". Read "## Phase 5" of implementation-log.md first. Facts the commit and review steps need:
 
-    1. CLI (done in Phase 4). Every CLI site that serializes RepoInfo strips an empty
-       `standalone_lockfiles` through `repo_json::repo_info_value` / `omit_empty_standalone_lockfiles`
-       (repo structure, fallback, `sniff --json`, `sniff filesystem --json`). The bare `repo --json`
-       aggregate's `structure` ALWAYS carries `standalone_lockfiles` (like its `monorepo_layers`).
-       Human output has a "Lockfiles" section (sniff/cli/src/output/filesystem/lockfile.rs).
-    2. No stderr "use the full request" hint was added: every CLI command that displays layers
-       corroborates and no CLI flag toggles corroboration, so no CLI command can show `not_requested`.
-       Documented as a deviation in the Phase 4 log. The README/docs pass should describe the
-       Lockfiles section (sniff/docs/cli/repo_structure.md is already updated) and must not mention a flag.
-    3. The CLI's `repo structure` on a single Poetry/PDM/Composer project reports no repository
-       (pre-existing CLI scope: it uses workspace detection), so standalone entries reach the CLI
-       only inside a workspace. Do not document standalone projects as visible via the CLI.
-    4. COUNTERS (Phase 5). Every request adds 3 lockfile probes per unique root (repo root plus each
-       final package root) for standalone candidates, never a read. Tests that pin exact
-       `filesystem.repo.lockfile_probes` must count them. Gradle's legacy dir costs one
-       `filesystem.io.read_dirs`. Rush config reads count as `REPO_MANIFEST_PARSES` and happen only
-       when corroborating.
-    5. JSONC. `filesystem::repo::jsonc::from_str` is the only way to read bun.lock / rush.json / Rush
-       config. Dependency docs for jsonc-parser are ALREADY updated; Phase 5 only verifies them.
-    6. Carried over: engine contract (`parse(content) -> Outcome`), store rules
-       (`ManifestStore::lockfile_presence` / `lockfile(path, format)`), `lockfile::test_seam::fail_metadata`
-       (R9), the unreachable root-only uv row, and R10(c) having no signal. The breaking-change commit
-       needs the `!` marker (R11) and must list the changed expectations from all phase logs
-       (Phase 4 changed four CLI snapshots and `expected_lockfile_structure_json()`).
-    7. Fixtures stay hidden from rg by `.ignore` (use --no-ignore). Tests copy each fixture into a
-       tempdir. sniff-cli's L1 `lockfile_cli.rs` reads the lib fixtures through
-       `env!("CARGO_MANIFEST_DIR")` + `.parent()` + `join("lib/tests/fixtures/lockfiles")`, and its
-       `unreadable-directory` case already exercises a directory-as-lockfile through the CLI.
-    8. `just cross-check sniff` runs only the `sniff` lib package; run `just cross-check sniff-cli`
-       separately for CLI evidence.
+    1. Nothing is committed. The breaking-change commit(s) need the `!` marker (ruling R11), e.g.
+       `feat(sniff)!:`, and must list the changed expectations recorded in the Phase 2-4 logs.
+       Commits must be signed with the author identity, carry no agent trailers, and pass
+       `git verify-commit`.
+    2. Phase 5 fixed a real bug the corpus pass found on this repository: Cargo corroboration counted
+       `[workspace].exclude` directories as members (false `members_missing` for
+       `darkmatter/dmls/zed-dmls`). Fix: `lockfile/cargo.rs` skips every path that has an excluded
+       seed (the detector's raw seeds hold an included AND an excluded seed for the same directory).
+       Regression: L1 `lockfile_isolation::a_cargo_workspace_exclude_is_not_a_missing_member`.
+    3. New L1 module `sniff/lib/tests/l1/lockfile_isolation.rs` (isolation, caching, precedence,
+       path spellings, counters) and a 24-case complete-JSON matrix in `lockfile_provenance.rs`.
+       Its normalizer sorts only leaf-marker layer members, because ext4 walk order differs from
+       APFS/NTFS (recorded in the `os` skill).
+    4. Pre-existing gaps recorded, not fixed: npm `"./dir/*"` workspace patterns match nothing
+       (`sniff/fixes/_unscheduled/npm-dot-slash-workspace-patterns`), and a Cargo layer's
+       `packages` lists a directory twice when `members` and `exclude` both match it.
+    5. Cross-OS evidence on the final tree: `just cross-check sniff --os all` and
+       `just cross-check sniff-cli --os all` pass on Linux, Windows, and WSL.
 ---
 
 # Lockfile corroboration for every workspace standard

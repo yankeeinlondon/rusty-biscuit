@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 4
+phase: 5
 agent: "claude/opus"
 yolo: "true"
 feature: 2026-09-26-lockfile-corroboration
@@ -136,6 +136,100 @@ packages:
     - sniff-cli
     - claudine
     - claudine-cli
+source_files_during_phase_5:
+    - sniff/lib/src/filesystem/repo/lockfile/cargo.rs
+    - sniff/lib/src/filesystem/repo/lockfile/membership.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/tests/l1/lockfile_isolation.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/cli/tests/l1/cli.rs
+docs_updated_during_phase_5:
+    - sniff/lib/README.md
+    - sniff/cli/README.md
+    - sniff/docs/sniff-library-architecture.md
+    - sniff/features/2026-09-26-lockfile-corroboration/measurements.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_5:
+    - sniff/fixes/_unscheduled/npm-dot-slash-workspace-patterns/spec.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/sniff/performance.md
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/sniff/testing.md
+    - .claude/skills/os/SKILL.md
+source_code:
+    - sniff/lib/src/filesystem/repo/lockfile/mod.rs
+    - sniff/lib/src/filesystem/repo/lockfile/sources.rs
+    - sniff/lib/src/filesystem/repo/lockfile/membership.rs
+    - sniff/lib/src/filesystem/repo/lockfile/pnpm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/uv.rs
+    - sniff/lib/src/filesystem/repo/lockfile/cargo.rs
+    - sniff/lib/src/filesystem/repo/lockfile/npm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/yarn.rs
+    - sniff/lib/src/filesystem/repo/lockfile/bun.rs
+    - sniff/lib/src/filesystem/repo/lockfile/rush.rs
+    - sniff/lib/src/filesystem/repo/lockfile/fallback.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/src/filesystem/repo/detection.rs
+    - sniff/lib/src/filesystem/repo/manifest_index.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/src/filesystem/repo/npm.rs
+    - sniff/lib/src/filesystem/repo/standard.rs
+    - sniff/lib/src/filesystem/repo/topology.rs
+    - sniff/lib/src/filesystem/repo/types.rs
+    - sniff/lib/src/filesystem/repo/aggregate_view.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/src/request.rs
+    - sniff/lib/tests/fixtures.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/integration.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/lib/tests/l1/lockfile_fixtures.rs
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+    - claudine/lib/src/events/environment.rs
+    - Cargo.lock
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/repo/jsonc.rs
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/lockfile/standalone.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/repo.rs
+    - sniff/cli/src/output/filesystem/lockfile.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/lockfile_cli.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_pnpm_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__pnpm_nx_monorepo_structure_text.snap
+    - sniff/lib/tests/l1/lockfile_isolation.rs
+documentation:
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/accepted-versions.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spike-s2-jsonc.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spike-s3-parsers.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spike-s4-evidence-audit.md
+    - sniff/features/2026-09-26-lockfile-corroboration/measurements.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/fixes/_unscheduled/package-manager-uv-label/spec.md
+    - sniff/lib/README.md
+    - sniff/cli/README.md
+    - sniff/docs/dependencies.md
+    - docs/dependencies.md
+    - sniff/docs/cli/repo_structure.md
+    - sniff/docs/sniff-library-architecture.md
+    - sniff/fixes/_unscheduled/npm-dot-slash-workspace-patterns/spec.md
+completed_phase: 5
+implemented: true
 ---
 
 # Lockfile corroboration for every workspace standard: implementation plan
@@ -761,7 +855,7 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
 
 **Wave 1** (concurrent)
 
-- [ ] **Isolation and caching tests**
+- [x] **Isolation and caching tests**
   - Add L1 tests for:
     - nested and overlapping layers with different authorities;
     - two layers sharing one lockfile (read once);
@@ -774,7 +868,7 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
     - `.hidden` members;
     - Windows-native separator conversion (a `#[cfg(windows)]` case plus a
       portable unit test of the normalizer).
-- [ ] **Counter tests**
+- [x] **Counter tests**
   - Disabled structure request: 0 reads, 0 parses, probes > 0, no additional
     walk counter.
   - Enabled request: each selected file read and parsed once, and a cached
@@ -784,11 +878,11 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
     provenance.
   - Propagate collection into workers, if any exist, per the counters
     contract.
-- [ ] **Complete-result matrix**
+- [x] **Complete-result matrix**
   - Extend `sniff/lib/tests/l1/lockfile_provenance.rs` to assert full
     serialized `RepoInfo` for every authority and every applicable status,
     plus orchestrator-only fixtures that produce no synthetic layer.
-- [ ] **Measurements**
+- [x] **Measurements**
   - Use release-mode timing and peak/retained allocation (dhat or the
     existing perf harness) on large generated JSON (npm), JSONC (Bun), YAML
     (pnpm and Yarn), and TOML (uv and Cargo) fixtures.
@@ -798,7 +892,7 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
   - Run a passive corpus pass over local checkouts and record statuses only;
     this is not a test dependency. Tests use counters, not wall-clock
     thresholds.
-- [ ] **Documentation**
+- [x] **Documentation**
   - Update `sniff/lib/README.md` and `sniff/cli/README.md`: the breaking
     removal of `lockfile_match`, the new object, the status and reason tables,
     root exclusion, Cargo `members_*` semantics, and `standalone_lockfiles`.
@@ -814,7 +908,7 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
 
 **Wave 2** (sequential)
 
-- [ ] **Local gates**
+- [x] **Local gates**
   - Run `just test` and `just lint` in `sniff/`.
   - Run `cargo clippy -p sniff -p sniff-cli --all-targets -- -D warnings`.
   - Run `just test` in `claudine/` for the affected packages. The Claudine
@@ -826,24 +920,28 @@ the wire types are frozen by then. Its final checkpoint waits for Phase 3.
     biscuit-terminal, biscuit-speaks, claudine, darkmatter, research, and
     scripts.
   - Do not run workspace-wide gates.
-- [ ] **Cross-OS verification**
+- [x] **Cross-OS verification**
   - Following the `os` skill, reuse qualifying evidence first, then run the
     `sniff` and `sniff-cli` L1 suites on native Windows and WSL2 hosts, in
     addition to macOS and Linux.
   - Pay particular attention to path normalization and the directory-as-file
     failure test on Windows.
   - Add no CI matrix cells and change no event scheduling.
-- [ ] **Implementation log and close**
+- [x] **Implementation log and close**
   - Write `implementation-log.md` covering the ruling outcomes, deviations,
     and the evidence locations.
   - Set the spec's frontmatter to `status: implemented` and
     `implemented: true`.
   - Stop at "implementation complete, ready for review". Do not move the spec
     to `_completed` and do not run `just complete`.
-- [ ] **Final checkpoint**
+- [x] **Final checkpoint**
   - Every Success item 1–8 above is checked with a pointer to its evidence.
   - Every commit is signed with the author identity and has no agent
     attribution trailers, and `git verify-commit` passes for each one.
+  - _Phase 5 note:_ the Success 1–8 evidence is in the "Success criteria
+    evidence" list of `implementation-log.md` `## Phase 5`. The implementing
+    session was told not to stage or commit, so the signing and
+    `git verify-commit` checks belong to the separate commit step.
 
 ## Dependency and parallelism summary
 

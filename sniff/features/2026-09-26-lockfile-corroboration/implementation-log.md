@@ -126,6 +126,100 @@ packages:
     - sniff-cli
     - claudine
     - claudine-cli
+source_files_during_phase_5:
+    - sniff/lib/src/filesystem/repo/lockfile/cargo.rs
+    - sniff/lib/src/filesystem/repo/lockfile/membership.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/tests/l1/lockfile_isolation.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/cli/tests/l1/cli.rs
+docs_updated_during_phase_5:
+    - sniff/lib/README.md
+    - sniff/cli/README.md
+    - sniff/docs/sniff-library-architecture.md
+    - sniff/features/2026-09-26-lockfile-corroboration/measurements.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+docs_created_during_phase_5:
+    - sniff/fixes/_unscheduled/npm-dot-slash-workspace-patterns/spec.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/sniff/SKILL.md
+    - .claude/skills/sniff/architecture.md
+    - .claude/skills/sniff/performance.md
+    - .claude/skills/sniff/remote-and-repository.md
+    - .claude/skills/sniff/testing.md
+    - .claude/skills/os/SKILL.md
+source_code:
+    - sniff/lib/src/filesystem/repo/lockfile/mod.rs
+    - sniff/lib/src/filesystem/repo/lockfile/sources.rs
+    - sniff/lib/src/filesystem/repo/lockfile/membership.rs
+    - sniff/lib/src/filesystem/repo/lockfile/pnpm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/uv.rs
+    - sniff/lib/src/filesystem/repo/lockfile/cargo.rs
+    - sniff/lib/src/filesystem/repo/lockfile/npm.rs
+    - sniff/lib/src/filesystem/repo/lockfile/yarn.rs
+    - sniff/lib/src/filesystem/repo/lockfile/bun.rs
+    - sniff/lib/src/filesystem/repo/lockfile/rush.rs
+    - sniff/lib/src/filesystem/repo/lockfile/fallback.rs
+    - sniff/lib/src/filesystem/repo/lockfile/tests.rs
+    - sniff/lib/src/filesystem/repo/detection.rs
+    - sniff/lib/src/filesystem/repo/manifest_index.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - sniff/lib/src/filesystem/repo/npm.rs
+    - sniff/lib/src/filesystem/repo/standard.rs
+    - sniff/lib/src/filesystem/repo/topology.rs
+    - sniff/lib/src/filesystem/repo/types.rs
+    - sniff/lib/src/filesystem/repo/aggregate_view.rs
+    - sniff/lib/src/performance/counters.rs
+    - sniff/lib/src/request.rs
+    - sniff/lib/tests/fixtures.rs
+    - sniff/lib/tests/l1/main.rs
+    - sniff/lib/tests/l1/integration.rs
+    - sniff/lib/tests/l1/lockfile_provenance.rs
+    - sniff/lib/tests/l1/lockfile_fixtures.rs
+    - sniff/cli/src/output/repo_json.rs
+    - sniff/cli/tests/l1/cli.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__repo_aggregate_json.snap
+    - claudine/lib/src/events/environment.rs
+    - Cargo.lock
+    - sniff/lib/Cargo.toml
+    - sniff/lib/src/filesystem/repo/jsonc.rs
+    - sniff/lib/src/filesystem/repo/nested.rs
+    - sniff/lib/src/filesystem/repo/lockfile/standalone.rs
+    - sniff/cli/src/output/filesystem/mod.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - sniff/cli/src/output/mod.rs
+    - sniff/cli/src/output/filesystem/repo.rs
+    - sniff/cli/src/output/filesystem/lockfile.rs
+    - sniff/cli/tests/l1/main.rs
+    - sniff/cli/tests/l1/lockfile_cli.rs
+    - sniff/cli/tests/l1/snapshots.rs
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__cargo_pnpm_monorepo_structure_text.snap
+    - sniff/cli/tests/l1/snapshots/l1__snapshots__pnpm_nx_monorepo_structure_text.snap
+    - sniff/lib/tests/l1/lockfile_isolation.rs
+documentation:
+    - sniff/features/2026-09-26-lockfile-corroboration/spec.md
+    - sniff/features/2026-09-26-lockfile-corroboration/plan.md
+    - sniff/features/2026-09-26-lockfile-corroboration/accepted-versions.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spike-s2-jsonc.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spike-s3-parsers.md
+    - sniff/features/2026-09-26-lockfile-corroboration/spike-s4-evidence-audit.md
+    - sniff/features/2026-09-26-lockfile-corroboration/measurements.md
+    - sniff/features/2026-09-26-lockfile-corroboration/implementation-log.md
+    - sniff/fixes/_unscheduled/package-manager-uv-label/spec.md
+    - sniff/lib/README.md
+    - sniff/cli/README.md
+    - sniff/docs/dependencies.md
+    - docs/dependencies.md
+    - sniff/docs/cli/repo_structure.md
+    - sniff/docs/sniff-library-architecture.md
+    - sniff/fixes/_unscheduled/npm-dot-slash-workspace-patterns/spec.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-26-lockfile-corroboration (5 phases)
@@ -800,3 +894,215 @@ tempdir and no package-manager binary runs.
   wsl pass (877). All 17 new or changed Phase 4 tests passed on each of the
   three, including the `unreadable-directory` CLI case on native Windows.
 - Skipped: nothing. No pre-existing failures.
+
+## Phase 5
+
+One orchestrating agent wrote the tests and ran the gates. Two background
+agents ran concurrently in Wave 1: one for measurements and the passive corpus
+pass (`measurements.md` only), and one for documentation (docs, skill files,
+and a comment-only source fix).
+
+### Bug found and fixed: Cargo `[workspace].exclude` reported as missing
+
+The corpus pass ran on this repository and got a false `members_missing` for
+`darkmatter/dmls/zed-dmls`, which the root `Cargo.toml` lists under
+`[workspace].exclude`. The Cargo detector's raw seeds hold an included seed and
+an excluded seed for a directory that `members` and `exclude` both match; they
+merge only later, in `seed.rs`. `lockfile::cargo::compare` treated every seed
+as a member. Cargo never locks an excluded directory as a member, so the
+lockfile was right and the observation was wrong. An excluded directory with
+an unparseable manifest also turned the result into
+`incomplete_manifest_discovery`.
+
+- **Fix:** `sniff/lib/src/filesystem/repo/lockfile/cargo.rs` skips every path
+  that has an excluded seed. Checking `is_excluded` on each seed is not enough,
+  because the included twin remains.
+- **Regression test (written first, failed before the fix):**
+  `lockfile_isolation::a_cargo_workspace_exclude_is_not_a_missing_member`. It
+  covers a legacy directory and an unparseable excluded manifest, under both
+  structure and full requests, and a real missing member still reported
+  afterward.
+- **After the fix,** `sniff repo structure --json` on this repository reports
+  `members_present`.
+- `pnpm`, `npm`, `yarn`, `bun`, and `uv` detectors never set `is_excluded`,
+  so `compare_members` is unchanged.
+- **Docs:** `sniff/lib/README.md` (Cargo paragraph) and
+  `.claude/skills/sniff/architecture.md`.
+
+### Deviations and observations
+
+- **No workers to propagate into.** `ManifestStore` uses `RefCell` and is not
+  `Sync`, so all lockfile probing, reading, and parsing happens on the
+  detecting thread. The counter-propagation task has nothing to change.
+- **`unknown_standard`, `metadata_failed`, `ambiguous_membership`,
+  `incomplete_manifest_discovery`, and `invalid_member_path` are not in the L1
+  complete-JSON matrix.**
+  - `Unknown` never owns a layer (ruling R7). The orchestrator-only cases show
+    its inferred standard entry and that `monorepo_layers` is absent.
+  - The metadata seam is `#[cfg(test)]` and crate-private (R9).
+  - All five are pinned by the library's unit tests: `lockfile::tests` and the
+    `detection` tests.
+- **The new complete-JSON matrix is structure-tier.** The existing
+  Cargo/pnpm/uv matrix still covers the full tier, and the added cases stay
+  independent of host tools.
+- **Leaf-marker member order is filesystem-dependent.** Bazel, Pants, and
+  Buck2 list layer members in directory-walk order: `app, lib` on APFS and
+  NTFS, `lib, app` on ext4. The first Linux and WSL run of the new matrix was
+  red for this reason only.
+  - The normalizer sorts those lists, and only those.
+  - The fact is recorded in the `os` skill.
+  - This ordering predates the feature and was not changed.
+- **Pre-existing, not changed:**
+  - A Cargo layer's `packages` lists a directory twice when `members` and
+    `exclude` both match it (visible in the regression test's debug output).
+    Ownership and catalogs are unaffected.
+  - npm workspace patterns written `"./dir/*"` match no members. Recorded as
+    `sniff/fixes/_unscheduled/npm-dot-slash-workspace-patterns/spec.md`.
+- **A dangling lockfile symlink is `absent`.** Metadata follows the link and
+  gets `NotFound`, which is absence under the same rule as a missing parent
+  directory. This is pinned by `symlinked_lockfiles_and_roots_are_followed`.
+- **A stale test comment was fixed.**
+  `create_cli_monorepo_with_matching_cargo_lock` in
+  `sniff/cli/tests/l1/cli.rs` still said a matching `Cargo.lock` "reports
+  lockfile provenance"; Cargo reports `members_present`. Comment only.
+
+### Requirement-to-test mapping
+
+| Behavior (plan task / AC) | Tests |
+|---|---|
+| Nested layers with different authorities read only their own lockfile, compare members relative to their own root, never borrow an ancestor's lockfile, and upgrade only owned packages (AC3) | L1 `lockfile_isolation::nested_layers_with_different_authorities_observe_only_their_own_lockfile` (root Cargo, nested pnpm `web/` match, nested pnpm `docs/` `absent` despite a decoy root `pnpm-lock.yaml`, 2 reads) |
+| Overlapping layers at one root (Yarn and npm) never share another authority's lockfile | L1 `overlapping_layers_at_one_root_never_share_another_authority_lockfile`; complete JSON in `lockfile_provenance::every_other_authority_reports_its_complete_repository_result` ("Yarn match beside an overlapping lockfile-less npm layer") |
+| Two layers sharing one lockfile: one probe, read, and parse, for success and a cached parse failure | unit `lockfile::tests::layers_sharing_one_lockfile_read_and_parse_it_once`; existing `detection::tests::cargo_lock_is_shared_by_corroboration_and_dependency_enrichment` |
+| Repeat calls with a cheaper request inherit no upgrade; no cross-request cache hides an edited file | L1 `repeat_calls_with_a_cheaper_request_inherit_no_upgrade` (corroborate, then `structure`, then `full` declined, then edit and corroborate) |
+| Filename precedence: a failed or unsupported selected file is never retried with a lower-priority file | L1 `a_failed_selected_lockfile_is_never_retried_with_a_lower_priority_file` (malformed, v1, and directory `npm-shrinkwrap.json` beside a matching `package-lock.json`; malformed `bun.lock` beside `bun.lockb`); existing `lockfile::tests::only_the_first_present_candidate_is_selected` |
+| Directory where the lockfile should be (R9) | the same L1 test (directory case), matrix case "npm directory in place of the lockfile"; existing `detection::tests::a_directory_in_place_of_the_lockfile_is_a_read_failure`, CLI `lockfile_cli` `unreadable-directory` |
+| Metadata-failure seam (R9) | existing `lockfile::tests::{a_metadata_failure_is_not_skipped_for_a_lower_priority_candidate, a_metadata_failure_is_unreadable_even_when_declined}`, `detection::tests::a_metadata_failure_is_unreadable_and_reads_nothing`, the Gradle and standalone seam tests |
+| Symlinked lockfile and root spellings, including the macOS `/var` to `/private/var` temporary directory; a dangling link | L1 `symlinked_lockfiles_and_roots_are_followed` (`#[cfg(unix)]`); portable L1 `a_root_spelled_with_dot_components_reports_the_same_observation` |
+| `.hidden` members keep their leading dots in match and mismatch | L1 `hidden_members_keep_their_leading_dots` (a `./.tools/lint/` spelling matches; stale `.cache/old` is `extra`); every Node and Rush real fixture's `.tools/hidden` in the matrix; existing unit `membership::tests::normalize_member_keeps_leading_dots_in_names_and_case` |
+| Windows-native separator conversion | portable unit `membership::tests::normalize_member_converts_windows_separators` (existing); `#[cfg(windows)]` unit `membership::tests::manifest_member_converts_native_windows_paths` (new, including `\\?\` verbatim roots); `#[cfg(windows)]` L1 `a_windows_native_root_spelling_yields_slash_separated_members` (new: `\` root, lower-case drive, `\` in the glob) |
+| Disabled structure request: 0 reads, 0 parses, probes > 0, probe cost independent of presence, no added walk (AC4) | L1 `a_declining_structure_request_probes_without_reading_or_walking` (walk, read-dir, nested-marker, and glob counters equal across absent, declined, and corroborated) |
+| Enabled request reads and parses each selected file once; a cached failure is not retried by the full request's later consumers | L1 `an_enabled_request_reads_and_parses_each_selected_lockfile_once` (Cargo, malformed npm, pnpm; structure and full: 3 reads, 3 parses) |
+| Full request with corroboration off still reads `Cargo.lock` for dependency versions, reports `not_requested`, never upgrades; a malformed lock is read once | L1 `a_full_request_declining_corroboration_still_reads_cargo_lock_for_versions` |
+| Complete serialized `RepoInfo` for every other authority and every reachable status: npm (match, mismatch extra, mismatch missing, parse_failed, unsupported_version, read_failed, absent, not_requested), Yarn plus overlapping npm, Bun text and binary, Rush match and unsupported_layout, Go (unverifiable, absent), Gradle, Bazel, Maven, .NET, Pants, Buck2 (not_applicable), and Nx-, Turborepo-, and Lerna-only (no layer, `unknown` standard) (AC1) | L1 `lockfile_provenance::every_other_authority_reports_its_complete_repository_result` (24 cases, hand-written documents, per-case read/parse counts, typed round trip); existing Cargo/pnpm/uv matrix |
+| Cargo `[workspace].exclude` is not a missing member (regression) | L1 `lockfile_isolation::a_cargo_workspace_exclude_is_not_a_missing_member` |
+
+Regression checks:
+
+- The exclude test failed before the fix, first with
+  `incomplete_manifest_discovery` and then with the per-seed-only version of
+  the fix.
+- Mutating one expected provenance in the matrix (Rush subspaces `explicit`
+  to `globbed`) makes it fail.
+
+Placement:
+
+- Every new test is L1, and no path segment carries a tier marker.
+- `tests/l1/lockfile_isolation.rs` is declared in `tests/l1/main.rs`.
+- The matrix reads fixtures through
+  `biscuit_test_harness::manifest_dir!().join("tests/fixtures/lockfiles")`.
+- `just check-tier-coverage sniff` finds 0 stranded tests.
+
+### Measurements and corpus (`measurements.md`)
+
+- Release-mode production parsers, measured through the public API with a
+  throwaway harness at `/tmp/lockfile-measure`: 200 members and 20,000
+  packages per format, 1 warm-up and 7 timed runs, warm page cache.
+  - Added time with corroboration on:
+    - npm 5.9 ms
+    - Bun 5.9 ms
+    - pnpm 61.8 ms
+    - Yarn 80.6 ms
+    - uv 69.1 ms
+    - Cargo 24.0 ms
+  - Peak: 1.1–1.3x the input for JSON and JSONC, 10–13x for YAML, and 36–41x
+    for TOML, the same as a generic `toml::Value` parse.
+  - Nothing is retained after the call.
+- Corpus pass over 15 local checkouts: no `unreadable` result. The two defects
+  it found are handled above (the Cargo exclude fix and the unscheduled npm
+  spec). The other unexpected rows are real stale lockfiles and one Yarn 3.1
+  `unsupported_version`.
+
+### Documentation and skills
+
+- `sniff/lib/README.md`: a "Lockfile Corroboration" section with the breaking
+  note, the status, reason, and source tables, root exclusion, Cargo semantics
+  (now including `exclude`), provenance, and request cost. Also Key Types and a
+  `jsonc-parser` dependency row.
+- `sniff/cli/README.md`: a "Lockfile Observations" section. It names no flag
+  and does not describe standalone single projects as visible.
+- `sniff/docs/sniff-library-architecture.md`: a Lockfile Corroboration
+  section.
+- `sniff/docs/cli/repo_structure.md` was verified unchanged. `just docs_cli`
+  was not needed, because no clap help text changed.
+- `sniff/docs/dependencies.md` and `docs/dependencies.md` already list
+  `jsonc-parser` (verified).
+- `.claude/skills/sniff/`:
+  - `architecture.md`: a lockfile pipeline section and the Cargo exclude rule.
+  - `performance.md`: probing stops at the first present candidate.
+  - `remote-and-repository.md`: the layer `lockfile` and
+    `standalone_lockfiles`.
+  - `SKILL.md`: trimmed to 199 lines by moving the testing guidance verbatim
+    into the new `testing.md`.
+- `.claude/skills/os/SKILL.md`: the ext4 `read_dir` order fact.
+- `sniff/lib/src/performance/counters.rs`: the `REPO_LOCKFILE_PROBES` doc
+  comment now describes the precedence-ordered probing and the standalone
+  probes (comment only).
+- Final `rg lockfile_match` sweep (outside `_completed` and this feature's own
+  documents): only the documented breaking-change notes remain, plus the L1
+  assertion that the key is gone.
+
+### Gates
+
+- `just test` (sniff): 3051 passed, 32 skipped.
+- `just lint` (sniff): clean.
+- `cargo clippy -p sniff -p sniff-cli --all-targets -- -D warnings`: clean,
+  and clean with `--all-features`. One `type_complexity` hit in a new test was
+  fixed by a named case struct.
+- `cargo check --all-targets` on all 22 direct reverse dependencies of
+  `sniff`, from `cargo tree -i sniff --depth 1`: clean.
+- `cargo nextest run -p claudine`: 4358 passed.
+- `claudine-cli` `wrap::env`: 28 passed.
+- Darkmatter `lazy_roots` (the `2026-09-20-repo-perf` boundary tests): 20
+  passed.
+- `just cross-check sniff --os all`, on the final tree:
+
+  | OS | Result |
+  |---|---|
+  | Linux | 2151 passed |
+  | Windows | 2141 passed |
+  | WSL | 2151 passed (archive mode) |
+
+  The +13 (Linux) and +14 (Windows) against Phase 4 are exactly this phase's
+  new tests, which shows that the `#[cfg(windows)]` cases ran on Windows.
+- `just cross-check sniff-cli --os all`:
+
+  | OS | Result |
+  |---|---|
+  | Linux | 877 passed |
+  | Windows | 873 passed |
+  | WSL | 877 passed |
+
+- Pre-existing Windows warnings, not from this change: an unused
+  `KEY_ALL_ACCESS` in `programs/windows_apps.rs`, unused `index` bindings in
+  lib tests, and an unused `stage_raw_path` in `git_parity.rs`.
+- No CI matrix cells were added and no event scheduling changed.
+- Skipped: nothing. No pre-existing failures.
+- Not done by this agent: commits, signing, and `git verify-commit`. The
+  session was told not to stage or commit. The breaking-change commit needs
+  the `!` marker (R11) and must list the changed expectations recorded in the
+  Phase 2–4 logs.
+
+### Success criteria evidence (plan "Success looks like")
+
+1. `lockfile_match` is gone. See the sweep above and the L1 assertion at
+   `lockfile_fixtures.rs:372`.
+2. The every-authority complete-JSON matrix (24 cases) and the
+   Cargo/pnpm/uv × state matrix, with orchestrator-only cases.
+3. Real-tool fixture tests (Phases 2 and 3, `lockfile_fixtures`) cover every
+   `accepted-versions.md` row and the negative variants.
+4. `lockfile_isolation` plus the unit tests mapped above.
+5. The counter tests mapped above.
+6. `lockfile_cli` (Phase 4) runs JSON and human modes through the shipped
+   binary.
+7. `measurements.md` Phase 5 sections, and the gates above on all four OSes.
+8. The READMEs, `sniff/docs`, skills, and dependency docs listed above.
