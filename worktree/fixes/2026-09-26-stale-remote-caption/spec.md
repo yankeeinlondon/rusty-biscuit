@@ -31,23 +31,32 @@ related:
     - 2026-09-24-ux-improvements
 human_review: false
 message_to_agent: |-
-    Phase 1 (spikes and baseline) found no conflict with plan Rules 1-14. Details are in
-    implementation-log.md under "## Phase 1". Points that affect later phases:
-    - Baseline on macOS: `just test` 466 passed / 18 skipped, `just lint` clean. Any new failure is yours.
-    - S1: a raw std::net::TcpListener is enough for both fixtures. The hold listener sees one
-      connection, and at a 500 ms deadline the process-group kill returns in about 0.50 s and the
-      listener sees EOF immediately. Killing only the git pid keeps the connection open, so keep
-      kill_tree and assert the listener observes the close. The 401 responder bytes are in the log.
-      Git exits 128 in about 25 ms with no prompt.
-    - S3: `ls-remote <remote> refs/heads/<b>` exits 0 with empty stdout for a missing branch (local
-      and HTTP), and does not match refs/heads/foo/<b>. A bare `<b>` pattern DOES tail-match, so
-      always pass the full refname and keep the exact-name comparison.
-    - S2: git ls-remote honors HTTPS_PROXY/HTTP_PROXY, so ProxyStub and FakeGitea (which counts
-      every request regardless of path, and holds them all when held) will receive the live-head
-      worker's request. Every test that counts connections/requests, or asserts "no launch", must
-      seed a fresh remote-head store (Rule 12). The per-test table is in the log.
-    - Repo-root docs/dependencies.md line 212 names `wt internal-refresh-prs`. Phase 5's drift grep
-      (`worktree .claude`) would miss it, so update it too.
+    Phase 2 (library foundations) is complete; details in implementation-log.md "## Phase 2".
+    Library API now available to Phase 3:
+    - worktree::live_remote (moved from remove::live_remote, which no longer exists):
+      RemoteHeads, LsRemote, run_noninteractive, is_object_id, LIVE_CHECK_DEADLINE, PUSH_DEADLINE.
+      Incomplete stdout or a malformed ls-remote line is now Err, never Ok(None).
+    - worktree::remote_head: remote_head_store_path(main), remote_head_lock_path(store),
+      select_cached_head(store, origin, default_branch, now) -> CachedRemoteHead
+      {Fresh(RemoteHead) | Stale(RemoteHead) | Miss}, RemoteHead { branch, sha: Option<String>,
+      checked_at } with is_stale_at/is_future_at, refresh_remote_head(store, main, clock,
+      &dyn RemoteHeads) -> RefreshOutcome, REMOTE_HEAD_REFRESH_DEADLINE (10 s). The freshness
+      window is pull_requests::FRESHNESS_WINDOW (not duplicated).
+    - Small deviation from Rule 5: pull_requests::RefreshOutcome gained BOTH NoDefaultBranch and
+      DefaultBranchChanged (a default change is not reported as OriginChanged).
+    - worktree::worktree::default_branch_in(repo) exists; use it in the worker (not the cwd form).
+    - listing::Caption has tracking_sha: String (same RefTips snapshot as the counts).
+    - cache::try_lock_sidecar is pub(crate), so CLI tests cannot call it. To probe the
+      remote-head lock from a CLI test, call refresh_remote_head with a stub RemoteHeads (the trait
+      is public) and check for RefreshOutcome::Contended, as probe_refresh does for PRs.
+    - No public writer exists for the store. The Phase 4 seed_remote_head_store helper must write
+      JSON {format_version: 1, origin_digest: pull_requests::origin_digest(<exact origin url>),
+      branch, sha: "<40|64 lowercase hex>" or null, checked_at}. Every field is required,
+      including sha (a missing sha is a miss, not an absence).
+    - The build-linux cross-check rig currently fails before compiling ("target/release/deps/*.rmeta
+      is not writeable"), a permission problem on that host. Use `just cross-check <pkg> --os wsl`
+      for Linux evidence until it is fixed. Windows and WSL2 passed this phase.
+    - Test baseline after Phase 2 (macOS): just test in worktree/ = 487 passed, 18 skipped.
 ---
 
 # `wt list` caption trusts a stale `origin/<default>`

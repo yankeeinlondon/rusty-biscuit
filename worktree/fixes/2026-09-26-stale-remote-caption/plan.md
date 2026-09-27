@@ -1,15 +1,37 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
-packages: []
+packages:
+    - worktree
+    - worktree-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1:
     - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remove/live_remote.rs
+    - worktree/lib/src/remote_head.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/remove/mod.rs
+    - worktree/lib/src/remove/remote.rs
+    - worktree/lib/src/remove/safety.rs
+    - worktree/lib/src/listing.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/lib/src/cache.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/cli/src/commands/remove/mod.rs
+    - worktree/cli/tests/list_table.rs
+docs_updated_during_phase_2:
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
 ---
 
 # Plan: `wt list` caption trusts a stale `origin/<default>`
@@ -142,27 +164,27 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **Move transport** (`lib/src/remove/live_remote.rs` → `lib/src/live_remote.rs`)
+- [x] **Move transport** (`lib/src/remove/live_remote.rs` → `lib/src/live_remote.rs`)
     - `git mv` the file, declare `pub mod live_remote` in `lib/src/lib.rs`, and remove it from `remove/mod.rs` (fix that module's `//!` link text).
     - Update imports in `remove/remote.rs`, `remove/safety.rs` (including test modules), and `cli/src/commands/remove/mod.rs`.
     - Apply Rule 7: `drain` returns a `Result`, stdout failure or timeout becomes `Err`, and malformed `ls-remote` lines become `Err`. Update the module docs to state the complete-output contract.
     - Keep `LIVE_CHECK_DEADLINE`, `PUSH_DEADLINE`, `kill_tree`, and `batch_ssh_command` unchanged.
     - The existing transport tests move with the file and still pass. Add unit tests: a malformed line gives `Err`, a wrong-length OID gives `Err`, and exact-ref matching ignores `refs/heads/x/main`.
-- [ ] **Caption tracking SHA** (`lib/src/listing.rs`, `lib/src/worktree.rs`)
+- [x] **Caption tracking SHA** (`lib/src/listing.rs`, `lib/src/worktree.rs`)
     - Add `tracking_sha: String` to `Caption` and fill it from the `remote_tip` already read in `fill_worktree_statuses`.
     - Reword the field docs: `ahead`/`behind` count against the **local tracking ref**, not the live remote. Fix the `Caption` and `remote` docs to match.
     - Update the struct literals in the unit tests and in `cli/tests/list_table.rs::Example` (compile only; behavior asserts come in Phase 3).
-- [ ] **Shared lock and default branch** (`lib/src/cache.rs`, `lib/src/pull_requests.rs`, `lib/src/worktree.rs`)
+- [x] **Shared lock and default branch** (`lib/src/cache.rs`, `lib/src/pull_requests.rs`, `lib/src/worktree.rs`)
     - Move `try_lock` to `cache::try_lock_sidecar` (Rule 2) and update `pull_requests::refresh`. The PR tests must pass unchanged.
     - Add `default_branch_in(repo)` (Rule 6), make `default_branch()` delegate to it, and add a unit test that it answers for a path other than the cwd.
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **Remote-head store** (`lib/src/remote_head.rs`)
+- [x] **Remote-head store** (`lib/src/remote_head.rs`)
     - Implement the schema, `remote_head_store_path`, `select_cached_head`, `RemoteHead` helpers, `refresh_remote_head`, and `REMOTE_HEAD_REFRESH_DEADLINE` per Rules 3–5.
     - Never store or log the origin URL; only `origin_digest`.
     - Module `//!` docs state the contracts: `checked_at` is taken before the request; a mismatch is not chronology; the lock is persistent and never unlinked; readers need no lock.
-- [ ] **Store tests (acceptance 1)** (unit tests in `remote_head.rs`, using `remove::test_support::TestRepo`, an injected clock, and a stub `RemoteHeads`)
+- [x] **Store tests (acceptance 1)** (unit tests in `remote_head.rs`, using `remove::test_support::TestRepo`, an injected clock, and a stub `RemoteHeads`)
     - Fresh at 59 s and stale at 60 s. Missing or changed origin, changed default branch, and future `checked_at` are misses.
     - Corrupt JSON, format 0/2, bad OID (short, uppercase, wrong length), and a missing field are misses. SHA-256-length OIDs are accepted. A verified absence (`sha: null`) is `Fresh` or `Stale`, not a miss.
     - Request failure, `Err` from invalid output, and publication failure (store path is a directory) leave the previous bytes byte-for-byte identical.
