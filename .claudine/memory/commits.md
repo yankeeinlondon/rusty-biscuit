@@ -279,6 +279,20 @@ belong here.
   sub-agent brief stale. Check `git log --oneline -5` for that subject first.
 - A merge commit that absorbs an out-of-scope group must name the absorbed
   scope in its body so reviewers do not expect a follow-up.
+- A *stale* merge state (`.git/MERGE_HEAD`, `MERGE_MSG`, `MERGE_RR` files
+  exist on disk but HEAD is already the merge commit, and `git status`
+  reports "All conflicts fixed but you are still merging") refuses
+  pathspec-restricted commits with `fatal: cannot do a partial commit
+  during a merge`. The merge was made and committed but the git
+  state-machine still thinks the merge is in progress; running a bare
+  `git commit -F <msg>` will silently absorb every staged file into a
+  single new merge commit and overwrite the message body. Recovery:
+  `git reset --soft HEAD~1` rolls the spurious merge commit back to
+  its parent while leaving all staged files in the index, then the
+  planned pathspec-restricted commit lands as a normal single-parent
+  commit. Detect with `git status | grep "still merging"` before the
+  first dispatch — the merge commit's date in the reflog is older than
+  the `MERGE_*` file mtimes, confirming the state is stale.
 
 ## Commit Messages
 
