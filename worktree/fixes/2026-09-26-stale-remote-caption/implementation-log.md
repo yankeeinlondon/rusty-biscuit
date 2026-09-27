@@ -55,6 +55,27 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/SKILL.md
+source_files_during_phase_4:
+    - worktree/cli/Cargo.toml
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remote_head.rs
+docs_updated_during_phase_4:
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Implementation Log for 2026-09-26-stale-remote-caption (5 phases)
@@ -343,3 +364,68 @@ Renaming the command and adding a live-head half broke 7 `list_prs` tests. They 
 ### Checkpoint 3
 
 Met: `just test` passes, the smoke run shows the qualified caption and "Remote state has not been verified." first and an aged observation next, and no worker lingers.
+
+## Phase 4
+
+Phase 4 adds the integration tests and finishes migrating the existing tests. No product code changed. The only non-test edit is a comment in `cli/Cargo.toml` that still named `internal-refresh-prs`. Two subagents wrote the isolated files (the `list_table.rs` snapshot matrix and the library transport tests). I reviewed both results and read the snapshots.
+
+### Migrate existing tests (finishing Phase 3's pull-forward)
+
+- Checked against the S2 inventory: every entry is done. The pieces left over from Phase 3 were:
+    - `level2_list_verbose::level2_list_stale_pr_answer_shows_a_dim_age_line_in_tmux`: after the worker exits, it now also asserts that the live-head lock is free (new `probe_head_refresh`). Before, only the PR lock and the process were checked (Rule 12).
+    - `cli/Cargo.toml`: the `sysinfo` comment now names `wt internal-refresh`.
+- `perf_support` additions, which the new tests use:
+    - `HoldingOrigin`, the Rule 13 loopback origin. It records each connection's request line and holds the connection until `close_held`.
+    - `MixedFixture::with_origin(url)`.
+    - `MixedFixture::wt_command_direct()`: no proxy variables, `GIT_CONFIG_COUNT` removed, `GIT_CONFIG_NOSYSTEM=1`, and `GIT_CONFIG_GLOBAL` set to an empty file.
+    - `MixedFixture::seed_empty_pr_store(age)`: an answer for an origin no provider recognizes.
+    - `isolated_cache_file(home, xdg, real)`, now shared with `MixedFixture::pr_store`.
+- Still left for Phase 5, which owns docs: `docs/dependencies.md` (repo root, line 212) and `worktree/docs/performance-testing.md` (line 33) still say `internal-refresh-prs`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+|---|---|
+| Acc. 2: a push elsewhere reads as a difference until the fetch. This is the reported bug: before the fix the caption said "in sync". | `list_remote_head::a_push_elsewhere_reads_as_a_difference_until_the_fetch_then_as_behind_and_matched` |
+| Acc. 2: after `git fetch`, the caption shows "1 commit behind" plus "matched", and listing makes no request (store bytes unchanged, no worker) | same test, second half |
+| Acc. 2: a fetch newer than the observation reads "differs", never "moved" or "advanced" | `list_remote_head::a_fetch_newer_than_the_observation_is_a_difference_never_a_move` |
+| Acc. 2: remote deletion reads absent; after `fetch --prune`, "No local tracking ref …; … was absent"; after the branch is recreated and refreshed, present | `list_remote_head::a_deleted_then_recreated_remote_branch_is_reported_absent_then_present` |
+| Acc. 2: the main checkout and a linked worktree resolve one `remote-head.json` (a worker launched from the linked worktree records it) | `list_remote_head::the_main_checkout_and_a_linked_worktree_share_one_live_head_store` |
+| Acc. 2 / no origin: leftover `refs/remotes/origin/main` shows no caption and starts no worker (no lock file created) | `list_remote_head::without_an_origin_leftover_tracking_refs_show_no_caption_and_start_no_worker` |
+| Acc. 3: snapshot matrix (5 rows, 4 comparison states, fresh/stale × match/differ/absent, missing default or tracking tip, failed comparison, `trunk`, age boundaries 59/60/3599/3600/2 d − 1 min/2 d, future-dated) | `list_table::caption_snapshot_observation_rows`, `…_comparison_states`, `…_fresh_and_stale_answers`, `…_missing_refs_and_failed_comparison`, `…_trunk_default_branch`, `…_age_boundaries_and_future_answers` (6 `.snap` files) |
+| Acc. 5: a missing or stale live head never holds up `wt list`. `.output()` returns while `HoldingOrigin` still holds the worker's `ls-remote`, the head lock is `Contended`, there is exactly one worker and one request (git's `GET /r.git/info/refs…`), no PR request, and the store is unchanged | `list_prs::a_missing_or_stale_live_head_never_holds_up_the_listing` (both cases, with a drop guard `ReleaseOnDrop`) |
+| Acc. 5: timing. Each sample's `remote select` stays under 300 ms with the refresh blocked; the best full command stays under 1 s | `perf_pr_request::perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh` (macOS: 0.3–0.9 ms per sample, 75 ms full). This is a `perf_` test, so it runs under `just test-perf`, not `just test`. |
+| Acc. 6: a `401` fails fast with no prompt | `live_remote::tests::an_unauthorized_origin_fails_fast_without_a_prompt` |
+| Acc. 6: a `401` leaves the store bytes unchanged and creates nothing when no store existed | `remote_head::tests::an_unauthorized_origin_fails_fast_and_leaves_the_store_alone` |
+| Acc. 6: the deadline kills the HTTP transport tree, and the listener sees the close (all OSes, no `cfg(unix)`) | `live_remote::tests::the_deadline_kills_the_http_transport_and_closes_its_connection` |
+| Acc. 6: a reader that errors or never finishes, and malformed lines, give `Err` and preserve the store | already covered in Phase 2: `unreadable_or_unfinished_output_is_an_error`, `a_malformed_line_is_an_error_not_an_absent_branch`, `failures_leave_the_previous_bytes_untouched` |
+| Acc. 7: the worker ignores a linked worktree, a subdirectory, and a missing path (no lock, no output); on the main checkout it takes both locks and a failure stores nothing in either store | `list_prs::the_worker_command_prints_nothing_and_ignores_anything_but_a_main_checkout` (renamed from `…_ignores_a_linked_worktree`) |
+| Acc. 7: removal is unchanged | `cli/tests/remove.rs` and the lib `remove::` suites (inside `just test`), and `level2_remove` in tmux (9/9) |
+
+Library-test fixture notes (from the subagent):
+- `live_remote::tests` is now `pub(crate) mod tests`, so `remote_head` tests can reuse its `Loopback` server.
+- Each test repository sets an empty `http.proxy`, which turns off proxying and overrides `*_proxy`, and an empty `credential.helper`. No test mutates the process environment.
+- Known gap: a user's global `url.*.insteadOf` rule matching `http://127.0.0.1` would still apply. No build host or CI runner has one.
+
+Findings while writing the tests (test-side only, no product change):
+- In `NO_COLOR` output a branch badge keeps its padding (`origin/main .`). `list_remote_head` normalizes the text before asserting, and the snapshots record it as rendered. The spacing is not new; the existing snapshots already had it.
+- Any stored answer 60 s or older is stale, so it launches a worker. A test that asserts "no request from listing" must keep the answer fresh, not aged.
+
+### Verification
+
+- `just test` in `worktree/`: **527 passed, 21 skipped, 0 failed** (Phase 3: 512/18). The 3 new skips are the `perf_` test and the two `perf_support::tests` copies in the new `list_remote_head` binary, which run under `just test-perf`.
+- `just test-perf` in `worktree/`: **21/21 passed**.
+- `just lint` in `worktree/`: clean. `cargo clippy -p worktree-cli --tests --all-features -- -D warnings`: clean.
+- L2 (tmux), `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_list_verbose) | binary(level2_remove)'`: **18/18 passed**.
+- `just check-tier-coverage worktree`: nothing stranded. Every new test is L1, except `perf_remote_select_…`, which is in the perf tier. All sit in declared targets (`worktree-cli` has no `autotests = false`, so `tests/list_remote_head.rs` is its own binary).
+- After the runs, `ps` shows no `internal-refresh` process.
+- Cross-OS:
+    - `just cross-check worktree-cli --os windows`: **284 passed** (Phase 3: 272; +12 new).
+    - `--os wsl`: **297 passed** (Phase 3: 285; +12).
+    - `just cross-check worktree`, run by the subagent: Windows **211**, WSL2 **231**, macOS 230.
+    - build-linux was not retried, because of the rig permission problem recorded in Phase 2. WSL2 stands in as the Linux evidence.
+    - The WSL cross-check published no receipt, because the tree is uncommitted.
+
+### Checkpoint 4
+
+Met: `just test` and `just lint` pass, the L2 runs for `level2_list_verbose` and `level2_remove` pass, no worker lingers, and the optional Windows cross-check was run for both packages.

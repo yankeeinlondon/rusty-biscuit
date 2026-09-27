@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-26
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 packages:
@@ -56,6 +56,27 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/SKILL.md
+source_files_during_phase_4:
+    - worktree/cli/Cargo.toml
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap
+    - worktree/lib/src/live_remote.rs
+    - worktree/lib/src/remote_head.rs
+docs_updated_during_phase_4:
+    - worktree/fixes/2026-09-26-stale-remote-caption/plan.md
+    - worktree/fixes/2026-09-26-stale-remote-caption/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 ---
 
 # Plan: `wt list` caption trusts a stale `origin/<default>`
@@ -253,12 +274,12 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
 
 ### Wave 1 (parallel; separate test files; each task owns the `perf_support` helpers it adds, which are listed here to avoid collisions)
 
-- [ ] **Migrate existing tests** (`cli/tests/perf_support/mod.rs`, `list_prs.rs`, `perf_pr_request.rs`, `level2_list_verbose.rs`; driven by S2's inventory)
+- [x] **Migrate existing tests** (`cli/tests/perf_support/mod.rs`, `list_prs.rs`, `perf_pr_request.rs`, `level2_list_verbose.rs`; driven by S2's inventory)
     - Rename the argv matching to `internal-refresh` in `refresh_workers` and `refresh_worker_via_gitea`, and the help/completion assertions in `the_worker_command_is_hidden_from_help_and_completion`.
     - Add `seed_remote_head_store` and `remote_head_store()` (Rule 12). Seed a fresh head in every test that asserts no worker, a worker count, or a request count, so the PR behavior under test is isolated.
     - Change `finish_worker` and the L2 stale-PR cleanup to wait for process exit plus both locks (Rule 12).
     - Update module docs that name the old command.
-- [ ] **Snapshot matrix (acceptance 3)** (`cli/tests/list_table.rs`)
+- [x] **Snapshot matrix (acceptance 3)** (`cli/tests/list_table.rs`)
     - Cover:
         - each of the five observation rows
         - all four comparison states
@@ -271,24 +292,24 @@ These rulings resolve ambiguities in the spec. Implementers follow them as writt
         - the age boundaries 59 s, 60 s, 3599 s, 3600 s, 2 days − 1 min, and 2 days
         - future-dated at render time
     - Update `caption_variants_read_as_ruled` and `only_the_caption_count_is_colored_yellow` to the new wording while keeping the yellow-count assertion. Snapshots stay in this integration test (the skill's double-compile rule).
-- [ ] **Real-Git detection (acceptance 2)** (new `cli/tests/list_remote_head.rs`, isolated `HOME`/`XDG_CACHE_HOME`, a local bare origin plus a pusher clone)
+- [x] **Real-Git detection (acceptance 2)** (new `cli/tests/list_remote_head.rs`, isolated `HOME`/`XDG_CACHE_HOME`, a local bare origin plus a pusher clone)
     - The pusher advances main. Run `wt internal-refresh <main>` synchronously as a direct child and wait for it, then `wt list`: the caption says "differs … run git fetch origin".
     - `git fetch` in the listed checkout, then `wt list`: shows "1 commit behind local tracking ref" **and** "matched the remote", with no new live request (store bytes unchanged, and the `checked_at` age still shown).
     - Remote deletion: "was absent on origin". Then `git fetch --prune`: "No local tracking ref origin/main; the remote branch …"/absent wording as the rows specify. Recreate the branch and refresh again: present.
     - A fetch newer than the cached observation: the caption says "differs" and never "moved" or "advanced".
     - Invoking from the main checkout and from a linked worktree resolves the same `remote-head.json` path.
     - A missing origin with leftover `refs/remotes/origin/main` shows no caption and starts no worker.
-- [ ] **No foreground wait (acceptance 5)** (extend `cli/tests/list_prs.rs`; timing in `perf_pr_request.rs`)
+- [x] **No foreground wait (acceptance 5)** (extend `cli/tests/list_prs.rs`; timing in `perf_pr_request.rs`)
     - Use the Rule 13 holding listener as the origin and seed a fresh PR store for it. Test two cases: live-head miss and live-head stale.
     - The captured `.output()` of `wt list` returns while the listener still holds the worker's connection. Assert one connection (the request count) and zero PR requests.
     - Clean up by closing the held connection, then waiting for the worker's process exit and both locks.
     - Add to `perf_pr_request.rs` a per-sample assertion that the `remote select` stage stays under 300 ms. Keep the existing full-command bound and `perf_list_meets_sla_with_a_stale_answer_and_a_blocked_refresh` unchanged.
-- [ ] **Failure and cleanup (acceptance 6)** (lib tests in `live_remote.rs` and `remote_head.rs`, plus loopback servers from S1)
+- [x] **Failure and cleanup (acceptance 6)** (lib tests in `live_remote.rs` and `remote_head.rs`, plus loopback servers from S1)
     - The Rule 14 `401` server gives a fast `Err`, no store change, and no prompt (stdin is null, and the test runs under nextest with no TTY).
     - A holding HTTP server with a 500 ms deadline gives `Err` within the bound, and the listener observes the close (tree kill). This runs on all OSes, unlike the existing Unix-only `hang.sh` test.
     - A stub reader that errors or times out gives `Err` from `run_noninteractive`, never an absence. A malformed line gives `Err` and preserves the store.
     - Every fixture that can spawn a worker uses a drop guard that closes held connections and waits for process exit, so assertion-failure paths also clean up.
-- [ ] **Command and removal regression (acceptance 7)**
+- [x] **Command and removal regression (acceptance 7)**
     - `wt internal-refresh` ignores a linked worktree, a subdirectory, and a missing path, and prints nothing (extend the existing `list_prs` worker test).
     - Run `cli/tests/remove.rs`, `cli/tests/level2_remove.rs` (tmux, `BISCUIT_TEST_REQUIRED_BACKENDS=tmux cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_remove)'`), and the lib `remove::` suites unchanged.
 

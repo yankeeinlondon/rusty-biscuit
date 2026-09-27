@@ -31,34 +31,23 @@ related:
     - 2026-09-24-ux-improvements
 human_review: false
 message_to_agent: |-
-    Phase 3 (worker, rendering, orchestration) is complete; details in implementation-log.md "## Phase 3".
-    What exists now for Phase 4:
-    - Hidden command is `wt internal-refresh <main>` (cli/src/commands/refresh_worker.rs). run_halves runs the PR
-      half and the live-head half on two scoped threads; panics are discarded per half.
-    - list::gather_remote implements Rule 8 via ListSeams { connect, launch }. Perf stages: `pr gather` (origin
-      lookup + PR select + any foreground request) and NEW `remote select` (live-head select + launch). Phase 4
-      adds the < 300 ms per-sample assertion on `remote select` in perf_pr_request.rs.
-    - list_table: RemoteFacts { default_branch, tracking_tip, answer } (no tracking_ref field; derived as
-      origin/<default>), TableFacts.remote, from_list(list, prs, remote) drops the caption when remote is None,
-      observation_markup(remote, now), age_text(seconds). The caption paragraph now word-wraps
-      (WordWrap::WrapProse(None, Some(1))); the 99-column snapshot shows it on two lines.
-    - Much of Phase 4's "Migrate existing tests" task is ALREADY DONE (it was needed to keep just test green):
-      argv rename, seed_remote_head_store(age, sha) / remote_head_store() / probe_head_refresh(),
-      wait_until_unlocked = both locks free AND no worker process, RemoveOnDrop removes the head store too,
-      fresh-head seeds in list_prs / perf_pr_request / level2_list_verbose. The plan checkbox is left unchecked;
-      verify against the S2 inventory and check it off.
-    - IMPORTANT: MixedFixture::wt_command_via / wt_command_via_gitea now set GIT_CONFIG_COUNT=2 with
-      protocol.http.allow=never and protocol.https.allow=never, because git honors HTTP(S)_PROXY and the
-      worker's ls-remote was being counted as a PR request by ProxyStub/FakeGitea. The Rule 13 live-hold test
-      needs git's HTTP transport, so it must env_remove("GIT_CONFIG_COUNT") (or build its own command).
-    - Linux/WSL: sysinfo lists threads as processes with the same argv; refresh_workers() now filters
-      thread_kind().is_none(). Any new process-counting helper must do the same (recorded in the os skill).
-    - Listing reads origin ONCE before the PR request (Rule 8), so the live head is selected with the
-      pre-request origin; seed heads for the origin that is current when `wt list` starts.
-    - seed_remote_head_store always writes branch "main"; add a parameter if a trunk fixture needs it.
-    - Test baseline after Phase 3 (macOS): just test in worktree/ = 512 passed, 18 skipped; level2_list_verbose
-      (tmux) 9/9. Cross-check worktree-cli: WSL2 285 passed; native Windows 272 passed (final tree).
-      build-linux rig was not retried (Phase 2 found it broken).
+    Phase 4 (integration tests and test migration) is complete; see implementation-log.md "## Phase 4" for the
+    requirement-to-test mapping. No product code changed in Phase 4.
+    For Phase 5:
+    - Drift left for you: docs/dependencies.md (repo root, ~L212) and worktree/docs/performance-testing.md (~L33)
+      still name `wt internal-refresh-prs`. The worktree skill has not yet been updated for the store/worker/caption
+      (Phase 5's skill task); also document the new test helpers there:
+      perf_support::HoldingOrigin (loopback origin that holds git's ls-remote), MixedFixture::with_origin,
+      wt_command_direct (no proxies, no user/system git config), seed_empty_pr_store, isolated_cache_file,
+      and the new real-git test file cli/tests/list_remote_head.rs (bare origin + pusher clone, worker run as a
+      direct child).
+    - Test counts after Phase 4 (macOS): just test 527 passed / 21 skipped; just test-perf 21/21 (the new
+      perf_remote_select_stays_under_the_deadline_with_a_blocked_live_head_refresh lives there, not in just test);
+      L2 tmux level2_list_verbose + level2_remove 18/18. Cross-check worktree-cli: Windows 284, WSL2 297;
+      worktree: Windows 211, WSL2 231. build-linux still has the rig permission problem from Phase 2.
+    - Any stored live-head answer >= 60 s old launches a worker from `wt list`; tests asserting "no request/no
+      worker" must seed a fresh answer.
+    - live_remote.rs's test module is now `pub(crate) mod tests` so remote_head tests reuse its Loopback server.
 ---
 
 # `wt list` caption trusts a stale `origin/<default>`
