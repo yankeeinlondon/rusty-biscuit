@@ -30,33 +30,37 @@ related:
     - 2026-09-26-stale-remote-caption
 human_review: false
 message_to_agent: |-
-    Phase 3 is done: every Phase 3 task is checked off; `just test` (590 passed) and `just lint` pass in
-    worktree/, and `just test-l2` passes on macOS (20). Read "## Phase 3" in implementation-log.md for the
-    exact APIs and deviations. What Phase 4 needs:
+    Phase 4 is done: every Phase 4 task is checked off. worktree `just test` (678 passed), `just lint`, and
+    `just test-l2` (20, macOS) pass; native Windows ran all of worktree-cli (one timing-dependent assertion
+    fixed and re-verified) and the fast_forward lib tests. Read "## Phase 4" in implementation-log.md for
+    APIs and deviations. What Phase 5 needs:
 
-    - The worker is `wt internal-refresh <main> [--attempt <id>] [--force]`. `refresh_worker::launch(main)`
-      still passes neither; Phase 4 replaces it with the Rule 18 `LaunchArgs` launcher. `--attempt` must be
-      32 lowercase hex (`remote_head::new_attempt_id()`); an invalid id makes `begin_attempt` fail, so the
-      head half ends `WriteFailed` and writes nothing.
-    - `remote_update::run_attempt` has NO `force` parameter (Rule 7 gives the head half no freshness skip).
-      `--force` only makes the PR half ignore its 60 s window and makes the worker write the receipt.
-    - `remote_head::refresh_remote_head` is GONE. `pull_requests::RefreshOutcome` is PR-only,
-      `Failed(PrFailure)`, and not `Copy`; `pull_requests::refresh` takes `force: bool` before `connect`.
-    - Receipt `prs` has a new `PrStatus::Ignored` (repository in ~/.wt.json: no PR request, no badges).
-      `api_preference::Preferences::ignores_origin(origin)` is the check.
-    - `remote_head::refresh_lock_held(store)` exists for the Rule 6 "contended" test, BUT it takes the
-      lock for an instant: a worker that tries to lock at that moment exits as `Contended` and writes
-      nothing. In the foreground wait, never probe before the launched worker's own attempt record
-      (`attempt.id == token`) has appeared or its `Child` has exited; otherwise the probe can make your own
-      worker lose its lock. Prefer reading the attempt record; probe only to decide adoption.
-    - `live_remote::tracking_ref_changed_at(base, branch)` is ready for the caption's reflog row.
-    - Tests already migrated (so skip them in Wave 3): `list_prs` (all), `list_remote_head` (all),
-      `level2_list_verbose::level2_list_stale_pr_answer…`, and S4's `DesignFixture` git-config isolation.
-      `FakeGitea` now answers `/branches/` 404 at once and counts it in `branch_requests()`, so
-      `requests()` is PR-only. Through `ProxyStub` (HTTPS) each worker is 2 connections (one per half).
-      Still unmigrated: every test whose expectation depends on `wt list` launching or waiting (the launch
-      rule itself is unchanged in Phase 3), and perf_* bounds.
-    - Cross-OS: the new lib tests pass on native Windows (99/99 of the touched modules); see the log.
+    - Perf gates: perf_pr_request.rs was migrated only far enough to stay green. Its tests are now
+      `perf_list_meets_sla_with_a_stale_answer_and_a_failing_refresh` (renamed from `…blocked_refresh`) and
+      `perf_a_held_live_head_check_costs_the_listing_only_its_wait` (replaces `perf_remote_select_…`; the
+      perf stage `remote select` is now `remote wait`, plus a `fast-forward` stage). A held FETCH bound and
+      `-r`/`--ff` bounds are not written yet. performance-testing.md is untouched.
+    - sniff's provider client has a 3 s CONNECT timeout, equal to the listing's 3 s wait. Against a
+      hanging proxy both of the worker's requests fail at ~3 s, racing the wait. Use
+      `perf_support::ProxyStub::closing_after(hold)` (counts, then drops each connection) or
+      `list_prs::close_after`, never a plain hanging proxy, when a test needs a deterministic listing.
+      Real-world effect: with a black-holed API the ls-remote fallback starts at ~3 s, so an ordinary
+      listing reads "still checking".
+    - L2: only the caption WORDING in level2_list_verbose was updated. Still to add: dim italic on the
+      suffix, the hint, the credentials warning, and the spinner-cleared check. Caution: the foreground
+      shows a §5 line only from THIS run's attempt ApiNote (list::credential_line), so a seeded store's
+      ApiNote is overwritten by the run's own attempt and never shown. To get a warning in L2, make the
+      run's own worker observe it: FakeGitea currently answers every /branches/ request 404, which
+      without a key plus a refused ls-remote gives the NotVisible line; add a reply option if another
+      condition (401/429) is wanted.
+    - A local-origin hold for L2/perf exists: `remote_fixture::UploadPackGate::install(&fixture, n)`
+      (cli/tests/remote_fixture/mod.rs) holds the n-th upload-pack run (0 = the check, 1 = the fetch).
+    - Docs not yet updated (Phase 5): worktree/docs/cli/list.md still describes the old two-sentence
+      caption and "wt never fetches"; README; performance-testing.md; the spec's Rule 10 argv amendment.
+      The worktree skill's `wt list` section WAS updated in Phase 4.
+    - `--ff` is a visible alias: help lists it, clap's dynamic completion offers only `--fast-forward`.
+    - Unrelated working-tree changes under worktree/fixes/2026-09-27-graph-merged-branch/ are not from
+      this fix; leave them alone.
 ---
 
 # `wt list` should know, not guess, whether `origin/<default>` is current

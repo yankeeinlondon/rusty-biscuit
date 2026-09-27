@@ -103,6 +103,53 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_4:
+    - worktree/lib/src/fast_forward.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/remote_fixture/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+    - worktree/cli/tests/snapshots/list_table__caption_every_row_in_every_comparison_state.snap
+    - worktree/cli/tests/snapshots/list_table__caption_reasons.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_timestamps.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__credential_lines_every_condition_for_every_provider.snap
+    - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+    - worktree/cli/tests/snapshots/list_table__output_order.snap
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap (deleted)
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap (deleted)
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap (deleted)
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap (deleted)
+docs_updated_during_phase_4:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/windows.md
 packages:
     - schematic-definitions
     - schematic-schema
@@ -737,3 +784,114 @@ The forced run's receipt: `{ attempt_id: ffee…1100, branch: main, head: ok, pr
 
 - **Windows flake, not a regression:** `list_prs::an_origin_change_during_a_foreground_request_shows_no_badges_from_the_old_origin` failed once in the parallel run (`requests() == 1`, expected 2: the second list's 300 ms foreground PR request never reached the server under load; the test took 9.6 s) and passed alone (4.6 s). The test is unchanged in this phase, and the foreground path is unchanged. It is the same 300 ms-under-Windows-load fragility the stale-store test already documents; Phase 4/5 should keep it in mind when the foreground wait lands.
 - No pre-existing failure was skipped.
+
+## Phase 4
+
+Phase 4 wires the foreground: the flags, the fast-forward, the renderer, the wait, and the listing orchestration, then migrates the tests the always-launch flow broke and adds the binary-level proofs. A subagent wrote `worktree/lib/src/fast_forward.rs` (a disjoint lib file); the orchestrator did everything else, because the renderer, the wait, and the orchestration share one contract.
+
+### Flags (`args.rs`, `main.rs`)
+
+- `Cli` gains `refresh` (`-r`/`--refresh`), `ignore_api` (`--ignore-api`), and `fast_forward` (`--fast-forward`, visible alias `--ff`), all global. `main.rs::reject_listing_flags` refuses any of them with `create`, `go`, `remove`, or the hidden worker through `Cli::command().error(ArgumentConflict, …)` (exit 2), before dispatch. Every combination is accepted for listing (Rule 15).
+- They reach `commands::list` as `ListFlags { refresh, ignore_api, fast_forward }`.
+- `WorktreeError::NoRepositoryIdentity(reason)` (exit 1 through the default arm): `--ignore-api` with no `origin`, a local-path `origin`, or no home directory. Nothing renders.
+- There was no flag-completion snapshot anywhere (the `wrapper_protocol` snapshots are the shell wrappers). A new one, `list_flags__global_flag_completions`, records `COMPLETE=fish wt -- wt --`. clap's dynamic completion offers `--fast-forward` but not its visible alias `--ff`; help lists both.
+
+### Fast-forward (`worktree::fast_forward`, subagent)
+
+- `fast_forward_default(main, default) -> FfResult { Moved { from, to, checkout }, UpToDate, Refused(FfRefusal) }`, with `FfRefusal { DirtyCheckout, Diverged, MissingLocal(name), MissingTracking(name), Changed, Other }`.
+- It re-reads both refs and their ancestry right before the move. No holder: `update-ref -m "wt: fast-forward" refs/heads/<d> <new> <old>`. A holder: re-verifies `symbolic-ref -q HEAD` there, confirms the ref still equals `<old>`, and runs `merge --ff-only --no-autostash -q <verified sha>` under `LC_ALL=C`; "would be overwritten" is `DirtyCheckout`. A holder that left the branch is re-resolved once.
+- Deviations: it merges the verified SHA rather than `origin/<d>` (a concurrent fetch cannot change what is merged). `--no-autostash` is added so `merge.autoStash` cannot stash the user's changes. Two checkouts holding the branch (`worktree add --force`) is `Refused(Other)`. The one unclosable gap (a checkout switching branch between the check and the merge) is documented in the module.
+- Tests (13, `fast_forward::tests`): `moves_the_ref_when_no_checkout_holds_the_branch`, `a_concurrent_change_makes_the_compare_and_swap_refuse`, `fast_forwards_a_clean_checkout_holding_the_branch`, `refuses_when_local_changes_touch_files_the_update_changes` (bytes, HEAD, and refs unchanged), `re_resolves_a_branch_that_moved_to_another_worktree`, `re_resolves_to_a_ref_update_when_the_old_holder_left_and_none_took_it`, `refuses_a_diverged_branch_without_changing_refs`, `reports_up_to_date_when_in_sync`, `reports_up_to_date_when_the_local_branch_is_ahead`, `names_a_missing_local_branch_and_creates_none`, `names_a_missing_tracking_ref_and_changes_nothing`, `fast_forwards_a_default_branch_not_named_main`, `refuses_an_invalid_branch_name_without_running_a_mutation`.
+
+### Rendering (`list_table.rs`, Rule 16)
+
+- `RemoteFacts { default_branch, tracking_tip, status: RemoteStatus }` replaces the stored `answer`. **Deviation:** Rule 16 adds `remote_status: Option<RemoteStatus>` beside `remote`; keeping it inside `RemoteFacts` keeps "`None` ⇔ no `origin`" in one field.
+- `RemoteStatus` has one variant per §4 row (`CheckedNow`, `Fetched`, `FetchFailed { reason }`, `StillChecking { last }`, `StillPulling`, `CheckFailed { reason, last }`, `Absent`); `LastKnown` is `Answer { checked_at }`, `TrackingRefChanged { at }`, or `Never`, as Unix seconds judged at render time (a future timestamp reads as `Never`).
+- `TableFacts` gains `credential_line`, `unfinished`, `ff_suggestion`, `fallback_notice`, and (**addition**) `ff_notice: Option<FfNotice>` for `--ff` refusals, which the spec requires to be printed but Rule 16 did not place. They sit in the closing notes, before the §8 notice.
+- `caption_markup(caption, remote, now)`: the comparison (`local origin/<d>` only in the fetch-failed and still-pulling rows), then `<dim><i>(…)</i></dim>`. Wording choices the spec left open: a Git credentials failure reads "origin didn't accept Git's credentials"; a fetch failure other than the timeout reads "fetch failed"; without a comparison the sentence is "origin/main (…)", or "No local tracking ref origin/main (…)", or, pruned and absent, "main was absent on origin when checked just now". The diverged row keeps the spec's `(N ahead, M behind)` and adds the suffix as a second parenthetical.
+- `render` prints the caption, then the §5 line (dim), a blank line, the table, the legend, and the PR age line. `render_hint` (§6) and `render_notes` (`--ff` refusal or §9, then §8) are separate, and `assemble(Sections { table, graph, hint, verbose, notes })` fixes the order (Rule 16). Notes are `UnorderedList` items, so long lines wrap with a hanging indent.
+- The old caption snapshots were replaced, not kept (`caption_observation_rows`, `caption_comparison_states`, `caption_fresh_and_stale_answers`, `caption_age_boundaries_and_future_answers` deleted; `caption_missing_refs_and_failed_comparison` and `caption_trunk_default_branch` rewritten). New: `caption_every_row_in_every_comparison_state` (9 rows × 4 states), `caption_reasons`, `caption_age_boundaries_and_future_timestamps`, `credential_lines_every_condition_for_every_provider` (5 conditions × 4 providers), `closing_notes`, `output_order` (with and without a graph, with and without `--verbose`). Tests: `the_caption_is_one_sentence_with_a_dim_italic_suffix` (checks the SGR 2 and 3 bytes before the suffix), `only_rows_that_could_not_update_the_ref_call_it_local`, `an_absent_branch_never_reads_as_in_sync_with_origin`, `the_credentials_line_is_dim_and_directly_follows_the_caption`, `the_hint_appears_only_with_unfinished_work`, plus the existing table tests.
+
+### Wait and spinner (`list/wait.rs`, Rule 6)
+
+- `wait(WaitRequest { main, origin_digest, branch, force, budget }, &dyn WaitEnv, WorkerLaunch, on_phase) -> Waited { end: WaitEnd, worker }`. `WaitEnd` is `Finished { attempt, receipt }`, `TimedOut { last }`, or `Unavailable`. `WaitEnv` abstracts the store, the receipt, both lock probes, the clock, and the id generator; `StoreEnv` is production.
+- Rules as implemented:
+    - The worker's exit is read **before** the store, so an outcome written just before exit is never missed.
+    - Only the followed id's attempt is observed, and only while `is_current_for(digest, branch, now)`.
+    - Adoption only after our own worker has exited without recording an attempt (the Phase 3 message: probing earlier could steal our worker's lock), and only while the head lock is held; otherwise `Unavailable` at once.
+    - A worker that recorded its attempt and exited without an outcome (a failed store write) is `Unavailable` at once, not a 3 s wait.
+    - Forced: after the outcome, waits for this token's receipt; `prs: contended` waits for the PR lock (probed only after our worker exited); a worker that exits with no receipt ends the wait (bounded publication failure). A receipt saying `adopted-elsewhere` follows the current attempt, or, when the holder is for another origin or branch, waits for the head lock and relaunches with a new token (same budget).
+- Budgets: `ORDINARY_BUDGET` 3 s, `FORCED_BUDGET` = `ATTEMPT_MAX_AGE` (75 s), polled every 25 ms.
+- `Progress` wraps the biscuit-terminal `Spinner` (150 ms delay); `phase_text` maps phases to the §3 texts.
+- `refresh_worker::launch(main, &LaunchArgs { attempt, force }) -> io::Result<WorkerHandle>` now passes `--attempt` and `--force`; `WorkerHandle::from_child` polls `try_wait` and never joins or kills.
+- Tests (21, `list::wait::tests`, fake clock that advances only on sleep): `our_attempt_is_followed_through_every_phase_to_its_outcome` (also asserts zero early lock probes), `a_running_attempt_is_adopted_with_no_second_launch`, `a_contender_that_exits_early_is_never_a_finished_check` (3 stores), `a_spawn_failure_is_unavailable_at_once`, `a_worker_that_stops_mid_attempt_is_unavailable`, `the_budget_ends_the_wait_with_the_last_phase_seen`, `an_outcome_for_another_attempt_branch_or_origin_is_never_taken` (id, branch, origin, expired), `a_forced_wait_follows_the_outcome_to_the_receipt`, `a_forced_wait_waits_for_a_contended_pr_half_to_be_released`, `a_forced_worker_that_exits_without_a_receipt_ends_the_wait`, `a_forced_wait_adopts_a_matching_attempt_its_worker_reported`, `a_forced_wait_relaunches_after_a_holder_for_another_branch_finishes`, `an_ordinary_wait_never_relaunches_for_another_branchs_holder`, `a_forced_attempt_that_fails_its_fetch_still_waits_for_the_receipt`, `the_spinner_text_follows_the_phase`, `the_spinner_writes_nothing_when_its_output_is_not_a_terminal`, `the_spinner_draws_the_phase_text_and_clears_its_line_on_a_terminal`, `a_launched_process_reports_its_exit`.
+
+### List orchestration (`list.rs`)
+
+- Order: `parse_worktree_state` (main checkout and default branch) → `gather_remote` (origin; `--ignore-api` records first; stored PR answer; a PR miss requests in the foreground **before** the launch; launch and wait; the spinner cleared; the PR answer re-selected, since the worker may have published one) → `--ff` → `WorktreeList::reread_refs` (new lib method) → the local gather with the graph thread → facts → `assemble` → one `eprint!`.
+- **Deviation (ordering):** the PR miss request (≤ 300 ms) now runs before the launch instead of beside the git work, so the worker's PR half finds the answer and never repeats the request (Rule 20's request counts stay exact). Under `-r`/`--ff` and for an ignored repository the foreground makes no PR request at all.
+- **Deviation (seams):** `ListSeams { connect, launch, wait_budget, forced_budget }` has no clock. The wait's clock is `WaitEnv`'s, and the pure `wait` tests inject it; `gather_remote` tests use real time with a 300 ms budget and stub launchers that write the real store.
+- `tracking_ref_changed_at` runs lazily, only for a row that needs `LastKnown` and has no stored answer. §5 and §8 read only this run's followed attempt's `ApiNote`, this run's foreground PR failure, or the receipt's PR failure under `-r`/`--ff`. The §9 suggestion needs `CheckedNow` or `Fetched`, a caption strictly behind, and no `--ff`.
+- `unfinished` = the wait timed out, or the PR answer is not fresh and a refresh is running: our worker is still alive, or (after it exited) someone holds the PR lock. New lib probe `pull_requests::pr_lock_held`.
+- `render_verbose` returns a `String`, so every section is assembled before printing.
+- Perf stages: `pr gather`, `remote wait` (replaces `remote select`), `fast-forward`.
+- Tests (`list::tests::gather`, 11): `every_listing_with_an_origin_launches_once_and_waits_for_the_outcome` (git calls = the origin lookup only), `a_stale_answer_is_shown_and_the_parent_never_writes_it`, `a_stale_empty_answer_is_still_an_answer`, `a_pr_answer_the_worker_publishes_during_the_wait_is_shown`, `a_pr_miss_settles_before_the_worker_is_launched`, `a_failed_miss_shows_no_badges_stores_nothing_and_is_this_runs_failure`, `a_forced_listing_leaves_a_pr_miss_to_its_forced_worker`, `a_changed_origin_never_shows_the_old_answers`, `a_worker_that_cannot_launch_is_unavailable_without_a_wait`, `a_silent_worker_is_waited_for_only_until_the_budget`, `without_an_origin_stored_answers_are_ignored_and_nothing_is_requested_or_launched`. `list::tests::observations` (6): `every_ending_maps_to_its_caption_row`, `only_a_row_without_a_current_answer_asks_what_was_last_known`, `each_confirmed_condition_gives_its_line_with_the_key_used_or_the_keys_accepted` (10 cases, incl. a 404 with a key and a no-key fallback that answered), `a_pr_failure_this_run_observed_gives_a_line_only_for_a_confirmed_condition` (and none when nothing was observed this run), `a_credentials_line_names_variables_and_never_their_values` (sentinel `GITHUB_TOKEN` value), `the_fallback_notice_follows_only_a_no_key_fallback_that_answered` (never for a rate limit).
+
+### Wave 3: migration and new binary-level tests
+
+Fewer tests broke than S4 predicted (12, not about 25), because Phase 3 had already migrated the worker-side ones.
+
+- **Shared fixture.** `list_remote_head.rs`'s local-origin `Fixture` moved to `cli/tests/remote_fixture/mod.rs`, shared with the new `list_flags.rs`. `remote_fixture::UploadPackGate` points `remote.origin.uploadpack` at a `sh` script that counts runs and holds the Nth (0: the check's `ls-remote`, 1: the fetch) until a release file appears; its drop releases. This is how "still checking", "still pulling", and adoption are proven against a local origin without HTTP.
+- **`list_remote_head.rs`** (14): rewritten for the new caption and flow, plus new `a_listing_fetches_a_variance_and_counts_from_the_fetched_tip` (counts, caption, and §9 from the post-fetch snapshot; `FETCH_HEAD` absent; `feature` unmoved), `a_check_still_running_at_the_deadline_is_still_checking_and_the_next_run_shows_it` (dated previous answer, hint, < 5 s, next run "checked just now"), `a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_the_listing` (one coherent pre-fetch snapshot, no §9, the worker fetches after `wt list` exited), `a_second_listing_adopts_the_running_attempt_and_asks_origin_nothing` (one `upload-pack` run for two listings), `an_origin_that_cannot_be_read_keeps_the_previous_answer_dated` (the bare repository moved away). `a_fetch_newer_than_the_observation…` became `a_manual_fetch_before_the_listing_is_checked_and_never_reported_as_a_move`. Every listing asserts that no spinner glyph, `\r`, or clear-line reached captured stderr.
+- **`list_prs.rs`**: `a_fresh_pr_store…` and `a_stale_store_shows_its_badges_and_its_workers_failed_request_stores_nothing` count one and two worker connections. A scoped `close_after` thread closes the held connections as soon as they arrive, because sniff's provider client has a **3 s connect timeout**, which races the listing's 3 s wait against a hanging proxy (the old "lock still held after `wt list` returned" assertion failed that way). The held-PR detachment proof stays in the `FakeGitea` tests. `a_changed_origin_…_and_its_worker_stores_nothing`; `an_origin_change_during_a_foreground_request…` now expects the worker's request for the **new** origin (3 requests) and only a new-origin answer stored; `a_missing_or_stale_live_head_never_holds_up_the_listing` became `a_held_live_head_check_holds_the_listing_only_until_its_deadline` (reflog-dated still-checking row, hint, < 5 s, `.output()` returns while `HoldingOrigin` still holds the request).
+- **`perf_pr_request.rs`** (the minimum to keep `just test` green; Phase 5 owns the gates and `performance-testing.md`): new `ProxyStub::closing_after(hold)` (counts, then drops each connection after `hold`). `…when_the_pr_request_hits_its_deadline` holds 400 ms (the foreground still hits its 300 ms deadline) and bounds the full command at 1 s + 300 ms, since the miss request now precedes the wait. `…with_a_stale_answer_and_a_blocked_refresh` became `…and_a_failing_refresh` (fresh runs make only the live-head connection). `perf_remote_select_stays_under…` became `perf_a_held_live_head_check_costs_the_listing_only_its_wait` (`remote wait` in [3 s, 3.3 s), full < 3 s + 1 s; the second listing adopts the first one's held attempt).
+- **`list_flags.rs`** (new, 19 incl. 2 shared helper tests): parsing on `wt` and `wt list`; refusal with `create`/`go`/`remove` in both flag positions (exit 2, nothing created); help; completion snapshot; `refresh_waits_for_both_halves_and_asks_again_despite_young_answers` (`FakeGitea`: a young PR answer is re-requested, the branch head is re-checked, the new PR badge shows in the same run, the receipt exists before render, no worker left); `refresh_on_a_local_origin_fetches_and_reports_like_a_listing`; `refresh_is_bounded_when_the_worker_can_publish_nothing` (Unix; read-only store directory; < 5 s); `ignore_api::{the_repository_is_recorded_before_the_run_and_no_provider_is_asked, a_corrupt_file_ignores_nothing_and_is_never_overwritten, without_an_identifiable_origin_the_flag_fails_and_records_nothing}` (Unix only: native Windows resolves home without `HOME`; the lib's `%USERPROFILE%` test covers it); `fast_forward_*` for a checked-out branch (tree moves), an unheld branch (`update-ref`), uncommitted touched files (refused, bytes kept), diverged (refused, no suggestion), in sync and ahead (silent), a failed check (moves to the local `origin/main`, keeps "couldn't check origin"), and `--ff -r` (one check, one fetch, one move).
+- **L2** (`level2_list_verbose::level2_list_styles_follow_the_design_in_tmux`): only the caption **wording** was updated so the L2 suite stays green; the dim-italic suffix, hint, and warning style assertions remain Phase 5's L2 task.
+
+### Requirement → test mapping (Phase 4 scope)
+
+| Requirement | Tests |
+|---|---|
+| Every listing launches or adopts one attempt, waits ≤ 3 s, gathers after | `gather::every_listing_with_an_origin_launches_once…`, `a_listing_fetches_a_variance_and_counts_from_the_fetched_tip`, `a_fetch_still_running_at_the_deadline_is_still_pulling…`, `perf_a_held_live_head_check_costs_the_listing_only_its_wait` |
+| Adopt, never mistake a contender for a finished check | `wait::tests::a_running_attempt_is_adopted…`, `a_contender_that_exits_early…`, `a_second_listing_adopts_the_running_attempt_and_asks_origin_nothing` |
+| Spawn failure / early exit → unavailable at once | `a_spawn_failure_is_unavailable_at_once`, `gather::a_worker_that_cannot_launch…`, `a_worker_that_stops_mid_attempt_is_unavailable` |
+| Never another attempt's, branch's, or origin's outcome | `an_outcome_for_another_attempt_branch_or_origin_is_never_taken` |
+| §4 rows × comparison states, reasons, reflog, never, absent (±tracking ref), non-`main` | `caption_snapshot_*` (5), `an_absent_branch_never_reads_as_in_sync_with_origin`, `every_ending_maps_to_its_caption_row` |
+| Dim italic suffix, one sentence, "local" only where ruled | `the_caption_is_one_sentence_with_a_dim_italic_suffix`, `only_rows_that_could_not_update_the_ref_call_it_local` |
+| §5 per condition × provider, names never values, this run only | `credential_lines_snapshot_…`, `each_confirmed_condition_gives_its_line…`, `a_pr_failure_this_run_observed…`, `a_credentials_line_names_variables_and_never_their_values` |
+| §6 hint only when unfinished, after graph/PR line, before verbose | `the_hint_appears_only_with_unfinished_work`, `output_order_snapshot`, the still-checking/still-pulling binary tests |
+| §8 notice only for a no-key fallback that answered, never rate limit | `the_fallback_notice_follows_only_a_no_key_fallback_that_answered`, `closing_notes_snapshot`, `output_order_snapshot` |
+| §9 only after a completed check/fetch and strictly behind | `a_listing_fetches_a_variance…` (shown), still-pulling test (not shown), `fast_forward_refuses_a_diverged_branch_and_suggests_nothing` |
+| Flags parse, refuse, help, completion | `list_flags::every_listing_flag_*`, `help_lists_every_listing_flag`, `completion_offers_every_listing_flag` |
+| `-r` waits for both halves, forces young caches, bounded on failures | `refresh_waits_for_both_halves…`, `refresh_is_bounded_when_the_worker_can_publish_nothing`, `a_forced_*` wait tests |
+| `--ignore-api` before the run, no provider request, corrupt file, no origin | `list_flags::ignore_api::*`, `gather::a_forced_listing…` (no foreground request) |
+| `--ff` §9 table, `--ff -r` | `fast_forward::tests` (13), `list_flags::fast_forward_*`, `a_failed_check_fast_forwards_to_the_local_tracking_ref…` |
+| Spinner never on a non-terminal; clears its line | `the_spinner_writes_nothing…`, `the_spinner_draws_the_phase_text_and_clears_its_line…`, `assert_no_spinner` in every real-Git listing |
+| No worker outlives a fixture | `remote_fixture::Fixture` drop, `ReleaseOnDrop`, `wait_until_unlocked`; `pgrep -f internal-refresh` empty after the full runs |
+
+### Gates (macOS)
+
+| Gate | Result |
+|---|---|
+| `just test` (worktree) | 678 passed, 23 skipped (Phase 3: 590) |
+| `just lint` (worktree) | pass |
+| `just test-l2` (worktree) | 20 passed |
+| `just check-tier-coverage worktree` | nothing stranded |
+| `cargo check -p worktree-cli --features terminal-tests --tests` | clean |
+| Leaked workers after the runs | none (`pgrep -f internal-refresh`) |
+
+`schematic/`, `sniff/`, and `biscuit-terminal/` were not changed in this phase, so their gates were not rerun.
+
+### Cross-OS (Phase 4)
+
+| Host | Run | Result |
+|---|---|---|
+| native Windows | `./scripts/cross-check.sh --os windows worktree-cli` (whole package) | 366 of 367 on the first run; the failure is below, fixed, and re-verified |
+| native Windows | `./scripts/cross-check.sh --os windows worktree fast_forward` | 14 of 14 |
+| WSL2 (Ubuntu, nextest archive) | `./scripts/cross-check.sh --os wsl worktree-cli` | 384 of 384 |
+| build-linux | not run; WSL2 stands in for Linux, as in Phase 3 | — |
+
+- **Windows fix:** `list_prs::a_changed_origin_hides_the_stored_badges_and_its_worker_stores_nothing` asserted "couldn't check origin". Native Windows spends about 2 s on each refused loopback connection, so under parallel load the worker's check sometimes outlived the 3 s wait and the row read "still checking". Both rows are truthful, so the test now asserts only "; never checked with origin)". It passes alone and in the full run on macOS and Windows. The fact is recorded in `.claude/skills/os/windows.md`.
+- A first Windows run with substring filters (`list_flags`, `list_remote_head`, …) selected only 110 tests, because nextest filters match test **names**, not binary names; the whole-package run above is the evidence.
+- `remote_fixture::UploadPackGate`'s `sh` script works under Git for Windows (the gate tests passed there).
+- Only `worktree/` changed in this phase, so the other three areas' gates were not rerun.

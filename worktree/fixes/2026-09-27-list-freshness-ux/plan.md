@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 source_files_during_phase_1: []
@@ -104,6 +104,53 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_4:
+    - worktree/lib/src/fast_forward.rs
+    - worktree/lib/src/lib.rs
+    - worktree/lib/src/error.rs
+    - worktree/lib/src/pull_requests.rs
+    - worktree/lib/src/worktree.rs
+    - worktree/cli/src/args.rs
+    - worktree/cli/src/main.rs
+    - worktree/cli/src/commands/mod.rs
+    - worktree/cli/src/commands/list.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/src/commands/list/wait.rs
+    - worktree/cli/src/commands/list/wait/tests.rs
+    - worktree/cli/src/commands/list_table.rs
+    - worktree/cli/src/commands/refresh_worker.rs
+    - worktree/cli/tests/list_table.rs
+    - worktree/cli/tests/list_flags.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/tests/list_prs.rs
+    - worktree/cli/tests/perf_pr_request.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/remote_fixture/mod.rs
+    - worktree/cli/tests/level2_list_verbose.rs
+    - worktree/cli/tests/snapshots/list_flags__global_flag_completions.snap
+    - worktree/cli/tests/snapshots/list_table__caption_every_row_in_every_comparison_state.snap
+    - worktree/cli/tests/snapshots/list_table__caption_reasons.snap
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_timestamps.snap
+    - worktree/cli/tests/snapshots/list_table__caption_missing_refs_and_failed_comparison.snap
+    - worktree/cli/tests/snapshots/list_table__caption_trunk_default_branch.snap
+    - worktree/cli/tests/snapshots/list_table__credential_lines_every_condition_for_every_provider.snap
+    - worktree/cli/tests/snapshots/list_table__closing_notes.snap
+    - worktree/cli/tests/snapshots/list_table__output_order.snap
+    - worktree/cli/tests/snapshots/list_table__the_spec_example_renders_as_ruled.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_99_columns_shows_no_counts.snap
+    - worktree/cli/tests/snapshots/list_table__the_table_at_100_columns_shows_counts.snap
+    - worktree/cli/tests/snapshots/list_table__caption_observation_rows.snap (deleted)
+    - worktree/cli/tests/snapshots/list_table__caption_comparison_states.snap (deleted)
+    - worktree/cli/tests/snapshots/list_table__caption_fresh_and_stale_answers.snap (deleted)
+    - worktree/cli/tests/snapshots/list_table__caption_age_boundaries_and_future_answers.snap (deleted)
+docs_updated_during_phase_4:
+    - worktree/fixes/2026-09-27-list-freshness-ux/plan.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/implementation-log.md
+    - worktree/fixes/2026-09-27-list-freshness-ux/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/windows.md
 packages:
     - schematic-definitions
     - schematic-schema
@@ -157,11 +204,11 @@ Code locations this plan relies on (verified 2026-09-27):
 
 ### Definition of done
 
-- [ ] Every `wt list` with an `origin` and a resolvable default branch launches, or adopts, one worker attempt. It waits for a terminal outcome for at most 3 s, then gathers refs, counts, and the graph *after* the wait.
+- [x] Every `wt list` with an `origin` and a resolvable default branch launches, or adopts, one worker attempt. It waits for a terminal outcome for at most 3 s, then gathers refs, counts, and the graph *after* the wait.
 - [x] The worker checks through the provider API (or `ls-remote` when the remote is unsupported, the API call fails, or the repository is ignored), all within one 10 s budget. It publishes the check before fetching, and fetches only `refs/remotes/origin/<default>` with the exact spec command and a 60 s deadline. `FETCH_HEAD`, tags, and other refs stay unchanged.
 - [x] A 404 is never treated as absence. Only a complete `ls-remote` answer that lacks the ref proves absence. No failure erases the last successful answer, and a fetch failure keeps the newly checked answer.
 - [ ] The caption is one sentence in every §4 row, with a dim italic suffix. §5 warnings, the §6 hint, the §9 suggestion, and the §8 notice appear only under their stated conditions and in their stated positions.
-- [ ] `-r`, `--ignore-api`, and `--ff` work as `wt …` and `wt list …`, are rejected with `create`, `go`, and `remove`, and appear in help and in the completion snapshot.
+- [x] `-r`, `--ignore-api`, and `--ff` work as `wt …` and `wt list …`, are rejected with `create`, `go`, and `remove`, and appear in help and in the completion snapshot.
 - [ ] The spinner is never written when stderr is not a terminal, and its line is cleared before the caption is drawn (L2).
 - [ ] The performance contract holds: local gather plus render stays within 1 s, and ordinary listing with a stalled worker returns within 3 s plus render time. `worktree/docs/performance-testing.md` states the new full-command bound.
 - [ ] `just test` and `just lint` pass in `schematic/`, `sniff/`, `biscuit-terminal/`, and `worktree/`. `just test-l2` passes for `worktree/` on macOS. No detached worker outlives any test fixture.
@@ -471,7 +518,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 1 (parallel; disjoint files)
 
-- [ ] **Flags** (`worktree/cli/src/args.rs`, `worktree/cli/src/main.rs`, the completion snapshot)
+- [x] **Flags** (`worktree/cli/src/args.rs`, `worktree/cli/src/main.rs`, the completion snapshot)
     - Implement Rule 15, and thread `refresh`, `ignore_api`, and `fast_forward` into the listing entry point.
     - Tests:
         - `wt -r`, `wt list -r`, `--ignore-api`, `--ff`, and `--fast-forward` parse;
@@ -525,7 +572,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 2 (after Wave 1)
 
-- [ ] **List orchestration** (`worktree/cli/src/commands/list.rs`, `list/tests.rs`)
+- [x] **List orchestration** (`worktree/cli/src/commands/list.rs`, `list/tests.rs`)
     - The new order:
         1. Resolve `origin` and the default branch cheaply.
         2. `--ignore-api`: add the preference first, before the launch.
@@ -544,9 +591,9 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
 
 ### Wave 3 (after Wave 2; parallel by test file)
 
-- [ ] **Existing-test migration** (per the S4 table: `list_prs.rs`, `list_output.rs`, `cache_*_path.rs`, `perf_support/`)
+- [x] **Existing-test migration** (per the S4 table: `list_prs.rs`, `list_output.rs`, `cache_*_path.rs`, `perf_support/`)
     - Apply Rule 20: seed or stub where a test would stall, keep cleanup waits for the process and both locks, and update caption text assertions.
-- [ ] **Real-Git update-flow tests** (`cli/tests/list_remote_head.rs`)
+- [x] **Real-Git update-flow tests** (`cli/tests/list_remote_head.rs`)
     - Spec acceptance 4 at the binary level with a local bare origin and a `pusher` clone:
         - no variance → "checked just now", with no fetch;
         - variance → new counts, with `FETCH_HEAD` unchanged;
@@ -556,7 +603,7 @@ These rulings resolve the spec's ambiguities and fix the cross-task contracts, s
         - refused and black-holed origins keep the previous answer, dated;
         - an ignored repository (`~/.wt.json` in the test `HOME`) → no request through a counting `ProxyStub`, and no notice;
         - the spinner is never written to captured stderr.
-- [ ] **Flags end to end** (`cli/tests/list_flags.rs`, new)
+- [x] **Flags end to end** (`cli/tests/list_flags.rs`, new)
     - `-r` waits for both halves and forces fresh requests with young caches. `-r` with a spawn failure or a publication failure stays bounded.
     - `--ignore-api` writes the entry before the run; a corrupt file is treated as empty; an unreadable file is not overwritten; there is no `origin` → exit 1.
     - `--ff` covers acceptance 9 at the binary level, including a failed remote check that fast-forwards to the local `origin/<default>` while keeping the failure reason. `--ff` with `-r` performs one update and one move.
