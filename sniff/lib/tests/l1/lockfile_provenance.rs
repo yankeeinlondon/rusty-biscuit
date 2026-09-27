@@ -1,10 +1,15 @@
 //! Lockfile provenance fixture matrix (`2026-09-21-lockfile-provenance-cost`,
-//! AC3): each lockfile authority (Cargo, pnpm, uv) crossed with each lockfile
-//! state, detected through the public API under a corroborating request and a
-//! declining one, with hand-written expected results and fresh work counters.
-//! Each cell also asserts the complete serialized `RepoInfo` against a
-//! hand-written document; that document was checked to equal the pre-change
-//! (`ea73a87aa`) output for the corroborating and full requests.
+//! AC3, extended by `2026-09-26-lockfile-corroboration`): each lockfile
+//! authority (Cargo, pnpm, uv) crossed with each lockfile state, detected
+//! through the public API under a corroborating request and a declining one,
+//! with hand-written expected results and fresh work counters. Each cell also
+//! asserts the complete serialized `RepoInfo` against a hand-written document.
+//!
+//! `2026-09-26-lockfile-corroboration` changed three expectations on purpose:
+//! every layer now carries a `lockfile` object; Cargo reports subset evidence
+//! (`members_present`/`members_missing`) and never upgrades provenance; and
+//! the uv lockfile uses uv's real `[manifest]` layout with the root excluded
+//! from comparison. An absent lockfile is now probed and never opened.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -12,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use sniff::filesystem::repo::detect_repo_with_request;
+use sniff::filesystem::repo::{LockfileObservation, detect_repo_with_request};
 use sniff::filesystem::{
     MonorepoLayer, MonorepoStandard, PackageEcosystem, PackageProvenance, RepoInfo, detect_repo,
     detect_repo_structure,
@@ -132,19 +137,32 @@ fn build_fixture(authority: Authority, state: LockState) -> Fixture {
                     &format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
                 );
             }
-            let members = match state {
-                LockState::Matching => Some(r#"".", "py/lib-a", "py/lib-b""#),
-                LockState::ExtraMember => Some(r#"".", "py/lib-a", "py/lib-b", "py/lib-gone""#),
-                LockState::MissingMember => Some(r#"".", "py/lib-a""#),
-                LockState::Absent => None,
-                LockState::Unparseable => Some("\"."),
+            let entry = |name: &str, source: &str| {
+                format!("[[package]]\nname = \"{name}\"\nversion = \"0.1.0\"\nsource = {source}\n\n")
             };
-            members.map(|members| {
-                (
-                    "uv.lock",
-                    format!("version = 1\n\n[workspace]\nmembers = [{members}]\n"),
+            let root = entry("root-py", r#"{ virtual = "." }"#);
+            let lib = |name: &str| entry(name, &format!(r#"{{ editable = "py/{name}" }}"#));
+            let lock = |names: &str, packages: String| {
+                format!(
+                    "version = 1\nrevision = 3\n\n[manifest]\nmembers = [{names}]\n\n{packages}"
                 )
-            })
+            };
+            let body = match state {
+                LockState::Matching => Some(lock(
+                    r#""lib-a", "lib-b", "root-py""#,
+                    lib("lib-a") + &lib("lib-b") + &root,
+                )),
+                LockState::ExtraMember => Some(lock(
+                    r#""lib-a", "lib-b", "lib-gone", "root-py""#,
+                    lib("lib-a") + &lib("lib-b") + &lib("lib-gone") + &root,
+                )),
+                LockState::MissingMember => {
+                    Some(lock(r#""lib-a", "root-py""#, lib("lib-a") + &root))
+                }
+                LockState::Absent => None,
+                LockState::Unparseable => Some("version = 1\nrevision = 3\n[manifest\n".to_owned()),
+            };
+            body.map(|body| ("uv.lock", body))
         }
     };
     if let Some((name, content)) = lockfile {
@@ -153,43 +171,130 @@ fn build_fixture(authority: Authority, state: LockState) -> Fixture {
     Fixture { _dir: dir, root }
 }
 
+/// A hand-written `lockfile` object in its wire spelling. `paths` is the
+/// authority's lockfile unless the state is [`LockState::Absent`].
+#[derive(Debug, Clone, Copy)]
+struct Expected {
+    status: &'static str,
+    reason: Option<&'static str>,
+    extra: &'static [&'static str],
+    missing: &'static [&'static str],
+}
+
+const fn expected(
+    status: &'static str,
+    reason: Option<&'static str>,
+    extra: &'static [&'static str],
+    missing: &'static [&'static str],
+) -> Expected {
+    Expected {
+        status,
+        reason,
+        extra,
+        missing,
+    }
+}
+
 /// Hand-written expected layer answer for one matrix cell under a request that
-/// corroborates: `(layer provenance, lockfile_match)`.
+/// corroborates: `(layer provenance, lockfile object)`.
 ///
-/// Cargo checks only that each member name resolves in `Cargo.lock`, because
-/// dependencies add many unrelated entries; pnpm and uv compare exact member
-/// sets. That is why the extra-member row differs between them.
-const CORROBORATED: &[(Authority, LockState, PackageProvenance, Option<bool>)] = {
+/// pnpm and uv compare exact member sets. Cargo can only check that each
+/// member has a source-less entry with its name and version (ruling R1), so a
+/// stale extra entry is invisible to it and it never upgrades provenance.
+const CORROBORATED: &[(Authority, LockState, PackageProvenance, Expected)] = {
     use Authority::{Cargo, Pnpm, Uv};
     use LockState::{Absent, ExtraMember, Matching, MissingMember, Unparseable};
     use PackageProvenance::{Globbed, Lockfile};
+    const SUBSET: Option<&str> = Some("subset_only");
+    const PARSE_FAILED: Option<&str> = Some("parse_failed");
     &[
-        (Cargo, Matching, Lockfile, Some(true)),
-        (Cargo, ExtraMember, Lockfile, Some(true)),
-        (Cargo, MissingMember, Globbed, Some(false)),
-        (Cargo, Absent, Globbed, None),
-        (Cargo, Unparseable, Globbed, None),
-        (Pnpm, Matching, Lockfile, Some(true)),
-        (Pnpm, ExtraMember, Globbed, Some(false)),
-        (Pnpm, MissingMember, Globbed, Some(false)),
-        (Pnpm, Absent, Globbed, None),
-        (Pnpm, Unparseable, Globbed, None),
-        (Uv, Matching, Lockfile, Some(true)),
-        (Uv, ExtraMember, Globbed, Some(false)),
-        (Uv, MissingMember, Globbed, Some(false)),
-        (Uv, Absent, Globbed, None),
-        (Uv, Unparseable, Globbed, None),
+        (Cargo, Matching, Globbed, expected("members_present", SUBSET, &[], &[])),
+        (Cargo, ExtraMember, Globbed, expected("members_present", SUBSET, &[], &[])),
+        (
+            Cargo,
+            MissingMember,
+            Globbed,
+            expected("members_missing", SUBSET, &[], &["crates/beta"]),
+        ),
+        (Cargo, Absent, Globbed, expected("absent", None, &[], &[])),
+        (Cargo, Unparseable, Globbed, expected("unreadable", PARSE_FAILED, &[], &[])),
+        (Pnpm, Matching, Lockfile, expected("match", None, &[], &[])),
+        (
+            Pnpm,
+            ExtraMember,
+            Globbed,
+            expected("mismatch", None, &["packages/gone"], &[]),
+        ),
+        (
+            Pnpm,
+            MissingMember,
+            Globbed,
+            expected("mismatch", None, &[], &["packages/ui"]),
+        ),
+        (Pnpm, Absent, Globbed, expected("absent", None, &[], &[])),
+        (Pnpm, Unparseable, Globbed, expected("unreadable", PARSE_FAILED, &[], &[])),
+        (Uv, Matching, Lockfile, expected("match", None, &[], &[])),
+        (
+            Uv,
+            ExtraMember,
+            Globbed,
+            expected("mismatch", None, &["py/lib-gone"], &[]),
+        ),
+        (
+            Uv,
+            MissingMember,
+            Globbed,
+            expected("mismatch", None, &[], &["py/lib-b"]),
+        ),
+        (Uv, Absent, Globbed, expected("absent", None, &[], &[])),
+        (Uv, Unparseable, Globbed, expected("unreadable", PARSE_FAILED, &[], &[])),
     ]
 };
 
+/// The answer a request declining corroboration reports: a present lockfile
+/// is probed but not read.
+fn declined(state: LockState) -> Expected {
+    if state == LockState::Absent {
+        expected("absent", None, &[], &[])
+    } else {
+        expected("not_requested", Some("request_disabled"), &[], &[])
+    }
+}
+
+/// `expected` as the serialized `lockfile` object for `authority` in `state`.
+fn lockfile_json(authority: Authority, state: LockState, expected: Expected) -> serde_json::Value {
+    let paths: Vec<&str> = if state == LockState::Absent {
+        Vec::new()
+    } else {
+        vec![shape(authority).lockfile]
+    };
+    serde_json::json!({
+        "status": expected.status,
+        "paths": paths,
+        "reason": expected.reason,
+        "extra": expected.extra,
+        "missing": expected.missing,
+    })
+}
+
+/// `expected` as the typed observation, parsed from its hand-written wire form.
+fn lockfile_observation(
+    authority: Authority,
+    state: LockState,
+    expected: Expected,
+) -> LockfileObservation {
+    serde_json::from_value(lockfile_json(authority, state, expected))
+        .expect("the expected lockfile object uses the wire vocabulary")
+}
+
 /// The layer every request reports for `authority`, with `provenance` and
-/// `lockfile_match` supplied by the caller. Layer packages are sorted and use
-/// `/` separators.
+/// `lockfile` supplied by the caller. Layer packages are sorted and use `/`
+/// separators.
 fn expected_layer(
     authority: Authority,
     root: &Path,
     provenance: PackageProvenance,
-    lockfile_match: Option<bool>,
+    lockfile: LockfileObservation,
 ) -> MonorepoLayer {
     let (standard, root_is_package, packages): (_, _, &[&str]) = match authority {
         Authority::Cargo => (
@@ -213,7 +318,7 @@ fn expected_layer(
         authority: standard,
         orchestrators: Vec::new(),
         provenance,
-        lockfile_match,
+        lockfile,
         root_is_package,
         packages: packages.iter().map(|p| (*p).to_owned()).collect(),
     }
@@ -304,11 +409,13 @@ fn package_identities(repo: &RepoInfo) -> Vec<PackageIdentity> {
 fn assert_repo(
     repo: &RepoInfo,
     authority: Authority,
+    state: LockState,
     root: &Path,
     provenance: PackageProvenance,
-    lockfile_match: Option<bool>,
+    lockfile: Expected,
     context: &str,
 ) {
+    let lockfile = lockfile_observation(authority, state, lockfile);
     assert!(repo.is_monorepo, "{context}");
     assert_eq!(repo.root, root, "{context}");
     let standards: Vec<_> = repo
@@ -319,14 +426,14 @@ fn assert_repo(
     assert_eq!(
         standards,
         vec![(
-            expected_layer(authority, root, provenance, lockfile_match).authority,
+            expected_layer(authority, root, provenance, lockfile.clone()).authority,
             root.to_path_buf()
         )],
         "{context}"
     );
     assert_eq!(
         normalized_layer(repo),
-        expected_layer(authority, root, provenance, lockfile_match),
+        expected_layer(authority, root, provenance, lockfile),
         "{context}"
     );
     // Packages inherit the layer's provenance.
@@ -457,7 +564,7 @@ fn expected_json(
     state: LockState,
     tier: Tier,
     provenance: PackageProvenance,
-    lockfile_match: Option<bool>,
+    lockfile: Expected,
 ) -> serde_json::Value {
     use serde_json::{Value, json};
 
@@ -526,17 +633,15 @@ fn expected_json(
         })
         .collect();
 
-    let mut layer = json!({
+    let layer = json!({
         "root": ROOT,
         "authority": shape.standard,
         "orchestrators": [],
         "provenance": provenance,
+        "lockfile": lockfile_json(authority, state, lockfile),
         "root_is_package": shape.root_is_package,
         "packages": shape.layer_packages,
     });
-    if let Some(matched) = lockfile_match {
-        layer["lockfile_match"] = json!(matched);
-    }
 
     json!({
         "is_monorepo": true,
@@ -596,11 +701,11 @@ fn assert_complete_json(
     state: LockState,
     tier: Tier,
     provenance: PackageProvenance,
-    lockfile_match: Option<bool>,
+    lockfile: Expected,
     context: &str,
 ) {
     let actual = normalized_json(repo, root, authority);
-    let expected = expected_json(authority, state, tier, provenance, lockfile_match);
+    let expected = expected_json(authority, state, tier, provenance, lockfile);
     assert!(
         actual == expected,
         "{context}\n--- expected\n{}\n--- actual\n{}",
@@ -611,11 +716,11 @@ fn assert_complete_json(
 
 #[test]
 fn corroborating_requests_report_hand_written_provenance_for_every_lockfile_state() {
-    for &(authority, state, provenance, lockfile_match) in CORROBORATED {
+    for &(authority, state, provenance, lockfile) in CORROBORATED {
         let fixture = build_fixture(authority, state);
         let root = fixture.root.as_path();
-        // An absent lockfile is one read attempt and no parse.
-        let expected_parses = u64::from(state != LockState::Absent);
+        // An absent lockfile is probed and never opened.
+        let expected_work = u64::from(state != LockState::Absent);
 
         let request = RepoRequest::structure().with_lockfile_provenance(true);
         let (repo, counts) = measured(|| detect_repo_with_request(root, &request));
@@ -623,7 +728,7 @@ fn corroborating_requests_report_hand_written_provenance_for_every_lockfile_stat
             .expect("detection succeeds")
             .expect("fixture is a workspace");
         let context = format!("{authority:?} × {state:?}, opted-in structure: {counts:?}");
-        assert_repo(&repo, authority, root, provenance, lockfile_match, &context);
+        assert_repo(&repo, authority, state, root, provenance, lockfile, &context);
         assert_complete_json(
             &repo,
             root,
@@ -631,17 +736,17 @@ fn corroborating_requests_report_hand_written_provenance_for_every_lockfile_stat
             state,
             Tier::Structure,
             provenance,
-            lockfile_match,
+            lockfile,
             &context,
         );
         assert_eq!(
             counter(&counts, counters::REPO_LOCKFILE_READS),
-            1,
+            expected_work,
             "{context}"
         );
         assert_eq!(
             counter(&counts, counters::REPO_LOCKFILE_PARSES),
-            expected_parses,
+            expected_work,
             "{context}"
         );
 
@@ -650,7 +755,7 @@ fn corroborating_requests_report_hand_written_provenance_for_every_lockfile_stat
             .expect("detection succeeds")
             .expect("fixture is a workspace");
         let context = format!("{authority:?} × {state:?}, full: {counts:?}");
-        assert_repo(&repo, authority, root, provenance, lockfile_match, &context);
+        assert_repo(&repo, authority, state, root, provenance, lockfile, &context);
         assert_complete_json(
             &repo,
             root,
@@ -658,17 +763,18 @@ fn corroborating_requests_report_hand_written_provenance_for_every_lockfile_stat
             state,
             Tier::Full,
             provenance,
-            lockfile_match,
+            lockfile,
             &context,
         );
+        // Cargo's dependency enrichment shares the corroboration parse.
         assert_eq!(
             counter(&counts, counters::REPO_LOCKFILE_READS),
-            1,
+            expected_work,
             "{context}"
         );
         assert_eq!(
             counter(&counts, counters::REPO_LOCKFILE_PARSES),
-            expected_parses,
+            expected_work,
             "{context}"
         );
     }
@@ -680,89 +786,79 @@ fn declining_requests_report_manifest_provenance_and_read_no_lockfile() {
         let fixture = build_fixture(authority, state);
         let root = fixture.root.as_path();
 
-        let request = RepoRequest::structure();
-        let (repo, counts) = measured(|| detect_repo_with_request(root, &request));
-        let repo = repo
-            .expect("detection succeeds")
-            .expect("fixture is a workspace");
-        let context = format!("{authority:?} × {state:?}, structure request: {counts:?}");
-        assert_repo(
-            &repo,
-            authority,
-            root,
-            PackageProvenance::Globbed,
-            None,
-            &context,
-        );
-        assert_complete_json(
-            &repo,
-            root,
-            authority,
-            state,
-            Tier::Structure,
-            PackageProvenance::Globbed,
-            None,
-            &context,
-        );
-        assert_eq!(
-            counter(&counts, counters::REPO_LOCKFILE_READS),
-            0,
-            "{context}"
-        );
-        assert_eq!(
-            counter(&counts, counters::REPO_LOCKFILE_PARSES),
-            0,
-            "{context}"
-        );
-
-        let (repo, counts) = measured(|| detect_repo_structure(root));
-        let repo = repo
-            .expect("detection succeeds")
-            .expect("fixture is a workspace");
-        let context = format!("{authority:?} × {state:?}, detect_repo_structure: {counts:?}");
-        assert_repo(
-            &repo,
-            authority,
-            root,
-            PackageProvenance::Globbed,
-            None,
-            &context,
-        );
-        assert_complete_json(
-            &repo,
-            root,
-            authority,
-            state,
-            Tier::Structure,
-            PackageProvenance::Globbed,
-            None,
-            &context,
-        );
-        assert_eq!(
-            counter(&counts, counters::REPO_LOCKFILE_READS),
-            0,
-            "{context}"
-        );
-        assert_eq!(
-            counter(&counts, counters::REPO_LOCKFILE_PARSES),
-            0,
-            "{context}"
-        );
+        for (label, detect) in [
+            (
+                "structure request",
+                (|root: &Path| {
+                    detect_repo_with_request(root, &RepoRequest::structure())
+                }) as fn(&Path) -> sniff::Result<Option<RepoInfo>>,
+            ),
+            ("detect_repo_structure", detect_repo_structure),
+        ] {
+            let (repo, counts) = measured(|| detect(root));
+            let repo = repo
+                .expect("detection succeeds")
+                .expect("fixture is a workspace");
+            let context = format!("{authority:?} × {state:?}, {label}: {counts:?}");
+            assert_repo(
+                &repo,
+                authority,
+                state,
+                root,
+                PackageProvenance::Globbed,
+                declined(state),
+                &context,
+            );
+            assert_complete_json(
+                &repo,
+                root,
+                authority,
+                state,
+                Tier::Structure,
+                PackageProvenance::Globbed,
+                declined(state),
+                &context,
+            );
+            assert_eq!(
+                counter(&counts, counters::REPO_LOCKFILE_READS),
+                0,
+                "{context}"
+            );
+            assert_eq!(
+                counter(&counts, counters::REPO_LOCKFILE_PARSES),
+                0,
+                "{context}"
+            );
+            assert!(
+                counter(&counts, counters::REPO_LOCKFILE_PROBES) >= 1,
+                "the layer's lockfile is still probed: {context}"
+            );
+        }
     }
 }
 
 #[test]
-fn extra_lockfile_member_corroborates_cargo_but_not_pnpm_or_uv() {
-    let lockfile_match = |authority| {
+fn an_extra_lockfile_member_is_a_mismatch_for_pnpm_and_uv_but_invisible_to_cargo() {
+    let lockfile = |authority| {
         let fixture = build_fixture(authority, LockState::ExtraMember);
         let request = RepoRequest::structure().with_lockfile_provenance(true);
         let repo = detect_repo_with_request(&fixture.root, &request)
             .expect("detection succeeds")
             .expect("fixture is a workspace");
-        repo.monorepo_layers[0].lockfile_match
+        let layer = &repo.monorepo_layers[0];
+        (serde_json::to_value(layer.lockfile.status).expect("status"), layer.lockfile.extra.clone())
     };
 
-    assert_eq!(lockfile_match(Authority::Cargo), Some(true));
-    assert_eq!(lockfile_match(Authority::Pnpm), Some(false));
-    assert_eq!(lockfile_match(Authority::Uv), Some(false));
+    assert_eq!(
+        lockfile(Authority::Cargo),
+        (serde_json::json!("members_present"), Vec::<String>::new())
+    );
+    assert_eq!(
+        lockfile(Authority::Pnpm),
+        (serde_json::json!("mismatch"), vec!["packages/gone".to_owned()])
+    );
+    assert_eq!(
+        lockfile(Authority::Uv),
+        (serde_json::json!("mismatch"), vec!["py/lib-gone".to_owned()])
+    );
 }

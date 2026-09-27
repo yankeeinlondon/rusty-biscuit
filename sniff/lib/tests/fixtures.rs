@@ -343,19 +343,40 @@ pub fn create_pnpm_workspace_with_stale_lockfile() -> (TempDir, PathBuf) {
     let (dir, path) = create_pnpm_workspace();
     fs::write(
         dir.path().join("pnpm-lock.yaml"),
-        "lockfileVersion: '6.0'\n\nimporters:\n  \\n  .:\n    dependencies: {}\n  packages/app:\n    dependencies: {}\n  packages/lib:\n    dependencies: {}\n  packages/removed:\n    dependencies: {}\n",
+        "lockfileVersion: '6.0'\n\nimporters:\n  .:\n    dependencies: {}\n  packages/app:\n    dependencies: {}\n  packages/lib:\n    dependencies: {}\n  packages/removed:\n    dependencies: {}\n",
     )
     .unwrap();
     (dir, path)
 }
 
-/// Create a uv workspace whose `uv.lock` `workspace.members` agree with the
-/// manifest globs plus the always-counted root.
+/// A `uv.lock` in uv 0.9's layout: `[manifest].members` names mapped to
+/// paths through each package's `editable` or `virtual` source. `members` are
+/// `(name, source)` pairs.
+fn uv_lock(members: &[(&str, &str)]) -> String {
+    let names: Vec<String> = members.iter().map(|(name, _)| format!("\"{name}\"")).collect();
+    let mut lock = format!(
+        "version = 1\nrevision = 3\nrequires-python = \">=3.9\"\n\n[manifest]\nmembers = [{}]\n",
+        names.join(", ")
+    );
+    for (name, source) in members {
+        lock.push_str(&format!(
+            "\n[[package]]\nname = \"{name}\"\nversion = \"0.1.0\"\nsource = {source}\n"
+        ));
+    }
+    lock
+}
+
+/// Create a uv workspace whose `uv.lock` records exactly the manifest's
+/// members and root.
 pub fn create_uv_workspace_with_lockfile() -> (TempDir, PathBuf) {
     let (dir, path) = create_uv_workspace();
     fs::write(
         dir.path().join("uv.lock"),
-        "[workspace]\nmembers = [\".\", \"packages/app\", \"packages/lib\"]\n",
+        uv_lock(&[
+            ("app", r#"{ editable = "packages/app" }"#),
+            ("lib", r#"{ editable = "packages/lib" }"#),
+            ("root", r#"{ virtual = "." }"#),
+        ]),
     )
     .unwrap();
     (dir, path)
@@ -366,7 +387,12 @@ pub fn create_uv_workspace_with_stale_lockfile() -> (TempDir, PathBuf) {
     let (dir, path) = create_uv_workspace();
     fs::write(
         dir.path().join("uv.lock"),
-        "[workspace]\nmembers = [\".\", \"packages/app\", \"packages/lib\", \"packages/removed\"]\n",
+        uv_lock(&[
+            ("app", r#"{ editable = "packages/app" }"#),
+            ("lib", r#"{ editable = "packages/lib" }"#),
+            ("removed", r#"{ editable = "packages/removed" }"#),
+            ("root", r#"{ virtual = "." }"#),
+        ]),
     )
     .unwrap();
     (dir, path)
