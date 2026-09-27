@@ -25,7 +25,7 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 - `wt list`
     Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 
-    - a caption comparing the local default branch with `origin/<default>` (in sync, ahead, behind, or diverged)
+    - a caption comparing the local default branch with its local tracking ref `origin/<default>` (in sync, ahead, behind, or diverged; as of your last fetch), followed by what `origin` answered for that branch the last time a background check asked, with its age (`matched`, `differs … run git fetch origin`, `was absent`, or `Remote state has not been verified.`). `wt list` never asks `origin` itself: when that answer is missing or at least 60 s old, the background `wt` process that refreshes PRs also checks it for the next run. Without an `origin` there is no caption
     - a table with one row per worktree; the current row is highlighted
         - **Worktree**: a dot for uncommitted files (none, other files, or source files) and the directory name (`base repo` for the main checkout)
         - **Branch**: a tree of which branch was forked from which (recorded by `wt create`); deleted parents are struck through

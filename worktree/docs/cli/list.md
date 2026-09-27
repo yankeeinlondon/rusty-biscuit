@@ -7,7 +7,7 @@ The output is, in order: a caption, the worktree table, a two-line legend, an op
 ## Output
 
 ```text
-  main  is 7 commits behind  origin/main
+  main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
@@ -33,7 +33,23 @@ Ahead/behind and merge comparisons use one **target**: whichever of the local de
 
 ### Caption
 
-When both the local default branch and `origin/<default>` exist, the caption compares them: `is N commits behind`, `is N commits ahead of`, `is in sync with`, or `has diverged from [origin/main]: N commits ahead, M commits behind`. Only the counts are colored. Without both refs there is no caption.
+The caption describes the local default branch, its local tracking ref `origin/<default>`, and the last live answer from `origin`. It needs an `origin` remote: without one, leftover `origin/*` refs produce no caption.
+
+When both the local default branch and `origin/<default>` exist, it first compares them: `is N commits behind`, `is N commits ahead of`, `is in sync with`, or `has diverged from`, each followed by `local tracking ref origin/main` (`main has diverged from local tracking ref origin/main: 3 commits ahead, 7 commits behind.`). Only the counts are colored. These counts come from your last fetch, never from the remote.
+
+Then it says what `origin` answered the last time a background check asked it (`git ls-remote origin refs/heads/<default>`):
+
+| Last answer | Caption text |
+|---|---|
+| Same commit as `origin/main` | `origin/main matched the remote when checked 2 min ago.` |
+| Another commit | `origin/main differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs.` |
+| Branch absent on `origin` | `main was absent on origin when checked 2 min ago.` |
+| No answer yet, or one for another `origin` or default branch | `Remote state has not been verified.` |
+| An answer, but no `origin/main` locally | `No local tracking ref origin/main; the remote branch was present (or absent) when checked 2 min ago.` (`…; remote state has not been verified.` without an answer) |
+
+The age uses the PR age units: `less than 1 min ago`, then minutes, hours below two days, then days. The observation is dim. An old answer is still shown, always with its age. "Differs" only means the two commits differ; it does not say which is newer, since a fetch can be newer than the check. Without a local default branch, only the answer is shown.
+
+`wt list` never asks `origin` itself. When the stored answer is missing or at least 60 seconds old, it starts the same detached background `wt` process that refreshes PRs (see below), which asks `origin` with a 10 second limit and stores the answer for the next run. A failed or timed-out check leaves the previous answer as it was.
 
 ### Columns
 
@@ -68,7 +84,7 @@ Open pull requests on `origin` whose source is this repository show as a green `
 
 A PR from a fork with a same-named branch is never shown. In terminals that support OSC 8 hyperlinks the badge links to the PR; elsewhere it shows the number only, with no visible URL, so the table always fits.
 
-A successful answer is stored with the `origin` it came from, and `wt list` shows a stored answer for the current `origin` at once, whatever its age. Once it is 60 seconds old a dim `PRs as of N min ago` line follows the legend, and `wt list` starts a detached `wt` process that asks again and replaces the stored answer for the next run; `wt list` exits without waiting for it. At most one such refresh makes a request at a time, and a refresh that fails leaves the stored answer as it was.
+A successful answer is stored with the `origin` it came from, and `wt list` shows a stored answer for the current `origin` at once, whatever its age. Once it is 60 seconds old a dim `PRs as of N min ago` line follows the legend, and `wt list` starts a detached `wt` process that asks again and replaces the stored answer for the next run; `wt list` exits without waiting for it. That one process also checks the caption's remote answer, and each check runs and stores its answer independently of the other. At most one such refresh makes a request at a time, and a refresh that fails leaves the stored answer as it was.
 
 With no stored answer for the current `origin` (the first run, a cleared cache, or a changed or removed `origin`), the request runs in parallel with the git work and is given 300 ms. An answer stored for a different `origin` is never shown. A failure is never stored, and with no network and no usable stored answer the table shows no badges.
 
