@@ -20,6 +20,7 @@ All components implement the [`Renderable`](../../lib/src/components/renderable.
 | [Progress](./progress.md) | Horizontal progress bar with configurable width, characters, and colors |
 | [Prose](./prose.md) | Styled text with bracketed tags (`<b>...</b>`, `<red>...</red>`) and a Markdown subset |
 | [Section](./section.md) | Heading (h1-h6) with optional content body |
+| [Spinner](./spinner.md) | Live single-line activity spinner on stderr (not a `TerminalRenderable`) |
 | [Status](./status.md) | Status items with icons (success, failure, warning, info, active, not-started) |
 | [Table](./table.md) | Box-drawing table with auto-sized columns and rich formatting |
 | [TerminalImage](./terminal_image.md) | Inline images via Kitty/iTerm2 protocols with graceful fallback |

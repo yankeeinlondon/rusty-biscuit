@@ -30,6 +30,7 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `Progress` | `progress.rs` | No | Progress indicator rendering |
 | `Prose` | `prose.rs` | No | Styled text with inline tokens (atomic + block) |
 | `Section` | `section.rs` | Yes | Heading (h1-h6) with content body |
+| `Spinner` | `spinner.rs` | No | Live stderr activity spinner; not a `TerminalRenderable` (see below) |
 | `Status` | `status.rs` | No | Status items with icons (success, failure, warning, info, active, not-started) |
 | `Table` | `table/` | Yes | Box-drawing table with auto-sized columns |
 | `TerminalImage` | `terminal_image.rs` | Yes | Inline images via Kitty/iTerm2 protocols |
@@ -174,6 +175,27 @@ Progress indicator rendering component.
 ```rust
 use biscuit_terminal::components::progress::Progress;
 ```
+
+## Spinner
+
+A live, time-driven stderr widget, so it is **not** a `TerminalRenderable` or
+render-tree node. It draws only when stderr is a terminal, starts after an
+optional delay, accepts replacement text, and clears its line on `finish()` or
+`Drop`. The clear is written once, and only if a frame was drawn.
+
+```rust
+use std::time::Duration;
+use biscuit_terminal::prelude::Spinner;
+
+let spinner = Spinner::new("updating")
+    .with_delay(Duration::from_millis(150))
+    .start_on_stderr();
+spinner.set_text("rate limited, using fallback method");
+spinner.finish();
+```
+
+Test with `start_on(writer, is_terminal)` and the pure `frame(i, text, width)`
+and `CLEAR_LINE`; see [docs/components/spinner.md](../../../biscuit-terminal/docs/components/spinner.md).
 
 ## FileSystem
 
