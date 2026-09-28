@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use biscuit_terminal::components::git_graph::{GraphViewport, LaneEntry, NaturalSize};
+use biscuit_terminal::components::mermaid::MermaidTheme;
 use biscuit_terminal::components::terminal_image::ImageWidth;
 use biscuit_terminal::discovery::fonts::CellSize;
+use biscuit_visualized::mermaid::{CommitGeometry, GitGraphGeometry, MermaidDiagram};
 use worktree::fork_origin::{ForkOrigin, ForkOriginStore};
 use worktree::git::recorder;
 use worktree::listing::RefTips;
@@ -1211,4 +1213,220 @@ fn first_parent_entries_place_only_anchors_on_the_lane() {
         history.first_parent_entries(&"0".repeat(40), topology::Extent::Open { cap_window: false }, 3, &[]),
         Err(topology::GatherGap)
     );
+}
+
+// ---------------------------------------------------------------------------
+// End to end: gathered facts, planned with the real measurement, checked
+// against the layout the image is drawn from (never the Mermaid text).
+// ---------------------------------------------------------------------------
+
+const ALPHA: &str = "feature/very-long-exact-branch-reference-alpha";
+/// R12's second long label is `origin/very-long-exact-branch-reference-beta`;
+/// `wt list` draws no remote-tracking ref but `origin/<default>`, so the same
+/// length arrives here as a local branch.
+const BETA: &str = "fix/very-long-exact-branch-reference-beta";
+
+/// R12's long labels as `wt list` meets them: `ALPHA` is an unmerged lane
+/// with an open PR, `BETA` is a label on the default lane beside `main`, and
+/// `origin/main` is one commit ahead of `main`.
+///
+/// ```text
+/// r - d1 - d2 - d3 (BETA) - d4 (main) - d5 (origin/main)
+///       \
+///        a1 - a2   (ALPHA, PR #104 → main)
+/// ```
+struct LongLabels {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+    d3: String,
+    d4: String,
+    d5: String,
+    a2: String,
+}
+
+fn long_labels() -> LongLabels {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    commit(&path, "r");
+    commit(&path, "d1");
+    run_git(&path, &["checkout", "-q", "-b", ALPHA]);
+    commit(&path, "a1");
+    let a2 = commit(&path, "a2");
+    run_git(&path, &["checkout", "-q", "main"]);
+    commit(&path, "d2");
+    let d3 = commit(&path, "d3");
+    run_git(&path, &["branch", BETA]);
+    let d4 = commit(&path, "d4");
+    let d5 = commit(&path, "d5");
+    set_origin_main(&path, &d5);
+    run_git(&path, &["reset", "-q", "--hard", &d4]);
+    LongLabels { _dir: dir, path, d3, d4, d5, a2 }
+}
+
+/// What the laid-out graph must show, by full SHA.
+struct Evidence<'a> {
+    /// `(tag, SHA)`: the label must be on that commit's emitted ID.
+    tags: Vec<(&'a str, &'a str)>,
+    /// `(merge, first parent, second parent)`.
+    merges: Vec<(&'a str, &'a str, &'a str)>,
+}
+
+/// The laid-out commit emitted for `sha`. Display IDs are SHA prefixes of at
+/// least seven characters; `+N` squares never match.
+fn laid_out<'g>(geometry: &'g GitGraphGeometry, sha: &str) -> Option<&'g CommitGeometry> {
+    geometry
+        .commits
+        .iter()
+        .find(|commit| commit.id.len() >= 7 && sha.starts_with(commit.id.as_str()))
+}
+
+fn geometry_of(mermaid: &str) -> GitGraphGeometry {
+    MermaidDiagram::new(mermaid)
+        .with_theme(MermaidTheme::Default)
+        .gitgraph_geometry()
+        .unwrap_or_else(|error| panic!("{error}: {mermaid}"))
+        .expect("a gitGraph")
+}
+
+fn viewport(columns: u32, rows: u32) -> GraphViewport {
+    GraphViewport {
+        columns,
+        rows,
+        cell: CellSize::FALLBACK,
+    }
+}
+
+/// Plans `facts` at 120×40 and 56×60 with the real measurement and checks the
+/// layout that renders: no two tags intersect, every expected tag is on its
+/// SHA's emitted ID, merge parents are exact (a first parent may be a `+N`
+/// square once trimmed), no tag text changes with the viewport, and a graph
+/// wider than 56 columns is trimmed or shrunk there. `--width 40` is never
+/// trimmed. Returns one report line per viewport for the implementation log.
+fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &Evidence) -> Vec<String> {
+    let graph = facts.to_git_graph(prs, None).with_theme(MermaidTheme::Default);
+    let mut report = Vec::new();
+    let mut tag_texts: Option<Vec<String>> = None;
+    let mut ordinary_columns = None;
+    for vp in [viewport(120, 40), viewport(56, 60)] {
+        let planned = graph.plan(vp).expect("a plan");
+        let context = format!("{name} {}x{}:\n{}", vp.columns, vp.rows, planned.mermaid);
+        assert!(!planned.incomplete, "{context}");
+        assert_eq!(planned.hidden_lanes, 0, "{context}");
+        let geometry = geometry_of(&planned.mermaid);
+        assert_eq!(geometry.tag_overlaps(), Vec::<(String, String)>::new(), "{context}");
+
+        for (tag, sha) in &expected.tags {
+            let commit = laid_out(&geometry, sha).unwrap_or_else(|| panic!("{tag}'s commit {sha} drawn: {context}"));
+            assert!(
+                commit.tags.iter().any(|placed| placed.text == *tag),
+                "{tag} on {}: {:?}\n{context}",
+                commit.id,
+                commit.tags
+            );
+        }
+        for (merge, first, second) in &expected.merges {
+            let commit = laid_out(&geometry, merge).unwrap_or_else(|| panic!("merge {merge} drawn: {context}"));
+            assert_eq!(commit.parents.len(), 2, "{:?}\n{context}", commit.parents);
+            assert!(
+                first.starts_with(commit.parents[0].as_str()) || (planned.trimmed_commits > 0 && commit.parents[0].starts_with('+')),
+                "first parent of {}: {:?}\n{context}",
+                commit.id,
+                commit.parents
+            );
+            assert!(second.starts_with(commit.parents[1].as_str()), "second parent of {}: {:?}\n{context}", commit.id, commit.parents);
+        }
+
+        let mut texts: Vec<String> = geometry.tag_boxes().iter().map(|(_, text, _)| text.to_string()).collect();
+        texts.sort();
+        match &tag_texts {
+            None => tag_texts = Some(texts),
+            Some(ordinary) => assert_eq!(&texts, ordinary, "no label is shortened or dropped: {context}"),
+        }
+        match ordinary_columns {
+            None => ordinary_columns = Some(planned.columns),
+            Some(ordinary) if ordinary > vp.columns => assert!(
+                planned.trimmed_commits > 0 || planned.columns > vp.columns,
+                "a {ordinary}-column graph is trimmed or shrunk at {}: {planned:?}",
+                vp.columns
+            ),
+            Some(_) => {}
+        }
+        if planned.columns > vp.columns {
+            let floor = graph.plan(viewport(1, vp.rows)).expect("a plan");
+            assert_eq!(planned.mermaid, floor.mermaid, "wider than the viewport only once fully trimmed: {context}");
+        }
+        report.push(format!(
+            "{name} {}x{}: columns={} rows={} trimmed={} step={:.1} natural_width={:.0}",
+            vp.columns, vp.rows, planned.columns, planned.rows, planned.trimmed_commits, geometry.commit_step, geometry.width
+        ));
+    }
+
+    let explicit = facts
+        .to_git_graph(prs, Some(ImageWidth::Characters(40)))
+        .with_theme(MermaidTheme::Default)
+        .plan(viewport(120, 40))
+        .expect("a plan");
+    assert_eq!(explicit.columns, 40, "{name}");
+    assert_eq!(explicit.trimmed_commits, 0, "{name}: an explicit width is never trimmed to");
+    assert_eq!(explicit.mermaid, graph.mermaid().expect("mermaid"), "{name}: the whole graph, scaled");
+    report
+}
+
+#[test]
+#[serial_test::serial]
+fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
+    let mut report = Vec::new();
+
+    let repo = merged_via_merge_commit();
+    {
+        let _guard = DirGuard::enter(&repo.path);
+        let expected = Evidence {
+            tags: vec![("main", &repo.d2), ("origin/main", &repo.merge)],
+            merges: vec![(&repo.merge, &repo.d2, &repo.w2)],
+        };
+        for (view, current) in [("observation-1 focused", "fix/wt-ux"), ("observation-1 base", "main")] {
+            let (graph, _) = gather(&input(current, &["main", "fix/wt-ux"], ForkOriginStore::default()), true, false);
+            report.extend(assert_laid_out(view, &graph.expect("a graph"), &PrListing::default(), &expected));
+        }
+    }
+
+    let repo = nested_parent_merged_into_default();
+    {
+        let _guard = DirGuard::enter(&repo.path);
+        let (graph, _) = gather(&input("main", &["main", "fix/wt-ux", "fix/sniff"], repo.forks.clone()), true, false);
+        let sniff_tip = repo.sniff.last().expect("sniff commits");
+        report.extend(assert_laid_out(
+            "observation-2 base",
+            &graph.expect("a graph"),
+            &PrListing::default(),
+            &Evidence {
+                tags: vec![("main", &repo.m103), ("origin/main", &repo.m104)],
+                merges: vec![(&repo.m103, &repo.d1, &repo.w2), (&repo.m104, &repo.m103, sniff_tip)],
+            },
+        ));
+    }
+
+    let repo = long_labels();
+    {
+        let _guard = DirGuard::enter(&repo.path);
+        let prs = PrListing {
+            source_repo: Some("owner/repo".to_string()),
+            pull_requests: vec![pr(104, "owner/repo", ALPHA, "main")],
+            fetched_at: Some(0),
+        };
+        let (graph, _) = gather(&input("main", &["main", ALPHA, BETA], ForkOriginStore::default()), true, false);
+        report.extend(assert_laid_out(
+            "long-labels base",
+            &graph.expect("a graph"),
+            &prs,
+            &Evidence {
+                tags: vec![(BETA, &repo.d3), ("main", &repo.d4), ("origin/main", &repo.d5), ("PR #104 → main", &repo.a2)],
+                merges: vec![],
+            },
+        ));
+    }
+
+    // Recorded in the implementation log.
+    eprintln!("{}", report.join("\n"));
 }
