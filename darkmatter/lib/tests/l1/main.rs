@@ -12,6 +12,7 @@ mod context_functions;
 mod current_root_documentation_contract;
 mod current_root_migration_guard;
 mod dasherized_identifier_compose;
+mod data_origin;
 mod dasherized_identifier_corpus;
 mod directive_target_analysis;
 mod empty_package_area;

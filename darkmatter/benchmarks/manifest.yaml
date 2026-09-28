@@ -3,7 +3,7 @@
 # `bash generate.sh` then `DM_BENCH_EMIT=1 cargo nextest run -p darkmatter
 # --test l1 benchmark_fixtures::`. Verified by benchmark_fixtures.rs.
 generator:
-  version: 1.3.0
+  version: 1.3.1
   command: bash generate.sh
 fixtures:
 - id: compose_child
@@ -19,13 +19,13 @@ fixtures:
 - id: compose_interpolation_heavy
   path: fixtures/compose_interpolation_heavy.md
   provenance: generated
-  bytes: 2881
+  bytes: 2885
   lines: 105
   headings: 2
   frontmatter_hash: 6e340c9b32e3c593
-  body_hash: 5d14f70f5e81581f
-  darkmatter_hash: 6e340c9b32e3c593-5d14f70f5e81581f
-  xxhash64: f5da6937f3be160b
+  body_hash: 30e1857c5c0e0896
+  darkmatter_hash: 6e340c9b32e3c593-30e1857c5c0e0896
+  xxhash64: 19f63effc92720e3
 - id: compose_schema_transclusion
   path: fixtures/compose_schema_transclusion.md
   provenance: generated

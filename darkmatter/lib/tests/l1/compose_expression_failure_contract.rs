@@ -151,19 +151,14 @@ fn a_body_failure_after_text_replacement_keeps_its_authored_span() {
     }
 }
 
-/// A rescan evaluates text a replacement produced, including text a
-/// `{{{ … }}}` literal left in a value; a failure there is fatal too. It has
-/// no authored span, so none is claimed.
+/// Text a replacement produced is data, including text a `{{{ … }}}` literal
+/// left in a value: the single scan never parses it, so it composes verbatim.
 #[test]
-fn a_failure_in_replacement_output_is_fatal_without_an_authored_span() {
-    for error in failures("---\nnote: \"call {{{ f( }}}\"\n---\nsee {{ note }}\n") {
-        let MarkdownError::Interpolation { key: None, expression, source, cause } = &error else {
-            panic!("expected a body interpolation error, got {error:?}");
-        };
-        assert_eq!(expression, "f(");
-        assert!(matches!(cause.as_ref(), ExpressionError::Parse(_)), "{cause:?}");
-        assert!(matches!(source.as_ref(), SourceRef::OnDisk(_)), "{source:?}");
-    }
+fn replacement_output_is_data_and_never_fails() {
+    let markdown: Markdown = "---\nnote: \"call {{{ f( }}}\"\n---\nsee {{ note }}\n".into();
+    let (composed, report) = markdown.compose().expect("inserted text is never parsed");
+    assert_eq!(composed.content().trim(), "see call {{ f( }}");
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 }
 
 // ── Frontmatter interpolation ───────────────────────────────────────────────

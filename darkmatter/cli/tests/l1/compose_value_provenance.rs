@@ -1,8 +1,10 @@
 //! Whether a filled-in value is re-read as a template
 //! (`2026-09-27-agent-text-is-data`).
 //!
-//! The ignored tests reproduce the defect and assert the fixed behavior. The
-//! others pin ruling N1: command-line setters remain templates.
+//! Text an expression, a file read, or a literal escape produced is data: it
+//! is never scanned again, in the document or in a transcluded child. The
+//! `--set` tests pin ruling N1: command-line setters remain templates, and a
+//! failure in one names the override rather than the document (R5).
 
 use crate::common;
 
@@ -10,7 +12,6 @@ use common::CliProcessFixture;
 use predicates::prelude::*;
 
 #[test]
-#[ignore = "red until phase 2"]
 fn escaped_expression_in_frontmatter_stays_literal_in_body() {
     let fixture =
         CliProcessFixture::named("escaped_expression_in_frontmatter_stays_literal_in_body");
@@ -29,7 +30,6 @@ fn escaped_expression_in_frontmatter_stays_literal_in_body() {
 }
 
 #[test]
-#[ignore = "red until phase 2"]
 fn escaped_non_expression_in_frontmatter_stays_literal_in_body() {
     let fixture =
         CliProcessFixture::named("escaped_non_expression_in_frontmatter_stays_literal_in_body");
@@ -60,7 +60,57 @@ fn set_value_with_malformed_template_still_fails() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("interpolation failed"))
-        .stderr(predicate::str::contains("note"));
+        .stderr(predicate::str::contains("note"))
+        .stderr(predicate::str::contains("command-line override (`--set`)"))
+        .stderr(predicate::str::contains("Defined in:").not());
+}
+
+/// R5 control: a malformed template the document authors keeps its
+/// document location.
+#[test]
+fn authored_malformed_template_still_names_the_document() {
+    let fixture = CliProcessFixture::named("authored_malformed_template_still_names_the_document");
+    let md_path = fixture.write_file(
+        "cwd/authored.md",
+        "---\nnote: \"see {{…}} siblings\"\n---\nLast: {{ note }}\n",
+    );
+
+    fixture
+        .command()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("interpolation failed"))
+        .stderr(predicate::str::contains("Defined in:"))
+        .stderr(predicate::str::contains("authored.md"))
+        .stderr(predicate::str::contains("command-line override").not());
+}
+
+/// N14: a link inside inserted text is content, so a missing target warns
+/// instead of failing the run; the same link authored in the body still
+/// fails reference validation.
+#[test]
+fn missing_link_inside_inserted_text_warns() {
+    let fixture = fixture_with_data_file("missing_link_inside_inserted_text_warns");
+    fixture.write_file("cwd/links.md", "---\nlink: \"[l](./nope.md)\"\n---\n");
+    let data_path = fixture.write_file(
+        "cwd/data-link.md",
+        "---\ntitle: t\n---\nsee {{ frontmatter('links.md', 'link') }}\n",
+    );
+    let authored_path =
+        fixture.write_file("cwd/authored-link.md", "---\ntitle: t\n---\nsee [l](./nope.md)\n");
+
+    fixture
+        .command()
+        .arg("compose")
+        .arg(&data_path)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Missing local target: ./nope.md"))
+        .stderr(predicate::str::contains("inside inserted text"));
+
+    fixture.command().arg("compose").arg(&authored_path).assert().code(2);
 }
 
 #[test]
@@ -111,7 +161,6 @@ fn fixture_with_data_file(name: &str) -> CliProcessFixture {
 
 /// B1: a directive line inside read data is text, not a transclusion.
 #[test]
-#[ignore = "red until phase 2"]
 fn directive_in_interpolated_file_data_is_not_executed() {
     let fixture = fixture_with_data_file("directive_in_interpolated_file_data_is_not_executed");
     let md_path = fixture.write_file(
@@ -131,7 +180,6 @@ fn directive_in_interpolated_file_data_is_not_executed() {
 
 /// B1: a code fence inside read data must not hide a later authored directive.
 #[test]
-#[ignore = "red until phase 2"]
 fn fence_in_interpolated_file_data_does_not_hide_authored_directive() {
     let fixture =
         fixture_with_data_file("fence_in_interpolated_file_data_does_not_hide_authored_directive");
@@ -151,7 +199,6 @@ fn fence_in_interpolated_file_data_does_not_hide_authored_directive() {
 
 /// B4: inherited parent state is data in the child.
 #[test]
-#[ignore = "red until phase 2"]
 fn transcluded_child_does_not_reevaluate_inherited_escape() {
     let fixture =
         CliProcessFixture::named("transcluded_child_does_not_reevaluate_inherited_escape");
@@ -172,7 +219,6 @@ fn transcluded_child_does_not_reevaluate_inherited_escape() {
 
 /// B4: a parent value read from another file reaches the child verbatim.
 #[test]
-#[ignore = "red until phase 2"]
 fn transcluded_child_prints_inherited_file_data_verbatim() {
     let fixture = fixture_with_data_file("transcluded_child_prints_inherited_file_data_verbatim");
     fixture.write_file("cwd/child.md", "Child: {{ braces }}\n");
@@ -193,7 +239,6 @@ fn transcluded_child_prints_inherited_file_data_verbatim() {
 
 /// B5: a `set.NAME=` value produced by a literal escape is data in the child.
 #[test]
-#[ignore = "red until phase 2"]
 fn directive_set_value_from_escape_is_not_reevaluated_in_child() {
     let fixture =
         CliProcessFixture::named("directive_set_value_from_escape_is_not_reevaluated_in_child");
@@ -219,7 +264,6 @@ fn directive_set_value_from_escape_is_not_reevaluated_in_child() {
 /// B5: a `set.NAME=` value interpolated from file data reaches the child
 /// verbatim.
 #[test]
-#[ignore = "red until phase 2"]
 fn directive_set_value_from_file_data_reaches_child_verbatim() {
     let fixture =
         fixture_with_data_file("directive_set_value_from_file_data_reaches_child_verbatim");

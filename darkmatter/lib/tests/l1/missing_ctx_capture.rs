@@ -165,35 +165,23 @@ fn a_transcluded_child_failure_reports_the_child_file_and_line() {
     );
 }
 
-/// An expression that only exists in a replacement value (found by the rescan)
-/// has no authored position: the error names the file but no line, rather
-/// than an offset into generated text.
+/// An expression that only exists in a replacement value is data: it is never
+/// evaluated, so it cannot read an uncaptured context group.
 #[test]
-fn a_generated_expression_is_not_reported_at_an_authored_line() {
+fn a_generated_expression_is_never_evaluated() {
     let dir = TempDir::new().unwrap();
     // `{{{ … }}}` makes the frontmatter value the literal text `{{ ctx.os }}`;
-    // body interpolation substitutes it on line 7 and the rescan then fails.
+    // body interpolation inserts it on line 7 as data.
     let root = write(
         dir.path(),
         "root.md",
         "---\ntemplate: \"{{{ ctx.os }}}\"\n---\none\ntwo\nthree\nvalue={{ template }}\n",
     );
 
-    let error = compose_file(&root, ComposeOptions::new_with_context(date_time_only(dir.path())))
-        .expect_err("the generated reference still fails");
-
-    assert_not_captured(&error, "os", ContextGroup::Os);
-    let MarkdownError::Interpolation { key, source, .. } = &error else {
-        panic!("expected an interpolation error, got {error:?}");
-    };
-    assert_eq!(*key, None, "the failure is in the body, not the frontmatter");
-    match source.as_ref() {
-        SourceRef::OnDisk(context) => assert!(context.display.ends_with("root.md")),
-        other => panic!("a generated expression must not carry an authored line: {other:?}"),
-    }
-    let out = rendered(&error);
-    assert!(out.contains("root.md"), "{out}");
-    assert!(!out.contains("Expression at line"), "{out}");
+    let composed =
+        compose_file(&root, ComposeOptions::new_with_context(date_time_only(dir.path())))
+            .expect("the inserted reference is data");
+    assert!(composed.contains("value={{ ctx.os }}"), "{composed}");
 }
 
 /// A page block removed before the failing expression shifts every later body
