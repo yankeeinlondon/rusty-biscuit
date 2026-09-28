@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -34,10 +34,23 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/git.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/src/commands/list/tests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/build-hosts.md
 packages:
     - worktree-cli
     - biscuit-visualized
     - biscuit-terminal
+    - worktree
 ---
 
 # Plan: `wt list` graph hides a merged branch and overlaps neighboring tags
@@ -314,11 +327,11 @@ Goal: `commands::git_graph` supplies first-parent lanes, verified merges, explic
 
 **Wave 4** (concurrent)
 
-- [ ] **Topology helpers** (new `worktree/cli/src/commands/git_graph/topology.rs`; tests in `git_graph/tests.rs`, never `insta` because of the lib/bin double compile)
+- [x] **Topology helpers** (new `worktree/cli/src/commands/git_graph/topology.rs`; tests in `git_graph/tests.rs`, never `insta` because of the lib/bin double compile)
   - Add `classify(branch_tip, candidates) -> Result<Integration, GatherGap>` implementing R4's table.
   - Add `first_parent_entries(tip, stop, window, anchors) -> Result<(Vec<LaneEntry>, Option<i64>), GatherGap>` implementing R5 and R6 (window + anchors + `Elided` runs; distance verification).
   - Every git call goes through the existing `git_command`, so the tests' git-call recorder counts it.
-- [ ] **Fixture builders** (`git_graph/tests.rs` helpers, reusing `init_repo`/`commit`/`forked`)
+- [x] **Fixture builders** (`git_graph/tests.rs` helpers, reusing `init_repo`/`commit`/`forked`)
   - `merged_via_merge_commit` (observation 1)
   - `nested_parent_merged_into_default` (observation 2: a side longer than `BASE_DEFAULT_WINDOW`, local `main` one merge behind `origin/main`)
   - `merged_into_parent`
@@ -332,26 +345,26 @@ Goal: `commands::git_graph` supplies first-parent lanes, verified merges, explic
 
 **Wave 5** (after Wave 4; the two tasks touch different functions and can run concurrently)
 
-- [ ] **Focused view rewrite**
+- [x] **Focused view rewrite**
   - `focused_view` uses `classify` for the current branch and its recorded parent.
   - The default lane becomes `CONTEXT_COMMITS` before the anchor, then first-parent entries up to `lane_tip` with the merge destinations and ref commits pinned.
   - Lines get `with_tip` and `merged_into`.
   - A failed `merge_base` no longer returns `None` for the whole graph (R9).
   - `gather`'s verbose half keeps its current semantics.
-- [ ] **Base view rewrite**
+- [x] **Base view rewrite**
   - `base_view` does two stages, each over `std::thread::scope`:
     1. classify every selected branch in parallel;
     2. build every lane's entries with its anchors in parallel.
   - The default lane is first-parent from `lane_tip`, with `BASE_DEFAULT_WINDOW` plus anchors (fork commits, merge destinations, local `main`).
   - `DefaultTips::diverged_line` becomes first-parent.
   - Selection code (`recorded_parent`, `branches`, `drawn`) is untouched.
-- [ ] **`GraphFacts` plumbing**
+- [x] **`GraphFacts` plumbing**
   - Add `incomplete: bool`, and have `to_git_graph` call `with_incomplete_history()`.
   - PR filtering is unchanged.
 
 **Wave 6** (after Wave 5)
 
-- [ ] **Gathering tests.** One test per fixture, asserting full SHAs of lane entries, forks, `merged_into`, tips, `Elided` counts, `refs`, and `incomplete`:
+- [x] **Gathering tests.** One test per fixture, asserting full SHAs of lane entries, forks, `merged_into`, tips, `Elided` counts, `refs`, and `incomplete`:
   - Observation 1, from the merged branch: the branch has a lane, `merged_into == merge SHA`, and the default lane is first-parent.
   - Observation 1, from `main` in the base view with a tall enough viewport: the same lane survives.
   - Observation 2:
@@ -368,23 +381,23 @@ Goal: `commands::git_graph` supplies first-parent lanes, verified merges, explic
   - Old connections: the fork and merge commits are present as `Commit` entries, with `Elided` runs whose counts equal the real first-parent distances.
   - Shallow clone: `incomplete` is set, the verified lanes and labels remain, and the graph is not `None`.
   - Deleted parent: the existing fallback output is unchanged.
-- [ ] **Existing gather tests**
+- [x] **Existing gather tests**
   - Update `criss_cross_lines_and_verbose_details_hold_tip_unique_commits` and `origin_ahead_extends_the_default_lane_and_diverged_origin_gets_a_line` only where first-parent semantics change the lane, and state why in the test docs.
   - `graph_and_verbose_share_one_merge_base` stays green, or its git-call count is updated with a justification.
-- [ ] **No new network requests**
+- [x] **No new network requests**
   - Add a binary test in `cli/tests/list_remote_head.rs` style.
   - Run `wt list` on the shallow fixture, with a fresh PR store and a fresh remote-head store seeded (`seed_remote_head_store`) and `remote_fixture::UploadPackGate` on the origin.
   - Assert zero upload-pack runs, exit 0, the table present, and the notice text in stdout or stderr as rendered.
-- [ ] **Sizing regressions**
+- [x] **Sizing regressions**
   - `cargo nextest` runs the existing base-view cap and omitted-worktree notice tests and the focused-view exemption tests unchanged.
   - Add one base-view case where a merged lane competes under the cap and is kept or omitted by the unchanged activity rule.
-- [ ] **Lint and full L1**
+- [x] **Lint and full L1**
   - `just lint` and `just test` in `worktree`.
 
 **Checkpoint 3**
 
-- [ ] All gathering fixtures pass on macOS.
-- [ ] Git usage is confirmed OS-neutral: results are compared as SHAs, never as paths or localized stderr, and the `os` skill has been consulted for any Windows git differences found in S3.
+- [x] All gathering fixtures pass on macOS.
+- [x] Git usage is confirmed OS-neutral: results are compared as SHAs, never as paths or localized stderr, and the `os` skill has been consulted for any Windows git differences found in S3.
 
 ## Phase 4 — Rendered Evidence, Cross-OS, and Performance
 

@@ -33,39 +33,54 @@ related:
     - 2026-09-27-list-freshness-ux
 human_review: false
 message_to_agent: |-
-    Phase 2 (shared rendering layers) is done; read implementation-log.md's
-    "## Phase 2" before writing Phase 3 code. What Phase 3 must rely on:
+    Phase 3 (git discovery in worktree-cli) is done; read implementation-log.md's
+    "## Phase 3" first. What Phase 4 must rely on or finish:
 
-    - GitGraph contract (biscuit-terminal): pass every line's tip with
-      `GraphLine::with_tip(sha)`; a line without commits is labeled ONLY at
-      its tip (the fork fallback is gone). `GraphLine::merged_into(sha)` draws
-      a `merge` at that commit, found by position, but only if the merged lane
-      is emitted before it AND the destination lane already has a commit
-      before it (0.3.1 drops a labeled merge into a lane with no head). So in
-      the focused and base views, keep at least one entry (context commit or
-      `+N` square) before any merge destination on the default lane.
-    - `fork_sha == None`, or a fork commit not drawn anywhere, makes the lane
-      unconnected (never a substitute attachment) and sets
-      `GitGraphPlan::incomplete`. A ref/PR/label whose commit is not drawn also
-      sets it. So every ref you pass (local `main`, `origin/main`, parent tips)
-      must be drawn, or it will trigger "Some history is not shown": anchor it
-      (R6) rather than leave it outside the window.
-    - `GitGraph::with_incomplete_history()` is the hook for `GraphFacts::incomplete`.
-    - worktree-cli was touched once, deliberately: every GraphLine built in
-      commands/git_graph.rs now calls `.with_tip(...)` so merged branches keep
-      their labels until you rewrite gathering. Keep that when rewriting.
-    - R3-A1: tag spacing applies only to LR/RL gitGraphs. With the global
-      step, trimming a lone commit to `+1` no longer narrows the image; Phase 4's
-      56-column evidence should expect trimmed_commits > 0 with the image
-      shrinking, not getting narrower.
-    - biscuit-terminal's `just lint` does not enable `image` (the feature that
-      compiles git_graph); also run
-      `cargo clippy -p biscuit-terminal --features image --all-targets -- -D warnings`.
-    - Test helper: `biscuit_visualized::mermaid::MermaidDiagram::gitgraph_geometry()`
-      (#[doc(hidden)]) gives repaired parents, lanes, and tag bounds with
-      `tag_overlaps()`; Phase 4's end-to-end layout test should use it.
-    - Docs are Phase 5: biscuit-terminal/docs/components/git_graph.md still
-      says merged branches become tags and no merge statements are emitted.
+    - Gathering: `commands/git_graph.rs` `assemble` (classify in parallel, then
+      branch lanes in parallel, then the default lane from leftover anchors);
+      the git helpers are `commands/git_graph/topology.rs`. `GraphFacts` now has
+      `incomplete`, passed on through `with_incomplete_history()`.
+    - The fixtures you need for the end-to-end layout evidence already exist as
+      unit-test builders in `cli/src/commands/git_graph/tests.rs`
+      (`merged_via_merge_commit`, `nested_parent_merged_into_default`,
+      `old_connections`, `shallow_clone`, ...). They are private to that test
+      module; an integration test cannot call them, so either add the layout
+      assertions beside them (they already call `to_git_graph().plan_with`) or
+      port the builders.
+    - KITTY L2 COULD NOT BE VERIFIED in the Phase 3 session: both
+      `level2_graph_in_kitty` tests failed at the screenshot step with a capture
+      that has window chrome but no contents, which the test attributes to the
+      calling terminal lacking macOS Screen Recording permission. Phase 4's
+      screenshot evidence needs a session that has it; a failure of this shape
+      is not a graph regression.
+    - LINUX CROSS-CHECK: `./scripts/cross-check.sh --os linux <pkg>` (archive
+      mode) fails on build-linux before compiling repository code
+      (`target/release/deps/*.rmeta is not writeable`, stale kache links in the
+      fix-wt-ux clone; see the os skill's build-hosts.md). Add a build flag
+      (`--features terminal-tests` for worktree-cli, `--features image` for
+      biscuit-terminal) to take the native path; it runs `perf_` tests too.
+      Phase 3 results: Linux 493 passed, Windows 420 passed.
+    - The `a_shallow_clone_lists_with_the_incomplete_history_notice_...` binary
+      test cannot assert zero upload-pack runs: the listing's own live-head
+      worker always checks origin. It asserts the graph adds none.
+    - Known visible consequence of R4 (not a bug; Phase 5 docs must state it):
+      a branch continued after its merge is an unconnected lane plus "Some
+      history is not shown", because its fork (the old merged tip) is on no
+      first-parent lane.
+    - Plan deviations recorded as amendments: R4-A2 (merged-into-parent fork
+      against C^1), anchors verified with `log --no-walk --ignore-missing`
+      instead of a `rev-parse` batch, stage 2 split into branch lanes then the
+      default lane, and CONTEXT_COMMITS replaced by "oldest anchor + its first
+      parent". Perf (Phase 4): classification adds one `merge-base
+      --is-ancestor` per candidate lane per branch, and anchors beyond a window
+      add one `rev-list --count` each (on threads) plus one batched `log`.
+    - Still open from Phase 2: biscuit-terminal's `just lint` does not enable
+      `image` (which compiles git_graph); also run `cargo clippy -p
+      biscuit-terminal --features image --all-targets -- -D warnings`. The
+      layout helper is `MermaidDiagram::gitgraph_geometry()` (#[doc(hidden)],
+      `tag_overlaps()`). Docs are Phase 5: `worktree/docs/git-graph.md` and
+      `biscuit-terminal/docs/components/git_graph.md` still describe merged
+      branches as tags.
 references:
     renderer-spike.md: >-
         Isolated renderer feasibility experiment covering measured label spacing,

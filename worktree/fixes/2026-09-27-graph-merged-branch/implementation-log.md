@@ -33,10 +33,23 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/lib/src/git.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/src/commands/list/tests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/os/build-hosts.md
 packages:
     - worktree-cli
     - biscuit-visualized
     - biscuit-terminal
+    - worktree
 ---
 
 # Implementation Log for 2026-09-27-graph-merged-branch (5 phases)
@@ -667,3 +680,236 @@ Covered by the three tables above. Skipped or pre-existing failures: none. Not
 done here by plan: `docs/` pages (Phase 5). `biscuit-terminal/docs/components/git_graph.md`
 still documents merged branches as tags and "no merge statements"; that drift
 is Phase 5's to fix, in the same pass that writes the new contract.
+
+## Phase 3
+
+Git discovery in `worktree-cli`, 2026-09-27. Branch selection is unchanged
+(`recorded_parent`, the base view's `branches`/`drawn`, and the focused view's
+one-level parent rule are the same code).
+
+### What changed
+
+- **`worktree` lib (`lib/src/git.rs`)**: new `git_command_allow_no_match`
+  beside `git_command` (both now share `git_command_status`). Exit 1 is
+  `Ok(None)`, any other failure `Err`, so `merge-base --is-ancestor`'s "no" and
+  `merge-base`'s "no common ancestor" are told apart from errors **by exit code**
+  (R9-A1), which `git_command`'s `Err(stderr)` could not do. Every call is still
+  counted by the git-call recorder. Test:
+  `git::tests::allow_no_match_separates_a_no_from_a_failure_by_exit_code`.
+- **New `cli/src/commands/git_graph/topology.rs`**: `GatherGap`, `History`
+  (`read` = one `rev-parse --is-shallow-repository`; a failed read is a gap and
+  is treated as shallow), `is_ancestor`, `merge_base`, `classify` (R4 + R4-A1
+  exactly: `chain` ∩ `descendants`, leading run), and `first_parent_entries`
+  (R5 + R6). Every git line is parsed strictly; an unparseable line is a gap.
+- **`cli/src/commands/git_graph.rs`**: `focused_view` and `base_view` now build
+  a list of `Selected` branches with the unchanged selection code and hand it to
+  one `assemble`:
+  1. stage 1, every selected branch classified in parallel (`place`);
+  2. stage 2a, every branch lane and a diverged `origin/<default>` line built in
+     parallel with the anchors routed to them;
+  3. stage 2b, the default lane, with its own anchors plus every anchor no
+     branch lane placed.
+  `GraphFacts` gains `incomplete`, and `to_git_graph` calls
+  `with_incomplete_history()`. PR filtering is unchanged. The verbose half is
+  unchanged (`commit_details_since` keeps all-parents semantics) and still
+  shares the focused view's one `merge-base`.
+
+### How each class is drawn
+
+| Class (`Integration`) | Lane stop (`--not`) | Fork | Merge | Notice |
+|---|---|---|---|---|
+| `Unmerged` | default tips + parent tip | `merge-base(parent tip, else default lane tip, T)` (reuses verbose's answer when there is no parent) | none | no |
+| `MergedDirectly { C }` | `C^1` (+ parent tip when merged elsewhere) | `merge-base(parent tip if merged elsewhere, else C^1, T)` | `merged_into(C)` | no |
+| `NoSeparateHistory` | — (label only, `with_tip(T)`) | none | none | no |
+| `IntegratedOtherwise` | as merged | as merged | none | **yes** |
+| gap (`Err`) | as unmerged | `merge-base` if it answers, else none (unconnected) | none | **yes** |
+
+A shallow "no" (is-ancestor exit 1, merge-base exit 1, an empty chain) is a gap
+(R9-A1), and so is a `+N` square in a shallow repository (a lower bound).
+
+### Anchors (R6) and their routing
+
+- Each placement asks for its fork on its fork lane (the parent's, else the lane
+  it was measured against), its merge commit on the lane it merged into, and
+  a label's tip on the lane containing it. The default lane also anchors the
+  local default tip and `origin/<default>` (unless diverged).
+- `first_parent_entries` places an anchor already in the shown window for free.
+  Otherwise its position is `rev-list --first-parent --count A..tip` (one per
+  anchor, on scoped threads), and every candidate position is verified in **one**
+  `log --no-walk=unsorted --ignore-missing --format='%H %P' tip~d…`. R6 named a
+  batched `rev-parse`; that fails the whole batch with exit 128 when one
+  `tip~d` passes the root (an off-chain anchor's count is the whole chain), so
+  `--ignore-missing` replaced it (checked on git 2.55: invalid `tip~d` dropped,
+  exit 0). An anchor among the answers is at its own distance, since one chain
+  position names one commit. A branch lane shorter than its window is fully
+  shown, so it asks no anchor distances at all.
+- Anchors a branch lane did not place fall back to the default lane (built
+  last). A branch lane whose entries came out empty also sends its tip there,
+  so it is labeled where it is.
+
+### Deviations from the plan (recorded; the spec is untouched)
+
+- **R4-A2 (amendment).** R4 says a merged branch's fork is
+  `merge-base(<recorded parent tip, else C^1>, T)`. When the branch was merged
+  **into** that parent, the parent's tip contains `T`, and `merge-base` returns
+  `T` itself. The fork is therefore measured against `C^1` whenever the merge's
+  lane is the parent's, and against the parent's tip only when the merge went
+  elsewhere (the `fix/sniff` shape). The parent's tip is likewise added to the
+  lane stop only in that case. Proven by
+  `a_child_merged_into_its_parent_merges_on_the_parent_lane` (fork `p1`, not
+  `c2`).
+- **Stage 2 is 2a (branch lanes, parallel) then 2b (default lane).** The plan
+  said "build every lane's entries with its anchors in parallel". A child's
+  fork can lie on its parent's lane or below it on the default lane, and only
+  the parent lane's build knows which. Building the default lane last with the
+  leftovers costs one lane's latency and saves one `rev-list --count` per
+  misrouted anchor (each 60–70 ms on Windows, S3).
+- **`CONTEXT_COMMITS` is gone as a constant.** The focused view's two context
+  commits are now "the oldest anchor and its first parent" (`Extent::Open {
+  cap_window: true }`), taken from `%P`, with no extra git call. The base view
+  keeps its 10-commit window (`cap_window: false`) and also extends one commit
+  below an anchor beyond the window, so a merge destination is never the default
+  lane's first statement (Phase 2's R2-A2 constraint). For every pre-existing
+  fixture the drawn default lane is identical to before.
+- **`DefaultTips::diverged_line` no longer exists.** The diverged
+  `origin/<default>` line is one of stage 2a's jobs (first-parent, window
+  `LINE_WINDOW`, stop at the local tip) and receives the anchors of branches
+  merged into it.
+- **The no-network test cannot assert zero `upload-pack` runs.** A graph-free
+  listing of the same repository already runs exactly one (the listing's
+  live-head worker checks `origin` whenever there is one, with fresh PR and
+  live-head stores seeded). The test asserts the graph-drawing listing makes
+  exactly as many runs as the graph-free one (`without_graph <= 1`, and the
+  difference equals it), which is the claim R9 makes: no *new* request.
+
+### Consequence worth knowing (follows R4 as written)
+
+A branch that **continued after its merge** is `Unmerged` with its fork at the
+old merged tip. That commit is the merge's second parent, on no first-parent
+lane, so `GitGraph` draws the lane unconnected and shows "Some history is not
+shown". This is truthful (the connection through the old merge is not drawn)
+and matches the plan's expectation for the fixture, but it is a visible notice
+for a common workflow. Phase 5's docs should state it.
+
+### Tests (all L1; `cli/src/commands/git_graph/tests.rs` unless noted)
+
+| Requirement (plan Wave 6 / spec acceptance row) | Test |
+|---|---|
+| Observation 1 from the merged branch: own lane, `merged_into == merge`, first-parent default lane, local `main` labeled | `a_merged_current_branch_keeps_its_lane_and_merges_at_its_merge_commit` |
+| Observation 1 from `main` (base view, tall viewport keeps the lane) | `a_merged_branch_keeps_its_lane_in_the_base_view` |
+| Observation 2: `fix/sniff` forks at `fix/wt-ux`'s tip, merged at `m104`, `+7` long side; no side commit on the default lane; `fix/wt-ux` merged at `m103`; local `main` tagged | `a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view` |
+| Merged into the parent: `merged_into` on the parent lane, which anchors it | `a_child_merged_into_its_parent_merges_on_the_parent_lane` |
+| Recorded parent with and without its own worktree selected; child keeps `with_parent`; base view nests only under a drawn parent | `a_recorded_parent_is_selected_with_or_without_its_own_worktree` |
+| Fast-forward: label at the actual commit, no entries, no merge | `a_fast_forwarded_branch_is_a_label_at_its_commit` |
+| Equal tips: `c` keeps its lane and merge, `d` is a label at `c`'s tip | `equal_tips_keep_the_merged_lane_and_label_the_new_branch` |
+| Continued after merge: unmerged lane at the old merged tip, no merge edge (plan shows `incomplete`) | `a_branch_continued_after_its_merge_is_an_unmerged_lane` |
+| Indirect integration: lane without merge, `incomplete` | `an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_the_notice` |
+| Old connections: fork and merge are `Commit` entries, `Elided` counts equal real first-parent distances (focused and base) | `old_forks_and_merges_stay_drawn_with_exact_elided_runs` |
+| Shallow clone: `incomplete`, verified lanes and labels remain, graph not `None` | `a_shallow_clone_draws_what_it_can_verify_and_reports_the_rest` |
+| Deleted parent: existing fallback unchanged | `a_deleted_recorded_parent_falls_back_to_the_default_branch` |
+| A merged lane competes under the base-view cap by the unchanged activity rule | `a_merged_lane_competes_under_the_height_cap_by_activity` |
+| Every classification outcome; first candidate wins; a git failure is a gap, never `Unmerged` | `classify_names_every_integration_and_tries_candidates_in_order` |
+| Anchors: off-chain not placed; below a branch lane's stop not placed; exact `+N` runs; unreadable tip is the only `Err` | `first_parent_entries_place_only_anchors_on_the_lane` |
+| No new network request; table and notice present (binary, pty, Unix) | `cli/tests/list_remote_head.rs::a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing` |
+
+Existing tests whose expectations changed on purpose:
+
+| Test | Change | Why |
+|---|---|---|
+| `the_base_view_gives_every_worktree_branch_a_line` | `chore/merged` (fast-forwarded) now has `fork_sha == None` and `merged_into == None`; call counts are split into `--is-ancestor` checks (5), merge bases (3), `log` (4, the label-only branch has no lane), `rev-list` (1, its empty chain); `incomplete == false` | R4/R7: a label-only branch has no fork; classification adds the yes/no checks |
+| `graph_and_verbose_share_one_merge_base` | counts merge bases excluding `--is-ancestor` (still 1) and all `merge-base` calls (2) | classification's one yes/no check is not a merge base; the fork reuses verbose's answer |
+
+`criss_cross_lines_and_verbose_details_hold_tip_unique_commits` and
+`origin_ahead_extends_the_default_lane_and_diverged_origin_gets_a_line` pass
+unchanged: in both fixtures the first-parent lane holds exactly the commits the
+all-parents walk did.
+
+Tier and placement: every new unit test is in `git_graph/tests.rs` (compiled by
+the lib and bin targets, no tier marker in any path segment). The binary test
+is in `list_remote_head.rs` (an auto-discovered test target, no marker) and is
+`#[cfg(unix)]`, since `script` is Unix-only, like `perf_graph_stages.rs`.
+`just check-tier-coverage worktree`: 0 stranded.
+
+### Gates
+
+- `just test` in `worktree`: 744 passed, 29 skipped (tier-filtered `perf_` and
+  L2), exit 0.
+- `just lint` in `worktree`: pass. `cargo clippy -p worktree-cli -p worktree
+  --all-targets -- -D warnings`: clean.
+- `biscuit-terminal` sizing regressions, unchanged
+  (`cargo nextest run -p biscuit-terminal --features image --lib`, filtered):
+  `the_base_view_height_cap_keeps_the_most_recently_active_lanes`,
+  `the_height_cap_adds_lanes_in_activity_order_until_one_does_not_fit`,
+  `a_focused_view_is_never_cut_by_the_height_cap`,
+  `the_height_cap_keeps_a_merged_lanes_destination_lane`,
+  `tags_of_lanes_the_height_cap_leaves_out_are_not_reported_twice`,
+  `without_image_support_the_terminal_gets_the_code_block_and_the_lane_note`,
+  `the_incomplete_history_notice_follows_the_lane_note`,
+  `the_caller_can_report_incomplete_history`: 8 passed.
+- **Not verified here: the Kitty L2** (`level2_graph_in_kitty`, run with
+  `BISCUIT_TEST_REQUIRED_BACKENDS=kitty`). Both tests reached the screenshot
+  step and failed there with a capture that has window chrome but no contents
+  at all (not even the table text), which the test's own message attributes to
+  the calling terminal lacking macOS Screen Recording permission. This
+  non-interactive session cannot grant it. Phase 4 re-runs this test for its
+  screenshot evidence and needs a session with that permission.
+
+### A stale `perf_` expectation found on Linux (fixed)
+
+`commands::list::tests::perf_subprocess_counts_meet_sla` (lib and bin targets)
+counted `merge-base` calls in the base-view gather as one per line. It is a
+`perf_` test, so neither `just test` nor CI's L1 runs it; build-linux's native
+path runs everything and failed on it (`left: 2, right: 1`). The count now
+splits one shallow check, one `--is-ancestor` per line (each branch in that
+fixture has only the default lane as a candidate), and one merge base per line.
+It fails the same way on macOS before the fix, so it was never Linux-specific.
+
+### Cross-OS (Checkpoint 3)
+
+| OS | How | Result |
+|---|---|---|
+| macOS (this host, git 2.55.0) | `just test` in `worktree` | 744 passed, 29 skipped |
+| native Windows (`build-win-native`, git 2.55.0.windows.3) | `./scripts/cross-check.sh --os windows worktree-cli` (archive from `windows-latest`) | 420 passed, 46 skipped; includes every new graph test, the `file:///C:/…` shallow clone, and `allow_no_match`'s exit codes |
+| Linux (`build-linux`, git 2.47.3) | `./scripts/cross-check.sh --os linux worktree-cli --features terminal-tests` | 493 passed (after the `perf_` fix above), including the `script -qec` pty test |
+| Linux (local Docker `rust:1`, arm64, git 2.47.3) | `cargo test` of `worktree` lib `allow_no_match`, `worktree-cli --lib git_graph`, `--test list_remote_head shallow` | 1 + 24 + 1 passed |
+
+- The plain linux leg (archive mode) failed twice before compiling any
+  repository code: `target/release/deps/*.rmeta is not writeable` in the
+  `fix-wt-ux` standing clone, the stale read-only kache links the `os` skill
+  already records for that clone. A build flag takes the native path, which
+  ran green; the skill now records the 2026-09-27 recurrence and that the
+  native path runs `perf_` tests.
+- OS neutrality: every assertion compares full SHAs or entry lists, never paths
+  or git's stderr. Git errors are classified only by exit code
+  (`git_command_allow_no_match`), never by (possibly localized) stderr. The one
+  path-shaped value, the shallow fixture's `file://` URL, is built as
+  `file:///C:/…` on Windows. The `os` skill's git notes (CI's depth-1 checkouts,
+  Windows verbatim paths) do not apply: every fixture builds its own temporary
+  repository. WSL2 is left to the nightly schedule, as the plan says.
+
+### Perf gates (not Phase 4's recorded comparison)
+
+`just test-perf perf_graph` (dev profile, one sample; Phase 4 records the
+release medians against the Phase 1 baseline): pass, both stages reported on
+every fixture. `just test-perf meets_sla`: all six pass
+(`perf_full_command_non_image_meets_sla`, both cache paths, the three
+`perf_pr_request` gates).
+
+### Checkpoint 3
+
+- All gathering fixtures pass on macOS, Windows, and Linux.
+- Git usage is OS-neutral (above); the `os` skill was consulted and updated.
+- Not verified: the Kitty L2 screenshot step (Screen Recording permission, see
+  Gates). Phase 4 owns that evidence.
+
+### Requirement-to-test mapping, targeted tests, and skips (Phase 3 summary)
+
+- Mapping: the "Tests" table above; every Wave 6 bullet has a named test.
+- Targeted tests added: 15 in `git_graph/tests.rs`, 1 in `lib/src/git.rs`, 1 in
+  `cli/tests/list_remote_head.rs`.
+- Broader gates: `just test`/`just lint` in `worktree`, clippy `--all-targets`,
+  the `biscuit-terminal` sizing tests, the `perf_` SLA and graph gates, and the
+  three cross-OS runs above.
+- Skipped or failing and not caused by this phase: `level2_graph_in_kitty`
+  (environment: no Screen Recording permission); build-linux archive mode
+  (environment: stale kache links). No pre-existing test failures otherwise.
