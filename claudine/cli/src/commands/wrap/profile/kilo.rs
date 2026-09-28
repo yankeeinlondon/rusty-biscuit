@@ -8,7 +8,8 @@ use super::{PromptDelivery, WrapperProfile};
 /// Kilo Code's CLI is an OpenCode fork, so the wrapper mirrors the OpenCode
 /// profile: the non-interactive entrypoint is `kilo run`, structured streaming
 /// is `--format json` NDJSON (parsed by the reused OpenCode parser), and the
-/// prompt is delivered as a positional message. The one Kilo-specific flag is
+/// prompt is a positional message under `run` and the `--prompt` value in the
+/// interactive TUI. The one Kilo-specific flag is
 /// `--auto`: `kilo run` denies questions and auto-rejects permissions by
 /// default, so `--auto` (approve root + tracked task) is required for any
 /// autonomous non-interactive progress. `--dangerously-skip-permissions` is a
@@ -51,25 +52,35 @@ impl WrapperProfile for KiloWrapper {
         &self,
         _args: &[String],
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        // `kilo run` accepts the task as a positional message. Separate it with
-        // `--` so the parser stops looking for flags — composed prompts often
-        // open with a Markdown bullet (`- ...`) that would otherwise be read as
-        // an unknown option.
         const ARG_MAX_HEADROOM: usize = 768 * 1024; // conservative vs OS ARG_MAX
         if prompt.len() > ARG_MAX_HEADROOM {
             bail!(
-                "Kilo requires the prompt as a positional argument, but the composed \
+                "Kilo requires the prompt as a command-line argument, but the composed \
                  prompt is too large ({} KB) for reliable argv delivery.\n\
                  Reduce the prompt size or switch providers for this run.",
                 prompt.len() / 1024
             );
         }
-        Ok(PromptDelivery::AppendArgs(vec![
-            "--".to_string(),
-            prompt.to_string(),
-        ]))
+        if non_interactive {
+            // `kilo run` accepts the task as a positional message. Separate it
+            // with `--` so the parser stops looking for flags — composed
+            // prompts often open with a Markdown bullet (`- ...`) that would
+            // otherwise be read as an unknown option.
+            return Ok(PromptDelivery::AppendArgs(vec![
+                "--".to_string(),
+                prompt.to_string(),
+            ]));
+        }
+        // The TUI's positional is a project directory (`kilo [project]`), so
+        // the first turn goes through `--prompt`. As in OpenCode, a
+        // `-`-prefixed value is attached so yargs cannot read it as an option.
+        Ok(if prompt.starts_with('-') {
+            PromptDelivery::AppendArgs(vec![format!("--prompt={prompt}")])
+        } else {
+            PromptDelivery::AppendArgs(vec!["--prompt".to_string(), prompt.to_string()])
+        })
     }
 
     fn apply_structured_stream(&self, args: &mut Vec<String>) {

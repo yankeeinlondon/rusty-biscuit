@@ -2,7 +2,7 @@ use std::path::Path;
 
 use claudine::provider::Provider;
 use claudine::system_prompt::PreparedSystemPrompt;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, bail};
 
 use super::{PromptDelivery, WrapperProfile};
 
@@ -15,7 +15,8 @@ use super::{PromptDelivery, WrapperProfile};
 /// / `--system-prompt` file flags, and there is no YOLO mode (Pi is permissive
 /// by default). Model selection (`--model`) is catalog-driven via the default
 /// `apply_model`. Only prompt delivery, system-prompt delivery, and the resume
-/// selector need Pi-specific handling.
+/// selector need Pi-specific handling. Interactive sessions need Pi 0.84.3 or
+/// later, the first release that accepts `--` before a positional message.
 pub(crate) struct PiWrapper;
 
 impl WrapperProfile for PiWrapper {
@@ -27,15 +28,34 @@ impl WrapperProfile for PiWrapper {
         &self,
         _args: &[String],
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<PromptDelivery> {
-        // Pi reads the prompt from STDIN in `-p` mode (verified against pi
-        // 0.80.3: `echo PROMPT | pi -p --mode json` streams the run). Stdin is
-        // the only safe channel: Pi's bespoke arg parser rejects both a bare
-        // `--` separator (`Error: Unknown option: --`) and any positional
-        // message beginning with `-` (`Error: Unknown option: - ...`), and
-        // composed prompts routinely open with a Markdown bullet.
-        Ok(PromptDelivery::Stdin(prompt.to_string()))
+        if non_interactive {
+            // `-p` mode reads the prompt from stdin (`echo PROMPT | pi -p
+            // --mode json`), which keeps large prompts off argv.
+            return Ok(PromptDelivery::Stdin(prompt.to_string()));
+        }
+        // Piped stdin always switches Pi to print mode, so an interactive first
+        // turn must be a positional message: `pi -- <prompt>`. `--` ends
+        // options from Pi 0.84.3 (earlier releases reject it), so a prompt
+        // opening with a Markdown bullet is not read as an option.
+        const ARG_MAX_HEADROOM: usize = 768 * 1024; // conservative vs OS ARG_MAX
+        if prompt.len() > ARG_MAX_HEADROOM {
+            bail!(
+                "Pi needs an interactive first message on the command line, but the \
+                 composed prompt is too large ({} KB) for reliable argv delivery.\n\
+                 Reduce the prompt size or run without -i, which delivers it on stdin.",
+                prompt.len() / 1024
+            );
+        }
+        // Even after `--`, Pi reads a token starting with `@` as a file
+        // reference; a leading space keeps the prompt a message.
+        let message = if prompt.starts_with('@') {
+            format!(" {prompt}")
+        } else {
+            prompt.to_string()
+        };
+        Ok(PromptDelivery::AppendArgs(vec!["--".to_string(), message]))
     }
 
     fn apply_system_prompt(

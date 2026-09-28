@@ -757,3 +757,251 @@ fn test_all_providers_flags_before_double_dash() {
         }
     }
 }
+
+// -- Interactive startup prompts (2026-09-18-edit-integration) ----------
+
+/// The argv an interactive launch ends with once `prompt_delivery` has run on
+/// the interactive entrypoint. Panics if the delivery would seed stdin: in an
+/// interactive session stdin is the user's terminal.
+fn interactive_startup_argv(provider: Provider, prompt: &str) -> Vec<String> {
+    let p = profile(provider);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, false);
+    let delivery = p
+        .prompt_delivery(&args, prompt, false)
+        .unwrap_or_else(|err| panic!("{provider:?}: interactive prompt_delivery failed: {err}"));
+    assert!(
+        !matches!(delivery, PromptDelivery::Stdin(_) | PromptDelivery::WireRpc(_)),
+        "{provider:?}: interactive delivery must not use stdin or wire RPC, got {delivery:?}"
+    );
+    let stdin_seed = delivery.apply_to(&mut args);
+    assert_eq!(stdin_seed, None, "{provider:?}: interactive stdin must stay the terminal");
+    args
+}
+
+fn with_prompt(template: &[&str], prompt: &str) -> Vec<String> {
+    template.iter().map(|arg| arg.replace("{P}", prompt)).collect()
+}
+
+/// Interactive startup argv per provider slug: `(slug, plain prompt, prompt
+/// opening with a Markdown bullet)`, with `{P}` standing for the prompt. Rows
+/// are keyed by slug so this fact table adds no provider dispatch site.
+const INTERACTIVE_STARTUP_TABLE: &[(&str, &[&str], &[&str])] = &[
+    ("claude", &["{P}"], &["--", "{P}"]),
+    ("codex", &["{P}"], &["--", "{P}"]),
+    ("gemini", &["--prompt-interactive", "{P}"], &["--prompt-interactive={P}"]),
+    (
+        "goose",
+        &["run", "--text", "{P}", "--interactive"],
+        &["run", "--text={P}", "--interactive"],
+    ),
+    // Kimi has no native interactive startup-prompt surface: `--prompt` runs
+    // one turn and exits. This row pins today's argv while the author rules on
+    // the fleet-wide promise (ruling N2); it is not a verified interactive form.
+    ("kimi", &["--prompt", "{P}"], &["--prompt", "{P}"]),
+    ("opencode", &["--prompt", "{P}"], &["--prompt={P}"]),
+    ("qwen", &["--prompt-interactive", "{P}"], &["--prompt-interactive={P}"]),
+    ("kilo", &["--prompt", "{P}"], &["--prompt={P}"]),
+    ("pi", &["--", "{P}"], &["--", "{P}"]),
+    (
+        "antigravity",
+        &["--prompt-interactive", "{P}"],
+        &["--prompt-interactive={P}"],
+    ),
+];
+
+#[test]
+fn every_provider_delivers_an_interactive_startup_prompt() {
+    let fleet: std::collections::BTreeSet<&str> = claudine::provider::PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(|provider| provider.as_slug())
+        .collect();
+    assert_eq!(fleet.len(), PROVIDER_COUNT, "display order must list every provider once");
+    assert_eq!(
+        INTERACTIVE_STARTUP_TABLE.len(),
+        PROVIDER_COUNT,
+        "one expectation row per provider"
+    );
+
+    let plain = "Reply with the single word READY.";
+    let bullet = "- item one\n- item two\n\nReply with the single word READY.";
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let (_, plain_argv, bullet_argv) = INTERACTIVE_STARTUP_TABLE
+            .iter()
+            .find(|(slug, _, _)| *slug == provider.as_slug())
+            .unwrap_or_else(|| panic!("{provider:?}: no interactive startup expectation row"));
+        assert_eq!(
+            interactive_startup_argv(provider, plain),
+            with_prompt(plain_argv, plain),
+            "{provider:?}: plain interactive startup prompt"
+        );
+        assert_eq!(
+            interactive_startup_argv(provider, bullet),
+            with_prompt(bullet_argv, bullet),
+            "{provider:?}: bullet-first interactive startup prompt"
+        );
+    }
+}
+
+#[test]
+fn goose_interactive_prompt_leads_with_run_so_other_flags_parse_as_run_options() {
+    let p = profile(Provider::Goose);
+    let mut args = vec!["--system".to_string(), "be brief".to_string()];
+    p.prompt_delivery(&args, "hello", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(
+        args,
+        vec!["run", "--text", "hello", "--interactive", "--system", "be brief"]
+    );
+}
+
+#[test]
+fn goose_interactive_prompt_follows_an_existing_run_entrypoint() {
+    let p = profile(Provider::Goose);
+    let mut args = vec!["run".to_string(), "--debug".to_string()];
+    p.prompt_delivery(&args, "- item", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["run", "--text=- item", "--interactive", "--debug"]);
+}
+
+#[test]
+fn goose_non_interactive_prompt_shape_is_unchanged() {
+    let p = profile(Provider::Goose);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, true);
+    p.prompt_delivery(&args, "hello", true)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["run", "-t", "hello"]);
+
+    let mut bare: Vec<String> = Vec::new();
+    p.prompt_delivery(&bare, "hello", true)
+        .unwrap()
+        .apply_to(&mut bare);
+    assert_eq!(bare, vec!["run", "-t", "hello"]);
+}
+
+#[test]
+fn kilo_interactive_prompt_uses_prompt_flag_not_the_project_positional() {
+    let p = profile(Provider::Kilo);
+    for (prompt, expected) in [
+        ("fix the bug", vec!["--prompt", "fix the bug"]),
+        ("- fix the bug", vec!["--prompt=- fix the bug"]),
+    ] {
+        let mut args = Vec::new();
+        p.prompt_delivery(&args, prompt, false)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(args, expected, "prompt {prompt:?}");
+    }
+}
+
+#[test]
+fn kilo_non_interactive_prompt_stays_positional_after_run() {
+    let p = profile(Provider::Kilo);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, true);
+    p.prompt_delivery(&args, "- fix the bug", true)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["run", "--", "- fix the bug"]);
+}
+
+#[test]
+fn kilo_rejects_an_oversized_prompt_in_both_modes() {
+    let p = profile(Provider::Kilo);
+    let huge = "x".repeat(768 * 1024 + 1);
+    for non_interactive in [true, false] {
+        let err = p.prompt_delivery(&[], &huge, non_interactive).unwrap_err();
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+    assert!(p.prompt_delivery(&[], &"x".repeat(768 * 1024), false).is_ok());
+}
+
+#[test]
+fn antigravity_interactive_prompt_uses_prompt_interactive_not_print() {
+    let p = profile(Provider::Antigravity);
+    for (prompt, expected) in [
+        ("review", vec!["--prompt-interactive", "review"]),
+        ("- review", vec!["--prompt-interactive=- review"]),
+    ] {
+        let mut args = Vec::new();
+        p.prompt_delivery(&args, prompt, false)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(args, expected, "prompt {prompt:?}");
+    }
+}
+
+#[test]
+fn antigravity_non_interactive_prompt_stays_print_last() {
+    let p = profile(Provider::Antigravity);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, true);
+    p.apply_structured_stream(&mut args);
+    p.prompt_delivery(&args, "- review", true)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(
+        args[args.len() - 2..],
+        ["--print".to_string(), "- review".to_string()]
+    );
+    assert!(!args.iter().any(|a| a.starts_with("--prompt-interactive")));
+}
+
+#[test]
+fn pi_interactive_prompt_is_a_positional_message_after_end_of_options() {
+    let p = profile(Provider::Pi);
+    for prompt in ["review the plan", "- review\n- the plan"] {
+        let mut args = Vec::new();
+        let stdin_seed = p
+            .prompt_delivery(&args, prompt, false)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(stdin_seed, None, "stdin must stay the terminal");
+        assert_eq!(args, vec!["--".to_string(), prompt.to_string()]);
+    }
+}
+
+#[test]
+fn pi_interactive_prompt_starting_with_at_is_not_read_as_a_file() {
+    let p = profile(Provider::Pi);
+    let mut args = Vec::new();
+    p.prompt_delivery(&args, "@alice please review", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["--", " @alice please review"]);
+
+    // Only a leading `@` is touched; a mid-prompt mention is left alone.
+    let mut args = Vec::new();
+    p.prompt_delivery(&args, "ask @alice", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["--", "ask @alice"]);
+}
+
+#[test]
+fn pi_interactive_rejects_a_prompt_too_large_for_argv() {
+    let p = profile(Provider::Pi);
+    let err = p
+        .prompt_delivery(&[], &"x".repeat(768 * 1024 + 1), false)
+        .unwrap_err();
+    assert!(err.to_string().contains("too large"), "{err}");
+    assert!(p.prompt_delivery(&[], &"x".repeat(768 * 1024), false).is_ok());
+}
+
+#[test]
+fn pi_non_interactive_prompt_stays_on_stdin_whatever_its_size_or_prefix() {
+    let p = profile(Provider::Pi);
+    for prompt in ["- item".to_string(), "@file".to_string(), "x".repeat(768 * 1024 + 1)] {
+        let mut args = Vec::new();
+        let stdin_seed = p
+            .prompt_delivery(&args, &prompt, true)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(stdin_seed.as_deref(), Some(prompt.as_str()));
+        assert!(args.is_empty());
+    }
+}
