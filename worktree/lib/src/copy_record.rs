@@ -166,6 +166,12 @@ pub fn load_from(path: &Path, worktree: &Path, expected: &Registration) -> Loade
     LoadedRecord::Trusted(record)
 }
 
+/// Deletes this repository's records whose worktree is neither in `live` nor
+/// still registered with the marker the record was bound to.
+///
+/// `live` is a listing's `git worktree list`, which can predate a worktree
+/// `wt create` added while the listing waited on the remote; that worktree's
+/// registration still matches, so its new record survives.
 pub fn prune_from(cache_dir: &Path, repo_root: &Path, live: &HashSet<PathBuf>) -> Result<(), WorktreeError> {
     let prefix_path = record_path(repo_root, repo_root)?;
     let prefix = prefix_path.file_name().unwrap().to_string_lossy();
@@ -183,9 +189,15 @@ pub fn prune_from(cache_dir: &Path, repo_root: &Path, live: &HashSet<PathBuf>) -
         let path = entry.path();
         let Ok(bytes) = fs::read(&path) else { continue; };
         let Ok(record) = serde_json::from_slice::<CopyRecord>(&bytes) else { continue; };
-        if !live.contains(&record.worktree) { delete(&path)?; }
+        if !live.contains(&record.worktree) && !still_registered(&record) { delete(&path)?; }
     }
     Ok(())
+}
+
+/// Whether `record`'s Git admin directory still holds the marker it was
+/// bound to; Git deletes the directory when the worktree is removed or pruned.
+fn still_registered(record: &CopyRecord) -> bool {
+    fs::read_to_string(record.admin_dir.join(MARKER)).is_ok_and(|nonce| nonce == record.registration)
 }
 
 pub fn prune(repo_root: &Path, live: &HashSet<PathBuf>) -> Result<(), WorktreeError> {
@@ -259,10 +271,34 @@ mod tests {
             }
         });
         assert_ne!(records[0].0, records[1].0);
+        repo.git(&["worktree", "remove", "--force", second.to_str().unwrap()]);
         let live = HashSet::from([first.canonicalize().unwrap()]);
         prune_from(&cache, &repo.path(), &live).unwrap();
         assert!(records[0].0.exists());
         assert!(!records[1].0.exists());
+    }
+
+    /// A listing's worktree list predates a worktree created during its
+    /// remote wait; that worktree's new record must survive the prune.
+    #[test]
+    fn a_record_for_a_worktree_missing_from_the_listing_survives_while_registered() {
+        let repo = TestRepo::new();
+        let added = repo.add_linked_worktree("added-during-the-wait");
+        let cache = repo.cache_path();
+        let admin = repo.git_in(&added, &["rev-parse", "--path-format=absolute", "--git-dir"]);
+        let identity = registration(Path::new(&admin)).unwrap();
+        let record = CopyRecord { format_version: FORMAT_VERSION,
+            worktree: added.canonicalize().unwrap(), admin_dir: identity.admin_dir,
+            registration: identity.nonce, source: repo.path(), source_label: "base".into(), files: vec![] };
+        let path = cache.join(record_path(&repo.path(), &added).unwrap().file_name().unwrap());
+        write_atomic(&path, &record).unwrap();
+
+        prune_from(&cache, &repo.path(), &HashSet::from([repo.path().canonicalize().unwrap()])).unwrap();
+        assert!(path.exists(), "still registered with the record's marker");
+
+        fs::write(record.admin_dir.join(MARKER), "0123456789abcdef0123456789abcdef").unwrap();
+        prune_from(&cache, &repo.path(), &HashSet::new()).unwrap();
+        assert!(!path.exists(), "a new registration at that path does not keep the old record");
     }
 
     #[test]

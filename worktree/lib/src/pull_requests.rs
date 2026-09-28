@@ -10,10 +10,18 @@
 //! makes the request under [`LIST_DEADLINE`]. A failure is never stored, so an
 //! authentication error cannot become "no open PRs".
 //!
-//! Every successful write stamps a new random publication id beside
-//! `fetched_at`. `fetched_at` is whole seconds at the request's start, so two
-//! answers can share it; [`stored_publication`] is what tells a waiting run
-//! that another process published.
+//! One ordering rule covers both writers: a write happens only while holding
+//! the refresh lock ([`pr_lock_path`]), and only when no other answer was
+//! published after the writer's request began. [`refresh`] holds the lock
+//! from before its request, so nothing can publish in between;
+//! [`fetch_and_publish`] makes its request unlocked, so it compares the
+//! publication id it read before the request under the lock. An answer whose
+//! request began before another publication therefore never replaces it.
+//!
+//! Every successful write stamps a new random publication id and its
+//! [`Writer`] beside `fetched_at`. `fetched_at` is whole seconds at the
+//! request's start, so two answers can share it; [`stored_publication`] is
+//! what tells a waiting run that another process published, and which kind.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,8 +35,9 @@ use crate::git::git_from;
 use crate::remote_head::PrFailure;
 use sniff::remote::blocking::PrUnavailable;
 
-/// Format 3 added `publication`; an older store is a [`CachedPrs::Miss`].
-pub const PR_STORE_FORMAT_VERSION: u32 = 3;
+/// Format 3 added `publication` and format 4 `writer`; an older store is a
+/// [`CachedPrs::Miss`].
+pub const PR_STORE_FORMAT_VERSION: u32 = 4;
 
 /// How long stored results stand in without a refresh.
 pub const FRESHNESS_WINDOW: Duration = Duration::from_secs(60);
@@ -136,6 +145,7 @@ struct StoreFile {
     /// A random id ([`crate::remote_head::new_attempt_id`]) new with every
     /// write; see [`stored_publication`].
     publication: String,
+    writer: Writer,
     source_repo: Option<String>,
     pull_requests: Vec<OpenPullRequest>,
 }
@@ -225,18 +235,40 @@ pub fn select_cached(store: &Path, origin: Option<&str>, now: u64) -> CachedPrs 
     }
 }
 
-/// The publication id of the answer [`select_cached`] would serve, or `None`
-/// on a miss.
-///
-/// Every successful write, by either writer, stores a new id, so a changed
-/// id proves a publication even when `fetched_at` did not move.
-pub fn stored_publication(store: &Path, origin: &str, now: u64) -> Option<String> {
-    usable(store, Some(origin), now).map(|file| file.publication)
+/// Which path stored an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Writer {
+    /// [`refresh`], the background worker's PR half.
+    Refresh,
+    /// [`fetch_and_publish`], an ordinary listing's miss request.
+    Listing,
 }
 
-/// Makes the request for `origin` and stores a successful answer, stamped
-/// `now` and with a new publication id, while `repo_root`'s `origin` still
-/// matches.
+/// The identity of one stored answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Publication {
+    /// New with every successful write, so a changed id proves a publication
+    /// even when `fetched_at` did not move.
+    pub id: String,
+    pub writer: Writer,
+}
+
+/// The publication of the answer [`select_cached`] would serve, or `None` on
+/// a miss.
+pub fn stored_publication(store: &Path, origin: &str, now: u64) -> Option<Publication> {
+    usable(store, Some(origin), now).map(|file| Publication { id: file.publication, writer: file.writer })
+}
+
+/// Makes the request for `origin` and returns a successful answer, stamped
+/// `now`, while `repo_root`'s `origin` still matches; stores it, with a new
+/// publication id, only under the module's ordering rule.
+///
+/// The request is made without the lock, so it is never delayed by a worker.
+/// The answer is stored only if the lock is free when it returns and the
+/// store's publication id is still the one read before the request; a
+/// contended lock or a newer publication leaves the store as it is, and this
+/// run shows its own answer.
 ///
 /// `Err` is why the request failed and `Ok(None)` means `origin` changed
 /// during it; either way the store is untouched. An answer for a previous
@@ -249,11 +281,16 @@ pub fn fetch_and_publish(
     now: u64,
     source: &dyn OpenPrSource,
 ) -> Result<Option<PrListing>, PrFailure> {
+    let before = load_publication(store);
     let answer = fetch(source)?;
     if origin_url(repo_root).as_deref() != Some(origin) {
         return Ok(None);
     }
-    let _ = publish(store, origin, now, &answer);
+    if let Ok(Some(_lock)) = try_lock_sidecar(&pr_lock_path(store))
+        && load_publication(store) == before
+    {
+        let _ = publish(store, origin, now, &answer, Writer::Listing);
+    }
     Ok(Some(answer.into_listing(now)))
 }
 
@@ -317,7 +354,7 @@ pub fn refresh(
     if origin_url(repo_root).as_deref() != Some(origin.as_str()) {
         return RefreshOutcome::OriginChanged;
     }
-    match publish(store, &origin, started, &answer) {
+    match publish(store, &origin, started, &answer, Writer::Refresh) {
         Ok(()) => RefreshOutcome::Refreshed,
         Err(_) => RefreshOutcome::PublishFailed,
     }
@@ -367,13 +404,14 @@ fn fetch(source: &dyn OpenPrSource) -> Result<Answer, PrFailure> {
 }
 
 /// Stores `answer` for `origin`, stamped `fetched_at`, under a new
-/// publication id.
-fn publish(path: &Path, origin: &str, fetched_at: u64, answer: &Answer) -> Result<(), WorktreeError> {
+/// publication id. Call with the lock held.
+fn publish(path: &Path, origin: &str, fetched_at: u64, answer: &Answer, writer: Writer) -> Result<(), WorktreeError> {
     let file = StoreFile {
         format_version: PR_STORE_FORMAT_VERSION,
         origin_digest: origin_digest(origin),
         fetched_at,
         publication: crate::remote_head::new_attempt_id()?,
+        writer,
         source_repo: answer.source_repo.clone(),
         pull_requests: answer.pull_requests.clone(),
     };
@@ -393,6 +431,12 @@ fn listing(file: &StoreFile) -> PrListing {
         pull_requests: file.pull_requests.clone(),
         fetched_at: Some(file.fetched_at),
     }
+}
+
+/// The publication id of whatever answer is stored, for any `origin` or
+/// age; `None` when nothing readable is stored.
+fn load_publication(path: &Path) -> Option<String> {
+    load(path).map(|file| file.publication)
 }
 
 fn load(path: &Path) -> Option<StoreFile> {
@@ -561,6 +605,7 @@ mod tests {
                 origin_digest: origin_digest(ORIGIN),
                 fetched_at,
                 publication: "0123456789abcdef0123456789abcdef".into(),
+                writer: Writer::Refresh,
                 source_repo: Some("o/r".into()),
                 pull_requests: vec![pr(99, Some("o/r"), "fix/x", "main")],
             })
@@ -587,10 +632,20 @@ mod tests {
             "source_repo": "o/r",
             "pull_requests": [],
         });
+        // Format 3 exactly as it was written: no writer.
+        let version_three = serde_json::json!({
+            "format_version": 3,
+            "origin_digest": origin_digest(ORIGIN),
+            "fetched_at": NOW,
+            "publication": "0123456789abcdef0123456789abcdef",
+            "source_repo": "o/r",
+            "pull_requests": [],
+        });
         for contents in [
             b"{not json".to_vec(),
             serde_json::to_vec(&version_one).unwrap(),
             serde_json::to_vec(&version_two).unwrap(),
+            serde_json::to_vec(&version_three).unwrap(),
             file(PR_STORE_FORMAT_VERSION + 1, NOW),
             // A clock set back must not freeze the store, fresh or stale.
             file(PR_STORE_FORMAT_VERSION, NOW + 1),
@@ -610,18 +665,20 @@ mod tests {
         assert_eq!(stored_publication(&store, ORIGIN, NOW), None, "nothing stored");
         seed(&store, &root, ORIGIN, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
         let seeded = stored_publication(&store, ORIGIN, NOW).expect("the seeded answer has an id");
-        assert!(seeded.len() == 32 && seeded.bytes().all(|b| b.is_ascii_hexdigit()), "{seeded}");
+        assert!(seeded.id.len() == 32 && seeded.id.bytes().all(|b| b.is_ascii_hexdigit()), "{seeded:?}");
+        assert_eq!(seeded.writer, Writer::Listing);
 
         let (_, source) = stub(Ok(vec![pr(7, Some("o/r"), "feat/y", "main")]));
         fetch_and_publish(&store, &root, ORIGIN, NOW, &source).unwrap().unwrap();
         let foreground = stored_publication(&store, ORIGIN, NOW).expect("the foreground answer has an id");
-        assert_ne!(foreground, seeded, "same second, new answer, new id");
+        assert_ne!(foreground.id, seeded.id, "same second, new answer, new id");
 
         let (_, source) = stub(Ok(vec![pr(8, Some("o/r"), "feat/z", "main")]));
         let (_, connect) = connector(source);
         assert_eq!(refresh(&store, &root, || NOW, true, connect), RefreshOutcome::Refreshed);
         let refreshed = stored_publication(&store, ORIGIN, NOW).expect("the worker's answer has an id");
-        assert_ne!(refreshed, foreground, "the worker stamps its own id");
+        assert_ne!(refreshed.id, foreground.id, "the worker stamps its own id");
+        assert_eq!(refreshed.writer, Writer::Refresh);
         let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else {
             panic!("the refreshed answer is served");
         };
@@ -657,6 +714,67 @@ mod tests {
     fn origin_url_is_none_without_an_origin() {
         let (_dir, root, _store) = repo(None);
         assert_eq!(origin_url(&root), None);
+    }
+
+    /// Review 3: a listing's miss request is overtaken by a forced refresh
+    /// that publishes a newer answer before the listing's request returns.
+    #[test]
+    fn a_foreground_answer_never_replaces_one_published_during_its_request() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        let (calls, mut source) = stub(Ok(vec![pr(1, Some("o/r"), "old", "main")]));
+        let (during_store, during_root) = (store.clone(), root.clone());
+        source.during = Some(Box::new(move || {
+            let (_, newer) = stub(Ok(vec![pr(2, Some("o/r"), "new", "main")]));
+            let (_, connect) = connector(newer);
+            assert_eq!(refresh(&during_store, &during_root, || NOW + 1, true, connect), RefreshOutcome::Refreshed);
+        }));
+
+        let shown = fetch_and_publish(&store, &root, ORIGIN, NOW, &source).unwrap().expect("same origin");
+
+        assert_eq!(calls.get(), 1);
+        assert_eq!(numbers(&shown), [1], "this run still shows its own answer");
+        let CachedPrs::Fresh(stored) = select_cached(&store, Some(ORIGIN), NOW + 1) else {
+            panic!("the refreshed answer is stored");
+        };
+        assert_eq!((numbers(&stored), stored.fetched_at), (vec![2], Some(NOW + 1)), "the newer answer survives");
+        assert_eq!(stored_publication(&store, ORIGIN, NOW + 1).map(|p| p.writer), Some(Writer::Refresh));
+    }
+
+    /// The rule binds listing writers to each other too, and compares the id
+    /// read before the request, not whether the store was a miss.
+    #[test]
+    fn a_foreground_answer_never_replaces_a_listings_answer_published_during_its_request() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        seed(&store, &root, ORIGIN, NOW - 600, vec![pr(9, Some("o/r"), "stale", "main")]);
+        let (_, mut source) = stub(Ok(vec![pr(1, Some("o/r"), "old", "main")]));
+        let (during_store, during_root) = (store.clone(), root.clone());
+        source.during = Some(Box::new(move || seed(&during_store, &during_root, ORIGIN, NOW, vec![pr(2, Some("o/r"), "new", "main")])));
+
+        fetch_and_publish(&store, &root, ORIGIN, NOW, &source).unwrap().expect("same origin");
+
+        let CachedPrs::Fresh(stored) = select_cached(&store, Some(ORIGIN), NOW) else {
+            panic!("the answer published during the request is stored");
+        };
+        assert_eq!(numbers(&stored), [2]);
+    }
+
+    #[test]
+    fn a_foreground_answer_is_shown_but_not_stored_while_a_refresh_holds_the_lock() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        let holder = try_lock_sidecar(&pr_lock_path(&store)).unwrap().expect("free");
+        let (calls, source) = stub(Ok(vec![pr(7, Some("o/r"), "feat/y", "main")]));
+
+        let shown = fetch_and_publish(&store, &root, ORIGIN, NOW, &source).unwrap().expect("same origin");
+
+        assert_eq!(calls.get(), 1, "the lock never withholds the bounded request");
+        assert_eq!(numbers(&shown), [7]);
+        assert!(!store.exists(), "only the lock holder writes");
+        drop(holder);
+
+        let (_, source) = stub(Ok(vec![pr(8, Some("o/r"), "feat/z", "main")]));
+        fetch_and_publish(&store, &root, ORIGIN, NOW, &source).unwrap().expect("same origin");
+        let stored = stored_publication(&store, ORIGIN, NOW).expect("a free lock and an unchanged store: stored");
+        assert_eq!(stored.writer, Writer::Listing);
     }
 
     #[test]
@@ -855,12 +973,19 @@ mod tests {
         let (_dir, root, store) = repo(Some(ORIGIN));
         seed(&store, &root, ORIGIN, NOW, Vec::new());
         let before = fs::read(&store).unwrap();
+        // The seed made the sidecar; a directory in its place cannot be locked.
+        fs::remove_file(pr_lock_path(&store)).unwrap();
         fs::create_dir_all(pr_lock_path(&store)).unwrap();
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
         assert_eq!(refresh(&store, &root, || NOW + 600, false, connect), RefreshOutcome::LockFailed);
         assert_eq!(calls.get(), 0);
         assert_eq!(fs::read(&store).unwrap(), before);
+
+        let (_, source) = stub(Ok(vec![pr(7, Some("o/r"), "feat/y", "main")]));
+        let shown = fetch_and_publish(&store, &root, ORIGIN, NOW + 600, &source).unwrap().expect("same origin");
+        assert_eq!(numbers(&shown), [7], "a listing still shows its answer");
+        assert_eq!(fs::read(&store).unwrap(), before, "but cannot store it without the lock");
     }
 
     #[test]

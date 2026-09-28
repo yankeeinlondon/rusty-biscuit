@@ -32,13 +32,16 @@
 //!   `<repo hash>.remote-head.lock` and never unlink it; each writer is a
 //!   read-modify-write of one half. Publication is an atomic rename, so
 //!   readers take no lock and never see a partial document.
-//! - The completion receipt `<repo hash>.refresh-receipt.json` ([`Receipt`])
-//!   is bound to one attempt id; last writer wins, and readers key on the id.
+//! - Each forced attempt's completion receipt ([`Receipt`]) is its own file,
+//!   `<repo hash>.refresh-receipt.<attempt id>.json`, so overlapping forced
+//!   runs never replace each other's. Its run deletes it once the wait ends;
+//!   one left behind (a run that timed out) is deleted by the next forced
+//!   worker once older than [`ATTEMPT_MAX_AGE`] ([`remove_stale_receipts`]).
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -313,10 +316,65 @@ pub fn refresh_lock_held(store: &Path) -> bool {
     matches!(try_lock_sidecar(&remote_head_lock_path(store)), Ok(None))
 }
 
-/// The completion receipt for the repository whose main worktree is
-/// `repo_root`: `<repo hash>.refresh-receipt.json`.
-pub fn refresh_receipt_path(repo_root: &Path) -> Result<PathBuf, WorktreeError> {
-    repo_cache_file(repo_root, "refresh-receipt.json")
+/// Attempt `attempt_id`'s completion receipt for the repository whose main
+/// worktree is `repo_root`: `<repo hash>.refresh-receipt.<attempt id>.json`.
+///
+/// ## Errors
+///
+/// Fails for an id that is not 32 lowercase hex digits, which keeps the name
+/// inside the cache directory.
+pub fn refresh_receipt_path(repo_root: &Path, attempt_id: &str) -> Result<PathBuf, WorktreeError> {
+    receipt_path_beside(&remote_head_store_path(repo_root)?, attempt_id)
+}
+
+/// As [`refresh_receipt_path`], beside the remote-head store at `store`
+/// (`<repo hash>.remote-head.json`, or `remote-head.json` in tests).
+pub fn receipt_path_beside(store: &Path, attempt_id: &str) -> Result<PathBuf, WorktreeError> {
+    if !is_attempt_id(attempt_id) {
+        return Err(invalid("a receipt for an invalid attempt id"));
+    }
+    let name = store.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    let prefix = name.strip_suffix("remote-head.json").unwrap_or_default();
+    Ok(store.with_file_name(format!("{prefix}{RECEIPT_INFIX}{attempt_id}.json")))
+}
+
+/// Between the repository prefix and the attempt id in a receipt's name.
+const RECEIPT_INFIX: &str = "refresh-receipt.";
+
+/// Deletes this repository's receipts, beside `receipt`, last modified more
+/// than [`ATTEMPT_MAX_AGE`] before `now`; best effort.
+///
+/// No run waits on such a receipt: a forced wait lasts at most
+/// [`ATTEMPT_MAX_AGE`] from its launch, and its worker writes the receipt
+/// after that launch. Only names of the form
+/// `<repo prefix>refresh-receipt.<anything>.json` are touched.
+pub fn remove_stale_receipts(receipt: &Path, now: SystemTime) {
+    let (Some(dir), Some(name)) = (receipt.parent(), receipt.file_name().and_then(|name| name.to_str())) else {
+        return;
+    };
+    let Some(at) = name.find(RECEIPT_INFIX) else {
+        return;
+    };
+    let prefix = &name[..at + RECEIPT_INFIX.len()];
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if !file_name.starts_with(prefix) || !file_name.ends_with(".json") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .is_ok_and(|modified| now.duration_since(modified).is_ok_and(|age| age > ATTEMPT_MAX_AGE));
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// A fresh attempt id: 128 bits from the OS random source, the same generator
@@ -592,7 +650,8 @@ impl Receipt {
     }
 }
 
-/// Publishes `receipt` at `path` atomically, replacing any other.
+/// Publishes `receipt` at `path` ([`refresh_receipt_path`] for its attempt)
+/// atomically.
 pub fn write_receipt(path: &Path, receipt: &Receipt) -> Result<(), WorktreeError> {
     if !receipt.is_valid() {
         return Err(invalid("an invalid receipt"));
@@ -786,9 +845,11 @@ mod tests {
             remote_head_lock_path(&store).file_name().unwrap().to_string_lossy(),
             format!("{stem}.remote-head.lock")
         );
-        let receipt = refresh_receipt_path(dir.path()).unwrap();
-        assert_eq!(receipt.file_name().unwrap().to_string_lossy(), format!("{stem}.refresh-receipt.json"));
+        let receipt = refresh_receipt_path(dir.path(), ID).unwrap();
+        assert_eq!(receipt.file_name().unwrap().to_string_lossy(), format!("{stem}.refresh-receipt.{ID}.json"));
         assert_eq!(cache.parent(), receipt.parent());
+        assert_eq!(receipt_path_beside(&store, ID).unwrap(), receipt);
+        assert!(refresh_receipt_path(dir.path(), "../../escape").is_err());
     }
 
     // Format 2: the answer and attempt halves, and the completion receipt.
@@ -1231,6 +1292,51 @@ mod tests {
         }
         // Finishing in the second it started is not older.
         assert!(load_receipt(&path, &Attempt { started_at: NOW + 30, ..ours }).is_some());
+    }
+
+    /// Two overlapping forced attempts each keep their own receipt.
+    #[test]
+    fn receipts_of_different_attempts_never_replace_each_other() {
+        let (_dir, store) = temp_store();
+        let ours = receipt_path_beside(&store, ID).unwrap();
+        let theirs = receipt_path_beside(&store, OTHER_ID).unwrap();
+        assert_ne!(ours, theirs);
+        write_receipt(&ours, &receipt()).unwrap();
+        let other = Receipt { attempt_id: OTHER_ID.into(), prs: PrStatus::Ok, ..receipt() };
+        write_receipt(&theirs, &other).unwrap();
+
+        assert_eq!(load_receipt(&ours, &attempt(NOW)), Some(receipt()));
+        assert_eq!(load_receipt(&theirs, &Attempt { id: OTHER_ID.into(), ..attempt(NOW) }), Some(other));
+    }
+
+    #[test]
+    fn only_this_repositorys_receipts_older_than_an_attempt_are_swept() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("abc.remote-head.json");
+        let now = SystemTime::now();
+        let aged = |path: &Path, age: Duration| {
+            fs::write(path, b"{}").unwrap();
+            let file = fs::OpenOptions::new().write(true).open(path).unwrap();
+            file.set_modified(now - age).unwrap();
+        };
+        let stale = receipt_path_beside(&store, ID).unwrap();
+        let fresh = receipt_path_beside(&store, OTHER_ID).unwrap();
+        let legacy = dir.path().join("abc.refresh-receipt.json");
+        let other_repo = dir.path().join(format!("xyz.refresh-receipt.{ID}.json"));
+        let unrelated = dir.path().join("abc.prs.json");
+        let over = ATTEMPT_MAX_AGE + Duration::from_secs(1);
+        aged(&stale, over);
+        aged(&fresh, ATTEMPT_MAX_AGE - Duration::from_secs(1));
+        aged(&legacy, over);
+        aged(&other_repo, over);
+        aged(&unrelated, over);
+
+        remove_stale_receipts(&fresh, now);
+
+        assert!(!stale.exists(), "older than any wait");
+        assert!(!legacy.exists(), "the old single receipt goes too");
+        assert!(fresh.exists(), "a run may still be waiting for it");
+        assert!(other_repo.exists() && unrelated.exists(), "never another repository's or another store");
     }
 
     #[test]
