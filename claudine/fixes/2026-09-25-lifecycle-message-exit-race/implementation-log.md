@@ -30,6 +30,28 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_3:
+    - claudine/cli/src/shutdown.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/interrupt.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/tests/l1/exit_site_guard.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/lib/src/messaging/delivery.rs
+    - claudine/lib/src/messaging/delivery/tests.rs
+    - claudine/lib/src/messaging/mod.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/pipeline.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/hook-actions.md
 packages:
     - claudine-cli
     - claudine
@@ -313,3 +335,160 @@ packages:
   model to stay isolated, and the tests module says so.
 - Unrelated: `claudine/features/2026-09-21-lifecycle-ergonomics/spec.md` shows
   as modified in the worktree. This phase did not touch it.
+
+## Phase 3
+
+- Started and finished 2026-09-27.
+
+### What landed
+
+- **`cli/src/shutdown.rs` (new).** `finish(code) -> Infallible` computes
+  `min(now + DELIVERY_DRAIN_BUDGET, handle deadline)`, installs the drain
+  Ctrl+C ladder only when a delivery is still running and no compose guard
+  is held (amended Rule 8), awaits `drain_deliveries`, calls `report()`,
+  flushes stdout and stderr, and then calls `std::process::exit(code)` inside
+  the runtime. It also provides `exit_before_runtime(code) -> !`,
+  `set_drain_deadline(Instant)` (a `OnceLock`, first call wins), and
+  `hold_interrupt_guard(UserInterruptGuard)` (a static `Mutex<Option<_>>`).
+- **`main.rs`.** `run()` returns `Result<Infallible>`, so it returns only for
+  a pre-runtime error, which `main` renders before calling
+  `exit_before_runtime(1)`. `async_main` calls `dispatch()` (the former body,
+  now `Result<i32>`), renders an `Err` with `render_top_level_error`, and then
+  awaits `shutdown::finish(code)`. The error block therefore precedes any
+  drain warning. Commands that return `Result<()>` map to `0`, and
+  `handle`, `compose`, `inline-compose`, `sequence`, and the provider wrappers
+  return their code directly.
+- **Compose family.** `run_compose` and `run_inline_compose` return
+  `Result<i32>`, and the `_inner` wrappers were folded in. `prep.rs` hands the
+  `UserInterruptGuard` to `shutdown::hold_interrupt_guard` at install time,
+  so it survives a `?` error return as well as a normal return (R4).
+  `run_sequence` returns the code, and the budget-ledger wrapper is unchanged,
+  so `76`, `77`, and the `130`-versus-exhausted mapping are unaffected.
+- **Provider wrappers.** A private `WrapperOutcome { AgentExited{..},
+  NotLaunched, NoModel }` replaces the tuple, so the no-model branch returns
+  instead of calling `exit(1)`. It keeps the old behavior: no second agent
+  error report and no perf report. Dry run and abandoned `--edit` still give
+  `0` with the perf report.
+- **`handle`.** `deadline_at = Instant::now() + resolve_deadline()` is
+  computed and passed to `shutdown::set_drain_deadline` **before**
+  `run_inner`, and `timeout_at(deadline_at, …)` replaces `timeout`. `Ok` and
+  the elapsed case flush and return the code (`124` on elapsed). The `Err`
+  path is unchanged. The `## Exit discipline` doc was rewritten.
+- **Drain interrupt ladder (amended Rule 8).** `interrupt.rs` gained
+  `install_drain_interrupt_guard()`, which is the same ladder with a drain
+  notice ("User interrupted while waiting for outbound messages; press
+  Ctrl+C again to exit now"). On Unix its press counter starts at 1 when a
+  Ctrl+C was already observed during the run, so that user's next press
+  force-exits. On Windows this already follows from the coordinator's
+  process-wide press count. `install_user_interrupt_guard` now delegates to
+  the shared `install_ladder`, and its behavior is unchanged.
+- **Library.** `claudine::messaging::has_pending_deliveries()` returns whether
+  any tracked task is still unfinished. This was the accessor Phase 2's
+  message asked for. Unit test:
+  `pending_deliveries_are_seen_until_they_finish`.
+- **Reproduction.** Removed the `#[ignore]` attribute from
+  `compose_success_message_is_delivered_before_exit`, and changed nothing
+  else. It now passes on macOS, Linux, and Windows.
+
+### Departures from the plan
+
+- **The exit guard has no entry for `wrap/exec/termination/windows.rs`.** The
+  `process::exit(2|3)` text there is inside an `r#"…"#` literal, which
+  `sanitize` blanks, so the file has no live site. An entry would trip the
+  required stale-entry check. The allowlist is instead **exact per file,
+  with site counts** (`shutdown.rs` 2, `main.rs` 1, `commands/compose/interrupt.rs` 5),
+  so a new exit in an allowlisted file fails too. The plan records this
+  amendment. The detector also catches `use std::process::exit;`, so an
+  import-then-bare-`exit(…)` cannot slip past.
+- **`ShutdownHold` is not a separate type.** The only thing ever held is the
+  compose `UserInterruptGuard`, so `hold_interrupt_guard` takes it directly
+  (Rule 2: no single-use abstraction). Registering at install time, instead
+  of returning the guard with the code, also covers error returns, which a
+  returned `(i32, ShutdownHold)` could not do.
+- `render_top_level_error` stays in `main.rs` and is called from both
+  `async_main` and `main`, because a pre-runtime error still needs it.
+
+### Verification
+
+- Reproduction, fixed code (macOS): `compose_success_message_is_delivered_before_exit`
+  passed in 1.9 s. The child stayed alive while the reply was withheld,
+  exited `0` after release, and exactly one POST carried the `success` text.
+- The guard is load-bearing: appending `fn _planted() { std::process::exit(9) }`
+  to `commands/sequence.rs` failed `direct_exits_occur_only_at_allowlisted_sites`
+  with `direct exit outside the shutdown path: commands/sequence.rs:589 (process::exit)`.
+  The file was restored. On the unfixed tree the guard would have flagged
+  `compose/mod.rs`, `sequence.rs`, `wrap/mod.rs` (×2), `handle.rs` (×2),
+  and `main.rs` (a count of 2 against 1).
+- Checkpoint suites: `handle_deadline`, `handle_blocking_output`,
+  `compose_cli`, `inline_compose_cli`, `sequence_cli`, and `sequence_budget`
+  gave 49/49 on macOS. `sequence_ctrl_c_windows` and `handle_deadline`
+  (including the `124` path) pass on Windows native.
+- Wall-time spot check (macOS, debug builds, stub `claude`, no route,
+  hyperfine `-N`, 3 warm-ups, 30 runs): this tree 216.9 ± 7.9 ms against
+  `HEAD` 217.6 ± 6.1 ms for `claudine compose doc.md`. `claudine handle stop`
+  was about 0.36 s on both. `HEAD` was built in a temporary detached
+  worktree, which has since been removed.
+- `just lint` (claudine): exit 0. The only warning is the pre-existing macOS
+  linker `__eh_frame` notice.
+- `just test` (claudine): 7411 passed, 9 skipped. The skip count fell by one
+  from Phase 2's 10 because the reproduction now runs.
+- Cross-OS:
+
+| OS | Command | Result |
+| --- | --- | --- |
+| macOS (local) | `just test` | pass |
+| Linux (`build-linux`) | `just cross-check claudine-cli --os linux --features test-fixtures lifecycle_message_drain exit_site_guard handle_deadline handle_blocking_output shutdown:: interrupt::` | 28/28 |
+| Windows native (`build-win-native`) | `just cross-check claudine-cli --os windows --features test-fixtures lifecycle_message_drain exit_site_guard handle_deadline sequence_ctrl_c_windows shutdown:: interrupt::` | 28/28 (the reproduction included) |
+| Linux / Windows | `just cross-check claudine --os … delivery::` | 14/14 each |
+
+- The Windows build compiles the `cfg(not(unix))` side of `install_ladder`
+  and `Mutex<Option<UserInterruptGuard>>` (`Send`: both Windows fields are
+  unit or `PhantomData` guards).
+- Pre-existing, not from this phase: the Windows build warns
+  `constant GENERATED_MARKER is never used` in
+  `cli/tests/l1/sequence_initialize_include_preflight.rs:23`.
+
+### Docs
+
+- `docs/topics/messaging.md`: the **Planned** CLI-drain paragraph became
+  "The CLI drains before every ordinary exit" (budget, `handle` cap, `124`,
+  unchanged exit code, no cost when nothing was sent, Ctrl+C behavior, and
+  the warning text). The Mermaid diagram and the stale 3-second bullet are
+  left for Phase 5.
+- `docs/topics/signal-handling.md`, "Hook handler deadline": drift found and
+  fixed. The section said the deadline was checked "at each phase boundary"
+  and ended in `_exit(124)`. In fact it is a Tokio timer, and the code is
+  returned. The section now also states that the drain is capped by the same
+  deadline.
+- `docs/pipeline.md`, G2 and G4: "Drop SIGINT guard / RAII restores prior
+  handler" and "`std::process::exit(code)`" were replaced with the hand-over
+  of the guard and the drain-then-exit step.
+- Skill `hook-actions.md`: "The CLI's drain on exit is planned" now names
+  `shutdown::finish` and the exit guard.
+
+### Requirement-to-test mapping (Phase 3)
+
+| Requirement | Test |
+| --- | --- |
+| R6 reproduction passes unchanged on fixed code (R2 for compose `success`) | `claudine-cli::l1 lifecycle_message_drain::compose_success_message_is_delivered_before_exit` (macOS, Linux, Windows) |
+| R2 exit-site guard, both directions, exact allowlist | `exit_site_guard::{direct_exits_occur_only_at_allowlisted_sites, a_site_in_an_unlisted_file_fails, an_extra_site_in_a_listed_file_fails, an_entry_with_no_live_site_fails, every_allowlist_entry_states_a_reason}` |
+| R2 detector self-tests (forms caught; comments, strings, raw strings, `err.exit()`, `force_exit`, `exit_code` ignored) | `exit_site_guard::{the_detector_finds_every_exit_form, the_detector_ignores_comments_strings_and_similar_names}` |
+| R3 budget and `handle` cap (min of the two; a passed deadline stays past) | `claudine-cli::bin/claudine shutdown::tests::{the_drain_budget_applies_when_no_command_set_a_deadline, an_earlier_command_deadline_caps_the_drain, a_later_command_deadline_does_not_extend_the_budget, a_passed_command_deadline_is_kept_in_the_past}` |
+| R3 / Rule 8: only a running delivery installs the drain ladder | `claudine messaging::delivery::tests::pending_deliveries_are_seen_until_they_finish` |
+| R3 exit codes unchanged: `handle` `124`, budget `76`/`77`, compose/sequence codes | existing `handle_deadline::handle_exits_on_deadline`, `sequence_budget::*`, `compose_cli::*`, `sequence_cli::*` (green) |
+| R3 "no slower when nothing is sent" | hyperfine spot check above (not an automated test; Phase 4 does not add one either) |
+| R4 second Ctrl+C during the drain | **Phase 4** (`Second Ctrl+C during drain`); the ladder rungs themselves are pinned by the existing `interrupt::tests::*` |
+
+- Tier placement: `exit_site_guard.rs` is declared in `cli/tests/l1/main.rs`
+  with no tier marker. It reads `manifest_dir!().join("src")`, which is the
+  form CI recognizes. The `shutdown::tests` unit tests compile into the bin
+  target. `test_placement` and `spawn_site_guard` stay green inside
+  `just test`.
+
+### Notes for Phase 4 and Phase 5
+
+- Stale doc claims found but outside this phase: `.claude/skills/claudine/unified-hooks.md:532-534`,
+  `cli-reference.md:282`, and `architecture.md:853` say the `handle` deadline
+  defaults to **5 s** (the code default is 15 s) and repeat the "3 s messenger
+  timeout". Phase 5's skill pass names only `hook-actions.md`, `SKILL.md`,
+  and `architecture.md`, so add `unified-hooks.md` and `cli-reference.md`.

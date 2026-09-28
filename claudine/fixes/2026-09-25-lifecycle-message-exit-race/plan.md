@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -30,6 +30,28 @@ docs_updated_during_phase_2:
     - claudine/docs/dependencies.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_3:
+    - claudine/cli/src/shutdown.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/interrupt.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/tests/l1/exit_site_guard.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/lib/src/messaging/delivery.rs
+    - claudine/lib/src/messaging/delivery/tests.rs
+    - claudine/lib/src/messaging/mod.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/pipeline.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
     - .claude/skills/claudine/hook-actions.md
 packages:
     - claudine-cli
@@ -102,20 +124,20 @@ The fix has three parts:
 
 ### Definition of done
 
-- [ ] On the fixed code, the Phase 1 reproduction test passes: the child waits
+- [x] On the fixed code, the Phase 1 reproduction test passes: the child waits
       for the withheld reply and the listener receives exactly one POST
       containing the `success` text before the process exits. The old-code
       observation is recorded in `implementation-log.md`.
 - [x] `grep` finds no bare `tokio::spawn` or `handle.spawn` in
       `lib/src/messaging/` outside the tracker module, and a guard test enforces
       it.
-- [ ] The only direct `process::exit`, `_exit`, or `ExitProcess` calls in
+- [x] The only direct `process::exit`, `_exit`, or `ExitProcess` calls in
       `claudine/cli/src` are the four allowlisted sites. The exit-site guard
       enforces this with an exact allowlist, and an allowlist entry that matches
       no live call site fails the guard.
 - [ ] Every R6 bullet has a passing test (L1 unless noted). The Ctrl+C test
       runs on macOS, Linux, and Windows.
-- [ ] A run that sends nothing takes no longer to exit than before. The drain
+- [x] A run that sends nothing takes no longer to exit than before. The drain
       returns immediately when nothing is pending.
 - [ ] Exit codes are unchanged in every scenario, including `124` for `handle`.
 - [ ] R7 is done: the docs and the `claudine` skill no longer describe
@@ -375,7 +397,7 @@ change in the implementation log before moving on.
 
 **Wave 4**
 
-- [ ] **Shutdown module and `main`**
+- [x] **Shutdown module and `main`**
     - Add `cli/src/shutdown.rs` per Rules 2, 3, and 5: `finish`,
       `exit_before_runtime`, `set_drain_deadline`, and a `ShutdownHold` holder
       for Rule 8.
@@ -387,7 +409,7 @@ change in the implementation log before moving on.
 
 **Wave 5** (parallel; each owns different files, and each depends on Wave 4)
 
-- [ ] **Compose family**
+- [x] **Compose family**
     - `run_compose`, `run_inline_compose`, and `run_sequence` return
       `Result<(i32, ShutdownHold)>` (or register the hold with `shutdown`) and
       no longer call `process::exit`. Carry the `UserInterruptGuard` out of
@@ -395,12 +417,12 @@ change in the implementation log before moving on.
       outcome for `sequence`).
     - Check that the budget-ledger wrapper in `run_sequence` still returns the
       code unchanged.
-- [ ] **Provider wrappers**
+- [x] **Provider wrappers**
     - `run_provider_wrapper` returns the code instead of calling exit at
       `wrap/mod.rs:245`, and the no-model branch at `:441` returns `Ok(1)`.
       Its perf report and `AgentErrorReport` still render before the return.
       Update the early-return call site in `async_main`.
-- [ ] **`handle`**
+- [x] **`handle`**
     - Compute `start` and `deadline_at` before `run_inner`, call
       `shutdown::set_drain_deadline(deadline_at)`, and use
       `tokio::time::timeout_at`.
@@ -410,7 +432,7 @@ change in the implementation log before moving on.
       `?`, unchanged.
     - Update the `## Exit discipline` doc comment: the handler flushes, and the
       shared shutdown path exits.
-- [ ] **Exit-site guard**
+- [x] **Exit-site guard**
     - Add `cli/tests/l1/exit_site_guard.rs`, modeled on `spawn_site_guard.rs`.
       It scans `claudine/cli/src/**` with `source_scan::sanitize` for
       `process::exit(`, `_exit(`, and `ExitProcess(`, and checks every match
@@ -423,15 +445,21 @@ change in the implementation log before moving on.
       an entry that matches no live site fails.
     - Module docs list the Clap and completion exits as out of scope (Rule 9).
       Add a detector self-test.
+    - *Amended in Phase 3:* `wrap/exec/termination/windows.rs` has **no**
+      entry. Its `process::exit` calls sit inside a raw string literal (the
+      generated child program), which `source_scan::sanitize` blanks, so it
+      has no live site, and an entry would fail the stale-entry check. The
+      allowlist is exact per file (site counts): `shutdown.rs` 2, `main.rs` 1,
+      `commands/compose/interrupt.rs` 5.
 
 **Validation checkpoint 3**
 
-- [ ] The reproduction test from Phase 1 passes **unchanged**.
-- [ ] Existing suites that pin exit codes and deadlines still pass:
+- [x] The reproduction test from Phase 1 passes **unchanged**.
+- [x] Existing suites that pin exit codes and deadlines still pass:
       `handle_deadline.rs` (including the `124` path),
       `handle_blocking_output.rs`, `compose_cli.rs`, `sequence_cli.rs`,
       `sequence_budget.rs`, and `sequence_ctrl_c_windows.rs`.
-- [ ] Spot check: `claudine compose` with no messaging route exits as fast as
+- [x] Spot check: `claudine compose` with no messaging route exits as fast as
       on `main` (compare wall time over a few runs).
 
 ## Phase 4: Verification matrix (R3, R4, R5, R6)

@@ -1,6 +1,26 @@
 ---
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
 created: 2026-09-25
-status: draft-spec
+status: planned
 clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6-sol
@@ -9,34 +29,29 @@ review_iterations: 0
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 2 is done; read `implementation-log.md` → Phase 2 (and Phase 1).
-    - Library API now in `claudine::messaging`: `drain_deliveries(deadline:
-      tokio::time::Instant) -> DrainOutcome`, `DrainOutcome { pending, panicked }`
-      with `report()` (prints the single pending Warning; panics were already
-      printed during the drain), `DeliveryLabel`, and `DELIVERY_DRAIN_BUDGET`
-      (10 s). `finish` in Phase 3 should be roughly
-      `let outcome = drain_deliveries(min(now + BUDGET, handle_deadline)).await;
-      outcome.report();` then flush and exit.
-    - `drain_deliveries` with a deadline already in the past polls each task
-      once, aborts the rest, and returns without waiting, so `handle`'s `124`
-      path needs no special case.
-    - Rule 8 (amended) needs "is the registry non-empty?" before draining, to
-      decide whether to install the compose ladder for sequence and wrappers.
-      There is no public accessor for that yet (only a `#[cfg(test)]`
-      `tracked_count`). Either add a small public
-      `has_pending_deliveries() -> bool` in `messaging/delivery.rs`, or install
-      the ladder unconditionally when the drain will not return at once. If you
-      add the accessor, extend `delivery/tests.rs`.
-    - `docs/topics/messaging.md` now has a "Delivery tracking" section with the
-      CLI drain marked **Planned**. Remove that marker when Phase 3 lands the
-      drain (Phase 5 still owns the fuller rewrite and the stale 3-second claim).
-      `.claude/skills/claudine/hook-actions.md` also says "The CLI's drain on
-      exit is planned"; update it too.
-    - Filtered nextest runs: `-E '...'` breaks the shared `_test` recipe
-      (locally and in `just cross-check --os windows`); use a positional name
-      filter with cross-check, or `cargo nextest run` directly. On Linux
-      cross-check, pass a build flag (`--all-features` for the lib,
-      `--features test-fixtures` for the CLI) to dodge the stale kache links.
+    Phase 3 is done; read `implementation-log.md` → Phase 3.
+    - Every ordinary exit now goes through `cli/src/shutdown.rs::finish(code)`:
+      drain (≤ 10 s, or `claudine handle`'s deadline if earlier) → `report()` →
+      flush → `process::exit`. Commands return `Result<i32>`; `async_main`
+      renders an `Err` first and exits `1` through the same path.
+    - The compose `UserInterruptGuard` is handed to
+      `shutdown::hold_interrupt_guard` when installed (`compose/prep.rs`), so it
+      is live during the drain. For sequence/wrappers `finish` installs
+      `install_drain_interrupt_guard()` only when
+      `claudine::messaging::has_pending_deliveries()` is true. Its first-press
+      notice reads "User interrupted while waiting for outbound messages; press
+      Ctrl+C again to exit now"; a user who pressed during the run force-exits
+      on the next press. Phase 4's R4 test should assert that notice text, then
+      exit `130` on the second press.
+    - `cli/tests/l1/exit_site_guard.rs` uses an exact per-file allowlist with
+      site counts; `wrap/exec/termination/windows.rs` has no entry (its exits
+      are inside a raw string). If a Phase 4 change adds a direct exit, it will
+      fail there by design.
+    - Filtered runs: `cargo nextest run -p claudine-cli --features test-fixtures
+      --test l1 -E '…'` locally; `just cross-check claudine-cli --os
+      windows|linux --features test-fixtures <name filters>` remotely (no `-E`).
+    - Phase 5: see the log's "Notes for Phase 4 and Phase 5" for stale 5 s /
+      3 s claims in skill files beyond the three the plan names.
 ---
 
 # Outbound messages sent near process exit are silently dropped
