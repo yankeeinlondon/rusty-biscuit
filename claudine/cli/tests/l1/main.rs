@@ -13,6 +13,7 @@ mod agent_cwd;
 #[cfg(unix)]
 mod agent_text_is_data;
 mod argv_normalization;
+mod authored_text_rendering;
 mod cfg_gate;
 mod characterization_error_routes;
 mod cli_process_fixture;
@@ -67,6 +68,7 @@ mod handle_blocking_output;
 mod handle_deadline;
 mod handle_message_drain;
 mod handle_repo_config;
+mod handoff_owners;
 mod hooks_cli;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
@@ -94,12 +96,14 @@ mod level1_review_router_partial_pty;
 mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
+mod lifecycle_downgrade_outcome;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
+mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
 mod override_boundary_guard;

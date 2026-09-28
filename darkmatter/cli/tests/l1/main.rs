@@ -26,6 +26,7 @@ mod compose_icmp;
 mod compose_interpolation;
 mod compose_layout;
 mod compose_lazy_roots;
+mod compose_literal_only;
 mod compose_nested_markdown;
 mod compose_page_blocks;
 mod compose_perf;

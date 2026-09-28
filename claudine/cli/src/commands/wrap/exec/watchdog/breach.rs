@@ -199,18 +199,7 @@ pub(crate) fn render_watchdog_error_to_stream(
     }
 }
 
-/// Escape user-controlled text so it can be safely interpolated into
-/// biscuit-terminal prose markup.
+/// Escape the termination message so it renders exactly as written inside Prose markup.
 fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    biscuit_terminal::components::prose::Prose::escape_text(input)
 }

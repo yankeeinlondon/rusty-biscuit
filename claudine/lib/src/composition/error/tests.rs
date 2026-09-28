@@ -33,8 +33,10 @@ fn file_link_uses_encoded_url_and_portable_label() {
 
     assert!(link.contains("a%20b%23%25.md"), "expected encoded URL: {link}");
     assert!(
-        link.contains(&biscuit_file::to_portable_string(&path)),
-        "expected portable label: {link}"
+        link.contains(&biscuit_terminal::components::prose::Prose::escape_text(
+            &biscuit_file::to_portable_string(&path)
+        )),
+        "expected escaped portable label: {link}"
     );
 }
 
@@ -1146,7 +1148,8 @@ fn lifecycle_short_form_removed_status_block_is_escape_free_at_none() {
         "got: {rendered}"
     );
     assert!(rendered.contains("success:"), "got: {rendered}");
-    assert!(rendered.contains("\\\"x\\\""), "got: {rendered}");
+    assert!(rendered.contains("success: \"x\""), "got: {rendered}");
+    assert!(!rendered.contains('\\'), "no escape backslash may leak: {rendered}");
 }
 
 #[test]
@@ -1170,10 +1173,10 @@ fn phase_1_plain_composition_error_block_snapshots() {
         short_form,
         "⤫ CompositionError: short-form action removed\n\
 ┃ \n\
-┃ Short-form lifecycle action `success(\\\"x\\\")` in `success` in\n\
+┃ Short-form lifecycle action `success(\"x\")` in `success` in\n\
 ┃ prompts/plan.md has been removed.\n\
 ┃ \n\
-┃ Rewrite to positional form: `success: \\\"x\\\"`\n\
+┃ Rewrite to positional form: `success: \"x\"`\n\
 ┃ \n\
 ┃ Use positional form (`verb: value`) or key/value form (`{ action: verb,\n\
 ┃ ... }`). `verb(args)` is no longer accepted."

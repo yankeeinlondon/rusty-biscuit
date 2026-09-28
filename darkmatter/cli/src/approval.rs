@@ -176,9 +176,9 @@ fn write_prompt<W: Write>(
         })
 }
 
-/// Escapes angle brackets in user-provided text to prevent Prose tag interpretation.
+/// Escape text so it renders exactly as written inside Prose markup.
 fn escape_prose(text: &str) -> String {
-    text.replace('<', "\\<").replace('>', "\\>")
+    Prose::escape_text(text)
 }
 
 /// Returns true if interactive prompting is safe.

@@ -98,14 +98,14 @@ impl biscuit_terminal::errors::BlockError for LinkError {
                 .error_header(ErrorHeader::new("LinkError", "unrecognized link format"))
                 .body("Input did not look like an HTML `<a>` tag or a Markdown `[text](href)` link.")
                 .hint(
-                    "Use <cyan>[display](url)</cyan> for Markdown or <cyan>&lt;a href=\"url\"&gt;text&lt;/a&gt;</cyan> for HTML.",
+                    "Use <cyan>\\[display\\](url)</cyan> for Markdown or <cyan>\\<a href=\"url\"\\>text\\</a\\></cyan> for HTML.",
                 ),
 
             Self::MalformedHtml(message) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("LinkError", "malformed HTML link"))
-                .body(format!("<dim>Message:</dim> {message}"))
+                .body(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))
                 .hint(
-                    "Ensure the link opens with <cyan>&lt;a ...&gt;</cyan> and closes with <cyan>&lt;/a&gt;</cyan> and has an <cyan>href</cyan> attribute.",
+                    "Ensure the link opens with <cyan>\\<a ...\\></cyan> and closes with <cyan>\\</a\\></cyan> and has an <cyan>href</cyan> attribute.",
                 ),
 
             Self::MalformedMarkdown {
@@ -113,7 +113,7 @@ impl biscuit_terminal::errors::BlockError for LinkError {
                 message,
                 caret,
             } => {
-                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {message}"))];
+                let mut body = vec![Prose::new(format!("<dim>Message:</dim> {}", Prose::escape_text(message)))];
                 body.push(Prose::new("Link parsing failed here:"));
 
                 // Link fragments usually start at line 1 of their own string.

@@ -671,7 +671,7 @@ fn resolve_schema_context(
     Ok(config.resolve(document_path)?)
 }
 
-/// Neutralizes Prose markup so diagnostic text renders literally.
+/// Escape text so it renders exactly as written inside Prose markup.
 fn escape_prose(text: &str) -> String {
-    text.replace('<', "&lt;").replace('>', "&gt;")
+    Prose::escape_text(text)
 }

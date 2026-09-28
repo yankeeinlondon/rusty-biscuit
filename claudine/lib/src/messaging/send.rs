@@ -518,17 +518,10 @@ fn redact_webhook_urls(input: &str) -> String {
     redacted.into_owned()
 }
 
-/// Escape Prose markup tokens so arbitrary error text can't be interpreted
-/// as markup when embedded in a `Status::from_prose` body.
-///
-/// Covers `< >` (HTML-style tags), `{{ }}` (template syntax), and `**`
-/// (bold) which are the most likely to appear in reqwest/serde error strings.
+/// Escape arbitrary error text so it renders exactly as written when embedded
+/// in a `Status::from_prose` body.
 pub(super) fn prose_escape(text: &str) -> String {
-    text.replace('<', "\\<")
-        .replace('>', "\\>")
-        .replace("{{", "\\{{")
-        .replace("}}", "\\}}")
-        .replace("**", "\\*\\*")
+    biscuit_terminal::components::prose::Prose::escape_text(text)
 }
 
 /// Internal payload structure for the async send task.

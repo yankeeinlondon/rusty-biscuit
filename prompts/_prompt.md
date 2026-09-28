@@ -14,9 +14,6 @@ $prompt:
 lifecycle: true
 flow: true
 testing: true
-# Rendered in the body on purpose: a file with no real span skips the interpolation
-# pass, and its `{{{ … }}}` literals would then reach the agent as triple braces.
-as_of: 2026-09-20
 # The defect warnings at the end are gated on this spec: each renders only while the spec is
 # still at this active path and its finding id is absent from the spec's `fixed:` list. Fixing
 # a defect means adding its id there; nothing in this file needs editing. `&` pins the
@@ -36,7 +33,7 @@ Three commands run a prompt:
 | `claudine inline-compose <file>` | the agent writes the document's own body, driven by a frontmatter `prompt:` |
 | `claudine sequence <file>` | runs an ordered list of steps, each its own composition |
 
-This describes Claudine as of **{{ as_of }}**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
+This describes Claudine as of **2026-09-20**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
 
 ### Composition: what runs before the agent sees anything
 

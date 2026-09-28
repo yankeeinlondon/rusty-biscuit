@@ -93,17 +93,9 @@ pub fn description_suffix(description: Option<&str>) -> String {
     }
 }
 
+/// Escape schema text (paths, names, types, descriptions) for splicing into
+/// Prose markup, so it renders exactly as written.
 #[doc(hidden)]
 pub fn escape_schema_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for character in input.chars() {
-        match character {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(character);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    Prose::escape_text(input)
 }

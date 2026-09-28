@@ -654,7 +654,7 @@ Dry-run output follows Unix stream conventions so `claudine compose --dry-run do
 - **stdout** — the composed document body (the data product).
 - **stderr** — the finalized YAML frontmatter (syntax-highlighted) followed by a metadata table.
 
-The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
+The metadata table rows, in order: **Document** (frontmatter `name`, or the relative path, rendered as a blue OSC8 link), **Description** (italic + dim, only when set, and shown exactly as authored: Markdown such as `**bold**` or `_emphasis_` in it is not interpreted, so a file name like `_pr/open.md` keeps every character), **Agent** (the resolved provider name when one is selected, or a classified resolution breakdown — no-agent, invalid frontmatter hint, not-installed hint, multi-suggestion list, auto-selected single suggestion, or zero-installed list — rendered as a multi-line cell), **Model** (the resolved model, or `default`), **YOLO** (`true`/`false`), **Session** (`interactive` or `non-interactive` with the resolved source in parentheses, e.g. `interactive (frontmatter)` or `non-interactive (--no-interactive)`), **Area** (the focused monorepo area, only when inside a monorepo), and **Deferred** (the lifecycle event keys left raw in the YAML block above because they interpolate at event-time, only when at least one such key is present — so a raw `{{err.code}}` span there reads as intentional, not as an unresolved-variable bug).
 
 `--quiet` and `--silent` have **no effect** in dry-run mode: the full output is always rendered.
 
@@ -981,6 +981,8 @@ State is owned in four layers, which is what makes "what survives a handoff" ans
 
 A failed handoff never half-activates the target: the source stays active for diagnostic attribution, the failure follows the normal event-aware routing, and no duplicate terminal or `finalize` event is synthesized.
 
+**The chain records handoffs, not requests.** A request refused because its target does not resolve, its `with:` overlay fails to evaluate, it would revisit a document already in the chain, or it would exceed the hop limit adds nothing to the chain, so a later legitimate request is never refused against it. A committed handoff adds exactly one entry, and every owner adopts what it commits. Adoption does not depend on the target succeeding: a target that then fails its `initialize` or validation stays in the chain. For example, a looping source whose iteration 1 proxies to itself is refused as a cycle; under `fail_fast: false`, iteration 2 can still proxy to `target.md`, and the chain reads `loop.md -> target.md`.
+
 ### Entry reasons and the stage matrix
 
 Every entry into canonical preparation declares **why**, and each reason has exactly one row — no reason falls through to another's policy:
@@ -1040,7 +1042,12 @@ The coordinator is nested **inside** the command's own ownership — a handoff c
 
 - **`compose`** routes the final active document's output to stdout.
 - **`inline-compose`** stays inline mode across a handoff, but only the **final** target is eligible for the inline closure. The document that proxied away is not rewritten.
-- **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff.
+- **`compose --loop`** (any looping document) ends the loop on a proxy from any event that can raise one — `initialize`, `start`, `success`, `failure`, or `finalize` — and hands the target to the command's coordinator. No further source iteration runs, and the loop gate does not fire for the abandoned iteration. The target is not an extra iteration.
+- **`sequence`** contains a proxy within its current step: no step advance, no restart, and the step keeps its scoped inputs and timing identity. There is no cross-step handoff. This holds for a step that runs the document body and for a `prompt:` task, whichever event raised the proxy:
+    - the target reads the step's inputs (the user's setters, a task's `params`, `state`/`previous`/`next`) and sees the step's environment (a task's `operation` as `OPERATION`, and `CLAUDINE_FAIL_FAST`), while `AGENT`, `MODEL`, and `YOLO` describe the target's own provider; it writes `set` and `outputs` into the step's runtime state, so later steps see them;
+    - a `prompt:` task's `setup` and `teardown` run once around the whole chain, and the task publishes one `outputs` entry: the final target's. A target that fails fails the task, and `fail_fast` decides what runs next;
+    - each task owns its chain, so two parallel siblings may both proxy to the same target, while a cycle within one task's chain is still refused;
+    - a step that runs the document body publishes every completed provider run, as a `retry` does, so a proxy from `success` leaves the source's entry and the target's.
 - **`--dry-run`** never traverses a dynamic proxy route, and this follows structurally rather than from a per-route check: the dry-run seam returns *before* the lifecycle runtime is constructed, so `initialize` never fires and no `proxy` control can be produced. A dry run always reports the document named on the command line. See [Dry Run](#dry-run).
 
 ### Backward compatibility

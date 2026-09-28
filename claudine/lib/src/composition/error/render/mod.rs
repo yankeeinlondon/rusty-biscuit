@@ -168,8 +168,8 @@ pub(super) fn render_file_link(path: &std::path::Path) -> String {
     });
     match absolute.and_then(|path| url::Url::from_file_path(path).ok()) {
         Some(href) => format!(
-            "<a href=\"{}\">{escaped_label}</a>",
-            escape_prose_path(href.as_str())
+            "<a href={}>{escaped_label}</a>",
+            Prose::quoted_attr(href.as_str())
         ),
         None => escaped_label,
     }
@@ -181,18 +181,10 @@ fn optional_line(line: usize) -> Value {
     if line > 0 { json!(line) } else { Value::Null }
 }
 
+/// Escape author or diagnostic text for splicing into Prose markup, so paths,
+/// identifiers such as `_loop_count`, and messages render exactly as written.
 pub(super) fn escape_prose_path(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    Prose::escape_text(input)
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
