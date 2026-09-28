@@ -32,6 +32,35 @@ implemented: false
 related:
     - 2026-09-27-list-freshness-ux
 human_review: false
+message_to_agent: |-
+    Phase 1 (rulings, spikes, baseline) is done; read implementation-log.md's
+    "Amendments" section before writing code, because four planning rules
+    changed and the amendments win over the plan text:
+
+    - R4-A1: the plan's `git rev-list --first-parent --ancestry-path --parents T..X`
+      returns nothing for indirect integration (it walks first-parent edges only).
+      Find C as the oldest commit of X's first-parent chain (`rev-list
+      --first-parent --parents T..X`) that is in `rev-list --ancestry-path T..X`,
+      stopping at the first chain commit that is not.
+    - R9-A1: in a shallow repository, `merge-base --is-ancestor` and `merge-base`
+      exit 1 silently when history is missing, exactly like a real "no". Check
+      `rev-parse --is-shallow-repository` once; there, every negative or empty
+      answer is a gap and every `+N` count sets `incomplete`.
+    - R2-A1: leave a merge alone when its single parent already is the source
+      tip; `feat` vs `feat x` is NOT ambiguous under R2 (it resolves to `feat x`),
+      so the Phase 2 rejection test must use lanes `x` and `x tag: "t"` with
+      `merge x tag: "t" id: "M"`.
+    - R8-A1: disconnected lanes render correctly (declare `branch <lane>` before
+      the root lane's first commit).
+
+    R3 (tag spacing, TAG_GAP = theme font size) and R6 (anchor distance plus
+    batched `rev-parse` verification) are confirmed unchanged. A working
+    prototype of R2, R3, and `tag_boxes` is in
+    spikes/render-topologies/src/main.rs. Global spacing widens diagrams up to
+    3.8x, so watch trimming and image scale in the real-backend proof. Each git
+    call costs about 60 ms on native Windows, so keep per-lane git calls few.
+    Phase 4 reruns the baseline unchanged with
+    `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
 references:
     renderer-spike.md: >-
         Isolated renderer feasibility experiment covering measured label spacing,

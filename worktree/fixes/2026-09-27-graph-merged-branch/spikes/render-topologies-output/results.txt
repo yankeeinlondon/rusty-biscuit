@@ -1,0 +1,257 @@
+== S1: renderer topologies ==
+s1-disconnected-raw: commits=5 arrows=3 parent_edges=3 step=34 two_pass=false size=300.0x140.8 tag_overlaps=0 cross_lane=0 tag_over_other_dot=1
+  A lane="main" type=Normal parents=[] tags=[]
+  B lane="main" type=Normal parents=["A"] tags=["main"]
+  L1 lane="lost" type=Normal parents=[] tags=[]
+  L2 lane="lost" type=Normal parents=["L1"] tags=["PR #9 → main"]
+  C lane="main" type=Normal parents=["B"] tags=["origin/main"]
+  note: tag "PR #9 → main"@L2 covers commit L1
+s1-disconnected-fixed: commits=5 arrows=3 parent_edges=3 step=86.892975 two_pass=true size=564.5x140.8 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  A lane="main" type=Normal parents=[] tags=[]
+  B lane="main" type=Normal parents=["A"] tags=["main"]
+  L1 lane="lost" type=Normal parents=[] tags=[]
+  L2 lane="lost" type=Normal parents=["L1"] tags=["PR #9 → main"]
+  C lane="main" type=Normal parents=["B"] tags=["origin/main"]
+s1-nested-into-root-raw: commits=7 arrows=6 parent_edges=6 step=34 two_pass=false size=416.8x217.1 tag_overlaps=1 cross_lane=0 tag_over_other_dot=2
+  D1 lane="main" type=Normal parents=[] tags=[]
+  W1 lane="fix/wt-ux" type=Normal parents=["D1"] tags=[]
+  W2 lane="fix/wt-ux" type=Normal parents=["W1"] tags=["fix/wt-ux-tip"]
+  +96 lane="fix/sniff" type=Highlight parents=["W2"] tags=[]
+  S1 lane="fix/sniff" type=Normal parents=["+96"] tags=[]
+  M103 lane="main" type=Merge parents=["D1"] tags=["main"]
+  M104 lane="main" type=Merge parents=["M103"] tags=["origin/main"]
+  OVERLAP "main"@M103 x "origin/main"@M104
+  note: tag "fix/wt-ux-tip"@W2 covers commit W1
+  note: tag "origin/main"@M104 covers commit M103
+s1-nested-into-root-fixed: commits=7 arrows=8 parent_edges=8 step=86.913086 two_pass=true size=787.2x217.1 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  D1 lane="main" type=Normal parents=[] tags=[]
+  W1 lane="fix/wt-ux" type=Normal parents=["D1"] tags=[]
+  W2 lane="fix/wt-ux" type=Normal parents=["W1"] tags=["fix/wt-ux-tip"]
+  +96 lane="fix/sniff" type=Highlight parents=["W2"] tags=[]
+  S1 lane="fix/sniff" type=Normal parents=["+96"] tags=[]
+  M103 lane="main" type=Merge parents=["D1", "W2"] tags=["main"]
+  M104 lane="main" type=Merge parents=["M103", "S1"] tags=["origin/main"]
+  repair: M103: second parent W2 from lane "fix/wt-ux"
+  repair: M104: second parent S1 from lane "fix/sniff"
+s1-into-parent-lane-raw: commits=7 arrows=6 parent_edges=6 step=34 two_pass=false size=396.4x213.5 tag_overlaps=0 cross_lane=0 tag_over_other_dot=1
+  A lane="main" type=Normal parents=[] tags=[]
+  P1 lane="parent" type=Normal parents=["A"] tags=[]
+  C1 lane="child" type=Normal parents=["P1"] tags=[]
+  C2 lane="child" type=Normal parents=["C1"] tags=[]
+  PM lane="parent" type=Merge parents=["P1"] tags=["parent-merge"]
+  P2 lane="parent" type=Normal parents=["PM"] tags=[]
+  B lane="main" type=Normal parents=["A"] tags=["main"]
+  note: tag "parent-merge"@PM covers commit P2
+s1-into-parent-lane-fixed: commits=7 arrows=7 parent_edges=7 step=89.881836 two_pass=true size=787.5x213.5 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  A lane="main" type=Normal parents=[] tags=[]
+  P1 lane="parent" type=Normal parents=["A"] tags=[]
+  C1 lane="child" type=Normal parents=["P1"] tags=[]
+  C2 lane="child" type=Normal parents=["C1"] tags=[]
+  PM lane="parent" type=Merge parents=["P1", "C2"] tags=["parent-merge"]
+  P2 lane="parent" type=Normal parents=["PM"] tags=[]
+  B lane="main" type=Normal parents=["A"] tags=["main"]
+  repair: PM: second parent C2 from lane "child"
+s1-merge-is-fork-raw: commits=5 arrows=4 parent_edges=4 step=34 two_pass=false size=300.0x212.8 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  A lane="main" type=Normal parents=[] tags=[]
+  S1 lane="side" type=Normal parents=["A"] tags=[]
+  M lane="main" type=Merge parents=["A"] tags=["origin/main"]
+  L1 lane="later" type=Normal parents=["M"] tags=["later-tip"]
+  N lane="main" type=Normal parents=["M"] tags=["main"]
+s1-merge-is-fork-fixed: commits=5 arrows=5 parent_edges=5 step=81.05371 two_pass=true size=535.3x212.8 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  A lane="main" type=Normal parents=[] tags=[]
+  S1 lane="side" type=Normal parents=["A"] tags=[]
+  M lane="main" type=Merge parents=["A", "S1"] tags=["origin/main"]
+  L1 lane="later" type=Normal parents=["M"] tags=["later-tip"]
+  N lane="main" type=Normal parents=["M"] tags=["main"]
+  repair: M: second parent S1 from lane "side"
+s1-squares-both-sides-raw: commits=7 arrows=6 parent_edges=6 step=34 two_pass=false size=384.0x141.0 tag_overlaps=0 cross_lane=0 tag_over_other_dot=1
+  F lane="main" type=Normal parents=[] tags=[]
+  +5 lane="side" type=Highlight parents=["F"] tags=[]
+  T lane="side" type=Normal parents=["+5"] tags=[]
+  +7 lane="main" type=Highlight parents=["F"] tags=[]
+  M lane="main" type=Merge parents=["+7"] tags=["origin/main"]
+  +3  lane="main" type=Highlight parents=["M"] tags=[]
+  N lane="main" type=Normal parents=["+3 "] tags=["main"]
+  note: tag "origin/main"@M covers commit +7
+s1-squares-both-sides-fixed: commits=7 arrows=7 parent_edges=7 step=81.05371 two_pass=true size=713.4x141.0 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  F lane="main" type=Normal parents=[] tags=[]
+  +5 lane="side" type=Highlight parents=["F"] tags=[]
+  T lane="side" type=Normal parents=["+5"] tags=[]
+  +7 lane="main" type=Highlight parents=["F"] tags=[]
+  M lane="main" type=Merge parents=["+7", "T"] tags=["origin/main"]
+  +3  lane="main" type=Highlight parents=["M"] tags=[]
+  N lane="main" type=Normal parents=["+3 "] tags=["main"]
+  repair: M: second parent T from lane "side"
+s1-unlabeled-raw: commits=3 arrows=3 parent_edges=3 step=34 two_pass=false size=216.0x135.7 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  A lane="main" type=Normal parents=[] tags=[]
+  S1 lane="side" type=Normal parents=["A"] tags=[]
+  2-5be2b62 lane="main" type=Merge parents=["A", "S1"] tags=[]
+s1-unlabeled-fixed: commits=3 arrows=3 parent_edges=3 step=34 two_pass=false size=216.0x135.7 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  A lane="main" type=Normal parents=[] tags=[]
+  S1 lane="side" type=Normal parents=["A"] tags=[]
+  2-5be2b62 lane="main" type=Merge parents=["A", "S1"] tags=[]
+s1-headless-destination-raw: commits=3 arrows=2 parent_edges=2 step=34 two_pass=false size=216.0x135.7 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  S1 lane="side" type=Normal parents=[] tags=[]
+  1-b2374b8 lane="main" type=Merge parents=["S1"] tags=[]
+  A lane="main" type=Normal parents=["1-b2374b8"] tags=[]
+s1-headless-destination-fixed: commits=3 arrows=2 parent_edges=2 step=34 two_pass=false size=216.0x135.7 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  S1 lane="side" type=Normal parents=[] tags=[]
+  1-b2374b8 lane="main" type=Merge parents=["S1"] tags=[]
+  A lane="main" type=Normal parents=["1-b2374b8"] tags=[]
+  repair: 1-b2374b8: single parent already is the source tip; left alone
+s1-ambiguous: parsed parents=[("A", []), ("X1", ["A"]), ("Y1", ["A"]), ("M", ["A"])] repair=Err("M: ambiguous merge source \"x tag: \\\"t\\\" id: \\\"M\\\"\": [\"x\", \"x tag: \\\"t\\\"\"]")
+s1-prefix-feat-vs-feat-x: parsed parents=[("A", []), ("F1", ["A"]), ("G1", ["A"]), ("M", ["A"])] repair=Ok(["M: second parent G1 from lane \"feat x\""])
+s1-unknown-lane: parsed parents=[("A", []), ("M", ["A"])] repair=Err("M: no lane matches merge source \"nowhere id: \\\"M\\\"\"")
+s1-empty-source: parsed parents=[("A", []), ("B", ["A"]), ("M", ["B"])] repair=Err("M: merge source lane \"side\" has no earlier commit")
+
+== S2: tag geometry (R3 prototype, TAG_GAP = theme font_size) ==
+s2-cross-lane-light-default: commits=6 arrows=5 parent_edges=5 step=34 two_pass=false size=656.1x160.5 tag_overlaps=2 cross_lane=0 tag_over_other_dot=2
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["d200000"] tags=["origin/very-long-exact-branch-reference-beta"]
+  f200000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["f100000"] tags=["PR #104 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["origin/main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["main"]
+  OVERLAP "origin/very-long-exact-branch-reference-beta"@f100000 x "PR #104 → main"@f200000
+  OVERLAP "origin/main"@d300000 x "main"@d400000
+  note: tag "origin/very-long-exact-branch-reference-beta"@f100000 covers commit f200000
+  note: tag "PR #104 → main"@f200000 covers commit f100000
+s2-cross-lane-light-spaced: commits=6 arrows=5 parent_edges=5 step=234.68164 two_pass=true size=1860.2x160.5 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["d200000"] tags=["origin/very-long-exact-branch-reference-beta"]
+  f200000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["f100000"] tags=["PR #104 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["origin/main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["main"]
+s2-cross-lane-dark-default: commits=6 arrows=5 parent_edges=5 step=34 two_pass=false size=631.9x165.0 tag_overlaps=2 cross_lane=0 tag_over_other_dot=2
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["d200000"] tags=["origin/very-long-exact-branch-reference-beta"]
+  f200000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["f100000"] tags=["PR #104 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["origin/main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["main"]
+  OVERLAP "origin/very-long-exact-branch-reference-beta"@f100000 x "PR #104 → main"@f200000
+  OVERLAP "origin/main"@d300000 x "main"@d400000
+  note: tag "origin/very-long-exact-branch-reference-beta"@f100000 covers commit f200000
+  note: tag "PR #104 → main"@f200000 covers commit f100000
+s2-cross-lane-dark-spaced: commits=6 arrows=5 parent_edges=5 step=246.50714 two_pass=true size=1906.9x165.0 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["d200000"] tags=["origin/very-long-exact-branch-reference-beta"]
+  f200000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["f100000"] tags=["PR #104 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["origin/main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["main"]
+s2-stack-light-default: commits=3 arrows=2 parent_edges=2 step=34 two_pass=false size=252.1x138.0 tag_overlaps=1 cross_lane=0 tag_over_other_dot=3
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=["feature/very-long-exact-branch-reference-alpha"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["main", "origin/main", "v1.0.0", "release/2026-09"]
+  OVERLAP "feature/very-long-exact-branch-reference-alpha"@d200000 x "release/2026-09"@d300000
+  note: tag "feature/very-long-exact-branch-reference-alpha"@d200000 covers commit d100000
+  note: tag "feature/very-long-exact-branch-reference-alpha"@d200000 covers commit d300000
+  note: tag "release/2026-09"@d300000 covers commit d200000
+s2-stack-light-spaced: commits=3 arrows=2 parent_edges=2 step=246.66406 two_pass=true size=854.0x138.0 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=["feature/very-long-exact-branch-reference-alpha"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["main", "origin/main", "v1.0.0", "release/2026-09"]
+s2-stack-dark-default: commits=3 arrows=2 parent_edges=2 step=34 two_pass=false size=256.5x143.3 tag_overlaps=1 cross_lane=0 tag_over_other_dot=3
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=["feature/very-long-exact-branch-reference-alpha"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["main", "origin/main", "v1.0.0", "release/2026-09"]
+  OVERLAP "feature/very-long-exact-branch-reference-alpha"@d200000 x "release/2026-09"@d300000
+  note: tag "feature/very-long-exact-branch-reference-alpha"@d200000 covers commit d100000
+  note: tag "feature/very-long-exact-branch-reference-alpha"@d200000 covers commit d300000
+  note: tag "release/2026-09"@d300000 covers commit d200000
+s2-stack-dark-spaced: commits=3 arrows=2 parent_edges=2 step=258.5384 two_pass=true size=886.2x143.3 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=["feature/very-long-exact-branch-reference-alpha"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=["main", "origin/main", "v1.0.0", "release/2026-09"]
+s2-squares-light-default: commits=6 arrows=5 parent_edges=5 step=34 two_pass=false size=656.1x160.5 tag_overlaps=0 cross_lane=0 tag_over_other_dot=2
+  +40 lane="main" type=Highlight parents=[] tags=[]
+  d100000 lane="main" type=Normal parents=["+40"] tags=["origin/main"]
+  +12 lane="feature/very-long-exact-branch-reference-alpha" type=Highlight parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["+12"] tags=["PR #104 → main"]
+  +3 lane="main" type=Highlight parents=["d100000"] tags=[]
+  d200000 lane="main" type=Normal parents=["+3"] tags=["main"]
+  note: tag "origin/main"@d100000 covers commit +40
+  note: tag "PR #104 → main"@f100000 covers commit +12
+s2-squares-light-spaced: commits=6 arrows=5 parent_edges=5 step=97.381256 two_pass=true size=1036.3x160.5 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  +40 lane="main" type=Highlight parents=[] tags=[]
+  d100000 lane="main" type=Normal parents=["+40"] tags=["origin/main"]
+  +12 lane="feature/very-long-exact-branch-reference-alpha" type=Highlight parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["+12"] tags=["PR #104 → main"]
+  +3 lane="main" type=Highlight parents=["d100000"] tags=[]
+  d200000 lane="main" type=Normal parents=["+3"] tags=["main"]
+s2-squares-dark-default: commits=6 arrows=5 parent_edges=5 step=34 two_pass=false size=631.9x163.9 tag_overlaps=0 cross_lane=0 tag_over_other_dot=2
+  +40 lane="main" type=Highlight parents=[] tags=[]
+  d100000 lane="main" type=Normal parents=["+40"] tags=["origin/main"]
+  +12 lane="feature/very-long-exact-branch-reference-alpha" type=Highlight parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["+12"] tags=["PR #104 → main"]
+  +3 lane="main" type=Highlight parents=["d100000"] tags=[]
+  d200000 lane="main" type=Normal parents=["+3"] tags=["main"]
+  note: tag "origin/main"@d100000 covers commit +40
+  note: tag "PR #104 → main"@f100000 covers commit +12
+s2-squares-dark-spaced: commits=6 arrows=5 parent_edges=5 step=103.40341 two_pass=true size=1048.3x163.9 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  +40 lane="main" type=Highlight parents=[] tags=[]
+  d100000 lane="main" type=Normal parents=["+40"] tags=["origin/main"]
+  +12 lane="feature/very-long-exact-branch-reference-alpha" type=Highlight parents=["d100000"] tags=[]
+  f100000 lane="feature/very-long-exact-branch-reference-alpha" type=Normal parents=["+12"] tags=["PR #104 → main"]
+  +3 lane="main" type=Highlight parents=["d100000"] tags=[]
+  d200000 lane="main" type=Normal parents=["+3"] tags=["main"]
+s2-base-lanes-light-default: commits=11 arrows=10 parent_edges=10 step=34 two_pass=false size=801.0x306.0 tag_overlaps=1 cross_lane=0 tag_over_other_dot=3
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  b0a0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["d100000"] tags=[]
+  b0t0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["b0a0000"] tags=["origin/fix/very-long-worktree-name-number-0", "v0-tag", "PR #200 → main"]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  b1a0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["d200000"] tags=[]
+  b1t0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["b1a0000"] tags=["origin/fix/very-long-worktree-name-number-1", "v1-tag", "PR #201 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=[]
+  b2a0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["d300000"] tags=[]
+  b2t0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["b2a0000"] tags=["origin/fix/very-long-worktree-name-number-2", "v2-tag", "PR #202 → main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["origin/main"]
+  d500000 lane="main" type=Normal parents=["d400000"] tags=["main"]
+  OVERLAP "origin/main"@d400000 x "main"@d500000
+  note: tag "PR #200 → main"@b0t0000 covers commit b0a0000
+  note: tag "PR #201 → main"@b1t0000 covers commit b1a0000
+  note: tag "PR #202 → main"@b2t0000 covers commit b2a0000
+s2-base-lanes-light-spaced: commits=11 arrows=10 parent_edges=10 step=236.66895 two_pass=true size=3030.3x306.0 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  b0a0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["d100000"] tags=[]
+  b0t0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["b0a0000"] tags=["origin/fix/very-long-worktree-name-number-0", "v0-tag", "PR #200 → main"]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  b1a0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["d200000"] tags=[]
+  b1t0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["b1a0000"] tags=["origin/fix/very-long-worktree-name-number-1", "v1-tag", "PR #201 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=[]
+  b2a0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["d300000"] tags=[]
+  b2t0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["b2a0000"] tags=["origin/fix/very-long-worktree-name-number-2", "v2-tag", "PR #202 → main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["origin/main"]
+  d500000 lane="main" type=Normal parents=["d400000"] tags=["main"]
+s2-base-lanes-dark-default: commits=11 arrows=10 parent_edges=10 step=34 two_pass=false size=782.4x310.6 tag_overlaps=1 cross_lane=0 tag_over_other_dot=3
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  b0a0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["d100000"] tags=[]
+  b0t0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["b0a0000"] tags=["origin/fix/very-long-worktree-name-number-0", "v0-tag", "PR #200 → main"]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  b1a0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["d200000"] tags=[]
+  b1t0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["b1a0000"] tags=["origin/fix/very-long-worktree-name-number-1", "v1-tag", "PR #201 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=[]
+  b2a0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["d300000"] tags=[]
+  b2t0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["b2a0000"] tags=["origin/fix/very-long-worktree-name-number-2", "v2-tag", "PR #202 → main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["origin/main"]
+  d500000 lane="main" type=Normal parents=["d400000"] tags=["main"]
+  OVERLAP "origin/main"@d400000 x "main"@d500000
+  note: tag "PR #200 → main"@b0t0000 covers commit b0a0000
+  note: tag "PR #201 → main"@b1t0000 covers commit b1a0000
+  note: tag "PR #202 → main"@b2t0000 covers commit b2a0000
+s2-base-lanes-dark-spaced: commits=11 arrows=10 parent_edges=10 step=245.99579 two_pass=true size=3114.3x310.6 tag_overlaps=0 cross_lane=0 tag_over_other_dot=0
+  d100000 lane="main" type=Normal parents=[] tags=[]
+  b0a0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["d100000"] tags=[]
+  b0t0000 lane="fix/very-long-worktree-name-number-0" type=Normal parents=["b0a0000"] tags=["origin/fix/very-long-worktree-name-number-0", "v0-tag", "PR #200 → main"]
+  d200000 lane="main" type=Normal parents=["d100000"] tags=[]
+  b1a0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["d200000"] tags=[]
+  b1t0000 lane="fix/very-long-worktree-name-number-1" type=Normal parents=["b1a0000"] tags=["origin/fix/very-long-worktree-name-number-1", "v1-tag", "PR #201 → main"]
+  d300000 lane="main" type=Normal parents=["d200000"] tags=[]
+  b2a0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["d300000"] tags=[]
+  b2t0000 lane="fix/very-long-worktree-name-number-2" type=Normal parents=["b2a0000"] tags=["origin/fix/very-long-worktree-name-number-2", "v2-tag", "PR #202 → main"]
+  d400000 lane="main" type=Normal parents=["d300000"] tags=["origin/main"]
+  d500000 lane="main" type=Normal parents=["d400000"] tags=["main"]
+
+S2 spaced tag overlaps across all fixtures and themes: 0
