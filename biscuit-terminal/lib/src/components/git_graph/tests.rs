@@ -97,7 +97,12 @@ fn a_focused_view_draws_no_lane_for_an_unrelated_branch() {
 
 #[test]
 fn a_branch_already_in_the_default_branch_is_a_tag() {
-    let graph = spec_example().with_line(GraphLine::new("chore/old-cleanup").forked_at(sha("4c2e4d5")));
+    // A line without commits is labeled at its own tip (was: its fork).
+    let graph = spec_example().with_line(
+        GraphLine::new("chore/old-cleanup")
+            .forked_at(sha("4c2e4d5"))
+            .with_tip(sha("4c2e4d5")),
+    );
     let text = mermaid(&graph);
     assert!(text.contains("commit id: \"4c2e4d5\" tag: \"chore/old-cleanup\""), "{text}");
     assert!(!text.contains("branch chore/old-cleanup"), "{text}");
@@ -109,7 +114,7 @@ fn the_base_view_gives_every_branch_with_commits_a_lane() {
         .with_ref("main", sha("2222222"))
         .with_line(GraphLine::new("feat/a").forked_at(sha("1111111")).with_entries(commits(&["aaaaaaa"])))
         .with_line(GraphLine::new("feat/b").forked_at(sha("2222222")).with_entries(commits(&["bbbbbbb"])))
-        .with_line(GraphLine::new("merged").forked_at(sha("2222222")))
+        .with_line(GraphLine::new("merged").forked_at(sha("1111111")).with_tip(sha("2222222")))
         .with_current_branch("main");
     let text = mermaid(&graph);
     assert!(text.contains("branch feat/a") && text.contains("branch feat/b"), "{text}");
@@ -204,14 +209,24 @@ fn lanes_forking_at_one_commit_follow_creation_order() {
 }
 
 #[test]
-fn a_fork_point_outside_the_drawn_commits_hangs_from_the_lane_start() {
+fn a_fork_point_outside_the_drawn_commits_is_drawn_unconnected() {
+    // No substitute attachment (was: hung from the default lane's start).
     let graph = GitGraph::new("main", commits(&["1111111", "2222222"]))
         .with_line(GraphLine::new("feat/old").forked_at(sha("0ld0000")).with_entries(commits(&["aaaaaaa"])));
     let text = mermaid(&graph);
-    assert!(
-        text.contains("commit id: \"1111111\"\n    branch feat/old"),
-        "anchors after the first drawn commit: {text}"
+    assert_eq!(
+        text,
+        r#"gitGraph
+    branch feat/old
+    checkout main
+    commit id: "1111111"
+    checkout feat/old
+    commit id: "aaaaaaa"
+    checkout main
+    commit id: "2222222""#
     );
+    assert_eq!(parents_of(&text, "aaaaaaa"), Vec::<String>::new());
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
 }
 
 #[test]
@@ -252,9 +267,387 @@ fn a_default_lane_without_commits_draws_nothing() {
     assert!(graph.try_render(&term).is_err());
 }
 
+// ---------------------------------------------------------------------------
+// Merges, explicit tips, and accounting for undrawn history
+// ---------------------------------------------------------------------------
+
+fn geometry_of(text: &str) -> biscuit_visualized::mermaid::GitGraphGeometry {
+    biscuit_visualized::mermaid::MermaidDiagram::new(text)
+        .gitgraph_geometry()
+        .unwrap_or_else(|error| panic!("{error}: {text}"))
+        .expect("a gitGraph")
+}
+
+/// Parent IDs of `id` as the renderer lays the text out (merge repair included).
+fn parents_of(text: &str, id: &str) -> Vec<String> {
+    geometry_of(text)
+        .commit(id)
+        .unwrap_or_else(|| panic!("{id} drawn: {text}"))
+        .parents
+        .clone()
+}
+
+fn lane_of_commit(text: &str, id: &str) -> String {
+    geometry_of(text)
+        .commit(id)
+        .unwrap_or_else(|| panic!("{id} drawn: {text}"))
+        .lane
+        .clone()
+}
+
+/// Observation 1: `feat/x` merged into `main` at `mmmmmmm` (tagged `origin/main`).
+fn merged_into_default() -> GitGraph {
+    GitGraph::new("main", commits(&["1111111", "2222222", "mmmmmmm", "3333333"]))
+        .with_ref("main", sha("3333333"))
+        .with_ref("origin/main", sha("mmmmmmm"))
+        .with_line(
+            GraphLine::new("feat/x")
+                .forked_at(sha("1111111"))
+                .with_tip(sha("bbbbbbb"))
+                .with_entries(commits(&["aaaaaaa", "bbbbbbb"]))
+                .merged_into(sha("mmmmmmm")),
+        )
+        .with_current_branch("feat/x")
+}
+
+#[test]
+fn a_lane_merged_into_the_default_lane_is_drawn_merging_at_its_commit() {
+    let text = mermaid(&merged_into_default());
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "1111111"
+    branch feat/x
+    checkout feat/x
+    commit id: "aaaaaaa"
+    commit id: "bbbbbbb"
+    checkout main
+    commit id: "2222222"
+    merge feat/x id: "mmmmmmm" tag: "origin/main"
+    commit id: "3333333" tag: "main""#
+    );
+    assert_eq!(parents_of(&text, "mmmmmmm"), ["2222222", "bbbbbbb"]);
+    assert_eq!(lane_of_commit(&text, "mmmmmmm"), "main");
+    assert_eq!(parents_of(&text, "3333333"), ["mmmmmmm"]);
+    assert!(!plan(&merged_into_default(), viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane() {
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_ref("main", sha("1111111"))
+        .with_line(
+            GraphLine::new("feat/parent")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["ppppppp", "qqqqqqq", "rrrrrrr"])),
+        )
+        .with_line(
+            GraphLine::new("feat/child")
+                .with_parent("feat/parent")
+                .forked_at(sha("ppppppp"))
+                .with_tip(sha("ccccccc"))
+                .with_entries(commits(&["ccccccc"]))
+                .merged_into(sha("qqqqqqq")),
+        )
+        .with_current_branch("feat/child");
+    let text = mermaid(&graph);
+    assert!(text.contains(r#"    checkout feat/parent
+    merge feat/child id: "qqqqqqq""#), "{text}");
+    assert_eq!(parents_of(&text, "qqqqqqq"), ["ppppppp", "ccccccc"]);
+    assert_eq!(lane_of_commit(&text, "qqqqqqq"), "feat/parent");
+}
+
+/// Observation 2 (base view): `fix/sniff` forks from `fix/wt-ux`'s tip, both
+/// merge into `main`, and local `main` is one merge behind `origin/main`.
+fn nested_merges() -> GitGraph {
+    GitGraph::new("main", commits(&["d1d1d1d", "m103000", "m104000"]))
+        .with_ref("main", sha("m103000"))
+        .with_ref("origin/main", sha("m104000"))
+        .with_line(
+            GraphLine::new("fix/wt-ux")
+                .forked_at(sha("d1d1d1d"))
+                .with_tip(sha("w2w2w2w"))
+                .with_entries(commits(&["w1w1w1w", "w2w2w2w"]))
+                .merged_into(sha("m103000"))
+                .with_last_active(10),
+        )
+        .with_line(
+            GraphLine::new("fix/sniff")
+                .with_parent("fix/wt-ux")
+                .forked_at(sha("w2w2w2w"))
+                .with_tip(sha("s1s1s1s"))
+                .with_entries(vec![LaneEntry::Elided(96), LaneEntry::Commit(sha("s1s1s1s"))])
+                .merged_into(sha("m104000"))
+                .with_last_active(20),
+        )
+        .with_current_branch("main")
+}
+
+#[test]
+fn a_nested_lane_merged_into_the_default_lane_forks_from_its_parent() {
+    let text = mermaid(&nested_merges());
+    assert!(
+        text.contains(r#"    merge fix/wt-ux id: "m103000" tag: "main"
+    merge fix/sniff id: "m104000" tag: "origin/main""#),
+        "{text}"
+    );
+    assert_eq!(parents_of(&text, "m103000"), ["d1d1d1d", "w2w2w2w"]);
+    assert_eq!(parents_of(&text, "m104000"), ["m103000", "s1s1s1s"]);
+    assert_eq!(parents_of(&text, "+96"), ["w2w2w2w"]);
+    assert_eq!(lane_of_commit(&text, "s1s1s1s"), "fix/sniff");
+    assert!(!plan(&nested_merges(), viewport(400, 60)).incomplete);
+}
+
+#[test]
+fn a_merge_commit_can_also_be_a_fork_point() {
+    let graph = GitGraph::new("main", commits(&["aaaaaaa", "mmmmmmm", "nnnnnnn"]))
+        .with_line(
+            GraphLine::new("side")
+                .forked_at(sha("aaaaaaa"))
+                .with_entries(commits(&["s1s1s1s"]))
+                .merged_into(sha("mmmmmmm")),
+        )
+        .with_line(GraphLine::new("later").forked_at(sha("mmmmmmm")).with_entries(commits(&["l1l1l1l"])));
+    let text = mermaid(&graph);
+    assert!(
+        text.contains(r#"    merge side id: "mmmmmmm"
+    branch later
+    checkout later
+    commit id: "l1l1l1l""#),
+        "{text}"
+    );
+    assert_eq!(parents_of(&text, "mmmmmmm"), ["aaaaaaa", "s1s1s1s"]);
+    assert_eq!(parents_of(&text, "l1l1l1l"), ["mmmmmmm"]);
+}
+
+#[test]
+fn a_lane_merged_into_a_sibling_is_emitted_before_it() {
+    // Both fork at `1111111`; creation order alone would emit `feat/p` (and
+    // its merge commit) before `feat/c` has any commits.
+    let graph = GitGraph::new("main", commits(&["1111111", "2222222"]))
+        .with_line(
+            GraphLine::new("feat/p")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["ppppppp", "qqqqqqq"]))
+                .with_created_at(100),
+        )
+        .with_line(
+            GraphLine::new("feat/c")
+                .with_parent("feat/p")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["ccccccc"]))
+                .merged_into(sha("qqqqqqq"))
+                .with_created_at(200),
+        )
+        .with_current_branch("feat/c");
+    let text = mermaid(&graph);
+    assert!(text.find("branch feat/c").unwrap() < text.find("branch feat/p").unwrap(), "{text}");
+    assert_eq!(parents_of(&text, "qqqqqqq"), ["ppppppp", "ccccccc"]);
+    assert!(!plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_merge_whose_destination_is_not_drawn_is_left_out_and_reported() {
+    let graph = GitGraph::new("main", commits(&["1111111", "2222222"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("1111111"))
+            .with_entries(commits(&["aaaaaaa"]))
+            .merged_into(sha("0ld0000")),
+    );
+    let text = mermaid(&graph);
+    assert!(!text.contains("merge"), "{text}");
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_merge_that_would_precede_its_lane_is_left_out_and_reported() {
+    // The lane forks after its own merge destination (inconsistent input).
+    let graph = GitGraph::new("main", commits(&["1111111", "mmmmmmm", "2222222"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("2222222"))
+            .with_entries(commits(&["aaaaaaa"]))
+            .merged_into(sha("mmmmmmm")),
+    );
+    let text = mermaid(&graph);
+    assert!(text.contains(r#"commit id: "mmmmmmm""#), "{text}");
+    assert!(!text.contains("merge"), "{text}");
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_merge_at_the_start_of_the_default_lane_is_left_out_and_reported() {
+    // The parser drops a labeled merge into a lane with no commit yet.
+    let graph = GitGraph::new("main", commits(&["mmmmmmm", "2222222"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("0ld0000"))
+            .with_entries(commits(&["aaaaaaa"]))
+            .merged_into(sha("mmmmmmm")),
+    );
+    let text = mermaid(&graph);
+    assert!(text.contains(r#"commit id: "mmmmmmm""#), "{text}");
+    assert!(!text.contains("merge"), "{text}");
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn only_one_lane_merges_at_a_commit() {
+    let merged = |name: &str, commit: &str| {
+        GraphLine::new(name)
+            .forked_at(sha("1111111"))
+            .with_entries(commits(&[commit]))
+            .merged_into(sha("mmmmmmm"))
+    };
+    let graph = GitGraph::new("main", commits(&["1111111", "mmmmmmm"]))
+        .with_line(merged("a", "aaaaaaa"))
+        .with_line(merged("b", "bbbbbbb"));
+    let text = mermaid(&graph);
+    assert_eq!(text.matches("merge ").count(), 1, "{text}");
+    assert!(text.contains(r#"merge a id: "mmmmmmm""#), "{text}");
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_fork_commit_missing_from_the_parent_lane_is_not_replaced_by_its_start() {
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_line(
+            GraphLine::new("feat/parent")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["ppppppp", "qqqqqqq"])),
+        )
+        .with_line(
+            GraphLine::new("feat/child")
+                .with_parent("feat/parent")
+                .forked_at(sha("0ld0000"))
+                .with_entries(commits(&["ccccccc"])),
+        )
+        .with_current_branch("feat/child");
+    let text = mermaid(&graph);
+    assert!(text.starts_with("gitGraph\n    branch feat/child\n    checkout main\n"), "{text}");
+    assert_eq!(text.matches("branch feat/child").count(), 1, "declared once, unconnected: {text}");
+    assert_eq!(parents_of(&text, "ccccccc"), Vec::<String>::new());
+    assert_eq!(parents_of(&text, "ppppppp"), ["1111111"]);
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn an_unknown_fork_is_drawn_unconnected_and_reported() {
+    let graph = GitGraph::new("main", commits(&["1111111", "2222222"]))
+        .with_line(GraphLine::new("feat/x").with_entries(commits(&["aaaaaaa"])));
+    let text = mermaid(&graph);
+    assert!(text.starts_with("gitGraph\n    branch feat/x\n    checkout main\n"), "{text}");
+    assert_eq!(parents_of(&text, "aaaaaaa"), Vec::<String>::new());
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_tag_on_an_undrawn_commit_is_reported() {
+    // Control: everything the spec example tags is drawn.
+    assert!(!plan(&spec_example(), viewport(200, 40)).incomplete);
+    let graph = spec_example().with_ref("origin/feat/theme", sha("0ld0000"));
+    assert!(!mermaid(&graph).contains("origin/feat/theme"));
+    assert!(plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn a_label_only_line_sits_at_its_tip_never_its_fork() {
+    let graph = spec_example().with_line(
+        GraphLine::new("chore/done")
+            .forked_at(sha("4c2e4d5"))
+            .with_tip(sha("d44f301")),
+    );
+    let text = mermaid(&graph);
+    assert!(text.contains(r#"commit id: "d44f301" tag: "chore/done""#), "{text}");
+    assert!(text.contains("commit id: \"4c2e4d5\"\n"), "not at the fork: {text}");
+    assert!(!plan(&graph, viewport(200, 40)).incomplete);
+
+    // Without a tip, or with an undrawn one, the fork is never used: the label
+    // is reported as not shown.
+    for line in [
+        GraphLine::new("chore/done").forked_at(sha("4c2e4d5")),
+        GraphLine::new("chore/done").forked_at(sha("4c2e4d5")).with_tip(sha("0ld0000")),
+    ] {
+        let graph = spec_example().with_current_branch("main").with_line(line);
+        assert!(!mermaid(&graph).contains("chore/done"));
+        assert!(plan(&graph, viewport(200, 40)).incomplete);
+    }
+}
+
+#[test]
+fn a_pull_request_for_a_branch_the_graph_does_not_know_is_not_reported() {
+    let graph = spec_example().with_pull_request(GraphPullRequest {
+        number: 7,
+        source_branch: "not/drawn".into(),
+        target_branch: "main".into(),
+    });
+    assert!(!plan(&graph, viewport(200, 40)).incomplete);
+}
+
+#[test]
+fn the_caller_can_report_incomplete_history() {
+    let planned = plan(&spec_example().with_incomplete_history(), viewport(200, 40));
+    assert!(planned.incomplete);
+    assert_eq!(planned.mermaid, SPEC_EXAMPLE);
+}
+
+#[test]
+fn trimming_never_elides_a_merge_destination() {
+    let graph = GitGraph::new("main", commits(&["1111111", "2222222", "mmmmmmm", "3333333", "4444444"]))
+        .with_line(
+            GraphLine::new("feat/x")
+                .forked_at(sha("1111111"))
+                .with_entries(commits(&["aaaaaaa", "bbbbbbb"]))
+                .merged_into(sha("mmmmmmm")),
+        );
+    let planned = plan(&graph, viewport(5, 40));
+    assert!(planned.trimmed_commits > 0, "{planned:?}");
+    assert!(planned.mermaid.contains(r#"merge feat/x id: "mmmmmmm""#), "{}", planned.mermaid);
+    for trimmed in ["2222222", "3333333", "aaaaaaa"] {
+        assert!(!planned.mermaid.contains(trimmed), "{trimmed} trimmed: {}", planned.mermaid);
+    }
+    assert!(!planned.incomplete);
+}
+
+#[test]
+fn the_height_cap_keeps_a_merged_lanes_destination_lane() {
+    // `feat/x` forks from `main` but merged into `feat/p`, the least active
+    // lane; keeping `feat/x` keeps `feat/p`, so `feat/b` is left out.
+    let graph = GitGraph::new("main", commits(&["1111111"]))
+        .with_ref("main", sha("1111111"))
+        .with_line(line("feat/p", None, "ppppppp", 1).with_entries(commits(&["ppppppp", "qqqqqqq"])))
+        .with_line(line("feat/b", None, "bbbbbbb", 50))
+        .with_line(line("feat/x", None, "xxxxxxx", 90).merged_into(sha("qqqqqqq")))
+        .with_current_branch("main");
+    let planned = plan(&graph, viewport(200, 40));
+    let text = &planned.mermaid;
+    assert!(text.contains("branch feat/p") && text.contains(r#"merge feat/x id: "qqqqqqq""#), "{text}");
+    assert!(!text.contains("feat/b"), "{text}");
+    assert_eq!(planned.hidden_lanes, 1);
+    assert!(!planned.incomplete, "the cap's own note accounts for feat/b");
+}
+
+#[test]
+fn tags_of_lanes_the_height_cap_leaves_out_are_not_reported_twice() {
+    let graph = base_view_with_lanes()
+        .with_ref("origin/feat/a", sha("aaaaaaa"))
+        .with_pull_request(GraphPullRequest {
+            number: 5,
+            source_branch: "feat/a".into(),
+            target_branch: "main".into(),
+        });
+    let planned = plan(&graph, viewport(200, 40));
+    assert!(!planned.mermaid.contains("feat/a"), "{}", planned.mermaid);
+    assert!(planned.hidden_lanes > 0);
+    assert!(!planned.incomplete);
+}
+
 #[test]
 fn every_emitted_graph_parses() {
-    for graph in [spec_example(), spec_example().with_current_branch("main")] {
+    for graph in [
+        spec_example(),
+        spec_example().with_current_branch("main"),
+        merged_into_default(),
+        nested_merges(),
+    ] {
         let text = mermaid(&graph);
         biscuit_visualized::mermaid::MermaidDiagram::new(text.as_str())
             .natural_size()
@@ -459,8 +852,151 @@ fn measured_sizes_trim_to_the_width_cap() {
 }
 
 // ---------------------------------------------------------------------------
-// Rendering
+// Real backend: `plan()` measured by biscuit-visualized, checked against the
+// layout that renders (parents, tag placement, tag bounds), never the text.
 // ---------------------------------------------------------------------------
+
+const ALPHA: &str = "feature/very-long-exact-branch-reference-alpha";
+const BETA: &str = "origin/very-long-exact-branch-reference-beta";
+
+/// Long labels on neighboring commits of two lanes, `main` and
+/// `origin/main` one commit apart, and a PR tag.
+fn long_label_neighbors() -> GitGraph {
+    GitGraph::new("main", commits(&["d1d1d1d", "d2d2d2d", "d3d3d3d", "d4d4d4d"]))
+        .with_ref("main", sha("d4d4d4d"))
+        .with_ref("origin/main", sha("d3d3d3d"))
+        .with_ref(BETA, sha("f1f1f1f"))
+        .with_line(
+            GraphLine::new(ALPHA)
+                .forked_at(sha("d2d2d2d"))
+                .with_tip(sha("f2f2f2f"))
+                .with_entries(commits(&["f1f1f1f", "f2f2f2f"])),
+        )
+        .with_pull_request(GraphPullRequest {
+            number: 104,
+            source_branch: ALPHA.into(),
+            target_branch: "main".into(),
+        })
+        .with_current_branch(ALPHA)
+}
+
+/// A fork 5,000 and a merge 3,000 first-parent commits back, compressed into
+/// `+N` squares around the anchors.
+fn compressed_old_connections() -> GitGraph {
+    GitGraph::new(
+        "main",
+        vec![
+            LaneEntry::Commit(sha("f0f0f0f")),
+            LaneEntry::Elided(1999),
+            LaneEntry::Commit(sha("m0m0m0m")),
+            LaneEntry::Elided(2995),
+            LaneEntry::Commit(sha("t1t1t1t")),
+            LaneEntry::Commit(sha("t2t2t2t")),
+        ],
+    )
+    .with_ref("main", sha("t2t2t2t"))
+    .with_ref("origin/main", sha("t2t2t2t"))
+    .with_line(
+        GraphLine::new("feat/old")
+            .forked_at(sha("f0f0f0f"))
+            .with_tip(sha("o2o2o2o"))
+            .with_entries(vec![LaneEntry::Elided(40), LaneEntry::Commit(sha("o2o2o2o"))])
+            .merged_into(sha("m0m0m0m")),
+    )
+    .with_current_branch("feat/old")
+}
+
+struct Expected<'a> {
+    /// `(commit display ID, tag)` that must be placed exactly so.
+    tags: &'a [(&'a str, &'a str)],
+    /// `(merge display ID, [first parent, second parent])`.
+    merges: &'a [(&'a str, [&'a str; 2])],
+}
+
+fn assert_real_backend(name: &str, graph: &GitGraph, expected: &Expected) -> Vec<String> {
+    let graph = graph.clone().with_theme(MermaidTheme::Default);
+    let mut report = Vec::new();
+    for vp in [viewport(120, 40), viewport(56, 60)] {
+        let planned = graph.plan(vp).expect("a plan");
+        let geometry = geometry_of(&planned.mermaid);
+        assert_eq!(geometry.tag_overlaps(), Vec::<(String, String)>::new(), "{name} {vp:?}: {}", planned.mermaid);
+        for (id, tag) in expected.tags {
+            let placed = geometry
+                .commit(id)
+                .unwrap_or_else(|| panic!("{name} {vp:?}: {id} drawn: {}", planned.mermaid));
+            assert!(
+                placed.tags.iter().any(|placed| placed.text == *tag),
+                "{name} {vp:?}: {tag} on {id}: {placed:?}"
+            );
+        }
+        for (id, [first, second]) in expected.merges {
+            let parents = &geometry.commit(id).unwrap_or_else(|| panic!("{name} {vp:?}: merge {id}")).parents;
+            assert_eq!(parents.len(), 2, "{name} {vp:?}: {parents:?}");
+            // The first parent is the destination lane's previous entry, which
+            // trimming may have folded into a `+N` square.
+            assert!(
+                parents[0] == *first || (planned.trimmed_commits > 0 && parents[0].starts_with('+')),
+                "{name} {vp:?}: {parents:?}"
+            );
+            assert_eq!(parents[1], *second, "{name} {vp:?}");
+        }
+        if planned.columns > vp.columns {
+            // Too wide only once nothing more can be trimmed.
+            let floor = graph.plan(viewport(1, vp.rows)).unwrap();
+            assert_eq!(planned.mermaid, floor.mermaid, "{name} {vp:?}: wider than the viewport before fully trimmed");
+        }
+        assert!(!planned.incomplete, "{name} {vp:?}");
+        report.push(format!(
+            "{name} {}x{}: columns={} rows={} trimmed={} step={:.1} natural_width={:.0}",
+            vp.columns, vp.rows, planned.columns, planned.rows, planned.trimmed_commits, geometry.commit_step, geometry.width
+        ));
+    }
+    report
+}
+
+#[test]
+fn measured_plans_place_merges_and_tags_without_overlap() {
+    let mut report = Vec::new();
+    report.extend(assert_real_backend(
+        "observation-1",
+        &merged_into_default(),
+        &Expected {
+            tags: &[("mmmmmmm", "origin/main"), ("3333333", "main")],
+            merges: &[("mmmmmmm", ["2222222", "bbbbbbb"])],
+        },
+    ));
+    report.extend(assert_real_backend(
+        "observation-2",
+        &nested_merges(),
+        &Expected {
+            tags: &[("m103000", "main"), ("m104000", "origin/main")],
+            merges: &[("m103000", ["d1d1d1d", "w2w2w2w"]), ("m104000", ["m103000", "s1s1s1s"])],
+        },
+    ));
+    report.extend(assert_real_backend(
+        "long-labels",
+        &long_label_neighbors(),
+        &Expected {
+            tags: &[
+                ("d3d3d3d", "origin/main"),
+                ("d4d4d4d", "main"),
+                ("f1f1f1f", BETA),
+                ("f2f2f2f", "PR #104 → main"),
+            ],
+            merges: &[],
+        },
+    ));
+    report.extend(assert_real_backend(
+        "compressed",
+        &compressed_old_connections(),
+        &Expected {
+            tags: &[("t2t2t2t", "main"), ("t2t2t2t", "origin/main")],
+            merges: &[("m0m0m0m", ["+1999", "o2o2o2o"])],
+        },
+    ));
+    // Per-viewport size, trimming, and the tag-driven commit step, for review.
+    eprintln!("{}", report.join("\n"));
+}
 
 fn plain_terminal(width: u32, height: u32) -> Terminal {
     Terminal::builder()
@@ -483,6 +1019,24 @@ fn without_image_support_the_terminal_gets_the_code_block_and_the_lane_note() {
     let noun = if planned.hidden_lanes == 1 { "worktree" } else { "worktrees" };
     assert!(output.contains(&format!("{} more {noun} not shown", planned.hidden_lanes)), "{output}");
     assert!(graph.try_render(&term).is_err(), "no image support is an error on the fallible path");
+}
+
+#[test]
+fn the_incomplete_history_notice_follows_the_lane_note() {
+    let term = plain_terminal(200, 24);
+    let graph = base_view_with_lanes()
+        .with_theme(MermaidTheme::Default)
+        .with_ref("v0.1.0", sha("0ld0000"));
+    let output = graph.render(&term);
+    let lanes = output.find("more worktrees not shown").expect("the lane note");
+    let history = output.find(INCOMPLETE_HISTORY_NOTE).expect("the history notice");
+    assert!(lanes < history, "{output}");
+    assert_eq!(INCOMPLETE_HISTORY_NOTE, "Some history is not shown");
+    assert!(graph.try_render(&term).is_err(), "no image support is still an error");
+
+    // A complete graph has no notice.
+    let complete = spec_example().with_theme(MermaidTheme::Default).render(&term);
+    assert!(!complete.contains(INCOMPLETE_HISTORY_NOTE), "{complete}");
 }
 
 #[test]

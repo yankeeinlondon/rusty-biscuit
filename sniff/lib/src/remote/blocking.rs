@@ -19,6 +19,7 @@ use crate::SniffError;
 use crate::filesystem::git::commit_links::parse_remote_identity;
 use crate::filesystem::git::{ApiFlavor, GitHostingProvider, ResolvedRemote};
 
+use super::focused::INSUFFICIENT_CREDENTIALS_MESSAGE;
 use super::types::optional_timestamp_order;
 use super::{FocusedProviderClient, PullRequestInfo};
 
@@ -74,10 +75,30 @@ pub struct PrSummary {
     pub target_branch: Option<String>,
 }
 
+/// The commit a provider reports at the tip of one branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchHead {
+    /// Full object ID: 40 (SHA-1) or 64 (SHA-256) lowercase hex digits.
+    pub sha: String,
+}
+
+/// The environment variables a provider's blocking lookups read a token from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialEnv {
+    /// Provider display name, such as `GitHub`.
+    pub provider: String,
+    /// Variable names in the order lookups consult them; the first one set
+    /// is sent.
+    pub variables: Vec<String>,
+}
+
 /// Why no answer, positive or negative, could be obtained.
 ///
 /// None of these is ever reported as `Ok(None)`: only a provider that answered
 /// the query and listed no matching PR produces that.
+///
+/// A `key` is always the *name* of the environment variable whose token was
+/// sent, never its value, and no variant's `Display` includes a token.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PrUnavailable {
@@ -87,16 +108,35 @@ pub enum PrUnavailable {
     /// The provider could not be reached or the connection failed.
     #[error("provider unreachable: {message}")]
     Network { message: String },
-    /// Missing or rejected credentials (401), or a denied query (403).
-    #[error("provider denied the query: {message}")]
-    Auth { message: String },
-    /// A list endpoint answered 404. Providers answer a private repository
-    /// the caller may not see this way, so it is a permission failure as
-    /// much as an absence.
+    /// The provider answered 401 to a request sent without a token.
+    ///
+    /// `key` is `None` from every lookup here, since no variable was set; it
+    /// has the other credential variants' field so a caller can read `key`
+    /// uniformly.
+    #[error("provider requires credentials, and no token variable is set")]
+    CredentialsRequired { key: Option<String> },
+    /// The provider answered 401 to the token in `key`: it may be invalid,
+    /// expired, or revoked.
+    #[error("provider rejected the token in {key}")]
+    CredentialsRejected { key: String },
+    /// The provider answered 403 to the token in `key`, and its response
+    /// named a missing permission or scope.
+    #[error("the token in {key} lacks permission for this query")]
+    CredentialsInsufficient { key: String },
+    /// A 404, or a 403 whose response establishes neither rate limiting nor
+    /// a credentials denial. Providers answer a private repository the caller
+    /// may not see this way, so it is a permission failure as much as an
+    /// absence, whether or not a token was sent.
     #[error("repository not found or not permitted: {message}")]
     NotFoundOrNotPermitted { message: String },
-    #[error("provider rate limit reached: {message}")]
-    RateLimited { message: String },
+    /// A 429, or a 403 carrying a spent `x-ratelimit-remaining` or a
+    /// rate-limit body. `authenticated` is whether the token in `key` was
+    /// sent.
+    #[error("provider rate limit reached ({})", key.as_deref().map_or_else(|| "anonymous request".to_string(), |key| format!("token in {key}")))]
+    RateLimited {
+        authenticated: bool,
+        key: Option<String>,
+    },
     /// The remote is not a provider this module can query, or policy
     /// forbids contacting its host.
     #[error("unsupported provider or host: {message}")]
@@ -178,8 +218,9 @@ pub fn pull_request_for_branch_with(
 /// ## Errors
 ///
 /// Every failure to get an answer is a [`PrUnavailable`], never an empty
-/// list: in particular a 401 or 403 is [`PrUnavailable::Auth`] and a list 404
-/// is [`PrUnavailable::NotFoundOrNotPermitted`]. More open PRs than the page
+/// list: in particular a 401 is [`PrUnavailable::CredentialsRequired`] or
+/// [`PrUnavailable::CredentialsRejected`], and a list 404 is
+/// [`PrUnavailable::NotFoundOrNotPermitted`]. More open PRs than the page
 /// bound allows is [`PrUnavailable::Other`].
 pub fn open_pull_requests(
     remote_url: &str,
@@ -216,6 +257,85 @@ pub fn open_pull_requests_with(
         .collect())
 }
 
+/// The head commit of `branch` in the repository at `remote_url`.
+///
+/// `remote_url` should be the remote's *fetch* URL, since a separate push URL
+/// may name another repository. `branch` is sent as one percent-encoded path
+/// segment, so no branch name can change the repository path or the query.
+///
+/// A request is authenticated with the first set variable of
+/// [`credential_env`], and anonymous when none is set. A rejected or
+/// insufficient token is reported, not retried anonymously, as for
+/// [`open_pull_requests`].
+///
+/// Supported hosts are those of [`pull_request_for_branch`]; for a
+/// self-hosted server that needs consented discovery, call
+/// [`branch_head_with`].
+///
+/// Must not be called from inside a Tokio runtime (see the module docs).
+///
+/// ## Errors
+///
+/// A 404 is [`PrUnavailable::NotFoundOrNotPermitted`], never proof that the
+/// branch is absent: providers answer a private repository the same way. A
+/// head that is not 40 or 64 lowercase hex digits is [`PrUnavailable::Other`].
+pub fn branch_head(
+    remote_url: &str,
+    branch: &str,
+    deadline: Duration,
+) -> Result<BranchHead, PrUnavailable> {
+    let client = client_for_url(remote_url)?;
+    branch_head_with(&client, branch, deadline)
+}
+
+/// [`branch_head`] through an already-built client, whose API base, fetch
+/// policy, and credential scope are used as they are.
+///
+/// Must not be called from inside a Tokio runtime (see the module docs).
+///
+/// ## Errors
+///
+/// As for [`branch_head`].
+pub fn branch_head_with(
+    client: &FocusedProviderClient,
+    branch: &str,
+    deadline: Duration,
+) -> Result<BranchHead, PrUnavailable> {
+    let sha = run_with_deadline(client, deadline, |client| async move {
+        client.branch_head(branch).await
+    })?;
+    let object_id = matches!(sha.len(), 40 | 64)
+        && sha
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !object_id {
+        return Err(PrUnavailable::Other {
+            message: "provider sent a branch head that is not a full object ID".to_string(),
+        });
+    }
+    Ok(BranchHead { sha })
+}
+
+/// The provider display name and token variables for the repository at
+/// `remote_url`, or `None` when the blocking lookups do not support it.
+///
+/// The variables are the ones [`branch_head`], [`open_pull_requests`], and
+/// [`pull_request_for_branch`] read, in the order they read them. No variable
+/// is read and no request is made.
+pub fn credential_env(remote_url: &str) -> Option<CredentialEnv> {
+    let client = client_for_url(remote_url).ok()?;
+    Some(CredentialEnv {
+        provider: GitHostingProvider::from_url(remote_url)
+            .metadata()
+            .display_name
+            .to_string(),
+        variables: crate::credentials::provider_token_variables(client.remote().api_flavor)
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect(),
+    })
+}
+
 /// Runs one focused-client operation on a fresh current-thread runtime, with
 /// every request bounded by `deadline` from now, and classifies its failure.
 fn run_with_deadline<T, F, Fut>(
@@ -243,20 +363,22 @@ where
         .ok_or_else(|| PrUnavailable::Other {
             message: format!("deadline {deadline:?} is out of range"),
         })?;
+    let key = client.credential_key();
     runtime
         .block_on(operation(client.with_deadline(expires)))
-        .map_err(|error| classify(error, Some((expires, deadline))))
+        .map_err(|error| classify(error, Some((expires, deadline)), key))
 }
 
 fn client_for_url(remote_url: &str) -> Result<FocusedProviderClient, PrUnavailable> {
     let unsupported = |message: String| PrUnavailable::Unsupported { message };
     let (endpoint, namespace, repository) = parse_remote_identity(remote_url);
+    // The URL is never echoed: its userinfo may hold a token.
     let Some(host) = endpoint.as_ref().map(|endpoint| endpoint.host.clone()) else {
-        return Err(unsupported(format!("no host in remote URL `{remote_url}`")));
+        return Err(unsupported("the remote URL names no host".to_string()));
     };
     if namespace.is_none() || repository.is_none() {
         return Err(unsupported(format!(
-            "no owner/repository path in remote URL `{remote_url}`"
+            "the remote URL on `{host}` names no owner/repository path"
         )));
     }
     let api_flavor: ApiFlavor = GitHostingProvider::from_url(remote_url).into();
@@ -284,25 +406,42 @@ fn client_for_url(remote_url: &str) -> Result<FocusedProviderClient, PrUnavailab
     };
     // The caller's configured remote is the consent to contact its own host.
     FocusedProviderClient::new(remote, FetchPolicy::deny_all().allow_host(&host))
-        .map_err(|error| classify(error, None))
+        .map_err(|error| classify(error, None, None))
 }
 
 /// `timing` is the lookup's expiry and its original duration; a transport
-/// failure at or after the expiry is the deadline's doing.
-fn classify(error: SniffError, timing: Option<(Instant, Duration)>) -> PrUnavailable {
+/// failure at or after the expiry is the deadline's doing. `key` names the
+/// variable whose token the lookup sent.
+fn classify(
+    error: SniffError,
+    timing: Option<(Instant, Duration)>,
+    key: Option<String>,
+) -> PrUnavailable {
     let message = error.to_string();
     match error {
-        SniffError::MissingCredentials { .. }
-        | SniffError::InvalidCredentials { .. }
-        | SniffError::RemoteForbidden { .. }
-        | SniffError::RemoteApi {
-            status: 401 | 403, ..
-        } => PrUnavailable::Auth { message },
-        SniffError::RemoteApi { status: 404, .. } => {
-            PrUnavailable::NotFoundOrNotPermitted { message }
+        SniffError::InvalidCredentials { .. } | SniffError::RemoteApi { status: 401, .. } => {
+            match key {
+                Some(key) => PrUnavailable::CredentialsRejected { key },
+                None => PrUnavailable::CredentialsRequired { key: None },
+            }
         }
+        SniffError::MissingCredentials { .. } => PrUnavailable::CredentialsRequired { key: None },
+        SniffError::RemoteForbidden {
+            message: ref denial,
+            ..
+        } if denial == INSUFFICIENT_CREDENTIALS_MESSAGE => match key {
+            Some(key) => PrUnavailable::CredentialsInsufficient { key },
+            None => PrUnavailable::NotFoundOrNotPermitted { message },
+        },
+        SniffError::RemoteForbidden { .. }
+        | SniffError::RemoteApi {
+            status: 403 | 404, ..
+        } => PrUnavailable::NotFoundOrNotPermitted { message },
         SniffError::RateLimited { .. } | SniffError::RemoteApi { status: 429, .. } => {
-            PrUnavailable::RateLimited { message }
+            PrUnavailable::RateLimited {
+                authenticated: key.is_some(),
+                key,
+            }
         }
         SniffError::RemoteUnreachable { .. } => match timing {
             Some((expires, deadline)) if Instant::now() >= expires => {
@@ -418,7 +557,7 @@ mod tests {
     fn a_denial_is_never_classified_as_an_answer() {
         let forbidden = SniffError::RemoteForbidden {
             provider: "GitHub".to_string(),
-            message: "denied".to_string(),
+            message: INSUFFICIENT_CREDENTIALS_MESSAGE.to_string(),
         };
         let list_404 = SniffError::RemoteApi {
             provider: "GitHub".to_string(),
@@ -426,12 +565,14 @@ mod tests {
             message: "not found or not permitted".to_string(),
         };
 
+        assert_eq!(
+            classify(forbidden, None, Some("GH_TOKEN".to_string())),
+            PrUnavailable::CredentialsInsufficient {
+                key: "GH_TOKEN".to_string()
+            }
+        );
         assert!(matches!(
-            classify(forbidden, None),
-            PrUnavailable::Auth { .. }
-        ));
-        assert!(matches!(
-            classify(list_404, None),
+            classify(list_404, None, Some("GH_TOKEN".to_string())),
             PrUnavailable::NotFoundOrNotPermitted { .. }
         ));
     }

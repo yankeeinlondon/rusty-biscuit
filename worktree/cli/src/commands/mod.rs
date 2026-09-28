@@ -9,5 +9,5 @@ pub mod remove;
 
 pub use create::run as create;
 pub use go::run as go;
-pub use list::run as list;
+pub use list::{ListFlags, run as list};
 pub use remove::{Flags as RemoveFlags, run as remove, run_handoff as remove_handoff};

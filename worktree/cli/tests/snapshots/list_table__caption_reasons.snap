@@ -1,0 +1,27 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: labeled(cases)
+---
+## check failed: timeout
+main  is 3 commits behind  origin/main  (origin didn't answer within 10 s; last checked with origin 2 h ago)
+
+## check failed: credentials
+main  is 3 commits behind  origin/main  (origin didn't accept Git's credentials; last checked with origin 2 h ago)
+
+## check failed: other
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 2 h ago)
+
+## fetch failed: timeout
+main  is 3 commits behind local  origin/main  (origin differed when checked just now; fetch didn't finish within 60 s)
+
+## fetch failed: other
+main  is 3 commits behind local  origin/main  (origin differed when checked just now; fetch failed)
+
+## still checking, last known from an earlier answer
+main  is 3 commits behind  origin/main  (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
+
+## still checking, last known from the reflog
+main  is 3 commits behind  origin/main  (origin hasn't answered yet; still checking in the background; tracking ref last changed 3 h ago)
+
+## still checking, last known from nothing
+main  is 3 commits behind  origin/main  (origin hasn't answered yet; still checking in the background; never checked with origin)

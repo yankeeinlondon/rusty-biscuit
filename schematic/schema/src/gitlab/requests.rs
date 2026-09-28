@@ -435,6 +435,57 @@ impl crate::shared::EndpointSpec for ListGroupProjectsRequest {
     type Response = Vec<Project>;
     const ENDPOINT_ID: &'static str = "ListGroupProjects";
 }
+/// Request for `GetBranch` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::gitlab::GetBranchRequest;
+///
+/// let request = GetBranchRequest::new("id_value", "branch_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetBranchRequest {
+    /// Path parameter: id
+    pub id: String,
+    /// Path parameter: branch
+    pub branch: String,
+}
+impl GetBranchRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(id: impl Into<String>, branch: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            branch: branch.into(),
+        }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - The request body as a `RequestBody`
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!(
+            "/projects/{}/repository/branches/{}", urlencoding::encode(& self.id
+            .to_string()), urlencoding::encode(& self.branch.to_string())
+        );
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+    }
+}
+impl crate::shared::EndpointSpec for GetBranchRequest {
+    type Response = Branch;
+    const ENDPOINT_ID: &'static str = "GetBranch";
+}
 /// Request for `ListMergeRequests` endpoint.
 ///
 /// ## Example
@@ -1602,6 +1653,8 @@ pub enum GitLabRequest {
     GetProject(GetProjectRequest),
     /// List projects in a group
     ListGroupProjects(ListGroupProjectsRequest),
+    /// Get a single branch (commit.id is the branch head commit)
+    GetBranch(GetBranchRequest),
     /// List merge requests with metadata
     ListMergeRequests(ListMergeRequestsRequest),
     /// Get a single merge request by IID
@@ -1646,6 +1699,7 @@ impl GitLabRequest {
             Self::GetRepositoryFile(req) => req.into_parts(),
             Self::GetProject(req) => req.into_parts(),
             Self::ListGroupProjects(req) => req.into_parts(),
+            Self::GetBranch(req) => req.into_parts(),
             Self::ListMergeRequests(req) => req.into_parts(),
             Self::GetMergeRequest(req) => req.into_parts(),
             Self::ListMergeRequestCommits(req) => req.into_parts(),
@@ -1679,6 +1733,9 @@ impl GitLabRequest {
             }
             Self::ListGroupProjects(_) => {
                 <ListGroupProjectsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::GetBranch(_) => {
+                <GetBranchRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
             Self::ListMergeRequests(_) => {
                 <ListMergeRequestsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
@@ -1735,6 +1792,7 @@ impl GitLabRequest {
             Self::GetRepositoryFile(_) => crate::shared::ResponseKind::Json,
             Self::GetProject(_) => crate::shared::ResponseKind::Json,
             Self::ListGroupProjects(_) => crate::shared::ResponseKind::Json,
+            Self::GetBranch(_) => crate::shared::ResponseKind::Json,
             Self::ListMergeRequests(_) => crate::shared::ResponseKind::Json,
             Self::GetMergeRequest(_) => crate::shared::ResponseKind::Json,
             Self::ListMergeRequestCommits(_) => crate::shared::ResponseKind::Json,
@@ -1770,6 +1828,11 @@ impl From<GetProjectRequest> for GitLabRequest {
 impl From<ListGroupProjectsRequest> for GitLabRequest {
     fn from(req: ListGroupProjectsRequest) -> Self {
         Self::ListGroupProjects(req)
+    }
+}
+impl From<GetBranchRequest> for GitLabRequest {
+    fn from(req: GetBranchRequest) -> Self {
+        Self::GetBranch(req)
     }
 }
 impl From<ListMergeRequestsRequest> for GitLabRequest {

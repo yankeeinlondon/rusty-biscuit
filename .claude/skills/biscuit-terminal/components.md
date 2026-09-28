@@ -19,7 +19,7 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `BlockQuote` | `block_quote.rs` | Yes | Quoted text with left border and attribution |
 | `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
 | `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
-| `GitGraph` | `git_graph.rs` | Yes | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule and fits the terminal by trimming commits and lanes (`image` feature) |
+| `GitGraph` | `git_graph.rs` | Yes | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule, merges, the no-substitution rule, and fits the terminal by trimming commits and lanes (`image` feature; see below) |
 | `GraphExpression` | `graph_expression.rs` | Yes | Graph diagrams via biscuit-visualized with terminal image display |
 | `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
 | `MermaidDiagram` | `mermaid.rs` | Yes | Mermaid diagram rendering via biscuit-visualized; defaults to `ImageWidth::Scale(1.0)` (body text one line tall), measured from the SVG before rasterizing |
@@ -30,6 +30,7 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `Progress` | `progress.rs` | No | Progress indicator rendering |
 | `Prose` | `prose.rs` | No | Styled text with inline tokens (atomic + block) |
 | `Section` | `section.rs` | Yes | Heading (h1-h6) with content body |
+| `Spinner` | `spinner.rs` | No | Live stderr activity spinner; not a `TerminalRenderable` (see below) |
 | `Status` | `status.rs` | No | Status items with icons (success, failure, warning, info, active, not-started) |
 | `Table` | `table/` | Yes | Box-drawing table with auto-sized columns |
 | `TerminalImage` | `terminal_image.rs` | Yes | Inline images via Kitty/iTerm2 protocols |
@@ -175,6 +176,27 @@ Progress indicator rendering component.
 use biscuit_terminal::components::progress::Progress;
 ```
 
+## Spinner
+
+A live, time-driven stderr widget, so it is **not** a `TerminalRenderable` or
+render-tree node. It draws only when stderr is a terminal, starts after an
+optional delay, accepts replacement text, and clears its line on `finish()` or
+`Drop`. The clear is written once, and only if a frame was drawn.
+
+```rust
+use std::time::Duration;
+use biscuit_terminal::prelude::Spinner;
+
+let spinner = Spinner::new("updating")
+    .with_delay(Duration::from_millis(150))
+    .start_on_stderr();
+spinner.set_text("rate limited, using fallback method");
+spinner.finish();
+```
+
+Test with `start_on(writer, is_terminal)` and the pure `frame(i, text, width)`
+and `CLEAR_LINE`; see [docs/components/spinner.md](../../../biscuit-terminal/docs/components/spinner.md).
+
 ## FileSystem
 
 File/directory tree rendering with Nerd Font icons and gitignore-aware dimming. Used by `bt dir`.
@@ -190,6 +212,16 @@ New builder APIs for selective tree rendering:
 - `.with_root_icon(icon)` — `RootIconKind::Directory` or `RootIconKind::Repository`
 
 These are used by the `::file-links` compose directive to render bounded document trees.
+
+## GitGraph
+
+Full contract: `biscuit-terminal/docs/components/git_graph.md`. The caller runs git; the component never does.
+
+- `GraphLine::with_tip(sha)` is the branch's own tip. A line without commits is labeled there. `tip()` falls back to the newest drawn commit, **never** `fork_sha`. `forked_at` unset (`fork_sha == None`) means an unknown connection, not "tip here".
+- `GraphLine::merged_into(sha)` emits `merge <lane> id: "…" tag: "…"` at that commit on whatever lane draws it, only when the merged lane was already emitted in full and the destination lane has a head (the parser drops a labeled merge into a headless lane). `biscuit-visualized` restores the merge's second parent. Siblings hanging from one commit are reordered so a lane merged into a sibling is emitted first (`emit_merged_lanes_first`). A second lane merged at one commit is not drawn.
+- **No substitution:** a lane whose fork is undrawn or unknown is drawn unconnected (declared `branch` before the root lane's first commit), never from another lane's start. An undrawn tag, label, or merge destination is left out. Each sets `GitGraphPlan::incomplete`, as does the caller's `with_incomplete_history()`, and renders the dim `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown") after the hidden-lanes note. Tags of lanes the height cap hid are not counted twice.
+- Trimming (`trim_one_commit`) never folds lane tips, forks, merge destinations, or tagged commits. The height cap (`fit_lanes`) keeps a lane's ancestors: the lanes holding its fork and merge commits, and its parent's lane.
+- `biscuit-visualized` widens the commit step only for colliding tags (different commits, overlapping rows) and only to a one-em gap, so a single long label (e.g. `main`/`origin/main` stacked on one tip) keeps the default step and trimming works normally; a graph with colliding tags is widened everywhere and may still need to shrink. Assert the step against `biscuit_visualized::mermaid::default_gitgraph_commit_step()`. Prove tag placement with `biscuit_visualized::mermaid::MermaidDiagram::gitgraph_geometry()` (`tag_overlaps()`), never with Mermaid text.
 
 ## InlineContent
 

@@ -341,6 +341,28 @@ pub fn skip_with_reason(what: &str) -> bool {
     true
 }
 
+/// Whether this process may capture other applications' windows.
+///
+/// macOS grants Screen Recording to the app responsible for this process (the
+/// terminal that started the tests), never to the window being captured.
+/// Without it `screencapture` still succeeds but returns window chrome with no
+/// contents. Always `false` off macOS.
+pub fn screen_capture_permitted() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        #[link(name = "CoreGraphics", kind = "framework")]
+        unsafe extern "C" {
+            fn CGPreflightScreenCaptureAccess() -> bool;
+        }
+        // SAFETY: a parameterless CoreGraphics query (macOS 10.15+) that never prompts.
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 /// Detects a suitable shell for use as a generic command interpreter
 /// in real-terminal tests.
 ///

@@ -87,6 +87,17 @@ fn git_rev_parse(arg: &str) -> Result<String, WorktreeError> {
 
 /// Run an arbitrary git command and return trimmed stdout.
 pub fn git_command(args: &[&str]) -> Result<String, WorktreeError> {
+    git_command_status(args, false).map(Option::unwrap_or_default)
+}
+
+/// Like [`git_command`], but exit code 1 is `Ok(None)`: the answer "no" of
+/// commands such as `merge-base --is-ancestor`, or `merge-base` finding no
+/// common ancestor. Any other failure is still `Err`.
+pub fn git_command_allow_no_match(args: &[&str]) -> Result<Option<String>, WorktreeError> {
+    git_command_status(args, true)
+}
+
+fn git_command_status(args: &[&str], allow_no_match: bool) -> Result<Option<String>, WorktreeError> {
     #[cfg(any(test, feature = "count-git"))]
     recorder::record(args);
 
@@ -96,11 +107,14 @@ pub fn git_command(args: &[&str]) -> Result<String, WorktreeError> {
         .map_err(|e| WorktreeError::GitCommand(e.to_string()))?;
 
     if !output.status.success() {
+        if allow_no_match && output.status.code() == Some(1) {
+            return Ok(None);
+        }
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(WorktreeError::GitCommand(stderr));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
 }
 
 /// Run a git command in a specific directory.
@@ -288,6 +302,30 @@ mod tests {
     #[test]
     fn ensure_git_succeeds() {
         assert!(ensure_git().is_ok());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn allow_no_match_separates_a_no_from_a_failure_by_exit_code() {
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+        fs::write(repo.path().join("file.txt"), "2\n").unwrap();
+        run_git(repo.path(), &["commit", "-qam", "commit 2"]);
+
+        assert_eq!(
+            git_command_allow_no_match(&["merge-base", "--is-ancestor", "HEAD~1", "HEAD"]).unwrap(),
+            Some(String::new())
+        );
+        assert_eq!(
+            git_command_allow_no_match(&["merge-base", "--is-ancestor", "HEAD", "HEAD~1"]).unwrap(),
+            None,
+            "exit 1 is the answer no"
+        );
+        assert!(
+            git_command_allow_no_match(&["merge-base", "--is-ancestor", "HEAD", "no-such-ref"]).is_err(),
+            "exit 128 stays an error"
+        );
+        assert!(git_command(&["merge-base", "--is-ancestor", "HEAD", "HEAD~1"]).is_err());
     }
 
     #[test]

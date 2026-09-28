@@ -36,6 +36,10 @@ const TOKEN_VARIABLES: [&str; 8] = [
     "BITBUCKET_TOKEN",
 ];
 
+/// A token value distinctive enough that finding it in any `Display` output
+/// can only mean it leaked there.
+pub(super) const SECRET: &str = "sniff-test-secret-4f1c9e";
+
 /// Clears every provider token so a developer's real credentials never reach
 /// the loopback server and the "no token" paths are deterministic.
 pub(super) fn without_tokens() -> Vec<EnvGuard> {
@@ -63,6 +67,10 @@ impl Provider {
             server,
             flavor,
         }
+    }
+
+    pub(super) fn flavor(&self) -> ApiFlavor {
+        self.flavor
     }
 
     pub(super) fn mount(&self, mock: Mock) {
@@ -115,6 +123,13 @@ impl Provider {
         self.lookup_within(source_repo, Duration::from_secs(5))
     }
 
+    /// Every request the server received, in order.
+    pub(super) fn received_requests(&self) -> Vec<wiremock::Request> {
+        self.runtime
+            .block_on(self.server.received_requests())
+            .expect("request recording is on")
+    }
+
     /// Query pairs of every request the server received, in order.
     pub(super) fn received_queries(&self) -> Vec<Vec<(String, String)>> {
         self.runtime
@@ -144,6 +159,128 @@ pub(super) fn list_body(flavor: ApiFlavor, items: Vec<Value>) -> Value {
     match flavor {
         ApiFlavor::Bitbucket => json!({ "values": items }),
         _ => Value::Array(items),
+    }
+}
+
+/// The variable each flavor's credential cases set. GitHub's and Gitea's are
+/// not their first candidate, so a `key` naming them proves the variable
+/// that matched is reported.
+pub(super) fn token_variable(flavor: ApiFlavor) -> &'static str {
+    match flavor {
+        ApiFlavor::GitHub => "GITHUB_TOKEN",
+        ApiFlavor::GitLab => "GITLAB_TOKEN",
+        ApiFlavor::Gitea => "FORGEJO_TOKEN",
+        _ => "BITBUCKET_TOKEN",
+    }
+}
+
+/// The body each provider sends with a 403 that names the token's missing
+/// permission or scope.
+fn insufficient_body(flavor: ApiFlavor) -> Value {
+    match flavor {
+        ApiFlavor::GitHub => json!({"message": "Resource not accessible by personal access token"}),
+        ApiFlavor::GitLab => json!({
+            "error": "insufficient_scope",
+            "error_description": "The request requires higher privileges than provided by the access token."
+        }),
+        ApiFlavor::Gitea => json!({
+            "message": "token does not have at least one of required scope(s): [read:repository]"
+        }),
+        _ => json!({
+            "type": "error",
+            "error": {"message": "Your credentials lack one or more required privilege scopes."}
+        }),
+    }
+}
+
+/// The `PrUnavailable` condition a credential case must produce; the
+/// expected `key` follows from whether the case sets a token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Condition {
+    Required,
+    Rejected,
+    Insufficient,
+    NotVisible,
+    RateLimited,
+}
+
+/// One case: its name, whether a token is set, the provider's response, and
+/// the condition it must produce.
+pub(super) type CredentialCase = (&'static str, bool, ResponseTemplate, Condition);
+
+/// Every status §5 of `2026-09-27-list-freshness-ux` distinguishes, for
+/// `flavor`.
+pub(super) fn credential_cases(flavor: ApiFlavor) -> Vec<CredentialCase> {
+    use Condition::{Insufficient, NotVisible, RateLimited, Rejected, Required};
+    let status = ResponseTemplate::new;
+    let scoped = || status(403).set_body_json(insufficient_body(flavor));
+    let spent = |code| status(code).insert_header("x-ratelimit-remaining", "0");
+    let mut cases = vec![
+        ("401 anonymous", false, status(401), Required),
+        ("401 with token", true, status(401), Rejected),
+        ("404 anonymous", false, status(404), NotVisible),
+        ("404 with token", true, status(404), NotVisible),
+        ("403 scope body", true, scoped(), Insufficient),
+        // A scope body without a token says nothing about a token.
+        ("403 anonymous scope body", false, scoped(), NotVisible),
+        ("403 with token, no body", true, status(403), NotVisible),
+        ("429 anonymous", false, status(429), RateLimited),
+        ("429 with token", true, status(429), RateLimited),
+    ];
+    if flavor == ApiFlavor::GitHub {
+        let body = json!({"message": "API rate limit exceeded for user ID 1."});
+        let limited = status(403).set_body_json(body);
+        cases.extend([
+            ("403 spent quota", false, spent(403), RateLimited),
+            ("429 spent quota", true, spent(429), RateLimited),
+            ("403 rate-limit body", true, limited, RateLimited),
+        ]);
+    }
+    cases
+}
+
+/// Runs every credential case on every provider: `serve` mounts the case's
+/// response on the endpoint `run` queries.
+///
+/// Asserts the condition, that `key` names `token_variable` exactly when the
+/// case set a token, and that no `Display` output holds the token value.
+pub(super) fn check_credential_cases<T: std::fmt::Debug>(
+    serve: impl Fn(&Provider, ResponseTemplate),
+    run: impl Fn(&Provider) -> Result<T, PrUnavailable>,
+) {
+    let _tokens = without_tokens();
+    for flavor in FLAVORS {
+        for (name, token, response, expected) in credential_cases(flavor) {
+            let _token = token.then(|| EnvGuard::set_safe(token_variable(flavor), SECRET));
+            let key = token.then(|| token_variable(flavor).to_string());
+            let provider = Provider::start(flavor);
+            serve(&provider, response);
+
+            let error = run(&provider).expect_err(name);
+
+            let context = format!("{flavor:?} {name}: {error:?}");
+            assert!(!error.to_string().contains(SECRET), "{context}");
+            let matched = match (expected, &error) {
+                (Condition::Required, PrUnavailable::CredentialsRequired { key: found }) => {
+                    found.is_none()
+                }
+                (Condition::Rejected, PrUnavailable::CredentialsRejected { key: found })
+                | (
+                    Condition::Insufficient,
+                    PrUnavailable::CredentialsInsufficient { key: found },
+                ) => Some(found) == key.as_ref(),
+                (Condition::NotVisible, PrUnavailable::NotFoundOrNotPermitted { .. }) => true,
+                (
+                    Condition::RateLimited,
+                    PrUnavailable::RateLimited {
+                        authenticated,
+                        key: found,
+                    },
+                ) => *authenticated == token && *found == key,
+                _ => false,
+            };
+            assert!(matched, "expected {expected:?}; {context}");
+        }
     }
 }
 
@@ -381,30 +518,10 @@ fn a_missing_head_sha_stays_none_on_the_evidence() {
 
 #[test]
 #[serial]
-fn auth_failures_are_unavailable_on_every_provider() {
-    let _tokens = without_tokens();
-    for flavor in FLAVORS {
-        for (status, token) in [(401, None), (401, Some("rejected")), (403, Some("scoped"))] {
-            let _token = token.map(|value| {
-                let variable = match flavor {
-                    ApiFlavor::GitHub => "GITHUB_TOKEN",
-                    ApiFlavor::GitLab => "GITLAB_TOKEN",
-                    ApiFlavor::Gitea => "GITEA_TOKEN",
-                    _ => "BITBUCKET_TOKEN",
-                };
-                EnvGuard::set_safe(variable, value)
-            });
-            let provider = Provider::start(flavor);
-            provider.serve_list_response(ResponseTemplate::new(status));
-
-            let result = provider.lookup(TARGET);
-
-            assert!(
-                matches!(result, Err(PrUnavailable::Auth { .. })),
-                "{flavor:?} {status} token={token:?}: {result:?}"
-            );
-        }
-    }
+fn credentials_failures_are_unavailable_on_every_provider() {
+    check_credential_cases(Provider::serve_list_response, |provider| {
+        provider.lookup(TARGET)
+    });
 }
 
 #[test]

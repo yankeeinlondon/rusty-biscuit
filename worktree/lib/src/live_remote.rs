@@ -14,6 +14,10 @@
 //! not `<object id>\t<refname>`. So only a complete answer without the exact
 //! ref is `Ok(None)`: a failed or truncated request can never read as a
 //! deleted branch. Removal and the `wt list` live-head store both rely on that.
+//!
+//! Git runs with `LC_ALL=C`, so [`classify_git_failure`] can read its fixed
+//! English text. A deadline is typed ([`GitFailure::Timeout`]), never
+//! matched from a message.
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -21,6 +25,61 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crate::git::git_from;
+
+/// Why a non-interactive git call gave no answer, as far as git's `LC_ALL=C`
+/// text establishes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitFailure {
+    /// The deadline passed and the process tree was killed.
+    Timeout,
+    /// Git said it had no usable credentials or the server refused them.
+    Credentials,
+    /// Anything else, including a 403, a 404, a refused connection, and a
+    /// held ref lock: none of those establishes a reason worth naming.
+    Other,
+}
+
+/// A failed transport call: its [`GitFailure`] and a readable reason for
+/// callers that report one (git's stderr, the deadline, a spawn error).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportError {
+    pub failure: GitFailure,
+    pub reason: String,
+}
+
+impl TransportError {
+    fn other(reason: impl Into<String>) -> Self {
+        Self { failure: GitFailure::Other, reason: reason.into() }
+    }
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+/// `LC_ALL=C` stderr fragments that establish a credentials failure (spike
+/// S3). `unable to get password from user` is what git prints under the
+/// `credential.interactive=never` every call passes.
+const CREDENTIALS_PATTERNS: [&str; 6] = [
+    "Authentication failed for",
+    "could not read Username",
+    "could not read Password",
+    "unable to get password from user",
+    "Permission denied (publickey",
+    "The requested URL returned error: 401",
+];
+
+/// Maps git's `LC_ALL=C` stderr to [`GitFailure::Credentials`] or
+/// [`GitFailure::Other`]; it never yields [`GitFailure::Timeout`].
+pub fn classify_git_failure(stderr: &str) -> GitFailure {
+    if CREDENTIALS_PATTERNS.iter().any(|pattern| stderr.contains(pattern)) {
+        GitFailure::Credentials
+    } else {
+        GitFailure::Other
+    }
+}
 
 /// Removal's ruled deadline for one live `ls-remote` (Decision 21). The
 /// `wt list` live-head refresh uses
@@ -50,16 +109,79 @@ pub struct LsRemote<'a> {
     pub deadline: Duration,
 }
 
+impl LsRemote<'_> {
+    /// [`RemoteHeads::live_head`] with the failure typed.
+    pub fn head(&self, remote: &str, branch: &str) -> Result<Option<String>, TransportError> {
+        let refname = format!("refs/heads/{branch}");
+        let output = run_transport(self.base, &["ls-remote", remote, &refname], self.deadline)?;
+        parse_live_head(&output, &refname).map_err(TransportError::other)
+    }
+}
+
 impl RemoteHeads for LsRemote<'_> {
     fn live_head(&self, remote: &str, branch: &str) -> Result<Option<String>, String> {
-        let refname = format!("refs/heads/{branch}");
-        let output = run_noninteractive(
-            self.base,
-            &["ls-remote", remote, &refname],
-            self.deadline,
-        )?;
-        parse_live_head(&output, &refname)
+        self.head(remote, branch).map_err(|error| error.reason)
     }
+}
+
+/// Whether `branch` is a branch name git accepts as written
+/// (`check-ref-format --branch`). A name git would expand, such as `@{-1}`,
+/// is refused.
+pub fn is_valid_branch_name(base: &Path, branch: &str) -> bool {
+    !branch.starts_with('-')
+        && git_from(base, base, &["check-ref-format", "--branch", branch]).is_ok_and(|normalized| normalized == branch)
+}
+
+/// The fetch that brings exactly `refs/remotes/origin/<branch>` up to date.
+///
+/// `--no-write-fetch-head` and `--no-tags` leave `FETCH_HEAD` and tags alone;
+/// `--no-recurse-submodules` keeps a submodule's refs out of it, and an empty
+/// `--refmap=` stops git updating other tracking refs from a configured
+/// `remote.origin.fetch` (spike S3). The leading `+` accepts a remote rewind.
+pub fn fetch_argv(branch: &str) -> Vec<String> {
+    [
+        "-c",
+        "maintenance.auto=false",
+        "-c",
+        "gc.auto=0",
+        "fetch",
+        "--no-write-fetch-head",
+        "--no-tags",
+        "--no-recurse-submodules",
+        "--refmap=",
+        "origin",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .chain([format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")])
+    .collect()
+}
+
+/// Runs [`fetch_argv`] for `branch` in `base`, killing it at `deadline`.
+///
+/// ## Errors
+///
+/// [`GitFailure::Other`] without running the fetch when `branch` is not a
+/// valid branch name ([`is_valid_branch_name`]); otherwise the fetch's own
+/// failure.
+pub fn fetch_tracking_ref(base: &Path, branch: &str, deadline: Duration) -> Result<(), TransportError> {
+    if !is_valid_branch_name(base, branch) {
+        return Err(TransportError::other("not a valid branch name"));
+    }
+    let argv = fetch_argv(branch);
+    let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+    run_transport(base, &args, deadline).map(drop)
+}
+
+/// Unix seconds of the last change to `refs/remotes/origin/<branch>`, from
+/// its reflog: `None` when the ref, its reflog, or a parsable entry is
+/// missing. It dates a change to the ref, not a fetch or a check.
+pub fn tracking_ref_changed_at(base: &Path, branch: &str) -> Option<u64> {
+    let refname = format!("refs/remotes/origin/{branch}");
+    // An existing ref without a reflog prints nothing and exits 0 (S3).
+    git_from(base, base, &["reflog", "-1", "--format=%ct", &refname, "--"])
+        .ok()
+        .and_then(|output| output.trim().parse().ok())
 }
 
 /// Whether `value` is a full git object ID: 40 (SHA-1) or 64 (SHA-256)
@@ -101,6 +223,13 @@ fn parse_live_head(output: &str, refname: &str) -> Result<Option<String>, String
 /// A readable reason: git's stderr on failure, the deadline, or stdout that
 /// could not be read completely.
 pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Result<String, String> {
+    run_transport(base, args, deadline).map_err(|error| error.reason)
+}
+
+/// [`run_noninteractive`] with the failure typed: the deadline is
+/// [`GitFailure::Timeout`], a failed exit is [`classify_git_failure`] of its
+/// stderr, and everything else is [`GitFailure::Other`].
+pub fn run_transport(base: &Path, args: &[&str], deadline: Duration) -> Result<String, TransportError> {
     let mut command = Command::new("git");
     command
         .current_dir(base)
@@ -110,6 +239,7 @@ pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Res
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")
+        .env("LC_ALL", "C")
         .env("GIT_SSH_COMMAND", batch_ssh_command(base))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -120,7 +250,7 @@ pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Res
         // Its own process group, so one signal reaches the transport too.
         command.process_group(0);
     }
-    let mut child = command.spawn().map_err(|e| format!("could not run git: {e}"))?;
+    let mut child = command.spawn().map_err(|e| TransportError::other(format!("could not run git: {e}")))?;
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
 
@@ -132,27 +262,27 @@ pub fn run_noninteractive(base: &Path, args: &[&str], deadline: Duration) -> Res
                 // anyway so an orphan holding them cannot hang `wt`.
                 let grace = Duration::from_millis(500);
                 if status.success() {
-                    return collect(&stdout, grace);
+                    return collect(&stdout, grace).map_err(TransportError::other);
                 }
                 let err = collect(&stderr, grace).unwrap_or_default();
                 let err = err.trim();
                 return Err(if err.is_empty() {
-                    format!("git exited with {status}")
+                    TransportError::other(format!("git exited with {status}"))
                 } else {
-                    err.to_string()
+                    TransportError { failure: classify_git_failure(err), reason: err.to_string() }
                 });
             }
             Ok(None) if Instant::now() >= expires => {
                 kill_tree(&mut child);
-                return Err(format!(
-                    "origin did not answer within {} s",
-                    deadline.as_secs_f32()
-                ));
+                return Err(TransportError {
+                    failure: GitFailure::Timeout,
+                    reason: format!("origin did not answer within {} s", deadline.as_secs_f32()),
+                });
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => {
                 kill_tree(&mut child);
-                return Err(format!("could not wait for git: {e}"));
+                return Err(TransportError::other(format!("could not wait for git: {e}")));
             }
         }
     }
@@ -519,6 +649,165 @@ pub(crate) mod tests {
                 Err(e) => panic!("the connection stayed open after the deadline: {e}"),
             }
         }
+    }
+
+    #[test]
+    fn an_unauthorized_origin_is_a_typed_credentials_failure() {
+        let server = Loopback::unauthorized();
+        let repo = http_origin(&server);
+        let heads = LsRemote { base: &repo.path(), deadline: Duration::from_secs(10) };
+
+        let error = heads.head("origin", "main").unwrap_err();
+        assert_eq!(error.failure, GitFailure::Credentials, "{error}");
+
+        let error = fetch_tracking_ref(&repo.path(), "main", Duration::from_secs(10)).unwrap_err();
+        assert_eq!(error.failure, GitFailure::Credentials, "{error}");
+    }
+
+    #[test]
+    fn the_classifier_maps_each_recorded_sample_and_defaults_to_other() {
+        // Spike S3's `LC_ALL=C` first lines; URLs as git prints them.
+        let credentials = [
+            "fatal: unable to get password from user",
+            "fatal: could not read Username for 'https://h.example/r.git': terminal prompts disabled",
+            "fatal: could not read Password for 'https://u@h.example/r.git': terminal prompts disabled",
+            "fatal: Authentication failed for 'https://h.example/r.git/'",
+            "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.",
+            "fatal: unable to access 'https://h.example/r.git/': The requested URL returned error: 401",
+        ];
+        for stderr in credentials {
+            assert_eq!(classify_git_failure(stderr), GitFailure::Credentials, "{stderr}");
+        }
+        let other = [
+            "error: cannot lock ref 'refs/remotes/origin/main': Unable to create '/r/.git/refs/remotes/origin/main.lock': File exists.",
+            "fatal: unable to access 'https://h.example/r.git/': The requested URL returned error: 403",
+            "fatal: repository 'https://h.example/r.git/' not found",
+            "fatal: unable to access 'https://h.example/r.git/': Failed to connect to h.example port 443: Couldn't connect to server",
+            "fatal: unable to access 'https://h.example/r.git/': Could not resolve host: h.example",
+            "Host key verification failed.\nfatal: Could not read from remote repository.",
+            // A deadline has no stderr; its message is never classified.
+            "origin did not answer within 10 s",
+            "",
+        ];
+        for stderr in other {
+            assert_eq!(classify_git_failure(stderr), GitFailure::Other, "{stderr}");
+        }
+    }
+
+    #[test]
+    fn the_fetch_argv_is_the_ruled_command_with_one_refspec_argument() {
+        assert_eq!(
+            fetch_argv("feat/x"),
+            [
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
+                "fetch",
+                "--no-write-fetch-head",
+                "--no-tags",
+                "--no-recurse-submodules",
+                "--refmap=",
+                "origin",
+                "+refs/heads/feat/x:refs/remotes/origin/feat/x",
+            ]
+        );
+    }
+
+    /// Every ref that is not a symbolic ref (`origin/HEAD` follows
+    /// `origin/main`), and `FETCH_HEAD`'s bytes, to compare around a fetch.
+    fn snapshot(repo: &TestRepo) -> (String, Option<Vec<u8>>) {
+        let refs = repo.git(&["for-each-ref", "--format=%(if)%(symref)%(then)%(else)%(refname) %(objectname)%(end)"]);
+        let fetch_head = std::fs::read(repo.path().join(".git").join("FETCH_HEAD")).ok();
+        (refs, fetch_head)
+    }
+
+    #[test]
+    fn a_fetch_updates_only_the_one_tracking_ref() {
+        let repo = TestRepo::with_origin();
+        repo.git(&["push", "-q", "origin", "main:refs/heads/feature"]);
+        repo.git(&["fetch", "-q", "origin"]);
+        std::fs::write(repo.path().join(".git").join("FETCH_HEAD"), "sentinel\n").unwrap();
+        // A configured extra refspec and pruning must not widen the fetch.
+        repo.git(&["config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*"]);
+        repo.git(&["config", "fetch.prune", "true"]);
+
+        let main = repo.push_commit_to_origin("main", "upstream.txt");
+        repo.push_commit_to_origin("feature", "feature.txt");
+        let pusher = repo.path().parent().unwrap().join("pusher");
+        repo.git_in(&pusher, &["tag", "v2"]);
+        repo.git_in(&pusher, &["push", "-q", "origin", "v2"]);
+        let (before_refs, before_head) = snapshot(&repo);
+
+        fetch_tracking_ref(&repo.path(), "main", Duration::from_secs(10)).unwrap();
+
+        let (after_refs, after_head) = snapshot(&repo);
+        assert_eq!(repo.sha("origin/main"), main);
+        assert_eq!(after_head, before_head, "FETCH_HEAD is untouched");
+        let changed: Vec<_> = after_refs
+            .lines()
+            .filter(|line| !line.is_empty() && !before_refs.lines().any(|before| before == *line))
+            .collect();
+        assert_eq!(changed, [format!("refs/remotes/origin/main {main}")], "only origin/main moved");
+        assert!(repo.try_git(&["rev-parse", "--verify", "--quiet", "refs/tags/v2"]).is_err(), "no tag arrived");
+    }
+
+    #[test]
+    fn a_remote_rewind_is_applied() {
+        let repo = TestRepo::with_origin();
+        let first = repo.sha("main");
+        repo.push_commit_to_origin("main", "upstream.txt");
+        fetch_tracking_ref(&repo.path(), "main", Duration::from_secs(10)).unwrap();
+        assert_ne!(repo.sha("origin/main"), first);
+
+        repo.git_in(&repo.origin_path(), &["update-ref", "refs/heads/main", &first]);
+        fetch_tracking_ref(&repo.path(), "main", Duration::from_secs(10)).unwrap();
+
+        assert_eq!(repo.sha("origin/main"), first, "the leading + accepted the rewind");
+    }
+
+    #[test]
+    fn an_invalid_branch_name_is_refused_before_any_request() {
+        let server = Loopback::unauthorized();
+        let repo = http_origin(&server);
+        for branch in ["ma..in", "-x", "@{-1}", "a b", "main.lock", "", "feat/x:refs/heads/y"] {
+            assert!(!is_valid_branch_name(&repo.path(), branch), "{branch:?}");
+            let error = fetch_tracking_ref(&repo.path(), branch, Duration::from_secs(10)).unwrap_err();
+            assert_eq!(error.failure, GitFailure::Other, "{branch:?}");
+        }
+        assert_eq!(server.accepted(), 0, "no invalid name reached the origin");
+        for branch in ["main", "feat/x", "ü"] {
+            assert!(is_valid_branch_name(&repo.path(), branch), "{branch:?}");
+        }
+    }
+
+    #[test]
+    fn a_fetch_past_its_deadline_is_a_typed_timeout() {
+        let (server, _held) = Loopback::holding();
+        let repo = http_origin(&server);
+
+        let started = Instant::now();
+        let error = fetch_tracking_ref(&repo.path(), "main", Duration::from_millis(500)).unwrap_err();
+
+        assert_eq!(error.failure, GitFailure::Timeout, "{error}");
+        assert!(started.elapsed() < FAST, "took {:?}", started.elapsed());
+    }
+
+    #[test]
+    fn the_tracking_ref_reflog_dates_its_last_change_or_is_none() {
+        let repo = TestRepo::with_origin();
+        let changed = tracking_ref_changed_at(&repo.path(), "main").expect("push -u logged origin/main");
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        assert!(changed <= now && now - changed < 600, "{changed} vs {now}");
+
+        assert_eq!(tracking_ref_changed_at(&repo.path(), "no-such-branch"), None, "no ref");
+
+        // A ref whose reflog is gone (deleted, or logging disabled) is None.
+        let log = repo.path().join(".git").join("logs").join("refs").join("remotes").join("origin").join("main");
+        std::fs::remove_file(log).unwrap();
+        repo.git(&["config", "core.logAllRefUpdates", "false"]);
+        assert!(repo.try_git(&["rev-parse", "--verify", "origin/main"]).is_ok(), "the ref itself remains");
+        assert_eq!(tracking_ref_changed_at(&repo.path(), "main"), None, "no reflog");
     }
 
     #[test]

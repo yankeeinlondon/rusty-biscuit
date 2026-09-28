@@ -16810,6 +16810,7 @@ dependencies = [
  "base64 0.22.1",
  "biscuit-terminal",
  "biscuit-test-harness",
+ "biscuit-visualized",
  "chrono",
  "clap 4.6.1",
  "clap_complete",

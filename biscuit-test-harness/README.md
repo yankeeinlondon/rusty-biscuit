@@ -435,7 +435,12 @@ kitty.screenshot(&png_path)?;                // `screencapture -l`, no focus
 - `get-text` returns a soft-wrapped line whole (`--add-wrap-markers` does not
   split it), so split long lines at the window width to get screen rows.
 - `screencapture` needs the Screen Recording permission for the terminal
-  running the tests; without it the capture has no window contents.
+  running the tests; without it the capture has no window contents. Check it
+  with `biscuit_test_harness::screen_capture_permitted()`. A capture can also
+  come back without contents while the permission is granted and the window
+  is in the background, so a test should tell an empty capture (nothing drawn
+  anywhere, not even text Kitty holds) from a wrong one and skip, not fail,
+  on the first.
 
 ## Level 3 — OS keyboard injection
 

@@ -30,6 +30,7 @@ pub use crate::components::renderable::{
     BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
 };
 pub use crate::components::section::{HeadingLevel, Section};
+pub use crate::components::spinner::{Spinner, SpinnerHandle};
 pub use crate::components::status::{Status, StatusState, StatusTheme};
 pub use crate::components::status_block::StatusBlock;
 pub use crate::components::table::types::{ColumnType, Currency, VerticalAlign};

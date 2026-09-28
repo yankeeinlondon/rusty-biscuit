@@ -27,11 +27,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
-use worktree::live_remote::RemoteHeads;
 use worktree::pull_requests::{
     OpenPrSource, OpenPullRequest, RefreshOutcome, SniffOpenPrSource, pr_lock_path, refresh, unix_now,
 };
-use worktree::remote_head::{refresh_remote_head, remote_head_lock_path, remote_head_store_path};
+use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
+
+pub mod graph;
 
 /// Branches of each divergence shape in the mixed fixture. The total worktree
 /// count is `1 (main) + DIVERGENT + FAST_FORWARD + BEHIND`.
@@ -154,6 +155,17 @@ impl MixedFixture {
         self
     }
 
+    /// Points `origin` at a bare copy of the repository beside `HOME` and
+    /// fetches it, so the worker's check answers at once from local Git and
+    /// finds nothing to fetch. Pair it with [`MixedFixture::wt_command_direct`].
+    pub fn with_local_origin(self) -> Self {
+        let bare = self.home.path().join("origin.git");
+        run_git(&self.main, &["clone", "--bare", "--quiet", ".", bare.to_str().unwrap()]);
+        run_git(&self.main, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        run_git(&self.main, &["fetch", "--quiet", "origin"]);
+        self
+    }
+
     /// Points `origin` at `url`, such as a [`HoldingOrigin`]. Pair it with
     /// [`MixedFixture::wt_command_direct`].
     pub fn with_origin(self, url: &str) -> Self {
@@ -236,6 +248,11 @@ impl MixedFixture {
         &self.main
     }
 
+    /// The `HOME` every `wt` command runs with.
+    pub fn home(&self) -> &Path {
+        self.home.path()
+    }
+
     /// The linked worktrees, one per branch.
     pub fn worktrees(&self) -> &[PathBuf] {
         &self.worktrees
@@ -290,9 +307,11 @@ impl MixedFixture {
         let store = self.pr_store();
         fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
         let json = serde_json::json!({
-            "format_version": 2,
+            "format_version": worktree::pull_requests::PR_STORE_FORMAT_VERSION,
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": now - age.as_secs(),
+            "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+            "writer": "refresh",
             "source_repo": source_repo,
             "pull_requests": [{
                 "number": number,
@@ -314,9 +333,11 @@ impl MixedFixture {
         let store = self.pr_store();
         fs::create_dir_all(store.parent().expect("store dir")).expect("create store dir");
         let json = serde_json::json!({
-            "format_version": 2,
+            "format_version": worktree::pull_requests::PR_STORE_FORMAT_VERSION,
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": unix_now() - age.as_secs(),
+            "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+            "writer": "refresh",
             "source_repo": source_repo,
             "pull_requests": [],
         });
@@ -326,12 +347,12 @@ impl MixedFixture {
     /// Runs a refresh the way a competing worker would, with a source that
     /// must never be asked: `Contended` while a worker holds the lock.
     pub fn probe_refresh(&self) -> RefreshOutcome {
-        refresh(&self.pr_store(), &self.main, unix_now, |_| Box::new(NoRequest))
+        refresh(&self.pr_store(), &self.main, unix_now, false, |_| Box::new(NoRequest))
     }
 
-    /// [`MixedFixture::probe_refresh`] for the live-head lock.
-    pub fn probe_head_refresh(&self) -> RefreshOutcome {
-        refresh_remote_head(&self.remote_head_store(), &self.main, unix_now, &NoRequest)
+    /// Whether a worker holds the live-head lock.
+    pub fn head_lock_held(&self) -> bool {
+        refresh_lock_held(&self.remote_head_store())
     }
 
     /// Waits up to `limit` until no worker for the fixture runs and neither
@@ -343,7 +364,7 @@ impl MixedFixture {
         loop {
             nudge();
             if self.probe_refresh() != RefreshOutcome::Contended
-                && self.probe_head_refresh() != RefreshOutcome::Contended
+                && !self.head_lock_held()
                 && refresh_workers(&self.main).is_empty()
             {
                 return true;
@@ -423,21 +444,15 @@ impl Drop for RemoveOnDrop {
     }
 }
 
-/// A source (PR or live head) that must never be asked.
+/// A PR source that must never be asked.
 pub struct NoRequest;
-
-impl RemoteHeads for NoRequest {
-    fn live_head(&self, _remote: &str, _branch: &str) -> Result<Option<String>, String> {
-        Err("the probe makes no request".into())
-    }
-}
 
 impl OpenPrSource for NoRequest {
     fn source_repo(&self) -> Option<String> {
         None
     }
-    fn fetch(&self) -> Result<Vec<OpenPullRequest>, String> {
-        Err("the probe makes no request".into())
+    fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+        Err(PrFailure::Other)
     }
 }
 
@@ -568,6 +583,27 @@ impl ProxyStub {
         true
     }
 
+    /// Accepts and counts every connection, and closes each one `hold`
+    /// after accepting it: a request with a shorter deadline runs into its
+    /// deadline, while a worker's requests fail soon after instead of holding
+    /// the listing's whole wait.
+    pub fn closing_after(hold: Duration) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind proxy stub");
+        let port = listener.local_addr().expect("proxy stub address").port();
+        let connections = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&connections);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                counter.fetch_add(1, Ordering::SeqCst);
+                std::thread::spawn(move || {
+                    std::thread::sleep(hold);
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                });
+            }
+        });
+        Self { port, connections, held: Arc::default() }
+    }
+
     /// A port with nothing listening: every connection is refused at once,
     /// as with the network down.
     pub fn refusing() -> Self {
@@ -675,11 +711,29 @@ pub enum GiteaReply {
     Status(u16),
 }
 
+/// Which git smart-HTTP requests [`FakeGitea::hold_git`] keeps waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitHold {
+    None,
+    /// Every git request, which holds an `ls-remote` at its first request.
+    All,
+    /// Only a fetch's pack request (a body naming `command=fetch` or a
+    /// `want`), so an `ls-remote` passes and the fetch after it waits.
+    Fetch,
+}
+
 #[derive(Debug)]
 struct GiteaState {
     requests: usize,
+    branch_requests: usize,
+    branch_status: u16,
+    git_requests: usize,
+    git_waiting: usize,
+    git_hold: GitHold,
+    git_root: Option<PathBuf>,
     waiting: usize,
     held: bool,
+    branches_held: bool,
     reply: GiteaReply,
 }
 
@@ -687,9 +741,18 @@ struct GiteaState {
 /// [`FakeGitea::ORIGIN`] through `HTTP_PROXY` (sniff maps a `gitea.` host to
 /// the Gitea API), so no request leaves the host and no TLS is involved.
 ///
-/// While [`FakeGitea::hold`] is in effect every request waits unanswered,
+/// While [`FakeGitea::hold`] is in effect every PR request waits unanswered,
 /// which is how a test blocks a detached worker mid-request with its lock
 /// held. Dropping the server answers every waiting request with 503.
+///
+/// The worker's live-head half asks for the default branch's head
+/// (`/branches/`); that request is answered 404 (or the status given to
+/// [`FakeGitea::answer_branch_heads_with`]) at once (or, after
+/// [`FakeGitea::hold_branch_heads`], once released) and counted apart
+/// ([`FakeGitea::branch_requests`]), so it never counts as a PR request. Its
+/// `ls-remote` fallback is refused by the fixture's git config, unless the
+/// test lets git through this server ([`FakeGitea::serve_repositories`]),
+/// which then answers git's smart-HTTP requests itself.
 pub struct FakeGitea {
     port: u16,
     shared: Arc<(Mutex<GiteaState>, Condvar)>,
@@ -708,7 +771,19 @@ impl FakeGitea {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake gitea");
         let port = listener.local_addr().expect("fake gitea address").port();
         let shared = Arc::new((
-            Mutex::new(GiteaState { requests: 0, waiting: 0, held: false, reply }),
+            Mutex::new(GiteaState {
+                requests: 0,
+                branch_requests: 0,
+                branch_status: 404,
+                git_requests: 0,
+                git_waiting: 0,
+                git_hold: GitHold::None,
+                git_root: None,
+                waiting: 0,
+                held: false,
+                branches_held: false,
+                reply,
+            }),
             Condvar::new(),
         ));
         let before_reply: BeforeReply = Arc::new(Mutex::new(None));
@@ -733,6 +808,51 @@ impl FakeGitea {
         self.state().held = true;
     }
 
+    /// Makes every branch-head request from now on wait until
+    /// [`FakeGitea::release`], holding the worker's check without a connect
+    /// timeout racing it (the request reaches this plain-HTTP server at once).
+    pub fn hold_branch_heads(&self) {
+        self.state().branches_held = true;
+    }
+
+    /// Answers branch-head requests with `status` instead of 404 (429 is a
+    /// rate limit).
+    pub fn answer_branch_heads_with(&self, status: u16) {
+        self.state().branch_status = status;
+    }
+
+    /// Serves git's smart-HTTP requests for `/<namespace>/<repo>.git` from
+    /// the bare repositories under `root` through `git http-backend`, for a
+    /// git whose `http.proxy` is [`FakeGitea::url`].
+    pub fn serve_repositories(&self, root: &Path) {
+        self.state().git_root = Some(root.to_path_buf());
+    }
+
+    /// Makes the git requests `hold` names wait from now on, until another
+    /// `hold_git` or [`FakeGitea::release`] lets them through.
+    pub fn hold_git(&self, hold: GitHold) {
+        self.state().git_hold = hold;
+        self.shared.1.notify_all();
+    }
+
+    /// Git requests received so far, answered or not.
+    pub fn git_requests(&self) -> usize {
+        self.state().git_requests
+    }
+
+    /// Waits up to `limit` until `count` git requests are held unanswered.
+    pub fn wait_for_git_waiting(&self, count: usize, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        let mut state = self.state();
+        while state.git_waiting < count {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            state = self.shared.1.wait_timeout(state, left).expect("fake gitea state").0;
+        }
+        true
+    }
+
     /// Runs `action` for every later request after it is received and before
     /// it is answered, while the requester waits.
     ///
@@ -747,13 +867,20 @@ impl FakeGitea {
     pub fn release(&self, reply: GiteaReply) {
         let mut state = self.state();
         state.held = false;
+        state.branches_held = false;
+        state.git_hold = GitHold::None;
         state.reply = reply;
         self.shared.1.notify_all();
     }
 
-    /// Requests received so far, answered or not.
+    /// PR requests received so far, answered or not.
     pub fn requests(&self) -> usize {
         self.state().requests
+    }
+
+    /// Branch-head requests received so far, answered or not.
+    pub fn branch_requests(&self) -> usize {
+        self.state().branch_requests
     }
 
     /// Requests received and not yet answered.
@@ -795,6 +922,34 @@ fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_re
             Ok(read) => head.extend_from_slice(&buffer[..read]),
         }
     }
+    let request_line = head.split(|byte| *byte == b'\r').next().unwrap_or_default();
+    let line = String::from_utf8_lossy(request_line).into_owned();
+    if line.contains("/info/refs") || line.contains("/git-upload-pack ") {
+        serve_git(stream, &line, head, shared);
+        return;
+    }
+    if request_line.windows(10).any(|window| window == b"/branches/") {
+        let (lock, changed) = shared;
+        let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.branch_requests += 1;
+        changed.notify_all();
+        let deadline = Instant::now() + GITEA_HOLD_LIMIT;
+        while state.branches_held {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            state = changed.wait_timeout(state, left).unwrap_or_else(|poisoned| poisoned.into_inner()).0;
+        }
+        let status = state.branch_status;
+        drop(state);
+        let body = r#"{"message":"branch not found"}"#;
+        let response = format!(
+            "HTTP/1.1 {status} Fake\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(response.as_bytes());
+        return;
+    }
     let reply = {
         let (lock, changed) = shared;
         let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -825,6 +980,105 @@ fn serve(mut stream: TcpStream, shared: &(Mutex<GiteaState>, Condvar), before_re
     );
     // The requester may be gone (killed, or past its deadline).
     let _ = stream.write_all(response.as_bytes());
+}
+
+/// Answers one git smart-HTTP request through `git http-backend`, after
+/// holding it while [`GitHold`] says so. `head` is everything read so far,
+/// which may already hold the start of the body.
+fn serve_git(mut stream: TcpStream, line: &str, mut head: Vec<u8>, shared: &(Mutex<GiteaState>, Condvar)) {
+    let header_end = head.windows(4).position(|window| window == b"\r\n\r\n").map_or(head.len(), |at| at + 4);
+    let mut body = head.split_off(header_end);
+    let headers = String::from_utf8_lossy(&head).into_owned();
+    let header = |name: &str| {
+        headers.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim().eq_ignore_ascii_case(name).then(|| value.trim().to_string())
+        })
+    };
+    let length: usize = header("content-length").and_then(|value| value.parse().ok()).unwrap_or(0);
+    let mut buffer = [0_u8; 8192];
+    while body.len() < length {
+        match stream.read(&mut buffer) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => body.extend_from_slice(&buffer[..read]),
+        }
+    }
+    let fetch = body.windows(13).any(|window| window == b"command=fetch") || body.windows(5).any(|w| w == b"want ");
+
+    let root = {
+        let (lock, changed) = shared;
+        let mut state = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.git_requests += 1;
+        state.git_waiting += 1;
+        changed.notify_all();
+        let deadline = Instant::now() + GITEA_HOLD_LIMIT;
+        while state.git_hold == GitHold::All || (state.git_hold == GitHold::Fetch && fetch) {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            state = changed.wait_timeout(state, left).unwrap_or_else(|poisoned| poisoned.into_inner()).0;
+        }
+        state.git_waiting -= 1;
+        changed.notify_all();
+        state.git_root.clone()
+    };
+    let Some(root) = root else {
+        let _ = stream.write_all(b"HTTP/1.1 503 Fake\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        return;
+    };
+
+    // Through a proxy the request target is absolute: `GET http://host/path?query HTTP/1.1`.
+    let mut words = line.split(' ');
+    let method = words.next().unwrap_or_default();
+    let target = words.next().unwrap_or_default();
+    let path = target.split_once("://").map_or(target, |(_, rest)| rest.find('/').map_or("/", |at| &rest[at..]));
+    let (path, query) = path.split_once('?').unwrap_or((path, ""));
+    let mut backend = Command::new("git");
+    backend
+        .arg("http-backend")
+        .env("GIT_PROJECT_ROOT", &root)
+        .env("GIT_HTTP_EXPORT_ALL", "1")
+        .env("PATH_INFO", path)
+        .env("QUERY_STRING", query)
+        .env("REQUEST_METHOD", method)
+        .env("CONTENT_LENGTH", body.len().to_string())
+        .env("REMOTE_ADDR", "127.0.0.1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    for (name, variable) in
+        [("content-type", "CONTENT_TYPE"), ("content-encoding", "HTTP_CONTENT_ENCODING"), ("git-protocol", "GIT_PROTOCOL")]
+    {
+        if let Some(value) = header(name) {
+            backend.env(variable, value);
+        }
+    }
+    let Ok(mut child) = backend.spawn() else {
+        return;
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(&body);
+    }
+    let Ok(output) = child.wait_with_output() else {
+        return;
+    };
+    // CGI output: headers (with an optional `Status:`), a blank line, the body.
+    let cgi = output.stdout;
+    let split = cgi.windows(4).position(|window| window == b"\r\n\r\n").map_or(cgi.len(), |at| at + 4);
+    let (cgi_head, cgi_body) = cgi.split_at(split);
+    let cgi_head = String::from_utf8_lossy(cgi_head);
+    let mut status = "200 OK".to_string();
+    let mut response = String::new();
+    for line in cgi_head.lines().filter(|line| !line.is_empty()) {
+        match line.split_once(':') {
+            Some((key, value)) if key.eq_ignore_ascii_case("status") => status = value.trim().to_string(),
+            _ => response.push_str(&format!("{line}\r\n")),
+        }
+    }
+    let response =
+        format!("HTTP/1.1 {status}\r\n{response}content-length: {}\r\nconnection: close\r\n\r\n", cgi_body.len());
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.write_all(cgi_body);
 }
 
 fn gitea_pulls_json(prs: &[(u64, &str)]) -> String {

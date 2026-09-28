@@ -568,9 +568,9 @@ fork's same-named branch never matches. An open PR outranks merged ones, and
 the most recent merged PR wins among several. The result carries the source
 head SHA exactly as the provider sent it (Bitbucket Cloud abbreviates it to 12
 characters), and Gitea's is read from the list endpoint, which freezes it at
-merge. Missing or rejected credentials, 403, a 404 on the list, rate limits,
-timeouts, and unsupported hosts are typed `PrUnavailable` errors, never
-`Ok(None)`. Only hosts the URL identifies without a probe are supported;
+merge. Credentials failures, a 404 on the list, rate limits, timeouts, and
+unsupported hosts are typed `PrUnavailable` errors, never `Ok(None)` (see the
+classification below). Only hosts the URL identifies without a probe are supported;
 `pull_request_for_branch_with` takes a client built after consented discovery.
 `PullRequestInfo` also carries `source_repo`, `source_repo_is_target`, and
 `source_head_sha`.
@@ -585,6 +585,40 @@ or list 404 is a `PrUnavailable` error, never an empty list. Match a PR to a
 local branch on both source repository and branch, since a fork can reuse a
 branch name. A GitLab fork's project path costs one lookup per distinct fork;
 a fork the caller cannot see keeps `source_repo: None`.
+
+`remote::blocking::branch_head(remote_url, branch, deadline)` returns the
+provider's `BranchHead { sha }` for one branch, on the same runtime, deadline,
+host support, and error contract (`branch_head_with` takes a prebuilt client).
+Pass the remote's *fetch* URL. The branch is sent as one percent-encoded path
+segment (GitHub `git/ref/heads/{branch}`, Gitea/Forgejo `branches/{branch}`,
+GitLab `repository/branches/{branch}`, Bitbucket `refs/branches/{branch}`), so
+no branch name can change the repository path or the query. The SHA must be 40
+or 64 lowercase hex digits, or the lookup fails as `PrUnavailable::Other`. A
+404 is `NotFoundOrNotPermitted`, never proof that the branch is absent.
+
+The blocking lookups classify provider failures as follows. `key` is always the
+*name* of the variable whose token was sent, never its value, and no
+`PrUnavailable` message contains a token.
+
+| Response | `PrUnavailable` |
+|---|---|
+| 401 without a token | `CredentialsRequired { key: None }` |
+| 401 with a token | `CredentialsRejected { key }` |
+| 403 with a token whose body names a missing permission or scope | `CredentialsInsufficient { key }` |
+| 429, or a 403 with `x-ratelimit-remaining: 0` or a rate-limit body | `RateLimited { authenticated, key }` |
+| 404, or any other 403 | `NotFoundOrNotPermitted` |
+
+A token comes from the first set variable that
+`remote::blocking::credential_env(remote_url)` lists: GitHub `GH_TOKEN`,
+`GITHUB_TOKEN`; GitLab `GITLAB_TOKEN`, `GITLAB_PRIVATE_TOKEN`; Gitea and Forgejo
+`GITEA_TOKEN`, `FORGEJO_TOKEN`, `CODEBERG_TOKEN`; Bitbucket `BITBUCKET_TOKEN`.
+It returns `None` for a remote the blocking lookups do not support. A rejected
+or insufficient token is reported rather than retried anonymously.
+
+`filesystem::git::remote_identity(url)` returns a remote URL's raw
+`RemoteIdentity { scheme, host, port, path }`: the host ASCII-lowercased
+without userinfo, the port only as the URL spells it, and `path` as
+`namespace/repository` without `.git`. It applies no port or scheme policy.
 
 `FocusedProviderClient::from_pull_request_url` and
 `job_reference_from_url` accept a canonical provider **web or API** URL. Route

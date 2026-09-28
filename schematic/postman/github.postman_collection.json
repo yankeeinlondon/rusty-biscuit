@@ -800,6 +800,56 @@
           }
         },
         {
+          "name": "GetBranchReference",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/git/ref/heads/:branch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "git",
+                "ref",
+                "heads",
+                ":branch"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "branch",
+                  "value": "<branch>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/vnd.github+json"
+              },
+              {
+                "key": "X-GitHub-Api-Version",
+                "value": "2022-11-28"
+              },
+              {
+                "key": "User-Agent",
+                "value": "schematic-github-client"
+              }
+            ],
+            "description": "Get branch reference (object.sha is the branch head commit)"
+          }
+        },
+        {
           "name": "GetAnnotatedTag",
           "request": {
             "method": "GET",

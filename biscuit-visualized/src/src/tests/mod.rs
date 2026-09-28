@@ -1,6 +1,8 @@
 mod artifact_tests;
 mod cache_tests;
 #[cfg(feature = "image")]
+mod gitgraph_tests;
+#[cfg(feature = "image")]
 mod graph_tests;
 #[cfg(feature = "image")]
 mod mermaid_tests;

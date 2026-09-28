@@ -49,8 +49,10 @@ pub(crate) fn authenticate_provider_request<R: ProviderRequestBuilder>(
     }
 }
 
-pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<String>, &'static str) {
-    let names: &[&str] = match flavor {
+/// Environment variables that hold a provider-scoped token, in the order
+/// [`provider_token`] consults them.
+pub(crate) fn provider_token_variables(flavor: ApiFlavor) -> &'static [&'static str] {
+    match flavor {
         ApiFlavor::GitHub => &["GH_TOKEN", "GITHUB_TOKEN"],
         ApiFlavor::GitLab => &["GITLAB_TOKEN", "GITLAB_PRIVATE_TOKEN"],
         ApiFlavor::Gitea | ApiFlavor::Forgejo => {
@@ -59,9 +61,17 @@ pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<String>, &'static str
         ApiFlavor::Bitbucket | ApiFlavor::BitbucketDataCenter => &["BITBUCKET_TOKEN"],
         ApiFlavor::AzureDevOps => &["AZURE_DEVOPS_TOKEN"],
         _ => &[],
-    };
+    }
+}
+
+/// The first set variable of [`provider_token_variables`] as
+/// `(name, value)`, and the variable to name when none is set.
+pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<(&'static str, String)>, &'static str) {
+    let names = provider_token_variables(flavor);
     (
-        names.iter().find_map(|name| std::env::var(name).ok()),
+        names
+            .iter()
+            .find_map(|name| std::env::var(name).ok().map(|token| (*name, token))),
         names.first().copied().unwrap_or("PROVIDER_TOKEN"),
     )
 }

@@ -165,6 +165,31 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(claudine-cli) & test(/level2_/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# `wt --ff` against an origin that holds the fetch proves the listing returns
+# at the worker's own 60 s fetch deadline, so the elapsed time is the contract.
+# The 30s×3 = 90s ceiling leaves the test's own upper bound (60 s plus 3 s) in
+# charge. It runs only in `just test-perf` (`perf_`), serially.
+[[profile.default.overrides]]
+filter = 'package(worktree-cli) & test(=perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline)'
+slow-timeout = { period = "30s", terminate-after = 3 }
+
+# The graph-stage timings run `wt list` in a pseudo-terminal that never
+# answers terminal queries, so every run waits out about 2.5 s of query
+# timeouts. One sample per fixture (the default) needs about 12 s; a recorded
+# 10-sample run about 120 s. The 60s×5 = 300s ceiling covers the recorded run.
+# It runs only in `just test-perf` (`perf_`), serially.
+[[profile.default.overrides]]
+filter = 'package(worktree-cli) & test(=perf_graph_stages_are_reported_for_every_graph_fixture)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# The Kitty graph tests skip their screenshot comparison, with a warning on
+# stderr, when the capture cannot show what Kitty drew. Kitty never runs in CI,
+# so the passing output is shown to keep that warning (and the kept evidence
+# paths) visible in `just test-l2` and pre-push runs.
+[[profile.default.overrides]]
+filter = 'package(worktree-cli) & binary(level2_graph_in_kitty)'
+success-output = "final"
+
 [profile.local-evidence]
 # Evidence needs Nextest's machine-readable report without CI's runner-specific
 # concurrency caps. Test selection and failure policy inherit from the local
