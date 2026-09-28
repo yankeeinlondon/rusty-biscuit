@@ -16,6 +16,8 @@ mod bench_ids_sync;
 mod bench_plans;
 mod benchmark_workloads;
 #[cfg(feature = "remote")]
+mod branch_head;
+#[cfg(feature = "remote")]
 mod focused_provider;
 mod git_parity;
 mod host_capability_cache;

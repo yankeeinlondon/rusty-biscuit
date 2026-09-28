@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | API | Module | Endpoints | Auth | Description |
 |-----|--------|-----------|------|-------------|
 | Anthropic | `anthropic` | 4 | API Key (`X-Api-Key`) | Claude Messages API with tool use |
-| Bitbucket | `bitbucket` | 14 | Basic | Bitbucket Cloud API for repos, PRs, issues, tags |
+| Bitbucket | `bitbucket` | 16 | Basic | Bitbucket Cloud API for repos, PRs, issues, tags |
 | OpenAI | `openai` | 3 | Bearer | Models API (list, retrieve, delete) |
 | HuggingFace Hub | `huggingface` | 28+ | Bearer | Models, datasets, spaces, repos |
 | ElevenLabs | `elevenlabs` | 45+ REST, 2 WebSocket | API Key (`xi-api-key`) | TTS, voices, audio generation |
@@ -154,9 +154,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Ollama OpenAI | `ollama` | 4 | None | OpenAI-compatible subset |
 | EMQX Basic | `emqx` | 36 | Basic | MQTT broker REST API |
 | EMQX Bearer | `emqx` | 38 | Bearer | MQTT broker with token auth |
-| GitHub | `github` | 14 | Bearer | GitHub REST API for repos, PRs, issues, releases |
-| GitLab | `gitlab` | 15 | API Key (`PRIVATE-TOKEN`) | GitLab REST API for repos, MRs, issues, releases |
-| Gitea | `gitea` | 14 | API Key (`token`) | Gitea REST API for self-hosted Git forges |
+| GitHub | `github` | 17 | Bearer | GitHub REST API for repos, PRs, issues, releases |
+| GitLab | `gitlab` | 19 | API Key (`PRIVATE-TOKEN`) | GitLab REST API for repos, MRs, issues, releases |
+| Gitea | `gitea` | 16 | API Key (`token`) | Gitea REST API for self-hosted Git forges |
 | Eversolo | `eversolo` | 24 | None | DMP-A8 local HTTP control (device, playback, I/O) |
 | Samsung Smart TV | `samsung_smart_tv` | 4 REST, 1 WebSocket | None | S95C-focused LAN control (Smart View + remote WS) |
 | Unfolded Circle | `unfolded_circle` | 11 REST, 4+1+1 WebSocket | API Key / Bearer | Core REST + Core/Dock/Integration WebSocket APIs |

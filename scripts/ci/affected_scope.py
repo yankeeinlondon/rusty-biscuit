@@ -379,6 +379,7 @@ ARCHIVE_GUARD_SUITE = "archive-path-guard"
 # so `examples` excludes every package's.
 ARCHIVE_GUARD_SKIPPED_DIRS = frozenset({
     "target", ".git", "node_modules", ".gitnexus", "scripts", "examples", "fuzz",
+    "features", "fixes",
 })
 
 # The guard's own inputs, by exact path: the matcher, its fixture corpus, the

@@ -1,0 +1,92 @@
+host: Darwin arm64; git version 2.55.0
+
+== observation 1: current branch merged via merge commit ==
+  => fix/wt-ux vs origin/main: C=095d536 second parent is T (Merged directly), C^1=88aafd5 [plan cmd oldest: 095d536]
+  rev-list fp ancestry parents       exit=0 out=[095d536 88aafd5 b968afc]
+  merge-base(C^1, T)                 exit=0 out=[88aafd5]
+  merge-base(default tip, T)         exit=0 out=[b968afc]
+  lane: fp T --not C^1               exit=0 out=[b968afc|d31ffb9]
+  plain log origin/main (today)      exit=0 out=[095d536|b968afc|d31ffb9|88aafd5|04af2f2]
+  fp log origin/main (R5)            exit=0 out=[095d536|88aafd5|04af2f2]
+
+== default moved on before the merge (C is not the chain's oldest) ==
+  => B vs main: C=8416fd2 second parent is T (Merged directly), C^1=789f631 [plan cmd oldest: 8416fd2]
+
+== observation 2: nested parent, both merged, local main one merge behind ==
+  => fix/sniff vs fix/wt-ux: not contained (Unmerged candidate)
+  => fix/sniff vs origin/main: C=dded361 second parent is T (Merged directly), C^1=4d1ebd8 [plan cmd oldest: dded361]
+  => fix/wt-ux vs origin/main: C=4d1ebd8 second parent is T (Merged directly), C^1=359d8a7 [plan cmd oldest: 4d1ebd8]
+  fork: merge-base(parent tip, T)    exit=0 out=[4a028db]
+  sniff lane count (fp T --not C^1)  exit=0 out=[14]
+  plain log -10 origin/main (today)  exit=0 out=[Merge PR #104|Merge PR #103|s14|s13|s12|s11|s10|s9|s8|s7]
+  fp log -10 origin/main (R5)        exit=0 out=[Merge PR #104|Merge PR #103|d1|root]
+  anchor main on origin/main: distance=1 verified
+  anchor fix/wt-ux on origin/main: distance=2 NOT on chain (tip~2=359d8a7)
+
+== merged into a non-default parent ==
+  => child vs parent: C=544683c second parent is T (Merged directly), C^1=2788348 [plan cmd oldest: 544683c]
+  => child vs main: not contained (Unmerged candidate)
+
+== fast-forward ==
+  => ff vs main: C=1861033 first parent is T (No separate history) [plan cmd oldest: 1861033]
+  => main vs main: empty chain with is-ancestor true: T is X (No separate history) [plan cmd oldest: empty]
+
+== equal tips: C merged at M, D created at C's tip ==
+  => D vs C: empty chain with is-ancestor true: T is X (No separate history) [plan cmd oldest: empty]
+  => C vs main: C=073a7da second parent is T (Merged directly), C^1=f922a7d [plan cmd oldest: 073a7da]
+  rev-parse C D                      exit=0 out=[5522fd0|5522fd0]
+
+== continued after merge ==
+  => B vs main: not contained (Unmerged candidate)
+  fork: merge-base(main, B)          exit=0 out=[88eec82]
+  lane: fp B --not fork              exit=0 out=[2787686]
+
+== indirect integration (T merged into Y, Y merged into main) ==
+  => T vs main: C=b8395eb parents=097414c 67380aa (Integrated otherwise) [plan cmd oldest: empty]
+  lane: fp T --not C^1               exit=0 out=[5936a8f]
+
+== anchor not on the first-parent chain ==
+  anchor fix/sniff on origin/main: distance=2 NOT on chain (tip~2=359d8a7)
+
+== shallow clones (missing history) ==
+  is-shallow                         exit=0 out=[true]
+  is-ancestor sniff origin/main      exit=1 out=[]
+  merge-base sniff main              exit=1 out=[]
+  rev-list fp ancestry parents       exit=0 out=[]
+  rev-list fp count sniff..main      exit=0 out=[1]
+  rev-parse main~3                   exit=128 out=[origin/main~3] stderr=[fatal: ambiguous argument 'origin/main~3': unknown revision or path not in the working tree.|Use '--' to separate paths from revisions, like this:|'git <command> [<revision>...] -- [<file>...]']
+  rev-parse main^2                   exit=128 out=[origin/main^2] stderr=[fatal: ambiguous argument 'origin/main^2': unknown revision or path not in the working tree.|Use '--' to separate paths from revisions, like this:|'git <command> [<revision>...] -- [<file>...]']
+  cat-file -e main^1 (missing?)      exit=128 out=[] stderr=[fatal: Not a valid object name 4d1ebd84412167805b5093e070017b4a9265e101^1]
+  shallow-since: commits kept        exit=0 out=[9]
+  is-ancestor wt-ux origin/main      exit=1 out=[]
+  merge-base wt-ux sniff             exit=1 out=[]
+  fp ancestry wt-ux..main            exit=0 out=[]
+
+== timing: 9,000-commit first-parent chain, fork 5,000 back, merge 3,000 back ==
+  first-parent length: 9000
+  -- round 1
+  is-ancestor side main                      20 ms
+  rev-list fp ancestry parents side..main    22 ms
+  merge-base side main^{merge}^1             15 ms
+  rev-list fp count fork..main               23 ms
+  rev-parse main~5003 main~3000 batch        21 ms
+  log fp -10 main                            11 ms
+  -- round 2
+  is-ancestor side main                      21 ms
+  rev-list fp ancestry parents side..main    24 ms
+  merge-base side main^{merge}^1             15 ms
+  rev-list fp count fork..main               22 ms
+  rev-parse main~5003 main~3000 batch        21 ms
+  log fp -10 main                            11 ms
+  -- round 3
+  is-ancestor side main                      20 ms
+  rev-list fp ancestry parents side..main    23 ms
+  merge-base side main^{merge}^1             15 ms
+  rev-list fp count fork..main               20 ms
+  rev-parse main~5003 main~3000 batch        20 ms
+  log fp -10 main                            10 ms
+  => side vs main: C=913fc67 second parent is T (Merged directly), C^1=99ebe63 [plan cmd oldest: 913fc67]
+  anchor 913fc670610feb69d2678d72dc4f209dd459a89b on main: distance=3000 verified
+  anchor 81596812ce33a3d46937470dd71bb5f41558ec5a on main: distance=5000 NOT on chain (tip~5000=4bfcedb)
+
+work dir: /tmp/wt-s3-mac

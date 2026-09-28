@@ -1,0 +1,12 @@
+---
+source: worktree/cli/tests/list_flags.rs
+expression: "offered.join(\"\\n\")"
+---
+--fast-forward	Fast-forward the local default branch to origin/<default> (listing only)
+--help	Print help
+--ignore-api	Check origin with Git only, never the provider API, for this repository from now on (listing only; recorded in ~/.wt.json)
+--perf	Emit a performance report to stderr after command completion
+--refresh	Wait for a full update from origin, ignoring recent answers (listing only)
+--verbose	Show detailed commit history for the current worktree
+--version	Print version
+--width	Override the git graph width (e.g. "70", "70ch", "50%")

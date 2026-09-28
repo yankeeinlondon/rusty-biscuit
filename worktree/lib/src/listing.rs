@@ -955,6 +955,27 @@ mod repo_tests {
         assert_eq!(store.len(), 3);
     }
 
+    /// `wt list` reads the worktree state, waits on the remote, and only then
+    /// prunes: a `wt create` during that wait must keep its fork record, even
+    /// when a deleted branch's record makes the listing rewrite the store.
+    #[test]
+    #[serial_test::serial]
+    fn a_fork_record_written_while_the_listing_waits_survives_its_prune() {
+        let repo = TestRepo::new();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        fork(&repo, "gone", "main", 4);
+
+        let mut list = crate::worktree::parse_worktree_state().unwrap();
+        repo.git(&["branch", "fix/during-the-wait"]);
+        fork(&repo, "fix/during-the-wait", "main", crate::pull_requests::unix_now());
+        crate::worktree::fill_worktree_statuses(&mut list).unwrap();
+
+        let store = crate::fork_origin::ForkOriginStore::load_from(&fork_origin_path(&repo.path()).unwrap());
+        assert!(store.get("gone").is_none(), "the deleted branch's record was pruned");
+        assert_eq!(store.get("fix/during-the-wait").map(|origin| origin.base_branch.as_str()), Some("main"));
+    }
+
     #[test]
     #[serial_test::serial]
     fn the_parent_column_measures_against_the_parents_local_tip() {

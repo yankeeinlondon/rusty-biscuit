@@ -1,0 +1,111 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: labeled(cases)
+---
+## checked this run, no variance / behind
+main  is 3 commits behind  origin/main
+
+## checked this run, no variance / ahead
+main  is 3 commits ahead of  origin/main
+
+## checked this run, no variance / in sync
+main  is in sync with  origin/main
+
+## checked this run, no variance / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind)
+
+## variance; the fetch succeeded / behind
+main  is 3 commits behind  origin/main  (updated from origin just now)
+
+## variance; the fetch succeeded / ahead
+main  is 3 commits ahead of  origin/main  (updated from origin just now)
+
+## variance; the fetch succeeded / in sync
+main  is in sync with  origin/main  (updated from origin just now)
+
+## variance; the fetch succeeded / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (updated from origin just now)
+
+## variance; the fetch failed / behind
+main  is 3 commits behind local  origin/main  (origin differed when checked just now; fetch didn't finish within 60 s)
+
+## variance; the fetch failed / ahead
+main  is 3 commits ahead of local  origin/main  (origin differed when checked just now; fetch didn't finish within 60 s)
+
+## variance; the fetch failed / in sync
+main  is in sync with local  origin/main  (origin differed when checked just now; fetch didn't finish within 60 s)
+
+## variance; the fetch failed / diverged
+main  has diverged from local  origin/main  (3 commits ahead, 2 commits behind) (origin differed when checked just now; fetch didn't finish within 60 s)
+
+## still checking at 3 s / behind
+main  is 3 commits behind  origin/main  (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
+
+## still checking at 3 s / ahead
+main  is 3 commits ahead of  origin/main  (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
+
+## still checking at 3 s / in sync
+main  is in sync with  origin/main  (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
+
+## still checking at 3 s / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
+
+## still pulling at 3 s / behind
+main  is 3 commits behind local  origin/main  (origin differed when checked just now; pulling remote updates in the background)
+
+## still pulling at 3 s / ahead
+main  is 3 commits ahead of local  origin/main  (origin differed when checked just now; pulling remote updates in the background)
+
+## still pulling at 3 s / in sync
+main  is in sync with local  origin/main  (origin differed when checked just now; pulling remote updates in the background)
+
+## still pulling at 3 s / diverged
+main  has diverged from local  origin/main  (3 commits ahead, 2 commits behind) (origin differed when checked just now; pulling remote updates in the background)
+
+## check failed; an earlier answer exists / behind
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 2 h ago)
+
+## check failed; an earlier answer exists / ahead
+main  is 3 commits ahead of  origin/main  (couldn't check origin; last checked with origin 2 h ago)
+
+## check failed; an earlier answer exists / in sync
+main  is in sync with  origin/main  (couldn't check origin; last checked with origin 2 h ago)
+
+## check failed; an earlier answer exists / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (couldn't check origin; last checked with origin 2 h ago)
+
+## check failed; no earlier answer; the tracking ref has a reflog / behind
+main  is 3 commits behind  origin/main  (couldn't check origin; tracking ref last changed 3 h ago)
+
+## check failed; no earlier answer; the tracking ref has a reflog / ahead
+main  is 3 commits ahead of  origin/main  (couldn't check origin; tracking ref last changed 3 h ago)
+
+## check failed; no earlier answer; the tracking ref has a reflog / in sync
+main  is in sync with  origin/main  (couldn't check origin; tracking ref last changed 3 h ago)
+
+## check failed; no earlier answer; the tracking ref has a reflog / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (couldn't check origin; tracking ref last changed 3 h ago)
+
+## check failed; nothing known / behind
+main  is 3 commits behind  origin/main  (couldn't check origin; never checked with origin)
+
+## check failed; nothing known / ahead
+main  is 3 commits ahead of  origin/main  (couldn't check origin; never checked with origin)
+
+## check failed; nothing known / in sync
+main  is in sync with  origin/main  (couldn't check origin; never checked with origin)
+
+## check failed; nothing known / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (couldn't check origin; never checked with origin)
+
+## branch absent on origin, tracking ref still exists / behind
+main  is 3 commits behind  origin/main  (main was absent on origin when checked just now; origin/main is a local tracking ref)
+
+## branch absent on origin, tracking ref still exists / ahead
+main  is 3 commits ahead of  origin/main  (main was absent on origin when checked just now; origin/main is a local tracking ref)
+
+## branch absent on origin, tracking ref still exists / in sync
+main  is in sync with  origin/main  (main was absent on origin when checked just now; origin/main is a local tracking ref)
+
+## branch absent on origin, tracking ref still exists / diverged
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (main was absent on origin when checked just now; origin/main is a local tracking ref)

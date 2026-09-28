@@ -36,6 +36,8 @@ println!("{}", artifact.path.display());
 
 `biscuit-visualized` only generates the artifact. Width selection, terminal image protocols, render metadata display, and fallback-to-code-block behavior live in `biscuit-terminal`.
 
+For a `gitGraph`, rendering also restores the second parent of labeled merges and spaces commits so tags never overlap. See [Mermaid gitGraph corrections](docs/mermaid-gitgraph.md).
+
 ## Graph Example
 
 ```rust,no_run

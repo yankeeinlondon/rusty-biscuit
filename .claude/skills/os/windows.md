@@ -154,6 +154,14 @@ Compare against that, never against `to_string_lossy()`.
   `HANDLE_FLAG_INHERIT` on the current process's stdio before setting the
   detached creation flags (`windows` crate features `Win32_Foundation` and
   `Win32_System_Console`). Unix never sees this; fds are close-on-exec.
+- **A refused loopback connection is slow.** Connecting to a closed
+  `127.0.0.1` port fails in milliseconds on macOS and Linux, but native
+  Windows retries the SYN and reports the refusal after about 2 s. A test
+  that expects a refused request to fail *inside* some deadline (for example
+  `wt list`'s 3 s wait over `ProxyStub::refusing`) passes alone and fails
+  under parallel load there. Assert only what holds either way, or accept and
+  close connections instead (`ProxyStub::closing_after`). Found 2026-09-27 by
+  `list_prs::a_changed_origin_hides_the_stored_badges_and_its_worker_stores_nothing`.
 - **`python3` is an App Execution Alias, not an interpreter.** Windows ships a
   stub at `python3.exe` that *spawns successfully* and then exits non-zero with
   "Python was not found; run without arguments to install from the Microsoft

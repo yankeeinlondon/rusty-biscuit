@@ -23,6 +23,7 @@
 //! - `ListIssueTimeline` - List timeline events for an issue
 //! - `ListTags` - List repository tags
 //! - `ListReleases` - List releases (linked to tags via tag_name)
+//! - `GetBranch` - Get a branch (commit.id is the branch head commit)
 //! - `GetTagReference` - Get tag reference (returns array; check object.type: 'commit' vs 'tag')
 //! - `GetAnnotatedTag` - Get annotated tag object details (message, tagger)
 //! - `ListOrgRepos` - List repositories for an organization

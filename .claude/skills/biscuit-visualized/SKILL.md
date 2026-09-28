@@ -39,7 +39,7 @@ For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` dir
 
 | Topic | Description |
 |-------|-------------|
-| [Mermaid Rendering](./mermaid-rendering.md) | MermaidDiagram API, themes, config, quadrant charts |
+| [Mermaid Rendering](./mermaid-rendering.md) | MermaidDiagram API, themes, config, quadrant charts, gitGraph corrections |
 | [Graph Rendering](./graph-rendering.md) | Expression syntax, DOT format, GraphBuilder, orientation, color themes, terminal resolution tuning |
 | [Artifacts & Caching](./artifacts-caching.md) | RenderRequest, RenderedArtifact, FileCache, cache layout |
 | [Rasterization](./rasterization.md) | SVG-to-PNG via resvg, scale factors, font handling, terminal protocol ceiling |
@@ -47,6 +47,8 @@ For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` dir
 ### In-repo deep dive
 
 `biscuit-visualized/docs/dot-graph.md` — full reference for the DOT graph subset accepted by this library, including supported / rejected features, cluster syntax, and the resolution-tuning case study from `sniff repo package-dependencies --ui`.
+
+`biscuit-visualized/docs/mermaid-gitgraph.md` — every gitGraph is corrected before drawing: a labeled `merge` gets back the second parent `mermaid-rs-renderer` 0.3.1 loses, and commits are spaced only as far as colliding tags (different commits, overlapping rows) need for a one-em gap, so tags never overlap and an isolated long label keeps the default step (horizontal graphs with unrotated tags only). Both run in the one layout path that measurement and rendering share.
 
 ## Mermaid Diagrams
 
@@ -219,7 +221,7 @@ RasterError::IoError(std::io::Error)
 
 | Crate | Purpose |
 |-------|---------|
-| `mermaid-rs-renderer` v0.2 | Mermaid diagram rendering backend |
+| `mermaid-rs-renderer` 0.3.1 | Mermaid diagram rendering backend (cache backend id `mermaid-rs-renderer@0.3.x+bv3`) |
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
 | `resvg` v0.45 | SVG-to-PNG rasterization |
 | `biscuit-hash` | xxHash for cache key generation |

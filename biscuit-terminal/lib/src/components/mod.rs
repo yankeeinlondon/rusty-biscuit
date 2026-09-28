@@ -17,6 +17,7 @@ pub mod progress;
 pub mod prose;
 pub mod renderable;
 pub mod section;
+pub mod spinner;
 pub mod status;
 pub mod status_block;
 pub mod table;

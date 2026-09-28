@@ -12,6 +12,7 @@
 //! - **Repository Files**: Raw file content (Base64 encoded)
 //! - **Merge Requests**: List MRs with associated metadata, commits, and changes
 //! - **Issues**: List issues, comments, participants, time stats
+//! - **Branches**: A branch and its head commit
 //! - **Tags & Releases**: Distinguish regular tags from release tags
 //!
 //! ## Authentication
@@ -35,6 +36,7 @@
 //! | Repository | `ListRepositoryTree`, `GetRepositoryFile` |
 //! | Merge Requests | `ListMergeRequests`, `GetMergeRequest`, `ListMergeRequestCommits`, `ListMergeRequestChanges` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueNotes`, `ListIssueParticipants` |
+//! | Branches | `GetBranch` |
 //! | Tags/Releases | `ListTags`, `GetTag`, `ListReleases`, `GetRelease`, `GetLatestRelease` |
 //! | Projects | `GetProject` |
 //! | Pipelines | `ListProjectPipelines` |
@@ -88,6 +90,7 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<Vec<Note>>("Vec<Note>")
         .register::<User>("User")
         .register::<Vec<User>>("Vec<User>")
+        .register::<Branch>("Branch")
         .register::<Tag>("Tag")
         .register::<Vec<Tag>>("Vec<Tag>")
         .register::<Release>("Release")
@@ -117,6 +120,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// | GetIssue | GET | /projects/{id}/issues/{issue_iid} | Get single issue |
 /// | ListIssueNotes | GET | /projects/{id}/issues/{issue_iid}/notes | List issue comments |
 /// | ListIssueParticipants | GET | /projects/{id}/issues/{issue_iid}/participants | List issue participants |
+/// | GetBranch | GET | /projects/{id}/repository/branches/{branch} | Get single branch |
 /// | ListTags | GET | /projects/{id}/repository/tags | List repository tags |
 /// | GetTag | GET | /projects/{id}/repository/tags/{tag_name} | Get single tag |
 /// | ListReleases | GET | /projects/{id}/releases | List releases |
@@ -133,11 +137,12 @@ pub fn openapi_registry() -> SchemaRegistry {
 ///
 /// let api = define_gitlab_api();
 /// assert_eq!(api.name, "GitLab");
-/// assert_eq!(api.endpoints.len(), 18);
+/// assert_eq!(api.endpoints.len(), 19);
 /// ```
 pub fn define_gitlab_api() -> RestApi {
     let endpoints: Vec<Endpoint> = vec![
         endpoints::projects::all(),
+        endpoints::branches::all(),
         endpoints::merge_requests::all(),
         endpoints::issues::all(),
         endpoints::releases::all(),
@@ -207,7 +212,7 @@ mod tests {
         assert!(registry.get("Tag").is_some());
         assert!(registry.get("Release").is_some());
         assert!(registry.get("Pipeline").is_some());
-        assert_eq!(registry.len(), 22);
+        assert_eq!(registry.len(), 23);
     }
 
     #[test]
@@ -276,9 +281,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_eighteen_endpoints() {
+    fn api_has_nineteen_endpoints() {
         let api = define_gitlab_api();
-        assert_eq!(api.endpoints.len(), 18);
+        assert_eq!(api.endpoints.len(), 19);
     }
 
     #[test]
@@ -437,6 +442,28 @@ mod tests {
     }
 
     #[test]
+    fn get_branch_endpoint() {
+        let api = define_gitlab_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "GetBranch")
+            .expect("GetBranch endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/projects/{id}/repository/branches/{branch}");
+        assert!(endpoint.request.is_none());
+        assert!(endpoint.oauth_scopes.is_none());
+        match &endpoint.response {
+            schematic_define::ApiResponse::Json(schema) => {
+                assert_eq!(schema.type_name, "Branch");
+            }
+            _ => panic!("Expected JSON response"),
+        }
+        assert!(matches!(api.auth, AuthStrategy::ApiKey { .. }));
+    }
+
+    #[test]
     fn env_mapping_configured() {
         let api = define_gitlab_api();
 
@@ -511,6 +538,7 @@ mod tests {
             "GetMergeRequest",
             "ListMergeRequestChanges",
             "GetIssue",
+            "GetBranch",
             "GetTag",
             "GetRelease",
             "GetLatestRelease",
