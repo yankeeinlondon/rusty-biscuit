@@ -260,7 +260,7 @@ impl MermaidDiagram {
     #[doc(hidden)]
     pub fn gitgraph_geometry(&self) -> Result<Option<GitGraphGeometry>, MermaidError> {
         let laid_out = self.compute_layout(false)?;
-        Ok(GitGraphGeometry::from_layout(&laid_out.graph, &laid_out.layout, &laid_out.config))
+        Ok(GitGraphGeometry::from_layout(&laid_out.graph, &laid_out.layout, &laid_out.config, &laid_out.theme))
     }
 
     /// The one path from instructions to layout that measurement and rendering

@@ -12,8 +12,9 @@
 //!   parent. [`repair_gitgraph_merges`] restores the second parent.
 //! - **Tag spacing.** The renderer places a tag above its commit with no
 //!   collision avoidance and spaces commits a fixed `commit_step` apart, so a
-//!   tag wider than that step covers its neighbor's. [`layout`] lays out a
-//!   second time with the step widened to fit the widest tag.
+//!   tag wider than that step can cover a neighbor's. [`layout`] lays out
+//!   again with the smallest step that separates every colliding pair by one
+//!   em, and only when such a pair exists.
 
 use mermaid_rs_renderer::ir::GitGraphCommitType;
 use mermaid_rs_renderer::layout::{DiagramData, GitGraphLayout};
@@ -102,29 +103,96 @@ fn names_merge_source(suffix: &str, name: &str) -> bool {
     })
 }
 
-/// Lays out `graph`, spacing a gitGraph's commits so no two tags overlap.
+/// Label clearance below which a pair still counts as clear, in SVG user
+/// units. Absorbs float noise in a pair that was widened to exactly the gap.
+pub(crate) const SPACING_EPSILON: f32 = 0.01;
+
+/// Layouts allowed after the first, the fallback's included.
+pub(crate) const MAX_SPACING_PASSES: usize = 3;
+
+/// Lays out `graph`, spacing a gitGraph's commits so no two tags collide.
 ///
-/// A left-to-right or right-to-left gitGraph with at least one tag, none of
-/// them rotated, is laid out twice: the second pass sets `commit_step` to the
-/// widest tag plus [`TAG_GAP_EM`] (never less than the default step). Every
-/// other diagram, a gitGraph without tags, a vertical one (`TB`, `BT`), and one
-/// with a rotated tag get the single default pass, so their tags are not
-/// spaced.
+/// Only a left-to-right or right-to-left gitGraph with no rotated tag is
+/// spaced. Its first pass uses the default `commit_step`; when two tags on
+/// different commits share vertical extent and are closer than [`TAG_GAP_EM`],
+/// the step becomes the smallest one that gives every such pair that gap
+/// ([`required_step`]). Every other diagram, and a spaced one with no
+/// colliding pair, keeps the single default pass, so an isolated long label
+/// never widens the graph.
 pub(crate) fn layout(graph: &Graph, theme: &Theme) -> (Layout, LayoutConfig) {
     let mut config = LayoutConfig::default();
-    let first = mermaid_rs_renderer::compute_layout(graph, theme, &config);
-    let Some(widest) = gitgraph_of(&first)
-        .filter(|gitgraph| matches!(gitgraph.direction, Direction::LeftRight | Direction::RightLeft))
-        .and_then(widest_horizontal_tag)
-    else {
-        return (first, config);
-    };
-    let step = config.gitgraph.commit_step.max(widest + TAG_GAP_EM * theme.font_size);
-    if step == config.gitgraph.commit_step {
-        return (first, config);
-    }
+    let (layout, step) = spaced(config.gitgraph.commit_step, TAG_GAP_EM * theme.font_size, |step| {
+        let mut config = config.clone();
+        config.gitgraph.commit_step = step;
+        let layout = mermaid_rs_renderer::compute_layout(graph, theme, &config);
+        let labels = gitgraph_of(&layout).and_then(horizontal_labels);
+        (layout, labels)
+    });
     config.gitgraph.commit_step = step;
-    (mermaid_rs_renderer::compute_layout(graph, theme, &config), config)
+    (layout, config)
+}
+
+/// The spacing loop over an injected placement, which lays out at a step and
+/// returns the labels to space (`None` when the layout is not spaced at all).
+///
+/// Tag edges move linearly with the step, so the first widening normally
+/// verifies. If a collision survives `MAX_SPACING_PASSES - 1` widenings, the
+/// last layout uses the widest tag plus the gap, the bound that cannot
+/// collide, and is not verified again.
+pub(crate) fn spaced<L>(default: f32, gap: f32, mut place: impl FnMut(f32) -> (L, Option<Vec<LabeledCommit>>)) -> (L, f32) {
+    let (first, labels) = place(default);
+    let Some(labels) = labels else {
+        return (first, default);
+    };
+    let Some(mut step) = required_step(default, gap, &labels) else {
+        return (first, default);
+    };
+    for _ in 1..MAX_SPACING_PASSES {
+        let (laid, relaid) = place(step);
+        match relaid.and_then(|relaid| required_step(step, gap, &relaid)) {
+            None => return (laid, step),
+            Some(wider) => step = wider,
+        }
+    }
+    let widest = labels.iter().map(|label| label.bounds.width()).fold(0f32, f32::max);
+    let step = step.max(widest + gap);
+    (place(step).0, step)
+}
+
+/// One tag's label, with its commit's placement index and x.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LabeledCommit {
+    /// The commit's position in the laid-out commit order.
+    pub index: usize,
+    pub x: f32,
+    pub bounds: Bounds,
+}
+
+/// The smallest commit step that leaves `gap` between every colliding pair of
+/// labels, given labels laid out at `step`; `None` when every pair is clear.
+///
+/// A pair counts only when its labels are on different commits and their
+/// vertical interiors overlap. The earlier label is the one whose commit has
+/// the smaller x, and each step unit moves the later label by the two
+/// commits' index distance, so a pair short of the gap by `shortfall` needs
+/// `step + shortfall / distance`. The result is the maximum over all pairs.
+pub(crate) fn required_step(step: f32, gap: f32, labels: &[LabeledCommit]) -> Option<f32> {
+    let mut required: Option<f32> = None;
+    for (position, a) in labels.iter().enumerate() {
+        for b in &labels[position + 1..] {
+            if a.index == b.index || !(a.bounds.y1 < b.bounds.y2 && b.bounds.y1 < a.bounds.y2) {
+                continue;
+            }
+            let (earlier, later) = if a.x <= b.x { (a, b) } else { (b, a) };
+            let shortfall = gap - (later.bounds.x1 - earlier.bounds.x2);
+            if shortfall <= SPACING_EPSILON {
+                continue;
+            }
+            let pair = step + shortfall / a.index.abs_diff(b.index) as f32;
+            required = Some(required.map_or(pair, |required| required.max(pair)));
+        }
+    }
+    required
 }
 
 fn gitgraph_of(layout: &Layout) -> Option<&GitGraphLayout> {
@@ -134,18 +202,33 @@ fn gitgraph_of(layout: &Layout) -> Option<&GitGraphLayout> {
     }
 }
 
-/// The widest tag's width, or `None` when there is no tag or any is rotated.
-fn widest_horizontal_tag(gitgraph: &GitGraphLayout) -> Option<f32> {
-    let mut tags = gitgraph.commits.iter().flat_map(|commit| &commit.tags).peekable();
-    tags.peek()?;
-    let mut widest = 0f32;
-    for tag in tags {
-        if tag.transform.is_some() {
-            return None;
-        }
-        widest = widest.max(Bounds::of(&tag.points).width());
+/// Every tag's label in a horizontal gitGraph, or `None` when the graph is
+/// vertical or any tag is rotated.
+fn horizontal_labels(gitgraph: &GitGraphLayout) -> Option<Vec<LabeledCommit>> {
+    if !matches!(gitgraph.direction, Direction::LeftRight | Direction::RightLeft) {
+        return None;
     }
-    Some(widest)
+    let mut labels = Vec::new();
+    for (index, commit) in gitgraph.commits.iter().enumerate() {
+        for tag in &commit.tags {
+            if tag.transform.is_some() {
+                return None;
+            }
+            labels.push(LabeledCommit {
+                index,
+                x: commit.x,
+                bounds: Bounds::of(&tag.points),
+            });
+        }
+    }
+    Some(labels)
+}
+
+/// The renderer's default commit spacing, which an unspaced gitGraph keeps.
+/// Test support for callers without a `mermaid-rs-renderer` dependency.
+#[doc(hidden)]
+pub fn default_gitgraph_commit_step() -> f32 {
+    LayoutConfig::default().gitgraph.commit_step
 }
 
 /// An axis-aligned box in SVG user units.
@@ -197,6 +280,9 @@ pub struct GitGraphGeometry {
     pub commits: Vec<CommitGeometry>,
     /// The commit spacing the layout used.
     pub commit_step: f32,
+    /// The clearance spacing gives colliding tags: [`TAG_GAP_EM`] of the
+    /// theme's font size.
+    pub tag_gap: f32,
     pub width: f32,
     pub height: f32,
 }
@@ -206,6 +292,9 @@ pub struct GitGraphGeometry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitGeometry {
     pub id: String,
+    /// The position in layout order, which the step multiplies.
+    pub index: usize,
+    pub x: f32,
     /// The lane (branch) name the commit sits on.
     pub lane: String,
     /// Parent IDs after the merge repair.
@@ -223,15 +312,18 @@ pub struct TagGeometry {
 
 #[allow(missing_docs)]
 impl GitGraphGeometry {
-    pub(crate) fn from_layout(graph: &Graph, layout: &Layout, config: &LayoutConfig) -> Option<Self> {
+    pub(crate) fn from_layout(graph: &Graph, layout: &Layout, config: &LayoutConfig, theme: &Theme) -> Option<Self> {
         let gitgraph = gitgraph_of(layout)?;
         let commits = gitgraph
             .commits
             .iter()
-            .map(|laid| {
+            .enumerate()
+            .map(|(index, laid)| {
                 let parsed = graph.gitgraph.commits.iter().find(|commit| commit.id == laid.id);
                 CommitGeometry {
                     id: laid.id.clone(),
+                    index,
+                    x: laid.x,
                     lane: parsed.map(|commit| commit.branch.clone()).unwrap_or_default(),
                     parents: parsed.map(|commit| commit.parents.clone()).unwrap_or_default(),
                     tags: laid
@@ -248,6 +340,7 @@ impl GitGraphGeometry {
         Some(Self {
             commits,
             commit_step: config.gitgraph.commit_step,
+            tag_gap: TAG_GAP_EM * theme.font_size,
             width: gitgraph.width,
             height: gitgraph.height,
         })
