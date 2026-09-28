@@ -2,7 +2,9 @@
 created: 2026-09-27
 status: finalized-spec
 clarified: true
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6-sol
+reviewed_on: 2026-09-28
 review_iterations: 0
 implemented: false
 $schema:
@@ -34,7 +36,7 @@ related:
     - 2026-09-27-graph-merged-branch
 ---
 
-# `wt list` graph lanes shrink to their tip, and a directly merged branch floats
+# Restore commit density and direct merges in the `wt list` graph
 
 ## Outcome
 
@@ -63,7 +65,7 @@ The `main` lane's change is a correction. The two defects below are regressions.
 
 The branch lanes lose their commits during layout, not during gathering. The
 gathered facts still carry a `+N` square and 5 commits for each branch lane,
-which is 28 drawn commits in total.
+which is 28 commits before width fitting.
 
 1. A Mermaid gitGraph gives every commit its own column across all lanes, so
    the natural width grows with the total commit count.
@@ -71,8 +73,8 @@ which is 28 drawn commits in total.
    `commit_step` to the widest tag plus one em whenever the graph has **any**
    horizontal tag. Here that tag is `origin/main` (65 + 14), which raises the
    step from 34 to 79 for every commit.
-3. `GitGraph::plan_with` in `biscuit-terminal` then folds commits into `+N`
-   squares until the image fits the terminal width. It takes from whichever
+3. `GitGraph::plan_with` in `biscuit-terminal/lib/src/components/git_graph.rs`
+   then folds commits into `+N` squares until the image fits the terminal width. It takes from whichever
    lane shows the most commits, so every lane ends at its square plus its tip.
 
 Measured from the observed Mermaid text (dark theme):
@@ -84,7 +86,8 @@ Measured from the observed Mermaid text (dark theme):
 | Drawn plan (12 commits), with tags | 79 | 1279 (≈ 200 columns) |
 
 At the default step, about 27 of the 28 commits fit the same 200 columns. With
-the widened step, 12 fit and 17 were trimmed.
+the widened step, the observed run fit 12 and trimmed 17. The exact count
+depends on the other graph elements and on font measurement.
 
 The widening protects nothing in this graph. Only `b47a046` carries tags (`main`
 and `origin/main`, stacked on that one commit). Tags can only collide when
@@ -117,30 +120,47 @@ from the parent and a merge into the default branch at the correct commits.
 
 ### Spacing
 
-- In a graph where no two tags could overlap at the default step, the spacing
+- If every pair of tags on different commits either has no vertical overlap
+  or already has the existing one-em clearance at the default step, spacing
   stays at the default step. The observed case must lay out at step 34.
-- Where tags would overlap, they still must not overlap. Full labels stay
+- Where tags would overlap, they retain at least the one-em gap. Full labels stay
   attached to their exact commits, as `2026-09-27-graph-merged-branch`
   requires, and the `main`/`origin/main`-one-commit-apart case keeps passing.
 - Measurement and rendering keep sharing one layout, so a measured size stays
   the size of the image drawn.
-- The step is widened only as far as real collisions need (decision 1). For
-  each pair of tagged commits `k` columns apart whose tags overlap vertically,
-  the pair needs `step × k ≥ (w₁ + w₂) / 2 + gap`. The step is the default
-  step or the largest pair requirement, whichever is greater. Tags on
-  different lanes that don't overlap vertically impose nothing, and neither do
-  several tags stacked on one commit.
+- The step is widened only as far as real collisions need. Compare the actual
+  first-pass label bounds for tags on different commits whose vertical
+  interiors overlap. For each pair, use their commit sequence distance and
+  the amount by which the earlier label's right edge would cross the later
+  label's left edge after adding the existing one-em gap. Divide any shortfall
+  by the sequence distance and add it to the default step. Reverse the
+  horizontal ordering for right-to-left graphs. Choose the largest required
+  step, never less than the renderer's default. This uses actual placement,
+  including labels that are not centered on their commit; widths alone cannot
+  give an exact answer. Tags on one commit move together and add no spacing
+  requirement. Verify the resulting layout preserves the gap between tags
+  whose vertical interiors overlap. If label placement changes between passes,
+  widen from the remaining overlap and lay out again; if that cannot be proven
+  to converge, use the existing widest-tag step as a safe bound. Preserve the
+  current behavior for vertical graphs and rotated tags.
 
 ### Classification
 
-- A branch whose tip is a non-first parent of a merge on a candidate lane is
-  drawn as merged directly into that lane. It is not demoted to
-  `IntegratedOtherwise` because an earlier candidate reaches the tip only through that same merge.
-- The existing preference for the parent's lane still holds when the parent
-  merged the branch itself, for example a child merged into its parent that
-  later merged into `main`.
-- A fork commit that sits on no drawn lane stays undrawn (decision 2). The
-  lane is still connected by its verified merge, and the incomplete-history
+- Evaluate candidate lanes in the existing order: recorded parent, default,
+  then diverged `origin/<default>`. Keep the first direct merge or first-parent
+  match found in that order. A first-parent match remains a label on its lane;
+  a child merged into its parent stays attached to the parent after that
+  parent merges into `main`. Defer an indirect match while checking later
+  candidates for a direct merge or first-parent match. Use the first indirect
+  match only if no candidate supplies either stronger result.
+  If Git cannot establish an earlier candidate's relationship, the result is
+  a history gap, as it is today, even when a later candidate has a direct
+  merge: that later result does not prove which connection should win.
+- Keep the chosen merge commit and its first parent together when computing
+  the branch's history limit, merge edge, and fork. The recorded parent
+  remains the fork lane when present, even if the merge is on `main`.
+- A fork commit that sits on no drawn lane stays undrawn (the unplaceable-fork
+  decision below). The lane is still connected by its verified merge, and the incomplete-history
   notice accounts for the missing fork. The fork is never attached at a
   substitute commit, and earlier merges are not reconstructed to make it
   drawable.
@@ -157,30 +177,46 @@ trimmed.
 
 | Case | Required outcome | Validation |
 |---|---|---|
-| Observed repository shape (a real-Git fixture mirroring the problem history) at 200 columns | Each branch lane shows more than its tip after its `+N` square; `commit_step` is the default | Component plan assertions plus measured geometry |
+| Observed repository shape (a real-Git fixture mirroring the problem history) at 200 columns | The affected branch lanes show more than their tips after their `+N` squares; `commit_step` is the default | Component plan assertions plus measured geometry; assert the planned commits rather than an OS-specific pixel width |
 | Tags on one commit only | No widened step | `biscuit-visualized` geometry test |
 | Tagged commits adjacent, with long labels | No overlap; labels stay on their commits | Existing label-bounds tests keep passing |
 | Branch merged directly into the default lane after its parent merged the default branch back in | `merged_into` is the default-lane merge commit; the merge edge is drawn | Real-Git fixture in `worktree-cli` topology tests |
 | Child merged into its parent, parent later merged into the default branch | Still merged into the parent | Existing fixture |
+| Parent has the branch tip on its first-parent chain while another lane contains it | Branch stays a label on the parent's lane | Real-Git topology test |
+| Earlier candidate contains the tip only indirectly and no later candidate has a direct merge or first-parent match | Earlier indirect result and incomplete-history notice remain | Real-Git topology test |
+| Git cannot establish an earlier candidate's relationship in a shallow or failed history query | Incomplete-history notice; no invented merge edge | Topology test with existing history-gap behavior |
 | `fix/sniff`-style fork from a parent tip that now lives only in the default branch's second-parent history | Merge edge drawn; fork undrawn and accounted for by the notice; the lane is never attached to a substitute commit | Real-Git fixture and component assertions |
 | Two tagged commits on different lanes, one column apart, whose tags don't overlap vertically | Default step | `biscuit-visualized` geometry test |
+| Unequal or offset labels, right-to-left layout, and theme font overrides | Smallest step that clears actual inter-commit overlaps with the one-em gap; measured and rendered geometry agree | `biscuit-visualized` geometry tests |
 | Rendered image | No overlapping labels; density visibly restored | Kitty L2 test and the saved transmitted image |
 
 Record `graph image render (biscuit-terminal)` timings before and after for the
-observed case.
+same observed-case fixture, terminal size, and build profile. Report the
+measurement setup and spread across runs, since rendering and font
+measurements vary by host.
 
 ## Decisions
 
-Decided with Ken on 2026-09-28.
+The original choices were decided with Ken on 2026-09-28. This review clarifies
+their implementation contracts and effects on other callers.
 
 1. **Spacing: collision-driven global step.** `mermaid-rs-renderer` 0.3.1 places
    commits at `seq × commit_step` and returns connectors as finished SVG path
    strings, so per-gap spacing would mean regenerating those paths after
    layout (fragile) or changing the renderer (a dependency change). The
-   global step is kept but sized from real collisions only, using the first
-   layout pass's tag bounds. This fully restores the observed case. A real
-   collision, such as `main` and `origin/main` one commit apart, still widens
-   every column; that is accepted.
+   global step is kept but sized from actual label bounds and commit positions
+   in the first layout pass, then checked in the resulting layout. This restores
+   the observed case. A real collision, such as `main` and `origin/main` one
+   commit apart, still widens every column; that is accepted.
+   **Reader's note:** the previous widest-label rule prevented overlaps, but
+   one long, isolated label widened every column and caused the terminal
+   component to fold useful commits away. The bounds-based rule retains the
+   existing gap only where two labels can meet. Since the same Mermaid input
+   now produces a different image, bump `biscuit-visualized`'s Mermaid backend
+   cache identifier as its cache contract requires.
+   This correction is shared by every `biscuit-visualized` Mermaid caller,
+   including `biscuit-terminal` and Darkmatter, so the cache change and
+   geometry tests must cover direct Mermaid rendering as well as `wt list`.
 2. **Unplaceable fork: merge edge plus notice.** `fix/sniff` forked at
    `2a7298a`. That commit is on `fix/wt-ux`'s first-parent chain but already
    merged into `main` by #103, so neither lane draws it. The branch is drawn
@@ -204,3 +240,4 @@ Decided with Ken on 2026-09-28.
   the spacing interaction is described there.
 - `worktree/docs/git-graph.md`: the classification order and direct-merge
   preference.
+- `.claude/skills/worktree/SKILL.md`: the classification and spacing summary.
