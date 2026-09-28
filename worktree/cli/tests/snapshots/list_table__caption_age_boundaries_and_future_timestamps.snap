@@ -1,0 +1,33 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: labeled(cases)
+---
+## answer 0 s
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin less than 1 min ago)
+
+## answer 59 s
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin less than 1 min ago)
+
+## answer 60 s
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 1 min ago)
+
+## answer 3599 s
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 59 min ago)
+
+## answer 3600 s
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 1 h ago)
+
+## answer 2 days - 1 min
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 47 h ago)
+
+## answer 2 days
+main  is 3 commits behind  origin/main  (couldn't check origin; last checked with origin 2 days ago)
+
+## answer future-dated by 1 s
+main  is 3 commits behind  origin/main  (couldn't check origin; never checked with origin)
+
+## reflog 3 days
+main  is 3 commits behind  origin/main  (couldn't check origin; tracking ref last changed 3 days ago)
+
+## reflog future-dated by 1 day
+main  is 3 commits behind  origin/main  (couldn't check origin; never checked with origin)

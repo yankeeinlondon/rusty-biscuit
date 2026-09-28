@@ -127,6 +127,21 @@ focus-stealing tests could run, and they do not run on CI at all. Details in
   screenshot is black (never drawn). Stop an instance with `kitty @ --to …
   action quit`; without `confirm_os_window_close=0` that opens a "Quit
   kitty?" window instead.
+  An *occluded* instance's screenshot is empty too (2026-09-28): Kitty does
+  not render a window another window covers, and `open -g` puts it behind
+  the frontmost app. On the dev Mac it opened at the same spot on the second
+  display, under a full-height Zed window, so 100×32 and 56×60 windows were
+  always empty and 200×60 ones only when a strip stuck out; a second
+  instance also covers the first. Grant Screen Recording and uncover that
+  area for real pixel evidence; the Kitty graph tests skip visibly otherwise.
+- **A script's `cd <area>` lands in the main checkout.** The dev Mac's
+  shell exports `CDPATH` (with `~/coding/personal` and the main checkout
+  among its entries), so in a script or subshell run from a linked worktree,
+  a relative `cd worktree && just test` can resolve to
+  `~/coding/personal/rusty-biscuit/worktree` and quietly test the wrong tree
+  (seen 2026-09-27: every gate green, counts matching an older state). Use
+  absolute paths or `env -u CDPATH`, and check that the recipe's first
+  output line (the area path) names the worktree.
 - **A shell prompt inside a captured L2 frame.** The L2 WezTerm harness
   spawns an interactive login shell, so anything the host's shell startup
   does interactively lands in the pane. A first-run tool prompt (seen with

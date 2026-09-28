@@ -1,19 +1,23 @@
-//! The `wt list` table: the caption, the Worktree and Branch columns, the two
-//! target columns with their PR badges, the legend, and the PR age line.
+//! The `wt list` output around the git work: the caption, the credentials
+//! line, the table, the legend, the PR age line, the refresh hint, and the
+//! closing notes, plus [`assemble`], which puts them and the graph and
+//! verbose sections in their order.
 //!
 //! Rendering is pure over the library's listing facts and an explicit `now`,
-//! so every variant can be tested without git. The design is item 5 ("Table
-//! Design") of the worktree fix `2026-09-24-ux-improvements`; the caption's
-//! remote observation is the fix `2026-09-26-stale-remote-caption`.
+//! so every variant can be tested without git. The table design is item 5
+//! ("Table Design") of the worktree fix `2026-09-24-ux-improvements`; the
+//! caption, the credentials line, the hint, and the notes are §4–§9 of the fix
+//! `2026-09-27-list-freshness-ux`.
 //!
-//! The caption's comparison is against the **local tracking ref**, as of the
-//! last fetch. What the remote itself held comes only from the stored live-head
-//! answer ([`RemoteFacts::answer`]), always with its age, and a difference
-//! between the two is reported as a difference, never as the remote having
-//! moved: the fetch may be newer than the check.
+//! The caption compares the local default branch with the local tracking ref
+//! `origin/<default>` as gathered **after** this run's update attempt, and
+//! says in a dim italic suffix what that attempt established
+//! ([`RemoteStatus`]). A row that could not bring the tracking ref up to date
+//! calls it "local origin/<default>".
 
 use std::collections::HashMap;
 
+use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
@@ -27,15 +31,18 @@ use worktree::listing::{
     TreeRow,
 };
 use worktree::pull_requests::{OpenPullRequest, PrListing, PrPlacement, placement};
-use worktree::remote_head::RemoteHead;
+use worktree::remote_head::{CheckFailure, FetchFailure, REMOTE_HEAD_REFRESH_DEADLINE};
+use worktree::remote_update::FETCH_DEADLINE;
 use worktree::worktree::{DirtyStatus, WorktreeList, WorktreeStatus};
 
 /// The narrowest terminal that shows ahead/behind counts in the two target
 /// columns; `--width` sizes only the graph and does not move this gate.
 const METRICS_MIN_WIDTH: u32 = 100;
 
-/// Everything [`render`] shows: the caption and its remote observation, the
-/// table, the legend, and the PR age line.
+/// The §6 refresh hint.
+pub const REFRESH_HINT: &str = "running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately";
+
+/// Everything the pure renderers show.
 pub struct TableFacts<'a> {
     pub default_branch: &'a str,
     pub target: Option<&'a DefaultTarget>,
@@ -47,6 +54,17 @@ pub struct TableFacts<'a> {
     pub prs: &'a PrListing,
     /// `None` without an `origin`, which also suppresses the caption.
     pub remote: Option<RemoteFacts<'a>>,
+    /// The §5 line, only for a condition this run observed.
+    pub credential_line: Option<CredentialLine>,
+    /// The listing rendered while the worker was still working (§6).
+    pub unfinished: bool,
+    /// §9: set only after a completed check or fetch, with the default
+    /// branch strictly behind.
+    pub ff_suggestion: Option<FfSuggestion>,
+    /// Why `--ff` did not move the default branch.
+    pub ff_notice: Option<FfNotice>,
+    /// §8: the variables that would let `wt` use the provider API.
+    pub fallback_notice: Option<Vec<String>>,
 }
 
 /// What the caption can say about `origin`'s default branch.
@@ -56,20 +74,80 @@ pub struct RemoteFacts<'a> {
     /// The local tracking ref `origin/<default>`'s tip in this listing's ref
     /// snapshot, if the ref exists.
     pub tracking_tip: Option<&'a str>,
-    /// The stored live-head answer, if one matches the current `origin` and
-    /// default branch. Its age and validity are judged at render time.
-    pub answer: Option<&'a RemoteHead>,
+    pub status: RemoteStatus,
 }
 
-impl RemoteFacts<'_> {
-    fn tracking_ref(&self) -> String {
-        format!("origin/{}", self.default_branch)
-    }
+/// What this run's update attempt established: one variant per §4 row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteStatus {
+    /// No variance: the tracking ref matched `origin`.
+    CheckedNow,
+    /// Variance, and the fetch brought the tracking ref up to date.
+    Fetched,
+    /// Variance, and the fetch failed; the tracking ref is as it was.
+    FetchFailed { reason: FetchFailure },
+    /// The wait ran out before `origin` answered.
+    StillChecking { last: LastKnown },
+    /// The wait ran out while the fetch was running.
+    StillPulling,
+    /// No answer this run: the check failed, or the worker never started.
+    CheckFailed { reason: CheckFailure, last: LastKnown },
+    /// `origin` answered without the default branch.
+    Absent,
+}
+
+/// The last time anything is known about `origin`'s default branch, for a
+/// row without a current answer. Timestamps are Unix seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastKnown {
+    /// The stored answer's check time.
+    Answer { checked_at: u64 },
+    /// No stored answer; the tracking ref's reflog dates its last change,
+    /// which is not a check.
+    TrackingRefChanged { at: u64 },
+    Never,
+}
+
+/// A §5 condition, with the provider's display name and the variable
+/// wording (the one used, or the accepted ones joined by "or").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialLine {
+    pub provider: String,
+    pub key: String,
+    pub condition: CredentialCondition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialCondition {
+    /// No key, the provider did not show the repository, and Git failed too.
+    NotVisible,
+    Rejected,
+    Insufficient,
+    RateLimited { authenticated: bool },
+}
+
+/// §9: the local default branch is strictly behind its tracking ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FfSuggestion {
+    pub behind: usize,
+}
+
+/// Why `--ff` left the default branch where it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FfNotice {
+    DirtyCheckout,
+    Diverged,
+    /// The ref that does not exist, as shown (`main`, `origin/main`).
+    Missing(String),
+    /// The branch or its checkout changed while `wt` worked.
+    Changed,
+    Failed,
 }
 
 impl<'a> TableFacts<'a> {
     /// Without `remote` (no `origin`) the caption is dropped too, so leftover
-    /// `origin/*` refs never read as a comparison with a remote.
+    /// `origin/*` refs never read as a comparison with a remote. The notes
+    /// start empty.
     pub fn from_list(list: &'a WorktreeList, prs: &'a PrListing, remote: Option<RemoteFacts<'a>>) -> Self {
         Self {
             default_branch: &list.default_branch,
@@ -80,30 +158,36 @@ impl<'a> TableFacts<'a> {
             comparisons: &list.comparisons,
             prs,
             remote,
+            credential_line: None,
+            unfinished: false,
+            ff_suggestion: None,
+            ff_notice: None,
+            fallback_notice: None,
         }
     }
 }
 
-/// The caption, table, legend, and PR age line, each separated as printed.
+/// The caption, the §5 line, the table, the legend, and the PR age line,
+/// each separated as printed.
 ///
 /// `now` is Unix seconds, for the PR and remote-observation ages.
 pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     let prose = |markup: String| Prose::new(markup).render(terminal);
-    let mut out = String::from("\n");
-    let paragraph: Vec<String> = [
-        facts.caption.map(caption_markup),
-        facts.remote.as_ref().map(|remote| observation_markup(remote, now)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if !paragraph.is_empty() {
-        // Comparison and observation together outgrow a narrow terminal, which
-        // would otherwise break the line mid-word.
-        let caption = Prose::new(paragraph.join(" "))
+    let wrapped = |markup: String| {
+        Prose::new(markup)
             .with_word_wrap(WordWrap::WrapProse(None, Some(1)))
-            .render(terminal);
-        out.push_str(&format!(" {}\n\n", caption.trim_end()));
+            .render(terminal)
+            .trim_end()
+            .to_string()
+    };
+    let mut out = String::from("\n");
+    let caption = facts.remote.as_ref().map(|remote| caption_markup(facts.caption, remote, now));
+    let credentials = facts.credential_line.as_ref().map(credential_markup);
+    if caption.is_some() || credentials.is_some() {
+        for line in caption.into_iter().chain(credentials) {
+            out.push_str(&format!(" {}\n", wrapped(line)));
+        }
+        out.push('\n');
     }
     out.push_str(table(facts, terminal).render(terminal).trim_end());
     out.push_str("\n\n");
@@ -116,76 +200,213 @@ pub fn render(facts: &TableFacts<'_>, terminal: &Terminal, now: u64) -> String {
     out
 }
 
-/// The caption's comparison: the local default branch against its local
-/// tracking ref, never the live remote.
-pub fn caption_markup(caption: &Caption) -> String {
-    let local = local_badge(&caption.local);
-    let remote = format!("local tracking ref {}", remote_badge(&caption.remote));
-    let count = |n: usize| {
-        let noun = if n == 1 { "commit" } else { "commits" };
-        format!("<yellow>{n} {noun}</yellow>")
+/// The §6 hint, when the listing rendered with work unfinished.
+pub fn render_hint(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
+    facts.unfinished.then(|| notes_list([format!("<dim>{REFRESH_HINT}</dim>")], terminal))
+}
+
+/// The closing notes: the `--ff` result or the §9 suggestion, then the §8
+/// notice; `None` when there is nothing to say.
+pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<String> {
+    let local = Prose::escape_text(facts.default_branch);
+    let tracking = Prose::escape_text(&format!("origin/{}", facts.default_branch));
+    let mut lines = Vec::new();
+    if let Some(notice) = &facts.ff_notice {
+        lines.push(match notice {
+            FfNotice::DirtyCheckout => format!(
+                "{local} wasn't fast-forwarded: the checkout has uncommitted changes to files the update touches."
+            ),
+            FfNotice::Diverged => format!("{local} has diverged from {tracking}, so it can't be fast-forwarded."),
+            FfNotice::Missing(reference) => {
+                format!("{local} wasn't fast-forwarded: {} doesn't exist.", Prose::escape_text(reference))
+            }
+            FfNotice::Changed => {
+                format!("{local} wasn't fast-forwarded: it changed while wt was updating it.")
+            }
+            FfNotice::Failed => format!("{local} wasn't fast-forwarded: Git couldn't complete the update."),
+        });
+    }
+    if let Some(suggestion) = &facts.ff_suggestion {
+        lines.push(format!(
+            "{local} is {} behind {tracking}; run {} to fast-forward it.",
+            commits(suggestion.behind),
+            command_badge("wt --ff")
+        ));
+    }
+    if let Some(keys) = &facts.fallback_notice {
+        lines.push("Git checked origin using `ls-remote`; this can take longer than the provider API.".to_string());
+        lines.push(format!(
+            "Set {} to let wt try the provider API, or use {} to use Git directly for this repository.",
+            Prose::escape_text(&keys.join(" or ")),
+            command_badge("--ignore-api")
+        ));
+    }
+    (!lines.is_empty()).then(|| notes_list(lines, terminal))
+}
+
+/// The sections of one listing, in the order [`assemble`] prints them.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Sections<'s> {
+    /// [`render`]'s output.
+    pub table: &'s str,
+    pub graph: Option<&'s str>,
+    pub hint: Option<&'s str>,
+    pub verbose: Option<&'s str>,
+    pub notes: Option<&'s str>,
+}
+
+/// The whole listing: the table, the graph, the hint (so it follows the
+/// graph, or the PR age line without one), the verbose section, then a blank
+/// line and the notes.
+pub fn assemble(sections: Sections<'_>) -> String {
+    let mut out = sections.table.to_string();
+    for part in [sections.graph, sections.hint, sections.verbose].into_iter().flatten() {
+        out.push_str(part);
+    }
+    if let Some(notes) = sections.notes {
+        out.push('\n');
+        out.push_str(notes);
+    }
+    out
+}
+
+fn notes_list(lines: impl IntoIterator<Item = String>, terminal: &Terminal) -> String {
+    let mut list = UnorderedList::empty();
+    for line in lines {
+        list.add(Prose::new(line));
+    }
+    let rendered = list.render(terminal);
+    let mut out = String::new();
+    for line in rendered.trim_end().lines() {
+        out.push_str(&format!(" {line}\n"));
+    }
+    out
+}
+
+fn commits(n: usize) -> String {
+    let noun = if n == 1 { "commit" } else { "commits" };
+    format!("{n} {noun}")
+}
+
+/// The one-sentence caption: the comparison with the tracking ref, then what
+/// this run established in dim italics, omitted when a check this run made
+/// found the tracking ref current. Without a comparison (no local
+/// default branch, no tracking ref, or git could not compare) the sentence
+/// names what it can.
+pub fn caption_markup(caption: Option<&Caption>, remote: &RemoteFacts<'_>, now: u64) -> String {
+    let tracking = remote_badge(&format!("origin/{}", remote.default_branch));
+    let suffix = match status_text(remote, now) {
+        Some(text) => format!(" <dim><i>({})</i></dim>", Prose::escape_text(&text)),
+        None => String::new(),
     };
-    match caption.state() {
-        CaptionState::InSync => format!("{local} is in sync with {remote}."),
-        CaptionState::Behind(n) => format!("{local} is {} behind {remote}.", count(n)),
-        CaptionState::Ahead(n) => format!("{local} is {} ahead of {remote}.", count(n)),
+    let Some(caption) = caption else {
+        return match (remote.status, remote.tracking_tip) {
+            // Pruned: only the remote-absence observation is left to show.
+            (RemoteStatus::Absent, None) => format!(
+                "{} <dim><i>was absent on origin when checked just now</i></dim>",
+                local_badge(remote.default_branch)
+            ),
+            (_, None) => format!("No local tracking ref {tracking}{suffix}"),
+            (_, Some(_)) => format!("{tracking}{suffix}"),
+        };
+    };
+    let local = local_badge(&caption.local);
+    let target = match remote.status {
+        RemoteStatus::FetchFailed { .. } | RemoteStatus::StillPulling => format!("local {tracking}"),
+        _ => tracking,
+    };
+    let count = |n: usize| format!("<yellow>{}</yellow>", commits(n));
+    let comparison = match caption.state() {
+        CaptionState::InSync => format!("{local} is in sync with {target}"),
+        CaptionState::Behind(n) => format!("{local} is {} behind {target}", count(n)),
+        CaptionState::Ahead(n) => format!("{local} is {} ahead of {target}", count(n)),
         CaptionState::Diverged { ahead, behind } => format!(
-            "{local} has diverged from {remote}: {} ahead, {} behind.",
+            "{local} has diverged from {target} ({} ahead, {} behind)",
             count(ahead),
             count(behind)
         ),
+    };
+    format!("{comparison}{suffix}")
+}
+
+/// The suffix's text, without parentheses or markup. `None` for a check this
+/// run just made that found nothing to report: a fresh answer needs no date.
+fn status_text(remote: &RemoteFacts<'_>, now: u64) -> Option<String> {
+    let differed = "origin differed when checked just now";
+    let text = match remote.status {
+        RemoteStatus::CheckedNow => return None,
+        RemoteStatus::Fetched => "updated from origin just now".to_string(),
+        RemoteStatus::FetchFailed { reason } => format!("{differed}; {}", fetch_reason(reason)),
+        RemoteStatus::StillChecking { last } => format!(
+            "origin hasn't answered yet; still checking in the background; {}",
+            last_known_text(last, now)
+        ),
+        RemoteStatus::StillPulling => format!("{differed}; pulling remote updates in the background"),
+        RemoteStatus::CheckFailed { reason, last } => {
+            format!("{}; {}", check_reason(reason), last_known_text(last, now))
+        }
+        // A verified absence leaves the tracking ref in place; the comparison
+        // is still against it and must say so.
+        RemoteStatus::Absent => format!(
+            "{branch} was absent on origin when checked just now; origin/{branch} is a local tracking ref",
+            branch = remote.default_branch
+        ),
+    };
+    Some(text)
+}
+
+fn check_reason(reason: CheckFailure) -> String {
+    match reason {
+        CheckFailure::Timeout => {
+            format!("origin didn't answer within {} s", REMOTE_HEAD_REFRESH_DEADLINE.as_secs())
+        }
+        CheckFailure::Credentials => "origin didn't accept Git's credentials".to_string(),
+        CheckFailure::Other => "couldn't check origin".to_string(),
     }
 }
 
-/// The caption's remote observation at `now`: the stored live-head answer
-/// against this listing's tracking tip, with the answer's age.
-///
-/// An answer dated after `now`, or for another branch, is no answer. Every
-/// observed state is past tense, so a stale answer (a failed refresh can leave
-/// one arbitrarily old) never claims the remote's current state.
-pub fn observation_markup(remote: &RemoteFacts<'_>, now: u64) -> String {
-    let dim = |text: &str| format!("<dim>{text}</dim>");
-    let tracking = remote_badge(&remote.tracking_ref());
-    let answer = remote
-        .answer
-        .filter(|answer| answer.branch == remote.default_branch && !answer.is_future_at(now));
-    let Some(answer) = answer else {
-        return match remote.tracking_tip {
-            Some(_) => dim("Remote state has not been verified."),
-            None => format!(
-                "{} {tracking}{}",
-                dim("No local tracking ref"),
-                dim("; remote state has not been verified.")
-            ),
-        };
-    };
-    let ago = format!("{} ago", age_text(now - answer.checked_at));
-    match (answer.sha.as_deref(), remote.tracking_tip) {
-        (Some(sha), Some(tip)) if sha == tip => {
-            format!("{tracking} {}", dim(&format!("matched the remote when checked {ago}.")))
-        }
-        (Some(_), Some(_)) => format!(
-            "{tracking} {}",
-            dim(&format!(
-                "differs from the remote head observed {ago}; run git fetch origin to update local tracking refs."
-            ))
-        ),
-        (Some(_), None) => format!(
-            "{} {tracking}{}",
-            dim("No local tracking ref"),
-            dim(&format!("; the remote branch was present when checked {ago}."))
-        ),
-        (None, Some(_)) => format!(
-            "{} {}",
-            local_badge(remote.default_branch),
-            dim(&format!("was absent on origin when checked {ago}."))
-        ),
-        (None, None) => format!(
-            "{} {tracking}{}",
-            dim("No local tracking ref"),
-            dim(&format!("; the remote branch was absent when checked {ago}."))
-        ),
+fn fetch_reason(reason: FetchFailure) -> String {
+    match reason {
+        FetchFailure::Timeout => format!("fetch didn't finish within {} s", FETCH_DEADLINE.as_secs()),
+        FetchFailure::Other => "fetch failed".to_string(),
     }
+}
+
+/// A timestamp after `now` is no evidence, as for stored answers.
+fn last_known_text(last: LastKnown, now: u64) -> String {
+    match last {
+        LastKnown::Answer { checked_at } if checked_at <= now => {
+            format!("last checked with origin {} ago", age_text(now - checked_at))
+        }
+        LastKnown::TrackingRefChanged { at } if at <= now => {
+            format!("tracking ref last changed {} ago", age_text(now - at))
+        }
+        _ => "never checked with origin".to_string(),
+    }
+}
+
+/// The dim §5 line.
+pub fn credential_markup(line: &CredentialLine) -> String {
+    let provider = &line.provider;
+    let key = &line.key;
+    let text = match line.condition {
+        CredentialCondition::NotVisible => format!(
+            "{provider} did not show this repository, and Git could not check it. If it is private, set {key} and try again."
+        ),
+        CredentialCondition::Rejected => {
+            format!("{provider} didn't accept {key}; it may be invalid, expired, or revoked. Replace it and try again.")
+        }
+        CredentialCondition::Insufficient => {
+            format!("The API key {key} doesn't have rights to view this repository on {provider}.")
+        }
+        CredentialCondition::RateLimited { authenticated: false } => format!(
+            "{provider} rate limited the request for updated information. Add the {key} API key to get larger rate limits."
+        ),
+        CredentialCondition::RateLimited { authenticated: true } => {
+            format!("{provider} rate limited the request for updated information. Try again in a few minutes.")
+        }
+    };
+    format!("<dim>{}</dim>", Prose::escape_text(&text))
 }
 
 /// An age in the PR age line's units: `less than 1 min` below a minute, then
@@ -484,6 +705,11 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
 /// A local branch badge.
 fn local_badge(name: &str) -> String {
     format!("<bg-blue-800><white> {} </white></bg-blue-800>", Prose::escape_text(name))
+}
+
+/// A command the user can type, in reverse video.
+fn command_badge(command: &str) -> String {
+    format!("<inverse> {} </inverse>", Prose::escape_text(command))
 }
 
 /// A remote-tracking branch badge.

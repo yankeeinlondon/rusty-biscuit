@@ -1,0 +1,12 @@
+# Spike S1 (throwaway): how biscuit-visualized lays out a lane that is merged
+# mid-lane and then resumed. Its own workspace, so the monorepo never builds it.
+[package]
+name = "spike-s1-renderer-segments"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+biscuit-visualized = { path = "../../../../../biscuit-visualized/src", features = ["image"] }
+
+[workspace]

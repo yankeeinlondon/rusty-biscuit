@@ -3,7 +3,7 @@ source: worktree/cli/tests/list_table.rs
 expression: "plain(&Example::new())"
 ---
 
-  main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+  main  is 7 commits behind  origin/main
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │

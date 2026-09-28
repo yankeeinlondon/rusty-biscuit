@@ -1,0 +1,139 @@
+renderer default commit_step=34 layout_offset=8 parallel_commits=false
+
+== isolated-long-tag-stack [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                   origin/main on       d4 index  3 commit_x   134.00 bounds x    98.22..  163.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+  step34 tag                                          main on       d4 index  3 commit_x   134.00 bounds x    98.22..  163.28 y  -39.50.. -24.50 (x1-commit_x  -35.78)
+old widest-tag step 81.054 | R3 step default | default: min clearance None overlap false width 258.0 | at R3 step: min clearance None (gap 16) overlap false width 258.0 | second-pass shortfall None
+
+== isolated-long-tag-stack [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                   origin/main on       d4 index  3 commit_x   134.00 bounds x    98.22..  163.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+  step34 tag                                          main on       d4 index  3 commit_x   134.00 bounds x    98.22..  163.28 y  -39.50.. -24.50 (x1-commit_x  -35.78)
+old widest-tag step 89.054 | R3 step default | default: min clearance None overlap false width 275.5 | at R3 step: min clearance None (gap 24) overlap false width 275.5 | second-pass shortfall None
+
+== main-origin-one-apart [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                          main on       d2 index  1 commit_x    50.00 bounds x    29.56..   63.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    56.22..  121.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+old widest-tag step 81.054 | R3 step 57.712 | default: min clearance Some(-7.71) overlap true width 216.0 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 287.1 | second-pass shortfall None
+
+== main-origin-one-apart [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                          main on       d2 index  1 commit_x    50.00 bounds x    29.56..   63.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    56.22..  121.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+old widest-tag step 89.054 | R3 step 65.712 | default: min clearance Some(-7.71) overlap true width 233.5 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 328.6 | second-pass shortfall None
+
+== cross-lane-unequal [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag  origin/very-long-exact-branch-reference-beta on       f1 index  2 commit_x    92.00 bounds x   -20.59..  198.09 y   48.50..  63.50 (x1-commit_x -112.59)
+  step34 tag                                            v1 on       d3 index  3 commit_x   134.00 bounds x   119.43..  142.07 y  -23.50..  -8.50 (x1-commit_x  -14.57)
+  step34 tag                                          main on       d4 index  4 commit_x   176.00 bounds x   155.56..  189.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+old widest-tag step 234.682 | R3 step 36.506 | default: min clearance Some(13.49) overlap false width 318.1 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 330.6 | second-pass shortfall None
+
+== cross-lane-unequal [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag  origin/very-long-exact-branch-reference-beta on       f1 index  2 commit_x    92.00 bounds x   -20.59..  198.09 y   48.50..  63.50 (x1-commit_x -112.59)
+  step34 tag                                            v1 on       d3 index  3 commit_x   134.00 bounds x   119.43..  142.07 y  -23.50..  -8.50 (x1-commit_x  -14.57)
+  step34 tag                                          main on       d4 index  4 commit_x   176.00 bounds x   155.56..  189.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+old widest-tag step 242.682 | R3 step 44.506 | default: min clearance Some(13.49) overlap false width 344.6 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 397.1 | second-pass shortfall None
+
+== neighbors-unequal [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag feature/very-long-exact-branch-reference-alpha on       a2 index  1 commit_x    50.00 bounds x   -68.58..  162.08 y  -23.50..  -8.50 (x1-commit_x -118.58)
+  step34 tag                                            v1 on       a3 index  2 commit_x    92.00 bounds x    77.43..  100.07 y  -23.50..  -8.50 (x1-commit_x  -14.57)
+  step34 tag                                PR #104 → main on       a5 index  4 commit_x   176.00 bounds x   132.06..  213.44 y  -23.50..  -8.50 (x1-commit_x  -43.94)
+old widest-tag step 246.664 | R3 step 134.653 | default: min clearance Some(-84.65) overlap true width 303.4 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 803.3 | second-pass shortfall None
+
+== neighbors-unequal [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag feature/very-long-exact-branch-reference-alpha on       a2 index  1 commit_x    50.00 bounds x   -68.58..  162.08 y  -23.50..  -8.50 (x1-commit_x -118.58)
+  step34 tag                                            v1 on       a3 index  2 commit_x    92.00 bounds x    77.43..  100.07 y  -23.50..  -8.50 (x1-commit_x  -14.57)
+  step34 tag                                PR #104 → main on       a5 index  4 commit_x   176.00 bounds x   132.06..  213.44 y  -23.50..  -8.50 (x1-commit_x  -43.94)
+old widest-tag step 254.664 | R3 step 142.653 | default: min clearance Some(-84.65) overlap true width 320.9 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 860.8 | second-pass shortfall None
+
+== stack-of-three [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag feature/very-long-exact-branch-reference-alpha on       d2 index  1 commit_x    50.00 bounds x   -68.58..  162.08 y  -23.50..  -8.50 (x1-commit_x -118.58)
+  step34 tag                               release/2026-09 on       d3 index  2 commit_x    92.00 bounds x    46.06..  131.44 y  -23.50..  -8.50 (x1-commit_x  -45.94)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    46.06..  131.44 y  -39.50.. -24.50 (x1-commit_x  -45.94)
+  step34 tag                                          main on       d3 index  2 commit_x    92.00 bounds x    46.06..  131.44 y  -55.50.. -40.50 (x1-commit_x  -45.94)
+  step34 tag                                        v1.0.0 on       d4 index  3 commit_x   134.00 bounds x   110.51..  150.99 y  -23.50..  -8.50 (x1-commit_x  -23.49)
+old widest-tag step 246.664 | R3 step 166.022 | default: min clearance Some(-116.02) overlap true width 258.0 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 786.1 | second-pass shortfall None
+
+== stack-of-three [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag feature/very-long-exact-branch-reference-alpha on       d2 index  1 commit_x    50.00 bounds x   -68.58..  162.08 y  -23.50..  -8.50 (x1-commit_x -118.58)
+  step34 tag                               release/2026-09 on       d3 index  2 commit_x    92.00 bounds x    46.06..  131.44 y  -23.50..  -8.50 (x1-commit_x  -45.94)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    46.06..  131.44 y  -39.50.. -24.50 (x1-commit_x  -45.94)
+  step34 tag                                          main on       d3 index  2 commit_x    92.00 bounds x    46.06..  131.44 y  -55.50.. -40.50 (x1-commit_x  -45.94)
+  step34 tag                                        v1.0.0 on       d4 index  3 commit_x   134.00 bounds x   110.51..  150.99 y  -23.50..  -8.50 (x1-commit_x  -23.49)
+old widest-tag step 254.664 | R3 step 174.022 | default: min clearance Some(-116.02) overlap true width 275.5 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 835.6 | second-pass shortfall None
+
+== rl-text-direction-line [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                          main on       d2 index  1 commit_x    50.00 bounds x    29.56..   63.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    56.22..  121.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+old widest-tag step 81.054 | R3 step 57.712 | default: min clearance Some(-7.71) overlap true width 216.0 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 287.1 | second-pass shortfall None
+
+== rl-text-direction-line [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                          main on       d2 index  1 commit_x    50.00 bounds x    29.56..   63.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    56.22..  121.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+old widest-tag step 89.054 | R3 step 65.712 | default: min clearance Some(-7.71) overlap true width 233.5 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 328.6 | second-pass shortfall None
+
+== rl-programmatic-one-apart [default, font 16] direction=RightLeft
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                          main on       d2 index  1 commit_x    50.00 bounds x    29.56..   63.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    56.22..  121.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+old widest-tag step 81.054 | R3 step 57.712 | default: min clearance Some(-7.71) overlap true width 216.0 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 287.1 | second-pass shortfall None
+
+== rl-programmatic-one-apart [font-24, font 24] direction=RightLeft
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                          main on       d2 index  1 commit_x    50.00 bounds x    29.56..   63.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+  step34 tag                                   origin/main on       d3 index  2 commit_x    92.00 bounds x    56.22..  121.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+old widest-tag step 89.054 | R3 step 65.712 | default: min clearance Some(-7.71) overlap true width 233.5 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 328.6 | second-pass shortfall None
+
+== rl-programmatic-cross-lane [default, font 16] direction=RightLeft
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag  origin/very-long-exact-branch-reference-beta on       f1 index  2 commit_x    92.00 bounds x   -20.59..  198.09 y   48.50..  63.50 (x1-commit_x -112.59)
+  step34 tag                                            v1 on       d3 index  3 commit_x   134.00 bounds x   119.43..  142.07 y  -23.50..  -8.50 (x1-commit_x  -14.57)
+  step34 tag                                          main on       d4 index  4 commit_x   176.00 bounds x   155.56..  189.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+old widest-tag step 234.682 | R3 step 36.506 | default: min clearance Some(13.49) overlap false width 318.1 | at R3 step: min clearance Some(16.0) (gap 16) overlap false width 330.6 | second-pass shortfall None
+
+== rl-programmatic-cross-lane [font-24, font 24] direction=RightLeft
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag  origin/very-long-exact-branch-reference-beta on       f1 index  2 commit_x    92.00 bounds x   -20.59..  198.09 y   48.50..  63.50 (x1-commit_x -112.59)
+  step34 tag                                            v1 on       d3 index  3 commit_x   134.00 bounds x   119.43..  142.07 y  -23.50..  -8.50 (x1-commit_x  -14.57)
+  step34 tag                                          main on       d4 index  4 commit_x   176.00 bounds x   155.56..  189.94 y  -23.50..  -8.50 (x1-commit_x  -20.44)
+old widest-tag step 242.682 | R3 step 44.506 | default: min clearance Some(13.49) overlap false width 344.6 | at R3 step: min clearance Some(24.0) (gap 24) overlap false width 397.1 | second-pass shortfall None
+
+== observed [default, font 16] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                   origin/main on  999032d index 24 commit_x  1016.00 bounds x   980.22.. 1045.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+  step34 tag                                          main on  999032d index 24 commit_x  1016.00 bounds x   980.22.. 1045.28 y  -39.50.. -24.50 (x1-commit_x  -35.78)
+old widest-tag step 81.054 | R3 step default | default: min clearance None overlap false width 1551.3 | at R3 step: min clearance None (gap 16) overlap false width 1551.3 | second-pass shortfall None
+
+== observed [font-24, font 24] direction=LeftRight
+linearity: worst deviation from a + index*step = 0.0000
+commit x increases with placement index: true
+  step34 tag                                   origin/main on  999032d index 24 commit_x  1016.00 bounds x   980.22.. 1045.28 y  -23.50..  -8.50 (x1-commit_x  -35.78)
+  step34 tag                                          main on  999032d index 24 commit_x  1016.00 bounds x   980.22.. 1045.28 y  -39.50.. -24.50 (x1-commit_x  -35.78)
+old widest-tag step 89.054 | R3 step default | default: min clearance None overlap false width 1648.5 | at R3 step: min clearance None (gap 24) overlap false width 1648.5 | second-pass shortfall None

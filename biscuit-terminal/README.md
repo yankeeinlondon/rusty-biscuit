@@ -58,6 +58,7 @@ The `biscuit-terminal` package area contains both a Library and CLI which focus 
       [graceful degradation](./docs/components/prose.md#graceful-degradation) for
       OSC8 hyperlinks and double-underline on terminals like Apple Terminal
     - [`Section`](./docs/components/section.md)
+    - [`Spinner`](./docs/components/spinner.md) (a live stderr widget, not a `TerminalRenderable`)
     - [`Status`](./docs/components/status.md)
     - `StatusBlock`
     - [`Table`](./docs/components/table.md) — typed cell content including

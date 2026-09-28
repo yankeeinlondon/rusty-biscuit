@@ -15,6 +15,7 @@
 //! - `GetRepositoryFile` - Get file content (Base64 encoded, provide git_ref for branch/tag)
 //! - `GetProject` - Get project metadata (use URL-encoded path or numeric ID)
 //! - `ListGroupProjects` - List projects in a group
+//! - `GetBranch` - Get a single branch (commit.id is the branch head commit)
 //! - `ListMergeRequests` - List merge requests with metadata
 //! - `GetMergeRequest` - Get a single merge request by IID
 //! - `ListMergeRequestCommits` - List commits in a merge request

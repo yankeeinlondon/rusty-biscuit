@@ -830,6 +830,65 @@ impl crate::shared::EndpointSpec for ListIssueChangesRequest {
     type Response = PaginatedResponse<IssueChange>;
     const ENDPOINT_ID: &'static str = "ListIssueChanges";
 }
+/// Request for `GetBranch` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::bitbucket::GetBranchRequest;
+///
+/// let request = GetBranchRequest::new("workspace_value", "repo_slug_value", "name_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetBranchRequest {
+    /// Path parameter: workspace
+    pub workspace: String,
+    /// Path parameter: repo_slug
+    pub repo_slug: String,
+    /// Path parameter: name
+    pub name: String,
+}
+impl GetBranchRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(
+        workspace: impl Into<String>,
+        repo_slug: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self {
+            workspace: workspace.into(),
+            repo_slug: repo_slug.into(),
+            name: name.into(),
+        }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - The request body as a `RequestBody`
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!(
+            "/repositories/{}/{}/refs/branches/{}", urlencoding::encode(& self.workspace
+            .to_string()), urlencoding::encode(& self.repo_slug.to_string()),
+            urlencoding::encode(& self.name.to_string())
+        );
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+    }
+}
+impl crate::shared::EndpointSpec for GetBranchRequest {
+    type Response = Branch;
+    const ENDPOINT_ID: &'static str = "GetBranch";
+}
 /// Request for `ListTags` endpoint.
 ///
 /// ## Example
@@ -1265,6 +1324,8 @@ pub enum BitbucketRequest {
     ListIssueComments(ListIssueCommentsRequest),
     /// List change history for an issue
     ListIssueChanges(ListIssueChangesRequest),
+    /// Get a single branch by name (target.hash is the branch head commit)
+    GetBranch(GetBranchRequest),
     /// List repository tags
     ListTags(ListTagsRequest),
     /// Get a single tag by name
@@ -1297,6 +1358,7 @@ impl BitbucketRequest {
             Self::GetIssue(req) => req.into_parts(),
             Self::ListIssueComments(req) => req.into_parts(),
             Self::ListIssueChanges(req) => req.into_parts(),
+            Self::GetBranch(req) => req.into_parts(),
             Self::ListTags(req) => req.into_parts(),
             Self::GetTag(req) => req.into_parts(),
             Self::ListDownloads(req) => req.into_parts(),
@@ -1340,6 +1402,9 @@ impl BitbucketRequest {
             Self::ListIssueChanges(_) => {
                 <ListIssueChangesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
+            Self::GetBranch(_) => {
+                <GetBranchRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::ListTags(_) => {
                 <ListTagsRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1374,6 +1439,7 @@ impl BitbucketRequest {
             Self::GetIssue(_) => crate::shared::ResponseKind::Json,
             Self::ListIssueComments(_) => crate::shared::ResponseKind::Json,
             Self::ListIssueChanges(_) => crate::shared::ResponseKind::Json,
+            Self::GetBranch(_) => crate::shared::ResponseKind::Json,
             Self::ListTags(_) => crate::shared::ResponseKind::Json,
             Self::GetTag(_) => crate::shared::ResponseKind::Json,
             Self::ListDownloads(_) => crate::shared::ResponseKind::Json,
@@ -1430,6 +1496,11 @@ impl From<ListIssueCommentsRequest> for BitbucketRequest {
 impl From<ListIssueChangesRequest> for BitbucketRequest {
     fn from(req: ListIssueChangesRequest) -> Self {
         Self::ListIssueChanges(req)
+    }
+}
+impl From<GetBranchRequest> for BitbucketRequest {
+    fn from(req: GetBranchRequest) -> Self {
+        Self::GetBranch(req)
     }
 }
 impl From<ListTagsRequest> for BitbucketRequest {

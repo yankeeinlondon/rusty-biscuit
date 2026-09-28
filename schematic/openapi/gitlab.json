@@ -323,6 +323,53 @@
         }
       ]
     },
+    "/projects/{id}/repository/branches/{branch}": {
+      "get": {
+        "summary": "Get a single branch (commit.id is the branch head commit)",
+        "description": "Get a single branch (commit.id is the branch head commit)",
+        "operationId": "GetBranch",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branch"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Branch"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "branch",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
     "/projects/{id}/merge_requests": {
       "get": {
         "summary": "List merge requests with metadata",
@@ -1884,6 +1931,35 @@
             }
           ]
         }
+      },
+      "Branch": {
+        "title": "Branch",
+        "description": "A branch from `GET /projects/{id}/repository/branches/{branch}`.",
+        "type": "object",
+        "properties": {
+          "commit": {
+            "description": "Head commit of the branch."
+          },
+          "default": {
+            "type": "boolean"
+          },
+          "merged": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "web_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "commit"
+        ]
       },
       "Tag": {
         "title": "Tag",

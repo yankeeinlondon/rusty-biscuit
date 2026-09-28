@@ -1,185 +1,230 @@
 ---
 blast_radius:
   - claudine/cli/src/commands/sequence.rs
-  - claudine/cli/src/commands/compose.rs
-  - claudine/cli/src/commands/wrap/sequence.rs
-  - claudine/lib/src/composition/sequence.rs
-  - claudine/lib/src/composition/types.rs
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/setters.rs
+  - claudine/cli/src/commands/wrap/sequence/
+  - claudine/cli/src/commands/wrap/selection_ui.rs
+  - claudine/lib/src/composition/sequence/
 ---
 # Claudine's `sequence` command
 
-The `sequence` command allows you to run a serial sequence of composition steps defined in a single Markdown document. It is ideal for complex workflows that require multiple agent interactions, such as researching a topic across multiple providers, performing a multi-stage code refactor, or generating a series of related documents.
+`claudine sequence` runs a document whose frontmatter has a `sequence:` list,
+one step at a time. Each step composes and runs one unit of work, such as a
+prompt document, a shell command, or a group of tasks. Later steps can read
+what earlier steps produced.
+
+This page covers the command: how to call it, how it chooses providers, and
+its flags. How steps, tasks, state, groups, and `outputs` behave is in
+[Sequences](../topics/flow-control/sequences.md).
 
 ## Usage
 
 ```bash
-claudine sequence [flags] <arg>...
+claudine sequence [flags] <file> [key=value ...]
 ```
 
-Positional arguments are one file reference plus optional `key=value` setters
-in any order:
+Pass exactly **one file reference**. Any number of `key=value` setters can go
+before or after it:
 
 ```bash
 claudine sequence @research.md topic="async traits" retries=3
 claudine sequence topic="async traits" @research.md
 ```
 
-Setter values are parsed as JSON5 first and fall back to strings when parsing
-fails. Setter keys must start with an ASCII letter or `_` and may contain
-letters, digits, `_`, or `-`. Dot-paths and path-like tokens such as
-`foo.bar=baz` are not valid setters and are treated as file-reference
-candidates.
+A command with setters but no file fails:
 
-Inline setters override matching keys from `--set`, but reserved overlay keys
-listed in [Reserved Overlay Keys](#reserved-overlay-keys) still win over both.
+```text
+Error: missing file reference: expected exactly one file reference plus optional key=value setters
+```
 
-## Frontmatter Configuration
+### Setters
 
-A document is recognized as a sequence if it contains a `sequence` key in its frontmatter.
+- A token is a setter when the part before the first `=` starts with an ASCII
+  letter or `_` and contains only letters, digits, `_`, or `-`. Anything else,
+  such as `foo.bar=baz` or `./x=1`, is treated as the file reference.
+- The value is parsed as JSON5, and falls back to a plain string when it
+  doesn't parse: `retries=3` is a number, `tags=[a,b]` is a string, and
+  `tags='["a","b"]'` is an array.
+- `--set '{"key": "value"}'` sets several values at once. An inline setter
+  wins over `--set` for the same key.
+- Setters sit above the document's frontmatter and below runtime mutations
+  and the reserved per-step keys (`state`, `previous`, `next`, `outputs`,
+  `sequence_id`). See
+  [Phase 2 — Just-in-time composition](../topics/flow-control/sequences.md#phase-2--just-in-time-composition)
+  for the full order.
 
-### Inline Sequence
+## The sequence file
 
-You can define the steps directly in the Markdown file's frontmatter as a list of strings or objects.
+The file can be either of these:
+
+- a **Markdown document** whose frontmatter has a `sequence:` key;
+- a **`.yaml` / `.yml` file**, whose top-level mapping is read as frontmatter
+  with no body. Every step then needs an executable, because there is no body
+  for a plain step to compose.
 
 ```markdown
 ---
+agent: claude
 sequence:
-  - "Step 1: Research"
-  - "Step 2: Implement"
-  - name: "Step 3: Test"
-    framework: "jest"
+    - name: research
+      topic: parsing
+    - name: review
+      prompt: "@prompts/review.md"
+      params:
+          topic: "{{ state.topic }}"
+    - name: stage
+      shell: git add .
 ---
-
-Prompt for all steps: {{state.name || state}}
+Research {{ state.topic }} and write up what you find.
 ```
 
-- **String steps**: The string is used as both the step name and the `state` variable.
-- **Object steps**: Must contain a `name` property. The entire object is available via the `state` variable.
+The `research` step has no executable, so it composes this document's body.
+`review` composes `prompts/review.md` with `topic` set, and `stage` runs a
+shell command. The step fields, the ways to supply a list (`sources`), and
+groups are covered in [Sequences](../topics/flow-control/sequences.md).
 
-### External Sequence
+## Choosing providers
 
-For reusable sequences, you can point to an external YAML file.
+A provider is chosen twice: once for the whole run before any step starts,
+and again for each step when it launches.
 
-```markdown
----
-sequence: "@fixtures/steps.yaml"
----
+```mermaid
+flowchart TD
+    A["provider flag given? (--claude, --provider …)"] -- yes --> F["every step uses it; no review screen"]
+    A -- no --> B["sequence document's agent, after agent= / --set"]
+    B -- "resolves to one installed provider" --> P["planned target"]
+    B -- "missing, invalid, not installed, or several choices" --> C{"stderr is a terminal?"}
+    C -- yes --> R["review screen: a planned target per step"]
+    C -- no --> E["run fails before any step starts"]
+    R --> P
+    P --> L{"at launch: does the step's document name an agent?"}
+    L -- yes --> S["the step runs on that agent"]
+    L -- no --> T["the step runs on the planned target"]
 ```
 
-External YAML files support two formats:
+**Before the run**, the sequence plans a target from the sequence
+document's own `agent` and `model`:
 
-#### 1. Plain List Format
+- `--claude`, `--codex`, …, or `--provider <name>` sets the provider for
+  every step and skips everything below. `--model` does the same for the
+  model.
+- Otherwise the sequence document's `agent` is used. An `agent=…` setter or
+  `--set '{"agent": …}'` replaces it.
+- If that doesn't settle on one installed provider, for example when the
+  document has no `agent`, a terminal gets the **review screen**: one row
+  per step, each with a provider and a model picker, all starting on the
+  same default. Without a terminal, the run fails before any step starts.
+
+**At launch**, a step that runs a prompt document uses that document's own
+`agent` if it has one. That value can come from the prompt's frontmatter or
+from the step's `params`, and a caller setter overrides both. The planned
+target is only the fallback for a step whose document names no agent.
+
 ```yaml
+agent: claude                  # plans the run; also runs body steps
 sequence:
-  - "Step A"
-  - name: "Step B"
-    option: "value"
+    - name: review
+      prompt: "@prompts/review.md"
+      params: { agent: codex } # this step runs on Codex
+    - name: commit
+      prompt: "@prompts/commit.md"   # declares agent: opencode, so it runs on OpenCode
 ```
 
-#### 2. Templated Format
-This format allows you to define a common template for step properties, reducing duplication.
+That split has some surprising effects:
 
-```yaml
-kind: sequence
-template:
-  description: "Executing {{name}} for {{target}}"
-list:
-  - name: "Lint"
-    target: "src/"
-  - name: "Test"
-    target: "tests/"
-```
+- **A sequence document with no `agent` stops the run** (review screen or
+  error), even when every step names its own provider. Give the sequence
+  document an `agent` of its own to avoid this.
+- **A review-screen choice is ignored** for a step whose document names an
+  agent. It takes effect only for steps that name none.
+- **An `agent=` setter overrides every step**, because caller setters outrank
+  `params` and the prompt's frontmatter.
+- **The step's status line reports the planned target**, not the provider
+  that launched, so a step that ran on Codex can print
+  `succeeded (via Claude)`. The same goes for `{{ env.AGENT }}` and
+  `{{ env.MODEL }}` inside the composed prompt. The provider's own process
+  gets the correct `AGENT` and `MODEL`.
+- **A step naming a provider that isn't installed fails at its turn**, after
+  earlier steps have already run.
 
-Templates support `{{key}}` and `{{key || 'default'}}` fallback syntax. Template keys cannot collide with [Reserved Overlay Keys](#reserved-overlay-keys).
+## Fail-fast and exit codes
 
-### `fail_fast`
+A failing step stops the run when fail-fast is on. The setting comes from, in
+order: `--fail-fast <bool>` (`true`/`false`, `1`/`0`, `yes`/`no`), the
+document's `fail_fast`, and then the default, `true`.
 
-Controls whether the sequence should stop immediately if a step fails.
+The exit code is `0` when every executed step succeeded, `1` when at least one
+failed, and `130` after Ctrl+C. A preflight failure aborts the run whatever
+the fail-fast setting. See
+[Fail-fast, exit codes, and dry-run](../topics/flow-control/sequences.md#fail-fast-exit-codes-and-dry-run).
 
-- **Default**: `true`
-- **Frontmatter**: `fail_fast: false`
-- **CLI Override**: `--fail-fast false` (accepts `true`/`false`, `1`/`0`, `yes`/`no`)
+## Interactive sessions
 
-A step is considered failed if the composition fails (e.g., template error) or if the provider CLI exits with a non-zero code.
+A sequence document may not set `interactive: true`. A run is serial
+automation, and a document-level default would be ambiguous across steps, so
+`interactive: true` is a hard error. `interactive: false`, `null`, or no key
+at all is fine.
 
-### `interactive`
+To run the steps interactively anyway, pass `--interactive` (`-i`).
+`--timeout` and `--step-timeout` cannot be combined with it.
 
-Unlike `compose` and `inline-compose`, `sequence` **rejects** an authored `interactive: true` frontmatter property with a hard error. A sequence is serial automation, so a document-level dialog default would be ambiguous across steps. `interactive: false`, `interactive: null`, and an absent key are all accepted as no-op defaults. If you genuinely need an interactive sequence, pass the explicit `--interactive` (`-i`) CLI flag instead; for dialog-shaped prompts prefer `compose` or `inline-compose`.
+## Environment of each step
 
-## Template Variables (Overlay)
+Each step's provider session gets these variables:
 
-Each step in the sequence has access to a set of automatically injected variables. These "overlay" variables take precedence over any values provided via `--set`.
+| Variable | Value |
+|---|---|
+| `CLAUDINE_FAIL_FAST` | the effective fail-fast setting |
+| `AGENT` | the provider that launched, such as `codex` |
+| `MODEL` | the model that launched, when one was chosen |
+| `YOLO` | `true` when `--yolo` is set |
+| `OPERATION` | the step's `operation`, or `--operation` |
 
-| Variable | Description |
-|----------|-------------|
-| `state` | The current step configuration (string or object). |
-| `previous_state` | The configuration of the previous step (`null` for the first step). |
-| `next_state` | The configuration of the next step (`null` for the last step). |
-| `is_first` | `true` if this is the first step in the sequence. |
-| `is_last` | `true` if this is the last step in the sequence. |
-| `step` | The 1-based index of the current step. |
-| `total_steps` | The total number of steps in the sequence. |
+## Dry run
 
-### Reserved Overlay Keys
-The following keys are reserved and will always be overwritten by the sequence orchestrator: `state`, `previous_state`, `next_state`, `is_first`, `is_last`, `step`, `total_steps`.
+`--dry-run` runs the full preflight and then composes every step against the
+starting state, without launching a provider. **Shell work still runs**:
+`$( … )` expansions and `shell:` steps execute for real, so a dry run of a
+sequence with `shell: git commit …` will commit.
 
-## Execution Behavior
+## Flags
 
-### Serial Execution
-Steps are executed one after another in the order they are defined. If `fail_fast` is enabled, execution stops as soon as a step fails.
+Flags specific to `sequence`:
 
-### Shared Approval Cache
-Claudine maintains a shared shell-approval cache for the duration of the sequence run. If you approve a shell command with "Allow once" in an early step, that approval carries over to subsequent steps in the same sequence, preventing redundant prompts.
+| Flag | Effect |
+|---|---|
+| `--fail-fast <BOOL>` | overrides the document's `fail_fast` |
+| `--budget-ledger <PATH>` | enforces one shared invocation and active-time budget across every agent launch, retry, and wait in the run; see [Shared execution budgets](budget.md) |
 
-### Environment Variables
-The `FAIL_FAST` environment variable is injected into each step's session, reflecting the effective fail-fast setting for the run.
+Flags shared with `compose`:
 
-## CLI Flags
+| Group | Flags |
+|---|---|
+| Provider | `--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`, `--provider <NAME>`, `--exclude <PROVIDER>`, `-m`/`--model <MODEL>` |
+| Session | `-y`/`--yolo` (the provider's auto-approval mode, also set by `CLAUDINE_YOLO`), `-i`/`--interactive`, `--no-interactive`, `--sandbox`, `--include <ENV_NAME>` |
+| Timeouts | `-t`/`--timeout <DURATION>`, `--step-timeout <DURATION>`, `--stall-timeout <DURATION>` |
+| Resources | `--mcp`, `--use <ID,…>`, `--strict`, `--repo` |
+| System prompt | `--append-system-prompt`/`--asp <FILE>`, `--replace-system-prompt`/`--rsp <FILE>` |
+| Output | `-o`/`--output <FORMAT>`, `-q`/`--quiet`, `--silent`, `--perf` |
+| Values | `--set <JSON>`, `--operation`/`--op <OP>` |
+| Rehearsal | `--dry-run` |
 
-The `sequence` command inherits all shared composition flags:
+`-y` is `--yolo`, not "answer yes". It turns on each provider's own
+auto-approval mode, and it approves every shell command during preflight
+without prompting. Blocked commands are still refused. It does not skip the
+provider review screen.
 
-- **Provider Selection**: `--claude`, `--gemini`, `--provider <NAME>`, etc.
-- **Session Control**: `--interactive` (`-i`), `--timeout <DURATION>`, `--yolo` (`-y`).
-- **Resource Management**: `--mcp`, `--use <SERVERS>`, `--repo`.
-- **System Prompt**: `--append-system-prompt` (`--asp`), `--replace-system-prompt` (`--rsp`).
-- **Output Control**: `--output <FORMAT>`, `--quiet` (`-q`), `--silent`.
-- **Overrides**: `--set <JSON>`, `--model <MODEL>`.
+## Performance report
 
-`sequence` also accepts `--budget-ledger <PATH>`. It enforces one shared
-invocation and active-time budget across every agent launch, retry, and wait
-in the run. See [Shared execution budgets](budget.md).
+`--perf` prints one combined report after the sequence summary:
 
-### Performance Reporting
+- **CLI Overhead**: startup timings captured when the sequence starts.
+- **Composition Report**: merged across every step that composed a document.
+- **Agent Execution**: total launches and time, with first-response latency
+  averaged across steps. The note line gives both the average and the
+  minimum latency.
 
-`claudine sequence --perf` emits a single aggregated performance report at the end of the run, after the sequence summary. The report includes:
-
-- **CLI Overhead** — startup timings captured at sequence entry.
-- **Composition Report** — merged across all steps that performed document composition.
-- **Agent Execution** — summed launches and total time, with first-response latency averaged across steps. The note line includes both average and minimum latency.
-
-If the sequence is interrupted or stops due to `fail_fast`, the report is still rendered and includes a `partial sequence metrics` note. `--perf` overrides `--silent` and `--quiet` because it is an explicit opt-in.
-
-## Example: Multi-Provider Research
-
-```markdown
----
-sequence:
-  - name: "Claude"
-    provider: "claude"
-  - name: "Gemini"
-    provider: "gemini"
-fail_fast: false
----
-
-# Research Task
-Research the following topic using {{state.name}}:
-
-{{topic || 'Rust 2024 Edition changes'}}
-```
-
-Run with either form:
-
-```bash
-claudine sequence research.md --set '{"topic":"Async traits in Rust"}'
-claudine sequence research.md topic="Async traits in Rust"
-```
+An interrupted run, or one stopped by fail-fast, still prints the report,
+with a `partial sequence metrics` note. `--perf` overrides `--quiet` and
+`--silent`.

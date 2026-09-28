@@ -1,11 +1,24 @@
 //! Graph and verbose data for `wt list`.
 //!
 //! The graph half gathers typed facts (lines of work with full commit SHAs,
-//! ref tips) and hands them to biscuit-terminal's [`GitGraph`], which owns the
-//! lane/tag rule, elision, sizing, and the Mermaid text. The verbose half
-//! gathers the commit details `wt list -v` prints.
+//! fork and merge commits, ref tips) and hands them to biscuit-terminal's
+//! [`GitGraph`], which owns the lane/tag rule, elision, sizing, and the
+//! Mermaid text. The verbose half gathers the commit details `wt list -v`
+//! prints.
+//!
+//! Every lane is its tip's first-parent history, so a merged branch's commits
+//! never read as the default branch's. Each selected branch is classified
+//! against the lanes that could contain it ([`topology::Integration`]), and
+//! the fork, merge, and label commits other lanes need are kept on their lane
+//! however old they are. A lane's boundary, the first commit below it, is
+//! classified the same way, so a branch that continued after a candidate
+//! merged it draws that earlier merge from its real source, back to the
+//! branch's recorded creation commit. What Git cannot establish sets
+//! [`GraphFacts::incomplete`] instead of being guessed. See
+//! `worktree/docs/git-graph.md`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use biscuit_terminal::components::git_graph::{GitGraph, GraphLine, GraphPullRequest, LaneEntry};
 use biscuit_terminal::components::terminal_image::ImageWidth;
@@ -16,12 +29,14 @@ use worktree::listing::RefTips;
 use worktree::pull_requests::PrListing;
 use worktree::worktree::WorktreeList;
 
+mod topology;
+
+use topology::{Boundary, Extent, GatherGap, History, Integration, LaneHistory, LaneWindow};
+
 /// Newest commits drawn per line; older ones fold into one `+N` square.
 const LINE_WINDOW: usize = 5;
 /// Newest default-branch commits in the base view.
 const BASE_DEFAULT_WINDOW: usize = 10;
-/// Shared commits drawn up to a focused view's fork point.
-const CONTEXT_COMMITS: usize = 2;
 
 /// A parsed commit for verbose display.
 pub struct CommitDetail {
@@ -79,9 +94,13 @@ pub struct GraphFacts {
     /// The default lane, oldest first.
     pub default_entries: Vec<LaneEntry>,
     pub lines: Vec<GraphLine>,
-    /// Ref tips drawn as tags: the local default branch and `origin/<default>`.
+    /// Ref tips drawn as tags: the local default branch and `origin/<default>`,
+    /// plus the recorded parent's tip in a focused view.
     pub refs: Vec<(String, String)>,
     pub current_branch: String,
+    /// Local history could not establish something the graph would show (a
+    /// shallow clone, a failed git command): the graph carries the notice.
+    pub incomplete: bool,
 }
 
 impl GraphFacts {
@@ -90,6 +109,9 @@ impl GraphFacts {
     pub fn to_git_graph(&self, prs: &PrListing, width: Option<ImageWidth>) -> GitGraph {
         let mut graph = GitGraph::new(self.default_branch.clone(), self.default_entries.clone())
             .with_current_branch(self.current_branch.clone());
+        if self.incomplete {
+            graph = graph.with_incomplete_history();
+        }
         for (name, sha) in &self.refs {
             graph = graph.with_ref(name.clone(), sha.clone());
         }
@@ -137,31 +159,37 @@ struct DefaultTips {
 }
 
 impl DefaultTips {
-    /// One `merge-base` when both tips exist and differ.
-    fn read(input: &GatherInput) -> Option<Self> {
+    /// One `merge-base` when both tips exist and differ. Also returns whether
+    /// that `merge-base` was a gap, in which case `origin/<default>` gets no
+    /// line and its tag is accounted for by the graph.
+    fn read(input: &GatherInput, history: &History) -> Option<(Self, bool)> {
         let local = input.refs.local(&input.default_branch).map(str::to_string);
         let origin_name = format!("origin/{}", input.default_branch);
         let origin = input
             .refs
             .remote(&origin_name)
             .map(|sha| (origin_name, sha.to_string()));
-        let (lane_tip, diverged_at) = match (&local, &origin) {
+        let (lane_tip, diverged_at, gap) = match (&local, &origin) {
             (None, None) => return None,
-            (Some(local), None) => (local.clone(), None),
-            (None, Some((_, origin))) => (origin.clone(), None),
-            (Some(local), Some((_, origin))) if local == origin => (local.clone(), None),
-            (Some(local), Some((_, origin))) => match merge_base(local, origin) {
-                Some(base) if base == *local => (origin.clone(), None),
-                Some(base) if base == *origin => (local.clone(), None),
-                base => (local.clone(), base),
+            (Some(local), None) => (local.clone(), None, false),
+            (None, Some((_, origin))) => (origin.clone(), None, false),
+            (Some(local), Some((_, origin))) if local == origin => (local.clone(), None, false),
+            (Some(local), Some((_, origin))) => match history.merge_base(local, origin) {
+                Ok(Some(base)) if base == *local => (origin.clone(), None, false),
+                Ok(Some(base)) if base == *origin => (local.clone(), None, false),
+                Ok(base) => (local.clone(), base, false),
+                Err(GatherGap) => (local.clone(), None, true),
             },
         };
-        Some(Self {
-            local,
-            origin,
-            lane_tip,
-            diverged_at,
-        })
+        Some((
+            Self {
+                local,
+                origin,
+                lane_tip,
+                diverged_at,
+            },
+            gap,
+        ))
     }
 
     /// Tips whose history is the default branch's.
@@ -186,17 +214,24 @@ impl DefaultTips {
         refs
     }
 
-    /// `origin/<default>` as its own line, only when it has diverged.
-    fn diverged_line(&self) -> Option<GraphLine> {
-        let fork = self.diverged_at.as_ref()?;
-        let (name, sha) = self.origin.as_ref()?;
-        let local = self.local.as_deref()?;
-        let (entries, last_active) = line_entries(sha, &[local], LINE_WINDOW);
-        let mut line = GraphLine::new(name.clone()).forked_at(fork.clone()).with_entries(entries);
-        if let Some(time) = last_active {
-            line = line.with_last_active(time);
+    /// `origin/<default>`'s name and tip, only when it has diverged and so
+    /// gets a line of its own.
+    fn diverged(&self) -> Option<(&str, &str)> {
+        self.diverged_at.as_ref()?;
+        self.local.as_ref()?;
+        self.origin.as_ref().map(|(name, sha)| (name.as_str(), sha.as_str()))
+    }
+
+    /// Ref tips kept on the default lane: both, unless `origin/<default>` has
+    /// a line of its own.
+    fn lane_refs(&self) -> Vec<String> {
+        let mut tips: Vec<String> = self.local.iter().cloned().collect();
+        if self.diverged().is_none()
+            && let Some((_, origin)) = &self.origin
+        {
+            tips.push(origin.clone());
         }
-        Some(line)
+        tips
     }
 }
 
@@ -209,33 +244,38 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
     if !needs_graph && !(needs_verbose && input.has_verbose()) {
         return (None, None);
     }
-    let Some(tips) = DefaultTips::read(input) else {
+    // Verbose details alone never tell a shallow "no" from a real one, so
+    // only the graph pays for the check.
+    let (history, history_gap) = if needs_graph {
+        let (history, read) = History::read();
+        (history, read.is_err())
+    } else {
+        (History::complete(), false)
+    };
+    let Some((tips, tips_gap)) = DefaultTips::read(input, &history) else {
         return (None, None);
     };
+    let gap = history_gap || tips_gap;
 
     if input.is_base_view() {
-        let graph = needs_graph.then(|| base_view(input, &tips)).flatten();
+        let graph = needs_graph.then(|| base_view(input, &history, &tips, gap));
         return (graph, None);
     }
 
     let Some(current_tip) = input.refs.local(current) else {
         return (None, None);
     };
-    let fork = merge_base(&tips.lane_tip, current_tip);
-    let verbose = (needs_verbose && fork.is_some()).then(|| VerboseData {
-        default_branch: input.default_branch.clone(),
-        branch: current.to_string(),
-        merge_base: fork
-            .as_deref()
-            .and_then(|fork| commit_details(fork, 1).into_iter().next()),
-        branch_commits: commit_details_since(current_tip, &tips.exclusions()),
-    });
-    let graph = if needs_graph {
-        fork.as_deref()
-            .and_then(|fork| focused_view(input, &tips, current, current_tip, fork))
-    } else {
-        None
+    let base = history.merge_base(&tips.lane_tip, current_tip);
+    let verbose = match (&base, needs_verbose) {
+        (Ok(Some(fork)), true) => Some(VerboseData {
+            default_branch: input.default_branch.clone(),
+            branch: current.to_string(),
+            merge_base: commit_details(fork, 1).into_iter().next(),
+            branch_commits: commit_details_since(current_tip, &tips.exclusions()),
+        }),
+        _ => None,
     };
+    let graph = needs_graph.then(|| focused_view(input, &history, &tips, gap, current, current_tip, base));
     (graph, verbose)
 }
 
@@ -257,90 +297,52 @@ fn created_at(input: &GatherInput, branch: &str) -> Option<i64> {
 }
 
 /// The current branch, its non-default fork parent, and the default lane
-/// around their fork point.
+/// down to the oldest commit they connect at.
 fn focused_view(
     input: &GatherInput,
+    history: &History,
     tips: &DefaultTips,
+    gap: bool,
     current: &str,
     current_tip: &str,
-    current_fork: &str,
-) -> Option<GraphFacts> {
-    let default_exclusions = tips.exclusions();
-    let mut lines = Vec::new();
+    default_base: Result<Option<String>, GatherGap>,
+) -> GraphFacts {
+    let parent = recorded_parent(input, current, |_| true);
+    let mut selected = Vec::new();
     let mut refs = tips.refs(&input.default_branch);
-    let mut default_excludes = vec![current_tip.to_string()];
-
-    let anchor = match recorded_parent(input, current, |_| true) {
-        Some((parent, parent_tip)) => {
-            let parent_fork = merge_base(&tips.lane_tip, parent_tip)?;
-            let excludes: Vec<&str> = default_exclusions.iter().map(String::as_str).collect();
-            let (entries, _) = line_entries(parent_tip, &excludes, LINE_WINDOW);
-            let mut parent_line = GraphLine::new(parent)
-                .forked_at(parent_fork.clone())
-                .with_entries(entries);
-            if let Some(time) = created_at(input, parent) {
-                parent_line = parent_line.with_created_at(time);
-            }
-            lines.push(parent_line);
-            refs.push((parent.to_string(), parent_tip.to_string()));
-            default_excludes.push(parent_tip.to_string());
-
-            let current_fork = merge_base(parent_tip, current_tip)?;
-            let mut excludes = excludes;
-            excludes.push(parent_tip);
-            let (entries, _) = line_entries(current_tip, &excludes, LINE_WINDOW);
-            lines.push(
-                GraphLine::new(current)
-                    .with_parent(parent)
-                    .forked_at(current_fork)
-                    .with_entries(entries),
-            );
-            parent_fork
-        }
-        None => {
-            let excludes: Vec<&str> = default_exclusions.iter().map(String::as_str).collect();
-            let (entries, _) = line_entries(current_tip, &excludes, LINE_WINDOW);
-            lines.push(
-                GraphLine::new(current)
-                    .forked_at(current_fork.to_string())
-                    .with_entries(entries),
-            );
-            current_fork.to_string()
-        }
-    };
-    if let Some(line) = tips.diverged_line() {
-        lines.push(line);
+    if let Some((parent, parent_tip)) = parent {
+        selected.push(Selected {
+            branch: parent,
+            tip: parent_tip,
+            parent: None,
+            default_base: None,
+        });
+        refs.push((parent.to_string(), parent_tip.to_string()));
     }
-
-    let mut default_entries: Vec<LaneEntry> = log_commits(&anchor, &[], CONTEXT_COMMITS)
-        .into_iter()
-        .map(|(sha, _)| LaneEntry::Commit(sha))
-        .collect();
-    let excludes: Vec<&str> = default_excludes.iter().map(String::as_str).collect();
-    let (newer, _) = line_entries(&tips.lane_tip, &excludes, LINE_WINDOW);
-    default_entries.extend(newer);
-
-    Some(GraphFacts {
-        default_branch: input.default_branch.clone(),
-        default_entries,
-        lines,
+    selected.push(Selected {
+        branch: current,
+        tip: current_tip,
+        parent,
+        default_base: parent.is_none().then_some(default_base),
+    });
+    assemble(
+        input,
+        history,
+        tips,
+        &selected,
+        DefaultLane {
+            window: LINE_WINDOW,
+            cap_window: true,
+        },
         refs,
-        current_branch: current.to_string(),
-    })
+        current,
+        gap,
+    )
 }
 
 /// The default lane's newest commits and one line per worktree branch, each
-/// under its fork parent when that parent is also drawn. Branches gather in
-/// parallel.
-fn base_view(input: &GatherInput, tips: &DefaultTips) -> Option<GraphFacts> {
-    let default_entries: Vec<LaneEntry> = log_commits(&tips.lane_tip, &[], BASE_DEFAULT_WINDOW)
-        .into_iter()
-        .map(|(sha, _)| LaneEntry::Commit(sha))
-        .collect();
-    if default_entries.is_empty() {
-        return None;
-    }
-
+/// under its fork parent when that parent is also drawn.
+fn base_view(input: &GatherInput, history: &History, tips: &DefaultTips, gap: bool) -> GraphFacts {
     let mut seen = HashSet::new();
     let branches: Vec<&str> = input
         .branch_names
@@ -349,119 +351,513 @@ fn base_view(input: &GatherInput, tips: &DefaultTips) -> Option<GraphFacts> {
         .filter(|branch| *branch != input.default_branch && seen.insert(*branch))
         .collect();
     let drawn: HashSet<&str> = branches.iter().copied().collect();
-    let default_exclusions = tips.exclusions();
-
-    let mut lines: Vec<GraphLine> = std::thread::scope(|scope| {
-        let handles: Vec<_> = branches
-            .iter()
-            .map(|branch| {
-                let drawn = &drawn;
-                let default_exclusions = &default_exclusions;
-                scope.spawn(move || {
-                    let tip = input.refs.local(branch)?;
-                    let parent = recorded_parent(input, branch, |parent| drawn.contains(parent));
-                    let mut excludes: Vec<&str> = default_exclusions.iter().map(String::as_str).collect();
-                    let fork = match parent {
-                        Some((_, parent_tip)) => {
-                            excludes.push(parent_tip);
-                            merge_base(parent_tip, tip)?
-                        }
-                        None => merge_base(&tips.lane_tip, tip)?,
-                    };
-                    let (entries, last_active) = line_entries(tip, &excludes, LINE_WINDOW);
-                    let mut line = GraphLine::new(*branch).forked_at(fork).with_entries(entries);
-                    if let Some((parent, _)) = parent {
-                        line = line.with_parent(parent);
-                    }
-                    if let Some(time) = created_at(input, branch) {
-                        line = line.with_created_at(time);
-                    }
-                    if let Some(time) = last_active {
-                        line = line.with_last_active(time);
-                    }
-                    Some(line)
-                })
+    let selected: Vec<Selected> = branches
+        .iter()
+        .filter_map(|branch| {
+            Some(Selected {
+                branch,
+                tip: input.refs.local(branch)?,
+                parent: recorded_parent(input, branch, |parent| drawn.contains(parent)),
+                default_base: None,
             })
-            .collect();
-        handles
-            .into_iter()
-            .filter_map(|handle| handle.join().ok().flatten())
+        })
+        .collect();
+    assemble(
+        input,
+        history,
+        tips,
+        &selected,
+        DefaultLane {
+            window: BASE_DEFAULT_WINDOW,
+            cap_window: false,
+        },
+        tips.refs(&input.default_branch),
+        &input.default_branch,
+        gap,
+    )
+}
+
+/// A branch the view draws.
+struct Selected<'a> {
+    branch: &'a str,
+    tip: &'a str,
+    /// Its recorded parent and that parent's tip, when the parent is drawn.
+    parent: Option<(&'a str, &'a str)>,
+    /// `merge-base(default lane tip, tip)` when the caller already has it.
+    default_base: Option<Result<Option<String>, GatherGap>>,
+}
+
+/// The lane a fork, merge, or label commit is expected on.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum LaneId {
+    Default,
+    Branch(String),
+    Origin,
+}
+
+/// A branch lane's window, or the gap that kept it from being read.
+type Window = Result<LaneWindow, GatherGap>;
+
+/// How a selected branch is drawn.
+#[derive(Debug, Clone)]
+enum Shape {
+    /// A lane of the tip's first-parent history until its stop history.
+    Lane {
+        /// The lane's window, read against its final stop history.
+        window: Window,
+        /// `None`: the connection is unknown or the histories are unrelated.
+        fork: Option<(String, LaneId)>,
+        /// Earlier merges of the lane, oldest first: a source `B` on this
+        /// lane, and its merge `C` on another.
+        earlier: Vec<EarlierMerge>,
+        /// The merge of the tip, which follows every earlier one.
+        merge: Option<(String, LaneId)>,
+    },
+    /// No history of its own: a label at its tip on that lane.
+    Label(LaneId),
+}
+
+#[derive(Debug, Clone)]
+struct EarlierMerge {
+    source: String,
+    merge: String,
+    lane: LaneId,
+}
+
+#[derive(Debug, Clone)]
+struct Placement {
+    branch: String,
+    tip: String,
+    parent: Option<String>,
+    shape: Shape,
+    /// Classification or the fork was unknown.
+    gap: bool,
+}
+
+impl Placement {
+    /// The commits this branch needs drawn on other lanes.
+    fn anchors(&self) -> Vec<(LaneId, String)> {
+        match &self.shape {
+            Shape::Lane { fork, earlier, merge, .. } => {
+                let own = LaneId::Branch(self.branch.clone());
+                let mut anchors: Vec<(LaneId, String)> = fork.iter().chain(merge).map(|(sha, lane)| (lane.clone(), sha.clone())).collect();
+                for edge in earlier {
+                    anchors.push((own.clone(), edge.source.clone()));
+                    anchors.push((edge.lane.clone(), edge.merge.clone()));
+                }
+                anchors
+            }
+            Shape::Label(lane) => vec![(lane.clone(), self.tip.clone())],
+        }
+    }
+}
+
+/// Classifications shared by every placement of one gathering pass, so a
+/// commit asked about against the same candidate tips, such as a boundary
+/// two sibling lanes share, is classified once even when both ask at once.
+type Classified = Result<Integration, GatherGap>;
+/// A commit and the candidate tips it was classified against.
+type Question = (String, Vec<String>);
+
+#[derive(Default)]
+struct Classifications {
+    answers: Mutex<HashMap<Question, Arc<OnceLock<Classified>>>>,
+}
+
+impl Classifications {
+    fn classify(&self, history: &History, commit: &str, candidates: &[&str]) -> Classified {
+        let key = (commit.to_string(), candidates.iter().map(|tip| tip.to_string()).collect());
+        let answer = Arc::clone(self.answers.lock().unwrap_or_else(PoisonError::into_inner).entry(key).or_default());
+        answer.get_or_init(|| history.classify(commit, candidates)).clone()
+    }
+}
+
+/// The fork a lane gets when no earlier merge is drawn.
+enum Fork<'a> {
+    /// Already known, with whether finding it was a gap.
+    Known(Option<(String, LaneId)>, bool),
+    /// `merge-base(against, tip)`, expected on `lane`.
+    Against(&'a str, LaneId),
+}
+
+/// A lane after its earlier merges were walked.
+struct Extension {
+    window: Window,
+    earlier: Vec<EarlierMerge>,
+    /// `B` and `C^1` of the oldest earlier merge.
+    oldest: Option<(String, String, LaneId)>,
+    gap: bool,
+}
+
+/// Classifies one selected branch against its recorded parent's lane,
+/// the default lane, and a diverged `origin/<default>` line, in that order.
+fn place(history: &History, classifications: &Classifications, tips: &DefaultTips, selected: &Selected, record: Option<&str>) -> Placement {
+    let tip = selected.tip;
+    let mut candidates: Vec<(LaneId, &str)> = Vec::new();
+    if let Some((parent, parent_tip)) = selected.parent {
+        candidates.push((LaneId::Branch(parent.to_string()), parent_tip));
+    }
+    candidates.push((LaneId::Default, &tips.lane_tip));
+    if let Some((_, origin_tip)) = tips.diverged() {
+        candidates.push((LaneId::Origin, origin_tip));
+    }
+    let candidate_tips: Vec<&str> = candidates.iter().map(|(_, sha)| *sha).collect();
+    let parent_tip = selected.parent.map(|(_, sha)| sha);
+    let parent_lane = selected.parent.map(|(parent, _)| LaneId::Branch(parent.to_string()));
+    // A fork is expected on the parent's lane, else on the lane it is
+    // measured against.
+    let fork_of = |against: &str, from: &str, lane: &LaneId| match history.merge_base(against, from) {
+        Ok(fork) => (fork.map(|sha| (sha, parent_lane.clone().unwrap_or_else(|| lane.clone()))), false),
+        Err(GatherGap) => (None, true),
+    };
+
+    let classified = classifications.classify(history, tip, &candidate_tips);
+    let (stop, fork, merge, classified_gap) = match &classified {
+        Ok(Integration::NoSeparateHistory { candidate }) => {
+            return Placement {
+                branch: selected.branch.to_string(),
+                tip: tip.to_string(),
+                parent: selected.parent.map(|(parent, _)| parent.to_string()),
+                shape: Shape::Label(candidates[*candidate].0.clone()),
+                gap: false,
+            };
+        }
+        Ok(
+            integration @ (Integration::MergedDirectly { candidate, first_parent, .. }
+            | Integration::IntegratedOtherwise { candidate, first_parent }),
+        ) => {
+            let into = &candidates[*candidate].0;
+            // A tip that contains the branch is its own merge base with it,
+            // so the fork is taken against the parent's tip only when the
+            // merge went elsewhere and the parent does not contain the branch
+            // (after an indirect match it does), and otherwise against `C^1`.
+            let after_indirect = matches!(integration, Integration::MergedDirectly { after_indirect: true, .. });
+            let parent_elsewhere = parent_tip.filter(|_| !after_indirect && !matches!(into, LaneId::Branch(_)));
+            let mut stop = vec![first_parent.clone()];
+            stop.extend(parent_elsewhere.map(str::to_string));
+            let merge = match integration {
+                Integration::MergedDirectly { merge, .. } => Some((merge.clone(), into.clone())),
+                _ => None,
+            };
+            let indirect = merge.is_none();
+            (stop, Fork::Against(parent_elsewhere.unwrap_or(first_parent), into.clone()), merge, indirect)
+        }
+        classified @ (Ok(Integration::Unmerged) | Err(GatherGap)) => {
+            let fork = match (&selected.default_base, parent_tip) {
+                (Some(Ok(base)), None) => Fork::Known(base.clone().map(|sha| (sha, LaneId::Default)), false),
+                (Some(Err(GatherGap)), None) => Fork::Known(None, true),
+                (_, against) => Fork::Against(against.unwrap_or(&tips.lane_tip), LaneId::Default),
+            };
+            let mut stop = tips.exclusions();
+            stop.extend(parent_tip.map(str::to_string));
+            (stop, fork, None, classified.is_err())
+        }
+    };
+
+    let extension = extend(history, classifications, tip, &candidates, stop, record);
+    let (fork, fork_gap) = match (&extension.oldest, fork) {
+        // Measured against `B`, not the tip: a tip that merged the default
+        // branch back in contains `C^1`, which would be its merge base.
+        (Some((source, first_parent, lane)), _) => fork_of(first_parent, source, lane),
+        (None, Fork::Known(fork, gap)) => (fork, gap),
+        (None, Fork::Against(against, lane)) => fork_of(against, tip, &lane),
+    };
+    let shape = Shape::Lane {
+        window: extension.window,
+        fork,
+        earlier: extension.earlier,
+        merge,
+    };
+    let gap = classified_gap || fork_gap || extension.gap;
+    Placement {
+        branch: selected.branch.to_string(),
+        tip: tip.to_string(),
+        parent: selected.parent.map(|(parent, _)| parent.to_string()),
+        shape,
+        gap,
+    }
+}
+
+/// Walks a lane's boundaries backward and extends it past each one that a
+/// candidate lane merged directly, until a boundary is an ordinary fork, was
+/// integrated otherwise, is at or below the branch's recorded creation
+/// commit, or cannot be established (a gap). `window` is `Err` only when the
+/// lane's first read failed, so an accepted edge always keeps its source.
+fn extend(history: &History, classifications: &Classifications, tip: &str, candidates: &[(LaneId, &str)], mut stop: Vec<String>, record: Option<&str>) -> Extension {
+    let candidate_tips: Vec<&str> = candidates.iter().map(|(_, sha)| *sha).collect();
+    let mut earlier: Vec<EarlierMerge> = Vec::new();
+    let mut known: Vec<Boundary> = Vec::new();
+    let mut oldest = None;
+    let mut record_distance = None;
+    let mut gap = false;
+    let read = |stop: &[String]| {
+        let stop: Vec<&str> = stop.iter().map(String::as_str).collect();
+        history.lane_window(tip, &stop, LINE_WINDOW)
+    };
+    let mut window = read(&stop);
+    while let Ok(lane) = &window {
+        let boundary = match history.boundary(tip, lane) {
+            Ok(Some(boundary)) => boundary,
+            Ok(None) => break,
+            Err(GatherGap) => {
+                gap = true;
+                break;
+            }
+        };
+        if known.last().is_some_and(|newer| boundary.distance <= newer.distance) || known.iter().any(|seen| seen.sha == boundary.sha) {
+            gap = true;
+            break;
+        }
+        let (candidate, merge, first_parent, after_indirect) = match classifications.classify(history, &boundary.sha, &candidate_tips) {
+            Ok(Integration::MergedDirectly {
+                candidate,
+                merge,
+                first_parent,
+                after_indirect,
+            }) => (candidate, merge, first_parent, after_indirect),
+            Ok(Integration::NoSeparateHistory { .. } | Integration::IntegratedOtherwise { .. }) => break,
+            // `B` is in the stop history, so a lane contains it: "unmerged"
+            // is an answer Git should not give.
+            Ok(Integration::Unmerged) | Err(GatherGap) => {
+                gap = true;
+                break;
+            }
+        };
+        let cutoff = record_distance.get_or_insert_with(|| match record {
+            Some(recorded) => history.chain_distance(tip, recorded),
+            None => Ok(None),
+        });
+        match cutoff {
+            // The branch was created at or after `B`, so the merge is an
+            // older branch's.
+            Ok(Some(created)) if *created <= boundary.distance => break,
+            Ok(_) => {}
+            Err(GatherGap) => {
+                gap = true;
+                break;
+            }
+        }
+
+        // Classification already answered for the candidate tips it asked.
+        let answered = |tip: &str| {
+            if tip == candidate_tips[candidate] {
+                Some(true)
+            } else if !after_indirect && candidate_tips[..candidate].contains(&tip) {
+                Some(false)
+            } else {
+                None
+            }
+        };
+        let mut next = vec![first_parent.clone()];
+        for kept in &stop {
+            let contains = answered(kept).map_or_else(|| history.is_ancestor(&boundary.sha, kept), Ok);
+            match contains {
+                Ok(true) => {}
+                Ok(false) => next.push(kept.clone()),
+                // Keeping it can only make the lane shorter.
+                Err(GatherGap) => {
+                    gap = true;
+                    next.push(kept.clone());
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        next.retain(|sha| seen.insert(sha.clone()));
+
+        let lane_id = candidates[candidate].0.clone();
+        oldest = Some((boundary.sha.clone(), first_parent, lane_id.clone()));
+        earlier.push(EarlierMerge {
+            source: boundary.sha.clone(),
+            merge,
+            lane: lane_id,
+        });
+        known.push(boundary);
+        // A failed reread keeps the window already read: the accepted edge's
+        // source is its boundary, placed from `known` without asking Git.
+        match read(&next) {
+            Ok(wider) => window = Ok(wider),
+            Err(GatherGap) => {
+                gap = true;
+                break;
+            }
+        }
+        stop = next;
+    }
+    earlier.reverse();
+    Extension {
+        window: window.map(|lane| lane.with_known(known)),
+        earlier,
+        oldest,
+        gap,
+    }
+}
+
+/// How the default lane is drawn: its window, and whether the window, too,
+/// stops just below the oldest connection (the focused view's context).
+struct DefaultLane {
+    window: usize,
+    cap_window: bool,
+}
+
+/// Classifies every selected branch in parallel, then builds every branch
+/// lane (and a diverged `origin/<default>` line) in parallel, then the default
+/// lane. A fork, merge, or label commit is kept on the lane it was expected
+/// on, and otherwise tried on the default lane, which is built last so it
+/// holds only what no branch lane placed.
+#[allow(clippy::too_many_arguments)]
+fn assemble(
+    input: &GatherInput,
+    history: &History,
+    tips: &DefaultTips,
+    selected: &[Selected],
+    default_lane: DefaultLane,
+    refs: Vec<(String, String)>,
+    current_branch: &str,
+    mut incomplete: bool,
+) -> GraphFacts {
+    let classifications = Classifications::default();
+    let record = |branch: &str| input.forks.get(branch).map(|origin| origin.base_sha.as_str());
+    let placements: Vec<Placement> = parallel(selected, |selected| place(history, &classifications, tips, selected, record(selected.branch)))
+        .into_iter()
+        .filter_map(|placement| {
+            incomplete |= placement.is_none();
+            placement
+        })
+        .collect();
+    let requests: Vec<(LaneId, String)> = placements.iter().flat_map(Placement::anchors).collect();
+    let anchors_for = |lane: &LaneId| -> Vec<&str> {
+        requests
+            .iter()
+            .filter(|(on, _)| on == lane)
+            .map(|(_, sha)| sha.as_str())
             .collect()
-    });
-    if let Some(line) = tips.diverged_line() {
+    };
+
+    // A branch lane's window was read while placing it; `None` is read here.
+    let mut jobs: Vec<(LaneId, &str, Option<&Window>)> = placements
+        .iter()
+        .filter_map(|placement| match &placement.shape {
+            Shape::Lane { window, .. } => Some((LaneId::Branch(placement.branch.clone()), placement.tip.as_str(), Some(window))),
+            Shape::Label(_) => None,
+        })
+        .collect();
+    let diverged = tips.diverged();
+    let local = tips.local.as_deref();
+    if let (Some((_, origin_tip)), Some(_)) = (diverged, local) {
+        jobs.push((LaneId::Origin, origin_tip, None));
+    }
+    let lanes: HashMap<LaneId, LaneHistory> = parallel(&jobs, |(lane, tip, window)| {
+        let read;
+        let window = match window {
+            Some(window) => window.as_ref().ok()?,
+            None => {
+                read = history.lane_window(tip, &local.into_iter().collect::<Vec<_>>(), LINE_WINDOW).ok()?;
+                &read
+            }
+        };
+        Some(history.first_parent_entries(tip, Extent::Until(window), &anchors_for(lane)))
+    })
+    .into_iter()
+    .zip(&jobs)
+    .map(|(built, (lane, _, _))| {
+        // No window was ever read, so the lane verified no commit to keep.
+        let built = built.flatten().unwrap_or_else(|| LaneHistory {
+            gap: true,
+            ..LaneHistory::default()
+        });
+        (lane.clone(), built)
+    })
+    .collect();
+
+    let mut default_anchors = tips.lane_refs();
+    for (lane, sha) in &requests {
+        let placed = *lane != LaneId::Default && lanes.get(lane).is_some_and(|built| built.placed.contains(sha));
+        if !placed {
+            default_anchors.push(sha.clone());
+        }
+    }
+    // A lane that turned out to have no commits is labeled at its tip.
+    for placement in &placements {
+        let lane = LaneId::Branch(placement.branch.clone());
+        if lanes.get(&lane).is_some_and(|built| !has_commits(&built.entries)) {
+            default_anchors.push(placement.tip.clone());
+        }
+    }
+    let default_anchors: Vec<&str> = default_anchors.iter().map(String::as_str).collect();
+    let default_built = history.first_parent_entries(
+        &tips.lane_tip,
+        Extent::Open {
+            window: default_lane.window,
+            cap_window: default_lane.cap_window,
+        },
+        &default_anchors,
+    );
+    incomplete |= default_built.gap || lanes.values().any(|built| built.gap);
+
+    let mut lines = Vec::with_capacity(placements.len() + 1);
+    for placement in &placements {
+        incomplete |= placement.gap;
+        let mut line = GraphLine::new(placement.branch.clone()).with_tip(placement.tip.clone());
+        if let Some(parent) = &placement.parent {
+            line = line.with_parent(parent.clone());
+        }
+        if let Some(time) = created_at(input, &placement.branch) {
+            line = line.with_created_at(time);
+        }
+        if let Shape::Lane { fork, earlier, merge, .. } = &placement.shape {
+            if let Some((fork, _)) = fork {
+                line = line.forked_at(fork.clone());
+            }
+            for edge in earlier {
+                line = line.with_merge(edge.source.clone(), edge.merge.clone());
+            }
+            if let Some((merge, _)) = merge {
+                line = line.with_merge(placement.tip.clone(), merge.clone());
+            }
+            if let Some(built) = lanes.get(&LaneId::Branch(placement.branch.clone())) {
+                line = line.with_entries(built.entries.clone());
+                if let Some(time) = built.last_active {
+                    line = line.with_last_active(time);
+                }
+            }
+        }
+        lines.push(line);
+    }
+    if let (Some((name, origin_tip)), Some(fork), Some(built)) = (diverged, &tips.diverged_at, lanes.get(&LaneId::Origin)) {
+        let mut line = GraphLine::new(name)
+            .forked_at(fork.clone())
+            .with_tip(origin_tip)
+            .with_entries(built.entries.clone());
+        if let Some(time) = built.last_active {
+            line = line.with_last_active(time);
+        }
         lines.push(line);
     }
 
-    Some(GraphFacts {
+    GraphFacts {
         default_branch: input.default_branch.clone(),
-        default_entries,
+        default_entries: default_built.entries,
         lines,
-        refs: tips.refs(&input.default_branch),
-        current_branch: input.default_branch.clone(),
+        refs,
+        current_branch: current_branch.to_string(),
+        incomplete,
+    }
+}
+
+fn has_commits(entries: &[LaneEntry]) -> bool {
+    entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(_)))
+}
+
+/// `work` over `items` on scoped threads, in order; an item whose thread
+/// panicked is `None`.
+fn parallel<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<Option<R>> {
+    std::thread::scope(|scope| {
+        let work = &work;
+        let handles: Vec<_> = items.iter().map(|item| scope.spawn(move || work(item))).collect();
+        handles.into_iter().map(|handle| handle.join().ok()).collect()
     })
 }
 
-/// A line's newest `window` commits not reachable from `excludes`, oldest
-/// first, preceded by a `+N` square for the older ones. Also returns the tip
-/// commit's time when the line has commits.
-fn line_entries(tip: &str, excludes: &[&str], window: usize) -> (Vec<LaneEntry>, Option<i64>) {
-    let shown = log_commits(tip, excludes, window);
-    let last_active = shown.last().and_then(|(_, time)| *time);
-    let hidden = if shown.len() == window {
-        count_commits(tip, excludes).saturating_sub(shown.len())
-    } else {
-        0
-    };
-    let mut entries = Vec::with_capacity(shown.len() + 1);
-    if hidden > 0 {
-        entries.push(LaneEntry::Elided(hidden));
-    }
-    entries.extend(shown.into_iter().map(|(sha, _)| LaneEntry::Commit(sha)));
-    (entries, last_active)
-}
-
-/// Up to `max` commits reachable from `tip` but not from `excludes`, oldest
-/// first, with their commit times.
-fn log_commits(tip: &str, excludes: &[&str], max: usize) -> Vec<(String, Option<i64>)> {
-    let max = max.to_string();
-    let mut args = vec!["log", "--format=%H %ct", "--max-count", &max, "--reverse", tip];
-    if !excludes.is_empty() {
-        args.push("--not");
-        args.extend_from_slice(excludes);
-    }
-    args.push("--");
-    git_command(&args)
-        .map(|output| {
-            output
-                .lines()
-                .filter_map(|line| {
-                    let mut parts = line.split_whitespace();
-                    let sha = parts.next()?.to_string();
-                    Some((sha, parts.next().and_then(|time| time.parse().ok())))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Commits reachable from `tip` but not from `excludes`; 0 on failure, so a
-/// missing count only drops the `+N` square.
-fn count_commits(tip: &str, excludes: &[&str]) -> usize {
-    let mut args = vec!["rev-list", "--count", tip];
-    if !excludes.is_empty() {
-        args.push("--not");
-        args.extend_from_slice(excludes);
-    }
-    args.push("--");
-    git_command(&args)
-        .ok()
-        .and_then(|count| count.trim().parse().ok())
-        .unwrap_or(0)
-}
-
-fn merge_base(a: &str, b: &str) -> Option<String> {
-    git_command(&["merge-base", a, b]).ok().filter(|sha| !sha.is_empty())
-}
 
 /// Git format string using %x1f (Unit Separator) as field delimiter.
 /// Using git's own escape avoids embedding raw control chars in args.

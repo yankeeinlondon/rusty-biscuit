@@ -25,14 +25,17 @@ The **worktree** package area, like many in this monorepo, is composed of both a
 - `wt list`
     Lists the worktrees (along with the base repo checkout) which currently exist. See [`docs/cli/list.md`](./docs/cli/list.md) for the full output.
 
-    - a caption comparing the local default branch with its local tracking ref `origin/<default>` (in sync, ahead, behind, or diverged; as of your last fetch), followed by what `origin` answered for that branch the last time a background check asked, with its age (`matched`, `differs … run git fetch origin`, `was absent`, or `Remote state has not been verified.`). `wt list` never asks `origin` itself: when that answer is missing or at least 60 s old, the background `wt` process that refreshes PRs also checks it for the next run. Without an `origin` there is no caption
+    - first, a check of `origin`: every listing asks for the default branch's current commit (through the provider API, falling back to `git ls-remote`) and, when it differs from `origin/<default>`, fetches that one tracking ref. It waits up to 3 s, with a spinner on terminals; anything still running carries on in the background for the next run. The local default branch is never moved unless you ask with `--ff`
+    - a one-sentence caption comparing the local default branch with `origin/<default>` (in sync, ahead, behind, or diverged), followed in dim italics by what this run learned (`updated from origin just now`, `still checking in the background`, `couldn't check origin`, …; nothing when a fresh check found the tracking ref current). Without an `origin` there is no caption
     - a table with one row per worktree; the current row is highlighted
         - **Worktree**: a dot for uncommitted files (none, other files, or source files) and the directory name (`base repo` for the main checkout)
         - **Branch**: a tree of which branch was forked from which (recorded by `wt create`); deleted parents are struck through
         - **`-> {default}`**: `clean` or `conflicts` against the default branch (local or `origin/<default>`, whichever contains the other); from 100 columns, followed by `+ahead` and `-behind` commit counts
         - **`-> parent`**: the same against the branch's fork parent (its local branch)
-        - open PRs from this repository as badges, placed by the PR's target. A stored answer for the current `origin` is shown at once; once it is older than 60 s the dim `PRs as of N min ago` line appears and a background `wt` process refreshes it for the next run, so `wt list` never waits for it. Only the first run for an `origin` (no stored answer yet) makes the request itself, waiting at most 300 ms
+        - open PRs from this repository as badges, placed by the PR's target. A stored answer for the current `origin` is shown whatever its age; once it is older than 60 s the dim `PRs as of N min ago` line appears and the background process refreshes it. Only the first run for an `origin` (no stored answer yet) makes the request itself, waiting at most 300 ms
     - a legend, then, on image-capable terminals, a branch graph (see [`docs/git-graph.md`](./docs/git-graph.md))
+    - notes when they apply: a credentials warning under the caption when a missing or rejected API key stopped the check, a hint to run again when work was still unfinished, and closing notes suggesting `wt --ff` when the default branch is behind or explaining the `ls-remote` fallback
+    - flags (listing only): `-r`/`--refresh` waits for a full update from `origin`; `--ignore-api` makes this repository use `git ls-remote` only, recorded in `~/.wt.json`; `--ff`/`--fast-forward` fast-forwards the local default branch to `origin/<default>`
 
     > The **list** command is the default command so it will be run if a user types only `wt`
 

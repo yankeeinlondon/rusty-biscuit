@@ -149,9 +149,9 @@ lint-fix:
     @just _lint worktree-cli || just _fix_lint worktree-cli
 
 # install the worktree CLI binary (wt)
-install:
+install *args="":
     @just build --release
-    @just _install "./cli" "Worktree (wt)"
+    @just _install "./cli" "Worktree (wt)" {{ args }}
 
 # Validate the source code without doing a full build
 check:
