@@ -129,8 +129,8 @@ keeps working during that wait:
 
 - After `compose` or `inline-compose`, the run's own guard is still installed,
   so the ladder above applies unchanged.
-- After any other command (for example `sequence`) that left a delivery
-  running, the shutdown path installs the same ladder with a drain notice:
+- After any other command (for example `sequence` or a provider wrapper) that
+  left a delivery running, the shutdown path installs the same ladder with a drain notice:
   `User interrupted while waiting for outbound messages; press Ctrl+C again to
   exit now`. With nothing pending, no handler is installed and the process
   exits at once.
@@ -148,6 +148,37 @@ stateDiagram-v2
     Exit --> [*]: warn about unfinished sends, exit with the command's code
     Forced --> [*]: exit 130
 ```
+
+The two-press contract is tested for `compose`, `inline-compose`, `sequence`,
+and the `claude` wrapper, whose message comes from a user-config hook action.
+Every tier uses one fixture, `claudine/cli/tests/common/drain_interrupt.rs`,
+and differ only in how each press arrives:
+
+| Tier | Press | OS | File |
+|---|---|---|---|
+| L1 | `SIGINT` to the process; `CTRL_BREAK_EVENT` to its console group on Windows | macOS, Linux, Windows | `lifecycle_message_drain_interrupt.rs` |
+| L1 | ETX typed into a windowless console (ConPTY): conhost raises `CTRL_C_EVENT` | Windows | `lifecycle_message_drain_console_windows.rs` |
+| L2 | `tmux send-keys C-c`: the pane's line discipline signals the foreground process group | macOS, Linux | `level2_drain_ctrl_c_tmux.rs` |
+| L2 | `kitty @ send-key ctrl+c` into an unfocused kitty window, encoded by kitty's key encoder | macOS (private kitty), Linux (host kitty session) | `level2_drain_ctrl_c_kitty.rs` |
+| L3 | An OS key event: XTEST Ctrl+C on a private `Xvfb` display, into a kitty window focused on that display | Linux | `level3_drain_ctrl_c.rs` |
+
+The L2 rows are terminal-level evidence: the press starts inside the terminal,
+after the operating system's input layer. Only the L3 row starts where a
+physical keypress starts. It runs on a display of its own, so it never shows a
+window or moves focus on the user's desktop.
+
+macOS and Windows have no L3 row, because neither offers an isolated desktop
+that can receive a real key event:
+
+- **macOS** delivers key events only to the key window of the one login
+  session. A Ctrl+C posted to an unfocused kitty's process
+  (`CGEventPostToPid`) never reaches its pane, so a real keypress would take
+  the user's focus.
+- **Windows** `SendInput` reaches only the input desktop, which is the one the
+  user sees. A desktop made with `CreateDesktop` gets no input until
+  `SwitchDesktop` shows it to the user. There, the L1 ConPTY test types the
+  byte a terminal writes for a Ctrl+C key press, so the console's own input
+  handling raises the event.
 
 ### Process-scoped flag
 
