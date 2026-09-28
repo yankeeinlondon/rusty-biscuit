@@ -667,11 +667,10 @@ Inline: `{{ evaluated }}`             # always interpolated
 
 ### Braces Inside String Literals
 
-A quoted literal inside an expression is inert text. The body and mixed
-frontmatter strings rescan their output, so `{{ "in {{ area }}" }}` happens to
-resolve there. A value that is **exactly one** `{{ … }}` span takes the
-whole-value path, evaluates once, and never rescans, so the braces survive
-raw. Claudine lifecycle values are single-pass and are refused before launch.
+A quoted literal inside an expression is inert text, and every surface is
+single-pass: `{{ "in {{ area }}" }}` emits the braces as literal text in the
+body, in mixed frontmatter strings, and on the whole-value path alike.
+Claudine lifecycle values are refused before launch.
 Build strings with `+` (`{{ area ? "in " + area : "at root" }}`), which works
 on every surface. `lint_expression` / `lint_spanned`
 (`compose::expression::lint`) find the defect in authored source and return a

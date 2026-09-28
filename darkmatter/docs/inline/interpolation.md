@@ -215,7 +215,34 @@ Nested expression: {{{ {{ x }} }}} becomes {{ {{ x }} }} with x unevaluated.
 
 ### Frontmatter literals
 
-A literal in a frontmatter value is always text. `key: "{{{ x }}}"` resolves to the string `{{ x }}` and survives both frontmatter interpolation passes, including the pass that brackets frontmatter shell expansion.
+A literal in a frontmatter value is always text. `key: "{{{ x }}}"` resolves to the string `{{ x }}`, and that string is data from then on: no later frontmatter pass, body reference, or transcluded child evaluates it.
+
+```md
+---
+area: claudine
+note: "fixed {{{ area }}}"
+---
+Body: {{ note }}
+```
+
+composes to `Body: fixed {{ area }}`.
+
+## Inserted Text Is Data
+
+Every authored span is scanned **once**. The text an expression returns, a file read (`frontmatter(...)`), a shell command's output, and a literal's output are data: Darkmatter never scans them again for `{{ … }}`, `{{{ … }}}`, a whole-value `$( … )`, or a body directive (`::shell`, `::shell-block`, `::file`, `::code`, `::url`, `::block`). This holds in frontmatter, in the body, and in transcluded children, which receive their parent's composed values as data.
+
+| Inserted text | Result |
+| ------------- | ------ |
+| `{{ x }}` where `x` is `see {{ y }}` | `see {{ y }}`, never evaluated |
+| `{{ x }}` where `x` is `::shell echo hi` | the text `::shell echo hi`, never run |
+| `{{ x }}` where `x` is `` ``` `` | text; it cannot open a code fence that hides a later authored directive |
+| `::shell {{ exe }} arg` | rejected: an expression may supply arguments, never the executable, a chain operator, or a redirection |
+| `::shell-block` holding `echo {{ x }}` where `x` has a line break | rejected: data cannot split or join the block's commands |
+| a missing relative link inside inserted text | a warning, not a reference-validation error |
+
+A text replacement (`replace:`) writes its value as authored text when the value is authored, so a replacement can still expand to a directive, and as data when the value was itself produced (for example `replace: {X: "{{ y }}"}`).
+
+A caller can inject data directly: `ComposeOptions::with_data_overrides` and `ComposeOptions::with_override_layers` insert values that are never scanned. `--set` / `with_set_overrides` values are authored templates: a person typed them.
 
 
 ## Escaping an Opener with a Backslash
@@ -235,13 +262,12 @@ Handlebars writes a variable as \{{ name }} and a partial as \{\{> header }}.
 
 A quoted string literal inside an expression is text. The lexer copies it verbatim, so `{{ "in {{ area }}" }}` does not contain a nested expression at parse time. Whether those braces are ever interpolated depends on the surface:
 
-- **Rescanning surfaces** — the document body and mixed frontmatter strings (`"Hello {{ name }}"`) — run a fixpoint loop that rescans the text each pass produced, up to a fixed depth. The literal's braces land in the output and resolve on the next pass.
-- **Single-pass surfaces** — a scalar whose trimmed content is **exactly one** `{{ … }}` span — take the whole-value path, which parses and evaluates once and keeps the typed result. Nothing rescans the result, so a literal's braces survive as raw text. Claudine's lifecycle values (communication fields, stack operands, `proxy … with` values, and `when`/`while`/`until` predicates) are single-pass, and Claudine refuses a nested span there before any provider starts. An ordinary whole-value frontmatter key keeps the raw braces too (`r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`), although a body reference such as `{{ r }}` then resolves them on its own rescan.
+Every surface is single-pass: the literal's braces land in the output as data and are never interpolated. The body and mixed frontmatter strings (`"Hello {{ name }}"`) insert them as text, and a scalar whose trimmed content is **exactly one** `{{ … }}` span takes the whole-value path, which parses and evaluates once and keeps the typed result. `r: "{{ 'b {{ name }}' }}"` composes to `b {{ name }}`, and a body reference `{{ r }}` inserts that text unchanged. Claudine's lifecycle values (communication fields, stack operands, `proxy … with` values, and `when`/`while`/`until` predicates) are single-pass too, and Claudine refuses a nested span there before any provider starts.
 
-Write the value with `+` instead. It resolves identically on both kinds of surface:
+Write the value with `+` instead. It resolves on every surface:
 
 ```yaml
-# Never resolves on a single-pass surface
+# Never resolves: the inner braces are text
 say: '{{ area ? "Review in {{ area }} completed" : "Review completed" }}'
 
 # Resolves everywhere
@@ -257,21 +283,23 @@ say: '{{ area ? "Review in " + area + " completed" : "Review completed" }}'
 
 Array- and object-valued spans receive a suggestion like any scalar: both rendering paths stringify aggregates as compact JSON, so the rewrite composes the same text. The suggestion is withheld only when no equivalent rewrite exists. That covers a nested span that does not parse, a literal used as an object key, a `{{{ … }}}` literal sharing the string, and a doubly nested literal.
 
-Callers decide whether a surface is single-pass; the lint only describes syntax. A `{{{ … }}}` inside a quoted literal is not a nested span.
+The lint only describes syntax; callers decide where to report it. A `{{{ … }}}` inside a quoted literal is not a nested span.
 
 
 ## Implementation
 
-The current implementation uses a source-first scanner approach, rescanned to a fixed point (see [Braces Inside String Literals](#braces-inside-string-literals) for the whole-value exception):
+The current implementation uses a source-first scanner that reads each authored span once (see [Inserted Text Is Data](#inserted-text-is-data)):
 
 - A scanner finds `{{ ... }}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{{ ... }}}` text. Fenced and indented code blocks are skipped.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets
-- Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
-- A failing expression fails document composition. Under the lenient policy that only `compose_subtree(..., SubtreeStrictness::Lenient)` and preflight discovery use, it is left in place and reported once, and later scan passes do not evaluate it again. Coded warnings are reported once per issue: an unknown `ctx.*` group warns once per source document however often it is referenced, and a transcluded document's issues stay separate from its parent's
+- Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens in the same scan as expression evaluation, so only authored literals convert; a literal a replacement value introduces stays as written
+- The body carries the byte ranges of inserted data through every stage that rewrites it, until the transclusion directive parse. Each stage that looks for instructions reads a masked view in which data bytes cannot form an expression, a directive, or a code fence; if the ranges ever stop describing the body, composition fails rather than treat data as authored
+- A failing expression fails document composition. Under the lenient policy that only `compose_subtree(..., SubtreeStrictness::Lenient)` and preflight discovery use, it is left in place and reported once. Coded warnings are reported once per issue: an unknown `ctx.*` group warns once per source document however often it is referenced, and a transcluded document's issues stay separate from its parent's
 
 See the source modules:
 
 - `darkmatter/lib/src/markdown/compose/interpolation/` — lexer, evaluator, rewriter
 - `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs` — frontmatter-specific interpolation engine
+- `darkmatter/lib/src/markdown/compose/value_origin.rs` and `body_origin.rs` — which frontmatter values and body bytes are data

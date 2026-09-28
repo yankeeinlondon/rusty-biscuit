@@ -258,8 +258,11 @@ rule lives in the lexer, never in `is_identifier_char`. Any cursor-side scan
 rather than add `-` to a character class, which would merge `foo--bar`.
 
 A `{{ … }}` that cannot be parsed or evaluated fails full-document
-composition regardless of `fail_fast`, including one a rescan finds in
-replacement output. `interpolate_text`/`interpolate_value` take an explicit
+composition regardless of `fail_fast`. Every scan is single-pass: text an
+expression, file read, shell command, or literal produced is data and is
+never scanned again (`compose/value_origin.rs` for frontmatter,
+`DataRanges` in `compose/body_origin.rs` for the body); a directive
+scanner must read the masked view (`parse_utils::structural_view`). `interpolate_text`/`interpolate_value` take an explicit
 `ExpressionFailurePolicy`. Pass `Strict` from document stages. Use `Lenient`
 only for `compose_subtree(..., Lenient)` and preflight discovery (see
 [compose.md](compose.md#error-handling)). The error carries the authored
@@ -290,8 +293,8 @@ report merges upward. Push new warnings through `add_warning`/`add_warnings`,
 not `report.warnings.push`. Membership is O(1) through a private
 `WarningIndex` cache: it indexes direct pushes lazily and rebuilds when the
 vector shrinks, but an element replaced in place is not seen.
-`interpolate_text` tracks a failed span across
-rescans and never re-evaluates it. A new coded family, such as
+`interpolate_text` scans once, so a failed span
+is reported once. A new coded family, such as
 `dm.expression.unknown_identifier`, adds a `WarningSubject` constructor
 rather than a message-based check.
 

@@ -80,7 +80,7 @@ to error variants as they are constructed.
 A line number is only true in the frame of the `content` it indexes.
 `Markdown::full_source_context_for_errors` rebuilds its text from the
 *current* body, which text replacement, page blocks, directive targets,
-and interpolation rescans may already have rewritten. To point at an
+and interpolation may already have rewritten. To point at an
 authored position, index the loaded text (`loaded_source_context_for_errors`)
 and prove the location is authored first. Body and frontmatter
 interpolation do this — the body through the `BodyOrigin` edit map, the
