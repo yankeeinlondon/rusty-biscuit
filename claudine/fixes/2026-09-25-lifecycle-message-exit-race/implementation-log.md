@@ -13,8 +13,26 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_2:
+    - claudine/lib/src/messaging/delivery.rs
+    - claudine/lib/src/messaging/delivery/tests.rs
+    - claudine/lib/src/messaging/mod.rs
+    - claudine/lib/src/messaging/send.rs
+    - claudine/lib/src/messaging/send/tests.rs
+    - claudine/lib/tests/l1/messaging_delivery.rs
+    - claudine/lib/tests/l1/messaging_spawn_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - Cargo.lock
+docs_updated_during_phase_2:
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/hook-actions.md
 packages:
     - claudine-cli
+    - claudine
 ---
 
 # Implementation Log for 2026-09-25-lifecycle-message-exit-race (5 phases)
@@ -176,3 +194,122 @@ packages:
   are logged, Rules 1–10 are confirmed or amended, and the spawn guard passes.
 - The claudine skill needed no change in this phase. The fixture is documented
   in `docs/topics/testing.md`, which the skill links through `topics/`.
+
+## Phase 2
+
+- Started and finished 2026-09-27.
+
+### What landed
+
+- `lib/src/messaging/delivery.rs` (new, private module; public items
+  re-exported from `claudine::messaging`):
+  - `DELIVERY_DRAIN_BUDGET` (10 s), `DeliveryLabel::{Route(name), DesktopNotification}`
+    whose `Display` is `route {name}` or `desktop notification`,
+    `DrainOutcome { pending, panicked }` with `report()`, and
+    `drain_deliveries(deadline)`.
+  - `pub(crate) fn track(label, future)`: `Handle::try_current()` (warn and
+    return without a runtime, per amended Rule 7), spawn, then under the lock
+    partition out finished entries and push the new one. Finished entries are
+    polled with `Waker::noop()` **after** the lock is released, and a panic is
+    reported (Rule 6).
+  - Drain loop: take all entries, `timeout_at(deadline, handle)` each, repeat
+    until the registry is empty. Once the deadline has passed, one last sweep
+    polls late registrations once, and then the loop stops, so a task that
+    keeps registering cannot hold the exit open. Timed-out entries are
+    `abort()`ed and listed in `pending`. A `Cancelled` join error is not
+    reported (only the drain cancels).
+  - The pending warning reads
+    `Route <name> was still sending at exit; delivery is unknown`, and with
+    several entries `…, route <b>, desktop notification were still sending …`,
+    rendered as a `Warning` `Status`. The route name is prose-escaped.
+- `send.rs`: the three helpers call `track(...)`. `execute_notification` lost
+  its own `try_current` block because `track` owns that now.
+  `report_delivery_panic` sits beside the other two reporters and uses the
+  same "Failed to send …: delivery task panicked" shape. `prose_escape` became
+  `pub(super)`. The "fire-and-forget" wording in the module docs and all three
+  function docs was rewritten (R7, first bullet).
+
+### Departures from the plan (Rules unchanged in intent)
+
+- **No `id` field on registry entries** (Rule 1 listed `{ id, label, handle }`).
+  Nothing reads an id: pruning uses `is_finished()` and the drain takes the
+  whole `Vec`, so an id would be dead state.
+- **`DrainOutcome` gained `panicked: Vec<DeliveryLabel>`** beside `pending`.
+  It makes Rule 6's "panics are reported, not re-raised" observable to tests
+  and embedders. Panics are still printed as they are found; `report()` prints
+  only the pending warning.
+- **The spawn guard is library-side**, in `lib/tests/l1/messaging_spawn_guard.rs`,
+  not a CLI test reusing `cli/tests/common/source_scan.rs`. A CLI test that
+  reads `lib/src` would not run on a lib-only change (CI selects the owning
+  package's tests; dependents are only compile-checked), which is exactly the
+  change this guard polices. The lib has no sanitizer, so the guard lexes with
+  `proc-macro2` (new lib dev-dependency, `span-locations`, the same spec as
+  `claudine-cli`). Comments, doc comments, and strings cannot trip it. It flags
+  `spawn_blocking`, `spawn_local`, and any `spawn` ident after `.` or `:`
+  (which also catches `std::thread::spawn`).
+- **Tokio `test-util`** was added to the lib's dev-dependency features for the
+  paused-clock tests.
+- **Docs, ahead of Phase 5:** `docs/topics/messaging.md` gained a "Delivery
+  tracking" section documenting the library contract that now exists, with the
+  CLI drain marked **planned**. The stale "3-second timeout" bullet was left
+  for Phase 5, which owns that rewrite. The claudine skill's
+  `hook-actions.md` `message` row said `tokio::spawn`; it now names the
+  tracker. Its 3-second line is also left for Phase 5.
+
+### Verification
+
+- Guard proven load-bearing: appending `fn _planted() { tokio::spawn(async {}); }`
+  to `send.rs` made `messaging_starts_tasks_only_through_the_delivery_tracker`
+  fail with `src/messaging/send.rs:777:24`. The file was restored.
+- Rule 7 regression: `execute_resolved_message_without_a_runtime_does_not_panic`
+  covers a real route outside a runtime. On the old code the bare
+  `tokio::spawn` panics there ("must be called from the context of a Tokio
+  1.x runtime").
+- The reproduction `compose_success_message_is_delivered_before_exit` is
+  still red with `--run-ignored all`: `claudine exited (exit status: 0) before
+  the success message reached the listener`. This is expected until Phase 3.
+- `just lint` (claudine): exit 0. The only warning is the pre-existing macOS
+  linker `__eh_frame` notice.
+- `just test` (claudine): 7398 passed, 10 skipped (same skip set as Phase 1,
+  including the ignored reproduction).
+- Cross-OS, new and touched messaging tests:
+
+| OS | Command | Result |
+| --- | --- | --- |
+| macOS (local) | `just test` | pass |
+| Linux (`build-linux`) | `just cross-check claudine --os linux --all-features -E '…messaging…'` | 57/57 pass |
+| Windows native (`build-win-native`) | `just cross-check claudine --os windows messaging` | 116/116 pass (the 16 new tests included) |
+
+- Linux again hit the known stale kache hardlink
+  (`librenderable-*.rmeta is not writeable`) without a build flag. The claudine
+  lib has no features, so `--all-features` is the flag that takes the native
+  path; it ran green. The `os` skill already records this for this clone.
+- Windows cross-check with `-E '…'` failed in the shared `_test` recipe
+  (`syntax error near unexpected token '('`), the same pre-existing quoting
+  bug Phase 1 logged for `just test-cli -E`. A positional name filter works.
+
+### Requirement-to-test mapping (Phase 2)
+
+| Requirement | Test |
+| --- | --- |
+| R1: a quickly finishing task is not lost or reported | `messaging::delivery::tests::a_delivery_that_finishes_is_not_reported` |
+| R1: a task registered while draining is awaited | `…::a_delivery_registered_while_draining_is_awaited` |
+| R3: one shared deadline; stalled tasks listed and aborted | `…::stalled_deliveries_share_one_deadline_and_are_aborted` (paused clock: elapsed is exactly 10 s for four stalled deliveries; drop sentinels fire) |
+| R3 / Rule 5: a past deadline does not wait | `…::a_deadline_already_passed_returns_without_waiting` |
+| R3: nothing pending returns at once | `…::nothing_tracked_returns_immediately` |
+| R1 / Rule 6: a panic is reported, not re-raised, and the drain continues | `…::a_panicking_delivery_is_reported_and_not_re_raised` |
+| R1: finished entries (including panics) are pruned | `…::registering_prunes_finished_deliveries` |
+| Rule 7: no runtime means warn and return | `…::tracking_without_a_runtime_neither_panics_nor_registers`, `messaging::send::tests::execute_resolved_message_without_a_runtime_does_not_panic` |
+| R1 / R3: labels and the warning hold no URL, token, or body; the warning says delivery is unknown | `…::labels_render_only_the_route_name_or_the_notification_label`, `…::the_pending_warning_names_each_delivery_and_says_delivery_is_unknown`, `…::panics_alone_produce_no_pending_warning` |
+| R2: embedder opt-in drain (real HTTP) | `claudine::l1 messaging_delivery::a_drained_send_has_been_delivered_when_the_drain_returns` (the reply is withheld 300 ms, and the drain returns only after it is written) |
+| R3 through the public API, no secret in the label | `messaging_delivery::a_stalled_send_is_pending_under_its_route_name_alone` |
+| R6: guard that every messaging task goes through the tracker | `messaging_spawn_guard::{messaging_starts_tasks_only_through_the_delivery_tracker, the_detector_finds_every_spawn_form, the_detector_ignores_comments_strings_and_unrelated_names}` |
+
+- Tier placement: all new tests are L1 (no tier markers). The lib unit tests
+  compile into the lib target. The two lib L1 files are declared in
+  `lib/tests/l1/main.rs`, and `test_layout` passes. Repository reads use
+  `manifest_dir!().join("src/messaging")`.
+- The tracker is process-wide. The tests rely on nextest's process-per-test
+  model to stay isolated, and the tests module says so.
+- Unrelated: `claudine/features/2026-09-21-lifecycle-ergonomics/spec.md` shows
+  as modified in the worktree. This phase did not touch it.

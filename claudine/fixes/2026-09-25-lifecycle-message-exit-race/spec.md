@@ -9,62 +9,34 @@ review_iterations: 0
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 1 is done; read `implementation-log.md` → Phase 1 before starting.
-    - Rules 7, 8, and 10 in `plan.md` were amended (look for "*Amended ...*").
-      Rule 7: `track` must warn and return when `Handle::try_current()` fails,
-      for all three helpers; today `execute_message` and
-      `execute_resolved_message` call bare `tokio::spawn`, which panics on a
-      thread with no runtime (parallel sequence-group member threads).
-      Rule 8: for `sequence` and provider wrappers, `finish` installs the
-      compose ladder (`install_user_interrupt_guard`) during a non-empty drain,
-      because on Unix their leftover flag-only / wait-loop SIGINT handlers
-      swallow every press. compose/inline-compose hand over their
-      `UserInterruptGuard`; `handle` hands over nothing.
-    - The reproduction test
-      `lifecycle_message_drain::compose_success_message_is_delivered_before_exit`
-      carries `#[ignore = "red until the CLI drains deliveries before exit; ..."]`
-      so each phase ends green. Phase 3 deletes that attribute only. Run it
-      meanwhile with `--run-ignored all`. The control test
-      `compose_start_message_reaches_the_listener_during_the_run` must stay green.
-    - The loopback fixture is `cli/tests/common/webhook_listener.rs`
-      (`WebhookListener`, `ListenerMode`, `write_webhook_route`,
-      `apply_route_env`). Phase 2's library embedder test needs its own
-      in-process listener; this one lives in the CLI test tree.
-    - Phase 4's `sequence` test must use an agent step: sequence shell-task
-      stacks are hard-coded to no messaging route (`wrap/sequence/task_run.rs`).
-    - On macOS a native desktop notification runs `osascript` synchronously on
-      a Tokio worker. `abort()` cannot stop it, but `finish` exits the process
-      without waiting for worker threads, so the drain deadline still holds.
-    - `just test-cli -E "..."` breaks the `_test` recipe's shell quoting; call
-      `cargo nextest run -p claudine-cli --features test-fixtures --test l1 -E '...'`
-      directly for filtered runs.
-$schema:
-    status: |-
-        enum(
-            draft-spec,
-            finalized-spec,
-            planned,
-            implemented,
-            review-findings,
-            human-in-the-loop,
-            completed,
-            on-hold,
-            abandoned
-        ) -> an indicator of progress for this specification
-    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
-    reviewed_by: string -> the agent and model used in the spec review
-    reviewed_on: date -> the date the spec was reviewed
-    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
-    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
-    implemented: boolean -> indicates whether this spec's plan has been implemented
-    implemented_by: string -> the agent who implemented the plan
-area: claudine
-packages:
-    - claudine
-    - claudine-cli
-related:
-    - 2026-09-03-tts-not-finishing
-    - 2026-09-23-opencode-failure-lifecycle
+    Phase 2 is done; read `implementation-log.md` → Phase 2 (and Phase 1).
+    - Library API now in `claudine::messaging`: `drain_deliveries(deadline:
+      tokio::time::Instant) -> DrainOutcome`, `DrainOutcome { pending, panicked }`
+      with `report()` (prints the single pending Warning; panics were already
+      printed during the drain), `DeliveryLabel`, and `DELIVERY_DRAIN_BUDGET`
+      (10 s). `finish` in Phase 3 should be roughly
+      `let outcome = drain_deliveries(min(now + BUDGET, handle_deadline)).await;
+      outcome.report();` then flush and exit.
+    - `drain_deliveries` with a deadline already in the past polls each task
+      once, aborts the rest, and returns without waiting, so `handle`'s `124`
+      path needs no special case.
+    - Rule 8 (amended) needs "is the registry non-empty?" before draining, to
+      decide whether to install the compose ladder for sequence and wrappers.
+      There is no public accessor for that yet (only a `#[cfg(test)]`
+      `tracked_count`). Either add a small public
+      `has_pending_deliveries() -> bool` in `messaging/delivery.rs`, or install
+      the ladder unconditionally when the drain will not return at once. If you
+      add the accessor, extend `delivery/tests.rs`.
+    - `docs/topics/messaging.md` now has a "Delivery tracking" section with the
+      CLI drain marked **Planned**. Remove that marker when Phase 3 lands the
+      drain (Phase 5 still owns the fuller rewrite and the stale 3-second claim).
+      `.claude/skills/claudine/hook-actions.md` also says "The CLI's drain on
+      exit is planned"; update it too.
+    - Filtered nextest runs: `-E '...'` breaks the shared `_test` recipe
+      (locally and in `just cross-check --os windows`); use a positional name
+      filter with cross-check, or `cargo nextest run` directly. On Linux
+      cross-check, pass a build flag (`--all-features` for the lib,
+      `--features test-fixtures` for the CLI) to dodge the stale kache links.
 ---
 
 # Outbound messages sent near process exit are silently dropped

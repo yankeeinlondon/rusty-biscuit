@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -14,8 +14,26 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_2:
+    - claudine/lib/src/messaging/delivery.rs
+    - claudine/lib/src/messaging/delivery/tests.rs
+    - claudine/lib/src/messaging/mod.rs
+    - claudine/lib/src/messaging/send.rs
+    - claudine/lib/src/messaging/send/tests.rs
+    - claudine/lib/tests/l1/messaging_delivery.rs
+    - claudine/lib/tests/l1/messaging_spawn_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - Cargo.lock
+docs_updated_during_phase_2:
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/hook-actions.md
 packages:
     - claudine-cli
+    - claudine
 ---
 
 # Plan: outbound messages sent near process exit are silently dropped
@@ -88,7 +106,7 @@ The fix has three parts:
       for the withheld reply and the listener receives exactly one POST
       containing the `success` text before the process exits. The old-code
       observation is recorded in `implementation-log.md`.
-- [ ] `grep` finds no bare `tokio::spawn` or `handle.spawn` in
+- [x] `grep` finds no bare `tokio::spawn` or `handle.spawn` in
       `lib/src/messaging/` outside the tracker module, and a guard test enforces
       it.
 - [ ] The only direct `process::exit`, `_exit`, or `ExitProcess` calls in
@@ -304,14 +322,14 @@ change in the implementation log before moving on.
 
 **Wave 2**
 
-- [ ] **Tracker module**
+- [x] **Tracker module**
     - Implement `lib/src/messaging/delivery.rs` per Rules 1, 4, 5, 6, and 7:
       `track(label, future)`, which spawns, prunes, and registers;
       `drain_deliveries(deadline)`; `DrainOutcome::report()`; and
       `DELIVERY_DRAIN_BUDGET`.
     - Module `//!` docs state the contract: any helper that starts a delivery
       task must go through `track`, and the guard enforces this.
-- [ ] **Tracker unit tests** (paired with the module)
+- [x] **Tracker unit tests** (paired with the module)
     - A task that finishes before `drain` is not reported.
     - A task registered while a drain is running is awaited.
     - Several stalled tasks share **one** deadline: drain time is about the
@@ -328,7 +346,7 @@ change in the implementation log before moving on.
 
 **Wave 3** (parallel; both depend on Wave 2)
 
-- [ ] **Migrate the three helpers**
+- [x] **Migrate the three helpers**
     - `execute_message`, `execute_resolved_message`, and
       `execute_notification` call `delivery::track(...)` instead of spawning
       directly. `report_send_failure` and `report_notification_failure` stay
@@ -336,21 +354,21 @@ change in the implementation log before moving on.
     - Rewrite the "fire-and-forget" wording in the module and function docs
       (R7, first bullet). Update the existing tests in `send/tests.rs` if any
       depended on untracked spawning.
-- [ ] **Messaging spawn guard**
+- [x] **Messaging spawn guard**
     - Add an L1 source-scan guard, reusing `cli/tests/common/source_scan.rs`
       (`sanitize`, so comments and strings are ignored), or the equivalent
       library-side test. It fails if `tokio::spawn`, `.spawn(`, or
       `spawn_blocking` appears in `lib/src/messaging/**` outside
       `delivery.rs`. Include a self-test that the detector catches a planted
       site.
-- [ ] **Library embedder test**
+- [x] **Library embedder test**
     - A library test runs `execute_resolved_message` against an in-process
       loopback listener, calls `drain_deliveries`, and asserts the request
       arrived. This pins the opt-in drain contract for embedders.
 
 **Validation checkpoint 2**
 
-- [ ] `just test` in `claudine/` passes for the lib crate. The reproduction
+- [x] `just test` in `claudine/` passes for the lib crate. The reproduction
       test is still red, as expected, because the CLI does not drain yet.
 
 ## Phase 3: One ordinary-exit path in the CLI (R2, R3, R4)
