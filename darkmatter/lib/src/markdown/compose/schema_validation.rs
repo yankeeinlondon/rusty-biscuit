@@ -679,14 +679,23 @@ fn classify_caller_overrides(
         .collect()
 }
 
+/// The caller's values with the base their file references resolve from.
+///
+/// Without explicit records, every override is a caller value: authored
+/// (`--set`) and data alike. Origin decides whether a value is scanned for
+/// templates, not where a relative path in it points.
 fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::CallerInputRecords {
     if !options.caller_input_records().is_empty() {
         return options.caller_input_records().clone();
     }
-    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
-    else {
+    let overrides: Vec<(&String, &serde_json::Value)> = [&options.set_overrides, &options.data_overrides]
+        .into_iter()
+        .filter_map(|layer| layer.as_ref().and_then(serde_json::Value::as_object))
+        .flatten()
+        .collect();
+    if overrides.is_empty() {
         return Default::default();
-    };
+    }
     let origin = match (
         options.file_resolution_context.as_ref(),
         options.file_ref_fallback_dir.as_ref(),
@@ -699,7 +708,7 @@ fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::C
         (None, None) => return Default::default(),
     };
     overrides
-        .iter()
+        .into_iter()
         .map(|(key, value)| {
             (
                 key.clone(),
