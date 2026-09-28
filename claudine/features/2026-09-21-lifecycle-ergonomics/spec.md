@@ -36,11 +36,14 @@ When we first created lifecycle events in Claudine we just provided a dictionary
 
 In this feature we will focus on making the API surface that has developed over time more ergonomic. This will be a breaking change and it's important to know that we do not currently have production users so this change can and will be made without the need to support both API variants for an interim period.
 
-Terms used throughout: a **lifecycle event** is one of the frontmatter keys Claudine fires at a fixed point of a composition run (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`, and the `loop:` gate). An **action** is one thing an event does (print a line, speak, run a shell command, change flow). A **flow-control directive** is the subset of actions that decide what the run does next (`stop`, `skip`, `error`, `retry`, `resume`, `proxy`, `defer`, and the planned `break` and `prep`) rather than producing a side effect.
+Terms used throughout: a **lifecycle event** is one of the six frontmatter keys Claudine fires at a fixed point of a composition run (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`). A **stack** is any place the lifecycle action grammar is accepted: the six events, the `loop:` block's `gate:` (see [Loop Lifecycle](#loop-lifecycle)), and a sequence task's `setup:` and `teardown:`, which the same lifecycle parser reads today. Everything this spec says about an event's grammar holds for every stack. An **action** is one thing a stack does (print a line, speak, run a shell command, change flow). A **flow-control directive** is the subset of actions that decide what the run does next (`stop`, `skip`, `error`, `retry`, `resume`, `proxy`, `defer`, and the planned `break` and `prep`) rather than producing a side effect. **Document prepare** is the existing `prepare_document` boundary: the step that composes a document and runs before `initialize` fires; the TTS pre-warm pass in [Pre-compilation of TTS assets](#pre-compilation-of-tts-assets) runs there.
 
 ## Package Ownership and Sequencing
 
-Everything in this feature lands in **Claudine**: the grammar, the parser, the validator, the schemas, and the audio-scheduling change. No Darkmatter code changes.
+Everything that defines the grammar lands in **Claudine**: the parser, the validator, the schemas, the audio-scheduling change, and the TTS pre-warm pass. Two other packages are touched, in bounded ways:
+
+- **biscuit-speaks** gains the uniform `prepare` API and the cache-consult fix described in [Pre-compilation of TTS assets](#pre-compilation-of-tts-assets). That is a real library change with its own tests and documentation duty, not a Claudine-side workaround.
+- **Darkmatter** gains **no lifecycle machinery** — no engine, no grammar knowledge, no new parser. What does change on the Darkmatter side is test and mirror material that must move with the grammar, and it is part of this feature's [Migration Sweep](#migration-sweep): the static lifecycle-layout mirror in `darkmatter/dmls/src/diagnostics/nested_span.rs` and its parity test, the `initialize.stack[0].when` pointer tests in `darkmatter/dmls/src/overlay/frontmatter.rs`, the `mapping_only_corpus.rs` corpus test, the `sequence_descent/implement-plan.md` fixture, and the deletion of the Darkmatter-side schema copies named below.
 
 The parser and action-model slice — `parse.rs`, `action_shape.rs`, `actions.rs`, `validate.rs`, `signatures.rs`, and `source_map.rs` under `claudine/lib/src/composition/lifecycle/` — must be written **lift-ready**: it may not import Claudine runtime types, specifically global settings, the provider layer, messaging, or TTS/Playa types. This is discipline, not something the compiler enforces; the point is that a later feature can lift the slice into Darkmatter as a unit without untangling it first.
 
@@ -54,7 +57,7 @@ Editing that spec's frontmatter and flagging its examples as old-grammar is an *
 Two housekeeping facts established while clarifying ownership:
 
 - **Single schema home.** Claudine's schemas live in `claudine/schemas/` and nowhere else. Filled-in old-grammar copies exist at `darkmatter/docs/schemas/claudine.yaml` and `darkmatter/docs/schemas/claudine-types.yaml`; both are **deleted** by this feature, and the `.dmls.toml` example in `darkmatter/docs/topics/schemas/dmls-schema-support.md` that points at them is repointed to `claudine/schemas/`. `claudine/schemas/claudine.yaml` is currently an empty file.
-- **No Darkmatter `completed` event.** Darkmatter has no document-lifecycle notion today (its only "lifecycle" is the unrelated preflight stage), so the placeholder `claudine/schemas/partials/lifecycle.yaml` is wrong where it claims Claudine's `success` renames a Darkmatter `completed` event. The claim is removed when that file is rewritten under this feature.
+- **No Darkmatter `completed` event.** Darkmatter has no document-lifecycle notion today (its only "lifecycle" is the unrelated preflight stage), so the placeholder `claudine/schemas/partials/lifecycle.yaml` is wrong where it claims Claudine's `success` renames a Darkmatter `completed` event. The claim disappears when that placeholder is replaced under this feature ([Action Inventory](#action-inventory), rule 9).
 
 ## Ergonomic Shift
 
@@ -88,25 +91,27 @@ Today the "stack" is an explicit element but because the stack is all we have in
 - (no change from current) actions consist of:
     - communication (say/speak, effect, message, notify, stderr, stdout, info, warn, success)
     - `set`, the lifecycle mutation of document state
-    - the side-effect verbs Darkmatter provides (`set_frontmatter`, `http_post`, ...)
+    - the side-effect verbs and expression functions Darkmatter provides (`set_frontmatter`, `http_post`, `file_exists`, ...)
     - shell commands (_bespoke_)
     - flow control directives (retry, resume, proxy, ...)
 
 - (no change from current) the late binding variables like `err`, `current`, and `timing` are still available in exactly the same way
+
+The full list, with each verb's short and long form, is the [Action Inventory](#action-inventory).
 
 ### Execution model
 
 The stack is an **ordered array and nothing else**. There is no concurrency between actions, no audio thread, and no bundle concept in the executor.
 
 - Items run strictly in the order written. A `set` mutation is visible to every action after it (this is today's behavior: the executor is a plain ordered loop, and `set` commits against a pre-write snapshot).
-- A **dictionary bundle** — a `when` item with sibling verb keys, or a whole event written as a dictionary (see [Dictionary Grammar](#dictionary-grammar)) — is **desugared at parse time** into an ordered action list. The order is fixed and documented:
-    1. the `when` guard (if present)
+- A **dictionary bundle** — a `when` item with sibling verb keys, or a whole stack written as a dictionary (see [Dictionary Grammar](#dictionary-grammar)) — is **desugared at parse time** into an ordered action list. The order is fixed and documented:
+    1. the `when` guard (if present; only a list item can carry one — a root-level dictionary never does)
     2. `set`
     3. communication verbs, in the executor's existing order: `stdout`, `stderr`, `info`, `warn`, `success`, `message`, `notify`, then the audio verbs `effect`, `say`
     4. `shell`
-    5. Darkmatter side-effect verbs
+    5. Darkmatter side-effect verbs and expression functions
     6. the single flow-control key, last
-- The root-level dictionary form survives; under desugaring it costs nothing extra.
+- The root-level dictionary form survives; under desugaring it costs nothing extra. It **never carries `when`**: a guarded action requires the list form (a `- when:` item). This is today's rule — the lifecycle-concern key set the parser reads at a stack root excludes `when` — and it is what lets the `loop:` block read its loose verb keys the same way ([Loop Lifecycle](#loop-lifecycle)).
 - Audio (`say`/`speak`, `effect`) is **published** to Playa in stack order and never blocks on playback. Playa preserves publication order and serializes playback. See [Background Audio](#background-audio).
 - An event is **complete** when its non-audio work has finished and its audio has been published — never "when the audio has played".
 - Audio drains across flow-control transitions: when `retry`, `resume`, or `proxy` fires, audio already published for the event keeps playing in queue order and the next flow state's audio queues behind it. There is no cancel API and no job-ID bookkeeping.
@@ -116,7 +121,7 @@ The stack is an **ordered array and nothing else**. There is no concurrency betw
 
 Because a directive ends the whole event, actions written after an unconditional directive can never run. Claudine treats that as an authoring error rather than silently truncating:
 
-- The rule is **list-local**. Within any one list — the event root, a `then` body, or an `else` body — an item that unconditionally fires a directive must be the **last** item in that list. Violations are a parse error, `LifecycleActionOrder` (today this error covers ordering within a single item; its meaning is widened to ordering within a list).
+- The rule is **list-local**. Within any one list — a stack root, a `then` body, or an `else` body — an item that unconditionally fires a directive must be the **last** item in that list. Violations are a parse error, `LifecycleActionOrder` (today this error covers ordering within a single item; its meaning is widened to ordering within a list).
 - A `when` item **never counts as unconditional**, even when both its `then` and `else` bodies end in a directive. Items may follow it. Claudine performs no cross-branch reachability analysis; the author is trusted to know what the branches do.
 - More than one flow-control key in a single dictionary bundle is the parse error `LifecycleMultipleLifecycleActions`.
 - The rule applies unchanged to the planned `break` and `prep` directives.
@@ -190,7 +195,7 @@ success:
       no_error: true
 ```
 
-This grammar can also be used at the root of the lifecycle event. That means that the following is valid:
+This grammar can also be used at the root of a stack. That means that the following is valid:
 
 ```yaml
 start:
@@ -199,15 +204,15 @@ start:
     shell: "doit"
 ```
 
-Here the event is a single bundle: after desugaring it runs `message`, then `say`, then `shell`, and the event is complete when `shell` has finished and the audio has been published. A root-level dictionary follows the same rules as a bundled item: each verb at most once, no long form, at most one flow-control key (which runs last), `no_error` permitted, `then`/`else` not permitted.
+Here the event is a single bundle: after desugaring it runs `message`, then `say`, then `shell`, and the event is complete when `shell` has finished and the audio has been published. A root-level dictionary follows the same rules as a bundled item: each verb at most once, no long form, at most one flow-control key (which runs last), `no_error` permitted, `then`/`else` not permitted. It differs from a bundled item in one way: it **never carries `when`**. There is no guard slot on a root dictionary; the moment an event needs a condition, it is written as a list with a `- when:` item. The key set the parser reads at a stack root already excludes `when` today, so this is a rule the grammar keeps rather than one it adds.
 
 ### Long Form
 
 This is not a real change in behavior, the current implementation already supports the idea of a long form action too. The basic idea is that our shorthand syntax of: `{command}: {param}` works very well for most cases because almost all of the actions really only _require_ a single parameter. However, many actions offer optional parameters that give the caller greater control over what the action does.
 
-`no_error` is a parameter of **any** long-form action map, for example `- shell: { command: "post-summary.sh", no_error: true }`. That, and the dictionary-item sibling described above, are its **only two homes**; it is not accepted beside `then`/`else` on a `when` item.
+`no_error` is a parameter of **any** long-form action map, for example `- shell: { command: "post-summary.sh", no_error: true }`. That, and the dictionary-item sibling described above, are its **only two homes**; it is not accepted beside `then`/`else` on a `when` item. The one verb that has neither home is `set`: it has no long form, and a failed `set` is an expression-evaluation error, which `no_error` never suppresses, so `no_error` on `set` is rejected rather than silently ignored.
 
-A good example of this is that all flow control directives that move to another flow state provide an optional `with` parameter that allows the Frontmatter state of the next flow state to be prepared. This is the same `with` that `proxy` already accepts: an overlay applied to the target of the transition, for that transition only, never written to disk and never merged back into the caller. `prep` takes it too. `break` and `stop` do not, because neither has a next flow state to prepare.
+A good example of this is that every flow-control directive that moves to another document — one that re-reads or recomposes a document — provides an optional `with` parameter that allows the Frontmatter state of the next flow state to be prepared. This is the same `with` that `proxy` already accepts: an overlay applied to the target of the transition, for that transition only, never written to disk and never merged back into the caller. `retry` and the planned `prep` take it too. `resume` does **not**: it sends a follow-up message into the live provider session and continues, so no document is re-read and there is no target to overlay; state that a resumed attempt's later events should see is what `set` is for. (`with` may return on `resume` if it ever gains a defined target.) `break`, `stop`, `skip`, `error`, and `defer` do not take it either, because none of them has a next flow state to prepare.
 
 - the default behavior for flow-state transitions is to move the current state exactly to the new flow-state (which might be the same prompt, a different one, or a sequence)
 - the default behavior is good for a lot of flow-state transitions but it is very common that a caller will want to mutate state slightly for the next flow state.
@@ -218,7 +223,7 @@ failure:
     - retry:
         with:
             reason: "{{ err.msg }}"
-        max: 3
+        max_attempts: 3
 ```
 
 In the shorthand of a retry we would have done something like:
@@ -234,6 +239,64 @@ By contrast, the long form allows us far greater expression and control:
 
 - in our example we again set the maximum retries to 3
 - but then we also set the `reason` frontmatter state to the _reason_ why the prior run failed allowing the conditional blocks and interpolation on the page to respond appropriately when the reason property is populated.
+
+### Action Inventory
+
+`action.yaml` enumerates every verb and directive with its short and long form. The inventory below **freezes the source inventory as v1**: it was taken from the parser (`actions.rs`, `action_shape.rs`, `parse.rs`, `signatures.rs` under `claudine/lib/src/composition/lifecycle/`) and from the flow-control topic pages, and it is the one list the schema, the parser, and the docs must agree on. `no_error` applies to every row except `set`.
+
+| Verb | Category | Short-form value | Long-form parameters | Notes |
+|---|---|---|---|---|
+| `stop` | control | none | — | any event |
+| `skip` | control | none | — | `initialize` only |
+| `error` | control | `reason` string (opt) | `reason` | |
+| `proxy` | control | `target` file-ref (req) | `target` req; `with` mapping | |
+| `retry` | control | `max_attempts` number (opt) | `max_attempts`; `delay` duration; `backoff` `fixed`\|`exponential`; `with` mapping | `with` new |
+| `resume` | control | `message` string (req) | `message` req; `max_attempts` | needs a live session; no `with` (rule 5) |
+| `defer` | control | `delay` duration (req) | `delay` req; `reason` | **planned** |
+| `break` | control | `reason` string (opt) | `reason`; `code` int 0..255 | **planned** (`2026-09-27-sequence-improvements`) |
+| `prep` | control | `target` file-ref (req) | `target` req; `with` mapping | **planned** (`2026-09-27-sequence-improvements`) |
+| `say` / `speak` | communication | text (req) | `text` req | `speak` is an alias |
+| `effect` | communication | sound-effect name (req) | `text` req | validated against the effect catalog (`LifecycleUnknownEffect`) |
+| `message`, `notify`, `stderr`, `info`, `warn`, `success`, `stdout` | communication | text (req) | `text` req | |
+| `shell` | shell | `command` string (req) | `command` req; `on_error` | forbidden in `initialize`; `on_error` is a message string emitted when the command fails, not an ignore switch, so it does not overlap `no_error` |
+| `set` | runtime set | mapping only | (none; no long form) | no `no_error` |
+| `set_frontmatter` | side-effect | `[file, prop, value]` | `file`, `prop`, `value` | generated |
+| `merge_frontmatter` | side-effect | `[file, obj]` | `file`, `obj` | generated |
+| `delete_frontmatter` | side-effect | `[file, prop]` | `file`, `prop` | generated |
+| `increment_frontmatter` / `decrement_frontmatter` | side-effect | `[file, prop]` | `file`, `prop` | generated |
+| `append_frontmatter` / `prepend_frontmatter` | side-effect | `[file, prop, value]` | `file`, `prop`, `value` | generated |
+| `ensure_file` | side-effect | `file` or `[file, content]` | `file` req; `content` | generated |
+| `ensure_dir` | side-effect | `dir` | `dir` | generated |
+| `append_line` | side-effect | `[file, text]` | `file`, `text` | generated |
+| `append_jsonl` | side-effect | `[file, obj]` | `file`, `obj` | generated |
+| `http_post` | side-effect | `[url, body]` | `url`, `body` | generated |
+| 257 expression functions (`file_exists`, `frontmatter`, `length`, `has_command`, ...) | expression-function | scalar, or array zipped to the signature | the catalog's parameter names | generated; variadic `and`/`or` are positional-only |
+
+Rules:
+
+1. **Every verb and directive has a long form** `verb: { <params>, no_error?: bool }`, with two exceptions: `set` (rule 4) and the variadic expression functions (rule 2). The short form is the verb's single positional payload: a scalar for a one-parameter verb; an array zipped to the signature for a multi-argument side-effect or expression function; and a bare name, `null`, or `[]` for a zero-argument verb (`- stop`, `- stop: null`).
+2. **Side-effect and expression-function entries are generated**, not hand-maintained. The sources are `darkmatter/lib/src/effects/catalog.rs` (13 side-effect signatures) and `darkmatter/docs/schemas/expression-functions.yaml` (257 functions); long-form parameter names are the catalog's parameter names. Variadic functions (`and`, `or`) are positional-only and have no long form.
+3. **`break` and `prep` enter as planned entries**, carrying the parameter tables from `2026-09-27-sequence-improvements`. `defer` stays enumerated and planned; the runtime returns `LifecycleDeferNotImplemented` when it is used.
+4. **`set` has no long form and no `no_error`.** It stays mapping-only, `set: { key: value }`. A failed `set` is an expression-evaluation error, which `no_error` never suppresses, so the parameter would be meaningless there and is rejected.
+5. **`with` is accepted on `retry`, `proxy`, and `prep`** and rejected everywhere else, `resume` included. Its semantics are `proxy`'s overlay in every case: applied to the target of the transition — for `retry` that target is the fresh re-read of the same document — for that transition only, never persisted, never merged back. This is new behavior for `retry` and `prep`; today `LifecycleProxyOnlyParameter` rejects `with` anywhere but `proxy`. That name, and the `LifecycleProxyWith*` error family, become misnomers once `with` is shared by three directives, so they are **renamed at implementation**. `resume` takes no overlay because it sends a follow-up message into the live provider session rather than re-reading a document, so there is nothing to overlay ([Long Form](#long-form)). `break`, `stop`, `skip`, `error`, and `defer` take no overlay.
+6. **The communication long form has one payload alias, `text`.** The `message` and `sound` aliases are dropped. The `route` parameter is dropped from the grammar and the schema: it was parsed and validated but never read by the executor (`executor.rs:1323-1343`). It may return when messaging routes are wired.
+7. **The count parameter on `retry` and `resume` is `max_attempts`**, the existing name. (An earlier draft of this spec spelled it `max`; that was a typo.)
+8. **Confirmed as they are today:** `shell` takes `command` (required) and `on_error`, with no `cwd`, `env`, or `timeout` in v1; `error` takes `reason` only, no `code`; `say`/`speak` take no `voice` or `provider`, because TTS configuration stays in `claudine.toml`; `skip` remains `initialize`-only.
+9. The placeholder `claudine/schemas/partials/lifecycle.yaml` is replaced by the `action.yaml` and `lifecycle.yaml` type libraries, or reduced to a reference to `action.yaml`; implementation decides which.
+
+Two long forms side by side, both legal at the root of a list:
+
+```yaml
+failure:
+    - say: { text: "the run failed", no_error: true }
+    - retry:
+        max_attempts: 3
+        backoff: exponential
+        with:
+            reason: "{{ err.msg }}"
+```
+
+Two doc-drift items are fixed in the [Migration Sweep](#migration-sweep) because the inventory exposed them: the `break` table in `claudine/docs/topics/flow-control/flow-control.md` omits `code`, and `defer`'s `LifecycleDeferNotImplemented` error text still says "requeue". The `with` rules in `flow-control-reference.md` (lines 99–110 today) are rewritten to rule 5.
 
 ### Else Block
 
@@ -254,7 +317,8 @@ Rules:
 
 - `then` and `else` are keys of the `when` item. There is no stand-alone `- else:` item.
 - `else` requires `then`. A `when` item either has `then` (optionally with `else`) or has sibling verb keys (the dictionary grammar), never both.
-- A `then` or `else` body accepts exactly what an event accepts — a list, or a dictionary bundle — and does so recursively.
+- A `then` or `else` body accepts exactly what a stack accepts — a list, or a dictionary bundle — and does so recursively.
+- Because of that, a body written as a dictionary bundle may carry `no_error`, applying to every verb in that body, exactly as a root-level dictionary may. `no_error` remains rejected as a sibling of `then`/`else` on the `when` item itself.
 - These are parse errors, reported as `LifecycleStackInvalidShape`: an empty `then` or `else`; a `when` with neither `then` nor sibling actions; `then` or `else` on an item with no `when`.
 
 A dictionary bundle as a body:
@@ -338,15 +402,16 @@ What Darkmatter implements today, and what this feature builds on:
 
 ### Claudine Schema Structure
 
-Five files, two of them type libraries and three of them triggers whose payloads import from the libraries:
+Six files, three of them type libraries and three of them triggers whose payloads import from the libraries:
 
 | file path             | kind             | description                                                                                                                                                                                                                                                                             |
 |-----------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `action.yaml`         | `schema`         | types-only library: the action enumeration (every verb and directive, planned ones included), each with its short and long form shapes                                                                                                                                                  |
-| `lifecycle.yaml`      | `schema`         | types-only library built on `action.yaml`: the full shape of an event — a list of items or a dictionary bundle; the `when`/`then`/`else` item; the bundle as a pattern-keyed object; nesting unrolled to depth 5                                                                          |
-| `claudine.yaml`       | `trigger-schema` | matches on `any:` of the six event keys (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`) or `agent`/`model`; payload is the catalog of Claudine frontmatter properties below                                                                                         |
+| `action.yaml`         | `schema`         | types-only library: the action enumeration (every verb and directive, planned ones included), each with its short and long form shapes, per the [Action Inventory](#action-inventory); its side-effect and expression-function entries are **generated** from the two Darkmatter catalogs (`darkmatter/lib/src/effects/catalog.rs`, `darkmatter/docs/schemas/expression-functions.yaml`), not hand-maintained |
+| `lifecycle.yaml`      | `schema`         | types-only library built on `action.yaml`: the full shape of a stack — a list of items or a dictionary bundle; the `when`/`then`/`else` item; the bundle as a pattern-keyed object; nesting unrolled to depth 5; the same stack type is what a `loop:` block's `gate:` and a task's `setup:`/`teardown:` carry |
+| `linking.yaml`        | `schema`         | types-only library: the eleven optional keys that describe how a prompt is linked into a provider as a skill, command, or agent (`name`, `allowed-tools`, `tools`, `skills`, `license`, `compatibility`, `metadata`, `user-invocable`, `disable-model-invocation`, `argument-hint`, `max_turns`); imported by the `claudine.yaml` payload so a linked prompt raises no DMLS unknown-key warning |
+| `claudine.yaml`       | `trigger-schema` | matches on `any:` of the six event keys (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`) or `agent`/`model`; payload is the catalog of Claudine frontmatter properties below, with the linking keys imported from `linking.yaml`                                        |
 | `inline-compose.yaml` | `trigger-schema` | matches `prompt: string(required)` with `none: { sequence: any }`; payload is the shape of an inline-compose document                                                                                                                                                                    |
-| `sequence.yaml`       | `trigger-schema` | matches `sequence: any`; payload is the shape of a sequence document, written to the shape `2026-09-27-sequence-improvements` defines (`when:` on a step or task, `loop:` on a group and at the root, `loop` and `seq` reserved) so that spec's examples validate the day the schema lands |
+| `sequence.yaml`       | `trigger-schema` | matches `sequence: any`; payload is the shape of a sequence document, written to the shape `2026-09-27-sequence-improvements` defines (`when:` on a step or task, `loop:` on a group and at the root, `loop` and `seq` reserved) so that spec's examples validate the day the schema lands; every `loop:` block types `gate:`, and every task types `setup:`/`teardown:`, from `lifecycle.yaml` |
 
 The `claudine.yaml` payload describes the frontmatter properties common to every Claudine prompt, taken from `claudine/docs/topics/frontmatter-properties.md`:
 
@@ -355,8 +420,9 @@ The `claudine.yaml` payload describes the frontmatter properties common to every
 - timeouts: `timeout`, `step_timeout`, `timeout_warn`, `step_timeout_warn`
 - run controls: `exit_expressions`, `guard_settings`, `operation`, `yolo`, `verbosity`, `mode`
 - generated sequence/loop overlays: `state`, `previous_state`, `next_state`, `is_first`, `is_last`, `step`, `total_steps`; the `_loop_*` values become `state.loop.*`
+- the linking keys, typed from `linking.yaml`
 
-**Open ruling:** the linking-only keys (`name`, `allowed-tools`, `tools`, `skills`, `license`, `compatibility`, `metadata`, `user-invocable`, `disable-model-invocation`, `argument-hint`, `max_turns`) describe how a prompt is linked into a provider as a skill, command, or agent rather than how it composes. Whether they are excluded from `claudine.yaml` or given a separate linking schema is not yet decided; see [Open Questions](#open-questions).
+The linking-only keys (`name`, `allowed-tools`, `tools`, `skills`, `license`, `compatibility`, `metadata`, `user-invocable`, `disable-model-invocation`, `argument-hint`, `max_turns`) describe how a prompt is linked into a provider as a skill, command, or agent rather than how it composes. They therefore live in their own type library, `linking.yaml`, rather than in the composition catalog itself, and the `claudine.yaml` payload imports that library. The import is what keeps the editor quiet: DMLS reports an unknown frontmatter key as a warning by default (an error only in strict mode), and without the import every linked prompt would carry eleven of them.
 
 ### Expressiveness limits
 
@@ -365,21 +431,21 @@ The `claudine.yaml` payload describes the frontmatter properties common to every
 - **Can:** unions (`anyOf`) of inline objects as array items; named types via `Name@this` and imports; pattern keys (`<string>`) with `min-keys`/`max-keys` for the bundle shape.
 - **Cannot:** recursion (schemas are a DAG, so nesting is unrolled per level); an ordering constraint such as "the flow-control item must be last" (arrays support only `min`/`max`/`unique`, and the planned tuple form puts the spread last); mutual exclusion or at-most-one-of over keys.
 
-Hence the division of labor: the schemas describe shapes, and Claudine's parser remains the **sole enforcer** of placement (directive last, list-local) and cardinality (one flow-control key per bundle, each verb at most once, `then`/`else` not beside sibling verbs). No Darkmatter code changes.
+Hence the division of labor: the schemas describe shapes, and Claudine's parser remains the **sole enforcer** of placement (directive last, list-local), cardinality (one flow-control key per bundle, each verb at most once), and exclusion (`then`/`else` not beside sibling verbs; no `when` on a root-level dictionary; in a `loop:` block, `gate:` never beside loose verb keys). Darkmatter gains no lifecycle machinery for this (see [Package Ownership and Sequencing](#package-ownership-and-sequencing)).
 
 ### Schema spike
 
-The first task of the schema work — not a precondition for anything else — is a spike of about half a day: write the two type libraries and one trigger, then validate three fixtures (a flat stack, a root-level dictionary, and a nested `when` inside `then` with an `else`) through `md schema validate`, `md schema triggers`, and DMLS. Three known traps it must prove out: local type references need the `@this` suffix; the resolver strips `required` from reused named types; and the `trigger-schema`/`schema-trigger` envelope spelling drift.
+The first task of the schema work — not a precondition for anything else — is a spike of about half a day: write the `action.yaml` and `lifecycle.yaml` type libraries and one trigger, then validate three fixtures (a flat stack, a root-level dictionary, and a nested `when` inside `then` with an `else`) through `md schema validate`, `md schema triggers`, and DMLS. Three known traps it must prove out: local type references need the `@this` suffix; the resolver strips `required` from reused named types; and the `trigger-schema`/`schema-trigger` envelope spelling drift.
 
 ### Location
 
-All five files live under `claudine/schemas/`, which the ancestor walk discovers for any document under `claudine/`. A document elsewhere reaches the schema in one of three ways: a `schemas/` directory at the repository root that contains or links the files; a bare-name pointer `$schema: claudine.yaml` resolved against the schema roots; or a `.dmls.toml` `[schema.extensions]` entry naming `claudine/schemas/`.
+All six files live under `claudine/schemas/`, which the ancestor walk discovers for any document under `claudine/`. A document elsewhere reaches the schema in one of three ways: a `schemas/` directory at the repository root that contains or links the files; a bare-name pointer `$schema: claudine.yaml` resolved against the schema roots; or a `.dmls.toml` `[schema.extensions]` entry naming `claudine/schemas/`.
 
 ## Background Audio
 
 Today we have both TTS and sound effects which are played through the host's audio system, via Playa, Claudine's audio playback layer.
 
-The awkwardness is not latency. `say`/`speak` and `effect` already block only on **publication** to Playa's per-user queue (milliseconds; on a TTS cache miss a sequence slot is reserved and a separate preparation process is spawned), and Playa preserves publication order. The ergonomic problem is only the ordering API:
+The awkwardness in the ordering API is not blocking latency. `say`/`speak` and `effect` already block only on **publication** to Playa's per-user queue (milliseconds; on a TTS cache miss a sequence slot is reserved and a separate preparation process is spawned), and Playa preserves publication order. The time until the first utterance is _audible_ is a separate matter, handled by [Pre-compilation of TTS assets](#pre-compilation-of-tts-assets) below. The ergonomic problem here is only the ordering API:
 
 - because it can be useful to play a sound effect to get a user's attention _and then_ have the TTS speak afterwards, we added `say_first` and relied on a built-in effect-before-`say` ordering (`audio_phases`), with `say_first` as the way to reverse it.
 - to understand `say_first` the user is required to know too much about how Claudine and Playa order things.
@@ -397,20 +463,55 @@ success:
     - message: "build complete"
 ```
 
-### Pre-compilation of TTS assets (still under clarification)
+### Pre-compilation of TTS assets
 
-Independent of the ordering change is the idea of warming the TTS cache when a page loads: evaluate every `say`/`speak` the page defines, and for phrases whose text is static or interpolates only early-binding state (`ctx`, document globals, frontmatter) — not late-binding `err`/`current`/`timing` — produce the audio asset ahead of time so that _if_ the phrase is needed there is almost no latency. Phrases that depend on late-binding values cannot be pre-compiled.
+Independent of the ordering change is warming the TTS cache before an event fires: evaluate every `say`/`speak` a document defines and, for phrases whose text is static or interpolates only early-binding state (`ctx`, document globals, frontmatter), produce the audio ahead of time so that _if_ the phrase is needed there is almost no latency.
 
-None of the following is decided, and this spec does not decide it:
+**The problem, as framed by the owner.** The existing cache does not solve it. A warm cache adds nothing for `initialize` and little for `start` or `blocked`, because a document prepares and fires those within moments of each other; the value is real for the later events (`success`, `failure`, `finalize`, the `loop:` gate), whose phrases are known long before they are needed, and across a sequence the value extends to every event of every step. A TTS provider that consults its cache only for specific voices is a bug, not a feature. What is needed is one uniform way to tell every provider to cache a phrase: providers that do not cache ignore the request, and at play time the providers that did cache detect the hit and benefit.
 
-- where the cache lives and how entries are keyed (phrase text, voice, provider, and what else)
-- which TTS providers produce an intermediate audio file that can be cached, and how the warm-up interacts with Playa's existing `reserve_preparation` path
-- what to do for providers such as macOS `say` that produce no intermediate file: whether pre-computing makes sense at all
-- cleanup: when cached assets expire and who removes them
+**What exists today** (established from source):
+
+- biscuit-speaks, the TTS library Claudine plays through via Playa, already has a shared file cache (`biscuit-speaks/lib/src/audio_cache.rs`). The key is `provider:voice_id:text:format[:speed]`, hashed with `biscuit_hash::xx_hash`; entries are written atomically to `{OS temp}/biscuit-speaks-{hash}.{ext}`; there is no eviction and no TTL.
+- Providers that produce a file and use that cache: Kokoro, gTTS, Echogarden, ElevenLabs, and macOS `say`, which runs `say -o <tmp>.wav` and copies the result into the shared cache (`say.rs`). The earlier question of whether `say` produces an intermediate file is settled: it does.
+- Providers that produce no file: eSpeak (`espeak.rs`) and Windows SAPI (`sapi.rs`). Both are excluded from `requires_preparation`/`cached_job` in `detached.rs` and synthesize with near-zero latency, so there is nothing to pre-compute.
+- The cache-miss path: `Speak::play_detached` (`speak.rs`) calls `reserve_preparation` (`detached.rs`), which reserves a Playa queue slot and spawns a detached preparation worker; Playa polls a `Preparing` head slot every 25 ms for up to 10 minutes. `Speak::prepare()` exists but is a stub (`speak.rs:164-167`).
+- **Defect.** The cache is consulted only when the voice — and for `say`, the rate — is explicit: `say.rs:447-460` returns `None` unless `resolve_voice` and `resolve_rate` are both `Some`, and ElevenLabs' `cached_detached_job` returns `None` without a `requested_voice` (`elevenlabs.rs:843-848`). Under default settings the cache is never hit for these providers.
+- Claudine resolves `say` text at event time (`executor.rs:1000-1052`). A late-binding classifier already exists — `LATE_BINDING_ROOTS = ["err", "timing", "current", "current_env"]` in `claudine/lib/src/composition/reserved.rs`, used by `validate.rs` — and so does prepare-time resolution of early-bound spans (`resolve_string_value`, `executor.rs:926-943`).
+- Audible first-utterance latency today: roughly 0.2–0.8 s for `say`, 0.5–3 s for Kokoro on CPU, and 1–3 s for gTTS, Echogarden, and cloud providers; later sounds in the stack queue behind it.
+
+**Decision: a uniform `prepare` API in biscuit-speaks, and a full pre-warm pass in Claudine.** This feature therefore includes a **biscuit-speaks change**; the biscuit-speaks README and `docs/` pages are updated with it, as is the corresponding skill.
+
+biscuit-speaks (estimate 1.5–2.5 days, including tests on the four environments the repository proves: macOS, Linux, native Windows, and WSL2):
+
+- A uniform `prepare(text)` entry point on every provider: the `Speak::prepare` stub is implemented, and the provider trait gains a `prepare` method whose default is a no-op. File-producing providers synthesize into the existing cache; eSpeak and SAPI keep the no-op.
+- The default voice and rate are resolved once and **snapshotted**, so the cache key computed at prepare time is the key computed at play time.
+- The cache-consult defect is fixed: playback always checks the cache first, whether or not a voice was requested explicitly.
+- The `prepare` L1 tests need no audio device, no model download, and no network on any of the four environments. The WSL2 nightly leg has no audio device, and L1 has no network anywhere.
+
+Claudine (estimate 1–2 days):
+
+- At document prepare (the `prepare_document` boundary, which runs before `initialize`), walk every `say`/`speak` phrase in every stack **except `initialize`** (it fires before a prepare could complete). Classify each phrase with `LATE_BINDING_ROOTS`; resolve the early-bound ones against the launch frontmatter and context; call `prepare` for each.
+- For a **sequence**, run the same pass over every reachable prompt during sequence preflight, so a phrase in step five is warm before step one starts. "Reachable prompts" means the prompt documents in the preflight graph as it is built today.
+- The pass is **fire-and-forget**: it never fails the run and reports at most a warning.
+- One setting disables it: `tts.prewarm` (default on), a `claudine.toml` key in the existing `[tts]` section. It is never a frontmatter key. The pass is also skipped under `--dry-run`.
+- It is **silent in tests**. It must honor the existing `PLAYA_DRY_RUN`/private-spool fixture boundary or an equivalent biscuit-speaks dry-run switch; implementation decides which, the requirement is that no test triggers synthesis.
+
+The walk is total. It visits every `say`/`speak` in every stack — the five later events, a `loop:` block's `gate:`, and a task's `setup:`/`teardown:` — and inside both `then` and `else` bodies, whatever the guard on the branch says. Classification looks at the phrase text alone: a late-bound guard is irrelevant, because the guard decides whether a phrase plays, not what it says. The cost is the "unfired phrases are synthesized anyway" limit below. Two consequences of `with` being frontmatter-only: `proxy … with` cannot switch the TTS provider or voice, because neither is frontmatter (both live in `claudine.toml`); and a `proxy` or `prep` target's phrases are pre-warmed when that document is itself prepared, after its overlay has been applied, never by the caller.
+
+Limits, stated so that nobody expects more:
+
+- A phrase that names a late-binding root (`err`, `timing`, `current`, `current_env`) is never pre-warmed; it is synthesized at event time exactly as today.
+- An early-bound phrase whose frontmatter is mutated by `set` before its event resolves to different text than was pre-warmed. That is a graceful cache miss — the correct text is synthesized at event time — never wrong audio.
+- Phrases for events that never fire are synthesized anyway. For a cloud provider that is a billed call of a few dozen characters per unfired phrase.
+- Cache entries still have no eviction or TTL; this feature does not add cleanup.
 
 ## Loop Lifecycle
 
-The `loop:` block mixes two kinds of keys. Its iteration controls — `while`/`until`, `action`, `max`, `fail_fast`, and the rest — are owned by `2026-09-27-sequence-improvements`, which also owns when the condition is checked, what `action` mutates, the three loop outcomes, and `break`. This feature says one thing about `loop:`: its **lifecycle concerns use the same grammar as every other event**. Because the block is a dictionary, its lifecycle concerns are read as a root-level dictionary bundle — the canonical order, each verb at most once, a single flow-control key last, and no `stack:` or `action:` aggregator — and they fire on every gate pass, including the terminal pass that exits the loop.
+The `loop:` block mixes two kinds of keys. Its iteration controls — `while`/`until`, `action`, `max`, `fail_fast`, and the rest — are owned by `2026-09-27-sequence-improvements`, which also owns when the condition is checked, what `action` mutates, the three loop outcomes, and `break`. This feature says one thing about `loop:`: its **lifecycle concerns use the same grammar as every other stack**. They fire on every gate pass — the point at which the loop condition is checked, which the docs already call "the loop gate" — including the terminal pass that exits the loop.
+
+A `loop:` block spells those concerns in one of two ways, and an author picks one:
+
+- **Loose verb keys** at the loop root are the compact spelling. Because the block is a dictionary, they are read as a root-level dictionary bundle: the canonical order, each verb at most once, a single flow-control key last, no `stack:` or `action:` aggregator, and no `when`. (`action`/`actions` at the loop root is the sequence spec's iteration-control key; the looping parser consumes it before the lifecycle parser sees the block, so it is never the removed aggregator.)
 
 ```yaml
 loop:
@@ -419,6 +520,94 @@ loop:
     stderr: "loop gate"
     info: "finished iteration {{ iteration }} of {{ max_iterations }}"
 ```
+
+- **`gate:`** is the loop's list home. It holds exactly what any stack accepts — an ordered list, or a dictionary bundle — recursively per the conditional grammar, and it is where a loop puts concerns that need an order the canonical one does not give, or a guard, which the dictionary spelling cannot carry.
+
+```yaml
+loop:
+    while: "iteration < max_iterations"
+    action: increment(iteration)
+    gate:
+        - effect: "tick"
+        - when: "iteration == max_iterations"
+          then:
+              - warn: "iteration cap reached"
+        - info: "finished iteration {{ iteration }} of {{ max_iterations }}"
+```
+
+Two shapes are typed parse errors (`LifecycleStackInvalidShape`, or a new name chosen at implementation): **mixing loose verb keys with `gate:`** in one `loop:` block, and **`when` at the loop root**, which is neither an iteration-control key nor a verb — a guard belongs in `gate:`. Rejecting root `when` is also what removes the old `when`/`action` collision at the loop root. One uniform rule results: a list is ordered, a dictionary is compact, everywhere.
+
+`gate:` is typed by `lifecycle.yaml` and reaches sequence documents through `sequence.yaml` ([Schemas](#schemas)). Whether a loop's own block can read the `state.loop.*` values the engine seeds is a defect owned by `2026-09-27-sequence-improvements`, not by this feature; this feature only renames those values (AC7).
+
+## Acceptance Criteria
+
+For a reader new to the repository: tests here are tiered. **L1** tests are hermetic — no network, no real terminal, no audio — and run with `just test` inside a package area (`claudine/`, `darkmatter/`, `biscuit-speaks/`). **L2** tests carry the `level2_` name prefix, drive a real terminal, and run with `just test-l2`. `just lint` runs the linters and, in `claudine/`, the `lint-lifecycle-doc-facets` recipe, a grep gate over the lifecycle topic pages. CI proves Linux and macOS on a pull request, adds Windows on a push to `main`, and adds WSL2 nightly. "Green on the CI schedule" below means those normal runs pass; this feature adds no CI cell.
+
+All criteria are L1 unless marked.
+
+**Parser**
+
+- **AC1** Every stack — each of the six events, a `loop:` block's `gate:`, and a task's `setup:`/`teardown:` — accepts a flat action array; a root-level dictionary form is accepted, never carries `when`, and desugars in the canonical order given in [Execution model](#execution-model).
+- **AC2** `when`/`then`/`else` nest to depth 5; depth 6 is a typed parse error naming the path.
+- **AC3** In any stack, an action after an unconditional flow-control item within the same list is the typed list-local unreachable-action error (`LifecycleActionOrder`); the same verb in a sibling `else` list is legal; a `when` item never counts as unconditional.
+- **AC4** `no_error` is accepted in both homes (long-form parameter; dictionary-item sibling applying to every action in the item, a dictionary-bundle body included) and rejected beside `then`/`else` and on `set`.
+- **AC5** `with` is accepted on `retry` and `proxy` (and `prep` when built) and rejected elsewhere, `resume` included; a `retry` overlay is visible to the fresh re-read and never persisted.
+- **AC6** In any stack, the `loop:` block included: `stack:`; `action:` used as the item aggregator (`- action:`) or as a sibling of `when` on a list item (`- when: … / action: …`); `say_first:`; the communication `route` parameter; and any `_loop_*` read raise a typed removed-grammar `CompositionError` (name final at implementation) carrying replacement guidance, before the provider launches, in compose, inline-compose, and sequence. The `_loop_*` scan covers frontmatter expressions and body spans; where a body read is discoverable only at render time, the same typed error is raised there. The CLI-boundary test is modeled on `compose_removed_validation_keys.rs`. `loop.action`/`loop.actions` are the iteration-control keys of `2026-09-27-sequence-improvements`, consumed by the looping parser first, and are exempt; `when` at the loop root is itself rejected ([Loop Lifecycle](#loop-lifecycle)), so no collision with the aggregator check remains.
+- **AC7** `reserved.rs` no longer seeds `_loop_*`; the loop engine seeds `state.loop.{count,is_first,is_last,last_output,last_exit_code}` and `looping/expression.rs` resolves them. `loop` is reserved under `state`: authored state that carries a `loop` key is a typed normalization error, and `set` may not target it, so authored state never silently collides with the ambient values. `seq` stays reserved by `2026-09-27-sequence-improvements`.
+
+**Audio**
+
+- **AC8** `say_first` and `audio_phases` are gone; audio is published in stack order; a lifecycle test asserts publication order and that no test plays sound (the existing `PLAYA_DRY_RUN`/private-spool fixture boundary).
+- **AC9** biscuit-speaks `prepare` exists on every provider (a no-op for eSpeak and SAPI), default voice and rate are snapshotted, and playback consults the cache under default settings (a regression test for the explicit-voice-only defect). Claudine pre-warms early-bound phrases in every stack except `initialize`, in `then` and `else` bodies alike, at document prepare and across reachable prompts at sequence preflight; `tts.prewarm = false` in `claudine.toml` and `--dry-run` skip it; tests prove no synthesis is triggered under the test fixture boundary on any of the four environments.
+
+**Shipped artifacts**
+
+- **AC10** `claudine/cli/tests/l1/shipped_prompts.rs` gains a walker that runs the lifecycle parser over every `.md` under `prompts/` and every `claudine/docs/research/**/_fleet.md` plus `_TEMPLATE.md`; zero removed-grammar errors.
+- **AC11** `shipped_prompt_route_drift.rs` hashes are refreshed after its fixture is re-derived.
+- **AC12** Six files exist: `claudine/schemas/{action,lifecycle,linking}.yaml` (`kind: schema`) and `claudine/schemas/{claudine,inline-compose,sequence}.yaml` (`kind: trigger-schema`); `lifecycle.yaml` types `gate:` and `setup:`/`teardown:`, and `claudine.yaml` imports `linking.yaml`; they validate the three schema-spike fixtures via `md schema validate` and `md schema triggers`, and are picked up by DMLS; `darkmatter/docs/schemas/claudine*.yaml` are deleted; the DMLS `nested_span.rs` mirror and its parity test, the `overlay/frontmatter.rs` pointer tests, and `mapping_only_corpus.rs` pass against the new schema.
+
+**Docs and gates**
+
+- **AC13** The lifecycle, flow-control, flow-control-reference, looping, sequences, side-effects, frontmatter-properties, and getting-started pages show only the new grammar; the looping page no longer promises a one-release `_loop_*` alias period (the old names are a hard error per AC6); `just lint-lifecycle-doc-facets` passes; the biscuit-speaks docs describe `prepare`.
+- **AC14** `.claude/skills/claudine/SKILL.md` no longer names `say_first` (`timeline.md` is history and is untouched).
+- **AC15** `just test`, `just test-l2`, and `just lint` are green in `claudine/`; `just test` and `just lint` are green in `darkmatter/` (DMLS included) and in `biscuit-speaks/`.
+- **AC16** A repository-wide grep for `^\s+stack:|say_first|^\s+- action:|_loop_(count|is_first|is_last|last_output|last_exit_code)` over `prompts/`, `claudine/docs/`, `claudine/lib/`, `claudine/cli/`, `darkmatter/docs/schemas/`, `darkmatter/dmls/`, and `.claude/skills/claudine/` returns only `timeline.md` and spec snapshots.
+
+## Migration Sweep
+
+The grammar this feature removes — `stack:`, `action:` as the item aggregator (`- action:`) or as a sibling of `when` on a list item, `say_first`, the communication `route` parameter, and the `_loop_*` reserved names — is spelled in **65 non-Rust files and 62 Rust files**. All of them are rewritten in this feature. Old spellings are rejected with a typed error and a replacement hint (AC6) rather than silently ignored, and the shipped-prompt gate is extended to run the lifecycle parser (AC10) so the executed prompts, which no test covers today, cannot drift back. The inventory below was taken on 2026-09-28 with false positives removed. Whether the sweep lands as one commit or as per-area commits is a planning choice this spec does not make.
+
+**(a) Executed prompt documents — 48 files.** Run by agents; covered by no test until AC10.
+
+- Root `prompts/` (24): `_add/add-context-variables`, `_add/add-expressions`, `_clarify/findings`, `_implement/implement-plan`, `_implement/implement-review`, `_implement/implement-suggestions`, `_pr/diagnose`, `_pr/dirty`, `_pr/fix`, `_pr/open`, `_pr/push`, `_pr/triage`, `_prompt`, `_reviews/cross-platform`, `_reviews/dry`, `_reviews/feature-review`, `clarify`, `commit`, `format`, `implement`, `merge-conflicts`, `plan`, `pr`, `review`. Of these, `_prompt.md` and `_implement/implement-plan.md` also read `_loop_*`.
+- `claudine/docs/research/_TEMPLATE.md` and the 22 research-fleet prompts `claudine/docs/research/*/_fleet.md`: acp, agent-cli, agent-errors, agent-logging, agent-models, agent-permissions, hooks, local_runners, mcp, memory, model-config, non-interactive-sessions, plugins, resume, signals, skills, slash-commands, steering, subagents, system-prompt, usage. These are in scope: they are expected to keep working.
+- `claudine/docs/getting-started/index.md`.
+
+**(b) Docs, skills, and schemas — 10 files.**
+
+- `claudine/docs/topics/flow-control/lifecycle.md` (24 `stack:`, 24 `action:`, one `say_first`, one `_loop_`), `flow-control.md`, `flow-control-reference.md`, `looping.md`, `sequences.md`, `state-management/side-effects.md`, `frontmatter-properties.md` (the `_loop_*` table).
+    - `looping.md` also promises a one-release alias period for the `_loop_*` names. That is drifted doc: the old names are a hard error (AC6), consistent with the sequence spec's rule that old aliases are removed in the same migration. The sentence is removed under AC13.
+    - `sequences.md` includes task `setup:`/`teardown:` examples; those are stacks and are rewritten with the rest of the page.
+- `.claude/skills/claudine/SKILL.md` (`say_first` at line 10). `timeline.md` in the same skill is history and stays.
+- `darkmatter/docs/schemas/claudine-types.yaml` and `darkmatter/docs/schemas/claudine.yaml`, where the old grammar _is_ the schema; both are deleted (see [Package Ownership and Sequencing](#package-ownership-and-sequencing)).
+
+**(c) Markdown fixtures — 3 files.**
+
+- `claudine/cli/tests/fixtures/nested_span_regression/commit.md`.
+- `claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md`, hash-pinned by `shipped_prompt_route_drift.rs`; refresh with `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1 just test-cli shipped_prompt_route_drift::` (AC11).
+- `darkmatter/dmls/tests/fixtures/sequence_descent/implement-plan.md`.
+
+**(d) Rust — 62 files**, roughly 165 `stack:` and 445 `action:` lines.
+
+- `claudine/lib/src/composition/lifecycle/**` and `claudine/lib/tests` (16 files, 226 tests); `claudine/cli/tests/l1` (31 files); `claudine/cli/tests/level2` (11 files).
+- `claudine/lib/src/composition/sequence/task/**`, the sequence task parser and its tests, where `setup:`/`teardown:` are parsed by the same lifecycle parser; added on review, so not counted in the 62 above.
+- `_loop_*` reserved names: 38 in non-test lib source (`looping/expression.rs` 19, `looping/engine.rs` 8, `reserved.rs` 5, `looping/types.rs` 5, `reporting/queries/common.rs` 1); 21 in lib tests; 1 in CLI source (`compose/loop_run.rs`); 5 in CLI tests; 7 in Darkmatter (the `dasherized_identifier_*` tests and `compose/expression/parser.rs`).
+- **Cross-package coupling.** `darkmatter/dmls/src/diagnostics/nested_span.rs` carries a static mirror of the lifecycle layout kept in step with `claudine-types.yaml` by a parity test; `darkmatter/dmls/src/overlay/frontmatter.rs` tests assert `initialize.stack[0].when` pointers; `darkmatter/dmls/tests/l1/mapping_only_corpus.rs` runs the Claudine schema extension over a corpus. DMLS moves with the grammar. These are Darkmatter-side test and mirror edits required by the sweep, not new lifecycle machinery (AC12).
+- Repository file reads in tests are spelled per the `rust-testing` skill (`workspace_root().join(...)`) so that editing the files they read schedules the narrowed CI cell.
+
+**(e) Spec snapshots — 2 of 42 files.** Only `2026-09-27-sequence-improvements` (`spec.md`, `suggestions.md`) and `2026-09-22-lifecycle-events` (`spec.md`, `against-statement.md`) are rewritten, because both are unbuilt and depend on this grammar. The other 40 are snapshots and stay as written.
+
+**Not swept:** the 40 other spec and review snapshots; `.claude/skills/claudine/timeline.md`; `claudine/docs/research/hooks/*.md`, whose tables describe provider hooks, not lifecycle grammar.
 
 ## Hand-off: prepare `2026-09-27-sequence-improvements`
 
@@ -436,42 +625,53 @@ following has been done, and doing it is the last task of this feature:
    check each rewritten dictionary example against: if the old example's
    ordering differs from the canonical order, the rewrite must use the list
    form.
-2. **Add `break` and `prep` to `action.yaml`** with both a short and a long
-   form, using the parameter tables in that spec (`break`: `reason`, `code`;
-   `prep`: `target`, `with`). Add `defer` if it is not already enumerated, so
-   the schema names every directive the flow-control page documents, planned
-   ones included.
+2. **Confirm `break` and `prep` are in `action.yaml`** as planned entries with
+   the short and long forms recorded in the [Action Inventory](#action-inventory),
+   which already enumerates `defer` as planned. Adding them is part of the
+   schema deliverable (Action Inventory rule 3, AC12), not a hand-off task;
+   this item only checks that they are present and match. The inventory is
+   the source; do not restate the parameters from the sequence spec.
 3. **Confirm the placement rules here cover the new directives.** The rule is
    list-local: within any one list, an item that unconditionally fires `break`
    or `prep` must be last, exactly as for any other directive, and a `when`
    item never counts as unconditional. `break` inside a nested conditional is
-   legal and ends the innermost enclosing loop. The sequence spec's `break` and
-   `prep` sections still say a directive "ends the current stack", which
-   describes the old silent truncation; restate them against the entire-event
-   rule and the list-local error so a reader does not infer truncation.
-4. **Keep `with` as the one overlay parameter.** Every directive that moves
-   to another flow state (`retry`, `resume`, `proxy`, `prep`) takes `with`,
-   with `proxy`'s existing semantics: an overlay on the target, for that
+   legal and ends the innermost enclosing loop. `break` in a task `teardown:`
+   follows the same list-local rule, because `setup:` and `teardown:` are
+   stacks. The sequence spec's `break` and `prep` sections still say a
+   directive "ends the current stack", which describes the old silent
+   truncation; restate them against the entire-event rule and the list-local
+   error so a reader does not infer truncation.
+4. **Keep `with` as the one overlay parameter.** Every directive that re-reads
+   or recomposes a document (`retry`, `proxy`, `prep`) takes `with`, with
+   `proxy`'s existing semantics: an overlay on the target, for that
    transition only, never persisted, never merged back. There is no separate
-   `use`. `break` and `stop` take no overlay.
+   `use`. `resume`, `break`, `stop`, `skip`, `error`, and `defer` take no
+   overlay (Action Inventory rule 5); `resume` continues the live provider
+   session and has no target to overlay.
 5. **Write `sequence.yaml` to the shape the sequence spec defines**, not to
    today's shape: `when:` on a step or task, `loop:` on a group object and at
-   a sequence document's root, and `loop` and `seq` as reserved authored-state
-   keys. Otherwise DMLS rejects every example in that spec the day the schema
+   a sequence document's root, `gate:` inside every `loop:` typed from
+   `lifecycle.yaml`, and `loop` and `seq` as reserved authored-state keys.
+   Otherwise DMLS rejects every example in that spec the day the schema
    lands.
 6. **Keep the "Loop Lifecycle" section above to one job:** the `loop:`
-   block's lifecycle concerns use the same grammar as every other event.
-   Everything about when the loop condition is checked, what its
-   `action` mutates on each primitive, the three loop outcomes, and `break`
-   is owned by the sequence-improvements spec and is not restated here.
+   block's lifecycle concerns use the same grammar as every other stack,
+   spelled either as loose verb keys or under `gate:`, never both in one
+   block. Everything about when the loop condition is checked, what its
+   `action` mutates on each primitive, the three loop outcomes, `break`, and
+   whether the loop's own block can read `state.loop.*` is owned by the
+   sequence-improvements spec and is not restated here.
 7. **Migrate the `_loop_*` reads** in shipped prompts to `state.loop.*` in the
    same pass that rewrites their `stack:`/`action:` blocks, so those files are
-   swept once. The `in_loop` gates in `feature-review.md`,
-   `implement-suggestions.md`, and `implement-plan.md` stay until `when:` on
-   steps exists; only their spelling changes here.
+   swept once. The engine side, including reserving `loop` under `state`, is
+   AC7; the files are bucket (a) of the [Migration Sweep](#migration-sweep).
+   The `in_loop` gates in `feature-review.md`, `implement-suggestions.md`, and
+   `implement-plan.md` stay until `when:` on steps exists; only their
+   spelling changes here. `seq` stays with the sequence spec.
 8. **Record the rewrite** in that spec's frontmatter (`grammar: lifecycle-ergonomics`
-   or similar) and in this feature's implementation log, and set its
-   `depends-on` as satisfied.
+   or similar) and in this feature's implementation log, set its
+   `depends-on` as satisfied, and mark the `_loop_*` rows of its State table
+   and its `_loop_*` migration bullet as done by this feature.
 
 The flow-control and looping topic pages already describe `break`, `prep`, and
 uniform loops as planned. Their examples are also in the old grammar and are
@@ -480,11 +680,4 @@ sequence work.
 
 ## Open Questions
 
-Decisions this spec does not make. Each needs a ruling before the affected work is planned.
-
-1. **TTS pre-compilation.** Everything listed under [Pre-compilation of TTS assets](#pre-compilation-of-tts-assets-still-under-clarification): cache location and keying, which providers produce an intermediate file, whether macOS `say` can be pre-computed at all, and cleanup. The ordering decisions above do not depend on any of it.
-2. **Linking-only keys in `claudine.yaml`.** The keys that describe how a prompt links into a provider (`name`, `allowed-tools`, `tools`, `skills`, `license`, `compatibility`, `metadata`, `user-invocable`, `disable-model-invocation`, `argument-hint`, `max_turns`) are either excluded from `claudine.yaml` or given a separate linking schema. Excluding them means DMLS flags them as unknown on every linked prompt; including them blurs a composition schema with provider-linking concerns.
-3. **Long-form parameter tables.** Only `retry` is shown in this spec (`with`, `max`). `action.yaml` needs the full parameter set for every verb and directive — communication verbs (`route`, ...), `shell` (`command`, `no_error`, ...), `set`, every Darkmatter side-effect verb, and each directive (`backoff`, `delay`, `max_attempts`, `with`, `break`'s `reason`/`code`, `prep`'s `target`/`with`). The current lifecycle topic page and the flow-control reference are the sources; the tables have not been consolidated.
-4. **Acceptance criteria and test strategy.** None exist yet. At minimum the plan needs: parser fixtures for every rule named in this spec (canonical desugaring order, list-local placement, each `LifecycleStackInvalidShape` case, depth 5 versus 6), an executor test that audio publishes in stack order and the event completes before playback, a drain test across `retry`, and the three schema fixtures from the spike validated in both `md` and DMLS.
-5. **Migration sweep.** Every shipped prompt, `docs/` topic page, and `.claude/skills/` file that spells a lifecycle event in the old grammar (`stack:`, `action:`, `say_first`, notification-field dictionaries with fixed ordering assumptions) must be rewritten. The inventory has not been taken, and whether the sweep is one commit or per-area commits is undecided.
-6. **Ordered lifecycle concerns inside `loop:`.** The `loop:` block is a dictionary, so this spec reads its lifecycle concerns as a dictionary bundle. Whether a loop ever needs the ordered list form (and if so, under which key, since `stack:` is gone) has not been ruled on; today's engine only supports the bundle-style keys plus the removed `stack:`.
+None remain. The two rulings this section once held — where the linking-only keys live, and whether a `loop:` block has an ordered list home — are recorded in [Schemas](#schemas) (`linking.yaml`) and [Loop Lifecycle](#loop-lifecycle) (`gate:`).

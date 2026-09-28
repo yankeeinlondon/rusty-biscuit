@@ -1,0 +1,129 @@
+kind: schema
+types:
+  leaf:
+  - bundle[]@./action.yaml
+  - bundle@./action.yaml
+  stack-0:
+  - leaf@this
+  cond-1:
+    when: expression(required) -> condition
+    then: stack-0@this
+    else: stack-0@this
+  item-1:
+  - enum(stop, skip) -> bare zero-argument verb
+  - bundle@./action.yaml
+  - cond-1@this
+  stack-1:
+  - item-1[]@this
+  - bundle@./action.yaml
+  cond-2:
+    when: expression(required) -> condition
+    then: stack-1@this
+    else: stack-1@this
+  item-2:
+  - enum(stop, skip) -> bare zero-argument verb
+  - bundle@./action.yaml
+  - cond-2@this
+  stack-2:
+  - item-2[]@this
+  - bundle@./action.yaml
+  cond-3:
+    when: expression(required) -> condition
+    then: stack-2@this
+    else: stack-2@this
+  item-3:
+  - enum(stop, skip) -> bare zero-argument verb
+  - bundle@./action.yaml
+  - cond-3@this
+  stack-3:
+  - item-3[]@this
+  - bundle@./action.yaml
+  cond-4:
+    when: expression(required) -> condition
+    then: stack-3@this
+    else: stack-3@this
+  item-4:
+  - enum(stop, skip) -> bare zero-argument verb
+  - bundle@./action.yaml
+  - cond-4@this
+  stack-4:
+  - item-4[]@this
+  - bundle@./action.yaml
+  stack:
+  - stack-4@this
+  loop:
+    while: expression
+    until: expression
+    action:
+    - string
+    - object
+    - any[]
+    actions:
+    - string
+    - object
+    - any[]
+    max: number(integer; min(1))
+    fail_fast: boolean
+    gate: stack-4@this
+    stop:
+    - any -> stop the lifecycle stack (any event)
+    - '{ no_error: boolean }'
+    skip:
+    - any -> skip the provider run (initialize only)
+    - '{ no_error: boolean }'
+    error:
+    - string -> fail the run with a reason
+    - '{ reason: string, no_error: boolean }'
+    proxy:
+    - file -> hand the run to another prompt
+    - '{ target: file(required), with: object, no_error: boolean }'
+    retry:
+    - number(integer; min(0)) -> re-read and re-run the same document
+    - '{ max_attempts: number(integer), delay: string, backoff: enum(fixed, exponential), with: object, no_error: boolean }'
+    resume:
+    - string -> send a follow-up message into the live session
+    - '{ message: string(required), max_attempts: number(integer), no_error: boolean }'
+    defer:
+    - 'string -> planned: defer the run'
+    - '{ delay: string(required), reason: string, no_error: boolean }'
+    break:
+    - 'string -> planned: leave the sequence'
+    - '{ reason: string, code: number(integer; min(0); max(255)), no_error: boolean }'
+    prep:
+    - 'file -> planned: prepare a target prompt'
+    - '{ target: file(required), with: object, no_error: boolean }'
+    say:
+    - 'string -> say: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    speak:
+    - 'string -> speak: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    effect:
+    - 'string -> effect: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    message:
+    - 'string -> message: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    notify:
+    - 'string -> notify: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    stderr:
+    - 'string -> stderr: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    info:
+    - 'string -> info: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    warn:
+    - 'string -> warn: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    success:
+    - 'string -> success: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    stdout:
+    - 'string -> stdout: emit text'
+    - '{ text: string(required), no_error: boolean }'
+    shell:
+    - string -> run a shell command (not in initialize)
+    - '{ command: string(required), on_error: string, no_error: boolean }'
+    set:
+    - '{ <string>: any }(min-keys(1)) -> set runtime values (mapping only; no long form)'
