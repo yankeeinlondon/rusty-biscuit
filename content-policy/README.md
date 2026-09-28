@@ -46,7 +46,8 @@ content_policy:
 ```
 
 Use the `rule` / `action` form when specifying a different action. The default
-frontmatter key is `content-policy`, configurable by the caller. The proposed
+frontmatter key is `content_policy`, in snake_case like the repository's other
+frontmatter keys, and the caller can configure a different one. The proposed
 default for an absent policy is `ValidFor(6mo)`; callers can replace it.
 
 There are two baseline forms:
@@ -69,7 +70,8 @@ default date property, initially `last_updated`.
 
 Dates are enough for time policies. Other relative policies need evidence such
 as the package version used during research or a fingerprint of a source file.
-A structured rule form for this richer evidence is proposed in the design draft.
+A structured rule form for this richer evidence is planned; its exact shape is
+still under review.
 
 ## Evaluation and Renewal
 
@@ -92,8 +94,8 @@ baseline of renewable rules while preserving their settings, such as duration.
 | `SymbolChanged` | Compare selected symbol content with recorded content | Replace the fingerprint |
 | `UrlChanged` / `SchemaChanged` | Compare selected remote content with recorded content | Replace the comparison baseline |
 
-The initial implementation is proposed to cover the four time/constant rules,
-followed by `FileChanged`. Package, symbol, and remote policies are later
+The initial implementation is planned in two phases: the four time/constant
+rules, then `FileChanged`. Package, symbol, and remote policies are later
 extensions. File creation/removal and program installation/removal are also
 candidates; their state-versus-transition semantics need review.
 
@@ -141,19 +143,26 @@ Exact Rust types and signatures will follow design review.
 
 ## CLI Direction
 
-Proposed evaluation commands:
+The planned CLI is `policy`:
 
 ```sh
-# JSON report with policies, results, reasons, and the effective action
-policy document.md
+# Report with policies, results, reasons, and the effective action
+# (terminal-formatted by default; --plain or --json for scripts)
+policy check document.md
 
-# Whether any rule has confirmed that the document needs action
-policy document.md --is-stale
+# Whether any rule has confirmed that the document needs action:
+# prints true, false, or unknown
+policy check --needs-action document.md
+
+# Preview the edits that record a content update, then apply them
+policy renew document.md
+policy renew document.md --write
 ```
 
-The proposed boolean includes expired documents. It must distinguish `false`
-from an inability to determine freshness. Renewal will be an explicit operation;
-its command syntax and exit codes remain review questions.
+`--needs-action` includes expired documents, and it prints `unknown` rather
+than `false` when freshness cannot be determined. Both commands exit `0` when
+they produce their output and `1` on an error, so scripts read the printed
+answer, not the exit code.
 
 See [Policy Evaluation and Renewal](docs/topics/policy-lifecycle.md) for the
-planned lifecycle. The active design draft is `2026-09-28-content-policy`.
+planned lifecycle, including a scripting example and renewal's limits.

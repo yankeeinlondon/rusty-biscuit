@@ -32,6 +32,12 @@ initially `last_updated`. The proposed default policy for documents without a
 policy is `ValidFor(6mo)`. Missing baseline evidence produces `unknown`; checking
 a document does not invent an update date.
 
+Policies live under the `content_policy` key by default (snake_case, like the
+repository's other frontmatter keys); a caller can choose a different key.
+Some early research notes used a `Duration(3mo)` rule. `Duration` is not a
+rule name and is reported as a validation error, so write `ValidFor(3mo)`
+instead. The existing notes are planned to be migrated.
+
 Future relative policies need different evidence. A package rule needs the
 version used during research; a file rule needs a content fingerprint. A shared
 `last_updated` date cannot replace those observations.
@@ -64,6 +70,23 @@ ordinary renewal does not clear it. Changing that deadline is a policy edit.
 Proposed renewal behavior preserves references and edits their target properties.
 If one property supplies both a renewable baseline and a nonrenewable deadline,
 the renewal must surface that conflict rather than silently move the deadline.
+
+Renewal is planned to edit only the bytes of the values it changes, so comments,
+quoting, key order, and the Markdown body survive untouched. That precision
+limits which YAML shapes it can edit. Renewal refuses, and writes nothing, when:
+
+- the policy is a flow-style list, such as `content_policy: [ValidFor(3mo)]`
+- a value it must change is a block scalar or spans several lines
+- a value it must change is a double-quoted string containing escape sequences
+
+The error message suggests rewriting the policy as a block list:
+
+```yaml
+content_policy:
+  - ValidFor(3mo)
+```
+
+Evaluation has no such limit and accepts any valid YAML list.
 
 ## Choose the Action
 
@@ -114,6 +137,39 @@ If removal is already confirmed, an unknown refresh cannot change the winner.
 Action resolution is complete even though evaluation still has an unknown
 result. Consumers need both completeness indicators.
 
+## Check and Renew from the CLI
+
+The planned `policy` command has two subcommands:
+
+```sh
+policy check notes.md                  # report (add --plain or --json)
+policy check --at 2027-01-01 notes.md  # evaluate as of a chosen date
+policy renew notes.md                  # preview the renewal edits
+policy renew notes.md --write          # apply them
+```
+
+`policy check --needs-action` answers "does this document need action?" by
+printing `true` (stale or expired), `false` (fresh), or `unknown` (not every
+rule could be evaluated). It exits `0` for all three answers; `1` means an
+error such as an invalid declaration or unreadable file, and `2` a usage error.
+The answer is printed rather than signaled by exit code because a shell `if`
+treats any non-zero exit as false and would quietly read `unknown` as fresh.
+Compare the text instead:
+
+```sh
+case "$(policy check --needs-action notes.md)" in
+  true)    echo "notes.md needs a refresh, archive, or removal" ;;
+  false)   echo "notes.md is fresh" ;;
+  unknown) echo "notes.md could not be fully evaluated; read the report" ;;
+  *)       echo "policy check failed" >&2; exit 1 ;;
+esac
+```
+
+`policy renew` changes nothing unless `--write` is given. `--on <date>` sets
+the update date, which defaults to today (UTC). It exits `0` when a preview is
+produced or the edits are written, and `1` on any error: an unsupported YAML
+shape, a file that changed between planning and writing, or missing evidence.
+
 ## Library Ownership
 
 The library defines policy meaning, interprets baselines, compares observations,
@@ -125,6 +181,7 @@ For example, a package provider reports a release version. The policy evaluator
 decides whether that version crosses the configured major or minor boundary.
 Time policies need only the document data and an explicit evaluation time.
 
-The proposed first implementation covers time and constant rules, followed by
-file content changes. Exact date boundaries, structured declaration syntax,
-reference traversal, and CLI renewal syntax remain under design review.
+The first implementation is planned in two phases: time and constant rules,
+then file content changes. Exact date boundaries, structured declaration syntax,
+reference traversal, and line-ending handling for file fingerprints remain
+under design review.
