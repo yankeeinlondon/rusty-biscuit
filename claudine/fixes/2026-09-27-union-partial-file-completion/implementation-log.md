@@ -45,6 +45,20 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - biscuit-terminal/lib/src/errors/source_context.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/composition.md
+    - biscuit-terminal/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine-cli
     - claudine
@@ -455,3 +469,129 @@ Python `pty` harness:
 - The new CLI tests are `#[cfg(unix)]` (the PTY convention, and
   `compose_schema_cli.rs`'s shell-stub convention). No new `cfg` appears in
   production code.
+
+## Phase 4
+
+Phase 4 replaced the whole-block frontmatter excerpt with focused regions (R6,
+N2, N4). Everything here is L1 (unit tests plus the existing CLI suites); the
+L2 capture tests that S4 flagged were re-run against the new output.
+
+### Design, and where it departs from the plan
+
+- **Two locators, split by job.** The plan (N3) and R6 ("reuse, don't
+  re-implement") have `biscuit-terminal` supply the line selection. Claudine's
+  diagnostics, though, name *semantic* paths that `YamlKeyPath` does not
+  model: sequence indexes (`initialize.stack[0].action[1].set`,
+  `…metadata.files[0]`) and re-rooted sequence-task paths
+  (`tasks[0].setup[0]…` for authored `sequence[0].setup[0]…`, matched by
+  unique suffix). The split is now:
+  - Claudine's `locate_property_line` (kept, and fixed; see below) resolves a
+    semantic path to a **line**.
+  - A new `biscuit-terminal` method, `SourceContext::focused_line_regions(lines,
+    context)`, does everything else: the ±context window, enclosing header
+    lines found by indentation, merging, clamping, and the unsafe-YAML refusal.
+    It shares one private `select_regions` with `focused_yaml_regions`, so the
+    two cannot drift.
+  - `focused_yaml_regions` (Phase 2) stays for Darkmatter's
+    `focused_yaml_excerpt`. It is not used by Claudine.
+- **Locator bug fixed.** `locate_property_line` pushed a `- key:` line as one
+  parent at the marker's indent, so the item's later keys became children of
+  its first key (`$schema[0].spec.doc`). This is the same trap the N3 note
+  recorded for `biscuit-terminal`. It now pushes the item (`a[0]`) at the
+  marker column and the key (`a[0].key`) at the key column, and records the
+  item path too, so `failure.stack[0]` resolves. Pinned by
+  `item_keys_after_the_first_are_siblings_not_children`.
+- **The anchor exception (S4's open question).** The fully-covered exception
+  now means "the selection holds every line *between* the delimiters". A
+  delimiter hides nothing, and the inline-compose mismatch fixture (anchored
+  `sequence: &seq … alias: *seq`) has its `prompt`/`sequence` windows reaching
+  every line except the closing `---`. Without this, that L1 PTY test and both
+  L2 mismatch captures would lose their excerpt. A partial slice of an
+  anchored block is still refused.
+- **Highlight variants.** `BlockOnly` is gone. Besides `Property`, `Line`,
+  and `SchemaSpan`, there are two new variants:
+  - `Properties(Vec)` for plain keys shown together (the mismatch error:
+    `prompt` + `sequence`).
+  - `SchemaProperties(Vec)` for properties a schema problem names. The plan
+    called this `Properties`; it is split out because the per-name rule
+    differs. Each name is shown at its exact frontmatter key (when set) and at
+    its `$schema` declaration: inline mapping `$schema.x`, or every union arm
+    `$schema[N].x`. It is used by `SchemaValidation` (one or many),
+    `MissingProperties` (names plus pointer paths), `UnresolvedFileReference`,
+    and `UnsupportedInteractiveSchema`. The last was `Property` in S4's table;
+    it is a schema problem, and its declaration is what is unsupported.
+- **Producers per S4**, with one addition:
+  - `FrontmatterParse` with a YAML location becomes `Line(yaml_line + 1)`;
+    without a location there is no excerpt.
+  - Other `ComposeFailed` variants give no excerpt.
+  - `ShellExpansionFailed` is focused only for a `Frontmatter { key }` origin.
+    Instead of an ad-hoc `match` on eleven variants in Claudine, Darkmatter
+    gained `ShellExpansionError::origin()`, beside the existing `command()`.
+  - Absent keys (`PromptPropertyMissing`, `agent` from the CLI) drop out
+    naturally: nothing is located, so there is no excerpt.
+- **`capture_line`** now accepts an ordinary `---` block as well as the
+  `----` near-miss block, because a located YAML parse error lives in a normal
+  block.
+- **Rendering (N2).** Each region is one `CodeBlock` with
+  `with_start_line(region.start_line)` and absolute highlights. The `⋮` line
+  is placed in the `│` gutter column of the region below it, measured from
+  that block's rendered output, because the gutter width changes with the
+  digit count (a 1-digit region followed by a 2-digit one).
+- **Known cosmetic limits, not changed:**
+  - Each region repeats `CodeBlock`'s `yaml` language label and padding rows.
+    Removing them would need a Darkmatter option, and there is no second
+    consumer for it.
+  - At `ColorDepth::None`, `CodeBlock` degrades to a plain fence with **no
+    line numbers**. That was already true of the old appendix.
+    `composition.md` now says so.
+
+### Tests (all L1 unless noted)
+
+| Requirement | Test | Regression proof |
+|---|---|---|
+| R7.8 a mid-file property: ≤7 window lines plus ancestors | `frontmatter_excerpt::tests::mid_file_property_shows_three_lines_either_side_plus_its_ancestor` (spans `(3,3)`, `(7,13)`; `agent`/`tail` absent) | the old model rendered all 17 lines |
+| R7.8 `/spec` against the shipped `prompts/clarify.md` (`include_str!`, so CI reruns on edits) highlights the arm-0 `spec` line | `…::caller_input_problem_highlights_its_arm_declaration_in_clarify`, plus end to end through the error producers: `error::tests::caller_input_schema_problem_in_clarify_highlights_the_arm_declaration` (`SchemaValidation`, `UnresolvedFileReference`, `MissingProperties`) | the old code located nothing for `spec` and rendered the whole block unhighlighted (C5) |
+| R6 every union arm, plus a same-named top-level key | `…::schema_property_shows_every_arm_and_a_same_named_top_level_key`, `…::schema_property_under_an_inline_mapping_schema_is_located` | — |
+| R7.8 unlocatable gives no excerpt | `…::unlocatable_property_gives_no_excerpt`, `error::tests::enrich_omits_the_excerpt_when_nothing_is_locatable` (missing `prompt`, body interpolation, an undeclared schema pointer) | `BlockOnly` rendered the whole block for each |
+| R7.8 two problems give two regions with `⋮` | `…::two_problems_give_two_regions_with_an_elision_line`, `error::tests::several_schema_problems_show_the_union_of_their_regions` | multi-problem was `BlockOnly` |
+| R7.8 gutter numbers match source lines, and `⋮` sits in the gutter | `…::rendered_gutter_numbers_match_source_lines` (every source line: present with its real number iff selected) | — |
+| N4 whole-block exception | `…::a_block_the_window_already_covers_renders_whole`; `biscuit-terminal` `focused_regions_unsafe_yaml_fully_covered_renders_the_whole_block`, `focused_regions_unsafe_yaml_covered_but_for_a_delimiter_is_kept` | — |
+| Located `FrontmatterParse` is windowed | `error::tests::enrich_frontmatter_parse_error_windows_the_reported_line` (YAML line 3 gives source line 4) | — |
+| Mismatch focuses `prompt` and `sequence`; shell failures focus only frontmatter origins | `error::tests::inline_sequence_mismatch_focuses_prompt_and_sequence`, `…::shell_expansion_failure_is_excerpted_only_for_a_frontmatter_origin` | — |
+| Locator sibling fix | `…::item_keys_after_the_first_are_siblings_not_children` | fails on the old parent stack (`$schema[0].doc` was `None`) |
+| `focused_line_regions` | `biscuit-terminal` `focused_line_regions_keep_arm_and_parent_ancestors`, `…_find_the_owner_of_a_flush_sequence`, `…_ignore_lines_outside_the_block`, `…_refuse_a_partial_slice_of_anchored_yaml` | — |
+| `ShellExpansionError::origin()` | `darkmatter` `shell_expansion::types::tests::origin_names_the_authored_location_or_none_for_unscoped_failures` | — |
+
+The changed existing expectations are in the plan's changed-expectations
+table (Phase 4 rows). None was loosened. The S4-flagged
+`level1_pty_mismatch_takes_tty_branch_with_yaml_block` is unchanged and
+passes, through the delimiter rule above.
+
+### Gates
+
+- `claudine/`: `just test` ran 7567 tests: 7567 passed, 9 skipped. The first
+  run failed only `level1_pty_mismatch_takes_tty_branch_with_yaml_block`,
+  before the delimiter rule; it is green after it. `just lint` exits 0; its
+  only warning is the known macOS `__eh_frame` linker message. `just
+  check-tier-coverage claudine` reports 0 stranded.
+- `biscuit-terminal/`: `just test` ran 3331 tests: 3331 passed. `just lint`
+  is clean.
+- `darkmatter/`: `just test` ran 8582 tests: 8582 passed. `just lint` is
+  clean.
+- L2 (tmux only), `level2_{malformed_frontmatter,inline_compose_mismatch,schema_parse,removed_validation_key,invalid_file_reference}_capture`:
+  8 of 8 passed. The WezTerm variants were not run; Phase 5 runs the full
+  `just test-l2`.
+- Windows: `just cross-check claudine --os windows frontmatter_excerpt
+  composition::error::tests` ran 144 tests: 144 passed. This includes the
+  `include_str!` of `clarify.md`, where CRLF checkouts are the risk.
+- No new `cfg` anywhere.
+
+### Docs
+
+- `claudine/docs/topics/composition.md`: "Frontmatter YAML blocks in errors"
+  is rewritten. It covers focused regions with a `clarify.md` example, a
+  per-error focus table, the omission rule, the anchor rule, a Mermaid flow,
+  and the no-color fence caveat. The mismatch and removed-key paragraphs no
+  longer promise the whole block. Phase 5 only needs to review it.
+- `biscuit-terminal/README.md` documents `focused_line_regions` and the anchor
+  rule. The claudine skill's "Composition diagnostics" row is updated.

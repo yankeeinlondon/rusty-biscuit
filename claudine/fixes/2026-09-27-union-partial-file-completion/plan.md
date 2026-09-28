@@ -47,6 +47,20 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - biscuit-terminal/lib/src/errors/source_context.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/composition.md
+    - biscuit-terminal/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine-cli
     - claudine
@@ -110,7 +124,7 @@ independent technical tracks that meet in Claudine's compose preparation:
       `spec=fix` typed at the repo root.
 - [x] The provider picker renders inline below the cursor (no `\x1b[?1049h`)
       and leaves scrollback intact.
-- [ ] Frontmatter excerpts show only focused regions with real line numbers,
+- [x] Frontmatter excerpts show only focused regions with real line numbers,
       `⋮` elision, and highlights. No `BlockOnly` path remains. Unlocatable
       problems omit the excerpt.
 - [ ] Every R7 test (1–8) exists and passes. The existing `supplied.rs` tests
@@ -776,7 +790,7 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
 
 ### Wave 5 — excerpt model and rendering
 
-- [ ] **Excerpt model** (`frontmatter_excerpt.rs`; R6, N2, N4)
+- [x] **Excerpt model** (`frontmatter_excerpt.rs`; R6, N2, N4)
     - Replace the `block` + `highlight_line` model with the focused regions:
       each region is a source-text slice, its `start_line`, and its highlighted
       lines. Add `EXCERPT_CONTEXT_LINES = 3`.
@@ -788,11 +802,11 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
       `NO_COLOR` stripping are unchanged.
     - Update the module `//!` doc. It currently says "captures the verbatim
       frontmatter block", which will be stale.
-- [ ] **Property location for caller inputs** (R6 first bullet)
+- [x] **Property location for caller inputs** (R6 first bullet)
     - When a property is not a top-level frontmatter key, locate it inside
       `$schema`. For unions, locate it in every arm (the N3 every-arm path).
       Also include a same-named top-level key when one exists.
-- [ ] **Highlight producers** (`error/mod.rs:3203-3371`)
+- [x] **Highlight producers** (`error/mod.rs:3203-3371`)
     - Delete `FrontmatterHighlight::BlockOnly`.
     - Multi-problem `SchemaValidation` and multi-entry `MissingProperties`
       gain a `Properties(Vec<String>)` variant, which shows the union of the
@@ -805,7 +819,7 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
 
 ### Wave 6 — tests (parallel after Wave 5)
 
-- [ ] **Excerpt unit tests (R7.8)**
+- [x] **Excerpt unit tests (R7.8)**
     - A mid-file property gives ≤7 window lines plus ancestors.
     - `/spec` against a verbatim copy of `prompts/clarify.md` frontmatter
       highlights the arm-0 `spec` line (line 5 in the spec's excerpt; assert
@@ -813,15 +827,15 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
     - An unlocatable property gives no excerpt.
     - Two problems give two regions with `⋮` between them.
     - Rendered gutter numbers match source lines.
-- [ ] **Update existing expectations**
+- [x] **Update existing expectations**
     - Update each test from the S4 inventory that asserted whole-block
       output. Record every change, with its reason, in the Phase 5 table.
       Never loosen an assertion without a reason.
 
 ### Checkpoint 4
 
-- [ ] `rg 'BlockOnly' claudine/lib/src` finds nothing.
-- [ ] `just test` and `just lint` are green in `claudine/`.
+- [x] `rg 'BlockOnly' claudine/lib/src` finds nothing.
+- [x] `just test` and `just lint` are green in `claudine/`.
 
 ---
 
@@ -857,7 +871,15 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
 |---|---|---|---|
 | `schema::supplied::tests::supplied_files_leave_ambiguous_and_mismatched_union_arms_untouched` (Phase 3) | four union shapes, including `[{spec: eager file(**/*.md)}, {spec: eager file(**/*spec*.md)}]`, all give no pending entry | that one shape moved to `undecided_union_deduplicates_patterns_in_arm_order` and gives one entry with patterns `["**/*.md", "**/*spec*.md"]`; the other three shapes are unchanged | ruling D1: when every contending arm declares the property as the same eager `file(match)`, the existence check runs with the merged globs |
 | every `schema/supplied.rs` inline test (Phase 3) | inline `mod tests` in `supplied.rs` | the same tests, verbatim, in `schema/supplied/tests.rs`; `include_str!` paths are one level deeper | the inline-test budget (300 lines) in `test_placement::repository_test_placement` |
-| _(filled in by Phase 4/5)_ | | | |
+| every `frontmatter_excerpt.rs` inline test (Phase 4) | inline `mod tests` in `frontmatter_excerpt.rs` | the same tests in `frontmatter_excerpt/tests.rs`, next to the new R7.8 tests | the inline-test budget (300 lines) in `test_placement::repository_test_placement` |
+| `frontmatter_excerpt::tests::capture_line_none_for_valid_three_dash_fence` (Phase 4) | `capture_line` on a valid `---` block gives `None` | renamed `capture_line_windows_a_valid_three_dash_block`: line 5 gives the window 2–8; a new `capture_line_none_outside_the_block` pins the `None` cases | `capture_line` now also serves a `FrontmatterParse` YAML error with a location, which sits in an ordinary `---` block |
+| `frontmatter_excerpt::tests::capture_line_recognizes_four_dash_fence` (Phase 4) | the private `block` field starts `----\n` and ends `\n----` | the single region spans lines 1–4 and its text starts and ends with the fences | the `block` field no longer exists; the fences are inside line 1's ±3 window |
+| `frontmatter_excerpt::tests::schema_span_*` (3), `capture_line_appendix_highlights_fence_line` (Phase 4) | read the private `highlight_line` field | call the test accessor `highlight_line()`; the expected lines are unchanged | the model now stores regions |
+| `error::tests::enrich_is_idempotent` (Phase 4) | fixture `PromptPropertyMissing` on a document with no `prompt` key is wrapped once | fixture `PromptPropertyWrongType` on a document with `prompt: 42` is wrapped once | a missing key has no line, so the excerpt is omitted and there is nothing to wrap; the omitted case is now asserted in `enrich_omits_the_excerpt_when_nothing_is_locatable` |
+| `error::tests::enrich_frontmatter_parse_regular_error_gets_block_only_excerpt` (Phase 4) | some excerpt is attached (`BlockOnly`) | renamed `enrich_frontmatter_parse_error_windows_the_reported_line`: the highlight is source line 4 (YAML line 3 plus the opening `---`) | R6: a located parse error is windowed; `BlockOnly` is removed |
+| `cli/src/output/error_walker/tests.rs::appends_yaml_block_for_inline_sequence_mismatch_on_tty` (Phase 4) | excerpt built with `capture(doc, None, true)` (the whole block) | excerpt built with `capture_properties(doc, &["prompt", "sequence"], true)`; the assertions are unchanged | `capture` no longer takes an optional key; this mirrors the new focus of the mismatch error |
+| `cli/src/output/error_walker/tests.rs::leak_with_frontmatter` (Phase 4) | `capture(LEAK_DOC, Some("success.message"), …)` | `capture(LEAK_DOC, "success.message", …)` | signature only; the assertions are unchanged |
+| _(filled in by Phase 5)_ | | | |
 
 ### Checkpoint 5 (terminal state)
 
