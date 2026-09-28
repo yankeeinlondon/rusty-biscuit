@@ -10,7 +10,8 @@ blocked: false
 reviewed_by: codex/gpt-6-sol
 created: 2026-09-27T16:37:21-07:00
 spec: 2026-09-27-list-freshness-ux/spec.md
-implemented: false
+implemented: true
+next: 2026-09-27-list-freshness-ux/review-4.md
 description: "A **fix** review of `2026-09-27-list-freshness-ux/spec.md`"
 fix: 2026-09-27-list-freshness-ux/review-3.md
 previous: 2026-09-27-list-freshness-ux/review-2.md
