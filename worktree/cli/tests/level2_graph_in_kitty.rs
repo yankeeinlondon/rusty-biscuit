@@ -87,6 +87,7 @@ const SPARSE_SNIFF_COMMITS: usize = 94;
 /// The observed-shape history's named commits, by full SHA.
 struct SparseLanes {
     d2: String,
+    d5: String,
     w1: String,
     m103: String,
     m104: String,
@@ -192,24 +193,60 @@ impl Fixture {
         run_git(&repo, &["update-ref", "refs/heads/main", &m104]);
         run_git(&repo, &["update-ref", "refs/remotes/origin/main", &m104]);
         run_git(&repo, &["reset", "-q", "--hard", "main"]);
-        for (directory, branch, tip, parent) in [
-            ("wt-schema", "feat/schema-enhancement", schema.last().unwrap(), "main"),
-            ("wt-ux", "fix/wt-ux", synced.last().unwrap(), "main"),
-            ("wt-sniff", "fix/sniff", sniff.last().unwrap(), "fix/wt-ux"),
+        // Each record holds the commit its branch was created at, as `wt
+        // create` writes it.
+        for (directory, branch, tip, parent, base) in [
+            ("wt-schema", "feat/schema-enhancement", schema.last().unwrap(), "main", &d[2]),
+            ("wt-ux", "fix/wt-ux", synced.last().unwrap(), "main", &d[5]),
+            ("wt-sniff", "fix/sniff", sniff.last().unwrap(), "fix/wt-ux", &w1),
         ] {
-            run_git(&repo, &["branch", branch, tip]);
-            let worktree = fixture.path(directory);
-            run_git(&repo, &["worktree", "add", "-q", worktree.to_str().unwrap(), branch]);
-            fixture.worktrees.push(directory.to_string());
-            fixture.record_parent(branch, parent);
+            fixture.add_branch_worktree(directory, branch, tip);
+            fixture.record_parent(branch, parent, base);
         }
         fixture.sparse = Some(SparseLanes {
             d2: d[2].clone(),
+            d5: d[5].clone(),
             w1,
             m103,
             m104,
             b1,
         });
+        fixture
+    }
+
+    /// PR #105's shape (the L1 `continued_after_merge` history), with a
+    /// worktree per branch:
+    ///
+    /// ```text
+    /// main 1 - main 2 - d2 - d3 - d4 - P ---------------- C   (main, origin/main)
+    ///              \                    \                /
+    ///               w1 - w2 - w3 ------- S - x1 - … - x7 (B)  (fix/sniff-pr)
+    ///                                                    \
+    ///                                                     N   (fix/wt-ux)
+    /// ```
+    ///
+    /// `fix/sniff-pr` is recorded as created from `fix/wt-ux` at `B`;
+    /// `fix/wt-ux` has no record, as observed.
+    fn continued_after_merge() -> Self {
+        let mut fixture = Self::init();
+        let repo = fixture.main.clone();
+        let tree = git_output(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let d1 = git_output(&repo, &["rev-parse", "HEAD"]);
+        let d = chain_on(&repo, &tree, &d1, "d", 3);
+        let w = chain_on(&repo, &tree, &d1, "w", 3);
+        let p = commit_on(&repo, &tree, &[d.last().unwrap()], "P");
+        let sync = commit_on(&repo, &tree, &[w.last().unwrap(), &p], "Merge branch 'main' into fix/wt-ux");
+        let x = chain_on(&repo, &tree, &sync, "x", 7);
+        let b = x.last().unwrap().clone();
+        let c = commit_on(&repo, &tree, &[&p, &b], "Merge pull request #105 from fix/wt-ux");
+        let n = commit_on(&repo, &tree, &[&b], "N");
+
+        run_git(&repo, &["update-ref", "refs/heads/main", &c]);
+        run_git(&repo, &["update-ref", "refs/remotes/origin/main", &c]);
+        run_git(&repo, &["reset", "-q", "--hard", "main"]);
+        fixture.add_branch_worktree("wt-ux", "fix/wt-ux", &n);
+        fixture.add_branch_worktree("wt-sniff-pr", "fix/sniff-pr", &b);
+        fixture.record_parent("fix/sniff-pr", "fix/wt-ux", &b);
         fixture
     }
 
@@ -226,13 +263,22 @@ impl Fixture {
         root.join("worktree").join(real.file_name().expect("store file name"))
     }
 
-    fn record_parent(&self, branch: &str, parent: &str) {
+    /// Records `branch` as created from `parent` at `base_sha`.
+    fn record_parent(&self, branch: &str, parent: &str, base_sha: &str) {
         let origin = worktree::fork_origin::ForkOrigin {
             base_branch: parent.to_string(),
-            base_sha: git_output(&self.main, &["rev-parse", parent]),
+            base_sha: base_sha.to_string(),
             created_at: 1,
         };
         worktree::fork_origin::record(&self.fork_store(), branch, origin).expect("record the fork origin");
+    }
+
+    /// Creates `branch` at `tip` and checks it out in a new worktree.
+    fn add_branch_worktree(&mut self, directory: &str, branch: &str, tip: &str) {
+        run_git(&self.main, &["branch", branch, tip]);
+        let worktree = self.path(directory);
+        run_git(&self.main, &["worktree", "add", "-q", worktree.to_str().unwrap(), branch]);
+        self.worktrees.push(directory.to_string());
     }
 
     fn add_worktree(&mut self, directory: &str, branch: &str) -> PathBuf {
@@ -683,10 +729,10 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
 
 /// The observed sparse-lanes history in a 200×60 window: the table stays
 /// intact, the image fits the window and the rows `wt` reserved, no lane is
-/// left out, and the only notice is "Some history is not shown" (for
-/// `fix/sniff`'s undrawn fork). The screenshot and the transmitted PNG are
-/// kept in the temp directory for inspection of the lane density and the
-/// merge edge; the plan itself is proven at L1 by
+/// left out, and there is no notice (`fix/wt-ux` draws `W1` merged into
+/// `M103`, and `fix/sniff` forks there). The screenshot and the transmitted
+/// PNG are kept in the temp directory for inspection of the lane density and
+/// the merge edges; the plan itself is proven at L1 by
 /// `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60`.
 #[test]
 #[serial(level2_terminal)]
@@ -698,7 +744,29 @@ fn level2_graph_restores_lane_density_in_kitty() {
     run.keep_evidence("sparse");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(all.contains("Some history is not shown"), "fix/sniff's fork is not drawn:\n{all}");
+    assert!(!all.contains("Some history is not shown"), "every fork and merge is drawn:\n{all}");
+    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    run.assert_table_intact();
+    assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
+}
+
+/// PR #105's shape in a 200×60 window: `fix/wt-ux` draws its earlier merge
+/// into `main` and continues, `fix/sniff-pr` is a label on that lane, and
+/// nothing is reported as not shown. The screenshot and the transmitted PNG
+/// are kept in the temp directory; the layout (merge parents, the commit after
+/// the merge source, labels) is proven at L1 by
+/// `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
+    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+
+    let fixture = Fixture::continued_after_merge();
+    let mut run = GraphRun::new(&fixture, 200, 60);
+    run.keep_evidence("continued");
+    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    let all = run.all.join("\n");
+    assert!(!all.contains("Some history is not shown"), "the continued branch is connected:\n{all}");
     assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
     run.assert_table_intact();
     assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
@@ -732,7 +800,8 @@ fn level2_sparse_lanes_fixture_has_the_observed_topology() {
     assert_eq!(git_output(repo, &["worktree", "list", "--porcelain"]).matches("worktree ").count(), 4);
 
     let store = worktree::fork_origin::ForkOriginStore::load_from(&fixture.fork_store());
-    assert_eq!(store.get("fix/sniff").map(|fork| fork.base_branch.as_str()), Some("fix/wt-ux"));
-    assert_eq!(store.get("fix/wt-ux").map(|fork| fork.base_branch.as_str()), Some("main"));
-    assert_eq!(store.get("feat/schema-enhancement").map(|fork| fork.base_branch.as_str()), Some("main"));
+    let record = |branch: &str| store.get(branch).map(|fork| (fork.base_branch.as_str(), fork.base_sha.as_str()));
+    assert_eq!(record("fix/sniff"), Some(("fix/wt-ux", sparse.w1.as_str())), "created at W1");
+    assert_eq!(record("fix/wt-ux"), Some(("main", sparse.d5.as_str())), "created at d5");
+    assert_eq!(record("feat/schema-enhancement"), Some(("main", sparse.d2.as_str())), "created at d2");
 }
