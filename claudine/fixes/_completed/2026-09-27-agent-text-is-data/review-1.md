@@ -5,7 +5,10 @@ fix: 2026-09-27-agent-text-is-data/review-1.md
 spec: 2026-09-27-agent-text-is-data/spec.md
 reviewed_by: codex/gpt-6-sol
 created: 2026-09-28T06:51:15-07:00
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-27-agent-text-is-data/log.md
+next: 2026-09-27-agent-text-is-data/review-2.md
 ready: false
 findings:
     - "high: Malformed structured YAML is silently converted into text"
