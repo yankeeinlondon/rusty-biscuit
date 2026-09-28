@@ -331,6 +331,250 @@ pub fn apply_hash_save_text(
     Ok(Some(updated))
 }
 
+/// One step of a path from the frontmatter root to a value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum FrontmatterPathSegment {
+    /// A mapping key.
+    Key(String),
+    /// A sequence index.
+    Index(usize),
+}
+
+/// Renders a path as `a.b[2].c`.
+fn dotted_path(path: &[FrontmatterPathSegment]) -> String {
+    let mut out = String::new();
+    for segment in path {
+        match segment {
+            FrontmatterPathSegment::Key(key) => {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                out.push_str(key);
+            }
+            FrontmatterPathSegment::Index(index) => out.push_str(&format!("[{index}]")),
+        }
+    }
+    out
+}
+
+/// The authored source of one frontmatter string leaf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeafSpan {
+    /// The requested path.
+    pub path: Vec<FrontmatterPathSegment>,
+    /// Absolute byte range of the scalar in the document, quotes and a block
+    /// scalar's header included, final line break excluded. Replacing exactly
+    /// these bytes leaves every other byte, and every line ending, in place.
+    pub range: Range<usize>,
+    /// The text Darkmatter's compose reads for this leaf. For a clipped block
+    /// scalar that ends the frontmatter this lacks the trailing newline a
+    /// whole-block YAML parse reports.
+    pub decoded: String,
+}
+
+/// Why a requested leaf has no exact authored span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnlocatedLeafReason {
+    /// No value exists at the path.
+    Missing,
+    /// The value is a mapping or sequence, not a scalar.
+    NotAScalar,
+    /// The leaf carries an anchor, alias, or tag, or is reached through a
+    /// `<<` merge; replacing its bytes would change other values.
+    NodeProperties,
+    /// The YAML shape is outside what the locator models (a plain item in a
+    /// flow collection, a multi-line flow collection, a nested sequence).
+    UnsupportedShape,
+}
+
+impl std::fmt::Display for UnlocatedLeafReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Missing => "no value exists at this path",
+            Self::NotAScalar => "the value is a mapping or sequence, not a string",
+            Self::NodeProperties => {
+                "the value uses an anchor, alias, tag, or `<<` merge"
+            }
+            Self::UnsupportedShape => {
+                "the value's YAML layout cannot be edited in place (a plain flow-collection item, a multi-line flow collection, or a nested sequence)"
+            }
+        })
+    }
+}
+
+/// A leaf [`locate_frontmatter_leaves`] could not locate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnlocatedLeaf {
+    /// The requested path.
+    pub path: Vec<FrontmatterPathSegment>,
+    /// 1-based document line of the top-level property holding the path.
+    pub line: usize,
+    /// Why no span was produced.
+    pub reason: UnlocatedLeafReason,
+}
+
+impl UnlocatedLeaf {
+    /// The path rendered as `a.b[2].c`.
+    pub fn dotted_path(&self) -> String {
+        dotted_path(&self.path)
+    }
+}
+
+/// Failure of [`locate_frontmatter_leaves`].
+#[derive(Debug)]
+pub enum LeafLocateError {
+    /// The frontmatter itself is malformed or not a block mapping.
+    Document(MarkdownError),
+    /// One requested leaf has no exact span; no partial result is returned.
+    Unlocated(UnlocatedLeaf),
+}
+
+/// Locates the exact authored bytes of frontmatter string leaves.
+///
+/// Each path is located inside its own top-level property, so an unmodeled
+/// construct elsewhere in the frontmatter never blocks it. A leaf is accepted
+/// only when the decoded source text equals the value a YAML parse of the same
+/// frontmatter yields, so a returned span is always safe to replace.
+///
+/// ## Errors
+///
+/// [`LeafLocateError::Document`] when the frontmatter cannot be parsed as a
+/// block mapping; [`LeafLocateError::Unlocated`] for the first path that
+/// cannot be located, in request order.
+pub fn locate_frontmatter_leaves(
+    document: &str,
+    paths: &[Vec<FrontmatterPathSegment>],
+) -> Result<Vec<LeafSpan>, LeafLocateError> {
+    use crate::markdown::schemas::SchemaValueKind;
+    use crate::markdown::schemas::decode_scalar_node;
+    use crate::markdown::schemas::simplified::locate_frontmatter_value;
+
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let unlocated = |path: &[FrontmatterPathSegment], line: usize, reason| {
+        LeafLocateError::Unlocated(UnlocatedLeaf {
+            path: path.to_vec(),
+            line,
+            reason,
+        })
+    };
+    let Some(extraction) = extract_frontmatter_block(document).map_err(LeafLocateError::Document)?
+    else {
+        return Err(unlocated(&paths[0], 1, UnlocatedLeafReason::Missing));
+    };
+    validate_block_mapping(extraction.yaml).map_err(LeafLocateError::Document)?;
+    let nodes = locate_all_nodes(extraction.yaml).map_err(LeafLocateError::Document)?;
+
+    // Compose reads the YAML lines without the final terminator; decode and
+    // compare against that same text (see `FrontmatterExpressionLocation`).
+    let yaml_start = extraction.yaml_span.start;
+    let yaml_end = extraction.yaml_span.end
+        - [&b"\r\n"[..], b"\n", b"\r"]
+            .into_iter()
+            .find(|terminator| document.as_bytes()[..extraction.yaml_span.end].ends_with(terminator))
+            .map_or(0, <[u8]>::len);
+    let yaml_end = yaml_end.max(yaml_start);
+    let trimmed = &document[yaml_start..yaml_end];
+    let parsed: serde_json::Value = if trimmed.trim().is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        serde_yaml_ng::from_str(trimmed).map_err(|error| {
+            LeafLocateError::Document(text_edit_error(format!(
+                "frontmatter YAML could not be parsed: {error}"
+            )))
+        })?
+    };
+    let prefix = &document[..yaml_end];
+
+    let mut spans = Vec::with_capacity(paths.len());
+    for path in paths {
+        let Some(FrontmatterPathSegment::Key(top)) = path.first() else {
+            return Err(unlocated(path, 1, UnlocatedLeafReason::Missing));
+        };
+        let Some(node) = nodes.get(top) else {
+            return Err(unlocated(path, 1, UnlocatedLeafReason::Missing));
+        };
+        let node_start = yaml_start + node.range.start;
+        let line = document[..node_start].matches('\n').count() + 1;
+        let fail = |reason| Err(unlocated(path, line, reason));
+
+        let mut expected = &parsed;
+        for segment in path {
+            let next = match segment {
+                FrontmatterPathSegment::Key(key) => expected.get(key.as_str()),
+                FrontmatterPathSegment::Index(index) => expected.get(*index),
+            };
+            match next {
+                Some(value) => expected = value,
+                None => return fail(UnlocatedLeafReason::Missing),
+            }
+        }
+        let Some(expected) = expected.as_str() else {
+            return fail(UnlocatedLeafReason::NotAScalar);
+        };
+        if path
+            .iter()
+            .any(|segment| matches!(segment, FrontmatterPathSegment::Key(key) if key == "<<"))
+        {
+            return fail(UnlocatedLeafReason::NodeProperties);
+        }
+
+        let node_end = (yaml_start + node.range.end).min(yaml_end);
+        let Some(root) = locate_frontmatter_value(&document[node_start..node_end], node_start)
+        else {
+            return fail(UnlocatedLeafReason::UnsupportedShape);
+        };
+        let mut located = &root;
+        let mut parent_indent = 0;
+        for segment in path {
+            located = match (segment, &located.kind) {
+                (FrontmatterPathSegment::Key(key), SchemaValueKind::Mapping(entries)) => {
+                    if entries.iter().any(|entry| entry.key == "<<") {
+                        return fail(UnlocatedLeafReason::NodeProperties);
+                    }
+                    let Some(entry) = entries.iter().find(|entry| entry.key == *key) else {
+                        return fail(UnlocatedLeafReason::UnsupportedShape);
+                    };
+                    parent_indent = column_of(document, entry.key_span.start);
+                    &entry.value
+                }
+                (FrontmatterPathSegment::Index(index), SchemaValueKind::Sequence(items)) => {
+                    parent_indent = column_of(document, located.span.start);
+                    match items.get(*index) {
+                        Some(item) => item,
+                        None => return fail(UnlocatedLeafReason::UnsupportedShape),
+                    }
+                }
+                _ => return fail(UnlocatedLeafReason::UnsupportedShape),
+            };
+        }
+        if !matches!(located.kind, SchemaValueKind::Scalar) || located.span.is_empty() {
+            return fail(UnlocatedLeafReason::UnsupportedShape);
+        }
+        if matches!(document.as_bytes()[located.span.start], b'&' | b'*' | b'!') {
+            return fail(UnlocatedLeafReason::NodeProperties);
+        }
+        let Some((scalar, end)) = decode_scalar_node(prefix, located.span.start, parent_indent)
+            .filter(|(scalar, _)| scalar.decoded() == expected)
+        else {
+            return fail(UnlocatedLeafReason::UnsupportedShape);
+        };
+        spans.push(LeafSpan {
+            path: path.clone(),
+            range: located.span.start..end,
+            decoded: scalar.decoded().to_string(),
+        });
+    }
+    Ok(spans)
+}
+
+/// The character column of byte `offset` on its line of `text`.
+fn column_of(text: &str, offset: usize) -> usize {
+    let line_start = text[..offset].rfind(['\n', '\r']).map_or(0, |index| index + 1);
+    text[line_start..offset].chars().count()
+}
+
 #[derive(Debug)]
 struct TextNode {
     range: Range<usize>,
@@ -1397,5 +1641,175 @@ mod tests {
 
         assert_eq!(baseline.hash_body(false), boundary_only.hash_body(false));
         assert_ne!(baseline.hash_body(false), internal_change.hash_body(false));
+    }
+}
+
+#[cfg(test)]
+mod leaf_tests {
+    //! `locate_frontmatter_leaves`: the spike S2 shape table, one case per row.
+
+    use super::*;
+    use FrontmatterPathSegment::{Index, Key};
+
+    const TOKEN: &str = "\"{{!data:v1:SGk}}\"";
+
+    fn key(name: &str) -> FrontmatterPathSegment {
+        Key(name.to_string())
+    }
+
+    /// Replaces the leaf at `path` with a quoted token and checks the reparse
+    /// changes that leaf only and keeps every line ending.
+    fn replace_one(document: &str, path: Vec<FrontmatterPathSegment>) -> String {
+        let spans = locate_frontmatter_leaves(document, std::slice::from_ref(&path))
+            .unwrap_or_else(|error| panic!("{path:?} in {document:?}: {error:?}"));
+        let span = &spans[0];
+        let mut replaced = document.to_string();
+        replaced.replace_range(span.range.clone(), TOKEN);
+
+        let before = parse_text_frontmatter(document).unwrap().values;
+        let after = parse_text_frontmatter(&replaced).unwrap().values;
+        let mut expected = serde_json::Value::Object(before.into_iter().collect());
+        let mut slot = &mut expected;
+        for segment in &path {
+            slot = match segment {
+                Key(key) => slot.get_mut(key.as_str()).unwrap(),
+                Index(index) => slot.get_mut(*index).unwrap(),
+            };
+        }
+        *slot = serde_json::Value::String("{{!data:v1:SGk}}".to_string());
+        assert_eq!(
+            serde_json::Value::Object(after.into_iter().collect()),
+            expected,
+            "{replaced}"
+        );
+        if document.contains("\r\n") {
+            assert!(
+                !replaced.replace("\r\n", "").contains('\n'),
+                "a line ending changed: {replaced:?}"
+            );
+        }
+        replaced
+    }
+
+    fn reason(document: &str, path: Vec<FrontmatterPathSegment>) -> UnlocatedLeafReason {
+        match locate_frontmatter_leaves(document, &[path]) {
+            Err(LeafLocateError::Unlocated(unlocated)) => unlocated.reason,
+            other => panic!("expected an unlocated leaf, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn top_level_scalars_in_every_quoting_style_keep_their_comment() {
+        let document = "---\na: plain {{x}} # note\nb: 'single ''q'' {{x}}'\nc: \"double \\\" {{x}}\"\n---\nBody\n";
+        let replaced = replace_one(document, vec![key("a")]);
+        assert!(replaced.contains(&format!("a: {TOKEN} # note\n")), "{replaced}");
+        replace_one(document, vec![key("b")]);
+        replace_one(document, vec![key("c")]);
+        let spans = locate_frontmatter_leaves(document, &[vec![key("b")]]).unwrap();
+        assert_eq!(spans[0].decoded, "single 'q' {{x}}");
+    }
+
+    #[test]
+    fn nested_maps_sequences_and_block_scalars_are_located() {
+        let document = "---\nouter:\n  inner:\n    deep: v {{x}}\nlist:\n  - one\n  - name: n {{x}}\n    other: o\nblock: |-\n  line one {{x}}\n  line two\nlast: >\n  folded {{x}}\n---\n";
+        replace_one(document, vec![key("outer"), key("inner"), key("deep")]);
+        replace_one(document, vec![key("list"), Index(0)]);
+        replace_one(document, vec![key("list"), Index(1), key("other")]);
+        let replaced = replace_one(document, vec![key("block")]);
+        assert!(replaced.contains(&format!("block: {TOKEN}\nlast:")), "{replaced}");
+        // A clipped block ending the frontmatter decodes as compose reads it.
+        let spans = locate_frontmatter_leaves(document, &[vec![key("last")]]);
+        assert_eq!(spans.unwrap()[0].decoded, "folded {{x}}");
+    }
+
+    #[test]
+    fn indentless_sequences_empty_values_and_wide_markers_are_located() {
+        // `serde_yaml_ng` writes sequences without indenting them.
+        let document = "---\nitems:\n- a {{x}}\n- name: n\n  note: see {{x}}\nempty:\nwide:\n-   k: kv {{x}}\n    j: jv\n---\n";
+        replace_one(document, vec![key("items"), Index(0)]);
+        replace_one(document, vec![key("items"), Index(1), key("note")]);
+        replace_one(document, vec![key("wide"), Index(0), key("j")]);
+        assert_eq!(reason(document, vec![key("empty")]), UnlocatedLeafReason::NotAScalar);
+    }
+
+    #[test]
+    fn crlf_is_kept_at_every_depth() {
+        let document = "---\r\na: top {{x}}\r\nm:\r\n  k: nested {{x}}\r\nb: |\r\n  one {{x}}\r\n  two\r\nz: 1\r\n---\r\nBody\r\n";
+        replace_one(document, vec![key("a")]);
+        replace_one(document, vec![key("m"), key("k")]);
+        replace_one(document, vec![key("b")]);
+    }
+
+    #[test]
+    fn quoted_flow_items_are_located_and_plain_ones_are_not() {
+        let document = "---\nq: [a, \"b {{x}}\"]\nm: {k: 'v {{x}}'}\np: [a, b, c]\n---\n";
+        replace_one(document, vec![key("q"), Index(1)]);
+        replace_one(document, vec![key("m"), key("k")]);
+        assert_eq!(
+            reason(document, vec![key("p"), Index(1)]),
+            UnlocatedLeafReason::UnsupportedShape
+        );
+    }
+
+    #[test]
+    fn node_properties_and_unmodeled_shapes_fail_closed() {
+        let anchors = "---\na: &anc shared\nb: *anc\nc: !!str tagged\nbase: &base {k: v}\nmerged:\n  <<: *base\n  own: o\n---\n";
+        assert_eq!(reason(anchors, vec![key("a")]), UnlocatedLeafReason::NodeProperties);
+        assert_eq!(reason(anchors, vec![key("b")]), UnlocatedLeafReason::NodeProperties);
+        assert_eq!(reason(anchors, vec![key("c")]), UnlocatedLeafReason::NodeProperties);
+        assert_eq!(
+            reason(anchors, vec![key("merged"), key("own")]),
+            UnlocatedLeafReason::NodeProperties
+        );
+
+        // A kept block ending the frontmatter is located as compose reads it
+        // (one trailing newline, not the whole block's two).
+        let kept_end = "---\na: x\nkept: |+\n  keep\n\n---\n";
+        let spans = locate_frontmatter_leaves(kept_end, &[vec![key("kept")]]).unwrap();
+        assert_eq!(spans[0].decoded, "keep\n");
+
+        let nested = "---\nn:\n  - - inner\n---\n";
+        assert_ne!(
+            locate_frontmatter_leaves(nested, &[vec![key("n"), Index(0), Index(0)]]).ok(),
+            Some(Vec::new())
+        );
+        assert!(locate_frontmatter_leaves(nested, &[vec![key("n"), Index(0), Index(0)]]).is_err());
+
+        let multi_line_flow = "---\nf: [\n  \"a\",\n  \"b\"\n  ]\n---\n";
+        assert_eq!(
+            reason(multi_line_flow, vec![key("f"), Index(0)]),
+            UnlocatedLeafReason::UnsupportedShape
+        );
+    }
+
+    #[test]
+    fn an_unmodeled_construct_in_another_property_does_not_block() {
+        let document = "---\nflow: [\n  a,\n  b\n  ]\nnote: see {{x}}\n---\n";
+        replace_one(document, vec![key("note")]);
+    }
+
+    #[test]
+    fn a_failure_names_the_path_and_the_line_of_its_property() {
+        let document = "---\ntitle: t\nnested:\n  a: &x v\n---\n";
+        let Err(LeafLocateError::Unlocated(unlocated)) =
+            locate_frontmatter_leaves(document, &[vec![key("title")], vec![key("nested"), key("a")]])
+        else {
+            panic!("the anchored leaf must fail");
+        };
+        assert_eq!(unlocated.line, 3);
+        assert_eq!(unlocated.dotted_path(), "nested.a");
+        assert_eq!(
+            reason(document, vec![key("absent")]),
+            UnlocatedLeafReason::Missing
+        );
+    }
+
+    #[test]
+    fn malformed_frontmatter_is_a_document_error() {
+        let document = "---\na: [unclosed\n---\n";
+        assert!(matches!(
+            locate_frontmatter_leaves(document, &[vec![key("a")]]),
+            Err(LeafLocateError::Document(_))
+        ));
     }
 }
