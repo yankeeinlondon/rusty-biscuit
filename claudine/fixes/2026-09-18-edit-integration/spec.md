@@ -1,11 +1,34 @@
 ---
 created: 2026-09-18
-status: proposed
-reviewed: false
+status: draft-spec
+reviewed: true
+reviewed_by: codex/gpt-6-sol
+reviewed_on: 2026-09-28
+review_iterations: 0
 implemented: false
 area: claudine
 packages:
     - claudine-cli
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
 ---
 
 # Compose `--edit` with Interactive Provider Sessions
@@ -19,9 +42,9 @@ That restriction incorrectly couples two independent choices:
 - `--interactive` selects the provider session mode after that prompt is
   authored.
 
-Every provider wrapped by Claudine can accept an initial prompt when launched
-interactively. Claudine already models and implements that capability through
-the ordinary command-line form:
+Claudine intends to support an initial prompt when a provider is launched
+interactively. Its direct wrapper exposes that intent through the ordinary
+command-line form:
 
 ```sh
 claudine <provider> "initial prompt" --interactive
@@ -33,28 +56,33 @@ from continuing through the existing interactive prompt-delivery path is
 therefore a wrapper validation defect, not a provider limitation.
 
 The current behavior also contradicts the getting-started documentation, which
-advertises `claudine codex --edit -i` as the interactive variant.
+advertises `claudine codex --edit -i` as the interactive variant. That page
+also incorrectly says plain `claudine codex --edit` launches an interactive
+session; an edited, non-empty prompt selects non-interactive mode by default.
 
 ## Current Behavior and Root Cause
 
 The restriction is enforced in two places:
 
-1. `WrapperArgs::edit` declares `conflicts_with = "interactive"`, so clap
-   rejects the ordinary argument ordering.
-2. `validate_timeout_constraints` independently rejects the combination after
-   wrapper flags have been recovered from the passthrough argument bucket.
+1. [WrapperArgs::edit](../../cli/src/commands/wrap/flags.rs) in `claudine-cli`
+   declares `conflicts_with = "interactive"`, so clap rejects the ordinary
+   argument ordering.
+2. [validate_timeout_constraints](../../cli/src/commands/wrap/wrapper_stages.rs)
+   in `claudine-cli` independently rejects the combination after wrapper flags
+   have been recovered from the passthrough argument bucket.
 
 The duplicate runtime check exists because wrapper-owned boolean flags can be
 recognized on either side of the first positional argument. Both checks encode
 the same invalid policy and must be removed together.
 
 The original edit-command design justified the conflict by claiming that most
-provider CLIs could not seed an initial turn into an interactive session. That
-claim is false for Claudine's entire supported provider fleet. Current provider
-profiles already distinguish interactive from non-interactive prompt delivery,
-and their tests cover interactive delivery shapes such as positional prompts,
-provider prompt flags, end-of-options separation, and provider-specific
-argument placement.
+provider CLIs could not seed an initial turn into an interactive session.
+Claudine's wrapper profiles already distinguish interactive from
+non-interactive prompt delivery, and their tests cover shapes such as
+positional prompts, provider prompt flags, end-of-options separation, and
+provider-specific argument placement. Those tests establish Claudine's
+intended arguments, not that every native provider consumes them as an initial
+turn. Pi needs the additional verification described under Open Questions.
 
 The phrase `--edit requires an interactive terminal` describes a separate and
 valid precondition: Claudine needs attached terminal input and output to launch
@@ -85,21 +113,28 @@ The second form must:
    interactive prompt-delivery path; and
 5. leave the provider session interactive for subsequent user turns.
 
-This contract applies without exception to Claude Code, Codex, Gemini CLI,
-Goose, Kimi Code, OpenCode, Qwen Code, Kilo, Pi, and Antigravity. Do not add a
-provider capability flag, allowlist, fallback to non-interactive execution, or
-warning for this combination.
+The target contract applies to Claude Code, Codex, Gemini CLI, Goose, Kimi
+Code, OpenCode, Qwen Code, Kilo, Pi, and Antigravity. Do not add a provider
+capability flag, allowlist, fallback to non-interactive execution, or warning
+for this combination. Resolve the Pi delivery question before claiming the
+fleet-wide contract is implemented.
 
 ### R2. Use the existing prompt pipeline
 
-Editor output must continue to become `PromptSource::Inline`. Session-mode
+Editor output must continue to become
+[PromptSource::Inline](../../cli/src/commands/wrap/profile/mod.rs) in
+`claudine-cli`, the wrapper's typed form of a supplied prompt. Session-mode
 selection must then determine how the selected provider profile delivers that
 prompt, exactly as it does for a directly supplied initial prompt.
 
-Do not introduce a second editor-to-provider delivery path, emulate an initial
-turn through terminal keystrokes, or special-case individual providers. The
-editor remains a pre-launch authoring step; provider-specific delivery remains
-owned by `WrapperProfile::prompt_delivery` and the established launch pipeline.
+Do not introduce a second editor-to-provider delivery path or emulate an
+initial turn through terminal keystrokes. The editor remains a pre-launch
+authoring step; provider-specific delivery remains owned by
+[WrapperProfile::prompt_delivery](../../cli/src/commands/wrap/profile/mod.rs)
+in `claudine-cli` and the established launch pipeline. If a
+profile's existing interactive delivery is defective, repair that profile for
+all interactive startup prompts, whether edited or supplied on the command
+line.
 
 Seed prompts must work in either ordering already supported by wrapper flag
 extraction:
@@ -132,11 +167,23 @@ Preserve all other editor behavior:
 An interactive provider session must not start when editing is cancelled or
 fails.
 
+The wrapper currently resolves the provider executable before opening the
+editor. This fix does not change that preflight order for live runs: a missing
+provider can fail before editing begins. `--dry-run` continues to avoid
+executable resolution.
+
 ### R4. Preserve unrelated mode constraints
 
 This fix removes only the `--edit`/`--interactive` conflict. Existing timeout
 rules remain unchanged: wall-clock and step-silence timeouts that are invalid
 for interactive provider sessions must still be rejected.
+
+Validate an explicit interactive request combined with either timeout after
+wrapper flag extraction and before opening the editor. The current timeout
+check runs after editing, so simply deleting the edit conflict would make a
+user edit a prompt before receiving a predictable flag error. Keep the
+post-edit validation needed for mode decisions that depend on whether the
+edited prompt is empty.
 
 Editor time remains outside provider execution timing. `--quiet`, `--silent`,
 `--dry-run`, model selection, system-prompt options, MCP composition, sandbox
@@ -151,10 +198,12 @@ and not require or launch the provider executable.
 ### R5. Correct the behavior contract and remove stale rationale
 
 Update user-facing help and Claudine documentation wherever they describe
-`--edit` as non-interactive-only or repeat the false provider limitation. Keep
-the getting-started `--edit -i` example and make the implementation conform to
-it. Clarify where useful that "interactive terminal" in the editor diagnostic
-refers to editor I/O, not provider session mode.
+`--edit` as non-interactive-only or repeat the unsupported provider limitation.
+Correct the getting-started page's plain `--edit` example to say it starts a
+non-interactive session after a non-empty edit. Keep its `--edit -i` example
+and make the implementation conform to it. Clarify where useful that
+"interactive terminal" in the editor diagnostic refers to editor I/O, not
+provider session mode.
 
 Historical completed specs remain historical records and need not be rewritten.
 Current reference documentation and the Claudine skill snapshots must describe
@@ -168,9 +217,10 @@ narration.
 ## Acceptance Criteria and Regression Coverage
 
 1. Replace the wrapper integration test that expects `--edit` and
-   `--interactive` to conflict with a real-terminal test proving that an editor
-   result is delivered as the initial prompt and the provider is launched in
-   interactive mode.
+   `--interactive` to conflict with a terminal-backed test proving that an
+   editor result is delivered as the initial prompt and the provider is launched
+   in interactive mode. Use the repository's terminal test harness with a
+   background or hidden session; L2 and L3 tests must not take focus.
 2. Exercise both `--interactive` and `-i`, including a wrapper-owned flag found
    in the passthrough bucket after a positional seed prompt. Neither parsing
    route may retain the conflict.
@@ -197,6 +247,43 @@ narration.
 10. Update current documentation and generated/help snapshots as required, and
     add a drift assertion or focused test for the advertised
     `claudine codex --edit -i` form.
+11. Prove `--interactive --timeout` and `--interactive --step-timeout` fail
+    before the editor starts, including a flag recovered after a positional
+    seed prompt.
+12. Verify Pi's interactive startup prompt with evidence beyond generated
+    arguments. If its stdin delivery does not submit the first turn while
+    preserving the terminal session, repair the Pi profile and cover both
+    edited and direct startup prompts before closing this fix.
+
+## Open Questions
+
+### How should Pi receive an interactive startup prompt?
+
+The [Pi wrapper profile](../../cli/src/commands/wrap/profile/pi.rs) in
+`claudine-cli` currently pipes every supplied prompt to stdin, regardless of
+session mode. That profile's comment and the repository's Pi research describe
+stdin as a non-interactive print-mode channel. It is unclear whether the same
+channel submits the first turn to Pi's interactive terminal interface and
+leaves that interface usable. A unit test of the generated delivery shape
+cannot settle this behavior.
+
+1. **Recommended: verify Pi's native interactive startup contract and use it
+   inside the existing profile.** Pros: preserves a single editor pipeline and
+   makes direct `claudine pi "prompt" --interactive` work by the same route. Cons: may
+   require a Pi-specific profile correction and a terminal-backed test.
+2. **Keep stdin delivery after verifying it in a real terminal.** Pros: no
+   profile change if Pi already consumes stdin as intended. Cons: the current
+   print-mode evidence does not establish interactive behavior, so this choice
+   needs a direct proof and a regression test.
+3. **Exclude Pi from the all-provider promise.** Pros: avoids changing a
+   provider profile if Pi has no suitable launch surface. Cons: weakens the
+   intended consistent wrapper behavior and requires a user-facing exception.
+
+Choose the first option if Pi's native launch path supports an interactive
+startup prompt: it fixes the underlying direct-prompt behavior rather than
+adding an editor-only workaround. If investigation shows that Pi has no such
+path, revisit the fleet-wide promise before implementation rather than
+silently falling back to a one-shot run.
 
 ## Non-Goals
 
