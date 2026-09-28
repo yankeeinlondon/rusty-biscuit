@@ -37,37 +37,41 @@ related:
     - 2026-09-20-lifecycle-handoff-gaps
 human_review: false
 message_to_agent: |-
-    Phase 3 is complete (see implementation-log.md "## Phase 3"). What Phase 4
+    Phase 4 is complete (see implementation-log.md "## Phase 4"). What Phase 5
     builds on:
-    - The codec is public at `darkmatter::markdown::literal_token`: `encode`,
-      `encode_yaml_scalar` (always double-quoted), `decode`, `decode_leaf`,
-      `decode_literal_tokens(&Value)`, and `Frontmatter::decoded_literal_tokens()`.
-      Loaders keep tokens encoded; readers decode. Never hand decoded values
-      back to compose as authored text; pass them as a Data layer
-      (`with_override_layers`).
-    - Compose decodes an authored whole-leaf token in frontmatter pass 1 into a
-      data leaf. Keys in `exclude_keys` (Claudine lifecycle stacks) are NOT
-      decoded: a token there reaches event-time interpolation raw and fails
-      as `ExpressionError::MalformedLiteralToken`. That is fail-closed, but
-      Phases 4/5 must decide whether an agent can own a lifecycle key.
-    - Any token outside a whole authored frontmatter leaf, including a token
-      inside an expression's string literal, is the authoring-fatal
-      `ExpressionError::MalformedLiteralToken`, under Lenient too. Claudine
-      code that calls Darkmatter interpolation on text holding
-      `{{!data:` now gets that error. `ExpressionFinder::scan` reports tokens
-      in the new `tokens` list, so `find_all` no longer returns them: S3 row
-      16's hazard (a raw token passing Claudine's `reject_surviving_spans`
-      silently) is live until readers decode.
-    - Fixed a latent Phase 2 defect: the pre-approval gate
-      (`validate_pre_approved`) now collects from a snapshot taken before
-      frontmatter pass 1, so a produced `$( … )` (an expression result or a
-      decoded token) no longer fails `md compose` with "not pre-approved ...
-      bug in the pre-flight scanner".
-    - The N6 "pending" classifiers and Claudine `sequence/grammar.rs:122` are
-      still not decoding (Phase 5 owns them, per the plan).
-    Open decisions carried from Phase 2 are unchanged: N9, B14, and
-    B2/B11/B13 still await author confirmation, and a `::file … when="…"`
-    condition built from data is still evaluated.
+    - Runtime values reach Darkmatter through ONE boundary:
+      `claudine::composition::LayeredOverrides` (runtime_state.rs), built by
+      `layered_set_overrides`, carried on `PrepareOptions` /
+      `CallerInputLayers` as `set_overrides` + `data_override_keys` (use
+      `layered_overrides()` / `set_layered_overrides()`), and handed over only
+      by `LayeredOverrides::apply_to`. `cli/tests/l1/override_boundary_guard.rs`
+      fails on any other `with_set_overrides`/`with_data_overrides`/
+      `with_override_layers` call, and on any `literal_token` use in
+      runtime_state.rs, looping/, sequence/, cli wrap/sequence, or
+      wrap/overlay.rs. Encoding for persistence (closure.rs, the lifecycle
+      effect-engine writes) is outside that list on purpose.
+    - The `proxy.with:` overlay is per-document: `PrepareOptions::proxy_overlay`
+      (lowest data layer). Never put it in `CallerInputLayers`; the sequence
+      step overlay rides there as data and must survive an in-place proxy.
+    - The lifecycle executor scans authored text once (`evaluate_operand`); the
+      surviving-span guard and `LifecycleEvaluationReason::SurvivingSpan` are
+      gone. A `proxy.with:` value for a lifecycle key that still holds `{{`
+      fails closed. Pre-flight-stamped shell commands carry
+      `ShellAction::pre_resolved` and run as approved.
+    - Still yours (N6 amendment): the "pending composition" classifiers treat a
+      data value containing `{{` as pending. In Darkmatter
+      `schema_validation.rs` a data file reference named `{{x}}.md` still fails
+      (`caller_classification_instance`, `value_pending_composition`, and the
+      sites listed in the plan). Claudine `value_needs_composition` likewise.
+    - The two `#[ignore = "red until phase 5"]` tests in
+      cli/tests/l1/agent_text_is_data.rs are the only remaining ones.
+      `set_frontmatter_persisted_agent_data_survives_next_preparation` is no
+      longer blocked by B15: it now exits 0, but iteration 2 renders
+      `Note: [none]`. A loop iteration prepares from the in-memory source, not
+      a fresh disk read, so the test as written cannot observe B14. Redesign it
+      when you fix B14 so the persisted value is read back from disk (for
+      example a second `compose` run, or a sequence step, which re-reads the
+      live file).
 ---
 
 # Agent-Produced Text Is Data, Never Instructions

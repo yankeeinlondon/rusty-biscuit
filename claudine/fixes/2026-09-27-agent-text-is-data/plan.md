@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
 total_phases: 6
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 spec: 2026-09-27-agent-text-is-data
@@ -120,6 +120,57 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/override_boundary_guard.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/composition.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Plan: agent-produced text is data, never instructions
@@ -678,7 +729,7 @@ Depends on Phases 2 and 3.
 
 ### Wave 1
 
-- [ ] **Origin-tagged runtime layers** (`rust-developer`)
+- [x] **Origin-tagged runtime layers** (`rust-developer`)
       - `layered_set_overrides`, `with_initialized_outputs`, and
         `merge_object_into` (`runtime_state.rs:235-270`) return origin-tagged
         layers. `canonical_compose_options` (`prepare.rs:268-300`) passes them
@@ -695,14 +746,14 @@ Depends on Phases 2 and 3.
 
 ### Wave 2 (parallel; depends on Wave 1)
 
-- [ ] **`proxy.with:` as a Data layer** (`rust-developer`)
+- [x] **`proxy.with:` as a Data layer** (`rust-developer`)
       - Move the overlay out of `merge_frontmatter_overlay`
         (`cli/wrap/overlay.rs:17`; call sites `compose/prep.rs:352`,
         `harness_orch/prompt.rs:131`, `sequence/iterate.rs:686`) into a Data
         layer with the same precedence. Add a precedence test.
       - Also remove the retry/resume fold of `proxy.with:` into user setters
         (`harness_orch/prompt.rs:159-166`, I2 B16).
-- [ ] **Lifecycle messages and `set:`** (`rust-developer`)
+- [x] **Lifecycle messages and `set:`** (`rust-developer`)
       - Apply N10 in `lifecycle/executor.rs`: `render_message` (`:1302`),
         `resolve_string_value` (`:926`), `resolve_typed_value` (`:1862`),
         `dispatch_runtime_set` (`:1476`), and `resolve_proxy_with` /
@@ -714,7 +765,7 @@ Depends on Phases 2 and 3.
         (N10 amendment).
       - Update the tests in `lifecycle/executor/tests/*` and
         `lifecycle/tests/nested_span.rs`.
-- [ ] **Loop actions** (`rust-developer`)
+- [x] **Loop actions** (`rust-developer`)
       - Apply N11 in `looping/actions.rs:192`, `looping/expression.rs:267`, and
         `engine.rs:1108`.
       - A rendered action string keeps its string type. Do not re-parse it
@@ -722,7 +773,7 @@ Depends on Phases 2 and 3.
       - A seed control variable whose value differs from its authored
         source is Data. CLI setters in the seed stay Authored
         (`looping/seed.rs:130-148`, I2 B8).
-- [ ] **Sequence state, params, and variables** (`rust-developer`)
+- [x] **Sequence state, params, and variables** (`rust-developer`)
       - Step `state`/`previous`/`next` leaves derived from item data are Data
         (`sequence/mod.rs:196-240` → `model.rs:309`, I2 B10).
       - Evaluated task `params:` and group `variables:` enter the member
@@ -731,7 +782,7 @@ Depends on Phases 2 and 3.
 
 ### Wave 3
 
-- [ ] **Acceptance tests** (`feature-tester-rust`)
+- [x] **Acceptance tests** (`feature-tester-rust`)
       - Un-ignore and complete these Claudine L1 tests:
         - **loop:** `see {{…}} and $(rm -rf x)` is raw to predicates, appears
           byte-for-byte in the prompt, and requests no approval.
@@ -745,8 +796,8 @@ Depends on Phases 2 and 3.
 
 ### Checkpoint 4
 
-- [ ] `cd claudine && just test && just lint` is green.
-- [ ] The loop, sequence, and lifecycle red tests pass.
+- [x] `cd claudine && just test && just lint` is green.
+- [x] The loop, sequence, and lifecycle red tests pass.
 
 ---
 

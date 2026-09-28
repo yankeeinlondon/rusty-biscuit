@@ -20,6 +20,7 @@ skills_files_updated_during_phase_1: []
 packages:
     - darkmatter
     - darkmatter-cli
+    - claudine
     - claudine-cli
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/value_origin.rs
@@ -117,6 +118,57 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_4:
+    - claudine/lib/src/composition/runtime_state.rs
+    - claudine/lib/src/composition/runtime_state/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/actions.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/seed.rs
+    - claudine/lib/src/composition/looping/types.rs
+    - claudine/lib/src/composition/looping/engine/tests/iteration_actions.rs
+    - claudine/lib/src/composition/looping/engine/tests/seed_state.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/wrap/overlay.rs
+    - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/overlay_layering.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/src/commands/wrap/sequence/jit/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/phase1c.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/override_boundary_guard.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/flow-control/looping.md
+    - claudine/docs/topics/composition.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Implementation Log for 2026-09-27-agent-text-is-data (6 phases)
@@ -677,3 +729,193 @@ reader, but the token grammar's shapes are all covered:
   - `darkmatter`: Linux 22/22, native Windows 22/22.
   - `darkmatter-cli`: Linux 2/2, native Windows 2/2.
 - No new `#[cfg]`. No pre-existing failures were seen.
+
+## Phase 4
+
+- Started and finished 2026-09-28. Changes are in `claudine` (lib),
+  `claudine-cli`, and one function in `darkmatter` (lib). Phase 3 had been
+  committed (`fa9c7b953`, `882592f0e`, `c20f0c0e0`) by the time this phase
+  started; nothing from Phase 3 was touched.
+
+### What was built
+
+- **One override boundary** (`lib/src/composition/runtime_state.rs`).
+  - New public `LayeredOverrides`: the effective top-level override values
+    plus the set of keys that are data. `push`/`insert`/`extend` give a key the
+    origin of the layer that last supplied it. `apply_to(ComposeOptions)` is
+    the only place Claudine calls Darkmatter's `with_override_layers`; it
+    splits the keys into one authored and one data layer.
+  - `layered_set_overrides(base, runtime, overlay)` now takes a
+    `LayeredOverrides` base and returns one. Runtime mutations, `outputs`,
+    and the reserved overlay are always data. `with_initialized_outputs` was
+    replaced by `LayeredOverrides::initialize_outputs` (an absent `outputs` is
+    seeded as data).
+  - `PrepareOptions` and `CallerInputLayers` gain `data_override_keys`, with
+    `layered_overrides()` / `set_layered_overrides()` accessors (and a
+    `with_layered_overrides` builder on `PrepareOptions`). Every existing
+    reader of `set_overrides` (schema pre-validation, `prompt` overlay,
+    override keys) still sees the effective values unchanged.
+  - `canonical_compose_options` layers `proxy_overlay` (data) <
+    `layered_overrides()` and applies them through `apply_to`.
+  - Guard: `cli/tests/l1/override_boundary_guard.rs` fails on any
+    `with_set_overrides` / `with_data_overrides` / `with_override_layers` call
+    outside `runtime_state.rs`, and on any `literal_token` reference in the
+    runtime-layer modules (runtime values stay raw; no token at runtime).
+- **Call sites.**
+  - Loop iteration (`cli/compose/prep.rs`):
+    `ctx.as_layered_overrides(&caller)` replaces `as_set_overrides()`.
+  - Harness re-entry (`cli/wrap/harness_orch/prompt.rs`): re-layers the
+    input layers plus the live runtime snapshot, and passes
+    `proxy_overlay: state.overlay`. The old fold of `proxy.with:` into the
+    user setters (I2 B16) is gone.
+  - Sequence JIT (`cli/wrap/sequence/jit.rs`): `step_set_overrides` returns
+    `LayeredOverrides`, and `compose_step` / `build_template_preflight_options`
+    take it. Pre-validation's dropped optionals keep the other keys'
+    origins (`LayeredOverrides::from_parts`). Interactively collected values
+    are authored (`iterate.rs`).
+  - Task prompts (`sequence/task/mod.rs`): `PromptTaskRequest::set_overrides`
+    is a `LayeredOverrides`: evaluated `params` are data beneath authored user
+    setters (I2 B12). Group `variables` ride the reserved overlay, so they are
+    data too.
+- **Loop values (N11, I2 B8, B9).** `LoopIterationContext::as_layered_overrides`
+  marks a frontmatter key authored only while it still equals the value the
+  caller typed as authored. Control variables lifted from the composed seed,
+  action results, and every `_loop_*` ambient are data.
+  - `lift_seed` carries only authored caller keys.
+  - `render_string_with_lookup` no longer re-parses mixed text as JSON; a
+    whole-span leaf keeps its type.
+- **`proxy.with:` (I2 B16).** New `PrepareOptions::proxy_overlay`, applied as
+  the lowest data layer. `prepare_and_run_active_document` sets it for the
+  loop seed, pre-flight, and staged reads. The harness sets it from
+  `state.overlay` on every attempt. The eager shell pre-flight builds the
+  same layering with `overlay::proxy_caller_overrides`. The overlay is still
+  merged into the target's frontmatter map, so direct readers still see it.
+- **Lifecycle executor (N10, I2 B3, B15).**
+  - New `evaluate_operand`: an authored literal body is interpolated once;
+    any other expression's result is data. `render_message`,
+    `dispatch_side_effect`, and `resolve_typed_value` (`set:`, `with:`) use it.
+  - `reject_surviving_spans(_deep)`, `LifecycleExprError::SurvivingSpan`, and
+    `LifecycleEvaluationReason::SurvivingSpan` (with its renderer hint) are
+    deleted.
+  - `ShellAction::pre_resolved` marks commands stamped at pre-flight (C3). The
+    executor runs their bytes as approved (`render_shell_text`).
+    `validate_no_err_in_no_error_events` skips stamped text, which is data;
+    C3 already refuses an authored late-binding `err`.
+  - `reject_control_plane_template`: a `with:` value for a lifecycle key
+    (`LIFECYCLE_EVENT_KEYS`, which includes `loop`) that still holds a
+    `{{ … }}` span fails with `LifecycleProxyWithEvaluationFailed`.
+- **Darkmatter** (`schema_validation.rs::caller_input_records`). Without
+  explicit caller records, the fallback now includes data overrides as well
+  as `set_overrides`, so a schema-selected file value supplied by the run
+  resolves from the caller base exactly as it did when runtime values were
+  authored overrides.
+
+### Departures and decisions
+
+- **The surviving-span guard is deleted, not moved to authored text.**
+  Darkmatter's strict subtree compose evaluates every span
+  `find_all_plain` finds in authored text (`validate_strict_roots` and
+  `interpolate_value` both use `ScanMode::Plain`). So an authored-side check
+  after evaluation could only ever fire on inserted data, which is exactly
+  what N10 removes. A token in authored text is already the fatal
+  `MalformedLiteralToken`. The nested-span-in-literal guard and strict
+  unknown-root failure are unchanged and tested.
+- **The `proxy.with:` overlay stays merged into the target's frontmatter
+  map** as well as becoming a data layer. The plan said "move out of
+  `merge_frontmatter_overlay`", but loop recognition, `prompt:`, `$schema`,
+  provider selection, and the lifecycle parse read that map directly (the
+  `a_control_plane_overlay_is_reparsed_by_the_target` test installs a
+  `success:` stack this way). The data layer supersedes the merged copy for
+  compose, which is what makes the values inert.
+- **The overlay lives on `PrepareOptions`, never on `CallerInputLayers`.**
+  My first attempt put it into the caller layers and stripped data keys on
+  in-place adoption. That broke
+  `a_sequence_reserved_overlay_shadows_a_same_named_caller_file_input`: the
+  sequence step overlay also rides the caller layers as data and must
+  survive an in-place proxy. The overlay is per-document, so it now has its
+  own field that the harness re-derives from `state.overlay`.
+- **Lifecycle-key overlay values refuse template text (new guard).**
+  Without the old guard, run-time data carrying `{{ … }}` could otherwise
+  become a target's `success:` or `loop:` configuration, which Claudine
+  evaluates outside compose. The check reads resolved values only for those
+  keys. That answers Phase 3's open question for `proxy.with:`: an agent's
+  data cannot own a lifecycle key. The persistence side, whether an
+  agent-written lifecycle key in an inline document is owned, is still
+  Phase 5's.
+- **`LifecycleEvaluationReason` keeps one variant** (`Expression`). It stays
+  a typed hook for the renderer rather than being collapsed in this fix.
+- **Out of scope, handed to Phase 5.** The "pending composition" classifiers
+  still treat a data value that contains `{{` as pending (Darkmatter
+  `schema_validation.rs` `value_pending_composition` /
+  `caller_classification_instance`, and the other N6 sites). A trial fix in
+  `caller_classification_instance` alone was not enough: a data file
+  reference named `{{x}}.md` still failed. So it was reverted, and the row
+  was dropped from the new Darkmatter test.
+- **Docs drift fixed now** (Phase 6 still owns the full write-up):
+  - `lifecycle.md`: the surviving-span error section is replaced by "Template
+    text in a value is data, not an error".
+  - `flow-control-reference.md`: `with:` evaluation, the lifecycle-key
+    exception, and precedence.
+  - `looping.md` and `composition.md`: no JSON re-parse; the loop and
+    lifecycle renderers now differ in two ways, not three.
+  - `interpolation_conformance.rs`: the former "divergence 1" is now an
+    agreement test.
+
+### Requirement → test mapping
+
+| Requirement | Tests |
+| ----------- | ----- |
+| Loop `_loop_last_output` raw in the prompt, no approval, `x` survives (spec row 1) | `agent_text_is_data::loop_last_output_with_template_syntax_stays_raw`, `…_whole_value_shell_stays_raw`, `…_template_and_shell_stays_raw` (un-ignored) |
+| Loop predicate sees the raw text | `agent_text_is_data::loop_predicate_reads_the_raw_output` (new; pins the contract, it was not red before) |
+| Sequence `outputs` / `last(outputs)` raw, including a parallel group's nested entry (row 2) | `sequence_outputs_with_template_syntax_stay_raw`, `sequence_parallel_group_nested_output_stays_raw` |
+| Lifecycle stack message verbatim (row 5) | `lifecycle_stack_message_from_agent_written_file_is_sent_verbatim`; lib `a_frontmatter_value_holding_template_text_is_sent_verbatim`, `a_top_level_field_inserts_template_text_once`; CLI `wrap_compose_validation::a_template_text_value_is_sent_verbatim_at_event_time` (migrated) |
+| `set:` inert on the next preparation (row 4) | `lifecycle_set_from_agent_data_stays_inert_on_next_preparation` |
+| `proxy.with:` inert in the target: harness route, retry (B16), coordinator/loop route and eager pre-flight | `lifecycle_proxy_with_from_agent_data_stays_inert_in_target`, `lifecycle_proxy_with_from_agent_data_stays_inert_on_a_retry`, `initialize_proxy_with_from_file_data_stays_inert_in_a_looping_target`; lib `a_raw_span_stored_in_frontmatter_reaches_the_overlay_as_data` (migrated) |
+| Lifecycle-key overlay refuses run-time template text | lib `run_time_template_text_cannot_become_the_targets_lifecycle_configuration` |
+| B3 lifecycle shell runs the approved bytes | `lifecycle_shell_from_file_data_runs_approved_bytes` |
+| B8 loop seed | `loop_seed_from_composed_frontmatter_stays_raw` |
+| B9 action result not re-parsed | `loop_action_result_is_not_reparsed_as_json`; lib `interpolation_conformance::mixed_string_stays_a_string_in_both_engines` |
+| B10 step `state` | `sequence_state_from_jsonl_item_stays_raw` |
+| B12 params / group variables | `task_params_and_group_variables_from_outputs_stay_raw`; lib `sequence::task::tests` precedence test (now asserts origins) |
+| B15 positional side-effect argument | `set_frontmatter_argument_from_agent_data_is_not_reresolved` |
+| Regression: `--set '{"x":"{{ title }}"}'` fills in on every loop iteration | `set_value_template_still_fills_in_on_every_iteration` |
+| Regression: nested-span guard, strict unknown root | `nested_span_in_a_lifecycle_literal_is_still_refused`, `an_unknown_root_in_an_authored_lifecycle_span_still_fails`, lib `an_authored_span_with_an_unknown_root_still_fails_before_dispatch`; existing `wrap_compose_validation` nested-span suite unchanged |
+| Layer precedence and origin (N3) | lib `runtime_state::tests::layer_precedence_is_setters_then_mutations_then_overlay`, `only_user_setters_are_authored_and_every_runtime_layer_is_data`, `a_later_layer_gives_a_key_its_own_origin`, `from_parts_ignores_data_keys_that_are_no_longer_present`, `apply_to_hands_authored_keys_as_templates_and_data_keys_verbatim`, `initialize_outputs_seeds_only_when_absent`; CLI `jit::tests` precedence tests |
+| Single boundary; no token at runtime | `override_boundary_guard::overrides_reach_darkmatter_only_through_the_layered_boundary`, `runtime_layers_never_encode_a_literal_token`, `the_scan_sees_a_builder_call_but_not_prose_about_it` |
+| Data override file reference resolves from the caller base (Darkmatter) | darkmatter `data_origin::a_data_override_file_reference_resolves_from_the_caller_base`; CLI `overlay_layering::a_file_valued_overlay_property_resolves_through_the_targets_own_context` |
+| Audio silent | every CLI test spawns through `CliProcessFixture` (child-local `PLAYA_DRY_RUN=1` plus a private spool) |
+
+Mutation checks. I reverted each change temporarily and confirmed the named
+tests fail, then restored the code:
+
+- dropping the harness `proxy_overlay` fails both harness-route proxy tests;
+- dropping the coordinator `PrepareOptions::proxy_overlay` fails the looping
+  `initialize` proxy test;
+- building the eager pre-flight from authored setters only fails the same
+  test, on its whole-value `$(echo INJECTED)` row.
+
+The input-robustness matrix does not apply: no file format or configuration
+reader changed.
+
+### Gates
+
+- macOS, `cd claudine`: `just test` passed 7510 tests with 11 skipped. That
+  is 14 red tests un-ignored plus the new tests; the 2 remaining ignored
+  tests are marked `red until phase 5`. `just lint` passes; the only warning
+  is the existing macOS linker note.
+- macOS, `cd darkmatter`: `just test` passed 8566 tests with 12 skipped,
+  including the new `data_origin` test. `just lint` passes.
+- `just cross-check`:
+  - `darkmatter --os windows data_origin`: 16/16.
+  - `claudine-cli --os windows override_boundary_guard`: pass.
+  - `claudine --os linux runtime_state`: pass.
+- No new `#[cfg]`. The new CLI rows live in the existing `#[cfg(unix)]`
+  `agent_text_is_data` module (the fake-agent convention);
+  `override_boundary_guard` runs on every OS.
+- No pre-existing failures were seen.
+- The remaining B14 red test
+  (`set_frontmatter_persisted_agent_data_survives_next_preparation`) now
+  exits 0, but iteration 2 renders `Note: [none]`. Loop iterations prepare
+  from the in-memory source, not a fresh disk read, so the test cannot
+  observe B14 as written. Handed to Phase 5 to redesign (spec
+  `message_to_agent`).
