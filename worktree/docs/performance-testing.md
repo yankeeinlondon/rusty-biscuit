@@ -223,8 +223,21 @@ Measured on the macOS development host (Apple M4 Max, git 2.55.0), release profi
 | multiple selected branches (8 worktrees, 2 merged, base view) | 32.4 ms | 65.3 ms | +32.9 ms | 351.8 ms | 355.2 ms | +1.0% |
 
 - **Gather roughly doubles, by added sequential git calls.** Each `git` spawn costs about 5 ms here. The floor's whole rise is the one added shallow check. Elsewhere the stages run one after another: shallow check, then per branch the `--is-ancestor` check, the two `rev-list` walks for a merged branch, and the fork `merge-base`; then the branch lanes' `log`; then the default lane's `log`, its anchors' `rev-list --count` calls (concurrent), and the one verifying `log --no-walk`. Before, a branch cost one `merge-base` and one `log`, concurrently. The older-connections fixture adds the most, because its merge's `rev-list` walks and its anchor counts cross thousands of commits.
-- **Render is unchanged within noise.** It is dominated by about 350 ms of fixed cost that exists only in a pseudo-terminal: terminal detection waits for answers that never come (compare every row with the floor). The two-pass layout for tags stays below that noise.
+- **Render is unchanged within noise.** It is dominated by about 350 ms of fixed cost that exists only in a pseudo-terminal: terminal detection waits for answers that never come (compare every row with the floor). A second layout pass runs only when two tags collide, and stays below that noise.
 - **The full-command gates still pass** (`just -d worktree test-perf`, 2026-09-27), including `perf_full_command_non_image_meets_sla`, which never gathers a graph.
+
+A later change (2026-09-28) made tag spacing collision-driven and let a later lane's direct merge win over an earlier lane's indirect containment. Same host, command, and profile, 10 samples, median (min–max):
+
+| Fixture | Size | `graph gather` before | after | `graph image render` before | after |
+|---|---|---:|---:|---:|---:|
+| observed sparse lanes | 200×60 | 61.0 ms (58.8–70.3) | 75.2 ms (73.8–85.6) | 351.4 ms (350.0–357.8) | 348.4 ms (341.7–351.6) |
+| floor | 120×40 | 10.9 ms | 10.9 ms | 341.8 ms | 344.4 ms |
+| ordinary | 120×40 | 38.9 ms | 41.1 ms | 345.8 ms | 347.6 ms |
+| older essential connections | 120×40 | 130.9 ms | 135.4 ms | 347.6 ms | 344.0 ms |
+| multiple selected branches | 120×40 | 64.1 ms | 65.3 ms | 348.6 ms | 346.3 ms |
+
+- **Gather rises 14 ms on the observed shape**, and the ranges do not overlap. The branch its parent contains only indirectly is now also checked against `main`, which merged it directly, and that merge's anchors are then placed on the default lane. The other fixtures moved within noise.
+- **Render is unchanged.** None of these fixtures has colliding tags (the observed shape's `main` and `origin/main` share one commit), so each is laid out once.
 
 ## `git status` Cost (Investigated, Not Changed)
 

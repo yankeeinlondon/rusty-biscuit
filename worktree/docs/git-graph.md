@@ -45,7 +45,7 @@ Selection does not depend on whether a branch is merged.
 
 - The default branch and every worktree branch.
 - A branch's recorded parent is used only when that parent is also drawn.
-- When the graph is taller than half the terminal, `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time) and prints "N more worktrees not shown". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
+- When the graph is taller than half the terminal, `GitGraph` keeps the most recently active lanes (each line carries its tip's commit time, in whole seconds; lanes whose tips share a second keep their lane order) and prints "N more worktrees not shown". A lane is kept together with its parent's lane and the lanes holding its fork and merge commits. The focused view is never cut this way.
 
 ## The default lane
 
@@ -65,29 +65,40 @@ Each selected branch `B` with tip `T` is compared against the lanes that could c
 2. the default lane;
 3. the diverged `origin/<default>` lane, when there is one.
 
-The first lane whose tip contains `T` (`merge-base --is-ancestor`) decides. On that lane's first-parent chain, `C` is the oldest commit that descends from `T`. It is found as the leading run of `rev-list --first-parent --parents T..X` whose commits are also in `rev-list --ancestry-path T..X`.
+For each lane `X` whose tip contains `T` (`merge-base --is-ancestor`), `C` is the oldest commit on `X`'s first-parent chain that descends from `T`. It is found as the leading run of `rev-list --first-parent --parents T..X` whose commits are also in `rev-list --ancestry-path T..X`. What `C` says about `T` gives that lane's class.
+
+The lanes are tried in order, but not every answer ends the search:
+
+- **Merged directly** and **no separate history** are exact answers. The first lane that gives one decides.
+- **Integrated otherwise** only says that `T` arrived by way of some other branch. The first such answer is kept, and the later lanes are still tried. A later lane that merged `T` directly, or has it on its first-parent chain, wins. The kept answer is used only when none does.
+- A lane Git cannot answer for ends the search. Before any answer was kept, the branch is **unknown**. After one was kept, the kept answer stands: it already shows the notice, and no merge edge is guessed.
 
 ```mermaid
 flowchart TD
     start([Selected branch B, tip T]) --> next{Next candidate lane X?}
-    next -- none left --> unmerged[Unmerged:<br/>lane of B's own commits,<br/>fork at merge-base]
+    next -- none left --> kept1{An indirect answer kept?}
+    kept1 -- no --> unmerged[Unmerged:<br/>lane of B's own commits,<br/>fork at merge-base]
+    kept1 -- yes --> indirect[Integrated otherwise:<br/>lane, no merge edge,<br/>show the notice]
     next -- yes --> contains{T is an ancestor of X?}
     contains -- no --> next
-    contains -- git could not tell --> unknown[Unknown:<br/>draw what is verified,<br/>show the notice]
+    contains -- git could not tell --> kept2{An indirect answer kept?}
+    kept2 -- no --> unknown[Unknown:<br/>draw what is verified,<br/>show the notice]
+    kept2 -- yes --> indirect
     contains -- yes --> findC[Find C: oldest commit on X's<br/>first-parent chain containing T]
     findC --> c1{C's first parent is T,<br/>or T is X's tip?}
     c1 -- yes --> label[No separate history:<br/>label B at T on X's lane]
     c1 -- no --> c2{T is one of C's<br/>other parents?}
     c2 -- yes --> merged[Merged directly:<br/>lane plus a merge edge at C]
-    c2 -- no --> indirect[Integrated otherwise:<br/>lane, no merge edge,<br/>show the notice]
+    c2 -- no --> keep[Keep the first indirect answer]
+    keep --> next
 ```
 
 | Class | When | Drawn as |
 |---|---|---|
 | Unmerged | No candidate contains `T` | A lane of `T`'s first-parent commits that its fork lane lacks, forked at `merge-base(parent tip, else default lane tip, T)` |
-| Merged directly | `T` is a non-first parent of `C` | A lane of `T`'s first-parent commits down to `C^1`, with a merge edge into `C` |
+| Merged directly | `T` is a non-first parent of `C`, on the first lane that gives a merged-directly or no-separate-history answer | A lane of `T`'s first-parent commits down to `C^1`, with a merge edge into `C` |
 | No separate history | `T` is on `X`'s first-parent chain | A tag at `T` on `X`'s lane: no empty lane, no merge |
-| Integrated otherwise | `T` reached `X` through another branch's merge | A lane like a merged one, with no merge edge, and the notice |
+| Integrated otherwise | `T` reached `X` through another branch's merge, and no later lane merged it directly or has it on its first-parent chain | A lane like a merged one, with no merge edge, and the notice |
 | Unknown | Git could not answer (see [Unavailable history](#unavailable-history)) | Whatever was verified, and the notice |
 
 Tip equality is never used to classify. Two branches at the same commit can still differ: one may have been merged with a merge commit and the other created at that commit afterwards.
@@ -108,6 +119,28 @@ Tip equality is never used to classify. Two branches at the same commit can stil
 `C` is `08cf96a` and `T` (`2a7298a`) is its second parent. `fix/wt-ux` gets a lane of `7ba6ea8` and `2a7298a` from `3333333`, with a merge edge into `08cf96a`. The default lane is `3333333 → 08cf96a`, with `main` and `origin/main` as tags.
 
 **The merge's fork, when the parent is another branch.** `fix/sniff` was forked from `fix/wt-ux` (its recorded parent) and merged into `main`. It is not in `fix/wt-ux`, so the default lane decides: merged directly at `origin/main`'s merge commit. Its fork is measured against its parent's tip, so its lane hangs from `fix/wt-ux`'s lane and merges into the default lane. When a branch is merged **into** its parent instead, the fork is measured against `C^1`. The parent's tip contains `T`, so a `merge-base` with it would return `T` itself.
+
+**Merged directly after the parent took it indirectly.** `fix/sniff` was forked from `fix/wt-ux` (its recorded parent) at `W1`, then merged into `main` by `M104`. Earlier, `fix/wt-ux` itself was merged into `main` at `W1` (by `M103`) and kept going, and later it merged `main` back in (`B1`):
+
+```mermaid
+gitGraph
+    commit id: "A"
+    branch fix/wt-ux
+    commit id: "W1"
+    branch fix/sniff
+    commit id: "S1"
+    commit id: "S2"
+    checkout main
+    merge fix/wt-ux id: "M103"
+    checkout fix/wt-ux
+    commit id: "W2"
+    checkout main
+    merge fix/sniff id: "M104" tag: "origin/main"
+    checkout fix/wt-ux
+    merge main id: "B1"
+```
+
+`fix/wt-ux`'s tip contains `S2`, but only through `B1`, so the parent lane's answer is integrated otherwise. That answer is kept, and `main` is tried next: `S2` is `M104`'s second parent, so `fix/sniff` is merged directly into `main` at `M104`, with a merge edge. Because the parent's tip contains `S2`, the fork is measured against `M104`'s first parent, not against the parent's tip, and it comes out as `W1`. `W1` is on neither `fix/wt-ux`'s drawn first-parent run (it is `M103`'s second parent) nor `main`'s. So `fix/sniff`'s lane holds `S1` and `S2`, merges into `M104`, and hangs from nothing. The notice is shown for the undrawn fork; nothing else stands in for `W1`. When the fork is on a drawn lane, the same branch is connected at both ends and no notice appears.
 
 **No separate history.** A branch fast-forwarded into `main`, or created at a commit already on `main` and never committed to, has its tip on `main`'s first-parent chain. It is a tag on that commit.
 
@@ -163,7 +196,7 @@ Each open PR from origin's own repository whose head is a drawn branch becomes a
 
 `GitGraph` draws at 125% scale: at 100%, the diagram's 16-unit body text is one terminal line tall. The width follows from the image's natural width and the terminal's cell size (8×16 when unknown), capped at the available columns. Past the cap, commits move into `+N` squares before anything shrinks. Lane tips, forks, merge destinations, and tagged commits are never folded.
 
-Neighboring tags never overlap: `biscuit-visualized` spaces every commit by the widest tag plus one em. A graph with long labels is therefore wide, and on a narrow terminal it is trimmed and then shrunk rather than shortened. Labels are never abbreviated, moved, or combined.
+Neighboring tags never overlap. `biscuit-visualized` widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A long label on its own, such as `main` and `origin/main` stacked on the default lane's tip, keeps the renderer's default spacing, so every lane keeps its recent commits. Where tags do collide, the whole graph widens, and on a narrow terminal it is trimmed and then shrunk rather than shortened. Labels are never abbreviated, moved, or combined.
 
 `-w`/`--width` (`70`, `70ch`, `50%`) replaces the scale-derived width, and the graph is then never trimmed to fit it.
 
@@ -176,9 +209,9 @@ Neighboring tags never overlap: `biscuit-visualized` spaces every commit by the 
 
 ## Tests
 
-- [`git_graph/tests.rs`](../cli/src/commands/git_graph/tests.rs) (L1, real Git): the facts each view hands over, as exact full SHAs, for both observed merge situations. Also merged into a parent, fast-forward, equal tips, continued after a merge, indirect integration, old connections with exact `+N` counts, a shallow clone, a deleted parent, a merged lane under the height cap, and the classifier and anchor placement on their own. The shared `merge-base`, call counts, PR filtering, and the `--width` override are covered too.
-- `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` in the same file gathers real repositories, plans them at 120×40 and 56×60 with real measurement, and checks the layout the image is drawn from: no overlapping tags, every tag on its SHA's commit, exact merge parents, and no label shortened. `--width 40` is never trimmed.
+- [`git_graph/tests.rs`](../cli/src/commands/git_graph/tests.rs) (L1, real Git): the facts each view hands over, as exact full SHAs, for both observed merge situations. Also merged into a parent, fast-forward, equal tips, continued after a merge, indirect integration, old connections with exact `+N` counts, a shallow clone, a deleted parent, a merged lane under the height cap, a branch merged directly into `main` after its parent took it indirectly (with its fork undrawn, and with a drawn fork), and the classifier and anchor placement on their own. The shared `merge-base`, call counts, PR filtering, and the `--width` override are covered too.
+- `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` in the same file gathers real repositories, plans them at 120×40 and 56×60 with real measurement, and checks the layout the image is drawn from: no overlapping tags, every tag on its SHA's commit, exact merge parents, and no label shortened. `--width 40` is never trimmed. `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60` plans the observed history above at 200×60: the step is the renderer's default, every branch lane keeps at least two commits after its `+N` square, and `fix/sniff` merges into the default lane.
 - `cli/tests/list_remote_head.rs::a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing` runs `wt list` in a shallow clone. It shows the notice, the table stays, and the graph adds no request to origin.
 - `GitGraph`'s own tests cover lanes and tags, merges, the no-substitution rule, trimming, and sizing (`biscuit-terminal/lib/src/components/git_graph/tests.rs`).
 - `level2_list_verbose.rs` runs the image path in tmux, which cannot display it.
-- `level2_graph_in_kitty.rs` checks the graph as Kitty draws it (macOS): in a short and a narrow window, the image's columns fit, its rows respect the half-height cap and match the rows `wt` reserves, the elision notice follows it, the table is intact, and a screenshot shows the image where it belongs. `level2_graph_draws_a_merged_branch_in_kitty` does the same for a merged branch and keeps each screenshot and transmitted PNG for inspection.
+- `level2_graph_in_kitty.rs` checks the graph as Kitty draws it (macOS): in a short and a narrow window, the image's columns fit, its rows respect the half-height cap and match the rows `wt` reserves, the elision notice follows it, the table is intact, and a screenshot shows the image where it belongs. `level2_graph_draws_a_merged_branch_in_kitty` does the same for a merged branch, and `level2_graph_restores_lane_density_in_kitty` for the observed history at 200×60; both keep each screenshot and transmitted PNG for inspection.
