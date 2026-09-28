@@ -1,10 +1,11 @@
 ---
 created: 2026-09-27
-status: draft-spec
+status: implemented
 clarified: false
 reviewed: false
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: claude/opus
 $schema:
     status: |-
         enum(
@@ -30,20 +31,18 @@ packages:
     - claudine
     - claudine-cli
     - biscuit-terminal
+    - darkmatter
 related:
     - 2026-06-30-completion-failures
 human_review: false
 message_to_agent: |-
-    Phase 4 is complete. `just test` in claudine/ is green (7567 passed, 9 skipped). `just test` and `just lint` are green in biscuit-terminal/ and darkmatter/, `just lint` in claudine/ is clean, and nothing is stranded.
+    All five phases are implemented; the terminal state is "implementation complete, ready for review". The spec was not moved to `_completed`.
 
-    - Excerpts are focused. `FrontmatterExcerpt` holds regions, renders one `CodeBlock` per region with `with_start_line`, and joins them with `⋮` placed in the next block's gutter column. `EXCERPT_CONTEXT_LINES = 3`. `BlockOnly` is gone.
-    - Deviation from N3, recorded in the log: Claudine keeps its own `locate_property_line` for semantic paths (sequence indexes, re-rooted `tasks[0].…` suffixes), which `YamlKeyPath` cannot express. `biscuit-terminal` gained `SourceContext::focused_line_regions(lines, context)`, which shares window, ancestor, merge, and unsafe-YAML logic with `focused_yaml_regions` through one private `select_regions`. The locator also got a real bug fix: the keys of a `- key:` item after the first are now siblings, not children.
-    - Anchor rule (S4's open question): an anchored block is shown when the selection holds every line between the delimiters, and is omitted otherwise. That keeps the L1 PTY and L2 inline-compose mismatch excerpts.
-    - New highlight variants: `Properties` (mismatch: `prompt` + `sequence`) and `SchemaProperties` (schema problems: the frontmatter key plus the `$schema` declaration in every union arm). Darkmatter gained `ShellExpansionError::origin()`.
-    - Docs already done in Phase 4, so Phase 5 only needs to review them: `claudine/docs/topics/composition.md` § "Frontmatter YAML blocks in errors" (rewritten, with a Mermaid flow), `biscuit-terminal/README.md` (`focused_line_regions`), and the claudine skill's "Composition diagnostics" row.
-    - The changed-expectations table has Phase 4 rows. Phase 5 must still run the full `just test-l2`: only the tmux excerpt captures (8/8) ran here, and the WezTerm variants did not.
-    - Still open from Phase 3 (unchanged): the Darkmatter root-union relative-caller-path defect, and the pre-existing Windows `shipped_implement_plan_prepares_with_unset_optional_commit_message` failure. Surface both to the author in the hand-off.
-    - Known cosmetic limits (not changed): each region repeats `CodeBlock`'s `yaml` label, and at `ColorDepth::None` the `CodeBlock` is a plain fence without line numbers (as before).
+    - Phase 5 gates (macOS): `just test` green in claudine/ (7567 passed), biscuit-terminal/ (3331) and darkmatter/ (8582); `just lint` exit 0 in all three; `just test-l2` in claudine/ green (251 + 3), including both tmux and WezTerm excerpt captures. `just check-tier-coverage claudine`: 0 stranded.
+    - Windows (`just cross-check … --os windows`): claudine-cli, biscuit-terminal, and darkmatter compile and pass their filtered suites. The only new `cfg` is `#[cfg(unix)]` on three tests in `cli/tests/l1/compose_schema_cli.rs`, following that file's `#!/bin/sh`-stub convention.
+    - Phase 5 changed no source or test. It corrected two drifts in `claudine/docs/topics/composition.md` (the inline provider picker and its ordering were undocumented, and a stale "several arms defer" paragraph contradicted D1), and added a timeline entry to the claudine skill.
+    - For the reviewer, still open (pre-existing, outside C1–C5; details in the implementation log under Phase 3 "Found, not fixed"): (1) Darkmatter's root-union caller projection resolves a *relative* caller path from the document directory when no arm is selected, so a D1-shaped prompt in a subdirectory, run without `initialize` inside a git repo, can still fail after a successful pick (`darkmatter/lib/src/markdown/compose/schema_validation.rs`, `project_root_arm_caller_values`). It is worth an `_unscheduled` fix. (2) The pre-existing Windows `shipped_implement_plan_prepares_with_unset_optional_commit_message` failure.
+
 ---
 
 # Partial file completion is skipped for union schemas, and the failure arrives late and unreadable

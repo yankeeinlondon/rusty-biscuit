@@ -61,6 +61,51 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/completion/autocomplete_ui.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/common/pty.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_picker_pty.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - biscuit-terminal/lib/src/errors/source_context.rs
+    - biscuit-terminal/lib/src/errors/mod.rs
+    - darkmatter/lib/src/markdown/dsl/mod.rs
+    - darkmatter/lib/src/markdown/code_block.rs
+    - darkmatter/lib/src/markdown/output/code_block.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+documentation:
+    - claudine/docs/topics/composition.md
+    - biscuit-terminal/README.md
+    - darkmatter/docs/topics/code-blocks.md
+    - darkmatter/docs/topics/yamlblock-migration.md
+    - .claude/skills/darkmatter/rendering.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 5
+implemented: true
 packages:
     - claudine-cli
     - claudine
@@ -127,14 +172,14 @@ independent technical tracks that meet in Claudine's compose preparation:
 - [x] Frontmatter excerpts show only focused regions with real line numbers,
       `⋮` elision, and highlights. No `BlockOnly` path remains. Unlocatable
       problems omit the excerpt.
-- [ ] Every R7 test (1–8) exists and passes. The existing `supplied.rs` tests
+- [x] Every R7 test (1–8) exists and passes. The existing `supplied.rs` tests
       pass unchanged. Every changed snapshot or L1 expectation is listed with
       its reason in the Phase 5 changed-expectations table.
 - [x] `just test` and `just lint` are green in `claudine/`, `biscuit-terminal/`,
       and `darkmatter/`. The Windows compile surface is unchanged in shape: no
       new `#[cfg(unix)]` except on PTY tests, which already follow that
       convention.
-- [ ] The docs listed in Phase 5 have been updated to match.
+- [x] The docs listed in Phase 5 have been updated to match.
 
 ---
 
@@ -843,7 +888,7 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
 
 ### Wave 7 — parallel
 
-- [ ] **Full verification**
+- [x] **Full verification**
     - Run `just test` and `just lint` in `claudine/`, `biscuit-terminal/`,
       and `darkmatter/`. Run `just test-l2` in `claudine/`, because
       `level2_malformed_frontmatter_capture.rs` touches excerpt output.
@@ -852,7 +897,7 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
       cross-check guidance. There is no new `cfg(unix)` outside PTY tests.
     - Review `just ci-local --plan` before any push. That is an author step;
       the agent does not push.
-- [ ] **Docs drift**
+- [x] **Docs drift**
     - Claudine's `composition.md` ("frontmatter-rooted errors append a
       highlighted, line-numbered YAML block"): state that the excerpt is
       focused and omitted when unlocatable. Cover union partial completion and
@@ -862,7 +907,7 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
     - Darkmatter `CodeBlockMeta::start_line` docs, and `biscuit-terminal`
       `SourceContext` docs.
     - Add `darkmatter` to the spec's `packages` frontmatter (N1).
-- [ ] **Changed-expectations table**
+- [x] **Changed-expectations table**
     - Fill in the table below: file, old expectation, new expectation, reason.
 
 #### Changed expectations
@@ -879,12 +924,12 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
 | `error::tests::enrich_frontmatter_parse_regular_error_gets_block_only_excerpt` (Phase 4) | some excerpt is attached (`BlockOnly`) | renamed `enrich_frontmatter_parse_error_windows_the_reported_line`: the highlight is source line 4 (YAML line 3 plus the opening `---`) | R6: a located parse error is windowed; `BlockOnly` is removed |
 | `cli/src/output/error_walker/tests.rs::appends_yaml_block_for_inline_sequence_mismatch_on_tty` (Phase 4) | excerpt built with `capture(doc, None, true)` (the whole block) | excerpt built with `capture_properties(doc, &["prompt", "sequence"], true)`; the assertions are unchanged | `capture` no longer takes an optional key; this mirrors the new focus of the mismatch error |
 | `cli/src/output/error_walker/tests.rs::leak_with_frontmatter` (Phase 4) | `capture(LEAK_DOC, Some("success.message"), …)` | `capture(LEAK_DOC, "success.message", …)` | signature only; the assertions are unchanged |
-| _(filled in by Phase 5)_ | | | |
+| _(Phase 5: none)_ | — | — | Phase 5 changed no test or snapshot; it ran the gates and corrected docs only |
 
 ### Checkpoint 5 (terminal state)
 
-- [ ] Every Definition-of-done box is checked.
-- [ ] The spec's `status` is set to `implemented` and `implemented: true`. The
+- [x] Every Definition-of-done box is checked.
+- [x] The spec's `status` is set to `implemented` and `implemented: true`. The
       spec is **not** moved to `_completed`, and `just complete` is not run
       (that is the author's step). The terminal state is "implementation
       complete, ready for review".

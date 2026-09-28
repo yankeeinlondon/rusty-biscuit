@@ -59,6 +59,51 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/lib/src/composition/frontmatter_excerpt.rs
+    - claudine/lib/src/composition/frontmatter_excerpt/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/src/commands/schema_interactive/tests.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/src/completion/autocomplete_ui.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/common/pty.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/level1_provider_picker_pty.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - biscuit-terminal/lib/src/errors/source_context.rs
+    - biscuit-terminal/lib/src/errors/mod.rs
+    - darkmatter/lib/src/markdown/dsl/mod.rs
+    - darkmatter/lib/src/markdown/code_block.rs
+    - darkmatter/lib/src/markdown/output/code_block.rs
+    - darkmatter/lib/src/markdown/render_tree/code_renderer.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+documentation:
+    - claudine/docs/topics/composition.md
+    - biscuit-terminal/README.md
+    - darkmatter/docs/topics/code-blocks.md
+    - darkmatter/docs/topics/yamlblock-migration.md
+    - .claude/skills/darkmatter/rendering.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 5
+implemented: true
 packages:
     - claudine-cli
     - claudine
@@ -595,3 +640,102 @@ passes, through the delimiter rule above.
   longer promise the whole block. Phase 5 only needs to review it.
 - `biscuit-terminal/README.md` documents `focused_line_regions` and the anchor
   rule. The claudine skill's "Composition diagnostics" row is updated.
+
+## Phase 5
+
+Phase 5 ran the full gates, checked the Windows compile surface, corrected the
+remaining docs drift, and filled in the changed-expectations table. No source
+or test file changed in this phase.
+
+### Gates (macOS, local)
+
+| Area | Gate | Result |
+|---|---|---|
+| `claudine/` | `just test` | 7567 run: 7567 passed, 9 skipped |
+| `claudine/` | `just lint` | exit 0; the only warning is the known macOS `__eh_frame` linker message |
+| `claudine/` | `just test-l2` | `claudine-cli` 251 run: 251 passed; `claudine-gen` 3 run: 3 passed |
+| `claudine/` | `just check-tier-coverage claudine` | 0 stranded |
+| `biscuit-terminal/` | `just test` / `just lint` | 3331 run: 3331 passed, 55 skipped / exit 0 |
+| `darkmatter/` | `just test` / `just lint` | 8582 run: 8582 passed, 12 skipped / exit 0 |
+
+The L2 run includes every capture S4 flagged, on both backends:
+`level2_{malformed_frontmatter,inline_compose_mismatch,schema_parse,removed_validation_key,invalid_file_reference}_capture`
+(the tmux variants plus the WezTerm `mismatch` and `removed_key` variants that
+Phase 4 did not run). All passed.
+
+The skips are the usual tier- and feature-gated tests. There are no failures,
+pre-existing or new.
+
+### Windows
+
+`just cross-check <package> --os windows <filter>` builds the package's whole
+L1 target set on the native Windows host and runs the filtered tests:
+
+- `claudine-cli`, filter `schema_interactive`: pass (29 tests).
+- `biscuit-terminal`, filter `source_context`: pass.
+- `darkmatter`, filter `code_block`: pass.
+
+Phase 4 already ran `frontmatter_excerpt` and `composition::error::tests` on
+Windows (144 passed), including the `include_str!` of `clarify.md`.
+
+`cfg` audit over every source file this plan touched, compared with the plan's
+first commit: the only new gates are three `#[cfg(unix)]` in
+`cli/tests/l1/compose_schema_cli.rs`, on `caller_file_fixture` and the two R2/R4
+CLI tests. That file's existing tests all carry `#[cfg(unix)]`, because its
+provider stubs are `#!/bin/sh` scripts. The lib logic behind those tests has
+platform-neutral unit coverage
+(`prepare::service::tests::late_caller_file_verdict_names_the_callers_base_directory`
+and the `schema::supplied::tests` D1 rows), so the Windows surface keeps its
+shape. There is no new `cfg` in production code.
+
+`just ci-local --plan` is the author's step before pushing; the agent does not
+push.
+
+### Docs drift
+
+- `claudine/docs/topics/composition.md`:
+  - Provider Selection → TTY Mode: the picker renders inline, below the
+    cursor, at most 8 rows, with no alternate screen. `Esc` keeps the initial
+    selection and `Ctrl-C` cancels. It is the last question before launch, and a
+    decidable caller-file failure is reported before it opens (R2, R3, R5). This
+    was undocumented.
+  - Provided Partial File References: the closing paragraph still said a union
+    where several arms match "defers to canonical preparation". That
+    contradicts ruling D1, which Phase 3 documented a few paragraphs above it.
+    It now says how the arm is chosen (templated values are undecided) and that
+    an undecided union completes only through the merged-glob rule. The code
+    was checked: `SuppliedArms::Undecided` holds the applicable arms, or every
+    arm when none applies.
+  - The "Frontmatter YAML blocks in errors" section (Phase 4) was reviewed and
+    already states that the excerpt is focused and omitted when unlocatable.
+- `.claude/skills/claudine/timeline.md`: a `union-partial-file-completion` entry.
+  `SKILL.md` was already current (Phases 3 and 4), and `cli-reference.md` does
+  not describe the picker.
+- Darkmatter `CodeBlock::with_start_line` / `CodeBlockMeta::start_line`, and
+  the `biscuit-terminal` `SourceContext::focused_{yaml,line}_regions` rustdoc
+  and README, were reviewed and are current.
+- The spec's `packages` now lists `darkmatter` (N1).
+
+### Changed expectations
+
+Phase 5 changed no test or snapshot. The plan's table has a Phase 5 row saying
+so. One DoD wording note: "the existing `supplied.rs` tests pass unchanged"
+holds with one ruled exception. Phase 3 moved the
+`[{spec: **/*.md}, {spec: **/*spec*.md}]` shape out of the "untouched" test,
+because ruling D1 now completes it. That move is the first row of the table.
+
+### Requirement-to-test mapping (whole plan)
+
+| Requirement | Test(s) | Tier |
+|---|---|---|
+| R7.1 reproduce C1 | `level1_provided_partial_file_pty::union_partial_with_templated_file_sibling_reaches_chooser` | L1 PTY |
+| R7.2 fixed: chooser, then the stub gets the path | the R7.1 test, `…::union_partial_with_two_matches_opens_the_chooser_and_launches_the_pick` | L1 PTY |
+| R7.3 ordering | `…::union_partial_with_zero_matches_fails_before_the_provider_picker`, `…::union_partial_file_dialog_renders_before_the_provider_picker`, `…::union_partial_declined_or_cancelled_fails_before_the_provider_picker`, `compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive` | L1 |
+| R7.4 D1 | `…::d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes`, `schema::supplied::tests::undecided_union_*` (4) | L1 |
+| R7.5 lib arm selection | `schema::supplied::tests::{templated_file_sibling_does_not_rule_out_the_applicable_union_arm, literal_invalid_sibling_still_rules_out_the_union_arm, templated_sibling_does_not_select_conflicting_or_string_only_arms, supplied_files_select_shipped_clarify_spec_arm}` | L1 |
+| R7.6 R4 | `compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory`, `prepare::service::tests::late_caller_file_verdict_names_the_callers_base_directory` | L1 |
+| R7.7 R5 | `level1_provider_picker_pty::level1_pty_provider_picker_is_inline_and_launches_selection`, `schema_interactive::tests::chooser_height_fits_short_lists_and_caps_long_ones` | L1 |
+| R7.8 R6 | `frontmatter_excerpt::tests::{mid_file_property_shows_three_lines_either_side_plus_its_ancestor, caller_input_problem_highlights_its_arm_declaration_in_clarify, unlocatable_property_gives_no_excerpt, two_problems_give_two_regions_with_an_elision_line, rendered_gutter_numbers_match_source_lines}`, `error::tests::*` (Phase 4 table), the L2 captures above | L1, L2 |
+
+Each name was checked against the tree in this phase. The PTY files are declared
+in `cli/tests/l1/main.rs`. No test path carries a tier-removing segment.
