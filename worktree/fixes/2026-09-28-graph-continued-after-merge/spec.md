@@ -37,33 +37,27 @@ related:
     - 2026-09-27-graph-sparse-lanes
 human_review: false
 message_to_agent: |-
-    Phase 3 (2026-09-28) is done; read implementation-log.md "## Phase 3" first.
-    - Both waves landed and `just test`/`just lint` pass in worktree and biscuit-terminal.
-    - Four worktree-cli tests are `#[ignore = "flips in Phase 4"]` with a `// flips in Phase 4: …` note:
-      a_branch_continued_after_its_merge_is_an_unmerged_lane,
-      a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment,
-      gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags,
-      the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60. Remove every ignore in Phase 4.
-      Each fails only where it expects the old behavior. A scratch run proved gathered_graphs passes entirely
-      once the sparse-lanes Evidence has `incomplete: false` and the merge `(&repo.m103, &repo.d[12], repo.w1())`
-      (hidden_lanes stays [1, 0]). the_observed_graph passes up to `assert!(plan.incomplete)`; density and
-      M104's parents already hold.
-    - New worktree-cli fact tests already cover E1 (all views and variants), merged twice, indirect, both
-      shallow cases, new-branch-at-merged-tip, `fork_origin_cutoff_matrix`, and
-      `an_ordinary_unmerged_branch_gathers_unchanged_facts` (proven against pre-change HEAD too). Phase 4 adds
-      the plan/geometry Evidence for them (reuse `assert_no_repeated_commit`, `continued_lane`,
-      `shallow_clone_of`).
-    - API changes in worktree-cli: `Extent::Until(&LaneWindow)` (read by `History::lane_window`),
-      `Extent::Open { window, cap_window }`, and `first_parent_entries(tip, extent, anchors)` (no window
-      argument). `Shape::Lane` has `window`, `fork`, `earlier: Vec<EarlierMerge>`, `merge`.
-    - The P1 budget measured exactly +2 per ordinary short lane: the_base_view test now pins
-      `--is-ancestor` 8, `rev-list` 4, `merge-base` 3, `log` 4.
-    - biscuit-terminal: D3 was widened (a sibling's whole subtree's edges order siblings), D4 uses declaration
-      order, and trimming pins both ends of every merge, drawable or not. Byte-identical Mermaid for every
-      pre-existing component test was verified by a dump-and-diff.
-    - The interim doc/skill corrections are listed in the log under "Drift corrected". Phase 5 still owns the
-      full rewrites, and the worktree skill's Kitty sparse-lanes "exactly one notice" text, which Phase 4
-      changes.
+    Phase 4 (2026-09-28) is done; read implementation-log.md "## Phase 4" first. Phase 5 is docs, skill, and
+    review readiness only; no production code changed in Phase 4 (tests and fixtures only).
+    - All four "flips in Phase 4" tests now run; no `#[ignore]` remains. The renamed test is
+      `a_branch_continued_after_its_merge_draws_its_earlier_merge`.
+    - Density departure to document: at L1 (`CellSize::FALLBACK`, 200x60) `fix/wt-ux` keeps only its tip after
+      its last `+N` square, because `main` now draws `d6..d12` and `trim_one_commit` folds commits beside a
+      square first. Trim order is out of scope, so the test asserts the tip and `W1` instead. In real Kitty the
+      same history keeps three recent `fix/wt-ux` commits (sparse screenshot). Mention it in git-graph.md only
+      if you describe density.
+    - `Evidence` gained `post_merge`; new layout entries: continued AtMerge (base + both focused), Behind,
+      Diverged (origin/main is a lane there, so it is not a tag), merged twice, new-at-merged-tip with/without
+      the record. New Kitty test `level2_graph_draws_a_branch_continued_after_its_merge_in_kitty`
+      (`Fixture::continued_after_merge()`); `Fixture::record_parent` now takes `base_sha`.
+    - The perf before/after table and the 24 -> 40 sparse-lanes call count are in the log; copy them into
+      worktree/docs/performance-testing.md. The 120x40 perf table now prints min-max too.
+    - `perf_subprocess_counts_meet_sla` (commands/list/tests.rs) was a stale Phase 3 pin; it now expects
+      2x lines `--is-ancestor` and lines `rev-list`.
+    - The worktree skill's Kitty and density sentences were already corrected in Phase 4 (minimal edits);
+      Phase 5 still owns the full skill rewrite listed in the plan.
+    - Pre-existing, unrelated: biscuit-terminal-cli L2 `level2_columns_word_wrap_in_pane` fails
+      deterministically; `level2_render_tree_style_in_wezterm` is flaky under load.
 ---
 
 # Draw a branch that continued after its merge

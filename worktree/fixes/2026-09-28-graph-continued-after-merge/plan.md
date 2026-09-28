@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-28
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 packages:
@@ -17,6 +17,7 @@ source_code:
     - worktree/cli/tests/level2_graph_in_kitty.rs
     - worktree/cli/tests/perf_support/graph.rs
     - worktree/cli/tests/perf_graph_stages.rs
+    - worktree/cli/src/commands/list/tests.rs
 documentation:
     - worktree/docs/git-graph.md
     - worktree/docs/performance-testing.md
@@ -61,6 +62,18 @@ skills_files_updated_during_phase_3:
 packages_touched_during_phase_3:
     - biscuit-terminal
     - worktree-cli
+source_files_during_phase_4:
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+    - worktree/cli/tests/perf_support/graph.rs
+    - worktree/cli/tests/perf_graph_stages.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
+packages_touched_during_phase_4:
+    - worktree-cli
 ---
 
 # Plan: draw a branch that continued after its merge
@@ -99,19 +112,19 @@ flowchart TD
 
 ### What success looks like
 
-- [ ] In the PR #105-shaped real-Git fixture (base view), `fix/wt-ux` forks at the `b47a046` analog, `+N` is exact, `B` (`eeb7154` analog) is on its lane and merged into `C` (`85852c0` analog), then `572ef7d` follows. `fix/sniff-pr` is a label at `B` on the `fix/wt-ux` lane, and `incomplete` is false both in `GraphFacts` and in the plan.
-- [ ] The same holds before `--ff`, both when local `main` is behind `origin/main` and when the two have diverged, where `C` is drawn on the `origin/main` line.
-- [ ] `a_branch_continued_after_its_merge_is_an_unmerged_lane` is renamed and inverted: `b1` is on `b`'s lane, merged into `merge`, then `b2` follows, the fork is `d1`, and there is no notice.
-- [ ] `observed_sparse_lanes()`: `fix/wt-ux` draws `W1` merged into `M103`, `fix/sniff` forks at `W1` on that lane and merges into `M104`, and there is no notice. The `Evidence` entry, the density test, and `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment` are updated to match.
-- [ ] Merged twice and then continued: both edges are drawn in source order, no commit repeats, and there is no false notice.
-- [ ] A new branch created at an already merged tip, with a fork-origin record there, does not claim the old merge. Its lane stays unconnected with the notice.
-- [ ] `B` reached the default branch through another branch's merge: no edge is reconstructed, and today's drawing and notice stay.
-- [ ] Shallow clone: no invented merge, and the notice appears. Older-boundary failure: the earlier verified edges remain and the notice appears.
-- [ ] An ordinary unmerged branch forked from the default lane has **identical `GraphFacts`** to today. Its added Git calls stay within the ruled budget (P1), and the call-count test pins the new exact numbers.
-- [ ] Component tests cover a mid-lane merge, children forked before, at, and after `B`, a sibling merge chain, a cycle, and a destination hidden by the height cap. All existing component Mermaid outputs stay **byte-identical** except in tests the spec flips.
-- [ ] `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` includes the new fixtures, including the parents of post-merge commits.
-- [ ] Kitty L2: the continued-after-merge graph draws connected with no notice, and screenshots are kept. The sparse-lanes Kitty test no longer expects the notice.
-- [ ] `perf_graph_stages` medians and spread, before and after, plus Git call counts, are in `implementation-log.md`. Every existing SLA test passes.
+- [x] In the PR #105-shaped real-Git fixture (base view), `fix/wt-ux` forks at the `b47a046` analog, `+N` is exact, `B` (`eeb7154` analog) is on its lane and merged into `C` (`85852c0` analog), then `572ef7d` follows. `fix/sniff-pr` is a label at `B` on the `fix/wt-ux` lane, and `incomplete` is false both in `GraphFacts` and in the plan.
+- [x] The same holds before `--ff`, both when local `main` is behind `origin/main` and when the two have diverged, where `C` is drawn on the `origin/main` line.
+- [x] `a_branch_continued_after_its_merge_is_an_unmerged_lane` is renamed and inverted: `b1` is on `b`'s lane, merged into `merge`, then `b2` follows, the fork is `d1`, and there is no notice.
+- [x] `observed_sparse_lanes()`: `fix/wt-ux` draws `W1` merged into `M103`, `fix/sniff` forks at `W1` on that lane and merges into `M104`, and there is no notice. The `Evidence` entry, the density test, and `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment` are updated to match.
+- [x] Merged twice and then continued: both edges are drawn in source order, no commit repeats, and there is no false notice.
+- [x] A new branch created at an already merged tip, with a fork-origin record there, does not claim the old merge. Its lane stays unconnected with the notice.
+- [x] `B` reached the default branch through another branch's merge: no edge is reconstructed, and today's drawing and notice stay.
+- [x] Shallow clone: no invented merge, and the notice appears. Older-boundary failure: the earlier verified edges remain and the notice appears.
+- [x] An ordinary unmerged branch forked from the default lane has **identical `GraphFacts`** to today. Its added Git calls stay within the ruled budget (P1), and the call-count test pins the new exact numbers.
+- [x] Component tests cover a mid-lane merge, children forked before, at, and after `B`, a sibling merge chain, a cycle, and a destination hidden by the height cap. All existing component Mermaid outputs stay **byte-identical** except in tests the spec flips.
+- [x] `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` includes the new fixtures, including the parents of post-merge commits.
+- [x] Kitty L2: the continued-after-merge graph draws connected with no notice, and screenshots are kept. The sparse-lanes Kitty test no longer expects the notice.
+- [x] `perf_graph_stages` medians and spread, before and after, plus Git call counts, are in `implementation-log.md`. Every existing SLA test passes.
 - [ ] Docs and the skill describe the new behavior, and `just test` and `just lint` pass in `biscuit-terminal` and `worktree`. The spec is marked implemented and ready for review. Agents never move it to `_completed`, and never commit unless told to.
 
 ### Out of scope (restated from the spec)
@@ -380,7 +393,7 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
 
 ### Wave 4 (concurrent; the files are disjoint)
 
-- [ ] **Flip the L1 graph tests** (`worktree/cli/src/commands/git_graph/tests.rs`)
+- [x] **Flip the L1 graph tests** (`worktree/cli/src/commands/git_graph/tests.rs`)
     - rename and invert `a_branch_continued_after_its_merge_is_an_unmerged_lane`, to `a_branch_continued_after_its_merge_draws_its_earlier_merge`, per the spec's acceptance row
     - update `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment`: `W1` drawn on `fix/wt-ux`, `fix/sniff` connected there, and no notice. Fix its doc comment, which the code now contradicts
     - `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60`: `fix/wt-ux` has a merge into `M103` whose second parent is `W1`, every lane is connected, and there is no notice. Assert density on the run after the **last** `+N` square, since `fix/wt-ux` now has an anchor between squares
@@ -389,28 +402,28 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
         - the sparse-lanes entry adds `(M103, d12, W1)`, with `incomplete: false`; re-measure `hidden_lanes` and record the reason if it changes
         - add E1 (base and focused views, *behind* and *diverged*), merged twice, and new-branch-at-merged-tip entries
     - update the `untrimmed_plan` users that asserted the old notice
-- [ ] **Kitty L2** (`worktree/cli/tests/level2_graph_in_kitty.rs`, macOS)
+- [x] **Kitty L2** (`worktree/cli/tests/level2_graph_in_kitty.rs`, macOS)
     - add `Fixture::continued_after_merge()` (the E1 shape with `fix/sniff-pr` in its own worktree, base view) and `level2_graph_draws_a_branch_continued_after_its_merge_in_kitty` at 200×60, keeping `wt-graph-continued-200x60-{screenshot,transmitted}.png`; assert no "Some history is not shown"
     - `level2_graph_restores_lane_density_in_kitty`: expect **no** notice
     - E5: record realistic `base_sha` in `record_parent`
     - run with `just test-l2 level2_graph`. If Screen Recording permission is missing, the existing warning path applies; record which checks ran
-- [ ] **Perf and records** (`worktree/cli/tests/perf_support/graph.rs`, `perf_graph_stages.rs`)
+- [x] **Perf and records** (`worktree/cli/tests/perf_support/graph.rs`, `perf_graph_stages.rs`)
     - E5: realistic `base_sha` in `GraphFixture`, and update the fixture's sanity test
     - re-run the Phase 1 perf command on the same host, profile, and sample count; record after-medians, spreads, and call counts against the baseline in `implementation-log.md`, and apply P2's regression rule
 
 ### Wave 5 (sequential)
 
-- [ ] **Whole-area verification**
+- [x] **Whole-area verification**
     - `just test`, `just test-l2`, and `just lint` in `worktree` and in `biscuit-terminal`
     - `just ci-local --plan` from the repository root; record the executing cells and the duration band (see CLAUDE.md, "Estimating CI duration")
-- [ ] **Other operating systems**
+- [x] **Other operating systems**
     - load the `os` skill; run `worktree-cli`'s and `biscuit-terminal`'s L1 on Linux (`./scripts/cross-check.sh --os linux …`, or the host that skill names)
     - Windows is proven on the push to `main`, per the CI event schedule. There is no `#[cfg(windows)]` or path code in this change; record that in the log
 
 **Checkpoint 4**
 
-- [ ] Every acceptance row in the spec maps to a passing test, listed in `implementation-log.md` as a row-to-test table.
-- [ ] The Kitty screenshots and the transmitted PNGs are kept, and their paths are recorded.
+- [x] Every acceptance row in the spec maps to a passing test, listed in `implementation-log.md` as a row-to-test table.
+- [x] The Kitty screenshots and the transmitted PNGs are kept, and their paths are recorded.
 
 ## Phase 5 — Documentation, Skill, and Review Readiness
 
