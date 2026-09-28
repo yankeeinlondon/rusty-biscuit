@@ -1,13 +1,14 @@
 ---
 created: 2026-09-28
-status: draft-spec
+status: implemented
 clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28
 review_iterations: 0
 completed: false
-implemented: false
+implemented: true
+implemented_by: claude/opus
 $schema:
     status: |-
         enum(
@@ -37,27 +38,10 @@ related:
     - 2026-09-27-graph-sparse-lanes
 human_review: false
 message_to_agent: |-
-    Phase 4 (2026-09-28) is done; read implementation-log.md "## Phase 4" first. Phase 5 is docs, skill, and
-    review readiness only; no production code changed in Phase 4 (tests and fixtures only).
-    - All four "flips in Phase 4" tests now run; no `#[ignore]` remains. The renamed test is
-      `a_branch_continued_after_its_merge_draws_its_earlier_merge`.
-    - Density departure to document: at L1 (`CellSize::FALLBACK`, 200x60) `fix/wt-ux` keeps only its tip after
-      its last `+N` square, because `main` now draws `d6..d12` and `trim_one_commit` folds commits beside a
-      square first. Trim order is out of scope, so the test asserts the tip and `W1` instead. In real Kitty the
-      same history keeps three recent `fix/wt-ux` commits (sparse screenshot). Mention it in git-graph.md only
-      if you describe density.
-    - `Evidence` gained `post_merge`; new layout entries: continued AtMerge (base + both focused), Behind,
-      Diverged (origin/main is a lane there, so it is not a tag), merged twice, new-at-merged-tip with/without
-      the record. New Kitty test `level2_graph_draws_a_branch_continued_after_its_merge_in_kitty`
-      (`Fixture::continued_after_merge()`); `Fixture::record_parent` now takes `base_sha`.
-    - The perf before/after table and the 24 -> 40 sparse-lanes call count are in the log; copy them into
-      worktree/docs/performance-testing.md. The 120x40 perf table now prints min-max too.
-    - `perf_subprocess_counts_meet_sla` (commands/list/tests.rs) was a stale Phase 3 pin; it now expects
-      2x lines `--is-ancestor` and lines `rev-list`.
-    - The worktree skill's Kitty and density sentences were already corrected in Phase 4 (minimal edits);
-      Phase 5 still owns the full skill rewrite listed in the plan.
-    - Pre-existing, unrelated: biscuit-terminal-cli L2 `level2_columns_word_wrap_in_pane` fails
-      deterministically; `level2_render_tree_style_in_wezterm` is flaky under load.
+    All five phases are implemented (2026-09-28); the spec is ready for review. Phase 5 changed docs and skills only,
+    plus one reworded test assertion message. Departures from the spec are listed in implementation-log.md
+    "## Phase 5" > "Review readiness" (D3 subtree ordering, G5 amendment, the L1 density exception). Do not move
+    the spec to _completed; the author does that after review.
 ---
 
 # Draw a branch that continued after its merge

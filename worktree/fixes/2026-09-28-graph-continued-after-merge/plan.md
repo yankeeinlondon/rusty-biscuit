@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-28
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: true
 packages:
@@ -20,10 +20,11 @@ source_code:
     - worktree/cli/src/commands/list/tests.rs
 documentation:
     - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
     - worktree/docs/performance-testing.md
     - biscuit-terminal/docs/components/git_graph.md
     - .claude/skills/worktree/SKILL.md
-    - worktree/README.md
+    - .claude/skills/biscuit-terminal/components.md
 source_files_during_phase_1:
     - worktree/cli/src/commands/git_graph/tests.rs
 docs_updated_during_phase_1: []
@@ -74,6 +75,22 @@ skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
 packages_touched_during_phase_4:
     - worktree-cli
+source_files_during_phase_5:
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_5:
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - biscuit-terminal/docs/components/git_graph.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+packages_touched_during_phase_5:
+    - worktree-cli
+    - biscuit-terminal
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: draw a branch that continued after its merge
@@ -125,7 +142,7 @@ flowchart TD
 - [x] `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` includes the new fixtures, including the parents of post-merge commits.
 - [x] Kitty L2: the continued-after-merge graph draws connected with no notice, and screenshots are kept. The sparse-lanes Kitty test no longer expects the notice.
 - [x] `perf_graph_stages` medians and spread, before and after, plus Git call counts, are in `implementation-log.md`. Every existing SLA test passes.
-- [ ] Docs and the skill describe the new behavior, and `just test` and `just lint` pass in `biscuit-terminal` and `worktree`. The spec is marked implemented and ready for review. Agents never move it to `_completed`, and never commit unless told to.
+- [x] Docs and the skill describe the new behavior, and `just test` and `just lint` pass in `biscuit-terminal` and `worktree`. The spec is marked implemented and ready for review. Agents never move it to `_completed`, and never commit unless told to.
 
 ### Out of scope (restated from the spec)
 
@@ -429,7 +446,7 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
 
 ### Wave 6 (concurrent; the files are disjoint)
 
-- [ ] **`worktree/docs/git-graph.md`**
+- [x] **`worktree/docs/git-graph.md`**
     - replace "Continued after a merge" with the new drawing and a Mermaid example
     - update the "Merged directly after the parent took it indirectly" example, where the fork is now drawn
     - remove the "No reconstruction of earlier merges" limit
@@ -438,21 +455,21 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
     - state the remaining limits: shallow histories, octopus merges (one source per commit), and the unchanged squash and indirect limits
     - update the "Tests" section with the new fixtures
     - no mention of this fix by name (X2)
-- [ ] **`biscuit-terminal/docs/components/git_graph.md`**
+- [x] **`biscuit-terminal/docs/components/git_graph.md`**
     - replace `merged_into` in the API table and the example with `with_merge` and `LaneMerge`
     - describe segmented emission, the pause and resume rule, sibling ordering and cycle handling, the one-merge-per-commit rule, and the cap and trim pinning; add a Mermaid sequence or flow diagram of one pause and resume
-- [ ] **`.claude/skills/worktree/SKILL.md`**
+- [x] **`.claude/skills/worktree/SKILL.md`**
     - rewrite the `wt list` graph summary's continued-after-merge sentence, and the `merged_into(C)` and `GraphLine::merged_into(sha)` mentions
     - update the Kitty test descriptions (the new continued fixture, and no notice in sparse lanes) and the E5 fixture-record note
-- [ ] **`worktree/README.md` and `worktree/docs/performance-testing.md`**
+- [x] **`worktree/README.md` and `worktree/docs/performance-testing.md`**
     - README: change it only if its graph example or text shows the old continued-branch behavior (check it and record the result)
     - performance-testing: add the before and after graph-stage medians and the P1 call budget
 
 ### Wave 7 (sequential)
 
-- [ ] **Drift pass**
+- [x] **Drift pass**
     - grep docs, skills, and code comments for `merged_into`, "unconnected", "not reconstructed", and "continued after" in the touched areas; fix drifted text and record each fix in the log
-- [ ] **Review readiness**
+- [x] **Review readiness**
     - complete `implementation-log.md`: the rulings as amended, spike results, departures from the spec (the docs are corrected, and the spec is left as written), perf table, and acceptance-row mapping
     - set the spec's frontmatter to `implemented: true`, `implemented_by: claude/opus`, and `status: implemented`
     - do **not** move the spec to `_completed`, run `just complete`, or commit. The terminal state is "implementation complete, ready for review"

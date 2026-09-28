@@ -46,6 +46,37 @@ docs_updated_during_phase_4: []
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_5:
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - biscuit-terminal/docs/components/git_graph.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+source_code:
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+    - worktree/cli/tests/perf_support/graph.rs
+    - worktree/cli/tests/perf_graph_stages.rs
+    - worktree/cli/src/commands/list/tests.rs
+documentation:
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - worktree/docs/performance-testing.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-28-graph-continued-after-merge (5 phases)
@@ -755,3 +786,106 @@ No `#[ignore = "flips in Phase 4"]` remains.
 - Frontmatter: `human_review: false`. The one surprise, the L1 density
   exception, comes from trim order (explicitly out of scope) and does not
   appear at Kitty's real cell size, so it does not block Phase 5.
+
+## Phase 5
+
+Documentation, skill, and review readiness. No production code changed; one
+test assertion message was reworded (drift).
+
+### Wave 6 — docs and skill
+
+- `worktree/docs/git-graph.md`:
+  - "Continued after a merge" rewritten for a reader new to the repo: the
+    pull-request shape as `git log --graph` text (generated with real Git in a
+    scratch repository, commit names instead of SHAs so it cannot drift), the
+    drawing as a Mermaid `gitGraph`, how the boundary walk finds it, and where
+    the walk stops.
+  - New "fork-origin cutoff" paragraph: Git records commits, not when a branch
+    name was created; the `base_sha` rule; ignored record shapes; without a
+    usable record the old merge is drawn as the branch's own.
+  - The "merged directly after the parent took it indirectly" example already
+    described the drawn fork (Phase 3); checked, no change.
+  - Anchors list gains merge sources; the no-substitution merge bullet now
+    names source and destination.
+  - Limits: shallow histories, octopus merges (one merged lane per commit),
+    and branch creation known only from the record are stated; the old
+    "no reconstruction of earlier merges" limit was already replaced in
+    Phase 3 and is reworded.
+  - Summary bullet and Tests section updated (new L1 fixtures, the layout
+    proof's `post_merge`, the density exception for `fix/wt-ux` at the
+    fallback cell size, and the new Kitty test). No fix or feature is named.
+- `biscuit-terminal/docs/components/git_graph.md`: a "lane merged from its
+  middle" section (the `with_merge` call, the exact emitted Mermaid from
+  `a_lane_merged_from_its_middle_pauses_at_the_source_and_resumes_after_the_merge`,
+  the resulting parents, and a Mermaid flowchart of one pause and resume),
+  a "sibling order and cycles" section, and the height cap and trimming
+  rules now name merge sources and every merge destination (checked against
+  `lane_ancestors` and `trim_one_commit`). The API table already used
+  `with_merge` / `LaneMerge` (Phase 2).
+- `.claude/skills/worktree/SKILL.md`: the sentence citing
+  `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment`
+  as an unconnected-lane example now says its fork `W1` is drawn; the
+  `with_merge` sentence describes segmented emission, one merge per
+  destination, sibling order, cycles, and cap/trim pinning. The Kitty tests,
+  `record_parent(branch, parent, base_sha)`, and density sentences were
+  already corrected in Phase 4 and were re-read.
+- `worktree/README.md`: checked; it only links to `docs/git-graph.md` and
+  shows no graph example, so it is **unchanged**.
+- `worktree/docs/performance-testing.md`: the gather description now covers
+  boundary classification; the `perf_subprocess_counts_meet_sla` and
+  `graph_and_verbose_share_one_merge_base` descriptions give the current
+  counts (two `--is-ancestor`, one `rev-list` per lane); a new table holds the
+  before envelope and both after runs, the P1 call budget (as refined in
+  Phase 1), the explained increases, and the 24 → 40 call count.
+
+### Wave 7 — drift pass
+
+Grepped docs, skills, and code comments in `worktree`, `biscuit-terminal`,
+`biscuit-visualized`, `.claude/skills`, and `docs/` for `merged_into`,
+"unconnected", "not reconstructed", "continued after", "no lane draws", and
+"flips in Phase". Fixed:
+
+- `worktree/docs/cli/list.md` said a branch with new commits after its merge
+  is drawn without its connection because the merge is not reconstructed.
+  The code is correct and the doc was wrong: the sentence is removed and the
+  line-kinds list gains the continued branch.
+- `.claude/skills/biscuit-terminal/components.md`: trimming now also pins
+  merge sources, and the height cap keeps every merge destination's lane (the
+  code does both since Phase 3).
+- `worktree/cli/src/commands/git_graph/tests.rs`
+  (`a_branch_created_at_a_merged_tip_does_not_claim_the_old_merge`): an
+  assertion message said "today's fork", a pre-fix frame of reference; now
+  "the ordinary fork (the old merged tip)". Message text only.
+
+The remaining hits are accurate (the unconnected-lane rule, the "not
+reconstructed" indirect case, `merged_into_*` test-helper names).
+
+### Review readiness
+
+- Rulings as amended: Phase 1 "Rulings confirmed or amended" (G5 amended; P1
+  and P2 refined; the rest confirmed) and the plan's rulings section.
+- Spike results: Phase 1 (S1, S2).
+- Departures from the spec, with the docs corrected and the spec left as
+  written:
+  1. D3 sibling ordering considers every drawable edge in a sibling's subtree
+     (Phase 3).
+  2. G5's separate `is_ancestor(B, C^1)` check is dropped (Phase 1).
+  3. Density: at L1's fallback cell size `fix/wt-ux` keeps only its tip after
+     its last `+N` square (Phase 4); stated in `git-graph.md`'s Tests section
+     and the skill.
+- Perf table: Phase 4 "Perf and records", now also in
+  `performance-testing.md`.
+- Acceptance-row mapping: Phase 4 "Requirement-to-test mapping". Phase 5
+  adds no behavior, so no new test rows.
+
+### Verification
+
+- `worktree`: `just test` 788 passed, 30 skipped; `just lint` exit 0.
+- `biscuit-terminal`: `just test` 3357 passed, 55 skipped; `just lint` exit 0.
+- No OS-specific code changed in this phase (docs and one assertion
+  message), so no cross-check was run. Phase 4's Linux run stands, and
+  Windows and WSL2 are covered by the push and nightly schedules.
+- Pre-existing, unrelated failures from Phase 4 still stand
+  (`level2_columns_word_wrap_in_pane` deterministic,
+  `level2_render_tree_style_in_wezterm` flaky); L2 was not rerun, because
+  this phase changed no code.
