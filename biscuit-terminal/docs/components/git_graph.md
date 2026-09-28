@@ -27,7 +27,7 @@ let graph = GitGraph::new(
     GraphLine::new("fix/typo")
         .forked_at(base_sha)
         .with_tip(typo_sha.clone())
-        .merged_into(origin_sha.clone())
+        .with_merge(typo_sha.clone(), origin_sha.clone())
         .with_entries(vec![LaneEntry::Commit(typo_sha)]),
 )
 .with_pull_request(GraphPullRequest {
@@ -49,7 +49,7 @@ print!("{}", graph.render(&Terminal::new()));
 | `GraphLine` | A branch and the commits it has that its parent lacks, oldest first; its parent (`None` is the default branch), fork commit, tip, merge commit, creation time, and tip time. |
 | `GraphLine::forked_at(sha)` | The commit the lane hangs from. Unset means the connection is unknown: the lane is drawn unconnected. |
 | `GraphLine::with_tip(sha)` | The branch's own tip. A line without commits is labeled here; a line with commits defaults to its newest drawn commit. The fork commit is never used as a tip. |
-| `GraphLine::merged_into(sha)` | The merge commit, on another lane, that merged this line. Its lane is found by where that commit is drawn. |
+| `GraphLine::with_merge(source, destination)` | Appends a `LaneMerge`: the commit `source` on this line was merged by the merge commit `destination` on another lane. The destination's lane is found by where that commit is drawn. Append oldest first; a line merged at its tip passes its tip as `source`. |
 | `with_ref(name, sha)` | A ref tip: local branch, remote branch, or tag. |
 | `GraphPullRequest` | An open PR: number, source branch, and target branch. |
 | `with_current_branch(name)` | The checked-out branch. Unset, or the default branch, is the **base view**. |
@@ -57,13 +57,13 @@ print!("{}", graph.render(&Terminal::new()));
 
 ### Lanes and tags
 
-- **Lanes:** the default branch, the current branch, its fork parent when that is not the default branch, and `origin/<default>` when it is passed as a line with commits of its own (it has diverged). In the base view, every line with commits of its own gets a lane. A merged branch whose line has commits keeps its lane: the caller passes the branch's own commits, and `merged_into` draws where they were merged.
-- **Merges:** a lane with `merged_into` ends in a `merge` at that commit on the lane where it is drawn. Any lane can be the destination: the default lane, a parent's lane, or another branch's.
+- **Lanes:** the default branch, the current branch, its fork parent when that is not the default branch, and `origin/<default>` when it is passed as a line with commits of its own (it has diverged). In the base view, every line with commits of its own gets a lane. A merged branch whose line has commits keeps its lane: the caller passes the branch's own commits, and `with_merge` draws where they were merged.
+- **Merges:** a lane with a merge ends in a `merge` at its destination commit on the lane where that is drawn. Any lane can be the destination: the default lane, a parent's lane, or another branch's. Only a line's latest merge is drawn, from the lane's end. **Planned:** every merge is drawn from its own `source` commit, so a lane can merge mid-way and continue after the merge.
 - **Tags:** every ref whose tip is a drawn commit, except a lane's own tip (its label names it), and every line with no commits of its own, on its `with_tip` commit.
 - **PRs:** a tag `PR #n → target` on the source branch's tip.
 - **Order:** lanes forking at the same commit follow creation time, oldest first. Lanes without a creation time come last. A lane merged into a sibling (or into a lane hanging from that sibling) is emitted before it, because a merge can only be drawn after the merged lane's commits.
 
-For example, a default lane `1111111 → 2222222 → mmmmmmm → 3333333` (refs `origin/main` at `mmmmmmm`, `main` at `3333333`) and a line `feat/x` forked at `1111111` with commits `aaaaaaa`, `bbbbbbb`, `merged_into(mmmmmmm)` emit (display IDs are the first 7 SHA characters):
+For example, a default lane `1111111 → 2222222 → mmmmmmm → 3333333` (refs `origin/main` at `mmmmmmm`, `main` at `3333333`) and a line `feat/x` forked at `1111111` with commits `aaaaaaa`, `bbbbbbb`, `with_merge(bbbbbbb, mmmmmmm)` emit (display IDs are the first 7 SHA characters):
 
 ```text
 gitGraph
@@ -88,7 +88,7 @@ The component never draws something at a commit other than the one it was given:
 |---|---|---|
 | `forked_at` | unset, or its commit is not drawn | The lane is drawn **unconnected** (declared before the default lane's first commit, so its first commit has no parent), never from the start of another lane |
 | a ref, a label-only line's tip, a PR's source tip | its commit is not drawn | The tag is left out |
-| `merged_into` | its commit is not drawn, would be emitted before the merged lane's commits, or already merges another lane | A plain `commit`, no merge |
+| a line's latest merge | its destination commit is not drawn, would be emitted before the merged lane's commits, or already merges another lane | A plain `commit`, no merge |
 
 Each of these, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`, and the rendered graph is followed by the dim line `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown"), after the hidden-lanes note. Tags of lanes the height cap leaves out are counted by that note instead. A PR for a branch the graph does not know has no commit to account for, and is not counted.
 
