@@ -48,7 +48,7 @@ For the legacy HiDPI multiplier path, omit `target_width` and set `scale: N` dir
 
 `biscuit-visualized/docs/dot-graph.md` — full reference for the DOT graph subset accepted by this library, including supported / rejected features, cluster syntax, and the resolution-tuning case study from `sniff repo package-dependencies --ui`.
 
-`biscuit-visualized/docs/mermaid-gitgraph.md` — every gitGraph is corrected before drawing: a labeled `merge` gets back the second parent `mermaid-rs-renderer` 0.3.1 loses, and commits are spaced by the widest tag so tags never overlap (horizontal graphs with unrotated tags only). Both run in the one layout path that measurement and rendering share.
+`biscuit-visualized/docs/mermaid-gitgraph.md` — every gitGraph is corrected before drawing: a labeled `merge` gets back the second parent `mermaid-rs-renderer` 0.3.1 loses, and commits are spaced only as far as colliding tags (different commits, overlapping rows) need for a one-em gap, so tags never overlap and an isolated long label keeps the default step (horizontal graphs with unrotated tags only). Both run in the one layout path that measurement and rendering share.
 
 ## Mermaid Diagrams
 
@@ -221,7 +221,7 @@ RasterError::IoError(std::io::Error)
 
 | Crate | Purpose |
 |-------|---------|
-| `mermaid-rs-renderer` 0.3.1 | Mermaid diagram rendering backend (cache backend id `mermaid-rs-renderer@0.3.x+bv2`) |
+| `mermaid-rs-renderer` 0.3.1 | Mermaid diagram rendering backend (cache backend id `mermaid-rs-renderer@0.3.x+bv3`) |
 | `layout-rs` v0.1 | Graph layout engine and DOT parsing |
 | `resvg` v0.45 | SVG-to-PNG rasterization |
 | `biscuit-hash` | xxHash for cache key generation |
