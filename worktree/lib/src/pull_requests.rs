@@ -9,6 +9,11 @@
 //! replace in another process. With no usable answer, [`fetch_and_publish`]
 //! makes the request under [`LIST_DEADLINE`]. A failure is never stored, so an
 //! authentication error cannot become "no open PRs".
+//!
+//! Every successful write stamps a new random publication id beside
+//! `fetched_at`. `fetched_at` is whole seconds at the request's start, so two
+//! answers can share it; [`stored_publication`] is what tells a waiting run
+//! that another process published.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +27,8 @@ use crate::git::git_from;
 use crate::remote_head::PrFailure;
 use sniff::remote::blocking::PrUnavailable;
 
-pub const PR_STORE_FORMAT_VERSION: u32 = 2;
+/// Format 3 added `publication`; an older store is a [`CachedPrs::Miss`].
+pub const PR_STORE_FORMAT_VERSION: u32 = 3;
 
 /// How long stored results stand in without a refresh.
 pub const FRESHNESS_WINDOW: Duration = Duration::from_secs(60);
@@ -127,6 +133,9 @@ struct StoreFile {
     origin_digest: String,
     /// Seconds since the Unix epoch at which the request started.
     fetched_at: u64,
+    /// A random id ([`crate::remote_head::new_attempt_id`]) new with every
+    /// write; see [`stored_publication`].
+    publication: String,
     source_repo: Option<String>,
     pull_requests: Vec<OpenPullRequest>,
 }
@@ -205,15 +214,9 @@ pub enum CachedPrs {
 /// What the stored answer at `store` offers when `origin` is the current
 /// [`origin_url`]. A valid empty answer is an answer, not a miss.
 pub fn select_cached(store: &Path, origin: Option<&str>, now: u64) -> CachedPrs {
-    let Some(origin) = origin else {
+    let Some(file) = usable(store, origin, now) else {
         return CachedPrs::Miss;
     };
-    let Some(file) = load(store) else {
-        return CachedPrs::Miss;
-    };
-    if file.fetched_at > now || file.origin_digest != origin_digest(origin) {
-        return CachedPrs::Miss;
-    }
     let listing = listing(&file);
     if listing.is_stale_at(now) {
         CachedPrs::Stale(listing)
@@ -222,8 +225,18 @@ pub fn select_cached(store: &Path, origin: Option<&str>, now: u64) -> CachedPrs 
     }
 }
 
+/// The publication id of the answer [`select_cached`] would serve, or `None`
+/// on a miss.
+///
+/// Every successful write, by either writer, stores a new id, so a changed
+/// id proves a publication even when `fetched_at` did not move.
+pub fn stored_publication(store: &Path, origin: &str, now: u64) -> Option<String> {
+    usable(store, Some(origin), now).map(|file| file.publication)
+}
+
 /// Makes the request for `origin` and stores a successful answer, stamped
-/// `now`, while `repo_root`'s `origin` still matches.
+/// `now` and with a new publication id, while `repo_root`'s `origin` still
+/// matches.
 ///
 /// `Err` is why the request failed and `Ok(None)` means `origin` changed
 /// during it; either way the store is untouched. An answer for a previous
@@ -236,12 +249,12 @@ pub fn fetch_and_publish(
     now: u64,
     source: &dyn OpenPrSource,
 ) -> Result<Option<PrListing>, PrFailure> {
-    let file = fetch(origin, now, source)?;
+    let answer = fetch(source)?;
     if origin_url(repo_root).as_deref() != Some(origin) {
         return Ok(None);
     }
-    let _ = save(store, &file);
-    Ok(Some(listing(&file)))
+    let _ = publish(store, origin, now, &answer);
+    Ok(Some(answer.into_listing(now)))
 }
 
 /// Why a [`refresh`] ended.
@@ -261,7 +274,8 @@ pub enum RefreshOutcome {
     OriginChanged,
     /// The request failed; the store is untouched.
     Failed(PrFailure),
-    /// The answer could not be written; the store is untouched.
+    /// The answer could not be written, or no publication id could be made;
+    /// the store is untouched.
     PublishFailed,
 }
 
@@ -296,14 +310,14 @@ pub fn refresh(
     if !force && matches!(select_cached(store, Some(&origin), started), CachedPrs::Fresh(_)) {
         return RefreshOutcome::AlreadyFresh;
     }
-    let file = match fetch(&origin, started, connect(&origin).as_ref()) {
-        Ok(file) => file,
+    let answer = match fetch(connect(&origin).as_ref()) {
+        Ok(answer) => answer,
         Err(failure) => return RefreshOutcome::Failed(failure),
     };
     if origin_url(repo_root).as_deref() != Some(origin.as_str()) {
         return RefreshOutcome::OriginChanged;
     }
-    match save(store, &file) {
+    match publish(store, &origin, started, &answer) {
         Ok(()) => RefreshOutcome::Refreshed,
         Err(_) => RefreshOutcome::PublishFailed,
     }
@@ -336,14 +350,41 @@ pub fn unix_now() -> u64 {
         .unwrap_or_default()
 }
 
-fn fetch(origin: &str, fetched_at: u64, source: &dyn OpenPrSource) -> Result<StoreFile, PrFailure> {
-    Ok(StoreFile {
+/// A successful request's answer, before it is stored.
+struct Answer {
+    source_repo: Option<String>,
+    pull_requests: Vec<OpenPullRequest>,
+}
+
+impl Answer {
+    fn into_listing(self, fetched_at: u64) -> PrListing {
+        PrListing { source_repo: self.source_repo, pull_requests: self.pull_requests, fetched_at: Some(fetched_at) }
+    }
+}
+
+fn fetch(source: &dyn OpenPrSource) -> Result<Answer, PrFailure> {
+    Ok(Answer { pull_requests: source.fetch()?, source_repo: source.source_repo() })
+}
+
+/// Stores `answer` for `origin`, stamped `fetched_at`, under a new
+/// publication id.
+fn publish(path: &Path, origin: &str, fetched_at: u64, answer: &Answer) -> Result<(), WorktreeError> {
+    let file = StoreFile {
         format_version: PR_STORE_FORMAT_VERSION,
         origin_digest: origin_digest(origin),
         fetched_at,
-        pull_requests: source.fetch()?,
-        source_repo: source.source_repo(),
-    })
+        publication: crate::remote_head::new_attempt_id()?,
+        source_repo: answer.source_repo.clone(),
+        pull_requests: answer.pull_requests.clone(),
+    };
+    save(path, &file)
+}
+
+/// The stored answer for `origin`, unless it is unreadable, another format,
+/// fetched after `now`, or bound to another `origin`.
+fn usable(store: &Path, origin: Option<&str>, now: u64) -> Option<StoreFile> {
+    let origin = origin?;
+    load(store).filter(|file| file.fetched_at <= now && file.origin_digest == origin_digest(origin))
 }
 
 fn listing(file: &StoreFile) -> PrListing {
@@ -519,6 +560,7 @@ mod tests {
                 format_version: version,
                 origin_digest: origin_digest(ORIGIN),
                 fetched_at,
+                publication: "0123456789abcdef0123456789abcdef".into(),
                 source_repo: Some("o/r".into()),
                 pull_requests: vec![pr(99, Some("o/r"), "fix/x", "main")],
             })
@@ -537,9 +579,18 @@ mod tests {
                 "target_branch": "main",
             }],
         });
+        // Format 2 exactly as it was written: no publication id.
+        let version_two = serde_json::json!({
+            "format_version": 2,
+            "origin_digest": origin_digest(ORIGIN),
+            "fetched_at": NOW,
+            "source_repo": "o/r",
+            "pull_requests": [],
+        });
         for contents in [
             b"{not json".to_vec(),
             serde_json::to_vec(&version_one).unwrap(),
+            serde_json::to_vec(&version_two).unwrap(),
             file(PR_STORE_FORMAT_VERSION + 1, NOW),
             // A clock set back must not freeze the store, fresh or stale.
             file(PR_STORE_FORMAT_VERSION, NOW + 1),
@@ -551,6 +602,44 @@ mod tests {
         assert_eq!(select_cached(&store.with_file_name("absent.prs.json"), Some(ORIGIN), NOW), CachedPrs::Miss);
         fs::write(&store, file(PR_STORE_FORMAT_VERSION, NOW)).unwrap();
         assert!(matches!(select_cached(&store, Some(ORIGIN), NOW), CachedPrs::Fresh(_)), "control");
+    }
+
+    #[test]
+    fn every_publication_stores_a_new_id_even_within_one_second() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        assert_eq!(stored_publication(&store, ORIGIN, NOW), None, "nothing stored");
+        seed(&store, &root, ORIGIN, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
+        let seeded = stored_publication(&store, ORIGIN, NOW).expect("the seeded answer has an id");
+        assert!(seeded.len() == 32 && seeded.bytes().all(|b| b.is_ascii_hexdigit()), "{seeded}");
+
+        let (_, source) = stub(Ok(vec![pr(7, Some("o/r"), "feat/y", "main")]));
+        fetch_and_publish(&store, &root, ORIGIN, NOW, &source).unwrap().unwrap();
+        let foreground = stored_publication(&store, ORIGIN, NOW).expect("the foreground answer has an id");
+        assert_ne!(foreground, seeded, "same second, new answer, new id");
+
+        let (_, source) = stub(Ok(vec![pr(8, Some("o/r"), "feat/z", "main")]));
+        let (_, connect) = connector(source);
+        assert_eq!(refresh(&store, &root, || NOW, true, connect), RefreshOutcome::Refreshed);
+        let refreshed = stored_publication(&store, ORIGIN, NOW).expect("the worker's answer has an id");
+        assert_ne!(refreshed, foreground, "the worker stamps its own id");
+        let CachedPrs::Fresh(listing) = select_cached(&store, Some(ORIGIN), NOW) else {
+            panic!("the refreshed answer is served");
+        };
+        assert_eq!((listing.fetched_at, numbers(&listing)), (Some(NOW), vec![8]), "fetched_at did not move");
+
+        let (_, source) = stub(Err(PrFailure::Other));
+        let (_, connect) = connector(source);
+        assert_eq!(refresh(&store, &root, || NOW, true, connect), RefreshOutcome::Failed(PrFailure::Other));
+        assert_eq!(stored_publication(&store, ORIGIN, NOW), Some(refreshed), "a failure publishes nothing");
+    }
+
+    #[test]
+    fn a_publication_id_is_read_only_where_the_answer_would_be_served() {
+        let (_dir, root, store) = repo(Some(ORIGIN));
+        seed(&store, &root, ORIGIN, NOW, Vec::new());
+        assert!(stored_publication(&store, ORIGIN, NOW + 600).is_some(), "a stale answer still has its id");
+        assert_eq!(stored_publication(&store, "https://prs.example.invalid/o/other.git", NOW), None);
+        assert_eq!(stored_publication(&store, ORIGIN, NOW - 1), None, "fetched in the future");
     }
 
     #[test]

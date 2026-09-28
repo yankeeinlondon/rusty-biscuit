@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use worktree::remote_head::{
-    Attempt, FallbackReason, FetchFailure, HeadStatus, Outcome, Phase, PrStatus, Receipt, StoreState,
+    Attempt, FallbackReason, FetchFailure, HeadStatus, Outcome, Phase, PrFailure, PrStatus, Receipt, StoreState,
 };
 
 use super::*;
@@ -19,6 +19,9 @@ const OURS: &str = "0000000000000000000000000000000a";
 const SECOND: &str = "0000000000000000000000000000000b";
 const OTHER: &str = "ffffffffffffffffffffffffffffffff";
 const STARTED: u64 = 1_790_000_000;
+/// PR store publication ids: the answer stored at launch, and a holder's.
+const SEEDED: &str = "5eeded00000000000000000000000000";
+const PUBLISHED: &str = "fedcba9876543210fedcba9876543210";
 
 thread_local! {
     /// The fake clock: time since the wait began.
@@ -66,6 +69,7 @@ struct Fake {
     receipt: ReceiptScript,
     head_lock: Script<bool>,
     pr_lock: Script<bool>,
+    pr_answer: Script<Option<&'static str>>,
     ids: RefCell<Vec<&'static str>>,
     /// Head-lock probes made while a worker of ours was still running.
     early_probes: Cell<usize>,
@@ -83,6 +87,7 @@ impl Fake {
             receipt: Box::new(|_, _| None),
             head_lock: Box::new(|_| false),
             pr_lock: Box::new(|_| false),
+            pr_answer: Box::new(|_| None),
             ids: RefCell::new(vec![OURS, SECOND]),
             early_probes: Cell::new(0),
             worker_alive: Box::new(|| {
@@ -113,6 +118,12 @@ impl Fake {
         self.pr_lock = Box::new(held);
         self
     }
+
+    /// The stored PR answer's publication id.
+    fn pr_answer(mut self, publication: impl Fn(Duration) -> Option<&'static str> + 'static) -> Self {
+        self.pr_answer = Box::new(publication);
+        self
+    }
 }
 
 impl WaitEnv for Fake {
@@ -133,6 +144,10 @@ impl WaitEnv for Fake {
 
     fn pr_lock_held(&self) -> bool {
         (self.pr_lock)(now())
+    }
+
+    fn pr_publication(&self) -> Option<String> {
+        (self.pr_answer)(now()).map(str::to_string)
     }
 
     fn elapsed(&self) -> Duration {
@@ -335,16 +350,117 @@ fn a_forced_wait_follows_the_outcome_to_the_receipt() {
 }
 
 #[test]
-fn a_forced_wait_waits_for_a_contended_pr_half_to_be_released() {
+fn a_forced_wait_accepts_the_answer_a_contending_holder_published() {
     let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
         .receipts(|_, _| Some(receipt(OURS, HeadStatus::Ok, PrStatus::Contended)))
         .pr_lock(|t| t < ms(2_000))
+        .pr_answer(|t| Some(if t < ms(2_000) { SEEDED } else { PUBLISHED }))
         .exits(&[Some(ms(10))]);
 
     let (end, _, at) = run(&fake, true, launching);
 
-    assert!(matches!(end, WaitEnd::Finished { receipt: Some(_), .. }), "{end:?}");
+    let expected = receipt(OURS, HeadStatus::Ok, PrStatus::Contended);
+    assert_eq!(
+        end,
+        WaitEnd::Finished { attempt: attempt(OURS, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
+    );
+    assert!(at >= ms(2_000), "the holder's lock was waited for: {at:?}");
+    assert_eq!(launches().len(), 1, "a published answer needs no second request");
+}
+
+/// `fetched_at` is whole seconds, so a holder that replaces a young answer
+/// within its second leaves it unchanged; only the publication id proves
+/// the write, and the run must not ask again.
+#[test]
+fn a_forced_wait_accepts_a_holders_answer_published_within_the_same_second() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .receipts(|_, _| Some(receipt(OURS, HeadStatus::Ok, PrStatus::Contended)))
+        .pr_lock(|t| t < ms(500))
+        .pr_answer(|t| Some(if t < ms(500) { SEEDED } else { PUBLISHED }))
+        .exits(&[Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, true, launching);
+
+    let expected = receipt(OURS, HeadStatus::Ok, PrStatus::Contended);
+    assert_eq!(
+        end,
+        WaitEnd::Finished { attempt: attempt(OURS, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
+    );
+    assert_eq!(launches().len(), 1, "a new publication id is a published answer");
+}
+
+/// A holder that publishes into an empty store is published too.
+#[test]
+fn a_forced_wait_accepts_a_holders_first_answer() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync))))
+        .receipts(|_, _| Some(receipt(OURS, HeadStatus::Ok, PrStatus::Contended)))
+        .pr_lock(|t| t < ms(500))
+        .pr_answer(|t| (t >= ms(500)).then_some(PUBLISHED))
+        .exits(&[Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, true, launching);
+
+    assert!(matches!(end, WaitEnd::Finished { receipt: Some(Receipt { prs: PrStatus::Contended, .. }), .. }), "{end:?}");
+    assert_eq!(launches().len(), 1);
+}
+
+/// The holder's request failed or was skipped, so the store kept the answer
+/// (and publication id) it had at launch: the run asks again itself.
+#[test]
+fn a_forced_wait_relaunches_once_when_a_contending_holder_published_nothing() {
+    let fake = Fake::new(|t| {
+        let id = if t < ms(2_000) { OURS } else { SECOND };
+        with(attempt(id, Phase::Checking, Some(Outcome::InSync)))
+    })
+    .receipts(|_, for_attempt| {
+        Some(match for_attempt.id.as_str() {
+            OURS => receipt(OURS, HeadStatus::Ok, PrStatus::Contended),
+            _ => receipt(SECOND, HeadStatus::Ok, PrStatus::Ok),
+        })
+    })
+    .pr_lock(|t| t < ms(2_000))
+    .pr_answer(|_| Some(SEEDED))
+    .exits(&[Some(ms(10)), Some(ms(2_100))]);
+
+    let (end, _, at) = run(&fake, true, launching);
+
+    let expected = receipt(SECOND, HeadStatus::Ok, PrStatus::Ok);
+    assert_eq!(
+        end,
+        WaitEnd::Finished { attempt: attempt(SECOND, Phase::Checking, Some(Outcome::InSync)), receipt: Some(expected) }
+    );
     assert!(at >= ms(2_000), "{at:?}");
+    assert_eq!(
+        launches(),
+        [LaunchArgs { attempt: OURS.into(), force: true }, LaunchArgs { attempt: SECOND.into(), force: true }]
+    );
+}
+
+#[test]
+fn a_forced_wait_reports_a_pr_failure_when_the_relaunch_is_contended_too() {
+    let fake = Fake::new(|t| {
+        let id = if t < ms(1_000) { OURS } else { SECOND };
+        with(attempt(id, Phase::Checking, Some(Outcome::InSync)))
+    })
+    .receipts(|t, for_attempt| {
+        let written = for_attempt.id == OURS || t >= ms(1_100);
+        written.then(|| receipt(&for_attempt.id, HeadStatus::Ok, PrStatus::Contended))
+    })
+    .pr_lock(|t| t < ms(1_000) || (ms(1_050)..ms(3_000)).contains(&t))
+    .exits(&[Some(ms(10)), Some(ms(1_100))]);
+
+    let (end, _, at) = run(&fake, true, launching);
+
+    let failed = PrStatus::Failed { failure: PrFailure::Other };
+    assert_eq!(
+        end,
+        WaitEnd::Finished {
+            attempt: attempt(SECOND, Phase::Checking, Some(Outcome::InSync)),
+            receipt: Some(receipt(SECOND, HeadStatus::Ok, failed)),
+        }
+    );
+    assert!(at >= ms(3_000), "the second holder was waited for too: {at:?}");
+    assert_eq!(launches().len(), 2, "one relaunch, no more");
 }
 
 #[test]

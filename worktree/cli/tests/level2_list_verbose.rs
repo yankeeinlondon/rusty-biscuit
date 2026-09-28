@@ -10,8 +10,12 @@
 //! parent. Two scenes point `origin` at a local Gitea stand-in: one proves the
 //! dim credentials warning beneath the caption, the other holds the check
 //! past the 3 s wait to prove the spinner is drawn and then cleared before
-//! the caption, and that the dim refresh hint follows the legend. The caption
-//! suffix's dim italic is checked in the design test. The graph as an
+//! the caption, and that the dim refresh hint follows the legend. Two more
+//! let the pane's git reach a bare repository through the stand-in and hold
+//! `wt list -r`'s worker in each spinner phase: the no-key fallback turning
+//! into the fetch on the same line, and the rate-limited fallback, each
+//! captured as one spinner line before it clears ahead of the caption. The
+//! caption suffix's dim italic is checked in the design test. The graph as an
 //! image-capable terminal draws it is tested in
 //! `level2_graph_in_kitty.rs`.
 
@@ -27,7 +31,7 @@ use assert_cmd::cargo::cargo_bin;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
-use perf_support::{FakeGitea, GiteaReply, NoRequest, ProxyStub, wait_for_refresh_workers};
+use perf_support::{FakeGitea, GitHold, GiteaReply, NoRequest, ProxyStub, wait_for_refresh_workers};
 use serial_test::serial;
 use styled_capture::{Color, StyledScreen};
 use test_toolkit::{Backend, Level, require_level};
@@ -279,6 +283,9 @@ struct DesignFixture {
     home: PathBuf,
     main: PathBuf,
     feature: PathBuf,
+    /// Set by [`Self::with_gitea_repository`]: the root holding `o/r.git`,
+    /// which the pane's git reaches through the proxy.
+    git_root: Option<PathBuf>,
 }
 
 impl DesignFixture {
@@ -298,6 +305,37 @@ impl DesignFixture {
     /// branch of `o/r`, so no badge shows.
     fn with_gitea_origin() -> Self {
         Self::build(Duration::ZERO, false, FakeGitea::ORIGIN)
+    }
+
+    /// [`Self::with_gitea_origin`] plus a bare `o/r.git` whose `main` is one
+    /// commit past the listed clone's `origin/main`, so a check answered
+    /// through git differs from the tracking ref and the worker fetches it.
+    /// The commit exists only in `o/r.git`, or the fetch would send no pack.
+    /// Pair it with [`FakeGitea::serve_repositories`] on [`Self::git_root`];
+    /// the pane then sends git's HTTP requests to the proxy instead of
+    /// refusing them.
+    fn with_gitea_repository() -> Self {
+        let mut fixture = Self::with_gitea_origin();
+        let root = fixture.home.join("gitea");
+        let bare = root.join("o").join("r.git");
+        fs::create_dir_all(&bare).unwrap();
+        run_git(&bare, &["init", "--bare", "-b", "main"]);
+        run_git(&fixture.main, &["push", "-q", bare.to_str().unwrap(), "refs/remotes/origin/main:refs/heads/main"]);
+        let output = Command::new("git")
+            .current_dir(&bare)
+            .args(["-c", "user.name=Someone Else", "-c", "user.email=else@example.com"])
+            .args(["commit-tree", "main^{tree}", "-p", "main", "-m", "pushed by someone else"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "commit-tree: {output:?}");
+        let pushed = String::from_utf8(output.stdout).unwrap().trim().to_string();
+        run_git(&bare, &["update-ref", "refs/heads/main", &pushed]);
+        fixture.git_root = Some(root);
+        fixture
+    }
+
+    fn git_root(&self) -> &std::path::Path {
+        self.git_root.as_deref().expect("a fixture built with_gitea_repository")
     }
 
     /// [`Self::new`] plus `wt-child-work` (`child/long-descriptive-name`),
@@ -367,6 +405,7 @@ impl DesignFixture {
             home,
             feature: sibling("wt-feature"),
             main,
+            git_root: None,
             _parent: parent,
         };
         fixture.seed_stores(pr_age, with_child);
@@ -438,9 +477,10 @@ impl DesignFixture {
             pull_requests.push(pr(105, "child/long-descriptive-name", "feature-test"));
         }
         let prs = serde_json::json!({
-            "format_version": 2,
+            "format_version": worktree::pull_requests::PR_STORE_FORMAT_VERSION,
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": fetched_at,
+            "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
             "source_repo": "owner/repo",
             "pull_requests": pull_requests,
         });
@@ -517,10 +557,37 @@ impl DesignFixture {
         let cache = self.home.join("cache").display().to_string();
         // No user or system git config (no `insteadOf` can send the worker's
         // `ls-remote` fallback to the real host), and git's HTTP transports
-        // refused, since git honors `HTTPS_PROXY` too.
+        // refused, since git honors `HTTPS_PROXY` too; with a served
+        // repository, git's HTTP goes to the proxy instead.
         let empty_config = self.home.join("empty.gitconfig");
         fs::write(&empty_config, "").expect("write an empty global git config");
         let empty_config = empty_config.display().to_string();
+        let git_http: [(&str, &str); 4] = match self.git_root {
+            Some(_) => [
+                ("GIT_CONFIG_KEY_0", "http.proxy"),
+                ("GIT_CONFIG_VALUE_0", proxy),
+                ("GIT_CONFIG_KEY_1", "protocol.http.allow"),
+                ("GIT_CONFIG_VALUE_1", "always"),
+            ],
+            None => [
+                ("GIT_CONFIG_KEY_0", "protocol.http.allow"),
+                ("GIT_CONFIG_VALUE_0", "never"),
+                ("GIT_CONFIG_KEY_1", "protocol.https.allow"),
+                ("GIT_CONFIG_VALUE_1", "never"),
+            ],
+        };
+        let mut env = vec![
+            ("HOME", home.as_str()),
+            ("XDG_CACHE_HOME", cache.as_str()),
+            ("HTTPS_PROXY", proxy),
+            ("HTTP_PROXY", proxy),
+            ("FORCE_COLOR", "1"),
+            ("COLORFGBG", colorfgbg),
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_GLOBAL", empty_config.as_str()),
+            ("GIT_CONFIG_COUNT", "2"),
+        ];
+        env.extend(git_http);
         harness
             .send_text(format!("cd '{}'\n", self.feature.display()).as_bytes())
             .expect("send cd failed");
@@ -530,21 +597,7 @@ impl DesignFixture {
                     "env -u TERM_PROGRAM -u KITTY_WINDOW_ID -u GH_TOKEN -u GITHUB_TOKEN -u GITEA_TOKEN \
                      -u FORGEJO_TOKEN -u CODEBERG_TOKEN {bin} {args}"
                 ),
-                &[
-                    ("HOME", &home),
-                    ("XDG_CACHE_HOME", &cache),
-                    ("HTTPS_PROXY", proxy),
-                    ("HTTP_PROXY", proxy),
-                    ("FORCE_COLOR", "1"),
-                    ("COLORFGBG", colorfgbg),
-                    ("GIT_CONFIG_NOSYSTEM", "1"),
-                    ("GIT_CONFIG_GLOBAL", &empty_config),
-                    ("GIT_CONFIG_COUNT", "2"),
-                    ("GIT_CONFIG_KEY_0", "protocol.http.allow"),
-                    ("GIT_CONFIG_VALUE_0", "never"),
-                    ("GIT_CONFIG_KEY_1", "protocol.https.allow"),
-                    ("GIT_CONFIG_VALUE_1", "never"),
-                ],
+                &env,
             )
             .expect("send wt list failed");
         harness
@@ -579,8 +632,10 @@ fn level2_list_styles_follow_the_design_in_tmux() {
     let plain = screen.plain();
 
     // Caption: the local and remote badges around a yellow count. The pane
-    // cannot reach origin, so the suffix dates the seeded answer.
-    let caption = screen.row_with(&["main", "is", "behind", "origin/main"]);
+    // cannot reach origin, so the suffix dates the seeded answer. The `(`
+    // tells the caption from the `--ff` suggestion, which a failed check
+    // still prints below the graph with the same words.
+    let caption = screen.row_with(&["main", "is", "behind", "origin/main", "("]);
     assert!(screen.text(caption).trim().starts_with("main  is 1 commit behind  origin/main  ("), "{plain}");
     // The suffix is part of the same sentence, word-wrapped to the pane.
     let unwrapped = plain.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -950,4 +1005,110 @@ fn level2_list_clears_the_spinner_before_the_caption_and_shows_a_dim_hint_in_tmu
     gitea.release(GiteaReply::Open(Vec::new()));
     assert_worker_gone(&fixture);
     assert_eq!(gitea.requests(), 0, "a fresh PR answer makes no PR request");
+}
+
+/// The spinner's texts (spec §3 step 3).
+const SPINNER_TEXTS: [&str; 4] = [
+    "updating",
+    "no API key, using fallback method",
+    "rate limited, using fallback method",
+    "pulling remote updates",
+];
+
+/// The pane holds exactly one spinner line, it reads `<frame> {text}` with
+/// nothing after it, and no other spinner text is anywhere on the pane.
+fn assert_one_spinner_line(plain: &str, text: &str) {
+    use biscuit_terminal::components::spinner::FRAMES;
+
+    let lines: Vec<&str> =
+        plain.lines().filter(|line| FRAMES.iter().any(|glyph| line.contains(glyph))).collect();
+    assert_eq!(lines.len(), 1, "one spinner line:\n{plain}");
+    let line = lines[0].trim_end();
+    assert!(
+        FRAMES.iter().any(|glyph| line == format!("{glyph} {text}")),
+        "the spinner line is exactly the frame and {text:?}: {line:?}\n{plain}"
+    );
+    for other in SPINNER_TEXTS.iter().filter(|other| **other != text) {
+        assert!(!plain.contains(other), "{other:?} is left on the pane:\n{plain}");
+    }
+}
+
+/// The finished pane has no spinner frame and no spinner text other than the
+/// caption's own `pulling remote updates` row, and its caption starts a row
+/// with `expected`.
+fn assert_spinner_cleared_before_caption(screen: &StyledScreen, expected: &str) {
+    use biscuit_terminal::components::spinner::FRAMES;
+
+    let plain = screen.plain();
+    for glyph in FRAMES {
+        assert!(!plain.contains(glyph), "a spinner frame is left on the pane:\n{plain}");
+    }
+    for text in &SPINNER_TEXTS[..3] {
+        assert!(!plain.contains(text), "the spinner's {text:?} is left on the pane:\n{plain}");
+    }
+    let caption = (0..screen.rows.len())
+        .find(|&row| screen.text(row).trim().starts_with(expected))
+        .unwrap_or_else(|| panic!("no row starts with {expected:?}:\n{plain}"));
+    assert!(caption < screen.row_with(&["Worktree", "Branch"]), "the caption precedes the table:\n{plain}");
+}
+
+/// With `origin`'s API answering 404 without a key and git served through the
+/// proxy, the spinner shows the fallback while `ls-remote` is held, then,
+/// once the check answers a new tip and the fetch is held, replaces it on
+/// the same line with the shorter fetch text and no remnant of the longer
+/// one. Released, the spinner line is gone and the caption describes the
+/// fetched state.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_spinner_moves_from_the_fallback_to_the_fetch_on_one_line_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_repository();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.serve_repositories(fixture.git_root());
+    gitea.hold_git(GitHold::All);
+
+    // `-r` waits for the worker, so the held phases stay on screen.
+    let mut harness = fixture.start_in_pane(None, "list -r", "15;0", &gitea.url());
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the fallback's ls-remote reached git");
+    let fallback = wait_for_pane(&mut harness, |plain| plain.contains("no API key, using fallback method"));
+    assert_one_spinner_line(&fallback.plain, "no API key, using fallback method");
+    assert!(gitea.branch_requests() >= 1, "the API was asked first");
+
+    gitea.hold_git(GitHold::Fetch);
+    let fetching = wait_for_pane(&mut harness, |plain| plain.contains("pulling remote updates"));
+    assert_one_spinner_line(&fetching.plain, "pulling remote updates");
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the fetch is held");
+
+    gitea.release(GiteaReply::Open(Vec::new()));
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    // The fetched commit puts `main` two behind, where it was one before.
+    assert_spinner_cleared_before_caption(&screen, "main  is 2 commits behind");
+
+    assert_worker_gone(&fixture);
+}
+
+/// A rate-limited API shows its own fallback text on one spinner line while
+/// `ls-remote` is held, and the line is gone before the caption.
+#[test]
+#[serial(level2_terminal)]
+fn level2_list_spinner_shows_the_rate_limited_fallback_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let fixture = DesignFixture::with_gitea_repository();
+    let gitea = FakeGitea::new(GiteaReply::Open(Vec::new()));
+    gitea.answer_branch_heads_with(429);
+    gitea.serve_repositories(fixture.git_root());
+    gitea.hold_git(GitHold::All);
+
+    let mut harness = fixture.start_in_pane(None, "list -r", "15;0", &gitea.url());
+    assert!(gitea.wait_for_git_waiting(1, Duration::from_secs(15)), "the fallback's ls-remote reached git");
+    let fallback = wait_for_pane(&mut harness, |plain| plain.contains("rate limited, using fallback method"));
+    assert_one_spinner_line(&fallback.plain, "rate limited, using fallback method");
+
+    gitea.release(GiteaReply::Open(Vec::new()));
+    let screen = StyledScreen::parse(&wait_for_pane(&mut harness, |plain| plain.contains("parent deleted")).raw);
+    assert_spinner_cleared_before_caption(&screen, "main  is 2 commits behind");
+
+    assert_worker_gone(&fixture);
 }

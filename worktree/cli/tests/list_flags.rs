@@ -11,6 +11,7 @@ mod perf_support;
 mod remote_fixture;
 
 use std::fs;
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use assert_cmd::cargo::cargo_bin;
@@ -132,6 +133,107 @@ fn refresh_waits_for_both_halves_and_asks_again_despite_young_answers() {
     assert!(receipt.exists(), "the worker wrote its receipt before wt -r rendered");
     assert!(wait_for_refresh_workers(fixture.main(), 0, Duration::from_secs(2)).is_empty(), "both halves ended");
     let _ = fs::remove_file(receipt);
+}
+
+/// How old the PR answer stored before `wt -r` launches is.
+#[derive(Clone, Copy)]
+enum Seeded {
+    /// Two hours old, seeded before the holder starts.
+    Old,
+    /// Stamped now, seeded once the holder's request is held: its
+    /// `fetched_at` is at or after the holder's, so only the publication id
+    /// can show the holder's write.
+    Young,
+}
+
+/// `wt -r` whose PR half finds another worker's request holding the PR lock;
+/// that request is answered `holder_reply` once `wt -r`'s worker has recorded
+/// the contention. Returns `wt -r`'s collapsed stderr and the PR requests made.
+fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String, usize) {
+    let fixture = MixedFixture::new().with_gitea_origin();
+    let _cleanup = RemoveOnDrop(fixture.pr_store());
+    let receipt = fixture.pr_store().with_file_name(
+        refresh_receipt_path(fixture.main()).expect("receipt path").file_name().expect("file name"),
+    );
+    let _receipt_cleanup = RemoveOnDrop(receipt.clone());
+    let _ = fs::remove_file(&receipt);
+    if let Seeded::Old = seeded {
+        fixture.seed_pr_store(Duration::from_secs(2 * 3_600), 99, "divergent-0");
+    }
+    fixture.seed_remote_head_store(Duration::ZERO, Some("0123456789abcdef0123456789abcdef01234567"));
+    let gitea = FakeGitea::new(GiteaReply::Status(503));
+    gitea.hold();
+    let mut holder = fixture
+        .refresh_worker_via_gitea(&gitea)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("holder");
+    assert!(gitea.wait_for_waiting(1, WORKER_WAIT), "the holder's PR request is held with its lock");
+    if let Seeded::Young = seeded {
+        fixture.seed_pr_store(Duration::ZERO, 99, "divergent-0");
+    }
+
+    let refresh = fixture
+        .wt_command_via_gitea(&gitea)
+        .arg("-r")
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("wt -r");
+    let deadline = Instant::now() + WORKER_WAIT;
+    let contended = loop {
+        let recorded = fs::read(&receipt)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .is_some_and(|receipt| receipt["prs"]["kind"] == "contended");
+        if recorded || Instant::now() >= deadline {
+            break recorded;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    gitea.release(holder_reply);
+    let _ = holder.wait();
+    let output = refresh.wait_with_output().expect("wt -r ends");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(contended, "wt -r's worker found the PR lock held:\n{stderr}");
+    assert!(output.status.success(), "{stderr}");
+    assert!(wait_for_refresh_workers(fixture.main(), 0, WORKER_WAIT).is_empty(), "every worker ended");
+    (collapsed(&stderr), gitea.requests())
+}
+
+#[test]
+#[serial]
+fn refresh_shows_the_answer_a_contending_holder_published() {
+    let (stderr, requests) = refresh_against_a_holder(GiteaReply::Open(vec![(7, "divergent-1")]), Seeded::Old);
+
+    assert!(stderr.contains("PR #7"), "{stderr}");
+    assert!(!stderr.contains("PR #99") && !stderr.contains("PRs as of"), "{stderr}");
+    assert_eq!(requests, 1, "the holder's answer needed no second request");
+}
+
+/// The holder replaces a young answer without moving `fetched_at` forward
+/// (whole seconds, stamped at its request's start).
+#[test]
+#[serial]
+fn refresh_shows_a_holders_answer_that_replaced_a_young_one_within_its_second() {
+    let (stderr, requests) = refresh_against_a_holder(GiteaReply::Open(vec![(7, "divergent-1")]), Seeded::Young);
+
+    assert!(stderr.contains("PR #7"), "{stderr}");
+    assert!(!stderr.contains("PR #99") && !stderr.contains("PRs as of"), "{stderr}");
+    assert_eq!(requests, 1, "the holder's answer needed no second request");
+}
+
+/// The holder's request fails and stores nothing, so `wt -r` asks again
+/// itself; that fails too, and the old answer is shown with its age.
+#[test]
+#[serial]
+fn refresh_asks_again_when_a_contending_holder_failed() {
+    let (stderr, requests) = refresh_against_a_holder(GiteaReply::Status(500), Seeded::Old);
+
+    assert_eq!(requests, 2, "wt -r made its own request once the holder's failed");
+    assert!(stderr.contains("PR #99") && stderr.contains("PRs as of 2 h ago"), "{stderr}");
 }
 
 #[test]
