@@ -903,11 +903,10 @@ fn first_on_lane<'g>(geometry: &'g GitGraphGeometry, lane: &str) -> &'g CommitGe
 
 /// `fix/sniff` is merged into `main` directly by `M104`, and its recorded
 /// parent `fix/wt-ux` contains its tip only through `B1`'s merge of `main`.
-/// Its fork `W1` is `M103`'s second parent and older than `fix/wt-ux`'s drawn
-/// run, so no lane draws it.
-// flips in Phase 4: W1 is now drawn on fix/wt-ux's lane, where fix/sniff connects.
+/// Its fork `W1` is `M103`'s second parent: `fix/wt-ux`'s lane boundary, so
+/// `fix/wt-ux` draws it merged into `M103`, and `fix/sniff` hangs from it
+/// there.
 #[test]
-#[ignore = "flips in Phase 4"]
 #[serial_test::serial]
 fn a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment() {
     let repo = observed_sparse_lanes();
@@ -927,23 +926,30 @@ fn a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment
     assert!(graph.default_entries.contains(&LaneEntry::Commit(repo.m104.clone())));
     let w1 = LaneEntry::Commit(repo.w1().clone());
     assert!(!graph.default_entries.contains(&w1), "W1 is not on main's lane");
-    assert!(graph.lines.iter().all(|line| !line.entries.contains(&w1)), "W1 is on no branch lane");
 
-    // Gathering verified every connection it reports; the notice comes from
-    // `GitGraph`, which cannot attach the lane at its fork.
+    let wt_ux = line(&graph, "fix/wt-ux");
+    assert!(wt_ux.entries.contains(&w1), "W1 is on fix/wt-ux's lane: {:?}", wt_ux.entries);
+    assert_eq!(wt_ux.merges, [LaneMerge { source: repo.w1().clone(), destination: repo.m103.clone() }]);
+    assert_eq!(wt_ux.fork_sha.as_ref(), Some(&repo.d[5]), "merge-base(M103^1, W1)");
+    assert!(!graph.incomplete);
+    assert_no_repeated_commit(&graph);
+
     let plan = untrimmed_plan(&graph, 200, 60);
-    assert!(plan.incomplete, "the undrawn fork is accounted for by the notice");
+    assert!(!plan.incomplete, "every fork and merge is drawn: {}", plan.mermaid);
     assert_eq!(plan.hidden_lanes, 0, "{}", plan.mermaid);
     assert!(has_merge(&plan.mermaid, "fix/sniff", &repo.m104), "{}", plan.mermaid);
-    assert!(!plan.mermaid.contains(&repo.w1()[..7]), "W1 is not drawn: {}", plan.mermaid);
+    assert!(has_merge(&plan.mermaid, "fix/wt-ux", &repo.m103), "{}", plan.mermaid);
     let geometry = geometry_of(&plan.mermaid);
     let merge = laid_out(&geometry, &repo.m104).expect("M104 drawn");
     assert_eq!(merge.lane, "main", "the merge edge ends on the default lane");
     assert_eq!(merge.parents.len(), 2, "{merge:?}");
     assert!(repo.d[13].starts_with(merge.parents[0].as_str()), "{merge:?}");
     assert!(sniff_tip.starts_with(merge.parents[1].as_str()), "{merge:?}");
+    let drawn_w1 = laid_out(&geometry, repo.w1()).expect("W1 drawn");
+    assert_eq!(drawn_w1.lane, "fix/wt-ux", "{drawn_w1:?}");
     let start = first_on_lane(&geometry, "fix/sniff");
-    assert!(start.parents.is_empty(), "the lane starts unconnected, never at a substitute fork: {start:?}");
+    assert_eq!(start.parents.len(), 1, "{start:?}");
+    assert!(repo.w1().starts_with(start.parents[0].as_str()), "fix/sniff forks at W1: {start:?}");
 }
 
 /// The parent was fast-forwarded into `main` at `p2`, where `child` forked,
@@ -1205,15 +1211,12 @@ fn equal_tips_keep_the_merged_lane_and_label_the_new_branch() {
     assert!(text.contains(&format!("commit id: \"{}\" tag: \"d\"", &c2[..7])), "{text}");
 }
 
-/// `b` was merged at `merge` and then got another commit. Its current
-/// relationship is an unmerged lane forked at the old merged tip, which is
-/// not on any drawn lane (it is `merge`'s second parent), so the lane is
-/// unconnected and the graph says history is missing.
-// flips in Phase 4: b1 is now drawn on b's lane and merged into `merge`.
+/// `b` was merged at `merge` and then got another commit. The lane's
+/// boundary `b1` is `merge`'s second parent, so the earlier merge is drawn
+/// mid-lane: `b1` merged into `merge`, then `b2`, and the lane forks at `d1`.
 #[test]
-#[ignore = "flips in Phase 4"]
 #[serial_test::serial]
-fn a_branch_continued_after_its_merge_is_an_unmerged_lane() {
+fn a_branch_continued_after_its_merge_draws_its_earlier_merge() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_path_buf();
     init_repo(&path);
@@ -1232,25 +1235,30 @@ fn a_branch_continued_after_its_merge_is_an_unmerged_lane() {
     let graph = graph.expect("focused view");
 
     let b = line(&graph, "b");
-    assert_eq!(b.entries, commits(&[&b2]));
-    assert_eq!(b.fork_sha.as_ref(), Some(&b1));
-    assert_eq!(merge_destinations(b), Vec::<&String>::new(), "no earlier merge is reconstructed");
-    assert!(graph.default_entries.iter().all(|entry| *entry != LaneEntry::Commit(b1.clone())));
+    assert_eq!(b.entries, commits(&[&b1, &b2]));
+    assert_eq!(b.fork_sha.as_ref(), Some(&d1));
+    assert_eq!(b.merges, [LaneMerge { source: b1.clone(), destination: merge.clone() }]);
+    assert!(!graph.default_entries.contains(&LaneEntry::Commit(b1.clone())));
     assert!(graph.default_entries.contains(&LaneEntry::Commit(d1.clone())));
     assert!(graph.default_entries.contains(&LaneEntry::Commit(merge.clone())));
-    let plan = graph
-        .to_git_graph(&PrListing::default(), None)
-        .plan_with(
-            GraphViewport {
-                columns: 120,
-                rows: 40,
-                cell: CellSize::FALLBACK,
-            },
-            &|_: &str| Some(NaturalSize { width: 400.0, height: 120.0 }),
-        )
-        .expect("plan");
-    assert!(plan.incomplete, "the fork is not drawn, so the notice accounts for it");
-    assert!(!plan.mermaid.contains("merge "), "{}", plan.mermaid);
+    assert!(!graph.incomplete);
+    assert_no_repeated_commit(&graph);
+
+    let plan = untrimmed_plan(&graph, 120, 40);
+    assert!(!plan.incomplete, "every connection is drawn: {}", plan.mermaid);
+    assert!(has_merge(&plan.mermaid, "b", &merge), "{}", plan.mermaid);
+    let geometry = geometry_of(&plan.mermaid);
+    let drawn = laid_out(&geometry, &merge).expect("merge drawn");
+    assert_eq!(drawn.lane, "main", "{drawn:?}");
+    assert_eq!(drawn.parents.len(), 2, "{drawn:?}");
+    assert!(d1.starts_with(drawn.parents[0].as_str()), "{drawn:?}");
+    assert!(b1.starts_with(drawn.parents[1].as_str()), "the merge's second parent is b1: {drawn:?}");
+    let after = laid_out(&geometry, &b2).expect("b2 drawn");
+    assert_eq!(after.lane, "b", "{after:?}");
+    assert_eq!(after.parents.len(), 1, "{after:?}");
+    assert!(b1.starts_with(after.parents[0].as_str()), "b resumes from b1 after the merge: {after:?}");
+    let start = first_on_lane(&geometry, "b");
+    assert!(d1.starts_with(start.parents[0].as_str()), "the lane forks at d1: {start:?}");
 }
 
 /// `t` reached main only through `other`'s merge.
@@ -2479,6 +2487,9 @@ struct Evidence<'a> {
     tags: Vec<(&'a str, &'a str)>,
     /// `(merge, first parent, second parent)`.
     merges: Vec<(&'a str, &'a str, &'a str)>,
+    /// `(child, merge source)`: the next commit on the source's lane after a
+    /// merge source hangs from that source (a `+N` square once trimmed).
+    post_merge: Vec<(&'a str, &'a str)>,
     /// The plan's notice: some fork, merge, or tagged commit is not drawn.
     incomplete: bool,
     /// Lanes the height cap leaves out at 120×40 and at 56×60.
@@ -2549,6 +2560,20 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
             );
             assert!(second.starts_with(commit.parents[1].as_str()), "second parent of {}: {:?}\n{context}", commit.id, commit.parents);
         }
+        for (child, source) in &expected.post_merge {
+            let drawn_source = laid_out(&geometry, source).unwrap_or_else(|| panic!("merge source {source} drawn: {context}"));
+            let next = geometry
+                .commits
+                .iter()
+                .find(|commit| commit.lane == drawn_source.lane && commit.index > drawn_source.index)
+                .unwrap_or_else(|| panic!("a commit after {} on {}: {context}", drawn_source.id, drawn_source.lane));
+            assert!(
+                child.starts_with(next.id.as_str()) || (planned.trimmed_commits > 0 && next.id.starts_with('+')),
+                "the commit after {} is {child}: {next:?}\n{context}",
+                drawn_source.id
+            );
+            assert_eq!(next.parents, std::slice::from_ref(&drawn_source.id), "{} hangs from {}\n{context}", next.id, drawn_source.id);
+        }
 
         let mut texts: Vec<String> = geometry.tag_boxes().iter().map(|(_, text, _)| text.to_string()).collect();
         texts.sort();
@@ -2588,9 +2613,7 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
     report
 }
 
-// flips in Phase 4: the sparse-lanes entry now draws `W1` merged into `M103` and has no notice.
 #[test]
-#[ignore = "flips in Phase 4"]
 #[serial_test::serial]
 fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
     let mut report = Vec::new();
@@ -2601,6 +2624,7 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
         let expected = Evidence {
             tags: vec![("main", &repo.d2), ("origin/main", &repo.merge)],
             merges: vec![(&repo.merge, &repo.d2, &repo.w2)],
+            post_merge: vec![],
             incomplete: false,
             hidden_lanes: [0, 0],
         };
@@ -2622,6 +2646,7 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             &Evidence {
                 tags: vec![("main", &repo.m103), ("origin/main", &repo.m104)],
                 merges: vec![(&repo.m103, &repo.d1, &repo.w2), (&repo.m104, &repo.m103, sniff_tip)],
+                post_merge: vec![],
                 incomplete: false,
                 hidden_lanes: [0, 0],
             },
@@ -2644,15 +2669,17 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             &Evidence {
                 tags: vec![(BETA, &repo.d3), ("main", &repo.d4), ("origin/main", &repo.d5), ("PR #104 → main", &repo.a2)],
                 merges: vec![],
+                post_merge: vec![],
                 incomplete: false,
                 hidden_lanes: [0, 0],
             },
         ));
     }
 
-    // Its only undrawn connection is `fix/sniff`'s fork `W1`. At 40 rows the
-    // height cap leaves out the least active lane, `feat/schema-enhancement`
-    // (its tip is the oldest; see `commit_on`).
+    // Every connection is drawn: `fix/wt-ux` merges into `M103` from `W1`,
+    // where `fix/sniff` forks. At 40 rows the height cap leaves out the least
+    // active lane, `feat/schema-enhancement` (its tip is the oldest; see
+    // `commit_on`).
     let repo = observed_sparse_lanes();
     {
         let _guard = DirGuard::enter(&repo.path);
@@ -2663,9 +2690,101 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             &PrListing::default(),
             &Evidence {
                 tags: vec![("main", &repo.m104), ("origin/main", &repo.m104)],
-                merges: vec![(&repo.m104, &repo.d[13], repo.sniff.last().expect("sniff commits"))],
-                incomplete: true,
+                merges: vec![(&repo.m103, &repo.d[12], repo.w1()), (&repo.m104, &repo.d[13], repo.sniff.last().expect("sniff commits"))],
+                post_merge: vec![(&repo.wt_ux[SPARSE_WT_UX_BEFORE_MERGE], repo.w1())],
+                incomplete: false,
                 hidden_lanes: [1, 0],
+            },
+        ));
+    }
+
+    // PR #105's shape: `B` merged into `C`, then `N`; `fix/sniff-pr` is a
+    // label at `B`. With `main` behind, `C` is on the default lane; diverged,
+    // on the `origin/main` line.
+    for local_main in [LocalMain::AtMerge, LocalMain::Behind, LocalMain::Diverged] {
+        let repo = continued_after_merge(local_main);
+        let _guard = DirGuard::enter(&repo.path);
+        let main_tip = match local_main {
+            LocalMain::AtMerge => &repo.c,
+            LocalMain::Behind => &repo.p,
+            LocalMain::Diverged => repo.p_prime.as_ref().expect("P'"),
+        };
+        let views: &[(&str, &str)] = match local_main {
+            LocalMain::AtMerge => &[("base", "main"), ("focused wt-ux", "fix/wt-ux"), ("focused sniff-pr", "fix/sniff-pr")],
+            _ => &[("base", "main")],
+        };
+        for (view, current) in views {
+            let (graph, _) = gather(&input(current, &repo.branches(), repo.forks.clone()), true, false);
+            // Diverged, `origin/main` is a lane of its own, named rather than tagged.
+            let mut tags = vec![("main", main_tip.as_str())];
+            if local_main != LocalMain::Diverged {
+                tags.push(("origin/main", repo.c.as_str()));
+            }
+            if *current != "fix/wt-ux" {
+                tags.push(("fix/sniff-pr", repo.b()));
+            }
+            report.extend(assert_laid_out(
+                &format!("continued-{local_main:?} {view}"),
+                &graph.expect("a graph"),
+                &PrListing::default(),
+                &Evidence {
+                    tags,
+                    merges: vec![(&repo.c, &repo.p, repo.b())],
+                    post_merge: vec![(&repo.n, repo.b())],
+                    incomplete: false,
+                    hidden_lanes: [0, 0],
+                },
+            ));
+        }
+    }
+
+    let repo = merged_twice_and_continued();
+    {
+        let _guard = DirGuard::enter(&repo.path);
+        let (graph, _) = gather(&input("main", &["main", "b"], ForkOriginStore::default()), true, false);
+        report.extend(assert_laid_out(
+            "merged-twice base",
+            &graph.expect("a graph"),
+            &PrListing::default(),
+            &Evidence {
+                tags: vec![("main", &repo.c2)],
+                merges: vec![(&repo.c1, &repo.p1, &repo.b1), (&repo.c2, &repo.p2, &repo.b2)],
+                post_merge: vec![(&repo.b2, &repo.b1), (&repo.n, &repo.b2)],
+                incomplete: false,
+                hidden_lanes: [0, 0],
+            },
+        ));
+    }
+
+    // With its record, `new` does not claim `C`: its fork `b1` is undrawn, so
+    // the plan has the notice. Without it, the topology gives the merge.
+    let repo = new_branch_at_merged_tip();
+    {
+        let _guard = DirGuard::enter(&repo.path);
+        let (graph, _) = gather(&input("main", &["main", "new"], repo.forks.clone()), true, false);
+        report.extend(assert_laid_out(
+            "new-at-merged-tip recorded",
+            &graph.expect("a graph"),
+            &PrListing::default(),
+            &Evidence {
+                tags: vec![("main", &repo.c)],
+                merges: vec![],
+                post_merge: vec![],
+                incomplete: true,
+                hidden_lanes: [0, 0],
+            },
+        ));
+        let (graph, _) = gather(&input("main", &["main", "new"], ForkOriginStore::default()), true, false);
+        report.extend(assert_laid_out(
+            "new-at-merged-tip unrecorded",
+            &graph.expect("a graph"),
+            &PrListing::default(),
+            &Evidence {
+                tags: vec![("main", &repo.c)],
+                merges: vec![(&repo.c, &repo.p, &repo.b1)],
+                post_merge: vec![(&repo.n1, &repo.b1)],
+                incomplete: false,
+                hidden_lanes: [0, 0],
             },
         ));
     }
@@ -2674,23 +2793,22 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
     eprintln!("{}", report.join("\n"));
 }
 
-/// The laid-out commits on `lane` after its leading `+N` square.
+/// The laid-out commits on `lane` after its last `+N` square.
 fn after_square<'g>(geometry: &'g GitGraphGeometry, lane: &str) -> Vec<&'g CommitGeometry> {
     let on_lane: Vec<&CommitGeometry> = geometry.commits.iter().filter(|commit| commit.lane == lane).collect();
     let square = on_lane
         .iter()
-        .position(|commit| commit.id.starts_with('+'))
+        .rposition(|commit| commit.id.starts_with('+'))
         .unwrap_or_else(|| panic!("{lane} has no +N square: {on_lane:?}"));
     on_lane[square + 1..].to_vec()
 }
 
 /// The observed history at 200×60 with the real measurement: an isolated
 /// `main`/`origin/main` stack no longer widens the step, so every long lane
-/// keeps more than its tip after its `+N` square, and `fix/sniff` merges into
-/// `main` at `M104`.
-// flips in Phase 4: every lane is now connected, so the plan has no notice.
+/// keeps more than its tip after its last `+N` square; `fix/wt-ux` merges
+/// into `main` at `M103` from `W1`, where `fix/sniff` forks, and `fix/sniff`
+/// merges into `main` at `M104`.
 #[test]
-#[ignore = "flips in Phase 4"]
 #[serial_test::serial]
 fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
     let repo = observed_sparse_lanes();
@@ -2712,10 +2830,17 @@ fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
     assert!(plan.columns <= 200, "{plan:?}");
     assert_eq!(plan.hidden_lanes, 0, "{context}");
 
-    for lane in ["feat/schema-enhancement", "fix/wt-ux", "fix/sniff"] {
+    for lane in ["feat/schema-enhancement", "fix/sniff"] {
         let kept = after_square(&geometry, lane);
         assert!(kept.len() >= 2, "{lane} keeps more than its tip after its +N square: {kept:?}\n{context}");
     }
+    // `fix/wt-ux` has an anchor, `W1`, between its squares. Width trimming
+    // folds commits beside a square first, so its recent run folds into the
+    // last square before `main`'s unfolded `d6..d12` run does.
+    let wt_ux_tip = repo.wt_ux.last().expect("wt-ux commits");
+    let kept = after_square(&geometry, "fix/wt-ux");
+    assert!(wt_ux_tip.starts_with(kept.last().expect("the tip is kept").id.as_str()), "{kept:?}\n{context}");
+    assert!(plan.mermaid.contains(&repo.w1()[..7]), "W1 is drawn: {context}");
     let sniff_kept = after_square(&geometry, "fix/sniff");
     assert!(sniff_tip.starts_with(sniff_kept.last().expect("kept").id.as_str()), "{context}");
 
@@ -2725,17 +2850,22 @@ fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
     assert_eq!(merge.parents.len(), 2, "{merge:?}");
     assert!(sniff_tip.starts_with(merge.parents[1].as_str()), "{merge:?}");
 
+    assert!(has_merge(&plan.mermaid, "fix/wt-ux", &repo.m103), "{context}");
+    let earlier = laid_out(&geometry, &repo.m103).expect("M103 drawn");
+    assert_eq!(earlier.lane, "main", "{context}");
+    assert_eq!(earlier.parents.len(), 2, "{earlier:?}");
+    assert!(repo.w1().starts_with(earlier.parents[1].as_str()), "M103's second parent is W1: {earlier:?}\n{context}");
+
     assert_eq!(geometry.tag_overlaps(), Vec::<(String, String)>::new(), "{context}");
     let mut tags: Vec<&str> = merge.tags.iter().map(|tag| tag.text.as_str()).collect();
     tags.sort_unstable();
     assert_eq!(tags, ["main", "origin/main"], "both refs label M104: {context}");
 
-    // The notice's only cause: `fix/sniff` cannot attach at `W1`. Every other
-    // branch lane starts from a drawn commit.
-    assert!(plan.incomplete, "{context}");
-    assert!(!plan.mermaid.contains(&repo.w1()[..7]), "W1 is not drawn: {context}");
-    assert!(first_on_lane(&geometry, "fix/sniff").parents.is_empty(), "{context}");
-    for lane in ["feat/schema-enhancement", "fix/wt-ux"] {
+    // Every branch lane starts from a drawn commit, so there is no notice.
+    assert!(!plan.incomplete, "{context}");
+    for lane in ["feat/schema-enhancement", "fix/wt-ux", "fix/sniff"] {
         assert!(!first_on_lane(&geometry, lane).parents.is_empty(), "{lane} is connected: {context}");
     }
+    let sniff_start = first_on_lane(&geometry, "fix/sniff");
+    assert!(repo.w1().starts_with(sniff_start.parents[0].as_str()), "fix/sniff forks at W1: {sniff_start:?}\n{context}");
 }
