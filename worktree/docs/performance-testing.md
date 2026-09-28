@@ -31,7 +31,7 @@ The second owned cost center is graph data collection in [`worktree/cli/src/comm
 
 - Every stored answer is bound to a digest of the exact `git remote get-url origin` value, so every run pays that one git call, a cache hit included, before it may show stored badges.
 - A matching answer younger than 60 s is used as is. An older one is still shown at once, with its age; the worker every listing launches (below) refreshes it and never delays the listing for it. The worker holds a lock beside the store from its freshness recheck to publication, so concurrent workers make at most one request, and its answer is shown by the next run.
-- Only a miss (no store, another or no `origin`, an older format, a corrupt file, or a future fetch time) makes the request in the foreground, under a 300 ms deadline, and it settles *before* the worker is launched, so the worker finds the answer and never repeats the request. `-r`/`--ff` leave the miss to their forced worker, and a repository in `~/.wt.json` makes no request. A failure is never stored.
+- Only a miss (no store, another or no `origin`, an older format, a corrupt file, or a future fetch time) makes the request in the foreground, under a 300 ms deadline, and it settles *before* the worker is launched (the request never waits for the worker's lock; its answer is stored only if that lock is free afterwards and no other answer appeared meanwhile), so the worker finds the answer and never repeats the request. `-r`/`--ff` leave the miss to their forced worker, and a repository in `~/.wt.json` makes no request. A failure is never stored.
 - The `--perf` stage is `pr gather`: the origin lookup and, on a miss, the request. It never adds to `list gather`.
 
 ## Live Remote Head
@@ -40,7 +40,7 @@ Every listing with an `origin` checks the remote and, when it differs, fetches t
 
 - `wt list` launches (or adopts) one `wt internal-refresh <main checkout> --attempt <id>` and polls `<repo hash>.remote-head.json`'s `attempt` record every 25 ms until that attempt has an outcome or 3 s pass. Work still running at 3 s continues in the background, and the caption says so ("still checking" or "still pulling"). Refs, counts, and the graph are gathered *after* the wait, so they describe the post-fetch state.
 - The worker's check asks the provider API, then `git ls-remote`, within one 10 s budget (`REMOTE_HEAD_REFRESH_DEADLINE`), and its fetch of `refs/remotes/origin/<default>` has its own 60 s deadline (`FETCH_DEADLINE`). Both kill the whole process tree at the deadline ([`live_remote.rs`](../lib/src/live_remote.rs)), so no worker holds `remote-head.lock` forever.
-- `-r`/`--refresh` and `--ff` wait for the whole attempt and its completion receipt, bounded by `ATTEMPT_MAX_AGE` (75 s); in practice by the worker's own deadlines.
+- `-r`/`--refresh` and `--ff` wait for the whole attempt and its completion receipt, bounded by `ATTEMPT_MAX_AGE` (75 s); in practice by the worker's own deadlines. Each forced attempt writes its own receipt file (`<repo hash>.refresh-receipt.<attempt id>.json`), so two overlapping `-r` runs each read their own; the run deletes it when its wait ends, and the next forced worker deletes any older than 75 s.
 - The `--perf` stages are `remote wait` (launch through outcome or budget) and `fast-forward` (`--ff` only).
 
 ### The full-command contract
