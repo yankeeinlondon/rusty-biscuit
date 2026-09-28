@@ -556,6 +556,10 @@ When stdout is a terminal and no explicit `--<provider>` flag is given:
 
 1. **Interactive picker** — a `biscuit-tui` one-shot picker shows all installed providers. Frontmatter `agent` and config `favorite_agent` only influence the **default index** and **row ordering**; they do not bypass the picker.
 
+The picker renders **inline**, directly below the cursor, sized to its rows (at most 8 terminal rows), like the schema choosers. It never switches to the alternate screen, so earlier output stays in scrollback. `Esc` keeps the initial selection; `Ctrl-C` cancels.
+
+The picker is the **last** question before launch. Caller file completion ([Provided Partial File References](#provided-partial-file-references)) runs first, and an input failure that is already decidable is reported before the picker opens. For example, `spec=nomatch` with no matching file prints `no existing file matched reference` and exits; the picker never renders.
+
 ### Non-TTY Mode
 
 When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict chain with no interactive fallback:
@@ -859,11 +863,12 @@ for unrelated `plan` or `review` inputs. `-y` does not suppress confirmation or
 choose a file automatically; the usual TTY, configuration, and `--silent`
 gates still apply.
 
-For a root-level schema union, completion requires exactly one alternative to
-match after deferring existence checks on caller-supplied files. If other
-constraints leave no matching alternative, or several alternatives match,
-completion defers to canonical preparation without guessing a file type or
-issuing an early schema verdict.
+For a root-level schema union, an arm is chosen after deferring existence
+checks on caller-supplied files and treating templated values as undecided.
+When exactly one arm applies, its declaration drives completion. When no arm
+applies, or several do, completion runs only through the merged-glob rule
+above; otherwise it defers to canonical preparation without guessing a file
+type or issuing an early schema verdict.
 
 ### Schema Collection Independence
 
