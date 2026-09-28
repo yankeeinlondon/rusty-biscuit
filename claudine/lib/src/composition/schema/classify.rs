@@ -595,7 +595,10 @@ pub(in crate::composition) fn status_report_for_instance(
     source_path: &std::path::Path,
     fm_map: serde_json::Map<String, serde_json::Value>,
 ) -> Result<Option<SchemaStatusReport>, SchemaError> {
-    let instance = serde_json::Value::Object(fm_map.clone());
+    // Judged on the text composition reads; `fm_map` keeps stored tokens so
+    // the status below still sees them as data rather than pending.
+    let instance =
+        crate::composition::closure::stored_text(&serde_json::Value::Object(fm_map.clone()));
     let report = match phase {
         Some(phase) => effective.validate_for_phase(&instance, phase)?,
         None => effective.validate(&instance),

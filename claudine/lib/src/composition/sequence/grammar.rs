@@ -105,6 +105,16 @@ pub fn classify_source(value: &Value) -> Result<SequenceSourceSpec, CompositionE
 fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionError> {
     let trimmed = raw.trim();
 
+    // A literal token is stored data. Read as `{{ … }}` it would become an
+    // expression, and decoded it would be data choosing the run's steps.
+    if crate::composition::closure::opens_stored_token(trimmed) {
+        return Err(CompositionError::SequenceInvalid(
+            "`sequence` holds a stored literal token (`{{!data:…}}`), which is data; \
+             author the list, file reference, expression, or shell expansion directly"
+                .to_string(),
+        ));
+    }
+
     if let Some(inner) = whole_value_span(trimmed, "{{", "}}") {
         return Ok(SequenceSourceSpec::Expression(inner.trim().to_string()));
     }

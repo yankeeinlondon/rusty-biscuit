@@ -1921,6 +1921,31 @@ mod dynamic_sources {
         assert_eq!(names(&plan), vec!["1", "2"]);
     }
 
+    /// An expression source reads a stored literal token as the text it
+    /// holds; the text itself is data, so its `{{ … }}` names a step verbatim.
+    #[test]
+    fn an_expression_source_reads_a_stored_token_as_its_text() {
+        let token = darkmatter::markdown::literal_token::encode("a, see {{ x }}");
+        let plan =
+            plan_from_frontmatter(&[("raw", json!(token)), ("sequence", json!("{{ raw }}"))])
+                .unwrap();
+        assert_eq!(names(&plan), vec!["a", "see {{ x }}"]);
+    }
+
+    /// A `sequence:` value that is a stored token is refused: read as
+    /// `{{ … }}` it would be an expression, and decoded it would be data
+    /// choosing the steps.
+    #[test]
+    fn a_stored_token_is_not_a_sequence_source() {
+        for raw in [
+            darkmatter::markdown::literal_token::encode("{{ items }}"),
+            darkmatter::markdown::literal_token::encode("./steps.yaml"),
+        ] {
+            let error = classify_source(&json!(raw)).unwrap_err();
+            assert!(matches!(error, CompositionError::SequenceInvalid(_)), "{error}");
+        }
+    }
+
     #[test]
     fn a_failing_expression_is_a_typed_error() {
         let error = plan_from_frontmatter(&[("sequence", json!("{{ nope( }}"))]).unwrap_err();

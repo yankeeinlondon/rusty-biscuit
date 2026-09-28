@@ -172,7 +172,9 @@ fn supplied_file_shape<'a>(
         if report
             .problems
             .iter()
-            .all(|problem| !is_composition_independent(problem, &candidate))
+            .all(|problem| {
+                !is_composition_independent(problem, &candidate, &std::collections::BTreeSet::new())
+            })
         {
             if selected.is_some() {
                 return None;

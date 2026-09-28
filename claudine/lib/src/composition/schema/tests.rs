@@ -2132,3 +2132,67 @@ fn status_report_marks_document_dir_file_valid() {
         "a file value resolvable against the document dir must report Valid: {spec:?}",
     );
 }
+
+// -- stored literal tokens and data overrides are final values (N6) ---------
+
+/// A stored literal token is judged by the text it holds and is never
+/// "pending composition": a valid decoded value passes, an invalid optional
+/// one is dropped, and the source handed on keeps the token bytes.
+#[test]
+fn a_stored_literal_token_is_judged_by_its_text() {
+    use darkmatter::markdown::literal_token::{encode, encode_yaml_scalar};
+    let dir = TempDir::new().unwrap();
+    let valid = make_source(
+        &dir,
+        &format!(
+            "---\n$schema:\n  mode: 'enum(alpha, beta)'\nmode: {}\n---\nbody\n",
+            encode_yaml_scalar("alpha")
+        ),
+    );
+    let pre = pre_validate_schema(&valid, None, None).expect("the decoded text is in the enum");
+    assert_eq!(
+        pre.source.markdown.frontmatter().as_map()["mode"],
+        serde_json::json!(encode("alpha")),
+        "the token is kept for composition to decode"
+    );
+    let status = build_schema_status_report(&valid, None, None).unwrap().unwrap();
+    assert!(!status.has_invalid_optional, "{status:?}");
+
+    let invalid = make_source(
+        &dir,
+        &format!(
+            "---\n$schema:\n  count: 'number'\ncount: {}\n---\nbody\n",
+            encode_yaml_scalar("$(echo 1)")
+        ),
+    );
+    let (scrubbed, _, dropped) = drop_invalid_optionals(invalid, None, None);
+    assert!(
+        !scrubbed.markdown.frontmatter().as_map().contains_key("count"),
+        "a token holding command text is data, not a pending command"
+    );
+    assert_eq!(dropped.len(), 1);
+}
+
+/// A data override holding template text is judged; the same text typed by a
+/// person stays a template and is deferred to composition.
+#[test]
+fn a_data_override_is_judged_and_an_authored_one_is_deferred() {
+    use crate::composition::LayeredOverrides;
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  count: 'number(required)'\ncount: 1\n---\nbody\n",
+    );
+    let value = serde_json::json!({"count": "{{ n }}"});
+
+    let authored = LayeredOverrides::from_parts(Some(&value), &Default::default());
+    pre_validate_layered_for_mode(&source, &authored, None, CompositionMode::ChainedDocument)
+        .expect("an authored template is deferred to composition");
+
+    let data_keys = std::collections::BTreeSet::from(["count".to_string()]);
+    let data = LayeredOverrides::from_parts(Some(&value), &data_keys);
+    let error =
+        pre_validate_layered_for_mode(&source, &data, None, CompositionMode::ChainedDocument)
+            .expect_err("a data string cannot satisfy `number`");
+    assert!(matches!(error, CompositionError::SchemaValidation { .. }), "{error:?}");
+}

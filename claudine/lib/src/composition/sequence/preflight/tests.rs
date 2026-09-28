@@ -1029,6 +1029,28 @@ mod shell {
         );
     }
 
+    /// A stored literal token resolves to the text it holds, exactly as
+    /// composition will read it, so the approved bytes match what runs; the
+    /// inserted text is data and is not scanned again.
+    #[test]
+    fn a_stored_token_resolves_to_its_text_in_approved_bytes() {
+        let dir = TempDir::new().unwrap();
+        let token = darkmatter::markdown::literal_token::encode("see {{ title }}");
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("title", json!("t")),
+                ("note", json!(token)),
+                ("sequence", json!([{ "name": "alpha", "shell": "echo '{{ note }}'" }])),
+            ],
+            "Body.\n",
+        );
+
+        let graph = graph_for(&source).unwrap();
+        assert_eq!(graph.shell_commands[0].command, "echo 'see {{ title }}'");
+    }
+
     /// Each step resolves against its own state, so a per-step command is
     /// approved once per distinct byte string.
     #[test]
