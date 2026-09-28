@@ -20,9 +20,10 @@
 //!   function they live in, so an exception cannot silently spread to a
 //!   same-looking line in another file.
 //!
-//! `#[cfg(test)]` items and test directories are skipped structurally, per the
-//! spec's requirement that exclusions be path-based rather than substring
-//! exceptions.
+//! Items compiled only in a test build (`#[cfg(test)]` or a test-only feature,
+//! evaluated by [`crate::cfg_gate`]) and test directories are skipped
+//! structurally, per the spec's requirement that exclusions be path-based
+//! rather than substring exceptions.
 //!
 //! See `claudine/features/2026-07-13-error-propogation/spec.md` §D2 and §D8.
 
@@ -393,13 +394,10 @@ fn is_generated(relative: &str) -> bool {
     relative.ends_with("/data.rs") && relative.contains("/provider/")
 }
 
+/// Whether `attrs` compile the item only in a test build, per
+/// [`crate::cfg_gate`]. An unreadable predicate is scanned, never skipped.
 fn is_cfg_test(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        let Meta::List(list) = &attr.meta else {
-            return false;
-        };
-        list.path.is_ident("cfg") && list.tokens.to_string().contains("test")
-    })
+    crate::cfg_gate::attrs_are_test_only(attrs).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
