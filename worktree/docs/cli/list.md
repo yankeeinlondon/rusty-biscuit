@@ -158,13 +158,13 @@ Commits are formatted as conventional commits when possible (e.g. `feat(scope): 
 
 After a blank line, the output can end with up to three kinds of note, in this order.
 
-- **Fast-forward suggestion.** When this run's check completed and the local default branch is strictly behind `origin/<default>` (not diverged):
+- **Fast-forward suggestion.** When the local default branch is strictly behind `origin/<default>` (not diverged):
 
     ```text
     - main is 3 commits behind origin/main; run wt --ff to fast-forward it.
     ```
 
-    It is not shown when the listing rendered before the fetch finished, or under `--ff`, which reports its own result instead: nothing when it moved the branch or there was nothing to do, otherwise the reason it did not, for example (`main has diverged from origin/main, so it can't be fast-forwarded.`, `main wasn't fast-forwarded: the checkout has uncommitted changes to files the update touches.`, or `main wasn't fast-forwarded: origin/main doesn't exist.`).
+    It is not shown when the listing rendered while origin was still being checked or pulled, or under `--ff`, which reports its own result instead: nothing when it moved the branch or there was nothing to do, otherwise the reason it did not, for example (`main has diverged from origin/main, so it can't be fast-forwarded.`, `main wasn't fast-forwarded: the checkout has uncommitted changes to files the update touches.`, or `main wasn't fast-forwarded: origin/main doesn't exist.`). A failed check or fetch still shows it, since `--ff` moves to the local tracking ref; the caption keeps the failure reason, so the target may itself be out of date.
 - **Fallback notice.** When no API key was set, the provider would not show the repository without one, and `ls-remote` answered instead:
 
     ```text

@@ -240,6 +240,44 @@ fn a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_th
 
 #[test]
 #[serial]
+fn a_failed_check_still_suggests_fast_forwarding_to_the_local_tracking_ref() {
+    let fixture = Fixture::new();
+    fixture.commit_and_push("second");
+    fixture.git(&fixture.main, &["fetch", "origin"]);
+    let gate = UploadPackGate::failing(&fixture, 0);
+
+    let caption = fixture.list();
+
+    assert!(caption.contains("main is 1 commit behind origin/main (couldn't check origin;"), "the reason stays: {caption}");
+    assert!(caption.contains("main is 1 commit behind origin/main; run wt --ff to fast-forward it."), "{caption}");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "check-failed");
+    assert_eq!(gate.runs(), 1, "only the check ran");
+}
+
+#[test]
+#[serial]
+fn a_failed_fetch_still_suggests_fast_forwarding_to_the_local_tracking_ref() {
+    let fixture = Fixture::new();
+    fixture.commit_and_push("second");
+    fixture.git(&fixture.main, &["fetch", "origin"]);
+    let fetched = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
+    fixture.commit_and_push("third");
+    let gate = UploadPackGate::failing(&fixture, 1);
+
+    let caption = fixture.list();
+
+    assert!(
+        caption.contains("main is 1 commit behind local origin/main (origin differed when checked just now; fetch failed"),
+        "the reason stays: {caption}"
+    );
+    assert!(caption.contains("main is 1 commit behind origin/main; run wt --ff to fast-forward it."), "{caption}");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "fetch-failed");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), fetched, "the tracking ref did not move");
+    assert_eq!(gate.runs(), 2, "one check and one failed fetch");
+}
+
+#[test]
+#[serial]
 fn a_second_listing_adopts_the_running_attempt_and_asks_origin_nothing() {
     let fixture = Fixture::new();
     let gate = UploadPackGate::install(&fixture, 0);

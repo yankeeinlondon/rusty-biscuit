@@ -174,7 +174,8 @@ pub fn assert_no_spinner(stderr: &str) {
 }
 
 /// Holds `origin`'s `upload-pack` from its `hold_from`-th run (0: the
-/// check's `ls-remote`; 1: the fetch after it) until released, and counts
+/// check's `ls-remote`; 1: the fetch after it) until released, or fails it
+/// ([`UploadPackGate::failing`]), and counts
 /// every run: `remote.origin.uploadpack` points at a script, which both
 /// `ls-remote origin` and `fetch origin` run for a local `origin`.
 pub struct UploadPackGate {
@@ -183,15 +184,26 @@ pub struct UploadPackGate {
 
 impl UploadPackGate {
     pub fn install(fixture: &Fixture, hold_from: usize) -> Self {
+        Self::with_action(fixture, hold_from, "while [ ! -f \"$dir/release\" ]; do sleep 0.05; done")
+    }
+
+    /// Fails every `upload-pack` from its `fail_from`-th run on, so the
+    /// check (0) or the fetch (1) ends in a git error instead of a hold.
+    pub fn failing(fixture: &Fixture, fail_from: usize) -> Self {
+        Self::with_action(fixture, fail_from, "exit 1")
+    }
+
+    fn with_action(fixture: &Fixture, from: usize, action: &str) -> Self {
         let dir = fixture.root.path().join("gate");
         fs::create_dir_all(&dir).expect("gate dir");
         let shell_dir = dir.to_string_lossy().replace('\\', "/");
         let script = format!(
             "#!/bin/sh\n\
-             n=$(cat '{shell_dir}/count' 2>/dev/null || echo 0)\n\
-             echo $((n + 1)) > '{shell_dir}/count'\n\
-             if [ \"$n\" -ge {hold_from} ]; then\n\
-             \x20 while [ ! -f '{shell_dir}/release' ]; do sleep 0.05; done\n\
+             dir='{shell_dir}'\n\
+             n=$(cat \"$dir/count\" 2>/dev/null || echo 0)\n\
+             echo $((n + 1)) > \"$dir/count\"\n\
+             if [ \"$n\" -ge {from} ]; then\n\
+             \x20 {action}\n\
              fi\n\
              exec git upload-pack \"$@\"\n"
         );

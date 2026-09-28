@@ -163,7 +163,7 @@ fn gather_remote(
         force: flags.forced(),
         budget: if flags.forced() { seams.forced_budget } else { seams.wait_budget },
     };
-    let env = StoreEnv::new(main, stores.head.to_path_buf(), stores.prs.to_path_buf());
+    let env = StoreEnv::new(main, stores.head.to_path_buf(), stores.prs.to_path_buf(), origin.clone());
     let progress = Progress::on_stderr();
     let waited = wait::wait(request, &env, seams.launch, &mut |phase| progress.show(phase));
     progress.finish();
@@ -439,12 +439,13 @@ fn run_pipeline(
     }
     facts.unfinished = unfinished;
     facts.ff_notice = ff.as_ref().and_then(ff_notice);
+    // §9: a failed check or fetch still leaves `--ff` a local tracking ref to
+    // move to, and the caption keeps the reason. Only a render while the
+    // worker may yet fetch (still checking or still pulling) is excluded,
+    // since the comparison is about to change.
     facts.ff_suggestion = match (status, facts.caption.map(|caption| caption.state())) {
-        (Some(RemoteStatus::CheckedNow | RemoteStatus::Fetched), Some(CaptionState::Behind(behind)))
-            if !flags.fast_forward =>
-        {
-            Some(FfSuggestion { behind })
-        }
+        (Some(RemoteStatus::StillChecking { .. } | RemoteStatus::StillPulling), _) => None,
+        (Some(_), Some(CaptionState::Behind(behind))) if !flags.fast_forward => Some(FfSuggestion { behind }),
         _ => None,
     };
     let table = list_table::render(&facts, terminal, now);
