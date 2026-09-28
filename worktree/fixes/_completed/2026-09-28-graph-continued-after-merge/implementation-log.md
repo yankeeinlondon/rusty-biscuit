@@ -77,6 +77,7 @@ documentation:
     - .claude/skills/biscuit-terminal/components.md
 completed_phase: 5
 implemented: true
+implementation_1: "2026-09-28T11:40:18-07:00"
 ---
 
 # Implementation Log for 2026-09-28-graph-continued-after-merge (5 phases)
@@ -889,3 +890,56 @@ reconstructed" indirect case, `merged_into_*` test-helper names).
   (`level2_columns_word_wrap_in_pane` deterministic,
   `level2_render_tree_style_in_wezterm` flaky); L2 was not rerun, because
   this phase changed no code.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-28T11:40:18-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-28-graph-continued-after-merge/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'A failed history read discards a previously verified merge' at 11:40:29
+        - discovered: graph gathering calls `worktree::git::git_command` directly, so there is no `History` runner trait to wrap; the existing seam is `worktree::git::recorder` (built under `cfg(test)` or feature `count-git`, which `worktree-cli` enables for its dev-dependency), so failure injection was added there as `recorder::fail_matching(predicate) -> FailureGuard`, honored only by `git_command` and `git_command_allow_no_match`
+        - discovered: the branch-lane `first_parent_entries` call (`Extent::Until`) never made a failing Git read of its own; its empty-lane result came from the `Err` window that `extend` returned after a failed reread, and a failed anchor lookup there was already only a gap
+        - completed: `extend` keeps the last verified window when the reread past an accepted merge fails (the source `B` stays placed from `LaneWindow::with_known`), so `window` is `Err` only when the lane's first read failed
+        - completed: `History::first_parent_entries` is infallible; an unreadable default-lane window is a gap that still places the tip and every anchor at its verified position, so `assemble`, `focused_view`, and `base_view` return `GraphFacts` instead of `Option`
+        - completed: a branch or `origin/<default>` lane whose first window read failed is still drawn empty with a gap; it verified no commit, so nothing is substituted and a merge into it is not drawn
+        - completed: tests `a_failed_reread_after_an_accepted_merge_keeps_the_edge_and_its_source`, `a_failed_anchor_lookup_on_a_merged_lane_omits_only_that_connection`, `a_failed_default_lane_read_keeps_the_graph_and_its_verified_anchors`, and `a_failed_origin_line_read_draws_no_substitute_merge` in `git_graph/tests.rs`, asserting through `GraphFacts` and `GitGraphPlan`; the reread test fails against the old `extend`
+        - completed: updated `worktree/docs/git-graph.md` ("Unavailable history") and the `worktree` skill, which both said an unreadable default lane drops the graph
+        - class sweep: a later Git read failure replaces already verified lane history with an empty lane or suppresses the graph, instead of retaining the last drawable facts and reporting incomplete history; sites checked: `extend` reread, `extend` boundary/classification/cutoff/`is_ancestor` stops, `assemble` branch-lane `first_parent_entries`, `assemble` `origin/<default>` `lane_window`, `assemble` default-lane `first_parent_entries`, `place` `fork_of`, `DefaultTips::read` `merge_base`, `History::read`, `lane_window` count, `boundary`, `chain_distance`, `locate` counts and batch `log`, `classify`/`integration_into`, `parallel` thread join; fixed here: `extend` reread, default-lane `first_parent_entries` (`.ok()?`), `Open` window read inside `first_parent_entries`; clean: `extend` older boundary/classification/cutoff/`is_ancestor` stops (keep window and edges, set gap), branch-lane `first_parent_entries` (no read of its own; its empty lane came from the `extend` reread), `origin/<default>` and first branch `lane_window` failures (nothing verified yet; empty lane plus gap), `place` `fork_of` (nothing verified; unconnected plus gap), `DefaultTips::read` (gap, no `origin` line), `History::read` (gap, treated as shallow), `lane_window` count (uncounted window, gap), `boundary`, `chain_distance`, `classify` (gap), `locate` (unverified anchors left off, gap), `parallel` (a panic, not a Git read; placement dropped and graph marked incomplete)
+        - verified: `worktree` `just test` 796 passed, 30 skipped; `just lint` exit 0; `biscuit-terminal` not touched
+- work completed for 'A failed history read discards a previously verified merge' at 11:48:16
+- starting the work on 'Kitty image verification can pass without observing the rendered graph' at 11:48:42
+        - discovered: this host has Screen Recording permission, and the pre-change continued-after-merge run did compare pixels (its screenshot showed the connected graph); the permissive paths were the in-test `screen_capture_permitted()` early return and the `None` from `wait_for_drawn_band`, both of which printed a warning and passed
+        - discovered: an empty capture with the permission granted is macOS occlusion; Kitty does not render a window another window covers (its changelog: "not rendering occluded windows"), and `open -g` puts the instance behind the frontmost app; on this host every instance opened at (4509, 375) on the second display under a full-height Zed window, so the 100x32 and 56x60 windows were always empty and the 200x60 ones only sometimes drawn
+        - discovered: `level2_graph_draws_a_merged_branch_in_kitty` launched its second window before screenshotting the first, so the second covered the first and its capture was empty; this was a source of the "observed once" blank captures
+        - completed: the five tests that claim what Kitty drew gate on `kitty_pixels_available()` (`KittyInstance::can_launch()` and `screen_capture_permitted()`, the reason printed), so a host without the permission skips the whole test visibly, or fails under `BISCUIT_TEST_REQUIRED_BACKENDS=kitty`; `level2_sparse_lanes_fixture_has_the_observed_topology` claims no pixels and keeps `can_launch()`
+        - completed: `assert_pixels_match` is mandatory; `wait_for_drawn_band` still retries for 10 s, a table drawn without a graph still fails, and an empty window is now `Err(Unobserved)`, which `graph_drawn_or_skip!` turns into a visible skip through `test_toolkit::evaluate_harness(Level::L2, false, Backend::Kitty)` (a panic when Kitty is required); nothing returns success without a pixel match
+        - decided: an empty window is a skip rather than an unconditional failure, because it proves Kitty did not render (occlusion), not that the graph regressed, and an unconditional failure would make `just test-l2` red on window arrangement alone; `BISCUIT_TEST_REQUIRED_BACKENDS=kitty` makes it a failure (verified: FAIL with the `lists kitty` message)
+        - completed: the merged-branch test launches and screenshots one window at a time
+        - completed: evidence stays at fixed names in `$TMPDIR` (`wt-graph-continued-200x60-{screenshot,transmitted}.png` for the continued case), printed on every run and documented in `worktree/docs/git-graph.md`; a non-evidence screenshot is deleted only after a match
+        - completed: updated `worktree/docs/git-graph.md` (Tests), the `worktree`, `biscuit-test-harness`, and `os` (`macos.md`, occlusion) skills, `biscuit-test-harness/README.md`, and the `.config/nextest.toml` override comment, which all described the old warning-and-pass behavior
+        - class sweep: a real-terminal visual test treats unavailable or empty screen capture as a successful pixel check; sites checked: `worktree/cli/tests/level2_graph_in_kitty.rs` (`assert_pixels_match` permission return, `wait_for_drawn_band` empty return, all five pixel-claiming tests, the topology test), `KittyInstance::screenshot` and `screen_capture_permitted` in `biscuit-test-harness`, `WezTermHarness::capture_window_png`, `biscuit-icon/cli/tests/level2_terminal.rs`, `darkmatter/lib/tests/level3-terminal/level3_image_painting.rs`, `darkmatter/lib/tests/level2/level2_render_tree_terminal/images.rs`; fixed here: `assert_pixels_match` permission early return, `wait_for_drawn_band` empty-capture return, the merged test's overlapping windows; clean: `KittyInstance::screenshot` (`Err` on failure; the empty-window case is documented for callers), `screen_capture_permitted` (a plain query), `WezTermHarness::capture_window_png` (`Ok(None)` the caller must handle), `biscuit-icon` `level2_terminal.rs` (gates `require_level!` on capture availability; a black capture finds no red block and fails), `level2_render_tree_terminal/images.rs` (no capture; comment only), topology test (asserts no pixels), `darkmatter` `level3_image_painting.rs` (`skip_pixel_assertion` prints the reason and fails under `BISCUIT_TEST_LEVEL_REQUIRED=3`, the same visible-skip contract)
+        - verified: `just test-l2 kitty` on this host: 5 passed; the first post-change run compared pixels for the continued case (pass, no unavailable line), later runs printed `Kitty pixel check unavailable: …` and `skipping: requires kitty` for every window because it was covered; `BISCUIT_TEST_REQUIRED_BACKENDS=kitty` fails the covered continued case; `just test` 796 passed, 30 skipped; `just lint` exit 0; `just check-tier-coverage worktree` 0 stranded
+- work completed for 'Kitty image verification can pass without observing the rendered graph' at 12:01:45
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 22 minutes (11:40:18 to 12:02:30). During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- notes for the reviewer:
+        - finding 2's blank-capture outcome is a visible skip, or a failure under `BISCUIT_TEST_REQUIRED_BACKENDS=kitty`, instead of an unconditional failure; the review allowed "an explicit skip or failure for that environment"
+        - on this host, later Kitty runs skipped visibly because the Kitty window opened under another window on the second display; one post-change run compared real pixels for the continued-after-merge case and passed
+        - the kept continued-case screenshot in `$TMPDIR` is from a covered (skipped) run; rerun `just test-l2 kitty` with that screen area uncovered to refresh the evidence
+- the files changed in this cycle:
+        - `worktree/cli/src/commands/git_graph.rs`
+        - `worktree/cli/src/commands/git_graph/topology.rs`
+        - `worktree/cli/src/commands/git_graph/tests.rs`
+        - `worktree/lib/src/git.rs`
+        - `worktree/cli/tests/level2_graph_in_kitty.rs`
+        - `worktree/docs/git-graph.md`
+        - `.claude/skills/worktree/SKILL.md`
+        - `.claude/skills/biscuit-test-harness/SKILL.md`
+        - `.claude/skills/os/macos.md`
+        - `biscuit-test-harness/README.md`
+        - `.config/nextest.toml` (comment only)
