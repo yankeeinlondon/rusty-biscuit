@@ -13,8 +13,8 @@
 //! default branch, and `origin/<default>` when it has commits of its own
 //! (it has diverged). With no current branch, or the default branch checked
 //! out, every line with commits of its own gets a lane. A lane hangs from its
-//! fork commit, and a line [merged into](GraphLine::merged_into) a drawn commit
-//! is drawn merging there. Every other ref whose tip is a drawn commit is a
+//! fork commit, and a line's [merge](GraphLine::with_merge) into a drawn commit
+//! is drawn there. Every other ref whose tip is a drawn commit is a
 //! **tag** on that commit, a line without commits is a tag on its own
 //! [tip](GraphLine::with_tip), and an open PR is a tag on its source branch's
 //! tip; the precise form is documented in `worktree/docs/cli/list.md`.
@@ -97,6 +97,15 @@ pub enum LaneEntry {
     Elided(usize),
 }
 
+/// A merge of a line into another lane, by full SHAs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaneMerge {
+    /// The commit on the merged line that became the merge's second parent.
+    pub source: String,
+    /// The merge commit, on another lane.
+    pub destination: String,
+}
+
 /// A branch and the commits it has that its parent lacks, oldest first.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GraphLine {
@@ -109,8 +118,8 @@ pub struct GraphLine {
     /// Full SHA of the branch's own tip. A line without commits is labeled
     /// here; a line with commits defaults to its newest drawn commit.
     pub tip_sha: Option<String>,
-    /// Full SHA of the merge commit that brought the line into another lane.
-    pub merged_into: Option<String>,
+    /// Merges of this line into other lanes, oldest first.
+    pub merges: Vec<LaneMerge>,
     pub entries: Vec<LaneEntry>,
     /// Creation time (Unix seconds). Lanes forking at one commit are ordered
     /// by it, oldest first, and lines without one come last.
@@ -144,10 +153,14 @@ impl GraphLine {
         self
     }
 
-    /// The merge commit on another lane that merged this line; its lane is
-    /// found by where that commit is drawn.
-    pub fn merged_into(mut self, sha: impl Into<String>) -> Self {
-        self.merged_into = Some(sha.into());
+    /// Appends a merge of `source`, a commit on this line, into the merge
+    /// commit `destination` on another lane; that lane is found by where
+    /// `destination` is drawn. Append oldest first.
+    pub fn with_merge(mut self, source: impl Into<String>, destination: impl Into<String>) -> Self {
+        self.merges.push(LaneMerge {
+            source: source.into(),
+            destination: destination.into(),
+        });
         self
     }
 
@@ -164,6 +177,11 @@ impl GraphLine {
     pub fn with_last_active(mut self, unix_seconds: i64) -> Self {
         self.last_active = Some(unix_seconds);
         self
+    }
+
+    /// The destination of the latest merge, the only one drawn so far.
+    fn merge_destination(&self) -> Option<&str> {
+        self.merges.last().map(|merge| merge.destination.as_str())
     }
 
     fn has_commits(&self) -> bool {
@@ -601,7 +619,7 @@ impl GitGraph {
             children.entry(point).or_default().push(index);
         }
         let merge_lane = |index: usize| {
-            let destination = self.lines[index].merged_into.as_deref()?;
+            let destination = self.lines[index].merge_destination()?;
             positions.get(destination).and_then(|(key, _)| *key)
         };
         for siblings in children.values_mut() {
@@ -611,7 +629,7 @@ impl GitGraph {
         let mut merges: HashMap<String, Vec<usize>> = HashMap::new();
         let mut incomplete = !unconnected.is_empty();
         for (index, _) in &draft.lanes {
-            let Some(destination) = self.lines[*index].merged_into.as_deref() else {
+            let Some(destination) = self.lines[*index].merge_destination() else {
                 continue;
             };
             match positions.get(destination) {
@@ -824,7 +842,7 @@ impl GitGraph {
                 .map(|(other, _)| *other)
                 .find(|other| self.lines[*other].branch == parent)
         });
-        [on_lane(line.fork_sha.as_deref()), on_lane(line.merged_into.as_deref()), parent]
+        [on_lane(line.fork_sha.as_deref()), on_lane(line.merge_destination()), parent]
             .into_iter()
             .flatten()
             .filter(|other| *other != index)

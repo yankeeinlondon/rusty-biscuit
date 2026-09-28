@@ -305,7 +305,7 @@ fn merged_into_default() -> GitGraph {
                 .forked_at(sha("1111111"))
                 .with_tip(sha("bbbbbbb"))
                 .with_entries(commits(&["aaaaaaa", "bbbbbbb"]))
-                .merged_into(sha("mmmmmmm")),
+                .with_merge(sha("bbbbbbb"), sha("mmmmmmm")),
         )
         .with_current_branch("feat/x")
 }
@@ -333,6 +333,20 @@ fn a_lane_merged_into_the_default_lane_is_drawn_merging_at_its_commit() {
 }
 
 #[test]
+fn with_merge_appends_edges_oldest_first() {
+    let line = GraphLine::new("feat/x")
+        .with_merge(sha("b1b1b1b"), sha("c1c1c1c"))
+        .with_merge(sha("b2b2b2b"), sha("c2c2c2c"));
+    assert_eq!(
+        line.merges,
+        [
+            LaneMerge { source: sha("b1b1b1b"), destination: sha("c1c1c1c") },
+            LaneMerge { source: sha("b2b2b2b"), destination: sha("c2c2c2c") },
+        ]
+    );
+}
+
+#[test]
 fn a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane() {
     let graph = GitGraph::new("main", commits(&["1111111"]))
         .with_ref("main", sha("1111111"))
@@ -347,7 +361,7 @@ fn a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane() {
                 .forked_at(sha("ppppppp"))
                 .with_tip(sha("ccccccc"))
                 .with_entries(commits(&["ccccccc"]))
-                .merged_into(sha("qqqqqqq")),
+                .with_merge(sha("ccccccc"), sha("qqqqqqq")),
         )
         .with_current_branch("feat/child");
     let text = mermaid(&graph);
@@ -368,7 +382,7 @@ fn nested_merges() -> GitGraph {
                 .forked_at(sha("d1d1d1d"))
                 .with_tip(sha("w2w2w2w"))
                 .with_entries(commits(&["w1w1w1w", "w2w2w2w"]))
-                .merged_into(sha("m103000"))
+                .with_merge(sha("w2w2w2w"), sha("m103000"))
                 .with_last_active(10),
         )
         .with_line(
@@ -377,7 +391,7 @@ fn nested_merges() -> GitGraph {
                 .forked_at(sha("w2w2w2w"))
                 .with_tip(sha("s1s1s1s"))
                 .with_entries(vec![LaneEntry::Elided(96), LaneEntry::Commit(sha("s1s1s1s"))])
-                .merged_into(sha("m104000"))
+                .with_merge(sha("s1s1s1s"), sha("m104000"))
                 .with_last_active(20),
         )
         .with_current_branch("main")
@@ -405,7 +419,7 @@ fn a_merge_commit_can_also_be_a_fork_point() {
             GraphLine::new("side")
                 .forked_at(sha("aaaaaaa"))
                 .with_entries(commits(&["s1s1s1s"]))
-                .merged_into(sha("mmmmmmm")),
+                .with_merge(sha("s1s1s1s"), sha("mmmmmmm")),
         )
         .with_line(GraphLine::new("later").forked_at(sha("mmmmmmm")).with_entries(commits(&["l1l1l1l"])));
     let text = mermaid(&graph);
@@ -436,7 +450,7 @@ fn a_lane_merged_into_a_sibling_is_emitted_before_it() {
                 .with_parent("feat/p")
                 .forked_at(sha("1111111"))
                 .with_entries(commits(&["ccccccc"]))
-                .merged_into(sha("qqqqqqq"))
+                .with_merge(sha("ccccccc"), sha("qqqqqqq"))
                 .with_created_at(200),
         )
         .with_current_branch("feat/c");
@@ -452,7 +466,7 @@ fn a_merge_whose_destination_is_not_drawn_is_left_out_and_reported() {
         GraphLine::new("feat/x")
             .forked_at(sha("1111111"))
             .with_entries(commits(&["aaaaaaa"]))
-            .merged_into(sha("0ld0000")),
+            .with_merge(sha("aaaaaaa"), sha("0ld0000")),
     );
     let text = mermaid(&graph);
     assert!(!text.contains("merge"), "{text}");
@@ -466,7 +480,7 @@ fn a_merge_that_would_precede_its_lane_is_left_out_and_reported() {
         GraphLine::new("feat/x")
             .forked_at(sha("2222222"))
             .with_entries(commits(&["aaaaaaa"]))
-            .merged_into(sha("mmmmmmm")),
+            .with_merge(sha("aaaaaaa"), sha("mmmmmmm")),
     );
     let text = mermaid(&graph);
     assert!(text.contains(r#"commit id: "mmmmmmm""#), "{text}");
@@ -481,7 +495,7 @@ fn a_merge_at_the_start_of_the_default_lane_is_left_out_and_reported() {
         GraphLine::new("feat/x")
             .forked_at(sha("0ld0000"))
             .with_entries(commits(&["aaaaaaa"]))
-            .merged_into(sha("mmmmmmm")),
+            .with_merge(sha("aaaaaaa"), sha("mmmmmmm")),
     );
     let text = mermaid(&graph);
     assert!(text.contains(r#"commit id: "mmmmmmm""#), "{text}");
@@ -495,7 +509,7 @@ fn only_one_lane_merges_at_a_commit() {
         GraphLine::new(name)
             .forked_at(sha("1111111"))
             .with_entries(commits(&[commit]))
-            .merged_into(sha("mmmmmmm"))
+            .with_merge(sha(commit), sha("mmmmmmm"))
     };
     let graph = GitGraph::new("main", commits(&["1111111", "mmmmmmm"]))
         .with_line(merged("a", "aaaaaaa"))
@@ -596,7 +610,7 @@ fn trimming_never_elides_a_merge_destination() {
             GraphLine::new("feat/x")
                 .forked_at(sha("1111111"))
                 .with_entries(commits(&["aaaaaaa", "bbbbbbb"]))
-                .merged_into(sha("mmmmmmm")),
+                .with_merge(sha("bbbbbbb"), sha("mmmmmmm")),
         );
     let planned = plan(&graph, viewport(5, 40));
     assert!(planned.trimmed_commits > 0, "{planned:?}");
@@ -615,7 +629,7 @@ fn the_height_cap_keeps_a_merged_lanes_destination_lane() {
         .with_ref("main", sha("1111111"))
         .with_line(line("feat/p", None, "ppppppp", 1).with_entries(commits(&["ppppppp", "qqqqqqq"])))
         .with_line(line("feat/b", None, "bbbbbbb", 50))
-        .with_line(line("feat/x", None, "xxxxxxx", 90).merged_into(sha("qqqqqqq")))
+        .with_line(line("feat/x", None, "xxxxxxx", 90).with_merge(sha("xxxxxxx"), sha("qqqqqqq")))
         .with_current_branch("main");
     let planned = plan(&graph, viewport(200, 40));
     let text = &planned.mermaid;
@@ -901,7 +915,7 @@ fn compressed_old_connections() -> GitGraph {
             .forked_at(sha("f0f0f0f"))
             .with_tip(sha("o2o2o2o"))
             .with_entries(vec![LaneEntry::Elided(40), LaneEntry::Commit(sha("o2o2o2o"))])
-            .merged_into(sha("m0m0m0m")),
+            .with_merge(sha("o2o2o2o"), sha("m0m0m0m")),
     )
     .with_current_branch("feat/old")
 }
