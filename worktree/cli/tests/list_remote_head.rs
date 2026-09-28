@@ -332,3 +332,108 @@ fn without_an_origin_leftover_tracking_refs_show_no_caption_and_start_no_worker(
     assert!(!remote_head_lock_path(&fixture.head_store()).exists(), "no worker ever took the live-head lock");
     assert!(!fixture.head_store().exists());
 }
+
+/// Runs `wt list` from `dir` through `script` in a 120×40 pseudo-terminal
+/// with `TERM_PROGRAM=ghostty`, the only way `wt` gathers and draws its graph
+/// (see `perf_graph_stages.rs`). Returns whether it succeeded and everything
+/// the terminal received.
+#[cfg(unix)]
+fn list_in_pty(fixture: &Fixture, dir: &std::path::Path) -> (bool, String) {
+    use std::process::{Command, Stdio};
+    let quote = |value: &str| format!("'{}'", value.replace('\'', r"'\''"));
+    let wt = fixture.wt(dir);
+    let inner = format!("stty cols 120 rows 40; exec {} list", quote(&wt.get_program().to_string_lossy()));
+    let mut command = Command::new("script");
+    if cfg!(target_os = "macos") {
+        command.args(["-q", "/dev/null", "/bin/sh", "-c", &inner]);
+    } else {
+        command.args(["-qec", &format!("/bin/sh -c {}", quote(&inner)), "/dev/null"]);
+    }
+    for (name, value) in wt.get_envs() {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
+    let output = command
+        .current_dir(dir)
+        .env("TERM_PROGRAM", "ghostty")
+        .env_remove("KITTY_WINDOW_ID")
+        .stdin(Stdio::null())
+        .output()
+        .expect("script runs");
+    (output.status.success(), String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Fresh PR and live-head answers for the fixture's `origin`, so the listing
+/// itself has no reason to ask.
+fn seed_fresh_answers(fixture: &Fixture, head: &str) {
+    use worktree::pull_requests::{PR_STORE_FORMAT_VERSION, origin_digest, origin_url, pr_store_path};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let digest = origin_digest(&origin_url(&fixture.main).expect("the fixture has an origin"));
+    let pr_store = fixture.cache_file(pr_store_path(&fixture.main).expect("PR store path"));
+    fs::create_dir_all(pr_store.parent().expect("store dir")).expect("create store dir");
+    let prs = serde_json::json!({
+        "format_version": PR_STORE_FORMAT_VERSION,
+        "origin_digest": digest,
+        "fetched_at": now,
+        "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+        "writer": "refresh",
+        "source_repo": null,
+        "pull_requests": [],
+    });
+    fs::write(&pr_store, serde_json::to_vec(&prs).expect("json")).expect("write PR store");
+    let head_store = fixture.head_store();
+    let answer = serde_json::json!({
+        "format_version": 1,
+        "origin_digest": digest,
+        "branch": "main",
+        "sha": head,
+        "checked_at": now,
+    });
+    fs::write(&head_store, serde_json::to_vec(&answer).expect("json")).expect("write live-head store");
+}
+
+/// A shallow clone cannot establish how `feature` relates to `main`: the
+/// listing still succeeds with its table, the graph carries the
+/// incomplete-history notice, and nothing asks `origin` to fill the gap.
+///
+/// The listing's own worker checks `origin`'s live head whenever there is an
+/// `origin`, graph or not, so the proof is that a listing drawing the graph
+/// makes exactly as many `upload-pack` runs as one that draws none.
+#[cfg(unix)]
+#[test]
+#[serial]
+fn a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing() {
+    let fixture = Fixture::new();
+    fixture.git(&fixture.linked, &["commit", "--allow-empty", "-m", "feature work"]);
+    for message in ["second", "third", "fourth"] {
+        fixture.commit_and_push(message);
+    }
+    fixture.git(&fixture.main, &["fetch", "--depth", "2", "origin"]);
+    // Across the shallow boundary the histories look unrelated to `merge`.
+    fixture.git(&fixture.main, &["reset", "-q", "--hard", "origin/main"]);
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "--is-shallow-repository"]), "true");
+    let head = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
+    seed_fresh_answers(&fixture, &head);
+    let gate = UploadPackGate::failing(&fixture, 0);
+
+    // Captured stderr: no graph is gathered.
+    let captured = fixture.wt(&fixture.main).arg("list").output().expect("wt list runs");
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "no worker left running");
+    assert!(captured.status.success(), "{captured:?}");
+    let without_graph = gate.runs();
+    assert!(without_graph <= 1, "at most the worker's one check, got {without_graph}");
+
+    let (success, transcript) = list_in_pty(&fixture, &fixture.main);
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "no worker left running");
+
+    assert!(success, "wt list failed:\n{transcript}");
+    assert!(transcript.contains("feature"), "the table lists the worktree:\n{transcript}");
+    assert!(transcript.contains("\x1b_G"), "the graph was drawn:\n{transcript}");
+    assert!(transcript.contains("Some history is not shown"), "the notice is shown:\n{transcript}");
+    assert_eq!(gate.runs() - without_graph, without_graph, "drawing the graph adds no ls-remote or fetch");
+}
