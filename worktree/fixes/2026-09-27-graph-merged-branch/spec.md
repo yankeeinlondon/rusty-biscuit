@@ -61,6 +61,24 @@ The graph drew one lane, `main`, running `7ba6ea8 → 2a7298a → 08cf96a`, with
 
 It surfaced now because it's the first time the current worktree's branch was fully merged while its worktree still existed. Every earlier branch had commits of its own and so labeled its own lane.
 
+### Second observation: base view with a non-default recorded parent
+
+Observed later on 2026-09-27, running `wt list` from the main checkout (base view) just after PR #104 merged `fix/sniff` on GitHub. `wt list` fetched `origin/main` as part of its freshness check, so the local `main` stayed one merge behind:
+
+```text
+*   b47a046 (origin/main) Merge pull request #104 from yankeeinlondon/fix/sniff   ← parents 08cf96a, b3b17f3
+|\
+| * b3b17f3 (fix/sniff) test(ci): record sniff as a narrowed reader …
+| * 15edf42 …   (96 commits on this side; fix/sniff's recorded parent is fix/wt-ux)
+* 08cf96a (main) Merge pull request #103 from yankeeinlondon/fix/wt-ux
+```
+
+The merge bases were `feat/schema-enhancement` → `1314bd6` and `fix/wt-ux` → `2a7298a`. The worktree table was correct (`fix/sniff` `clean -1` against `origin/main`), but the graph was wrong in three ways:
+
+1. **`fix/sniff` vanished entirely: no lane and no tag.** `base_view` sets a line's fork to its merge base with its drawn recorded parent (`fix/wt-ux`); that commit sat inside `fix/wt-ux`'s `+N` square. With no commits of its own, `GraphLine::tip` falls back to the fork commit, and `GitGraph::tags` silently drops a tag whose commit is not drawn. The real tip, `b3b17f3`, was drawn on the default lane with no label. "No commits of its own" had been read as "tip equals fork", which holds only when the branch is an ancestor of its parent.
+2. **Both remaining lanes were drawn forking from the wrong commit.** `base_view` builds the default lane with a plain `git log -10 origin/main`, which walked into the merge's second parent and filled every slot with `fix/sniff`'s history presented as `main`'s. Neither real merge base was drawn, and `GitGraph::attach_point` silently hung both lanes from the default lane's first drawn commit (`14daf59`), an ancestry that does not exist.
+3. **The local `main` tag was missing.** `08cf96a` is the newest commit's first parent, but the date-ordered walk never reached it, so the graph did not show the gap the caption reported ("96 commits behind").
+
 ## Confirmed requirements
 
 ### Branch selection stays the same
@@ -80,6 +98,10 @@ Preserve the existing height behavior: only the base view has the half-terminal-
 
 Restore lanes for selected branches whose current tips are fully integrated through an actual Git merge commit into a displayed parent, including a non-default parent. Show the verified fork and merge relationships. A branch with identifiable separate history does not become a label-only branch merely because its tip is now reachable from its parent.
 
+This applies to a branch merged into the default branch even when its recorded fork parent is another selected branch, as `fix/sniff` (parent `fix/wt-ux`, merged into `main`) in the second observation. The fork comes from the parent and the merge goes into the default branch.
+
+Both views build the default lane from its own history, not from commits reached through merges' second parents. The base view's window must not be filled by a merged branch's commits presented as the default branch's, and a local default tip that is an ancestor of `origin/<default>` stays reachable as a label, in compressed history if necessary.
+
 For branches that continue after an earlier merge, preserve their current relationship without adding reconstruction of earlier partial or repeated merges. Squash-merge inference is outside this fix.
 
 Fast-forward integration and equal tips must be represented truthfully, without inventing a merge commit. When the available history establishes that a branch has no separate history to draw, show its label at the actual commit, without an empty lane or an explanatory legend. Equal tips alone do not prove that the branch never had separate history.
@@ -91,6 +113,8 @@ When a selected branch's fork or merge predates the ordinary displayed history, 
 ### Unavailable history
 
 If local history cannot establish a connection, draw verified information and retain the selected branch wherever it can be truthfully represented. Leave unknown connections undrawn and show a brief incomplete-history notice. Keep the worktree table available. Do not fetch automatically or introduce a new network request to fill the gap.
+
+An undrawn commit is never silently replaced by a different one. A fork commit that is not drawn is not attached at another commit (currently the start of the parent or default lane). A label whose commit is not drawn is either placed on that commit, brought back through the compressed history above, or accounted for by the incomplete-history notice. It is never dropped without a trace. A branch with no commits beyond its displayed tips is labeled at its own tip, not at its fork commit.
 
 Unknown history is distinct from successfully determining that a branch has no separate history: do not silently apply the label-only exception merely because discovery failed. Preserve the existing policy for ordinary renderer failures.
 
@@ -140,6 +164,9 @@ These criteria describe user-visible outcomes; implementation-specific API names
 | Same merged branch viewed from the default branch | It remains eligible for its lane under the same branch-selection rule; merged status alone cannot collapse it into a tag | Real-Git fixture and component assertions, with enough terminal height to retain the lane under the existing base-view cap |
 | Current branch has a recorded existing non-default parent | The parent remains selected and the child retains the recorded parent relationship; test both with and without a worktree for the parent | Real-Git selection fixtures |
 | Branch fully merged into a displayed non-default parent | Its separate lane and verified merge connection into that parent remain visible | Real-Git child/parent merge fixture and component assertions |
+| Base view: branch with a recorded non-default parent is merged into the default branch, and its fork from that parent lies inside the parent's `+N` square (second observation) | The branch is drawn with a fork from its parent and its merge into the default branch at the correct commits; at minimum its label sits on its actual tip, never nowhere | Real-Git fixture mirroring the observation and component assertions on tag and fork placement |
+| Base view after fetching a merge whose second parent carries more commits than the default window | The default lane shows default-branch history rather than the merged branch's commits; other lanes fork from their true merge bases; the local default tip keeps its label | Real-Git fixture with a merged side longer than the base window; assert fork commit identities and the local default tag |
+| A fork or label commit falls outside everything drawn | No lane attaches at a substitute commit and no label disappears silently; compressed history or the incomplete-history notice accounts for it | Component tests that omit the fork commit or tagged commit from drawn entries |
 | Branch continues after an earlier merge | Its current relationship remains represented without requiring reconstruction of earlier partial or repeated merges | Real-Git fixture with a commit after the merge |
 | Fast-forward integration or equal tips | No fabricated merge commit appears; a branch established to have no separate history is labeled at its actual commit, with no empty lane or new legend | Real-Git fixtures covering no separate history and identifiable merged history with equal tips |
 | Necessary local history is unavailable | Verified information remains, unknown connections stay undrawn, a brief notice appears, and the table remains available without a new network request | Incomplete-history fixture with output assertions and request-count verification |
