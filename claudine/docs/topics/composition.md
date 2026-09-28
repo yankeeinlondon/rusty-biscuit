@@ -416,9 +416,10 @@ frontmatter keys are available to inspect.
 The diagnostic identifies the resolved document (OSC8-linked when supported),
 names both `prompt` and `sequence`, points to `claudine sequence`, and notes the
 upcoming `sections` feature. Like every frontmatter-rooted composition error, it
-appends the authored frontmatter as a syntax-highlighted, line-numbered YAML
-block (see [Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
-When stderr is not a TTY the block is withheld to avoid exposing frontmatter,
+appends a focused, syntax-highlighted excerpt of the frontmatter, here around
+the `prompt` and `sequence` keys (see
+[Frontmatter YAML blocks in errors](#frontmatter-yaml-blocks-in-errors)).
+When stderr is not a TTY the excerpt is withheld to avoid exposing frontmatter,
 and there is no flag to reveal it.
 
 ## Whole-Value Frontmatter Expansion Is Executable State
@@ -458,43 +459,85 @@ and [Frontmatter Shell Expansion](../../../darkmatter/docs/inline/fm-shell-expan
 
 ## Frontmatter YAML blocks in errors
 
-Every composition error rooted in a prompt file's YAML frontmatter appends the
-authored frontmatter — delimiters included — as a `CodeBlock`: syntax
-highlighted, line-numbered so block line N equals source-file line N, and with
-the offending line highlighted when the error's property maps to a locatable
-key. This covers the lifecycle guards (nested span in a literal, undefined variable,
-say/effect/shape errors), the prompt/agent/model/interactive type errors, the
-schema errors (load, validation, missing, unsupported-interactive), the
-inline-compose / sequence mismatch, and body-composition failures
-(`ComposeFailed`, `ShellExpansionFailed`, which show the block as context with no
-highlight).
+A composition error rooted in a prompt file's YAML frontmatter appends a
+**focused excerpt** of that frontmatter: only the lines the error involves,
+each with 3 lines of context above and below, plus the header lines that
+enclose it (a `$schema:` parent, or the `- …` line that opens a union arm).
+Lines keep their real source numbers, the involved lines are highlighted, and a
+`⋮` line marks each gap between non-adjacent regions.
 
-The block is **TTY-gated**: it is rendered only when stderr is a TTY, and
+For example, `claudine compose prompts/clarify.md spec=fix` fails on the
+caller input `/spec`. `spec` is not a frontmatter key; it is declared in the
+first `$schema` union arm, so the excerpt focuses that declaration:
+
+```text
+ 2 │ description: |-
+ 3 │     Runs an interactive session to clarify the passed in spec or design file.
+ 4 │ $schema:
+ 5 │     - spec: file(required; match(**/*spec*.md); eager) -> pass in a …   ← highlighted
+ 6 │       doc: file
+ 7 │     - design: file(required; match(**/*design*.md)) -> pass in a …
+ 8 │       doc: file
+```
+
+What each error focuses on:
+
+| Error | Focus |
+|---|---|
+| Lifecycle guards, `proxy.with`/`set` shape errors, `InvalidFileReference`, the prompt/agent/model/interactive/hash type errors, `SchemaLoad` | the named property path (sequence indexes such as `initialize.stack[0].action[1].set` resolve; a sequence task's `tasks[0].…` path matches its unique authored suffix) |
+| `SchemaValidation`, `MissingProperties`, `UnresolvedFileReference`, `UnsupportedInteractiveSchema` | every named property, both where the frontmatter sets it and where `$schema` declares it: under an inline `$schema` mapping, or in **every** arm of a `$schema` union |
+| `SchemaParse` | the offending `$schema.<property>` line (a grammar span advances into a multi-line value), else the `$schema:` line |
+| `FrontmatterParse` | the line the YAML parser reported; for a near-miss `----` fence, the fence line |
+| Inline-compose / sequence mismatch | the `prompt` and `sequence` keys |
+| Whole-value interpolation failure | its receiving key |
+| `ShellExpansionFailed` | the frontmatter key a `$(…)` came from; a body or shell-block command gets no excerpt |
+
+**Nothing locatable, no excerpt.** When nothing the error names can be found in
+the frontmatter (a missing `prompt`, an `agent` that came from the command line,
+a body-rooted compose failure, a YAML error with no location), the excerpt is
+omitted. The diagnostic text already names the path, and a whole-block dump
+adds noise. The whole block renders only when the focused regions already
+cover every line between its delimiters. A block that uses YAML anchors,
+aliases, or merge keys (`&`, `*`, `<<`) is never sliced, because a partial
+slice can hide what an alias expands to: it is shown whole when the regions
+cover it, and omitted otherwise.
+
+```mermaid
+flowchart TD
+    E[frontmatter-rooted error] --> F{focus: property, schema property, or line}
+    F -->|none for this error| X[no excerpt]
+    F --> L{located in the frontmatter?}
+    L -->|no| X
+    L -->|yes| W[±3 lines + enclosing headers, merged into regions]
+    W --> U{anchors / aliases and regions miss a line?}
+    U -->|yes| X
+    U -->|no| R[one YAML CodeBlock per region, joined by ⋮]
+    R --> T{stderr is a TTY?}
+    T -->|no| H[withheld]
+    T -->|yes| A[appended after the diagnostic]
+```
+
+The excerpt is **TTY-gated**: it is rendered only when stderr is a TTY, and
 withheld in piped / `NO_COLOR` / CI output so frontmatter is never exposed into
 logs — unless `FORCE_COLOR=1` overrides the gate. At `ColorDepth::None`,
-`report_block_error` strips escapes for every variant. Capture happens at the
-render boundary — after all control-flow handling — so the wrapper never
-interferes with upstream decisions; the CLI error walker (`output::error_walker`)
-renders the deepest typed diagnostic and appends the YAML block after it
-(`excerpt.render_appendix`). The motivating case: a `success.message` referencing
-`{{review-file}}` (hyphen) when the variable is `review_file` (underscore) now
-shows the frontmatter with the offending line highlighted, instead of an opaque
-"interpolation leaked" message.
-
-**Near-miss frontmatter fences.** A `----`+ delimiter (instead of `---`) is
-detected by Darkmatter as `MarkdownError::FrontmatterFenceMismatch` and mapped by
-Claudine to `CompositionError::FrontmatterParse`; `FrontmatterExcerpt::capture_line`
-captures the matched fence pair and highlights the delimiter line (typically
-line 1).
+`report_block_error` strips escapes for every variant, and `CodeBlock` draws a
+plain fence without line numbers. Capture happens at the render boundary —
+after all control-flow handling — so the wrapper never interferes with
+upstream decisions; the CLI error walker (`output::error_walker`) renders the
+deepest typed diagnostic and appends the excerpt after it
+(`excerpt.render_appendix`).
 
 **Mechanism.** `composition::FrontmatterExcerpt` (module `frontmatter_excerpt`)
-captures the block plus its highlight line;
+resolves the error's property paths to source lines, and `biscuit-terminal`'s
+`SourceContext::focused_line_regions` selects the windows and enclosing headers
+(the width is the constant `EXCERPT_CONTEXT_LINES`, with no configuration
+surface). Each region renders as a Darkmatter `CodeBlock` numbered from its
+first source line (`CodeBlock::with_start_line`).
 `CompositionError::enrich_frontmatter(source, stderr_is_tty)` wraps a
 frontmatter-rooted error in the transparent
 `CompositionError::WithFrontmatter { inner, excerpt }` variant at the render
-boundary, so upstream variant matching is unaffected. This superseded the
-inline-compose mismatch's bespoke verbatim-YAML dump — the `raw_yaml` /
-`stderr_is_tty` fields were removed.
+boundary, so upstream variant matching is unaffected, and leaves the error
+unwrapped when nothing is locatable.
 
 ## Prepare-time warnings
 
@@ -1022,7 +1065,7 @@ A document that still declares any of these keys fails composition with a typed 
 | `handle` | a lifecycle `shell` action or other lifecycle action |
 | `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
-The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends the authored frontmatter as a syntax-highlighted YAML block under a TTY.
+The scan runs before lifecycle event blocks are parsed, so the diagnostic names the removed DSL key rather than falling through to generic unknown-field handling. Like every frontmatter-rooted composition error, it appends a focused, syntax-highlighted excerpt of the frontmatter around the removed key under a TTY.
 
 **Verification** that the agentic loop actually did the work it claimed (the old `post_checks` role) now belongs in the `success` or `finalize` stack: guard a `when:` clause and raise an `Error` lifecycle action when the contract is unmet. **Recovery** (the old `handle_*` role) belongs in a `failure`/`blocked` stack — or any other event's, since flow control is universal — via `retry`, `resume`, or `proxy`. See [Flow Control](flow-control/flow-control.md) for the full directive catalog.
 
