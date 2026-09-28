@@ -26,12 +26,11 @@ In the rusty-monorepo (where you are currently working), you will find:
         - `_speak` provides TTS services to allow the host to speak a message
         - `_play` and `_play_background` provides a set of sound effects which the user can choose from to indicate some sort of event
         - etc.
-    - `review.just` provides a way for a user to kickoff a review process or implement the suggestions from a review (leveraging the "claudine" service defined in this monorepo)
+    - `review.just` provides `just fix <spec>`, which alternates implementing a review's findings and re-reviewing an implemented spec until a review marks it production ready (at most 5 cycles; leverages the "claudine" service defined in this monorepo)
     - `spec.just` provides a way for a users to:
-        - create a new specification file for a feature or fix (`just feature`, `just fix`)
+        - create a new feature specification file (`just feature`)
         - clarify the requirements in a specification (`just clarify`)
         - etc.
-    - `plan.just` provides a user a way to create and then implement plan for a specification file and/or a technical design (or both)
     - `util.just` provides a number of utility recipes that the other `.just` files leverage
 
 ## About Just

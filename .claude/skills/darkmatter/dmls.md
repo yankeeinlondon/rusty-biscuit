@@ -52,6 +52,13 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 Completion and validation must call the same schema-arm selection and parser
 authorities. A completion-only reconstruction is drift.
 
+Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
+`dm.shell.invalid_suffix` diagnostic (`providers/dsl.rs`) read the library's
+`FRONTMATTER_SHELL_SUFFIXES`, `describe_suffix`, and
+`parse_frontmatter_shell_suffixes`, the grammar `md compose` parses with.
+`frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
+because the YAML span includes them.
+
 ## Unknown identifiers
 
 `dm.expression.unknown_identifier` is a **Warning** on body `{{ … }}` and on

@@ -66,6 +66,12 @@ the compose pipeline.
 - `prologue` / `epilogue` - Frontmatter-driven file includes
 - `when="..."` conditions, cycle detection, depth limits
 - Heading re-leveling for included markdown (H6 overflow handled gracefully)
+- A failing child becomes a `_Could not transclude …_` notice under lenient
+  mode, except fatal classes (`transclusion_failure_is_fatal` in
+  `pipeline/phases.rs`): cycle, depth, remote fetch, missing runtime context,
+  `NotPreApproved`, and any shell span failure (`MarkdownError::shell_span_failure`),
+  so a partial's unhandled `::shell`/`::shell-block`/`$( … )` failure fails the
+  composition exactly as it would inline
 
 **Inline Post** (serial):
 
@@ -154,10 +160,14 @@ let context = ComposeContext::capture_with_evidence(
 ```
 
 `ContextRequirements::for_content` scans active `ctx.*` references in one
-content fragment. `for_document` scans both authored frontmatter values and the
-body, preserving interpolation-literal masking and date/time aliases. `all`,
-`contains`, and `iter` support explicit orchestration without exposing the
-population modules. Date/time is always present in a requirements set.
+content fragment. `for_document` scans every frontmatter string at any depth
+(`for_frontmatter`, lifecycle blocks included) and the body, preserving
+interpolation-literal masking and date/time aliases. The body follows body
+interpolation's executable-span rule: a mention inside a fenced or indented
+code block demands nothing unless the document sets
+`interpolate_code_blocks: true`. `all`, `contains`, `iter`, and `union` support
+explicit orchestration without exposing the population modules. Date/time is
+always present in a requirements set.
 
 Calls to `package(`/`package_area(` demand `Repo` and `ipv4(`/`ipv6(` demand
 `Network` (`FUNCTION_GROUPS` in `capture/groups.rs`). Those functions read
@@ -287,6 +297,10 @@ file changes rather than discovering the repository a second time.
   `Evaluator::{eval, eval_value, eval_json}`, `conditions::evaluate_condition`,
   and the two `$()` ternary evaluations. That is the Q2 memo scope: repeated
   reads of one key inside one expression agree; the next expression refreshes.
+- `CurrentAuthority::memoized()` — an embedder's wider memo. It wraps the
+  authority's provider so every read through the returned handle (and its
+  clones) shares one observation per key; calling it again starts a fresh
+  memo. Claudine memoizes once per lifecycle event.
 
 Resolution rules, enforced in `EffectiveState`, `FrontmatterSeedState`, and
 `LayeredLookup` **before** frontmatter, external state, and injected globals,
@@ -441,6 +455,8 @@ optional-target idiom is condition-aware and warning-free:
 | `{{ current.branch }}` | The same key as `ctx.branch`, observed when this expression evaluates |
 | `{{ current_env.HOME }}` | The same key as `env.HOME`, reread from the live process environment |
 | `{{ file_exists(path) }}` | Read-side function (also `frontmatter`, `markdown_title`, `markdown_body_empty`, `validate_schema`, `absolute`, `relative`); resolves on every surface, both interpolation passes included |
+| `{{ find_files('&area/fixes/**/2026-01-01-x/spec.md') }}` | Every file a glob reference matches, sorted absolute paths; the path before the first wildcard is a file reference naming the directory walked (so the walk stays bounded), `[]` when nothing matches. Use it to find a spec by directory identity and to see ambiguity, which `%` (first lexical match) hides |
+| `{{ try_frontmatter(file) }}` | `frontmatter(file)` as `{ok, value, error}`: a missing, unreadable, or unparsable file is `ok: false` with the reason instead of failing the composition |
 
 Read-side functions and `doc.*` resolve identically on every surface
 (frontmatter both passes, body, `when=`, `$()` ternary condition/branches,
@@ -908,16 +924,31 @@ the missing include.
 
 ## Shell Command Caching
 
-Identical commands (same normalized command string) execute **once per compose
-run** by default; the memoized `stdout`/`stderr` is reused at every other call
-site, including across recursive transclusion (the cache lives in the shared
+Identical commands execute **once per compose run** by default. The cache stores
+the whole `ShellOutcome` (status, stdout, stderr, whether a deadline hit), keyed
+on the normalized command plus working directory, `strip_ansi`, effective
+timeout, and timeout policy (`shell_expansion::cache_key`). Each entry is a
+once-cell, so concurrent identical requests share one execution; a failure that
+leaves no outcome (missing executable, spawn error) is not cached. Every reader
+maps the one outcome: a text reader (`outcome_to_execution`) fails on a non-zero
+status, a result suffix (`::ok`/`::exit-code`/`::result`) turns it into a typed
+value. The cache is shared across recursive transclusion (it lives in the shared
 `ShellExpansionRuntime`, not in `cache::RunLocalCache`). Opt out per directive to
 get a full cache bypass (fresh execution at each occurrence) using each family's
 own spelling:
 
 - Body `::shell --no-cache <cmd>`
-- Frontmatter `$(<cmd>)::no-cache` (combines with `::timeout:N` in either order)
+- Frontmatter `$(<cmd>)::no-cache` (combines with the other suffixes in any order)
 - `::shell-block no_cache=true` (the flag form `--no-cache` stays a parse error)
+
+Frontmatter suffixes have one grammar, `parse_frontmatter_shell_suffixes`
+(`frontmatter_shell_expansion/suffix.rs`), used by execution, the leak guard,
+and DMLS: at most one result suffix, no suffix twice, no trailing text. A
+suffix is never part of the approved bytes. `ResolvedShellValue` and
+`execute_resolved_shell_values` (`frontmatter_shell_expansion/assignment.rs`)
+serve a `$( … )` that runs outside a compose (Claudine's lifecycle `set`): bytes
+are fixed at `resolve`, and every execution gets a fresh cache. See
+`docs/inline/fm-shell-expansion.md`.
 
 A repeated command whose executable is on the built-in volatile allowlist
 (`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning
