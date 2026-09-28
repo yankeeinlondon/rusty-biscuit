@@ -4,7 +4,7 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 ---
 ## with a graph
 
-  main  is 7 commits behind  origin/main  (checked just now)
+  main  is 7 commits behind  origin/main
  GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
@@ -27,14 +27,14 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
 <the git graph>
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 
- - main is 7 commits behind origin/main; run wt --ff to fast-forward it.
+ - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
- - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
 ## without a graph
 
-  main  is 7 commits behind  origin/main  (checked just now)
+  main  is 7 commits behind  origin/main
  GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
@@ -56,14 +56,14 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
  PRs as of 10 min ago
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 
- - main is 7 commits behind origin/main; run wt --ff to fast-forward it.
+ - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
- - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
 ## with a graph and --verbose
 
-  main  is 7 commits behind  origin/main  (checked just now)
+  main  is 7 commits behind  origin/main
  GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
@@ -87,14 +87,14 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 <the verbose section>
 
- - main is 7 commits behind origin/main; run wt --ff to fast-forward it.
+ - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
- - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
 ## without a graph, with --verbose
 
-  main  is 7 commits behind  origin/main  (checked just now)
+  main  is 7 commits behind  origin/main
  GitHub rate limited the request for updated information. Try again in a few minutes.
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
@@ -117,6 +117,6 @@ expression: "labeled(vec![(\"with a graph\".into(), assemble(Some(graph), None))
  - running this command again will provide updated metrics; alternatively use the --refresh / -r flags to force refresh immediately
 <the verbose section>
 
- - main is 7 commits behind origin/main; run wt --ff to fast-forward it.
+ - main is 7 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
- - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.

@@ -161,6 +161,13 @@ impl Drop for Fixture {
     }
 }
 
+/// A check this run made that found the tracking ref current: the caption is
+/// `sentence` with no parenthesized suffix after it.
+pub fn assert_checked_now(caption: &str, sentence: &str) {
+    assert!(caption.contains(sentence), "{sentence:?} in: {caption}");
+    assert!(!caption.contains(&format!("{sentence} (")), "no suffix after {sentence:?}: {caption}");
+}
+
 /// The spinner writes only to a terminal, so captured stderr never has it.
 pub fn assert_no_spinner(stderr: &str) {
     for glyph in biscuit_terminal::components::spinner::FRAMES {
