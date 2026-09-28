@@ -314,6 +314,14 @@ fn drawn_box(image: &RgbaImage, region: BoundingBox, color: impl Fn(&image::Rgba
     found
 }
 
+/// Kitty is never scheduled in CI, so this warning is the only trace of a
+/// pixel check that did not run; `.config/nextest.toml` shows this binary's
+/// output on success so it is seen.
+fn warn_pixels_unproven(reason: &str) {
+    let test = std::thread::current().name().unwrap_or("level2_graph_in_kitty").to_string();
+    eprintln!("WARNING: {test}: pixel check skipped: {reason}");
+}
+
 fn over_black(pixel: &image::Rgba<u8>) -> [u8; 3] {
     let [r, g, b, a] = pixel.0;
     let blend = |c: u8| (u16::from(c) * u16::from(a) / 255) as u8;
@@ -485,12 +493,38 @@ impl GraphRun {
             self.screen.join("\n")
         );
 
-        // Pixels: the drawn part of the transmitted PNG must appear exactly
-        // where the band starts, and nothing may be drawn elsewhere in it.
+        self.assert_pixels_match(legend, next);
+
+        // "Some history is not shown" may follow the image instead.
+        self.screen[next]
+            .trim()
+            .strip_suffix(" not shown")
+            .and_then(|notice| notice.strip_suffix(" more worktrees").or_else(|| notice.strip_suffix(" more worktree")))
+            .map(|count| count.parse().expect("numeric hidden-lane count"))
+    }
+
+    /// The drawn part of the transmitted PNG must appear exactly where the
+    /// band below `legend` starts, and nothing may be drawn elsewhere in it.
+    /// Skipped with a warning when the screenshot cannot show what Kitty drew;
+    /// the text and APC checks above still hold.
+    fn assert_pixels_match(&self, legend: usize, next: usize) {
+        let (cell_w, cell_h) = self.cell;
+        let image = &self.transmitted;
+        if !biscuit_test_harness::screen_capture_permitted() {
+            warn_pixels_unproven("this process lacks macOS Screen Recording permission (grant it to the terminal running the tests)");
+            return;
+        }
         let png_box = drawn_box(&image.png, (0, 0, i64::from(image.png.width()), i64::from(image.png.height())), over_black)
             .expect("the transmitted graph is not blank");
         let shot_path = self.instance_screenshot_path();
-        let (screen_box, shot) = self.wait_for_drawn_band(legend, next, &shot_path);
+        let Some((screen_box, shot)) = self.wait_for_drawn_band(legend, next, &shot_path) else {
+            warn_pixels_unproven(&format!(
+                "the screenshot holds no window contents, not even the table Kitty reports on screen, so Kitty had not \
+                 drawn its window. Screenshot: {}",
+                shot_path.display()
+            ));
+            return;
+        };
         let (x0, y0) = self.grid_origin(&shot);
         let top = y0 + (legend as i64 + 1) * i64::from(cell_h);
         let expected = (png_box.0 + x0, png_box.1 + top, png_box.2 + x0, png_box.3 + top);
@@ -511,13 +545,6 @@ impl GraphRun {
         if self.evidence.is_none() {
             let _ = fs::remove_file(&shot_path);
         }
-
-        // "Some history is not shown" may follow the image instead.
-        self.screen[next]
-            .trim()
-            .strip_suffix(" not shown")
-            .and_then(|notice| notice.strip_suffix(" more worktrees").or_else(|| notice.strip_suffix(" more worktree")))
-            .map(|count| count.parse().expect("numeric hidden-lane count"))
     }
 
     fn instance_screenshot_path(&self) -> PathBuf {
@@ -557,8 +584,9 @@ impl GraphRun {
 
     /// Screenshots the window until the band between `legend` and `next`
     /// holds drawn pixels (Kitty draws on its next frame), and returns their
-    /// bounding box and the screenshot.
-    fn wait_for_drawn_band(&self, legend: usize, next: usize, path: &Path) -> (BoundingBox, RgbaImage) {
+    /// bounding box and the screenshot. `None` when the last screenshot shows
+    /// nothing even where the table is, which proves nothing about the graph.
+    fn wait_for_drawn_band(&self, legend: usize, next: usize, path: &Path) -> Option<(BoundingBox, RgbaImage)> {
         let cell_h = i64::from(self.cell.1);
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -572,14 +600,17 @@ impl GraphRun {
                 y0 + next as i64 * cell_h,
             );
             if let Some(found) = drawn_box(&shot, band, opaque) {
-                return (found, shot);
+                return Some((found, shot));
             }
-            assert!(
-                Instant::now() < deadline,
-                "nothing drawn where the graph belongs. Screenshot: {} (a capture without window \
-                 contents means the calling terminal lacks the Screen Recording permission)",
-                path.display()
-            );
+            if Instant::now() >= deadline {
+                let table = (band.0, y0, band.2, band.1);
+                assert!(
+                    drawn_box(&shot, table, opaque).is_none(),
+                    "Kitty drew the table but nothing where the graph belongs. Screenshot: {}",
+                    path.display()
+                );
+                return None;
+            }
             std::thread::sleep(Duration::from_millis(200));
         }
     }

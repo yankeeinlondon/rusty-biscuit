@@ -182,6 +182,14 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(worktree-cli) & test(=perf_graph_stages_are_reported_for_every_graph_fixture)'
 slow-timeout = { period = "60s", terminate-after = 5 }
 
+# The Kitty graph tests skip their screenshot comparison, with a warning on
+# stderr, when the capture cannot show what Kitty drew. Kitty never runs in CI,
+# so the passing output is shown to keep that warning (and the kept evidence
+# paths) visible in `just test-l2` and pre-push runs.
+[[profile.default.overrides]]
+filter = 'package(worktree-cli) & binary(level2_graph_in_kitty)'
+success-output = "final"
+
 [profile.local-evidence]
 # Evidence needs Nextest's machine-readable report without CI's runner-specific
 # concurrency caps. Test selection and failure policy inherit from the local
