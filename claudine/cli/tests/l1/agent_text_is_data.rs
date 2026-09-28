@@ -232,7 +232,6 @@ Body.
 /// Spec row "frontmatter keys an agent adds or changes in an inline document":
 /// the rerun reads the agent's value back as the original string.
 #[test]
-#[ignore = "red until phase 5"]
 fn inline_agent_added_frontmatter_survives_a_second_run() {
     let fixture = CliProcessFixture::named("agent-text-inline");
     let md = fixture.cwd().join("doc.md");
@@ -273,6 +272,170 @@ fn inline_agent_added_frontmatter_survives_a_second_run() {
     );
 }
 
+/// Install a fake `goose` that runs `prelude` and then replaces `document`
+/// with exactly `content`, the way an agent that rewrites the whole file would.
+fn whole_file_agent(fixture: &CliProcessFixture, document: &std::path::Path, content: &str) {
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        &format!(
+            "#!/bin/sh\nprintf '%s' {} > {}\nprintf '%s\\n' 'Wrote the document.'\nexit 0\n",
+            sh_quote(content),
+            sh_quote(&document.display().to_string())
+        ),
+    );
+}
+
+fn frontmatter_value(document: &str, key: &str) -> serde_json::Value {
+    let markdown: darkmatter::markdown::Markdown = document.to_string().into();
+    markdown.frontmatter().as_map().get(key).cloned().unwrap_or_default()
+}
+
+/// The spec's inline acceptance case, end to end through `inline-compose`.
+///
+/// The agent adds four values. After run 1 the file is valid YAML: `summary`
+/// and `cmd` are literal tokens, `note` and `title` are quoted strings, the
+/// completion schema judged the decoded `summary` (its pattern rejects the
+/// token spelling), and the stamped hash agrees with the bytes. Run 2 reads
+/// every value back as the agent's exact text, the unchanged authored
+/// `{{ area }}` still fills in, and the stored tokens keep their bytes.
+#[test]
+fn inline_agent_values_are_stored_as_data_and_read_back_exactly() {
+    let fixture = CliProcessFixture::named("agent-text-inline-accept");
+    let md = fixture.cwd().join("doc.md");
+    fs::write(
+        &md,
+        concat!(
+            "---\n",
+            "area: here\n",
+            "area_note: \"in {{ area }}\"\n",
+            "$schema:\n",
+            "  summary: 'string(pattern(^fixed ); required)'\n",
+            "prompt: \"S=[{{ summary || 'none' }}] N=[{{ note || 'none' }}] C=[{{ cmd || 'none' }}] T=[{{ title || 'none' }}] A=[{{ area_note }}]\"\n",
+            "---\n",
+            "old body\n",
+        ),
+    )
+    .unwrap();
+
+    common::InlineAgentStub::new(&md)
+        .frontmatter_additions(
+            "summary: fixed {{…}} parsing\nnote: see issue #42\ncmd: \"$(echo X)\"\ntitle: Fix: colons\n",
+        )
+        .body("first body\n")
+        .install(fixture.bin_dir(), "goose");
+    let (first_code, first_stderr) =
+        run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+    assert_eq!(first_code, 0, "run 1 (the completion schema sees decoded text); stderr:\n{first_stderr}");
+    assert_no_shell_approval(&first_stderr);
+
+    let stored = fs::read_to_string(&md).unwrap();
+    use darkmatter::markdown::literal_token::encode;
+    assert_eq!(frontmatter_value(&stored, "summary"), serde_json::json!(encode("fixed {{…}} parsing")));
+    assert_eq!(frontmatter_value(&stored, "cmd"), serde_json::json!(encode("$(echo X)")));
+    assert!(stored.contains("note: \"see issue #42\"\n"), "{stored}");
+    assert!(stored.contains("title: \"Fix: colons\"\n"), "{stored}");
+    assert!(stored.contains("area_note: \"in {{ area }}\"\n"), "authored bytes kept:\n{stored}");
+
+    // `md hash --diff` compares with the same library call.
+    let markdown: darkmatter::markdown::Markdown = stored.clone().into();
+    let options = darkmatter::markdown::MdHashOptions {
+        forced_kind: Some(darkmatter::markdown::hash::MdHashKind::Simple),
+        ..Default::default()
+    };
+    let hash = frontmatter_value(&stored, "hash");
+    let stored_hash = darkmatter::markdown::hash::StoredHash::parse(&hash, &options.property).unwrap();
+    let comparison = markdown.compare_hash(&stored_hash, &options).unwrap();
+    assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{comparison:?}");
+
+    let prompt_log = fixture.home().join("prompt.txt");
+    let capture = format!(
+        "{{ printf '%s\\n' \"$*\"; /bin/cat; }} > {}\n",
+        sh_quote(&prompt_log.display().to_string())
+    );
+    common::InlineAgentStub::new(&md)
+        .prelude(&capture)
+        .body("second body\n")
+        .install(fixture.bin_dir(), "goose");
+    let (second_code, second_stderr) =
+        run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(second_code, 0, "run 2; stderr:\n{second_stderr}");
+    assert_no_shell_approval(&second_stderr);
+    let prompt = fs::read_to_string(&prompt_log).unwrap_or_default();
+    assert!(
+        prompt.contains("S=[fixed {{…}} parsing] N=[see issue #42] C=[$(echo X)] T=[Fix: colons] A=[in here]"),
+        "run 2 must read back the exact text; prompt:\n{prompt}"
+    );
+    let rewritten = fs::read_to_string(&md).unwrap();
+    for key in ["summary", "cmd", "note", "title"] {
+        assert_eq!(frontmatter_value(&rewritten, key), frontmatter_value(&stored, key), "{key}");
+    }
+}
+
+/// Spec "inline, unrepairable YAML": a duplicate key or a malformed nested
+/// value names the line and the agent, and the rollback restores the pre-run
+/// bytes exactly.
+#[test]
+fn unrepairable_agent_frontmatter_names_the_line_and_rolls_back() {
+    let original = "---\ntitle: t\nprompt: write it\n---\nold body\n";
+    for (label, agent_wrote, line) in [
+        ("duplicate key", "---\ntitle: t\nprompt: write it\ntitle: again\n---\nnew body\n", 4),
+        ("bad nesting", "---\ntitle: t\nprompt: write it\nmeta:\n  a: b: c\n---\nnew body\n", 5),
+    ] {
+        let fixture = CliProcessFixture::named("agent-text-inline-unrepairable");
+        let md = fixture.cwd().join("doc.md");
+        fs::write(&md, original).unwrap();
+        whole_file_agent(&fixture, &md, agent_wrote);
+
+        let (code, stderr) = run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+
+        assert_ne!(code, 0, "{label}: stderr:\n{stderr}");
+        let flat = stderr.split_whitespace().filter(|word| *word != "┃").collect::<Vec<_>>().join(" ");
+        assert!(flat.contains(&format!("(line {line})")), "{label}: names the line:\n{stderr}");
+        assert!(flat.contains("The agent wrote this line"), "{label}: names the agent:\n{stderr}");
+        assert_eq!(fs::read_to_string(&md).unwrap(), original, "{label}: rolled back");
+    }
+}
+
+/// Spec "inline, unrepairable YAML" formatting clause: CRLF and block scalar
+/// documents keep their formatting through repair and encoding.
+#[test]
+fn crlf_and_block_scalar_documents_keep_their_formatting() {
+    let fixture = CliProcessFixture::named("agent-text-inline-format");
+    let md = fixture.cwd().join("doc.md");
+    let original = "---\r\nprompt: write it\r\nkeep: |\r\n    four spaces: {{ x }}\r\n\r\n    # not a comment\r\n---\r\nold body\r\n";
+    fs::write(&md, original).unwrap();
+    whole_file_agent(
+        &fixture,
+        &md,
+        "---\r\nprompt: write it\r\nkeep: |\r\n    four spaces: {{ x }}\r\n\r\n    # not a comment\r\nnote: see issue #42\r\nlog: |\r\n  one {{ x }}\r\n  two\r\n---\r\nnew body\r\n",
+    );
+
+    let (code, stderr) = run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let stored = fs::read_to_string(&md).unwrap();
+    // The body goes through Darkmatter's cleanup pass, which has its own
+    // line-ending rules; the frontmatter is edited in place.
+    let frontmatter = &stored[..stored.find("new body").unwrap()];
+    assert!(
+        !frontmatter.replace("\r\n", "").contains('\n'),
+        "every frontmatter line ending is CRLF: {stored:?}"
+    );
+    assert!(
+        stored.contains("keep: |\r\n    four spaces: {{ x }}\r\n\r\n    # not a comment\r\n"),
+        "the unchanged block scalar keeps its bytes: {stored:?}"
+    );
+    assert!(stored.contains("note: \"see issue #42\"\r\n"), "{stored:?}");
+    assert_eq!(
+        stored_frontmatter_text(&stored, "log"),
+        // A clipped block ending the frontmatter reads without its final
+        // newline, which is what composition reads too.
+        "one {{ x }}\ntwo",
+        "the agent's block scalar is stored as its exact text: {stored:?}"
+    );
+}
+
 // ============================================================================
 // Row 5: agent-written files read by an authored expression
 // ============================================================================
@@ -300,6 +463,32 @@ fn lifecycle_field_from_agent_written_file_is_sent_verbatim() {
         stderr.contains("agent says: see {{{ title }}} siblings"),
         "the message must carry the agent's exact text; stderr:\n{stderr}"
     );
+}
+
+/// A log an earlier inline run persisted holds `message_to_agent` as a literal
+/// token. `frontmatter()` reads it back as the agent's text, so the message
+/// carries that text and never the token spelling.
+#[test]
+fn lifecycle_field_from_a_stored_literal_token_is_sent_as_its_text() {
+    use darkmatter::markdown::literal_token::encode_yaml_scalar;
+    let fixture = CliProcessFixture::named("agent-text-message");
+    counting_goose(&fixture, &write_agent_log(&encode_yaml_scalar("see {{ title }} and $(echo X)")), "ok");
+    let md = fixture.cwd().join("doc.md");
+    fs::write(
+        &md,
+        "---\ntitle: t\nsuccess:\n  info: \"agent says: {{ frontmatter('log.md', 'message_to_agent') }}\"\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("agent says: see {{ title }} and $(echo X)"),
+        "the message must carry the decoded text; stderr:\n{stderr}"
+    );
+    assert!(!stderr.contains("{{!data:"), "the token spelling must not leak; stderr:\n{stderr}");
+    assert_no_shell_approval(&stderr);
 }
 
 /// Spec row "agent-written files read by expression": a stack action operand
@@ -646,34 +835,60 @@ fn set_frontmatter_argument_from_agent_data_is_not_reresolved() {
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
     let state = fs::read_to_string(fixture.cwd().join("state.md")).unwrap_or_default();
-    assert!(
-        state.contains("agent said {{ title }}"),
+    assert_eq!(
+        stored_frontmatter_text(&state, "note"),
+        "agent said {{ title }}",
         "the written value must be the agent's exact text; state.md:\n{state}\nstderr:\n{stderr}"
     );
 }
 
-/// Rows B14 and B15: data persisted into the active document's frontmatter is
-/// read back as data when the next iteration prepares.
+/// The text a frontmatter value holds as Darkmatter reads it: a stored literal
+/// token decoded, anything else as written.
+fn stored_frontmatter_text(document: &str, key: &str) -> String {
+    let markdown: darkmatter::markdown::Markdown = document.to_string().into();
+    let value = markdown.frontmatter().as_map().get(key).cloned().unwrap_or_default();
+    darkmatter::markdown::literal_token::decode_literal_tokens(&value)
+        .expect("a well-formed token")
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Rows B14 and B15: data a lifecycle effect persists into the active
+/// document's frontmatter is stored as a literal token, so the next run, which
+/// reads the file afresh, renders the agent's exact text instead of scanning
+/// it as a template.
 #[test]
-#[ignore = "red until phase 5"]
 fn set_frontmatter_persisted_agent_data_survives_next_preparation() {
     let fixture = CliProcessFixture::named("agent-text-persist");
     counting_goose(&fixture, &write_agent_log("'see {{…}} siblings'"), "ok");
-    let md = fixture.cwd().join("loop.md");
+    let md = fixture.cwd().join("doc.md");
     fs::write(
         &md,
-        "---\ntitle: t\nnote: none\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\nsuccess:\n  stack:\n    - action: {set_frontmatter: [\"loop.md\", \"note\", \"{{ frontmatter('log.md', 'message_to_agent') }}\"]}\n---\nNote: [{{ note }}]\n",
+        "---\ntitle: t\nnote: none\nsuccess:\n  stack:\n    - action: {set_frontmatter: [\"doc.md\", \"note\", \"{{ frontmatter('log.md', 'message_to_agent') }}\"]}\n---\nNote: [{{ note }}]\n",
     )
     .unwrap();
 
-    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+    let (first_code, first_stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+    assert_eq!(first_code, 0, "first run; stderr:\n{first_stderr}");
+    let stored = fs::read_to_string(&md).unwrap();
+    let markdown: darkmatter::markdown::Markdown = stored.clone().into();
+    assert_eq!(
+        markdown.frontmatter().as_map().get("note"),
+        Some(&serde_json::json!(darkmatter::markdown::literal_token::encode("see {{…}} siblings"))),
+        "the persisted value is a literal token on disk:\n{stored}"
+    );
 
-    assert_eq!(code, 0, "the next iteration must prepare; stderr:\n{stderr}");
+    let (second_code, second_stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(second_code, 0, "the rerun must prepare; stderr:\n{second_stderr}");
+    assert_no_shell_approval(&second_stderr);
     let prompts = later_prompts(&fixture);
     assert!(
         prompts.contains("Note: [see {{…}} siblings]"),
-        "the persisted value must render verbatim; prompts:\n{prompts}\nstderr:\n{stderr}"
+        "the persisted value must render verbatim; prompts:\n{prompts}\nstderr:\n{second_stderr}"
     );
+    assert_eq!(stored_frontmatter_text(&fs::read_to_string(&md).unwrap(), "note"), "see {{…}} siblings");
 }
 
 // ============================================================================

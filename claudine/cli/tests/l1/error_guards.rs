@@ -1121,6 +1121,19 @@ mod corpus {
                     pointer_paths: Vec::new(),
                 }),
             ),
+            // The inline closure refusing the agent's frontmatter edit.
+            (
+                "CompositionError::InlineAgentFrontmatterRejected",
+                Box::new(CompositionError::InlineAgentFrontmatterRejected {
+                    path: PathBuf::from("run.md"),
+                    rejection: Box::new(claudine::composition::AgentFrontmatterRejection {
+                        line: Some(4),
+                        property: Some("title".to_string()),
+                        reason: "the key `title` appears more than once".to_string(),
+                        agent_edit: true,
+                    }),
+                }),
+            ),
             // The completion verdict's two halves.
             (
                 "CompositionError::CompletionBodyUnchanged",
