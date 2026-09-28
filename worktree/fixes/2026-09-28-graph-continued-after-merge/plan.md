@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-28
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 packages:
@@ -43,6 +43,22 @@ skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/biscuit-terminal/components.md
 packages_touched_during_phase_2:
+    - biscuit-terminal
+    - worktree-cli
+source_files_during_phase_3:
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_3:
+    - worktree/docs/git-graph.md
+    - biscuit-terminal/docs/components/git_graph.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+packages_touched_during_phase_3:
     - biscuit-terminal
     - worktree-cli
 ---
@@ -308,20 +324,20 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
 
 ### Wave 3a — `GitGraph` segmented emission (`biscuit-terminal`)
 
-- [ ] **Edge resolution** (D1)
+- [x] **Edge resolution** (D1)
     - in `arrange`, replace `merges: HashMap<String, Vec<usize>>` with resolved edges keyed by destination SHA, carrying `(source lane, source position)`; also record the source positions per lane
     - count undrawable edges as incomplete: source not drawn on its lane, destination undrawn or on the same lane, or a second edge into one commit
-- [ ] **Segmented emitter** (D2, D4)
+- [x] **Segmented emitter** (D2, D4)
     - replace `EmitState::finished` with per-lane cursors, a set of emitted sources, and a set of dropped edges
     - pause after a source and its children; at a ready destination, emit `merge`, then `checkout` the source, resume it, and `checkout` back
     - at the end of root emission, drain paused lanes by dropping their blocking edges, in deterministic order
     - keep `has_head` semantics, so a merge is never the first entry of a lane with no head
-- [ ] **Sibling order** (D3)
+- [x] **Sibling order** (D3)
     - generalize `emit_merged_lanes_first` to use every edge's destination lane; unrelated lanes keep the creation-time order
-- [ ] **Caps and trimming** (D5)
+- [x] **Caps and trimming** (D5)
     - `lane_ancestors` includes every edge's destination lane
     - `trim_one_commit` pins every source and destination position
-- [ ] **Component tests** (`biscuit-terminal/lib/src/components/git_graph/tests.rs`), each asserting Mermaid text and, through `biscuit-visualized` geometry, exact parents:
+- [x] **Component tests** (`biscuit-terminal/lib/src/components/git_graph/tests.rs`), each asserting Mermaid text and, through `biscuit-visualized` geometry, exact parents:
     - a mid-lane merge: `C`'s parents are `[C^1, B]`, and the first post-merge commit's parent is `B`; with `+N` folded after `B`, the square's parent is `B`
     - a source with two children, one forked before `B` and one after: both at their real SHAs, and the source resumes after `C`
     - a child forked **at** `B`: declared before the merge, with its label at `B`
@@ -332,22 +348,22 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
     - the height cap: a lane whose destination is another branch lane keeps that lane with it, or both are hidden, and a destination hidden by the cap is accounted for
     - width trimming never folds `B` or `C`
     - regression: every pre-existing component test's Mermaid output is byte-identical (the Phase 2 texts)
-- [ ] **Component docs in code**
+- [x] **Component docs in code**
     - update the module docs ("Lanes and tags", "Nothing undrawn is substituted") and the `plan_with` docs to describe sources, segments, and the one-merge-per-commit rule
 
 ### Wave 3b — Boundary reconstruction (`worktree-cli`)
 
-- [ ] **Topology helpers** (`git_graph/topology.rs`)
+- [x] **Topology helpers** (`git_graph/topology.rs`)
     - the G2 boundary lookup, with the window result and count handed to `first_parent_entries` (extend `Extent::Until` or add a `Known` argument, whichever reads better); no duplicate `newest` or count calls
     - the G3 fast path in `integration_into`
     - the G8 chain-position lookup for `base_sha`, with `is_object_id` validation before any Git call
-- [ ] **Reconstruction in `place()`** (`git_graph.rs`)
+- [x] **Reconstruction in `place()`** (`git_graph.rs`)
     - `Shape::Lane` gains `earlier: Vec<(String /*B*/, String /*C*/, LaneId)>`, oldest first
     - loop per G5–G8 with the G4 cache (created in `assemble`, passed to `place`); record the visited boundaries and `gap`
     - `Placement::anchors` adds `(own lane, B)` and `(C's lane, C)`; `assemble` passes the own-lane `B` anchors to that lane's `first_parent_entries`
     - `assemble` emits `with_merge(B, C)` for each earlier edge, then the tip edge (A2)
     - comment only the counter-intuitive points (why the fork is measured against `B`, why `Unmerged` for `B` is a gap), following the repository's comment rules
-- [ ] **Fact tests** (`git_graph/tests.rs`, exact SHAs, `GraphFacts` only)
+- [x] **Fact tests** (`git_graph/tests.rs`, exact SHAs, `GraphFacts` only)
     - E1 base view: `fix/wt-ux` entries, fork `P`, merges `[(B, C)]`, `fix/sniff-pr` a label line at `B` with its parent, `!incomplete`, and no SHA on two lanes (add an `assert_no_repeated_commit(&facts)` helper)
     - E1 focused views: from `fix/wt-ux` (lane plus edge) and from `fix/sniff-pr` (the parent's reconstructed lane)
     - E1 *behind* and *diverged*: `C` anchored on the default lane or on the `origin/main` line, respectively
@@ -357,8 +373,8 @@ Two concurrent waves in different crates. Wave 3b asserts on `GraphFacts` only, 
 
 **Checkpoint 3**
 
-- [ ] `just test` passes in `biscuit-terminal` and in `worktree`. The tests the spec flips (Phase 4) may be marked with a `// flips in Phase 4` note, but they must still compile. Do not leave them `#[ignore]`d past Phase 4.
-- [ ] `just lint` passes in both areas.
+- [x] `just test` passes in `biscuit-terminal` and in `worktree`. The tests the spec flips (Phase 4) may be marked with a `// flips in Phase 4` note, but they must still compile. Do not leave them `#[ignore]`d past Phase 4.
+- [x] `just lint` passes in both areas.
 
 ## Phase 4 — Integrated Evidence
 

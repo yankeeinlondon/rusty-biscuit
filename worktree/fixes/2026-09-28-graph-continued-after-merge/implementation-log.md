@@ -23,6 +23,19 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/biscuit-terminal/components.md
+source_files_during_phase_3:
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_3:
+    - worktree/docs/git-graph.md
+    - biscuit-terminal/docs/components/git_graph.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
 ---
 
 # Implementation Log for 2026-09-28-graph-continued-after-merge (5 phases)
@@ -252,3 +265,229 @@ does not name the API and is unchanged.
   name `nested_parent_merged_into_default` (English, not the API).
 - No cross-OS run: the change is a type rename with no path, process, or
   platform code, so it carries no OS-specific risk.
+
+## Phase 3
+
+Emission and reconstruction. Wave 3a (`biscuit-terminal`) and Wave 3b
+(`worktree-cli`) ran concurrently in disjoint files.
+
+### Wave 3a — `GitGraph` segmented emission
+
+**Changes** (`biscuit-terminal/lib/src/components/git_graph.rs`):
+
+- **D1:** `arrange` resolves every edge of a drawn lane through
+  `drawn_positions` into `Layouted::merges` (destination SHA → `Edge { source:
+  (lane, position), destination: (LaneKey, position) }`) and
+  `Layouted::sources` (`(lane, position)` → destinations, edge order). An edge
+  is undrawable (sets `incomplete`) when its source is not on its own lane, its
+  destination is undrawn or on the same lane, or the destination is already
+  claimed (first in line order, then edge order, wins). Lanes hidden by the
+  height cap are never resolved, so their edges stay uncounted.
+- **D2:** `EmitState::finished` is replaced by per-lane cursors, a `paused` set,
+  the `declared` lane order, and a `dropped` destination set. The cursor
+  advances before an entry's merge and children. After a source and its
+  children the lane pauses while a destination is neither emitted nor dropped,
+  unless the source is its last entry (so tip edges emit exactly the Phase 2
+  text). At a destination whose source is emitted and whose lane has a head,
+  `merge` is emitted; a paused, no-longer-blocked source is then resumed between
+  `checkout <source>` and `checkout <destination>`. Otherwise the destination is
+  a plain commit and the edge is dropped (a paused source then resumes at that
+  point). The private `GraphLine::merge_destination()` is removed.
+- **D3:** `emit_merged_lanes_first` takes `(source lane, destination lane)`
+  pairs and orders siblings by a stable depth-first pass (every sibling that must
+  come first is placed before it). **Departure:** it considers every drawable
+  edge in a sibling's subtree, not only the sibling's own edges, so a nested
+  lane merging into a sibling's subtree is not dropped; own-edge cases order
+  exactly as before. A cycle keeps its first lane first and is broken by D4.
+- **D4:** after root emission, the first paused lane in declaration order has
+  its blocking edges dropped (`incomplete`) and resumes; each round emits at
+  least one entry, so no loop bound is needed. "Lane order" is taken as
+  declaration order, which follows D3.
+- **D5:** `lane_ancestors` adds the lane of every edge's destination.
+  `trim_one_commit` pins both ends of every merge of a drawn lane (drawable or
+  not), a superset of the old destination pins.
+- Module docs gain "Merges and segments" (sources, segments, pause and resume,
+  one merge per commit); "Lanes and tags", "Nothing undrawn is substituted",
+  and `plan_with` are updated.
+
+**Tests added** (`git_graph::tests`, all L1, Mermaid text plus exact parents
+via `biscuit-visualized` geometry):
+
+| Requirement | Test |
+|---|---|
+| mid-lane merge: `C` `[C^1, B]`, next commit's parent `B` | `a_lane_merged_from_its_middle_pauses_at_the_source_and_resumes_after_the_merge` |
+| `+N` folded after `B` hangs from `B` | `a_square_folded_after_the_merge_source_hangs_from_the_source` |
+| children forked before and after `B`; source resumes after `C` | `children_forked_before_and_after_the_merge_source_hang_from_their_own_commits` |
+| child forked at `B` declared before the merge, label at `B` | `a_child_forked_at_the_merge_source_is_declared_before_the_merge` |
+| merged twice and continued, source order, no repeated ID | `a_lane_merged_twice_and_continued_draws_both_merges_in_source_order` |
+| merge into a sibling that merges into the default lane | `a_merge_into_a_sibling_that_merges_into_the_default_lane_emits_each_source_first` |
+| cycle: terminates, one edge, `incomplete`, each commit once | `a_cycle_of_merges_draws_one_and_reports_the_other` |
+| destination before its source: plain commit, no stranded pause | `a_destination_emitted_before_its_source_is_a_plain_commit_and_the_source_does_not_pause` |
+| D1: source not on its lane | `a_merge_whose_source_is_not_on_its_lane_is_left_out_and_reported` |
+| height cap keeps a mid-lane destination lane with its source | `the_height_cap_keeps_a_mid_lane_merges_destination_lane_with_its_source` |
+| height cap hides source and destination lanes together, counted by the lane note | `the_height_cap_hides_a_source_lane_and_its_destination_lane_together` |
+| width trimming never folds `B` or `C` | `trimming_never_folds_a_merge_source_or_its_destination` |
+
+**Regression (byte-identical):** every existing expected string is unchanged,
+and all 49 pre-existing tests pass. In addition, a temporary dump in the test
+helpers (`mermaid`, `plan`, `geometry_of`) captured every Mermaid text and plan
+of those 49 tests under the HEAD emitter and the new one; `diff -r` over the
+40 dumped outputs was identical. The dump was reverted.
+
+### Wave 3b — Boundary reconstruction
+
+**Changes:**
+
+- `topology.rs`:
+  - `LaneWindow` (newest `LINE_WINDOW` commits, length, whether the length was
+    counted, and verified `known` boundaries) is read once by
+    `History::lane_window` (today's `newest` plus, for a full window, today's
+    `count_first_parent`). `Extent::Until` now carries it, so
+    `first_parent_entries` repeats neither call, and places a known boundary
+    at its verified distance without `locate`. `Extent::Open` carries the
+    default lane's window (the separate `window` argument is gone).
+  - G2 `History::boundary`: the first parent of the oldest shown commit when
+    the window is the whole lane, otherwise one `log --no-walk=unsorted
+    --ignore-missing --format=%H %P tip~(length-1)`. No parent is a root in a
+    complete clone and a gap in a shallow one; an uncounted length is a gap.
+  - G3: `integration_into` returns `NoSeparateHistory` when the oldest commit
+    of the first-parent chain `T..X` has `T` as its first parent, skipping
+    `--ancestry-path`.
+  - G8 `History::chain_distance(tip, recorded)`: `is_object_id` first (no Git
+    call for a malformed value), then `rev-list --first-parent --count
+    --ignore-missing tip --not <recorded>` (so an unknown object counts the
+    whole chain instead of failing, and a failure is a real one) and `log
+    --no-walk=unsorted --ignore-missing --format=%H tip~d`: on the chain only
+    when that is `recorded`. Off the chain is stale in a complete clone; in a
+    shallow clone `cat-file -e` decides between stale (the object exists) and
+    a gap (missing, possibly past the cut).
+- `git_graph.rs`:
+  - `place()` classifies the tip as before (through the G4 cache), then
+    `extend()` walks boundaries: classify `B` against the same candidates;
+    `MergedDirectly` → G8 cutoff (computed lazily, once, only when an edge is
+    about to be accepted, so a lane with an ordinary boundary pays nothing
+    for its record) → replace each stop containing `B` with `C^1` (answers
+    classification already has are reused: the winning candidate contains
+    `B`, and without `after_indirect` every earlier one does not), dedup, and
+    re-read the window. Distances must strictly increase and never revisit a
+    boundary, else gap. `NoSeparateHistory`/`IntegratedOtherwise` stop
+    cleanly; `Unmerged`/gap set `gap`.
+  - The fork is `merge-base(C^1, B)` of the oldest accepted edge, expected on
+    the parent's lane if recorded, else `C`'s lane. With no edge, today's fork
+    rule runs unchanged; it is now computed after the walk, so a lane with an
+    edge never pays for the fork it replaces.
+  - `Shape::Lane { window, fork, earlier: Vec<EarlierMerge { source, merge,
+    lane }>, merge }` (a named struct instead of the plan's tuple).
+    `Placement::anchors` adds `(own lane, B)` and `(C's lane, C)`;
+    `assemble` emits `with_merge(B, C)` oldest first, then the tip edge (A2).
+  - G4 `Classifications`: `Mutex<HashMap<(commit, candidate tips),
+    Arc<OnceLock<…>>>>`, created in `assemble`; the map lock is held only to
+    fetch the cell, so two lanes asking the same question at once classify
+    it once while unrelated classifications stay parallel. The tip
+    classification goes through it too.
+  - The diverged `origin/<default>` line reads its window inside its
+    parallel job.
+  - Module `//!` docs describe the boundary classification.
+
+**Git call budget (P1), measured by the updated call-count tests:**
+
+- `the_base_view_gives_every_worktree_branch_a_line` (three lanes, each short,
+  each boundary an ordinary fork on the first candidate tried): `--is-ancestor`
+  5 → 8, `rev-list` 1 → 4; `merge-base` 3 and `log` 4 unchanged. Exactly +2
+  per lane, as ruled.
+- `graph_and_verbose_share_one_merge_base`: `merge-base` (all forms) 2 → 3.
+
+**Tests added** (`worktree-cli` `commands::git_graph::tests`, L1, `GraphFacts`
+only, exact SHAs; each runs on the library and binary targets):
+
+| Requirement | Test |
+|---|---|
+| E1 base view: fork `P`, exact `+7`, merges `[(B, C)]`, `fix/sniff-pr` a label at `B` under its parent, `!incomplete`, no commit on two lanes | `a_continued_branch_draws_its_earlier_merge_and_its_child_label_in_the_base_view` |
+| E1 focused from `fix/wt-ux` and from `fix/sniff-pr` | `a_continued_branch_draws_its_earlier_merge_in_both_focused_views` |
+| E1 *behind* (`C` on the default lane) and *diverged* (`C` on the `origin/main` line) | `a_continued_branch_merges_into_origin_main_before_a_fast_forward` |
+| merged twice and continued: both edges oldest first, fork `d1` | `a_branch_merged_twice_draws_both_merges_oldest_first` |
+| `B` integrated indirectly: no edge, today's facts | `a_boundary_integrated_through_another_merge_is_not_reconstructed` |
+| shallow crossing (no edge, incomplete) and older boundary failing (first edge kept, fork unknown, incomplete) | `a_shallow_boundary_invents_no_merge_and_keeps_the_verified_one` |
+| new branch at a merged tip, with the record (no edge) and without (edge) | `a_branch_created_at_a_merged_tip_does_not_claim_the_old_merge` |
+| Input Robustness Matrix, every row, plus shallow rows and both controls | `fork_origin_cutoff_matrix` |
+| ordinary unmerged lane: identical `GraphFacts` | `an_ordinary_unmerged_branch_gathers_unchanged_facts` |
+| P1 budget | `the_base_view_gives_every_worktree_branch_a_line`, `graph_and_verbose_share_one_merge_base` (updated counts) |
+
+`fork_origin_cutoff_matrix` writes the record with `save_atomic`, applies one
+textual edit per cell, reads it with `load_from`, and asserts `(merges, fork,
+incomplete)` of `new`'s line. Cells: unedited record at `B` (cutoff, control),
+no record (edge, control), absent, `null`, `123`, `""`, duplicate key,
+trailing garbage, 7-character, uppercase, unknown object, a tree object, off
+the chain (the parent's final tip `C`, and the sibling `p`), an ancestor of `B`
+on the chain (edge), `n1` newer than `B` (cutoff). For every cell it also
+asserts no Git argument was `""`, the abbreviation, or the uppercase value.
+Shallow rows (a depth-3 clone): no record (edge, incomplete from the tip's
+shallow classification), the record at `B` (cutoff), unknown object (no edge:
+`GatherGap`). Every cell passed on its first run; the two controls differ, so
+the field is load-bearing.
+
+**Pre-change proof for the literal test:**
+`an_ordinary_unmerged_branch_gathers_unchanged_facts` was also run against
+unmodified HEAD (`525611399`) in a scratch `git worktree` at `/tmp` (removed
+afterward): it passed there too, so the literal is today's output.
+
+**Smell grep (G8):** the added `worktree-cli` code has no `unwrap_or_default()`,
+`.ok()`, or `filter_map` on `base_sha` or its Git answers; `ForkOrigin` has
+no `#[serde(default)]`.
+
+### Tests marked for Phase 4
+
+Four `worktree-cli` tests assert the old behavior this phase changes. Each
+is `#[ignore = "flips in Phase 4"]` with a `// flips in Phase 4: …` note and
+still compiles:
+
+- `a_branch_continued_after_its_merge_is_an_unmerged_lane` (`b1` now drawn)
+- `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment`
+  (`W1` now on `fix/wt-ux`'s lane)
+- `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`: only
+  the sparse-lanes entry fails, on `incomplete`. A scratch run with that entry
+  set to `incomplete: false` and the merge `(M103, d12, W1)` added passed
+  entirely (hidden lanes still `[1, 0]`); the edit was reverted, since Phase 4
+  owns it.
+- `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60`: every
+  assertion passes up to `assert!(plan.incomplete)`, which is now false;
+  density and `M104`'s exact parents still hold.
+
+With both waves in place, each of the four fails only where its expectation
+is the old behavior.
+
+### Drift corrected
+
+Four texts described the behavior this phase removed. Following the rule
+that `docs/` is the current record, each got a minimal correction now; the
+full rewrites (diagrams, test lists, performance figures) remain Phase 5's:
+
+- `worktree/docs/git-graph.md`: the "merged directly after the parent took it
+  indirectly" example said `fix/sniff` hangs from nothing with the notice
+  (now connected at `W1` on `fix/wt-ux`'s reconstructed lane); "Continued
+  after a merge" said the earlier merge is not reconstructed (now describes
+  the boundary walk, the fork against `B`, and the record cutoff); the
+  "No reconstruction of earlier merges" limit is replaced by what is still
+  not drawn.
+- `biscuit-terminal/docs/components/git_graph.md`: the **Planned** marker on
+  per-source merges is removed and the "Merges" bullet and the undrawn-merge
+  table row describe segments and every undrawable case.
+- `.claude/skills/biscuit-terminal/components.md` and
+  `.claude/skills/worktree/SKILL.md`: the "only the latest merge is drawn"
+  and "continued branch is unconnected" sentences are replaced.
+
+The worktree skill's Kitty-test description (the sparse-lanes notice) is left
+for Phase 4/5, which change that test.
+
+### Verification
+
+- `just test` in `worktree`: 780 passed, 38 skipped (Phase 2: 770 and 30;
+  +18 new test runs, +8 skips = four ignored tests on two targets).
+- `just test` in `biscuit-terminal`: 3357 passed, 55 skipped (61
+  `git_graph::tests`).
+- `just lint` in `worktree` and `biscuit-terminal`: clean (clippy's
+  `type_complexity` required the `Window`, `Classified`, and `Question`
+  aliases).
+- No cross-OS run in this phase: there is no path, process, or `cfg` code; the
+  new shallow-clone helper reuses the existing Windows-safe `file://`
+  spelling. Phase 4 runs Linux L1 as planned.

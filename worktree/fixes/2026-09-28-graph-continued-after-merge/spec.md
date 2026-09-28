@@ -37,21 +37,33 @@ related:
     - 2026-09-27-graph-sparse-lanes
 human_review: false
 message_to_agent: |-
-    Phase 2 is done: `GraphLine::merged_into` is gone; `GraphLine::merges: Vec<LaneMerge { source, destination }>`
-    (oldest first) and `with_merge(source, destination)` replace it. Inside `GitGraph`, a private
-    `GraphLine::merge_destination()` (`merges.last()`'s destination) is read in exactly three places:
-    the `merge_lane` closure and the merge table in `arrange`, and `lane_ancestors`. Phase 3a replaces those
-    reads and removes the helper; `LaneMerge::source` is not read anywhere yet. In worktree-cli tests, assert
-    merges through `merge_destinations(line)` (pass a `&GraphLine`; clippy rejects `&&`). The component doc
-    marks multi-edge drawing as **planned**; Phase 3a/5 must remove that marker when it lands.
-
-    Phase 1 (2026-09-28) is done; read implementation-log.md "## Phase 1" first.
-    - Spike S1 confirmed D2 and D6: pausing the source lane at B makes B the merge's second parent, and a resumed commit or +N square follows B. biscuit-visualized needs no change.
-    - G5 is AMENDED in plan.md: do not add a separate `is_ancestor(B, C^1)` call. classify(B) already guarantees C^1 does not descend from B, and in a shallow clone that call's "no" is always a GatherGap, which would block every shallow reconstruction (S2 proved it). A stop whose `is_ancestor(B, stop)` is a shallow gap is kept and sets `gap`.
-    - P1 is refined: +2 (short lane) / +3 (long lane) measured, plus one `--is-ancestor` per candidate tried before the one that holds B.
-    - P2 is refined: run-to-run drift exceeds one run's spread, so compare Phase 4's numbers against the envelope of both baseline runs in the log, and run the after-measurement twice.
-    - Fixtures for Phase 3/4 already exist in worktree/cli/src/commands/git_graph/tests.rs: continued_after_merge(LocalMain::{AtMerge,Behind,Diverged}), merged_twice_and_continued(), new_branch_at_merged_tip() (its `forks` holds the record at b1; use ForkOriginStore::default() for the control), indirect_boundary(), shallow_merged_twice(1 | 2), plus helpers forked_at, parent_line, repo_with_root, set_branches.
-    - Spikes are throwaway and live under spikes/ (s1 is its own cargo workspace; s2 is a bash script).
+    Phase 3 (2026-09-28) is done; read implementation-log.md "## Phase 3" first.
+    - Both waves landed and `just test`/`just lint` pass in worktree and biscuit-terminal.
+    - Four worktree-cli tests are `#[ignore = "flips in Phase 4"]` with a `// flips in Phase 4: …` note:
+      a_branch_continued_after_its_merge_is_an_unmerged_lane,
+      a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment,
+      gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags,
+      the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60. Remove every ignore in Phase 4.
+      Each fails only where it expects the old behavior. A scratch run proved gathered_graphs passes entirely
+      once the sparse-lanes Evidence has `incomplete: false` and the merge `(&repo.m103, &repo.d[12], repo.w1())`
+      (hidden_lanes stays [1, 0]). the_observed_graph passes up to `assert!(plan.incomplete)`; density and
+      M104's parents already hold.
+    - New worktree-cli fact tests already cover E1 (all views and variants), merged twice, indirect, both
+      shallow cases, new-branch-at-merged-tip, `fork_origin_cutoff_matrix`, and
+      `an_ordinary_unmerged_branch_gathers_unchanged_facts` (proven against pre-change HEAD too). Phase 4 adds
+      the plan/geometry Evidence for them (reuse `assert_no_repeated_commit`, `continued_lane`,
+      `shallow_clone_of`).
+    - API changes in worktree-cli: `Extent::Until(&LaneWindow)` (read by `History::lane_window`),
+      `Extent::Open { window, cap_window }`, and `first_parent_entries(tip, extent, anchors)` (no window
+      argument). `Shape::Lane` has `window`, `fork`, `earlier: Vec<EarlierMerge>`, `merge`.
+    - The P1 budget measured exactly +2 per ordinary short lane: the_base_view test now pins
+      `--is-ancestor` 8, `rev-list` 4, `merge-base` 3, `log` 4.
+    - biscuit-terminal: D3 was widened (a sibling's whole subtree's edges order siblings), D4 uses declaration
+      order, and trimming pins both ends of every merge, drawable or not. Byte-identical Mermaid for every
+      pre-existing component test was verified by a dump-and-diff.
+    - The interim doc/skill corrections are listed in the log under "Drift corrected". Phase 5 still owns the
+      full rewrites, and the worktree skill's Kitty sparse-lanes "exactly one notice" text, which Phase 4
+      changes.
 ---
 
 # Draw a branch that continued after its merge
