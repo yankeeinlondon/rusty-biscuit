@@ -270,6 +270,9 @@ where
     let mut iteration_count = 0usize;
     let mut last_output = String::new();
     let mut last_exit_code = 0i32;
+    // The prepared snapshot of the most recent iteration's run; the loop's
+    // starting snapshot until an iteration reports its own.
+    let mut run_context: Option<darkmatter::markdown::compose::ComposeContext> = None;
 
     for iteration in 1..=max_iterations {
         // Under post-finalize checking the current frontmatter is the
@@ -291,7 +294,7 @@ where
                     .with_base_dir(base_dir)
                     .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
                     .with_file_resolution_context(file_resolution_context, prompt_path)
-                    .with_prepared_context(lifecycle_ctx.context);
+                    .with_prepared_context(run_context.as_ref().or(lifecycle_ctx.context));
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -310,7 +313,7 @@ where
 
         // The executor is responsible for emitting start, the terminal event,
         // and finalize through the shared guard.
-        let output = match executor(context, &mut guard) {
+        let mut output = match executor(context, &mut guard) {
             Ok(output) => output,
             Err(error) => {
                 last_output.clear();
@@ -346,6 +349,16 @@ where
             )
             .with_handoff(handoff));
         }
+
+        if let Some(context) = output.context.take() {
+            run_context = Some(context);
+        }
+        // The gate after this iteration belongs to this iteration's run.
+        let iteration_lifecycle = LifecycleRuntimeContext {
+            context: run_context.as_ref().or(lifecycle_ctx.context),
+            ..*lifecycle_ctx
+        };
+        let lifecycle_ctx = &iteration_lifecycle;
 
         last_output = output.output;
         last_exit_code = output.exit_code;
@@ -748,7 +761,8 @@ fn build_loop_stack_context<'a>(
         runtime_state: None,
         err: None,
         timing,
-        current,
+        // Each call builds one event's context: one `current` observation.
+        current: current.as_ref().map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         // A loop gate is not inside a sequence group; `group.*` has no scope
         // here.
         group: None,

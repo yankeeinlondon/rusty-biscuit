@@ -523,6 +523,7 @@ fn document_epoch_tokens_isolate_overlapping_work() {
     assert_eq!(
         left.work_snapshot(),
         DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -535,6 +536,7 @@ fn document_epoch_tokens_isolate_overlapping_work() {
     assert_eq!(
         right.work_snapshot(),
         DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -561,6 +563,7 @@ fn document_epoch_delta_keeps_exact_consumer_counts() {
     assert_eq!(
         invocation.work_snapshot().document_epoch_since(&before),
         DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 0,
             launch_context_extensions: 0,
             ambient_fallbacks: 1,
@@ -616,7 +619,7 @@ fn repeated_derivation_for_retry_resume_and_jit_reuses_invocation_evidence() {
     for revision in 0..6 {
         fs::write(&source, format!("revision {revision}")).unwrap();
         let source_context = invocation.derive_source(&source).unwrap();
-        let evidence = invocation.runtime_evidence(&source_context, &requirements);
+        let evidence = invocation.runtime_evidence(&RunEvidence::default(), &source_context, &requirements);
         let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
             source_context.base_dir(),
             &requirements,
@@ -640,10 +643,11 @@ fn repeated_derivation_for_retry_resume_and_jit_reuses_invocation_evidence() {
     assert_eq!(work.runtime_evidence_reuses.get("repo"), Some(&6));
 }
 
-/// A group whose evidence costs real work must be computed once per source
-/// directory no matter how many documents or derivations ask for it.
+/// A volatile group whose evidence costs real work is observed once per run
+/// no matter how many documents or derivations in that run ask for it, and is
+/// counted as a volatile observation rather than a stable capture.
 #[test]
-fn repeated_requests_for_one_source_capture_costly_evidence_once() {
+fn repeated_requests_in_one_run_observe_volatile_evidence_once() {
     let fixture = TempDir::new().unwrap();
     init_repo(fixture.path());
     write_workspace(fixture.path());
@@ -655,15 +659,17 @@ fn repeated_requests_for_one_source_capture_costly_evidence_once() {
         darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.dirty_files }}");
 
     let invocation = InvocationContext::capture_at(fixture.path());
+    let run = RunEvidence::default();
     let first_context = invocation.derive_source(&first).unwrap();
-    let _ = invocation.runtime_evidence(&first_context, &requirements);
-    let _ = invocation.runtime_evidence(&first_context, &requirements);
+    let _ = invocation.runtime_evidence(&run, &first_context, &requirements);
+    let _ = invocation.runtime_evidence(&run, &first_context, &requirements);
     let second_context = invocation.derive_source(&second).unwrap();
-    let _ = invocation.runtime_evidence(&second_context, &requirements);
+    let _ = invocation.runtime_evidence(&run, &second_context, &requirements);
 
     assert_eq!(first_context.base_dir(), second_context.base_dir());
     let work = invocation.work_snapshot();
-    assert_eq!(work.runtime_evidence_captures.get("file_changes"), Some(&1));
+    assert_eq!(work.volatile_observations.get("file_changes"), Some(&1));
+    assert_eq!(work.runtime_evidence_captures.get("file_changes"), None);
     assert_eq!(work.runtime_evidence_reuses.get("file_changes"), Some(&2));
     // `datetime` holds no evidence at all and must never look like work.
     assert_eq!(work.runtime_evidence_captures.get("datetime"), None);
@@ -685,7 +691,7 @@ fn supplied_os_evidence_matches_ambient_os_capture() {
 
     let invocation = InvocationContext::capture_at(fixture.path());
     let source_context = invocation.derive_source(&source).unwrap();
-    let evidence = invocation.runtime_evidence(&source_context, &requirements);
+    let evidence = invocation.runtime_evidence(&RunEvidence::default(), &source_context, &requirements);
     let supplied = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
         source_context.base_dir(),
         &requirements,
@@ -1407,4 +1413,180 @@ fn every_scope_position_projects_through_supplied_launch_evidence() {
         "an area literally named `root` is an ordinary area, not the \
          repository root"
     );
+}
+
+/// Run `git` in `root` with a fixture identity and no signing, so a host's
+/// global configuration cannot change or block the fixture's history.
+fn git(root: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("run git in the fixture");
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+}
+
+/// A repository with one committed file that is modified but not staged.
+fn repo_with_unstaged_change() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    fs::write(fixture.path().join("tracked.txt"), "one\n").unwrap();
+    git(fixture.path(), &["add", "tracked.txt"]);
+    git(fixture.path(), &["commit", "-q", "-m", "initial"]);
+    fs::write(fixture.path().join("tracked.txt"), "two\n").unwrap();
+    fixture
+}
+
+fn staged_count(context: &darkmatter::markdown::compose::ComposeContext) -> usize {
+    context
+        .get("staged_files")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len)
+}
+
+fn text<'a>(context: &'a darkmatter::markdown::compose::ComposeContext, key: &str) -> &'a str {
+    context.get(key).and_then(serde_json::Value::as_str).unwrap_or_default()
+}
+
+/// Volatile Git state is observed once per run: a later run sees a change
+/// made after an earlier run observed it, the earlier run keeps its own
+/// observation, and stable identity is neither rediscovered nor changed.
+#[test]
+fn each_run_observes_volatile_evidence_once_and_keeps_stable_evidence() {
+    let fixture = repo_with_unstaged_change();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.staged_files }} {{ ctx.repo_root }} {{ ctx.cwd }}",
+    );
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let before = invocation.work_snapshot();
+
+    let first = invocation.begin_document_epoch();
+    let first_context = first.capture_launch_context(&requirements);
+    git(fixture.path(), &["add", "tracked.txt"]);
+    let mut first_again = first_context.clone();
+    let _ = first.extend_launch_context(
+        &mut first_again,
+        &darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.dirty_files }}"),
+    );
+    let second = invocation.begin_document_epoch();
+    let second_context = second.capture_launch_context(&requirements);
+
+    assert_eq!(staged_count(&first_context), 0, "run A observed before staging");
+    assert_eq!(staged_count(&first_again), 0, "same-run extension is not a refresh");
+    assert_eq!(staged_count(&second_context), 1, "run B observes the staged file");
+    for key in ["repo_root", "cwd"] {
+        assert_eq!(text(&first_context, key), text(&second_context, key), "`{key}`");
+    }
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, before.git_root_discoveries);
+    assert_eq!(work.topology_probes, before.topology_probes);
+    assert_eq!(work.volatile_observations.get("file_changes"), Some(&2));
+    for epoch in [&first, &second] {
+        assert_eq!(
+            epoch.work_snapshot().volatile_observations.get("file_changes"),
+            Some(&1),
+            "each run observes the group once"
+        );
+    }
+}
+
+/// Which run first mentions a property has no effect on what a later run
+/// observes: the later run's value is the same whether or not an earlier run
+/// asked for the property before the change.
+#[test]
+fn first_mention_does_not_decide_a_later_runs_value() {
+    let staged = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.staged_files }}",
+    );
+    let unrelated =
+        darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.repo_root }}");
+
+    let observed_later = |earlier: &darkmatter::markdown::compose::ContextRequirements| {
+        let fixture = repo_with_unstaged_change();
+        let invocation = InvocationContext::capture_at(fixture.path());
+        let _ = invocation.begin_document_epoch().capture_launch_context(earlier);
+        git(fixture.path(), &["add", "tracked.txt"]);
+        staged_count(&invocation.begin_document_epoch().capture_launch_context(&staged))
+    };
+
+    assert_eq!(observed_later(&staged), 1, "the earlier run mentioned the property");
+    assert_eq!(observed_later(&unrelated), 1, "the earlier run did not mention it");
+}
+
+/// A branch created between runs is the later run's `ctx.branch`; the earlier
+/// run keeps the branch it observed.
+#[test]
+fn a_branch_change_between_runs_is_observed_by_the_later_run() {
+    let fixture = repo_with_unstaged_change();
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.branch }}");
+    let invocation = InvocationContext::capture_at(fixture.path());
+
+    let first = invocation.begin_document_epoch();
+    let first_context = first.capture_launch_context(&requirements);
+    git(fixture.path(), &["checkout", "-q", "-b", "feature"]);
+    let mut extended = first_context.clone();
+    let _ = first.extend_launch_context(&mut extended, &requirements);
+    let later = invocation.begin_document_epoch().capture_launch_context(&requirements);
+
+    assert_eq!(text(&first_context, "branch"), "main");
+    assert_eq!(text(&extended, "branch"), "main");
+    assert_eq!(text(&later, "branch"), "feature");
+    assert_eq!(invocation.work_snapshot().volatile_observations.get("git"), Some(&2));
+}
+
+/// Epochs that join one run share its observation: a parallel group's
+/// siblings begin from the capture taken before any of them started, and none
+/// of them observes the working tree again.
+#[test]
+fn epochs_joining_one_run_share_its_observation() {
+    let fixture = repo_with_unstaged_change();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.staged_files }} {{ ctx.branch }}",
+    );
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let group = RunEvidence::default();
+
+    // The group's own capture, taken before any sibling starts.
+    let _ = invocation.begin_document_epoch_in(&group).capture_launch_context(&requirements);
+    git(fixture.path(), &["add", "tracked.txt"]);
+    let siblings = [
+        invocation.begin_document_epoch_in(&group),
+        invocation.begin_document_epoch_in(&group),
+    ];
+
+    for sibling in &siblings {
+        assert_eq!(staged_count(&sibling.capture_launch_context(&requirements)), 0);
+        assert!(sibling.work_snapshot().volatile_observations.is_empty());
+    }
+    let work = invocation.work_snapshot();
+    assert_eq!(work.volatile_observations.get("file_changes"), Some(&1));
+    assert_eq!(work.volatile_observations.get("git"), Some(&1));
+    let reentered = invocation.begin_document_epoch().capture_launch_context(&requirements);
+    assert_eq!(staged_count(&reentered), 1, "a re-entering sibling starts a new run");
+}
+
+/// "Only what is found on the page" still holds per run: a run that names no
+/// Git fact observes no Git state, however many runs there are.
+#[test]
+fn runs_that_name_no_git_fact_observe_no_git_state() {
+    let fixture = repo_with_unstaged_change();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.repo_root }} {{ ctx.repo }} {{ ctx.cwd }}",
+    );
+    let invocation = InvocationContext::capture_at(fixture.path());
+
+    for _ in 0..3 {
+        let _ = invocation.begin_document_epoch().capture_launch_context(&requirements);
+    }
+
+    assert!(invocation.work_snapshot().volatile_observations.is_empty());
 }

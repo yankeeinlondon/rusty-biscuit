@@ -56,6 +56,7 @@ mod contamination_probes;
 mod context_command;
 mod contextual_errors;
 mod ctx_launch_anchor;
+mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
@@ -107,6 +108,10 @@ mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
 mod override_boundary_guard;
+mod preflight_execution_parity;
+mod pr_flow_rehearsal;
+mod prompt_guide_defects;
+mod lifecycle_set_shell_values;
 #[cfg(unix)]
 mod prompt_reporting;
 mod propagated_context_fixtures;

@@ -94,7 +94,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
@@ -278,7 +278,74 @@ start:
         on_error: "typecheck failed"
 ```
 
-A non-zero exit code is an action error unless `no_error: true` is set.
+A non-zero exit code is an action error unless `no_error: true` is set. A
+`shell` action returns nothing; to branch on a command, read its result with
+`set`.
+
+### Reading a Command's Result
+
+A `set` value written as a whole-value `$( … )` runs the command when the
+action executes and stores what it produced. The frontmatter
+[result suffixes](../../../../darkmatter/docs/inline/fm-shell-expansion.md#reading-a-commands-result)
+apply: no suffix stores the trimmed stdout (a non-zero exit fails the action),
+`::ok` a boolean, `::exit-code` a number, and `::result` an object
+`{ ok, code, stdout, stderr }` a later `when:` can read with dotted access.
+
+```yaml
+start:
+  stack:
+    - action:
+        - set:
+            sha: "$(git rev-parse --short HEAD)"
+            diff: "$(git diff --quiet)::result"
+    - when: "!diff.ok"
+      action:
+        - info: "Uncommitted changes at {{ sha }}: exit {{ diff.code }}"
+```
+
+Two lifetimes apply to such a value, and they are separate:
+
+```mermaid
+flowchart LR
+    A["pre-flight<br/>resolve {{ … }} from early-binding values"] --> B["approve the bare command<br/>(no suffix)"]
+    B --> C{"event fires,<br/>guard passes?"}
+    C -- no --> D["nothing runs"]
+    C -- yes --> E["run the approved bytes<br/>in a fresh result cache"]
+    E --> F{"every value<br/>succeeded?"}
+    F -- yes --> G["write every destination"]
+    F -- no --> H["write none"]
+```
+
+- **The command bytes are fixed at pre-flight.** Arguments resolve once from
+  early-binding values, pre-flight approves exactly those bytes, and the action
+  runs them. A later `set` of a value the command interpolated does not change
+  what runs.
+- **The result is produced each time the action executes.** Each executed
+  `set` gets its own result cache: two values naming the same command share one
+  run, but a command read in `start` and again in `success` runs twice, because
+  the agent may have changed the answer.
+- **It runs only when the action runs**: after its `when:` passes, never at
+  pre-flight, never under `--dry-run`, and never for an item whose guard is
+  false.
+- **Every value reads the pre-write state**, and no destination is written
+  unless every value succeeds. Expression values evaluate first, so a failing
+  expression runs no command. A command that already ran is **not undone** when
+  a later value fails: its external effects stand.
+- **Only an exit status becomes a value.** A missing, blacklisted, denied, or
+  timed-out command fails the action (Claudine has no allowed-timeout mode), a
+  command ended by a signal fails it, and a user interruption keeps its
+  cancellation outcome: `no_error: true` cannot turn it into `ok: false`.
+- **Only a top-level, whole-value `$( … )` runs.** `"sha $(cmd)"`, and a
+  `$( … )` inside a nested object or list, are stored as text.
+- Like a `shell` action, it runs from `start` or a later event, in Claudine's
+  working directory. It is refused in `initialize`, in every item including one
+  whose guard is false, and cannot run in an early catch handler before
+  pre-flight reaches `start`. A `set` in `start` is legal in a document that
+  also has `initialize`. A sequence task's `set` (`setup:`, `teardown:`, or a
+  `side_effect:` task) cannot run a command and refuses a whole-value `$( … )`.
+
+A `capture:` option on the `shell` action is not available; `set` is the one
+way a lifecycle step reads a command's result.
 
 ### Side-Effect Actions
 
@@ -336,14 +403,14 @@ Stack expressions have access to four late-binding roots in addition to frontmat
 |------|--------------|--------|
 | `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
-| `current` | every event | `current.<key>` for every `ctx.<key>`, observed when the reference is reached |
+| `current` | every event | `current.<key>` for every `ctx.<key>`, observed once per event: every read in one event's notification fields and stack agrees |
 | `current_env` | every event | `current_env.<KEY>` for every `env.<KEY>`, reread from the live process environment when the reference is reached |
 
 `err` and `timing` are Claudine globals. `current` and `current_env` are
 Darkmatter **reserved roots**: Claudine supplies the invocation's refresh
 capability, and a key that capability does not hold renders `null` with a
 `PartialRuntimeCapture` diagnostic rather than probing the host. Lazy is
-bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) and `current_env.*` refresh at reference time. See
+bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh from one event to the next, and `current_env.*` is reread at reference time. A gate that asks about now — "is anything staged yet?" — reads `current`; `ctx` holds what this composition run observed when it started. See
 [Context Variables — Binding time](../state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.

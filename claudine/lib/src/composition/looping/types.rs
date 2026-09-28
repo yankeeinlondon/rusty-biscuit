@@ -132,6 +132,14 @@ pub struct LoopIterationOutput {
     /// target is not an extra iteration of the source loop (R7) — and moves
     /// the handoff onto [`LoopExecutionResult::handoff`].
     pub handoff: Option<SurfacedHandoff>,
+    /// The prepared `ctx.*` snapshot of the composition run this iteration
+    /// was.
+    ///
+    /// Every iteration is its own run, so the loop gate that follows it, and
+    /// the next iteration's `_loop_is_last` prediction, read this snapshot
+    /// rather than the one the loop started with. `None` keeps the most recent
+    /// snapshot the loop has.
+    pub context: Option<darkmatter::markdown::compose::ComposeContext>,
 }
 
 impl LoopIterationOutput {
@@ -147,6 +155,7 @@ impl LoopIterationOutput {
             provider_id: None,
             model_id: None,
             handoff: None,
+            context: None,
         }
     }
 
@@ -162,6 +171,7 @@ impl LoopIterationOutput {
             provider_id: None,
             model_id: None,
             handoff: None,
+            context: None,
         }
     }
 

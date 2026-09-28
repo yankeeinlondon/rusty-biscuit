@@ -783,7 +783,7 @@ fn run_start_lifecycle_event(
     err: Option<&LifecycleErrorInfo>,
     loop_start: std::time::Instant,
 ) -> LifecycleEventOutcome {
-    observe_reentry_lifecycle_context(prompt_state, materialized);
+    install_reentry_lifecycle_context(prompt_state, lifecycle_guard, materialized);
     run_lifecycle_event(
         lifecycle_guard,
         LifecycleSignal::Start,
@@ -797,20 +797,25 @@ fn run_start_lifecycle_event(
     )
 }
 
-fn observe_reentry_lifecycle_context(
+/// A retried or resumed attempt is a new composition run: its lifecycle reads
+/// the attempt's own capture, not the snapshot of the attempt it replaced.
+fn install_reentry_lifecycle_context(
     prompt_state: &HarnessPromptState,
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) {
     if matches!(
         prompt_state.entry,
         claudine::composition::DocumentEntryReason::Retry
             | claudine::composition::DocumentEntryReason::Resume
-    ) && materialized.compose_context.is_some()
-        && let Some(epoch) = materialized.document_epoch.as_ref()
+    ) && let Some(context) = materialized.compose_context.as_ref()
     {
-        epoch.record_prepared_context_consumer(
-            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
-        );
+        lifecycle_guard.set_run_prepared_context(context.clone());
+        if let Some(epoch) = materialized.document_epoch.as_ref() {
+            epoch.record_prepared_context_consumer(
+                claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+            );
+        }
     }
 }
 
@@ -1081,7 +1086,7 @@ fn bootstrap_adopted_document_phase(
         apply_target_env_overrides(materialized, &rebuild.env_overrides);
         lifecycle
             .guard
-            .set_proxy_prepared_context(rebuild.prepared_context);
+            .set_run_prepared_context(rebuild.prepared_context);
 
         if prompt.effective_non_interactive {
             crate::output::log_compose_prompt(

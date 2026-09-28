@@ -122,8 +122,10 @@ impl StagedLifecycleRuntime {
             epoch.record_prepared_context_consumer(
                 claudine::invocation_context::PreparedContextConsumer::Lifecycle,
             );
-            let scan = serde_json::to_string(&bootstrap.effective_frontmatter).unwrap_or_default();
-            epoch.extend_launch_context(&mut context, &ContextRequirements::for_content(&scan));
+            epoch.extend_launch_context(
+                &mut context,
+                &ContextRequirements::for_frontmatter([&bootstrap.effective_frontmatter]),
+            );
         }
         for (key, value) in env_overrides {
             context.env_mut().insert(key.clone(), value.clone());
@@ -256,7 +258,10 @@ pub(crate) fn route_staged_initialize(
         runtime_state: None,
         err: None,
         timing: Some(&timing),
-        current: document.current.clone(),
+        current: document
+            .current
+            .as_ref()
+            .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
         base_dir: surface.source_path.parent().or(document.repo_root),
         ctx_base_dir: Some(document.launch_area),

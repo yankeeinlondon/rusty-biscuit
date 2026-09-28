@@ -371,6 +371,7 @@ impl Fixture {
             // Group scheduling builds a member's live stream from `stream`; a
             // lone task under test has no enclosing scheduler to give it one.
             live: None,
+            run_evidence: None,
         }
         .run()
     }

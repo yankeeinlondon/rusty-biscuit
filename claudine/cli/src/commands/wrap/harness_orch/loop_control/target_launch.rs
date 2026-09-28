@@ -583,7 +583,7 @@ pub(super) struct TargetLaunchRebuild {
     pub(super) env_overrides: Vec<(String, String)>,
     /// The target's early-binding context, seeded with the rebuilt identity, for
     /// installation on the lifecycle guard via
-    /// [`claudine::composition::LifecycleRunGuard::set_proxy_prepared_context`].
+    /// [`claudine::composition::LifecycleRunGuard::set_run_prepared_context`].
     pub(super) prepared_context: darkmatter::markdown::compose::ComposeContext,
 }
 

@@ -27,40 +27,6 @@ pub(crate) fn merge_frontmatter_overlay(
     }
 }
 
-/// The overrides a document entered through a `proxy` composes under.
-///
-/// Precedence, low→high: the target's authored frontmatter < the proxy's
-/// `with:` overlay < the caller's setters. The overlay values were evaluated in
-/// the source document, so they are **data** — the target never scans their
-/// `{{ … }}` or `$( … )` again — while the caller's setters stay authored,
-/// except the `data_keys` among them: inside a sequence step the caller layer
-/// also carries run-produced values (a task's `params`, the step overlay),
-/// which stay data across the handoff exactly as they were for the source. A
-/// `null` overlay value removes the key from the target's frontmatter
-/// ([`merge_frontmatter_overlay`]) and contributes no override.
-///
-/// The overlay is still merged into the target's frontmatter map as well, so
-/// readers that inspect the document directly (loop recognition, `prompt:`,
-/// `$schema`, provider selection) see the handed-off values; the data layer
-/// only decides how compose treats them.
-///
-/// Canonical preparation applies the same layering from
-/// [`PrepareOptions::proxy_overlay`](claudine::composition::PrepareOptions::proxy_overlay);
-/// this builds it for a compose that bypasses that path (the eager shell
-/// pre-flight).
-pub(crate) fn proxy_caller_overrides(
-    overlay: &IndexMap<String, Value>,
-    set_overrides: Option<&Value>,
-    data_keys: &std::collections::BTreeSet<String>,
-) -> claudine::composition::LayeredOverrides {
-    let mut overrides = claudine::composition::LayeredOverrides::proxy_overlay(overlay);
-    overrides.extend(&claudine::composition::LayeredOverrides::from_parts(
-        set_overrides,
-        data_keys,
-    ));
-    overrides
-}
-
 pub(crate) fn frontmatter_map_to_value(frontmatter: &darkmatter::markdown::Frontmatter) -> Value {
     Value::Object(
         frontmatter

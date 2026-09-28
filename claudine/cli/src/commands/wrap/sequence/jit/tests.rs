@@ -1,26 +1,57 @@
 //! Just-in-time composition unit coverage.
 //!
-//! The layering helpers are pure; the template-preflight options carry the
-//! document-relative resolution contract a step's approved shell bytes depend on.
+//! The layering helpers are pure; the step's options, which its template
+//! shell audit and its preparation share, carry the document-relative
+//! resolution contract a step's approved shell bytes depend on.
 
-use super::{StepComposeContext, build_template_preflight_options, compose_step};
+use super::{StepComposeContext, compose_step, step_prepare_options};
 use std::collections::BTreeMap;
+use std::path::Path;
 
-use darkmatter::markdown::Markdown;
-
-use claudine::composition::resolve_shell_approvals;
+use claudine::composition::{PrepareOptions, ResolvedCompositionSource, approve_document_shell};
 use claudine::harness::ShellApprovalOptions;
+
+#[derive(Debug, clap::Parser)]
+struct Probe {
+    #[command(flatten)]
+    shared: crate::commands::compose::SharedComposeArgs,
+}
+
+fn shared_args() -> crate::commands::compose::SharedComposeArgs {
+    use clap::Parser;
+    Probe::try_parse_from(["probe", "--dry-run"]).unwrap().shared
+}
+
+/// The options `compose_step` audits and prepares `source` with, for a step
+/// launched from `launch_area` (the invocation anchor when `None`).
+fn step_options(
+    source: &ResolvedCompositionSource,
+    invocation: &claudine::invocation_context::InvocationContext,
+    launch_area: Option<&Path>,
+    overrides: claudine::composition::LayeredOverrides,
+    env_overrides: &BTreeMap<String, String>,
+) -> PrepareOptions {
+    let shared = shared_args();
+    let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+    let caller_input_records = BTreeMap::new();
+    let child_cwd = source.resolved_path.parent().unwrap().to_path_buf();
+    let context = StepComposeContext {
+        source_repo_root: source_context.repository_root(),
+        child_cwd: &child_cwd,
+        launch_area,
+        shared: &shared,
+        approval_cache: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        inline_mode: false,
+        file_resolution_context: source_context.file_resolution_context(),
+        caller_input_records: &caller_input_records,
+        invocation,
+        run_evidence: None,
+    };
+    step_prepare_options(source, &context, overrides, env_overrides, false)
+}
 
 #[test]
 fn sequence_step_preparation_is_one_exact_document_epoch() {
-    use clap::Parser;
-
-    #[derive(Debug, clap::Parser)]
-    struct Probe {
-        #[command(flatten)]
-        shared: crate::commands::compose::SharedComposeArgs,
-    }
-
     let directory = tempfile::tempdir().unwrap();
     let source_path = directory.path().join("step.md");
     std::fs::write(
@@ -35,9 +66,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         source_path.to_string_lossy().as_ref(),
     )
     .unwrap();
-    let shared = Probe::try_parse_from(["probe", "--dry-run"])
-        .unwrap()
-        .shared;
+    let shared = shared_args();
     let approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
     let caller_input_records = BTreeMap::from([(
@@ -57,6 +86,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         file_resolution_context: source_context.file_resolution_context(),
         caller_input_records: &caller_input_records,
         invocation: &invocation,
+        run_evidence: None,
     };
     let step = compose_step(
         &source,
@@ -77,6 +107,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
     assert_eq!(
         step.prepared.document_epoch.unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,
@@ -142,7 +173,11 @@ fn template_preflight_resolves_against_document_dir() {
     )
     .unwrap();
 
-    let md = Markdown::try_from(source_path.as_path()).unwrap();
+    let source = claudine::composition::resolve_composition_source(
+        source_path.to_string_lossy().as_ref(),
+    )
+    .unwrap();
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(launch_dir.path());
     let overrides = serde_json::json!({ "spec": "spec.md" });
     let approval_options = ShellApprovalOptions {
         policy_root: Some(doc_dir.path().to_path_buf()),
@@ -154,21 +189,14 @@ fn template_preflight_resolves_against_document_dir() {
     // post-launch chdir.
     let _cwd = CwdGuard::enter(unrelated.path());
 
-    let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let (opts, _, _) = build_template_preflight_options(
-        &env_overrides,
-        &source_path,
-        &md,
-        (
-            &claudine::composition::LayeredOverrides::authored(Some(&overrides)),
-            &Default::default(),
-        ),
+    let options = step_options(
+        &source,
+        &invocation,
         Some(launch_dir.path()),
-        None,
-        None,
+        claudine::composition::LayeredOverrides::authored(Some(&overrides)),
+        &BTreeMap::new(),
     );
-    let result =
-        resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
+    let result = approve_document_shell(&source, &options, &approval_options).unwrap();
 
     assert!(
         result.approved_commands.contains("echo true"),
@@ -201,7 +229,11 @@ fn template_preflight_does_not_resolve_launch_only_file() {
     )
     .unwrap();
 
-    let md = Markdown::try_from(source_path.as_path()).unwrap();
+    let source = claudine::composition::resolve_composition_source(
+        source_path.to_string_lossy().as_ref(),
+    )
+    .unwrap();
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(launch_dir.path());
     let overrides = serde_json::json!({ "spec": "spec.md" });
     let approval_options = ShellApprovalOptions {
         policy_root: Some(doc_dir.path().to_path_buf()),
@@ -211,21 +243,14 @@ fn template_preflight_does_not_resolve_launch_only_file() {
 
     let _cwd = CwdGuard::enter(unrelated.path());
 
-    let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let (opts, _, _) = build_template_preflight_options(
-        &env_overrides,
-        &source_path,
-        &md,
-        (
-            &claudine::composition::LayeredOverrides::authored(Some(&overrides)),
-            &Default::default(),
-        ),
+    let options = step_options(
+        &source,
+        &invocation,
         None,
-        None,
-        None,
+        claudine::composition::LayeredOverrides::authored(Some(&overrides)),
+        &BTreeMap::new(),
     );
-    let result =
-        resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
+    let result = approve_document_shell(&source, &options, &approval_options).unwrap();
 
     assert!(
         result.approved_commands.contains("echo false"),
@@ -318,24 +343,20 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         ("AGENT".to_string(), "codex".to_string()),
         ("MODEL".to_string(), "gpt-5".to_string()),
     ]);
-    let (options, context, _) = build_template_preflight_options(
-        &env,
-        &pre.source.resolved_path,
-        &pre.source.markdown,
-        (
-            // The sequence boundary receives an already materialized caller
-            // value and must pass it through without re-anchoring it.
-            &claudine::composition::LayeredOverrides::authored(Some(
-                &serde_json::json!({ "caller_spec": materialized_caller }),
-            )),
-            &Default::default(),
-        ),
+    let options = step_options(
+        &pre.source,
+        &invocation,
         Some(&launch_dir),
-        Some(source_context.file_resolution_context()),
-        Some(&invocation),
+        // The sequence boundary receives an already materialized caller
+        // value and must pass it through without re-anchoring it.
+        claudine::composition::LayeredOverrides::authored(Some(
+            &serde_json::json!({ "caller_spec": materialized_caller }),
+        )),
+        &env,
     );
-    let (composed, _) = pre.source.markdown.compose_with(options).unwrap();
-    let body = composed.content();
+    let context = options.prepared_context.clone().expect("the step captures its epoch snapshot");
+    let prepared = claudine::composition::prepare_direct(&pre.source, options).unwrap();
+    let body = prepared.prompt.as_str();
 
     assert!(body.contains(&format!(
         "AREA=alpha CWD={} AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true",

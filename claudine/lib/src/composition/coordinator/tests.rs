@@ -822,6 +822,8 @@ mod commit_records_only_handoffs {
             )
         }
 
+        // Mirrors `commit_proxy`, whose module opts out for the same error type.
+        #[allow(clippy::result_large_err)]
         fn commit(
             &self,
             ledger: &mut RunLedger,

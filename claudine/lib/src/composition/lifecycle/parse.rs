@@ -160,8 +160,11 @@ pub(crate) fn parse_lifecycle_config_with_orders(
         )?;
 
         if signal == LifecycleSignal::Initialize {
+            // Every item, guarded or not: initialization is shell-free, so a
+            // shell action and a `set` value that runs a command are both
+            // refused before anything runs.
             for (index, item) in stack.iter().flatten().enumerate() {
-                if item.actions.iter().any(|action| matches!(action.kind, LifecycleActionKind::Shell(_))) {
+                if item.actions.iter().any(runs_a_shell) {
                     return Err(CompositionError::LifecycleActionPlacement {
                         source_path: source_file.to_path_buf(),
                         property: format!("initialize.stack[{index}].action"),
@@ -372,9 +375,41 @@ pub fn parse_task_action_stack_with_order(
     for (idx, raw_item) in items.iter().enumerate() {
         let item = parse_lifecycle_stack_item(signal, raw_item, source_file, &authored.at(idx))
             .map_err(|e| annotate_stack_error(e, property, idx))?;
+        for action in &item.actions {
+            refuse_task_set_shell(action, source_file, &format!("{property}[{idx}]"))?;
+        }
         parsed.push(item);
     }
     Ok(parsed)
+}
+
+/// A sequence task's `set` stores data; it cannot run a command.
+///
+/// A task's actions are parsed when the task runs, after the sequence's
+/// preflight approved its commands, so a whole-value `$( … )` there would have
+/// no approved bytes. It is refused rather than stored as its own text.
+fn refuse_task_set_shell(
+    action: &LifecycleAction,
+    source_file: &Path,
+    property: &str,
+) -> Result<(), CompositionError> {
+    let LifecycleActionKind::RuntimeSet(set) = &action.kind else {
+        return Ok(());
+    };
+    match set.shell_values().next() {
+        None => Ok(()),
+        Some((key, _)) => Err(CompositionError::LifecycleActionInvalidLongForm {
+            source_path: source_file.to_path_buf(),
+            property: property.to_string(),
+            action: "set".to_string(),
+            message: format!(
+                "`{key}` is a whole-value `$( … )`, and a sequence task's `set` cannot run a \
+                 command; use a `shell:` task, or assign it with `set` in the task document's \
+                 own lifecycle"
+            ),
+            source: None,
+        }),
+    }
 }
 
 /// Parse a single action written in the standard positional/key-value grammar.
@@ -417,7 +452,7 @@ pub(crate) fn parse_single_action_with_order(
             ),
         });
     };
-    parse_stack_item_action_object(
+    let action = parse_stack_item_action_object(
         signal,
         obj,
         source_file,
@@ -425,7 +460,9 @@ pub(crate) fn parse_single_action_with_order(
         0,
         authored_set_order,
     )
-    .map_err(|error| root_single_action_error(error, property))
+    .map_err(|error| root_single_action_error(error, property))?;
+    refuse_task_set_shell(&action, source_file, property)?;
+    Ok(action)
 }
 
 /// Drop the `action[0]` segment the shared object parser prefixes onto a
@@ -1571,3 +1608,13 @@ use indexmap::IndexMap;
 use super::*;
 use super::super::authored_order::AuthoredOrder;
 use super::super::json_util::json_type_name;
+
+/// Whether an action runs a shell command: a `shell` action, or a `set` whose
+/// mapping holds a whole-value `$( … )`.
+pub(crate) fn runs_a_shell(action: &LifecycleAction) -> bool {
+    match &action.kind {
+        LifecycleActionKind::Shell(_) => true,
+        LifecycleActionKind::RuntimeSet(set) => set.has_shell_values(),
+        _ => false,
+    }
+}

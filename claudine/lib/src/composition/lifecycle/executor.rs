@@ -53,7 +53,8 @@ use darkmatter::markdown::compose::expression::{
 };
 use darkmatter::markdown::compose::subtree::{InjectedGlobal, LayeredLookup, SubtreeCompose};
 use darkmatter::markdown::compose::{
-    ComposeContext, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
+    ComposeContext, ComposeOptions, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
+    ResolvedShellValue, execute_resolved_shell_values,
 };
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
@@ -246,6 +247,15 @@ pub enum ShellRunError {
     /// The lifecycle has not crossed the preflight boundary.
     #[error("shell commands are forbidden during initialize and before preflight completes; move the command to start or a later event")]
     BeforePreflight,
+    /// A `set` value's command did not produce a value: it is missing,
+    /// blacklisted, denied, not pre-approved, timed out, ended by a signal, or
+    /// (without a result suffix) exited non-zero.
+    #[error("{source}")]
+    Value {
+        /// The Darkmatter shell failure.
+        #[source]
+        source: darkmatter::markdown::compose::shell_expansion::ShellExpansionError,
+    },
     /// The shell process could not be spawned or waited on.
     #[error("command `{command}` failed to run: {source}")]
     Spawn {
@@ -266,6 +276,73 @@ pub trait ShellRunner: Sync {
     /// Return the exit code, or [`ShellRunError`] when execution is prohibited
     /// or the process could not be started.
     fn run(&self, command: &str) -> Result<i32, ShellRunError>;
+
+    /// Execute one `set` action's whole-value `$( … )` assignments and return
+    /// each destination's value, in order.
+    ///
+    /// The default runs them through Darkmatter's frontmatter shell executor
+    /// ([`execute_set_shell_values`]); a runner that prohibits shell execution
+    /// overrides it.
+    fn run_values(
+        &self,
+        request: &ShellValueRequest<'_>,
+    ) -> Result<Vec<(String, Value)>, ShellRunError> {
+        execute_set_shell_values(request)
+    }
+}
+
+/// One `set` action's shell assignments, ready to execute.
+pub struct ShellValueRequest<'a> {
+    /// The preflight-resolved values, in authored order.
+    pub values: &'a [&'a ResolvedShellValue],
+    /// The pre-write state every value reads: a ternary's condition and value
+    /// branches evaluate against it. Command bytes never do; they were fixed at
+    /// preflight.
+    pub state: &'a Map<String, Value>,
+    /// The composition source, for diagnostics and file references.
+    pub source_path: &'a Path,
+    /// The early-binding `ctx.*`/`env.*` snapshot.
+    pub context: ComposeContext,
+    /// The request's file-resolution snapshot, when there is one.
+    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+}
+
+/// Runs a `set` action's shell values through Darkmatter in a fresh result
+/// cache, so a command two values name runs once and nothing is reused from an
+/// earlier event.
+///
+/// Each value's commands are exactly the bytes preflight approved, so they are
+/// its pre-approved set; a lifecycle `shell` action runs its approved bytes on
+/// the same terms. Commands run in the process's working directory, as a
+/// lifecycle `shell` action does.
+///
+/// ## Errors
+///
+/// [`ShellRunError::Value`] carrying the first value's Darkmatter failure.
+pub fn execute_set_shell_values(
+    request: &ShellValueRequest<'_>,
+) -> Result<Vec<(String, Value)>, ShellRunError> {
+    let approved = request
+        .values
+        .iter()
+        .flat_map(|value| value.commands())
+        .collect();
+    let mut options = ComposeOptions::new_with_context(request.context.clone())
+        .with_source_file(request.source_path)
+        .with_pre_approved_commands(approved);
+    if let Ok(cwd) = std::env::current_dir() {
+        options = options.with_shell_working_directory(cwd);
+    }
+    if let Some(context) = request.file_resolution_context {
+        options = options.with_file_resolution_context(context.clone());
+    }
+    let state = request
+        .state
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    execute_resolved_shell_values(request.values, state, &options)
+        .map_err(|source| ShellRunError::Value { source })
 }
 
 /// Runner for initialization and its early catch handlers. Approvals cannot
@@ -275,6 +352,13 @@ pub struct DisabledShellRunner;
 
 impl ShellRunner for DisabledShellRunner {
     fn run(&self, _command: &str) -> Result<i32, ShellRunError> {
+        Err(ShellRunError::BeforePreflight)
+    }
+
+    fn run_values(
+        &self,
+        _request: &ShellValueRequest<'_>,
+    ) -> Result<Vec<(String, Value)>, ShellRunError> {
         Err(ShellRunError::BeforePreflight)
     }
 }
@@ -359,6 +443,11 @@ pub struct StackExecutionContext<'a> {
     /// `None` fails closed: every `current.<key>` renders `null` and records a
     /// `PartialRuntimeCapture` diagnostic rather than probing the host. Only a
     /// caller holding launch evidence supplies one.
+    ///
+    /// `current` is observed once per event: a constructor passes
+    /// [`CurrentAuthority::memoized`], so every read in the event's
+    /// notification fields and stack agrees, and [`Self::with_signal`] starts a
+    /// new memo for another event.
     ///
     /// Owned rather than borrowed because the authority is a cheap handle to
     /// shared invocation state, and every derived context clones it — sharing
@@ -662,6 +751,10 @@ impl StackExecutionContext<'_> {
     ///
     /// Used by [`LifecycleRunGuard::execute_event`](super::lifecycle::LifecycleRunGuard::execute_event)
     /// so one constructed context can service every signal in a run.
+    ///
+    /// Another signal is another event, and `current` is observed once per
+    /// event, so the copy starts a new `current` memo; the same signal keeps
+    /// the event's memo.
     pub fn with_signal(&self, signal: LifecycleSignal) -> StackExecutionContext<'_> {
         StackExecutionContext {
             signal,
@@ -670,7 +763,13 @@ impl StackExecutionContext<'_> {
             runtime_state: self.runtime_state,
             err: self.err,
             timing: self.timing,
-            current: self.current.clone(),
+            current: match signal == self.signal {
+                true => self.current.clone(),
+                false => self
+                    .current
+                    .as_ref()
+                    .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
+            },
             group: self.group,
             base_dir: self.base_dir,
             ctx_base_dir: self.ctx_base_dir,
@@ -1481,6 +1580,12 @@ impl StackExecutionContext<'_> {
 
     /// Resolve against the pre-write snapshot; an absent destination is a
     /// declared null, so optional values can be copied before being reset.
+    ///
+    /// Every value reads the same pre-write snapshot, and no destination is
+    /// written unless every value succeeds. Expression values evaluate first;
+    /// whole-value `$( … )` values run afterwards, together, through the
+    /// shell runner, so a failed expression runs no command. A command's
+    /// external effects are not undone when a later value fails.
     fn dispatch_runtime_set(
         &self,
         set: &RuntimeSet,
@@ -1491,8 +1596,11 @@ impl StackExecutionContext<'_> {
         for (key, _) in set.iter() {
             snapshot.entry(key.clone()).or_insert(Value::Null);
         }
-        let mut updates = IndexMap::with_capacity(set.len());
+        let mut resolved_values = HashMap::with_capacity(set.len());
         for (key, value) in set.iter() {
+            if matches!(value, ProxyWithValue::Shell(_)) {
+                continue;
+            }
             let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
                 let value_property = format!("{property}.{key}{suffix}");
                 let reason = LifecycleEvaluationReason::Expression;
@@ -1510,8 +1618,20 @@ impl StackExecutionContext<'_> {
                 info.reason = reason;
                 ActionFailure::Evaluation(info)
             })?;
-            updates.insert(key.clone(), resolved);
+            resolved_values.insert(key.clone(), resolved);
         }
+        if set.has_shell_values() {
+            resolved_values.extend(self.run_set_shell_values(set, property, &snapshot)?);
+        }
+        let updates: IndexMap<String, Value> = set
+            .iter()
+            .map(|(key, _)| {
+                let value = resolved_values
+                    .remove(key)
+                    .expect("every set destination resolved to a value");
+                (key.clone(), value)
+            })
+            .collect();
 
         let fallback;
         let state = match self.runtime_state {
@@ -1530,6 +1650,64 @@ impl StackExecutionContext<'_> {
             working.insert(key, value);
         }
         Ok(prior)
+    }
+
+    /// Run a `set` action's whole-value `$( … )` values against the pre-write
+    /// `snapshot`.
+    ///
+    /// A value preflight never resolved does not run. A runner that prohibits
+    /// shell execution, and a user interruption, are evaluation errors that
+    /// `no_error` cannot suppress; a command that fails is a dispatch error.
+    fn run_set_shell_values(
+        &self,
+        set: &RuntimeSet,
+        property: &str,
+        snapshot: &Map<String, Value>,
+    ) -> Result<Vec<(String, Value)>, ActionFailure> {
+        let mut values = Vec::new();
+        let mut authored = String::new();
+        for (key, shell) in set.shell_values() {
+            let Some(resolved) = shell.resolved.as_ref() else {
+                return Err(ActionFailure::Evaluation(
+                    LifecycleErrorInfo::from_action_failure(
+                        "set",
+                        format!(
+                            "`{property}.{key}` runs a command that pre-flight never resolved or \
+                             approved, so it cannot run"
+                        ),
+                    )
+                    .at_property(format!("{property}.{key}")),
+                ));
+            };
+            authored.push_str(&shell.authored);
+            values.push(resolved);
+        }
+        let request = ShellValueRequest {
+            values: &values,
+            state: snapshot,
+            source_path: self.source_path,
+            context: self.early_binding_context(&authored),
+            file_resolution_context: self.file_resolution_context,
+        };
+        match self.shell_runner.run_values(&request) {
+            Ok(results) if !crate::interrupt::interrupted() => Ok(results),
+            Ok(_) => Err(ActionFailure::Evaluation(
+                LifecycleErrorInfo::from_action_failure(
+                    "set",
+                    "the run was interrupted while a `set` command ran",
+                )
+                .at_property(property.to_string()),
+            )),
+            Err(error @ ShellRunError::BeforePreflight) => Err(ActionFailure::Evaluation(
+                LifecycleErrorInfo::from_error_or_action("set", &error).at_property(property.to_string()),
+            )),
+            Err(error) if crate::interrupt::interrupted() => Err(ActionFailure::Evaluation(
+                LifecycleErrorInfo::from_error_or_action("set", &error).at_property(property.to_string()),
+            )),
+            Err(error) => Err(ActionFailure::Dispatch(
+                LifecycleErrorInfo::from_error_or_action("set", &error).at_property(property.to_string()),
+            )),
+        }
     }
 
     /// Resolve a document-authored mutation target through the same captured
@@ -1823,6 +2001,14 @@ impl StackExecutionContext<'_> {
     ) -> Result<Value, (String, LifecycleExprError)> {
         match value {
             ProxyWithValue::Null => Ok(Value::Null),
+            // Only a `set` mapping holds one, and `set` runs it separately.
+            ProxyWithValue::Shell(shell) => Err((
+                String::new(),
+                LifecycleExprError::prose(format!(
+                    "`{}` is a shell value, which only a `set` action runs",
+                    shell.authored
+                )),
+            )),
             ProxyWithValue::Scalar(expr) => self
                 .resolve_typed_value(expr, fm)
                 .map_err(|msg| (String::new(), msg)),
@@ -1943,6 +2129,10 @@ fn proxy_with_scan_content(with: &ProxyWith) -> String {
 fn push_proxy_with_scan_content(value: &ProxyWithValue, content: &mut String) {
     match value {
         ProxyWithValue::Null => {}
+        ProxyWithValue::Shell(shell) => {
+            content.push(' ');
+            content.push_str(&shell.authored);
+        }
         ProxyWithValue::Scalar(Expr::StringLiteral(s)) => {
             content.push(' ');
             content.push_str(s);

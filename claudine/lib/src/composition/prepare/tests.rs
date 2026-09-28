@@ -131,6 +131,7 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
     assert_eq!(
         prepared.document_epoch.unwrap().work_snapshot(),
         crate::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,

@@ -55,7 +55,7 @@ use super::super::runtime_state::{
 };
 use darkmatter::markdown::compose::OverrideOrigin;
 use super::model::RuntimeMutation;
-use super::preflight::{PreflightAction, PreflightGraph, PreflightTask, property_child};
+use super::preflight::{PreflightAction, PreflightGraph, PreflightGroup, PreflightTask, property_child};
 use super::reserved;
 use crate::harness::parse_timeout;
 use crate::render::{TaskLiveOutput, TaskStreamOutcome, TaskStreamSink};
@@ -208,6 +208,22 @@ pub struct PromptTaskRequest {
     /// thread draining the child's stdout. `None` leaves the stream
     /// undecorated, which is what a `--silent` run selects.
     pub frame_writer: Option<crate::render::TaskFrameWriter>,
+    /// The composition run the task executes as.
+    ///
+    /// The document's first preparation joins it, so the task's own fields
+    /// and its document observe one view of Git working state. `None` lets the
+    /// document open a run of its own. A handoff, retry, or resume inside the
+    /// document is a new run regardless.
+    pub run_evidence: Option<crate::invocation_context::RunEvidence>,
+}
+
+/// A composition run opened for a group member or a whole parallel group.
+#[derive(Debug, Clone)]
+pub struct TaskRun {
+    /// The run's prepared `ctx.*` snapshot, for the member's own fields.
+    pub context: darkmatter::markdown::compose::ComposeContext,
+    /// The run a member's prompt document joins.
+    pub run: crate::invocation_context::RunEvidence,
 }
 
 /// What a `prompt:` task's runner reports back.
@@ -237,6 +253,25 @@ pub trait PromptTaskRunner: Sync {
     /// composed or launched at all. A launched provider that failed reports its
     /// code through [`PromptRunOutcome::exit_code`].
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError>;
+
+    /// Open the composition run one serial group member executes as.
+    ///
+    /// A serial member is a run of its own, so it observes what the members
+    /// before it changed. `None` keeps the group's snapshot for the member's
+    /// fields, which is all a runner without launch evidence can offer.
+    fn open_member_run(&self, _task: &PreflightTask) -> Option<TaskRun> {
+        None
+    }
+
+    /// Open the one composition run every sibling of a parallel group starts
+    /// from.
+    ///
+    /// The run is captured for the union of what the siblings mention before
+    /// any of them starts, so concurrent siblings share one view of the
+    /// working tree. `None` keeps the group's own snapshot and run.
+    fn open_group_run(&self, _group: &PreflightGroup) -> Option<TaskRun> {
+        None
+    }
 }
 
 /// A [`PromptTaskRunner`] that refuses every request.
@@ -312,6 +347,10 @@ pub struct TaskExecution<'a> {
     /// reader parked on a descendant's pipe is deliberately detached rather
     /// than joined, so it cannot hold a borrow of this execution.
     pub live: Option<&'a std::sync::Arc<TaskLiveOutput>>,
+    /// The composition run this task executes as, handed to its prompt
+    /// document's first preparation. A serial group member replaces it with
+    /// its own run; a parallel member with the group's.
+    pub run_evidence: Option<&'a crate::invocation_context::RunEvidence>,
 }
 
 impl TaskExecution<'_> {
@@ -560,6 +599,7 @@ impl TaskExecution<'_> {
             // The final assistant text is deliberately not re-emitted here: the
             // wrapper already wrote it, so a second emission would double-print.
             frame_writer: self.live.map(|live| live.rendered_writer()),
+            run_evidence: self.run_evidence.cloned(),
         };
 
         match self.prompt.run(&request) {

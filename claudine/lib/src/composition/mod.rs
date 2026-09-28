@@ -124,8 +124,8 @@ pub use preflight::{
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell, prepare_bootstrap,
-    prepare_direct, prepare_document, prepare_inline,
+    approve_document_shell, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline,
 };
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;

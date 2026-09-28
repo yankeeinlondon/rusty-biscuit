@@ -1439,6 +1439,16 @@ mod grammar_tests {
         ));
     }
 
+    /// A frontmatter shell suffix never reads as a reference operator on a
+    /// sequence source.
+    #[test]
+    fn a_shell_source_with_a_suffix_is_refused_by_name() {
+        for value in ["$(ls -la)::ok", "$(ls -la)::result", "$(ls -la)::timeout:5"] {
+            let error = classify_source(&json!(value)).unwrap_err().to_string();
+            assert!(error.contains("takes no suffix"), "{value}: {error}");
+        }
+    }
+
     /// Two adjacent spans are not a *whole-value* span, so the value stays a
     /// file reference rather than becoming an expression source.
     #[test]

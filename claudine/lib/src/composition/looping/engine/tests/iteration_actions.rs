@@ -92,6 +92,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
     assert_eq!(
         document_epoch.work_snapshot(),
         crate::invocation_context::DocumentEpochWork {
+            volatile_observations: Default::default(),
             launch_context_constructions: 1,
             launch_context_extensions: 0,
             ambient_fallbacks: 0,

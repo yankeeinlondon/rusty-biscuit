@@ -180,6 +180,15 @@ that can receive a real key event:
   byte a terminal writes for a Ctrl+C key press, so the console's own input
   handling raises the event.
 
+These rows are enough for this contract. The code under test is Claudine's
+interrupt ladder, which stays installed through the drain. It never reads
+keyboard events. Turning a key press into `SIGINT` or `CTRL_C_EVENT` is the
+job of the operating system and the terminal, and the drain does not change
+that path. Each OS proves the ladder with a real interrupt from its terminal
+layer: the tmux and kitty rows on macOS, and the ConPTY row on Windows. The
+Linux L3 row is kept as an extra end-to-end check. It is not a bar that every
+OS must meet.
+
 ### Process-scoped flag
 
 The flag has two halves that are kept in sync by a single setter on the

@@ -121,6 +121,19 @@ fn classify_string_source(raw: &str) -> Result<SequenceSourceSpec, CompositionEr
     if let Some(inner) = whole_value_span(trimmed, "$(", ")") {
         return Ok(SequenceSourceSpec::Shell(inner.trim().to_string()));
     }
+    // A frontmatter suffix (`::ok`, `::result`, `::timeout:5`, …) turns a value
+    // into something other than a list, or tunes a frontmatter command; a
+    // sequence source is neither, so name that rather than misreading the
+    // suffix as a reference operator.
+    if let Some(shell) = darkmatter::markdown::compose::parse_frontmatter_shell_value_spanned(trimmed)
+        && let Some(suffix) = trimmed.get(shell.close_span.end..)
+        && suffix.starts_with("::")
+    {
+        return Err(CompositionError::SequenceInvalid(format!(
+            "`sequence` shell source `{trimmed}` takes no suffix: `{suffix}` applies to a \
+             frontmatter value, and a sequence source must produce a list"
+        )));
+    }
 
     Ok(SequenceSourceSpec::Reference(parse_reference(trimmed)?))
 }

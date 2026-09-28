@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use claudine::composition::{
     CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    LIFECYCLE_EVENT_KEYS, LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
+    LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
     PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
     ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
     SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy_in_context,
@@ -699,8 +699,8 @@ pub(crate) fn prepare_and_run_active_document(
             &prepared_context,
             &document_epoch,
             &file_resolution_context,
-            &crate::commands::wrap::overlay::proxy_caller_overrides(
-                current_overlay,
+            current_overlay,
+            &claudine::composition::LayeredOverrides::from_parts(
                 set_overrides.as_ref(),
                 &caller_data_keys(step_scope),
             ),
@@ -755,8 +755,12 @@ pub(crate) fn prepare_and_run_active_document(
 
 /// How a document's shell commands are approved before it runs.
 enum DocumentBoot {
-    /// Everything was discovered and approved up front, body included.
-    Eager(claudine::composition::PreFlightResult),
+    /// Everything was discovered and approved up front, body included, with
+    /// these policy options.
+    Eager(
+        claudine::composition::PreFlightResult,
+        claudine::harness::ShellApprovalOptions,
+    ),
     /// The document authors `initialize`: approval is staged around it, with
     /// these policy options.
     Staged(claudine::harness::ShellApprovalOptions),
@@ -773,50 +777,42 @@ fn eager_shell_preflight(
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
     document_epoch: &claudine::invocation_context::DocumentEpoch,
     file_resolution_context: &biscuit_file::FileResolutionContext,
-    overrides: &claudine::composition::LayeredOverrides,
+    proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
+    caller_overrides: &claudine::composition::LayeredOverrides,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     approval_options: &claudine::harness::ShellApprovalOptions,
     prep_substages: &mut Vec<crate::perf::SubstageTiming>,
 ) -> Result<DocumentBoot> {
-    let compose_options = {
-        document_epoch.record_prepared_context_consumer(
-            claudine::invocation_context::PreparedContextConsumer::Preflight,
-        );
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
-            prepared_context.clone(),
-        )
-        .with_context_authority(document_epoch.compose_context_authority())
-        .with_source_file(&source.resolved_path)
-        .with_file_resolution_context(file_resolution_context.clone())
-        // Lifecycle subtrees remain deferred because their file references
-        // may target artifacts created before the event fires. Their shell
-        // commands are audited separately by `collect_lifecycle_shell_commands`.
-        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+    // The audit composes through the same canonical options, with the same
+    // overlay and caller layers, as the preparation that executes the
+    // document, so the discovered bytes are the executed bytes.
+    let discovery_options = PrepareOptions {
+        invocation_context: Some(prep_context.invocation.clone()),
+        document_epoch: Some(document_epoch.clone()),
+        caller_input_records: caller_input_records.clone(),
+        source_repo_root: prep_context.source_repo_root.clone(),
+        shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
+        prepared_context: Some(prepared_context.clone()),
         // Retain the captured launch directory as diagnostic metadata;
         // document-authored references use the request-scoped resolver.
-        .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone())
+        file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
+        file_resolution_context: Some(file_resolution_context.clone()),
         // Discovery, not judgment: this pass exists to find `::shell`
         // directives. The verdict belongs to canonical preparation — and for
         // an `initialize`-declaring dry run, which still reaches this audit,
         // withholding it keeps the schema from outranking `initialize` (R4) —
         // and reporting one here would render Darkmatter's raw error instead
         // of the typed one the direct route renders (AC28).
-        .with_deferred_schema_verdict(true);
-        opts = overrides.apply_to(opts);
-        opts = opts.with_caller_input_records(caller_input_records.clone());
-        opts
-    };
+        defer_schema_verdict: true,
+        proxy_overlay: proxy_overlay.clone(),
+        ..PrepareOptions::default()
+    }
+    .with_layered_overrides(caller_overrides.clone());
 
     let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
-        claudine::composition::resolve_shell_approvals(
-            Some(&source.markdown),
-            Some(&compose_options),
-            approval_options,
-            None,
-            None,
-        )?
+        claudine::composition::approve_document_shell(source, &discovery_options, approval_options)?
     };
     record_prep_substage(
         prep_substages,
@@ -824,7 +820,7 @@ fn eager_shell_preflight(
         "shell approval",
         shell_approval_t,
     );
-    Ok(DocumentBoot::Eager(preflight))
+    Ok(DocumentBoot::Eager(preflight, approval_options.clone()))
 }
 
 /// Validate timeout flags against interactive mode and parse their values.
@@ -938,9 +934,10 @@ fn build_loop_options(shared: &SharedComposeArgs) -> LoopExecutionOptions {
 /// Build the loop seed, lifecycle runtime context, and run the loop engine.
 ///
 /// Iteration 1 prepares at `schema_stage`; later iterations skip schema
-/// validation and shell approval; the loop engine emits `initialize` once and
-/// delegates `start`/terminal/`finalize` to the shared
-/// [`claudine::composition::LifecycleRunGuard`].
+/// validation. Every iteration audits the shell commands its own state
+/// produces before it runs (see [`audit_loop_iteration_template`]); the loop
+/// engine emits `initialize` once and delegates `start`/terminal/`finalize` to
+/// the shared [`claudine::composition::LifecycleRunGuard`].
 #[allow(clippy::too_many_arguments)]
 fn build_and_run_loop(
     source: &ResolvedCompositionSource,
@@ -954,6 +951,9 @@ fn build_and_run_loop(
     // lifecycle come from that read, and iteration 1 composes the stabilized
     // reread rather than the pre-`initialize` snapshot.
     staged: Option<&StagedBoot>,
+    // The document's shell policy; each iteration audits its own commands
+    // against it.
+    approval_options: &claudine::harness::ShellApprovalOptions,
     // Direct, or a committed proxy target: the entry reason iteration 1 records
     // on its prepared composition.
     entry: claudine::composition::DocumentEntryReason,
@@ -1054,15 +1054,19 @@ fn build_and_run_loop(
         loop_prepare_options.file_resolution_context.as_ref(),
         loop_prepare_options.document_epoch.as_ref(),
         |ctx, guard| {
+            // The prepared snapshot of this iteration's run, reported to the
+            // loop gate that follows it.
+            let run_context;
             let prepared = {
                 let _span = match kind {
                     CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
                     CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
                 };
                 // Iteration 1 prepares at the stage the coordinator selected;
-                // re-entry passes skip schema validation and shell pre-flight
-                // because the seed/frontmatter state was already judged on
-                // iteration 1.
+                // re-entry passes skip schema validation because the
+                // seed/frontmatter state was already judged on iteration 1.
+                // Shell approval is never carried over: every iteration audits
+                // the commands its own state produces.
                 //
                 // At the deferred stage iteration 1 is still a pre-`initialize`
                 // read of the document *body* — the engine emitted `initialize`
@@ -1086,6 +1090,32 @@ fn build_and_run_loop(
                         None,
                     ),
                 );
+                // Every iteration after the first is a composition run of its
+                // own: its epoch observes Git working state as the previous
+                // iterations left it, while stable launch evidence is reused.
+                if ctx.iteration > 1
+                    && let Some(invocation) = loop_prepare_options.invocation_context.as_ref()
+                {
+                    let live = match (staged, stabilized.as_ref()) {
+                        (Some(_), Some((fresh, _))) => fresh,
+                        _ => source,
+                    };
+                    let epoch = invocation.begin_document_epoch();
+                    let mut context = epoch.capture_launch_context(
+                        &darkmatter::markdown::compose::ContextRequirements::for_document(
+                            &live.markdown,
+                        ),
+                    );
+                    for (key, value) in env_overrides {
+                        context.env_mut().insert(key.clone(), value.clone());
+                    }
+                    // The iteration's events fire through the loop's guard,
+                    // which was built for iteration 1's run.
+                    guard.set_run_prepared_context(context.clone());
+                    iteration_options.prepared_context = Some(context);
+                    iteration_options.document_epoch = Some(epoch);
+                }
+                run_context = iteration_options.prepared_context.clone();
                 match (staged, ctx.iteration) {
                     (Some(staged), 1) => {
                         let read = staged_boot::reread_and_audit(
@@ -1140,17 +1170,48 @@ fn build_and_run_loop(
                                 (fresh, approved)
                             });
                         iteration_options.pre_approved_commands = Some(approved.clone());
+                        audit_loop_iteration_template(
+                            live,
+                            &mut iteration_options,
+                            approval_options,
+                            ctx.iteration,
+                        )?;
                         kind.prepare_without_schema(live, iteration_options)?
                     }
-                    (None, 1) => kind.prepare_staged(
-                        source,
-                        iteration_options,
-                        entry,
-                        schema_stage,
-                    )?,
-                    (None, _) => kind.prepare_without_schema(source, iteration_options)?,
+                    (None, 1) => {
+                        audit_loop_iteration_template(
+                            source,
+                            &mut iteration_options,
+                            approval_options,
+                            ctx.iteration,
+                        )?;
+                        kind.prepare_staged(source, iteration_options, entry, schema_stage)?
+                    }
+                    (None, _) => {
+                        audit_loop_iteration_template(
+                            source,
+                            &mut iteration_options,
+                            approval_options,
+                            ctx.iteration,
+                        )?;
+                        kind.prepare_without_schema(source, iteration_options)?
+                    }
                 }
             };
+            // Iteration 1's lifecycle is audited by the harness pre-flight.
+            // A later iteration re-stamps its lifecycle `shell` commands from
+            // its own state and skips that pre-flight, so its bytes are
+            // audited here; an approval earned for iteration 1's bytes never
+            // covers them.
+            if ctx.iteration > 1 {
+                claudine::composition::resolve_shell_approvals(
+                    None,
+                    None,
+                    &frozen_loop_approvals(approval_options),
+                    Some(&prepared.lifecycle),
+                    Some(&prepared.resolved_path),
+                )?;
+            }
 
             emit_compose_warnings(&prepared.warnings, shared.silent);
 
@@ -1200,11 +1261,10 @@ fn build_and_run_loop(
                 if !loop_fail_fast && !shared.silent {
                     claudine::harness::report::report_unhandled_failure(&downgrade.message, &term);
                 }
-                return Ok(downgraded_loop_iteration_output(
-                    ctx.iteration,
-                    &source.resolved_path,
-                    downgrade,
-                ));
+                let mut output =
+                    downgraded_loop_iteration_output(ctx.iteration, &source.resolved_path, downgrade);
+                output.context = run_context;
+                return Ok(output);
             }
             let outcome = attempt.map_err(|e| {
                 // A concrete `CompositionError` keeps its own identity. Since
@@ -1233,22 +1293,22 @@ fn build_and_run_loop(
                     },
                 }
             })
-            .map_err(|error| {
+            .inspect_err(|error| {
                 // Under `fail_fast: false` the engine continues past an
                 // iteration that could not complete and drops its error, so a
                 // refused hand-off or a preparation failure would otherwise
                 // never be shown.
                 if !loop_fail_fast && !shared.silent && !error.is_already_emitted() {
-                    crate::log::message(&biscuit_terminal::errors::BlockError::report_block_error(&error, &term));
+                    crate::log::message(&biscuit_terminal::errors::BlockError::report_block_error(
+                        error, &term,
+                    ));
                 }
-                error
             })?;
 
-            Ok(build_loop_iteration_output(
-                ctx.iteration,
-                &source.resolved_path,
-                outcome,
-            ))
+            let mut output =
+                build_loop_iteration_output(ctx.iteration, &source.resolved_path, outcome);
+            output.context = run_context;
+            Ok(output)
         },
     )
 }
@@ -1410,8 +1470,11 @@ fn execute_loop_or_single(
     // is captured separately.
 
     let eager_approved = match &boot {
-        DocumentBoot::Eager(preflight) => Some(preflight.approved_commands.clone()),
+        DocumentBoot::Eager(preflight, _) => Some(preflight.approved_commands.clone()),
         DocumentBoot::Staged(_) => None,
+    };
+    let boot_approval_options = match &boot {
+        DocumentBoot::Eager(_, options) | DocumentBoot::Staged(options) => options.clone(),
     };
     let loop_prepare_options = PrepareOptions {
         invocation_context: Some(prep_context.invocation.clone()),
@@ -1454,7 +1517,7 @@ fn execute_loop_or_single(
     // the loop and single routes gate the same bootstrap read. A failure here
     // precedes the document's own lifecycle, so it has no catch stack to reach.
     let staged = match boot {
-        DocumentBoot::Eager(_) => None,
+        DocumentBoot::Eager(..) => None,
         DocumentBoot::Staged(approval_options) => {
             let (bootstrap, approved) = staged_boot::bootstrap_document(
                 &source,
@@ -1479,6 +1542,7 @@ fn execute_loop_or_single(
             loop_options,
             schema_stage,
             staged.as_ref(),
+            &boot_approval_options,
             entry,
             kind,
             &file_for_loop,
@@ -1630,6 +1694,45 @@ fn execute_loop_or_single(
             final_output: outcome.final_output,
         }),
     }
+}
+
+/// Discover and approve the template shell commands one loop iteration will
+/// execute, and add them to the set it prepares with.
+///
+/// The iteration composes against loop state (`_loop_*`, carried values,
+/// lifecycle `set`) that the document-level audit never saw, so its commands
+/// are discovered through the same canonical options and state its
+/// preparation uses. Iteration 1 may still prompt, as nothing has launched;
+/// later iterations run mid-loop and audit deny-only, like a retry: cached and
+/// whitelisted commands pass and changed bytes are refused, never assumed.
+fn audit_loop_iteration_template(
+    source: &ResolvedCompositionSource,
+    options: &mut PrepareOptions,
+    approval_options: &claudine::harness::ShellApprovalOptions,
+    iteration: usize,
+) -> std::result::Result<(), CompositionError> {
+    let frozen;
+    let policy = if iteration > 1 {
+        frozen = frozen_loop_approvals(approval_options);
+        &frozen
+    } else {
+        approval_options
+    };
+    let approved = claudine::composition::preflight_document_shell(source, options, policy)?;
+    options
+        .pre_approved_commands
+        .get_or_insert_with(Default::default)
+        .extend(approved);
+    Ok(())
+}
+
+/// `approval_options` with the interactive handler removed.
+fn frozen_loop_approvals(
+    approval_options: &claudine::harness::ShellApprovalOptions,
+) -> claudine::harness::ShellApprovalOptions {
+    let mut frozen = approval_options.clone();
+    frozen.approval_handler = None;
+    frozen
 }
 
 /// A staged document's bootstrap read, taken and gated before its `initialize`.

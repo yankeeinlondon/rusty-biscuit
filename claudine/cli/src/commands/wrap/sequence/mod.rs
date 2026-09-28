@@ -607,6 +607,8 @@ pub(crate) fn execute_sequence(
         file_resolution_context: &file_resolution_context,
         caller_input_records: &caller_input_records,
         invocation: &prep_context.invocation,
+        // Each step opens its own run at its turn.
+        run_evidence: None,
     };
 
     let Some(validated) = run_phase_1c_with_schema(

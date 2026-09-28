@@ -307,8 +307,16 @@ fn run_one_step(
         .steps
         .get(step_index)
         .is_some_and(|step| step.task.is_some());
+    // One composition run per step: the step's composition of this document,
+    // its task, and the task's prompt document observe one view of Git state.
+    let step_run = claudine::invocation_context::RunEvidence::default();
+    let step_compose = StepComposeContext {
+        run_evidence: Some(&step_run),
+        ..run.compose.clone()
+    };
     let composed = match compose_with_late_collection(
         run,
+        &step_compose,
         &live,
         &set_overrides,
         &env_overrides,
@@ -331,6 +339,7 @@ fn run_one_step(
             target.as_ref(),
             runtime_state,
             composed.prepared.compose_perf.clone(),
+            &step_run,
         );
     }
 
@@ -437,6 +446,7 @@ fn run_one_step(
 #[allow(clippy::result_large_err)]
 fn compose_with_late_collection(
     run: &SequenceRunContext<'_>,
+    compose: &StepComposeContext<'_>,
     live: &ResolvedCompositionSource,
     set_overrides: &composition::LayeredOverrides,
     env_overrides: &std::collections::BTreeMap<String, String>,
@@ -444,7 +454,7 @@ fn compose_with_late_collection(
 ) -> Result<jit::StepComposition, CompositionError> {
     let first = jit::compose_step(
         live,
-        run.compose,
+        compose,
         set_overrides,
         env_overrides,
         run.approved.clone(),
@@ -473,7 +483,7 @@ fn compose_with_late_collection(
     );
     jit::compose_step(
         live,
-        run.compose,
+        compose,
         &merged,
         env_overrides,
         run.approved.clone(),

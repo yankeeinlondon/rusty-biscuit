@@ -304,7 +304,9 @@ pub(super) fn approve_discovered_commands(
 /// [`ShellAction::pre_resolved`]: super::lifecycle::ShellAction::pre_resolved
 ///
 /// Positional `shell` actions (`shell: "..."`) and key/value `shell` actions
-/// (`{ action: shell, command: ... }`) with any `on_error:` text are covered.
+/// (`{ action: shell, command: ... }`) with any `on_error:` text are covered,
+/// and so is every whole-value `$( … )` in a `set` mapping, whose command
+/// bytes Darkmatter fixes here ([`resolve_set_shell_value`]).
 /// Non-string command expressions (e.g. a bare `command: "ctx.repo"` parsed as a
 /// variable) and literals with no interpolation span are left untouched — there
 /// is nothing to stamp.
@@ -330,7 +332,7 @@ pub fn resolve_lifecycle_shell_commands(
         .unwrap_or_default();
 
     let state = EffectiveStateBuilder::new()
-        .with_frontmatter(frontmatter)
+        .with_frontmatter(frontmatter.clone())
         .with_context(context.clone())
         // A deferred lifecycle subtree never defines `ctx`; downgrade any
         // pathological `ctx` shape to a warning rather than aborting pre-flight.
@@ -352,10 +354,25 @@ pub fn resolve_lifecycle_shell_commands(
         };
         for (idx, item) in stack.iter_mut().enumerate() {
             for (action_idx, action) in item.actions.iter_mut().enumerate() {
+                let prefix = format!("{event_name}.stack[{idx}].action[{action_idx}]");
+                if let LifecycleActionKind::RuntimeSet(set) = &mut action.kind {
+                    for (key, shell) in set.shell_values_mut() {
+                        resolve_set_shell_value(
+                            key,
+                            shell,
+                            &frontmatter,
+                            context,
+                            &state,
+                            &resolution_ctx,
+                            &format!("{prefix}.set.{key}"),
+                            source_path,
+                        )?;
+                    }
+                    continue;
+                }
                 let LifecycleActionKind::Shell(shell) = &mut action.kind else {
                     continue;
                 };
-                let prefix = format!("{event_name}.stack[{idx}].action[{action_idx}]");
                 resolve_shell_command_expr(
                     &mut shell.command,
                     &state,
@@ -376,6 +393,47 @@ pub fn resolve_lifecycle_shell_commands(
             }
         }
     }
+    Ok(())
+}
+
+/// Fixes one lifecycle `set` shell value's command bytes (R9).
+///
+/// The authored text resolves against the same early-binding lookup as a
+/// `shell` action's command, with late-binding roots refused, and Darkmatter
+/// then fixes every pipeline the value can run. Those bytes are what approval
+/// sees and what the action runs; nothing re-interpolates them later.
+#[allow(clippy::too_many_arguments)]
+fn resolve_set_shell_value(
+    key: &str,
+    shell: &mut crate::composition::lifecycle::actions::SetShellValue,
+    frontmatter: &HashMap<String, serde_json::Value>,
+    context: &ComposeContext,
+    state: &darkmatter::markdown::compose::EffectiveState,
+    resolution_ctx: &ResolutionContext,
+    property: &str,
+    source_path: &Path,
+) -> Result<(), CompositionError> {
+    let mut resolved = Expr::StringLiteral(shell.authored.clone());
+    resolve_shell_command_expr(&mut resolved, state, resolution_ctx, property, source_path)?;
+    let Expr::StringLiteral(resolved) = resolved else {
+        unreachable!("a string literal stays a string literal");
+    };
+    let value = darkmatter::markdown::compose::ResolvedShellValue::resolve(
+        key,
+        &shell.authored,
+        &resolved,
+        frontmatter.clone(),
+        context,
+        resolution_ctx.clone(),
+    )
+    .map_err(|error| CompositionError::LifecycleShellResolution {
+        source_path: source_path.to_path_buf(),
+        property: property.to_string(),
+        raw: shell.authored.clone(),
+        message: crate::composition::lifecycle::actions::shell_value_error_message(&error),
+        source: Some(Box::new(darkmatter::markdown::MarkdownError::ShellExpansion(Box::new(error)))),
+    })?;
+    shell.resolved = Some(value);
     Ok(())
 }
 

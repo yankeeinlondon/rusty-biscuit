@@ -263,11 +263,12 @@ impl darkmatter::markdown::compose::CurrentProvider for UnsuppliedRefresh {
 /// The one `ComposeOptions` shape every canonical preparation stage composes
 /// with.
 ///
-/// Body preparation, inline preparation, the initialize-bootstrap read, and the
-/// proxy target's pre-flight shell audit all build their options here. They
-/// used to build them separately, three times, and the copies disagreed — the
-/// audit discovered commands against one option set while the compose that
-/// executed them used another.
+/// Body preparation, inline preparation, the initialize-bootstrap read, and
+/// every document-level pre-flight shell audit ([`approve_document_shell`]:
+/// a directly invoked document, a proxy target, a retry or resume, a loop
+/// iteration) all build their options here. They used to build them
+/// separately, and the copies disagreed — the audit discovered commands
+/// against one option set while the compose that executed them used another.
 fn canonical_compose_options(
     source_path: &Path,
     ctx: &ComposeContext,
@@ -423,25 +424,48 @@ pub fn preflight_document_shell(
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
 ) -> Result<std::collections::HashSet<String>, CompositionError> {
-    observe_prepared_context(
-        options,
-        crate::invocation_context::PreparedContextConsumer::Preflight,
-    );
-    let ctx = derive_compose_context(source, options);
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options, None);
-    match super::resolve_shell_approvals(
-        Some(&source.markdown),
-        Some(&compose_opts),
-        approval_options,
-        None,
-        None,
-    ) {
+    match approve_document_shell(source, options, approval_options) {
         Ok(result) => Ok(result.approved_commands),
         Err(CompositionError::PreFlightDiscoveryFailed(_)) => {
             Ok(std::collections::HashSet::new())
         }
         Err(e) => Err(e),
     }
+}
+
+/// Discover and approve a document's template shell surface (frontmatter
+/// `$(...)`, body `::shell`/`::shell-block`, and every transcluded child)
+/// with the exact options its preparation composes with.
+///
+/// This is the one resolver for approved bytes: the discovery walk and the
+/// compose that executes run on [`canonical_compose_options`] built from the
+/// same `options`, so both see the same target defaults, `proxy.with:`
+/// overlay, caller and runtime layers, reserved sequence inputs, snapshot, and
+/// source-relative base directory.
+///
+/// ## Errors
+///
+/// A discovery-walk failure (`PreFlightDiscoveryFailed`), or any approval
+/// failure [`resolve_shell_approvals`](super::resolve_shell_approvals)
+/// returns.
+pub fn approve_document_shell(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    approval_options: &crate::harness::ShellApprovalOptions,
+) -> Result<super::PreFlightResult, CompositionError> {
+    observe_prepared_context(
+        options,
+        crate::invocation_context::PreparedContextConsumer::Preflight,
+    );
+    let ctx = derive_compose_context(source, options);
+    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options, None);
+    super::resolve_shell_approvals(
+        Some(&source.markdown),
+        Some(&compose_opts),
+        approval_options,
+        None,
+        None,
+    )
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.

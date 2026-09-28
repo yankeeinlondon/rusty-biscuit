@@ -361,6 +361,7 @@ struct InvocationWorkCounts {
     launch_context_extensions: usize,
     ambient_fallbacks: usize,
     prepared_context_consumers: Vec<(String, usize)>,
+    volatile_observations: Vec<(String, usize)>,
     document_epochs: Vec<(usize, claudine::invocation_context::DocumentEpochWork)>,
 }
 
@@ -378,6 +379,11 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
                 .iter()
                 .map(|(name, count)| (name.clone(), *count))
                 .collect(),
+            volatile_observations: work
+                .volatile_observations
+                .iter()
+                .map(|(name, count)| (name.clone(), *count))
+                .collect(),
             document_epochs: work
                 .document_epochs
                 .iter()
@@ -387,12 +393,24 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
     }
 }
 
+/// `name` for a count of one, `name (n)` otherwise, joined by commas.
+fn counted_names(counts: Vec<(String, usize)>) -> String {
+    counts
+        .into_iter()
+        .map(|(name, count)| match count {
+            1 => name,
+            _ => format!("{name} ({count})"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 impl InvocationWorkCounts {
     fn note(self) -> String {
         format!(
             "source context work: Git discoveries {}, topology probes {}, topology reuses {}; \
              launch captures {} (extensions {}), ambient fallbacks {}, prepared consumers [{}]; \
-             document epochs [{}]",
+             volatile observations [{}]; document epochs [{}]",
             self.git_root_discoveries,
             self.topology_probes,
             self.topology_reuses,
@@ -410,6 +428,7 @@ impl InvocationWorkCounts {
                 })
                 .collect::<Vec<_>>()
                 .join(", "),
+            counted_names(self.volatile_observations),
             self.document_epochs
                 .into_iter()
                 .map(|(id, epoch)| format!(

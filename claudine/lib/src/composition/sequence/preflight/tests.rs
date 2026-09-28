@@ -103,7 +103,11 @@ mod loading {
         let source_context = invocation.derive_source(&source.resolved_path).unwrap();
         let requirements =
             darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
-        let evidence = invocation.runtime_evidence(&source_context, &requirements);
+        let evidence = invocation.runtime_evidence(
+            &crate::invocation_context::RunEvidence::default(),
+            &source_context,
+            &requirements,
+        );
         let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
             source_context.base_dir(),
             &requirements,
