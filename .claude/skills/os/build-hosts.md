@@ -259,6 +259,8 @@ archive mode failed while compiling the release `ci-build` tool
 (`--features image`, `--all-features`) takes the native path, which builds only the debug
 profile, and that ran green. The links were still there on 2026-09-26 (same error, same
 workaround), and remain until someone clears that clone's `target/release`.
+The `feat-schema-enhancement` clone on `build-linux` showed the same failure on 2026-09-27, and
+the same workaround applies, so check any standing clone for these links, not only `fix-wt-ux`.
 
 `unset RUSTC_WRAPPER` does **not** keep kache out; only an explicitly empty
 `RUSTC_WRAPPER=""` does (measured 2026-09-21):
