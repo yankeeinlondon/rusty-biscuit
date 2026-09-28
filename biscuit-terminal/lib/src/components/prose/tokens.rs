@@ -112,6 +112,15 @@ enum TagResolution {
     Unknown,
 }
 
+/// Whether the raw declaration content (between `<` and `>`) opens a tag the
+/// parser recognizes, and will therefore consume up to its matching close.
+pub(super) fn is_recognized_opening_tag(tag_content: &str) -> bool {
+    !tag_content.starts_with('/')
+        && parse_opening_tag(tag_content).is_some_and(|(name, attrs)| {
+            !matches!(resolve_tag(&name, &attrs), TagResolution::Unknown)
+        })
+}
+
 /// Build a foreground-color resolution from `<rgb …>` / `<bg-rgb …>` attrs.
 fn rgb_color(attrs: &[(String, String)]) -> Option<Color> {
     let rgb_str = attrs
