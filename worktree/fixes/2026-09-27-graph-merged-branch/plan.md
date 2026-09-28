@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -57,11 +57,65 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+docs_updated_during_phase_5:
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - biscuit-visualized/README.md
+docs_created_during_phase_5:
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/os/macos.md
 packages:
     - worktree-cli
     - biscuit-visualized
     - biscuit-terminal
     - worktree
+source_code:
+    - worktree/cli/tests/perf_support/graph.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/perf_graph_stages.rs
+    - .config/nextest.toml
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/git-discovery.sh
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/render-topologies/src/main.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/render-topologies/run.sh
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/src/main.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/run.sh
+    - worktree/lib/src/git.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - Cargo.lock
+    - worktree/cli/Cargo.toml
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+documentation:
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - biscuit-visualized/README.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: `wt list` graph hides a merged branch and overlaps neighboring tags
@@ -449,7 +503,7 @@ Goal: produce evidence the spec says source snapshots cannot provide, and confir
 
 **Wave 8** (concurrent)
 
-- [ ] **`worktree/docs/git-graph.md`**
+- [x] **`worktree/docs/git-graph.md`**
   - Replace the documented collapse of merged branches into tags. Describe:
     - first-parent lanes;
     - R4's classes with a compact example each;
@@ -460,23 +514,23 @@ Goal: produce evidence the spec says source snapshots cannot provide, and confir
   - Add a Mermaid diagram of the classification flow.
   - List the agreed limits: no squash inference, no reconstruction of earlier merges, no indirect-integration edge.
   - Never name the fix directory.
-- [ ] **`biscuit-terminal/docs/components/git_graph.md` and module docs**
+- [x] **`biscuit-terminal/docs/components/git_graph.md` and module docs**
   - Update "Lanes and tags" and the renderer-workaround list: `merge` is now emitted, and the parser repair lives in `biscuit-visualized`.
   - Document `with_tip`, `merged_into`, `with_incomplete_history`, `GitGraphPlan::incomplete`, the no-substitution rule, and merge-destination pinning.
   - Drop the module doc's reference to the `2026-09-24-ux-improvements` fix, per the rule that docs don't name specs, in the same edit.
-- [ ] **`biscuit-visualized` docs and skill**
+- [x] **`biscuit-visualized` docs and skill**
   - Document the gitGraph merge repair (R2) and the tag-spacing policy (R3), including the rotated-tag limitation and the cache-backend bump.
   - Correct the skill's stale "renderer v0.2" guidance to 0.3.1.
-- [ ] **Skills**
+- [x] **Skills**
   - `.claude/skills/worktree/SKILL.md`: update the `commands/git_graph.rs` bullet (first-parent lanes, classification, anchors, `incomplete`).
   - `.claude/skills/biscuit-terminal/`: update the `GitGraph` contract notes.
   - If S3 found a platform-specific git trap, add it to `.claude/skills/os/`.
-- [ ] **`worktree/docs/cli/list.md`**
+- [x] **`worktree/docs/cli/list.md`**
   - Update any tag or lane wording that described merged branches as tags.
 
 **Wave 9** (after Wave 8)
 
-- [ ] **Acceptance trace**
+- [x] **Acceptance trace**
   - In `implementation-log.md`, map each spec acceptance row to its test name(s) and evidence file(s):
 
   | Spec case | Proof |
@@ -498,13 +552,14 @@ Goal: produce evidence the spec says source snapshots cannot provide, and confir
   | `main` / `origin/main` adjacent | Wave 2a test; Wave 7 layout test |
   | Width too small | Wave 7 56-column and `--width 40` assertions |
 
-- [ ] **Final gates**
+- [x] **Final gates**
   - `just lint` and `just test` in `worktree`, `biscuit-terminal`, `biscuit-visualized`, and `darkmatter`.
   - `just test-l2` for the Kitty graph binary on macOS.
+    - Run on 2026-09-27: every check passes up to the screenshot step, which is blocked by the missing macOS Screen Recording permission. The screenshot stays open under "Kitty L2 extension"; see the implementation log's Phase 5 "Final gates".
   - Review `just ci-local --plan` so CI scope is understood before any push. The agent does not push unless told to.
-- [ ] **Comment drift pass**
+- [x] **Comment drift pass**
   - Review `///`/`//!` and inline comments on every changed symbol (`GraphLine`, `tip`, `attach_point`, `tags`, `trim_one_commit`, `focused_view`, `base_view`, `line_entries`, `log_commits`, `compute_layout`). Fix or delete drifted comments and record them in the log.
-- [ ] **Hand-off**
+- [x] **Hand-off**
   - Set the spec frontmatter to `status: implemented`, `implemented: true`, and `implemented_by: claude/opus`.
   - Report "implementation complete, ready for review", including the performance table and screenshot paths for the human review of timing and visual evidence.
   - Do not move the fix directory and do not run `just complete`.

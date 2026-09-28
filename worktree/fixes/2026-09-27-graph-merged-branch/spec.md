@@ -19,7 +19,7 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: finalized-spec
+status: implemented
 reviewed: true
 reviewed_by: codex/gpt-6-astra
 reviewed_on: 2026-09-27
@@ -28,61 +28,73 @@ clarified: true
 clarified_by: codex/gpt-6-astra
 needs_rulings: false
 review_note: the clarification process served as a review
-implemented: false
+implemented: true
+implemented_by: claude/opus
 related:
     - 2026-09-27-list-freshness-ux
-human_review: false
-message_to_agent: |-
-    Phase 4 (rendered evidence, cross-OS, performance) is done except one
-    environment-blocked item; read implementation-log.md's "## Phase 4".
+human_review: true
+human_review_items:
+    - |-
+        **The on-screen Kitty screenshot has never been captured.**
 
-    - KITTY SCREENSHOT STILL UNVERIFIED (third session in a row). The new
-      `level2_graph_draws_a_merged_branch_in_kitty` passes every check before
-      the screenshot at 100x32 and 56x60; the screenshot has window chrome and
-      no contents (the calling terminal lacks macOS Screen Recording
-      permission), and the two older Kitty tests fail at the same step. The
-      transmitted PNGs were inspected instead and are kept in
-      `spikes/phase4-kitty-output/`. Plan task "Kitty L2 extension" and
-      Checkpoint 4's screenshot item are left unchecked. The hand-off report
-      must say a human needs to run
-      `BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`
-      from a terminal with that permission and look at
-      `$TMPDIR/wt-graph-merged-{100x32,56x60}-screenshot.png`.
-    - Acceptance-trace names for Phase 5: the Wave 7 layout test is
-      `commands::git_graph::tests::gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`
-      (in `cli/src/commands/git_graph/tests.rs`, not `cli/tests/`, because
-      the fixtures and `gather` are private there); the Kitty test is
-      `level2_graph_in_kitty::level2_graph_draws_a_merged_branch_in_kitty`.
-      R12's `origin/very-long-exact-branch-reference-beta` became the local
-      branch `fix/very-long-exact-branch-reference-beta`, because `wt list`
-      draws no remote ref except `origin/<default>`.
-    - `worktree-cli` now has `biscuit-visualized` (image) as a
-      dev-dependency; `docs/dependencies.md` already records it.
-    - Performance is recorded in `worktree/docs/performance-testing.md`
-      ("Graph Stages"): `graph gather` roughly doubles (+4.6 to +56.8 ms,
-      from added sequential git spawns at about 5 ms each), render
-      unchanged; every `just test-perf` gate passes. That doc's graph
-      bullets are already current; git-graph.md is still Phase 5's.
-    - Out-of-scope finding, logged only: at 56 columns the `wt list` TABLE
-      wraps its `-> parent` header cell when a branch name is ~46
-      characters. No phase touched the table.
-    - Carried over from Phase 3 and still true: Linux cross-check needs a
-      build flag (native path); biscuit-terminal's `just lint` does not
-      enable `image`, so also run `cargo clippy -p biscuit-terminal
-      --features image --all-targets -- -D warnings`; biscuit-visualized on
-      Windows needs `--features image` (CI-excluded, archive mode refuses).
-    - Carried over from Phase 3 for the Phase 5 docs: a branch continued
-      after its merge is an unconnected lane plus "Some history is not
-      shown" (its fork, the old merged tip, is on no first-parent lane);
-      the docs must state it. Plan deviations to describe as current
-      behavior: R4-A2 (merged-into-parent fork measured against C^1),
-      anchors verified with `log --no-walk --ignore-missing`, stage 2 split
-      into branch lanes then the default lane, and the focused view's
-      context being "oldest anchor + its first parent". The shallow-clone
-      binary test asserts the graph adds no upload-pack run (the listing's
-      own worker always checks origin). `worktree/docs/git-graph.md` and
-      `biscuit-terminal/docs/components/git_graph.md` still describe merged
-      branches as tags.
+        The fix is implemented and every automated check passes. One piece of
+        visual evidence is still missing: a screenshot of the graph as the
+        Kitty terminal actually draws it on screen. The test that takes it
+        (`level2_graph_draws_a_merged_branch_in_kitty`) passes every check up
+        to the screenshot, but macOS only lets a terminal capture another
+        window's contents after a person grants it the **Screen Recording**
+        permission. The agent's session does not have it, so each capture
+        shows an empty window. This happened in four sessions in a row.
+
+        What is already verified: the exact image `wt` sent to Kitty was saved
+        and inspected. It shows the merged branch on its own lane, merging
+        into the right commit, with no overlapping labels
+        (`spikes/phase4-kitty-output/`). Portable tests also check the label
+        positions against the real layout on macOS, Linux, and Windows. What
+        is not verified is that Kitty puts that image where `wt` reserved room
+        for it.
+
+        The review cannot close until the visual evidence is accepted.
+
+        Options:
+
+        - **A. Run the test yourself (recommended).** From a terminal app
+          that has Screen Recording permission (System Settings → Privacy &
+          Security → Screen Recording), run
+          `BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`
+          and look at `$TMPDIR/wt-graph-merged-100x32-screenshot.png` and
+          `$TMPDIR/wt-graph-merged-56x60-screenshot.png`.
+          *Pros:* complete evidence, about a minute; it also re-checks the
+          two older Kitty tests that fail the same way.
+          *Cons:* needs a person at the Mac.
+        - **B. Accept the transmitted images as the visual evidence.**
+          *Pros:* no extra work.
+          *Cons:* placement on screen stays unproven by a screenshot. The
+          test's own checks do cover the reserved rows and columns.
+        - **C. Grant the permission to the terminal the agents run in, and
+          have an agent rerun it.**
+          *Pros:* future agent sessions can produce this evidence too.
+          *Cons:* gives that terminal app broad screen-capture rights.
+
+        I recommend **A**. It is the only option that fully closes the
+        evidence the spec asks for, and it costs about a minute.
+message_to_agent: |-
+    All five phases are implemented; the terminal state is "implementation
+    complete, ready for review". Do not move the directory to `_completed` and
+    do not run `just complete`.
+
+    - The acceptance trace (every spec row → tests and evidence files) is in
+      implementation-log.md, "## Phase 5" → "Acceptance trace".
+    - The only open item is the Kitty on-screen screenshot (see
+      human_review_items). Plan task "Kitty L2 extension" and Checkpoint 4's
+      screenshot box stay unchecked for that reason alone.
+    - Gotcha when running gates from a script: this host's `CDPATH` makes a
+      relative `cd worktree` land in the main checkout
+      (`~/coding/personal/rusty-biscuit`). Use absolute paths or unset
+      `CDPATH`, and check that each log's first line is this worktree's path.
+    - Behavior docs: `worktree/docs/git-graph.md`,
+      `biscuit-terminal/docs/components/git_graph.md`,
+      `biscuit-visualized/docs/mermaid-gitgraph.md` (new).
 references:
     renderer-spike.md: >-
         Isolated renderer feasibility experiment covering measured label spacing,

@@ -56,11 +56,65 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_5:
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+docs_updated_during_phase_5:
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - biscuit-visualized/README.md
+docs_created_during_phase_5:
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-terminal/components.md
+    - .claude/skills/os/macos.md
 packages:
     - worktree-cli
     - biscuit-visualized
     - biscuit-terminal
     - worktree
+source_code:
+    - worktree/cli/tests/perf_support/graph.rs
+    - worktree/cli/tests/perf_support/mod.rs
+    - worktree/cli/tests/perf_graph_stages.rs
+    - .config/nextest.toml
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/git-discovery.sh
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/render-topologies/src/main.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/render-topologies/run.sh
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/src/main.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/run.sh
+    - worktree/lib/src/git.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/tests/list_remote_head.rs
+    - worktree/cli/src/commands/list/tests.rs
+    - Cargo.lock
+    - worktree/cli/Cargo.toml
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+documentation:
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/cli/list.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - biscuit-visualized/README.md
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-27-graph-merged-branch (5 phases)
@@ -1174,3 +1228,129 @@ branch) and the descriptions of `perf_subprocess_counts_meet_sla` and
   tests at the screenshot step (environment: no Screen Recording permission);
   Windows archive mode for the CI-excluded `biscuit-visualized` (rerun
   natively, green).
+
+## Phase 5
+
+Documentation, skills, and review readiness, 2026-09-27. No behavior changed in
+this phase: the source edits are comment-only (see "Comment drift pass").
+
+### Wave 8 — documentation and skills
+
+| File | Change |
+|---|---|
+| `worktree/docs/git-graph.md` | Rewritten. Removed the collapse of merged branches into tags and the reference to the `2026-09-24-ux-improvements` fix. Now covers: selection (unchanged, both views, one-level parent, deleted-parent fallback), the first-parent default lane, the classification order and `C`, a Mermaid flowchart of the classification, a class table, one example per class (merged directly, the `fix/sniff` fork-from-parent shape and the merged-into-parent fork rule, no separate history, integrated otherwise, continued after a merge), anchors and `+N` compression, the two gathering stages, the default lane's "oldest anchor + first parent" extent, the no-substitution rule and notice, unavailable history (shallow rule, exit codes, no fetch), sizing with tag spacing, and the limits (no squash inference, no reconstruction of earlier merges, no indirect-integration edge, one lane merged per commit) |
+| `biscuit-terminal/docs/components/git_graph.md` | Documents `with_tip`, `forked_at` unset = unknown, `merged_into`, `with_incomplete_history`, `GitGraphPlan::incomplete`, `INCOMPLETE_HISTORY_NOTE`, merge emission (with the exact text a component test pins), sibling reordering, the no-substitution table, merge-destination pinning in trimming, lane ancestors under the height cap, and the tag-spacing consequence for width. "Renderer workarounds" now says `merge` is emitted and its second parent is repaired in `biscuit-visualized`. Dropped the fix reference. The example's merged line is in the base view (a focused view would not give it a lane) |
+| `biscuit-terminal/lib/src/components/git_graph.rs` module docs | Already current since Phase 2 (merges, no substitution, notice, no fix reference). No edit |
+| `biscuit-visualized/docs/mermaid-gitgraph.md` (new) | The merge repair (rule, example, outcome table, the headless-lane parser drop, the pin test), tag spacing (formula, `TAG_GAP_EM` as policy, the vertical and rotated-tag limitation, the width cost), the cache-backend bump `0.2.x+bv1` → `0.3.x+bv2`, `gitgraph_geometry`, and tests. A Mermaid diagram shows the one layout path |
+| `biscuit-visualized/README.md` | One paragraph linking the new page |
+| `worktree/docs/cli/list.md` | "Git Graph": removed "a branch already in the default branch is a tag rather than a line" and the fixed "two shared commits"; added the first-parent rule, merged lanes, label-only branches, old connections, and the incomplete-history notice (including the continued-after-merge case) |
+| `.claude/skills/biscuit-visualized/SKILL.md` | `mermaid-rs-renderer` v0.2 → 0.3.1 with the cache backend id; topic row and deep-dive pointer for the gitGraph corrections |
+| `.claude/skills/biscuit-visualized/mermaid-rendering.md` | New "gitGraph Corrections" section and the `gitgraph.rs` source row |
+| `.claude/skills/biscuit-terminal/components.md` | New "GitGraph" section (tip, merge, no substitution, pinning, geometry proof); overview row updated |
+| `.claude/skills/worktree/SKILL.md` | The `commands/git_graph.rs` bullet was already updated in Phases 3–4 (first-parent lanes, R4 classes, anchors, `incomplete`, the continued-after-merge notice) and matches the code. No edit |
+| `.claude/skills/os/macos.md` | Added the `CDPATH` trap that sent this phase's first gate run to the main checkout (see Final gates). No git trap to add: S3 found no platform-specific one (same classifications, exit codes, and shallow behavior on macOS, Linux, and Windows). The Windows per-process cost was recorded in Phase 3 |
+
+A search of the area docs and skills for the old wording ("tag rather than",
+"no merge statements", "already in the default branch/its parent") finds
+nothing left.
+
+### Comment drift pass
+
+Reviewed `///`, `//!`, and inline comments on `GraphLine` (fields, `with_tip`,
+`merged_into`, `tip`), `attach_point`, `tags`, `trim_one_commit`, `fit_lanes`,
+`lane_ancestors`, `plan_with`, `focused_view`, `base_view`, `place`,
+`assemble`, `topology::{Integration, Extent, first_parent_entries, locate}`,
+`compute_layout`, `gitgraph::{repair_gitgraph_merges, layout}`, and
+`MERMAID_BACKEND`. All describe current behavior. `line_entries` and
+`log_commits` no longer exist (removed in Phase 3).
+
+Drift found and fixed (comment-only): comments that cited planning rulings by
+number, which a reader of the code cannot resolve.
+
+| File | Before | After |
+|---|---|---|
+| `worktree/cli/src/commands/git_graph.rs` (`place`) | "Classifies one selected branch (R4) against" | "Classifies one selected branch against" |
+| `biscuit-terminal/lib/src/components/git_graph/tests.rs` (`long_label_neighbors`) | "R12's long labels on neighboring commits" | "Long labels on neighboring commits" |
+| same file, `measured_plans_place_merges_and_tags_without_overlap` | "Recorded in the implementation log (R3's wider step shows up here)." | "Per-viewport size, trimming, and the tag-driven commit step, for review." |
+| `worktree/cli/src/commands/git_graph/tests.rs` (`BETA`, `long_labels`) | "R12's second long label is …" / "R12's long labels as `wt list` meets them" | "A label as long as `origin/very-long-exact-branch-reference-beta`; …" / "Long labels as `wt list` meets them" |
+
+### Acceptance trace (Wave 9)
+
+Every spec acceptance row, its proof, and its evidence. Test files:
+`wt:` is `worktree/cli/src/commands/git_graph/tests.rs`, `bt:` is
+`biscuit-terminal/lib/src/components/git_graph/tests.rs`, and `bv:` is
+`biscuit-visualized/src/src/tests/gitgraph_tests.rs`.
+
+| Spec case | Proof (tests) | Evidence files |
+|---|---|---|
+| Current branch merged, worktree retained | `wt: a_merged_current_branch_keeps_its_lane_and_merges_at_its_merge_commit`; `wt: gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` (observation 1, focused); `bt: a_lane_merged_into_the_default_lane_is_drawn_merging_at_its_commit`; `level2_graph_in_kitty::level2_graph_draws_a_merged_branch_in_kitty` (all checks before the screenshot) | `spikes/phase2-renders-output/observation-1-{120x40,56x60}.png`; `spikes/phase4-kitty-output/wt-graph-merged-{100x32,56x60}-transmitted.png` |
+| Same branch from default | `wt: a_merged_branch_keeps_its_lane_in_the_base_view`; layout test (observation 1, base) | as above |
+| Recorded non-default parent ± worktree | `wt: a_recorded_parent_is_selected_with_or_without_its_own_worktree` | — |
+| Merged into non-default parent | `wt: a_child_merged_into_its_parent_merges_on_the_parent_lane`; `bt: a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane`; `bv: a_merge_into_a_non_root_lane_is_repaired` | `spikes/render-topologies-output/s1-into-parent-lane-fixed.png` |
+| Second observation (fork from parent inside its `+N`, merged into default) | `wt: a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view`; `bt: a_nested_lane_merged_into_the_default_lane_forks_from_its_parent`; `bt: measured_plans_place_merges_and_tags_without_overlap` (real backend); `bv: a_nested_lane_merges_into_the_root_lane`; layout test (observation 2) | `spikes/phase2-renders-output/observation-2-{120x40,56x60}.png` |
+| Merged side longer than the base window | `wt: a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view` (default lane holds no side commits, true forks, local `main` tagged); layout test (`main` on `m103`, `origin/main` on `m104`) | as above |
+| Fork/label commit undrawn | `bt: a_fork_commit_missing_from_the_parent_lane_is_not_replaced_by_its_start`, `a_fork_point_outside_the_drawn_commits_is_drawn_unconnected`, `an_unknown_fork_is_drawn_unconnected_and_reported`, `a_tag_on_an_undrawn_commit_is_reported`, `a_label_only_line_sits_at_its_tip_never_its_fork` | `spikes/render-topologies-output/s1-disconnected-fixed.png` |
+| Continued after merge | `wt: a_branch_continued_after_its_merge_is_an_unmerged_lane` | — |
+| Fast-forward / equal tips | `wt: a_fast_forwarded_branch_is_a_label_at_its_commit`, `equal_tips_keep_the_merged_lane_and_label_the_new_branch` | — |
+| History unavailable | `wt: a_shallow_clone_draws_what_it_can_verify_and_reports_the_rest`; `cli/tests/list_remote_head.rs::a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing` (table present, notice shown, no added upload-pack run); `bt: the_incomplete_history_notice_follows_the_lane_note` | — |
+| Height constrained | `bt: the_base_view_height_cap_keeps_the_most_recently_active_lanes`, `the_height_cap_adds_lanes_in_activity_order_until_one_does_not_fit`, `a_focused_view_is_never_cut_by_the_height_cap`, `the_height_cap_keeps_a_merged_lanes_destination_lane`; `wt: a_merged_lane_competes_under_the_height_cap_by_activity`; Kitty short-window test (pre-screenshot checks) | — |
+| Parent deleted | `wt: a_deleted_recorded_parent_falls_back_to_the_default_branch` | — |
+| Old essential connections | `wt: old_forks_and_merges_stay_drawn_with_exact_elided_runs` (focused and base; `+N` equal to real first-parent distances); `bt: measured_plans_place_merges_and_tags_without_overlap` ("compressed" fixture) | `renderer-spike/old-compressed-repaired.png` |
+| Long neighboring labels | `bv: long_labels_on_neighboring_commits_do_not_overlap`, `a_stack_of_three_tags_clears_its_neighbors`, `tags_on_different_lanes_do_not_overlap`; layout test (`long_labels` fixture, both viewports) | `spikes/phase2-renders-output/long-labels-{120x40,56x60}.png` |
+| `main` / `origin/main` adjacent | `bv: main_and_origin_main_one_commit_apart_do_not_overlap`; layout test (`main` on `d4`, `origin/main` on `d5`) | as above |
+| Width too small | layout test (56-column trimmed-or-shrunk and tag texts unchanged; `ImageWidth::Characters(40)` gives `columns == 40`, `trimmed_commits == 0`); `bt: an_explicit_width_is_never_trimmed_to`, `the_width_cap_trims_commits_before_anything_shrinks`; `trimming_never_elides_a_merge_destination` | `spikes/phase2-renders-output/*-56x60.png` |
+
+Every test named above exists in source (checked by name) and ran green in this
+phase's `just test` runs, except the Kitty L2 test (see Final gates).
+
+### Final gates (2026-09-27, this worktree)
+
+A first run of the gates `cd`-ed into the areas through the shell's `CDPATH`,
+which resolved `worktree` to the **main checkout** (`~/coding/personal/rusty-biscuit`),
+and so tested the wrong tree. It was discarded. Every result below is from a
+rerun with absolute paths and `CDPATH` unset, and each log's first line was
+checked to be this worktree's path.
+
+| Gate | Result |
+|---|---|
+| `just test` in `worktree` | 746 passed, 29 skipped (tier-filtered `perf_` and L2); the layout test ran in both targets |
+| `just test` in `biscuit-terminal` | 3,344 passed, 55 skipped |
+| `just test` in `biscuit-visualized` | 98 passed |
+| `just test` in `darkmatter` | 8,498 passed, 12 skipped |
+| `just lint` in the same four areas | pass |
+| `cargo clippy -p biscuit-terminal --features image --all-targets -- -D warnings` | clean |
+| `cargo clippy -p biscuit-visualized --all-features --all-targets -- -D warnings` | clean |
+| `cargo clippy -p worktree-cli -p worktree --all-targets --features worktree-cli/terminal-tests -- -D warnings` | clean |
+| Kitty L2 (`BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`) | 3 failed, **at the screenshot step only**, for the fourth session running: every earlier check passes, and the window screenshot has chrome and no contents (the calling terminal lacks macOS Screen Recording permission, which a non-interactive session cannot grant) |
+
+The transmitted PNG from this run
+(`$TMPDIR/wt-graph-merged-100x32-transmitted.png`) was inspected again:
+`fix/wt-ux` has its own lane from `74fbc59`, two commits, and a merge edge
+into `730ef34`, the commit tagged `main`. The default lane
+(`2419a21 → 74fbc59 → 898c330 → 730ef34`) holds no branch commit, and no
+labels overlap. The same picture as Phase 4's kept copies in
+`spikes/phase4-kitty-output/`.
+
+`just ci-local --plan` (reviewed, nothing pushed): the change inventory
+covers the whole branch against `main` (218 paths, including earlier
+sniff, schematic, and list-freshness work). Graph-relevant cells: `worktree`
+and `worktree-cli` L1 on all four environments, `worktree-cli` L2 on
+`ubuntu-latest` and `macos-latest` (tmux, kitty), `biscuit-terminal` L1 on all
+four environments plus its `check` cell compiling 15 dependents (Darkmatter
+among them). `biscuit-visualized` has no cell: it is CI-excluded
+(`gates = false`), as Phase 4 found, so its tests run only locally and
+through `biscuit-terminal`'s and `worktree-cli`'s tests of the real backend.
+
+### Requirement-to-test mapping, targeted tests, and skips (Phase 5 summary)
+
+- Behavior changed in this phase: none (docs, skills, comment-only edits). No
+  test was added. The acceptance trace above maps every spec row to its tests.
+- Broader gates: the Final gates table.
+- Failing and not caused by this phase: the three `level2_graph_in_kitty`
+  tests at the screenshot step (environment). No other failures or skips
+  beyond the tier-filtered ones.
+- Still open for review: the on-screen Kitty screenshot. From a terminal with
+  macOS Screen Recording permission, run the Kitty command above and inspect
+  `$TMPDIR/wt-graph-merged-{100x32,56x60}-screenshot.png`. Performance for
+  human review is in `worktree/docs/performance-testing.md` ("Graph Stages")
+  and in Phase 4's table above.
