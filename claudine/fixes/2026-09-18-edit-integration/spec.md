@@ -43,6 +43,13 @@ message_to_agent: |-
   3. Pi: stdin forces print mode (source `main.ts resolveAppMode`), so interactive must be `AppendArgs(["--", prompt])`, which needs Pi 0.84.3 or later. Two open points: (a) upstream issue #9200, a reported SIGKILL for positional messages of about 993 bytes or more, is escalated to the author, so do not finalize the Pi repair until it is ruled or checked live; (b) after `--`, Pi still reads a token starting with `@` as a file, so decide and test how a prompt starting with `@` is handled.
   4. Goose: clap `-t/--text` has no `allow_hyphen_values`, so use `--text=<prompt>` for a `-`-prefixed prompt, with `--interactive`. The same defect breaks the non-interactive `run -t <p>` path. That is outside this fix; file it in Phase 5 next to the N6 defect unless the author widens scope.
   5. S3 correction: only Pi newly moves to argv. Antigravity and Goose already deliver on argv in both modes. Use a per-profile size guard for Pi.
+
+  Phase 2 (wrapper validation) is done; see the implementation log's `## Phase 2`.
+
+  6. The two open human-review items above (Kimi, Pi #9200) were NOT touched by Phase 2 and still gate their Phase 3 tasks.
+  7. New seam: `wrapper_stages::reject_interactive_timeouts(args, interactive_requested)` runs at the end of Stage 2, before the editor. `validate_timeout_constraints` is now `(args, non_interactive_requested)` and holds only the post-edit "can only be used in non-interactive mode" rules. Do not re-add interactive checks there.
+  8. `claudine/cli/tests/l1/wrap_basics.rs` has a local `write_marker_executable` helper (sh or `.cmd` stub that only creates a marker file) plus `marker_editor_path`. Reuse them for the Phase 5 drift test `getting_started_edit_interactive_form_is_accepted`. Any `codex --edit …` L1 test now needs a `codex` stub on the fixture PATH, because binary resolution (Stage 1) runs before the editor.
+  9. Phase 5: the `--edit` help line changed to "Draft the initial prompt in an external editor; combine with -i for an interactive session". `claudine/docs/getting-started/index.md` still quotes the old sentence ("Open the prompt in an external editor before launching the provider"); update it in the getting-started task.
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28

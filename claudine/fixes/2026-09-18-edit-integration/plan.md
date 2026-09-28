@@ -10,7 +10,20 @@ docs_created_during_phase_1:
     - claudine/fixes/2026-09-18-edit-integration/spike-interactive-startup.md
     - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - claudine/cli/src/commands/wrap/flags.rs
+    - claudine/cli/src/commands/wrap/flags/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages/tests.rs
+    - claudine/cli/tests/l1/wrap_basics.rs
+docs_updated_during_phase_2:
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+    - claudine-cli
 ---
 
 # Plan: Compose `--edit` with Interactive Provider Sessions
@@ -219,35 +232,35 @@ detached.
 Depends on Phase 1 rulings only, not on the spikes. It can start while Wave 1
 runs.
 
-- [ ] **Remove clap conflict**
+- [x] **Remove clap conflict**
   - Delete `conflicts_with = "interactive"` from `WrapperArgs::edit`
     (`flags.rs:48`).
   - Update the `--edit` doc comment and the rich help line (`flags.rs:255`) to
     describe prompt authoring only. Add a note that the prompt can be combined
     with `-i` for an interactive session.
-- [ ] **Remove runtime conflict**
+- [x] **Remove runtime conflict**
   - Delete the `edit_requested && interactive_requested` branch and the
     `edit_requested` parameter from `validate_timeout_constraints`. Update its
     single caller (`mod.rs:394`).
-- [ ] **Pre-editor timeout check**
+- [x] **Pre-editor timeout check**
   - Add the N3 check between Stage 2 and Stage 3 in
     `run_provider_wrapper_inner`, as a small `pub(crate)` function in
     `wrapper_stages.rs` beside `validate_timeout_constraints`, so it can be
     unit-tested.
   - Remove the matching two branches from `validate_timeout_constraints`,
     which the pre-editor check now owns, so one policy lives in one place.
-- [ ] **Comment pass**
+- [x] **Comment pass**
   - Review every `///` and `//` comment within the Stage 2–5 region, in
     `prompt_source.rs`, and in `flags.rs`. Delete any rationale that exists
     only to justify the false conflict. Fix any drifted comment and log it.
-- [ ] **Unit tests (L1, in-crate)**
+- [x] **Unit tests (L1, in-crate)**
   - `flags/tests.rs`: `WrapperArgs` parses `--edit --interactive` and
     `--edit -i` (`try_parse_from`). Extend the existing proptest (`flags/tests.rs:405`)
     to assert that `--edit` and `-i` can coexist after the positional.
   - `wrapper_stages.rs`: the pre-editor check rejects `-i` with each timeout
     and accepts `--edit -i` alone. `validate_timeout_constraints` no longer
     rejects edit with interactive.
-- [ ] **L1 integration tests (`claudine/cli/tests/l1/wrap_basics.rs`)**
+- [x] **L1 integration tests (`claudine/cli/tests/l1/wrap_basics.rs`)**
   - Replace `wrapper_rejects_edit_and_interactive_conflict` with non-TTY
     tests for `--edit --interactive`, `--edit -i`, and
     `"seed" --edit --interactive`. Each expects
