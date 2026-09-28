@@ -16,8 +16,23 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_2:
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
+    - biscuit-visualized
 ---
 
 # Plan: restore commit density and direct merges in the `wt list` graph
@@ -155,34 +170,34 @@ The two waves touch different packages and can run concurrently. Wave 3's tests 
 
 ### Wave 2 — `biscuit-visualized` collision-driven spacing
 
-- [ ] **Pure step calculation**
+- [x] **Pure step calculation**
     - add `required_step` (R6) in `mermaid/gitgraph.rs`, with the R1 pair filter, the R2 ordering, the R3 shortfall arithmetic, and `SPACING_EPSILON`
     - unit tests on synthetic inputs: no pairs → `None`; same-commit tags → `None`; pairs without vertical overlap → `None`; one overlapping adjacent pair → the exact step; a pair three indices apart → shortfall ÷ 3; unequal and offset labels; RL-ordered input; the maximum over several pairs
-- [ ] **Layout loop**
+- [x] **Layout loop**
     - rewrite `layout()`: first pass at the default; if horizontal and unrotated, call `required_step`; lay out again; verify (R4); iterate up to `MAX_SPACING_PASSES`; fall back to the widest-tag step
     - make the placement step injectable for tests only (a private function taking a `compute` closure) so the fallback branch is tested without a pathological real graph
     - update `layout()`'s docs and the module `//!` "Tag spacing" bullet (the old widest-tag wording becomes stale)
-- [ ] **Geometry and default-step accessors**
+- [x] **Geometry and default-step accessors**
     - add `default_gitgraph_commit_step()` (R5), and `index`/`x` on `CommitGeometry` if S1 showed they are needed (R8)
-- [ ] **Geometry tests** (`src/src/tests/gitgraph_tests.rs`)
+- [x] **Geometry tests** (`src/src/tests/gitgraph_tests.rs`)
     - keep: long labels on neighboring commits, `main`/`origin/main` one commit apart, a stack of three, cross-lane with controls, the vertical and untagged single pass, and measured size equals the spaced layout
     - add: tags on one commit only → default step; two tagged commits on different lanes one column apart without vertical overlap → default step; the observed Mermaid text from S1 → default step; LR real collisions → no overlap **and** at least one counting pair's gap within `SPACING_EPSILON` of the one-em gap (proving minimality); `direction RL` text → the same geometry as its LR twin (amended after S1: 0.3.1 has no RL layout, so a mirrored RL collision cannot be built from text); a theme font override (`MermaidTheme` with a larger font) → the gap scales with the font size and measured equals rendered geometry (S1: tag widths are measured at the renderer's `tag_label_font_size`, so only the gap follows `theme.font_size`)
     - existing tests that asserted `commit_step == widest + gap` are rewritten to assert the gap property, not the old formula
-- [ ] **Cache identifier**
+- [x] **Cache identifier**
     - bump `MERMAID_BACKEND` to `+bv3` (R7); update `cache_tests.rs` and the `file_cache.rs` doc example
 
 **Checkpoint 2a**
 
-- [ ] `just test` and `just lint` pass in `biscuit-visualized` and `biscuit-terminal`. `biscuit-terminal`'s git-graph tests pass unchanged; any expectation that encoded the old widened step is corrected, and the reason is recorded in the log.
+- [x] `just test` and `just lint` pass in `biscuit-visualized` and `biscuit-terminal`. `biscuit-terminal`'s git-graph tests pass unchanged; any expectation that encoded the old widened step is corrected, and the reason is recorded in the log.
 
 ### Wave 3 — `worktree-cli` classification order
 
-- [ ] **Deferred indirect classification**
+- [x] **Deferred indirect classification**
     - change `History::classify` per C1–C3; update its doc comment (it currently says "the first of `candidates` … that contains it") and the `Integration` docs
     - extend `classify_names_every_integration_and_tries_candidates_in_order` with parent-indirect-then-default-direct → `MergedDirectly { after_indirect: true }`; parent-indirect with no later strong result → the parent's `IntegratedOtherwise`; parent first-parent while the default also contains the tip → the parent's `NoSeparateHistory`; parent direct merge while the default also contains the tip → the parent's `MergedDirectly`
-- [ ] **Fork and stop for deferred merges**
+- [x] **Fork and stop for deferred merges**
     - change `place()` per C4; update the fork comment at the `parent_elsewhere` line
-- [ ] **Topology tests** (real Git, `git_graph/tests.rs`)
+- [x] **Topology tests** (real Git, `git_graph/tests.rs`)
     - `fix/sniff`-shape (E1): `merged_into` = `M104`, the merge edge on the default lane, the lane's commits limited to the branch's own first-parent run, the fork `W1` not drawn, not substituted, and `incomplete == true`
     - a variant whose fork **is** on a drawn lane: merge and fork both drawn, `incomplete == false` (C6)
     - a child merged into its parent, parent later merged into default → still merged into the parent (existing `a_child_merged_into_its_parent_merges_on_the_parent_lane` keeps passing unchanged)
@@ -192,7 +207,7 @@ The two waves touch different packages and can run concurrently. Wave 3's tests 
 
 **Checkpoint 2b**
 
-- [ ] `just test` and `just lint` pass in `worktree`, and every pre-existing `git_graph` test passes without edits to its expected results.
+- [x] `just test` and `just lint` pass in `worktree`, and every pre-existing `git_graph` test passes without edits to its expected results.
 
 ## Phase 3 — Integrated Evidence
 

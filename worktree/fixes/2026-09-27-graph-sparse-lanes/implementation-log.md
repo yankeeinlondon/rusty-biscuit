@@ -15,8 +15,23 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_2:
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
+    - biscuit-visualized
 ---
 
 # Implementation Log for 2026-09-27-graph-sparse-lanes (4 phases)
@@ -273,3 +288,188 @@ arguments passed directly, not through a shell. The perf sanity test is
 Unix-only by its file's `#![cfg(unix)]`, and the Kitty file runs on macOS only.
 The plan schedules cross-OS proof in Phase 3, Wave 5. No test failed before or
 after these changes.
+
+## Phase 2
+
+Host: macOS (Darwin 27.2.0), Apple Silicon dev Mac. Date: 2026-09-28. Wave 2
+(`biscuit-visualized`) was implemented by the orchestrator. Wave 3
+(`worktree-cli`) was implemented by a delegated agent, in parallel.
+
+### Wave 2: collision-driven tag spacing (`biscuit-visualized`)
+
+`biscuit-visualized/src/src/mermaid/gitgraph.rs`:
+
+- `required_step(step, gap, &[LabeledCommit]) -> Option<f32>` (R6) is pure
+  over `(index, commit x, tag Bounds)`. It implements the R1 filter (different
+  commits, strict vertical-interior overlap), R2 ordering (smaller commit x is
+  earlier; distance = index difference), and R3 (`step + shortfall /
+  distance`, maximum over pairs). A shortfall at or below `SPACING_EPSILON`
+  (0.01) counts as clear. The first argument is the step the labels were laid
+  out at, not always the default, so the verification pass (R4) reuses the
+  same function on second-pass bounds.
+- `spaced(default, gap, place)` is the loop over an injected placement
+  closure, `place(step) -> (L, Option<Vec<LabeledCommit>>)`, generic over the
+  layout type, so the fallback is unit-tested with synthetic labels (R4, R6).
+  `layout(graph, theme)` stays the only production entry point and passes the
+  real `compute_layout` plus `horizontal_labels` (which returns `None` for
+  vertical graphs and any rotated tag).
+- **R4 counting, as implemented.** `MAX_SPACING_PASSES = 3` counts every
+  layout after the first, the fallback's included. So at most two verifying
+  widenings run; if a collision survives both, the third layout uses
+  `max(chosen, widest + gap)` and is returned unverified. This reads "at most
+  3 layouts in total after the first" and "the fallback is a return, not
+  another loop" together. Under S1's linearity, a real graph verifies after
+  the first widening (2 layouts in total).
+- `GitGraphGeometry` gains `#[doc(hidden)]` `tag_gap` (`TAG_GAP_EM ×
+  theme.font_size`). `CommitGeometry` gains `index` and `x` (R8).
+  `from_layout` now takes the theme. `default_gitgraph_commit_step()` is
+  re-exported from `biscuit_visualized::mermaid` (R5). **Departure:**
+  `tag_gap` is not named in R8. It lets tests assert minimality against the
+  gap the layout actually used, including under a `fontSize` init override,
+  without re-deriving the resolved theme.
+- The module `//!` "Tag spacing" bullet and `layout()`'s docs now describe the
+  collision rule. The widest-tag wording is gone from source.
+- `MERMAID_BACKEND` is `mermaid-rs-renderer@0.3.x+bv3` (R7). The existing
+  pin, `cache_tests::cache_key_different_mermaid_backend`, asserts the new
+  value and that the key differs from both `+bv2` and `0.2.x+bv1`. The
+  `file_cache.rs` doc example uses the constant, not a literal, so it needed
+  no edit.
+
+Tests (`biscuit-visualized/src/src/tests/gitgraph_tests.rs`):
+
+| Requirement | Test |
+|---|---|
+| no pairs → `None` | `no_labels_or_one_label_needs_no_step` |
+| same-commit tags → `None` | `tags_on_one_commit_add_no_requirement` |
+| no vertical overlap → `None` (shared edge too; control with 1 unit of overlap) | `labels_without_vertical_overlap_add_no_requirement` |
+| one adjacent overlapping pair → exact step | `an_adjacent_overlapping_pair_gets_exactly_the_missing_gap` |
+| three indices apart → shortfall ÷ 3 | `a_pair_three_indices_apart_divides_its_shortfall_by_three` |
+| unequal and offset labels, slice order irrelevant | `unequal_and_offset_labels_measure_edge_to_edge` |
+| RL-ordered input | `right_to_left_labels_take_the_smaller_x_as_earlier` |
+| epsilon applies only in the clear direction | `a_pair_within_epsilon_of_the_gap_is_clear` |
+| maximum over several pairs | `the_widest_requirement_over_several_pairs_wins` |
+| unspaced placement → one layout | `an_unspaced_placement_is_laid_out_once` |
+| linear placement verifies after one widening (2 layouts) | `a_linear_placement_verifies_after_one_widening` |
+| fallback through injected placement: `1 + MAX_SPACING_PASSES` layouts, `max(chosen, widest + gap)`, fallback layout returned | `a_placement_that_never_clears_falls_back_to_the_widest_tag` |
+| kept: neighbors, `main`/`origin/main` one apart, stack of three, cross-lane (now also assert minimality: no governed pair under the gap, tightest within `SPACING_EPSILON` of it, both themes) | `long_labels_on_neighboring_commits_do_not_overlap`, `main_and_origin_main_one_commit_apart_do_not_overlap`, `a_stack_of_three_tags_clears_its_neighbors`, `tags_on_different_lanes_do_not_overlap` (shared `assert_spaced` → `assert_minimal`) |
+| tags on one commit only → default step, identical to the single pass | `tags_stacked_on_one_commit_keep_the_default_step` |
+| different lanes one column apart, horizontal overlap but no vertical overlap → default step (control proves the horizontal overlap and adjacency) | `tags_on_lanes_apart_without_vertical_overlap_keep_the_default_step` |
+| observed Mermaid text (S1's `observed.mmd`, embedded as `OBSERVED`) → default step, no overlaps | `the_observed_graph_keeps_the_default_step` |
+| `direction RL` text → same geometry as LR, minimal | `right_to_left_text_lays_out_like_its_left_to_right_twin` |
+| font override (`%%{init}%%` `fontSize: 24`) → gap 24, minimal, step exactly 8 wider than at font 16, measured ≥ laid-out width | `the_gap_scales_with_an_overridden_font_size` |
+| kept: untagged and vertical single pass, measured = spaced | `a_diagram_without_tags_keeps_the_single_pass_layout`, `a_vertical_graph_with_tags_keeps_the_single_pass_layout`, `the_spaced_layout_is_the_measured_one` |
+| R5 accessor | `the_default_step_is_the_renderers` |
+
+The observed text is embedded instead of read with `include_str!` from the
+fix's `spikes/` directory. That directory moves when the spec closes, and a
+library test must not depend on a snapshot's location.
+
+**Regression proof.** With `spaced` temporarily patched back to the old
+widest-tag rule, and then restored, 12 of the 38 `gitgraph` tests failed:
+every minimality assertion, the three default-step cases (stacked, lanes
+apart, observed), the font-scaling case, and the loop tests. With the new
+rule, all 38 pass.
+
+No existing test asserted `commit_step == widest + gap` literally. The kept
+tests asserted only "widened", which still holds, and they now also assert
+the gap property.
+
+**Checkpoint 2a gates:**
+
+- `biscuit-visualized`: `just test` 116 passed, 0 skipped. `just lint`
+  clean.
+- `biscuit-terminal`: `just test` 3344 passed, 55 skipped (the existing
+  skips). `just lint` clean. No `biscuit-terminal` expectation encoded the
+  old widened step, so none changed.
+- A repo-wide search found no other Rust source pinning `+bv2` or the
+  spacing formula. Darkmatter only detects the gitGraph diagram type.
+- Docs (`biscuit-visualized/docs/mermaid-gitgraph.md`, the git-graph
+  component doc, `worktree/docs/git-graph.md`) still describe the widest-tag
+  rule and `+bv2`. The plan schedules those edits for Phase 4 (Wave 6/7).
+
+**Cross-OS (brought forward from Phase 3 for `biscuit-visualized`).**
+`just cross-check biscuit-visualized --os linux --all-features` passed on
+build-linux (116 of 116). On native Windows, the first run failed one
+assertion in `the_gap_scales_with_an_overridden_font_size`: with the
+`fontSize: 24` override, the root viewBox width (322.40) came out narrower
+than the layout's own `gitgraph.width` (328.62). On macOS it is wider. That
+check compared two renderer measurements whose relation depends on font
+metrics, and it was not the property under test. It now asserts that the
+measured width at font 24 exceeds the measured width at font 16: measurement
+shares the spaced layout, so the wider step shows. The comment at the
+assertion records why. After the change, Windows passed 116 of 116. Per the
+plan's Wave 5 rule, this fixed the assertion's robustness, not the OS.
+
+### Wave 3: classification order (`worktree-cli`)
+
+`worktree/cli/src/commands/git_graph/topology.rs`:
+
+- `History::classify` walks the candidates in the existing order.
+  `MergedDirectly` and `NoSeparateHistory` return at once. The first
+  `IntegratedOtherwise` is remembered, and the walk continues (C1). A
+  `GatherGap` returns `Err` when nothing is remembered yet, and returns the
+  remembered weak result otherwise (C2). The per-candidate check moved
+  unchanged into a private `integration_into`.
+- `Integration::MergedDirectly` gains `after_indirect: bool` (C3). The docs on
+  `classify` and `Integration` describe the strength order.
+
+`worktree/cli/src/commands/git_graph.rs` `place()`: `parent_elsewhere` also
+requires `!after_indirect`, so a deferred direct merge forks at
+`merge_base(C^1, tip)` and stops at `[C^1]` (C4). The fork comment is
+updated. No code was added to draw or substitute a fork (C5).
+
+| Requirement | Test (`worktree/cli/src/commands/git_graph/tests.rs`) |
+|---|---|
+| C1/C3: parent-indirect then default-direct → `MergedDirectly { after_indirect: true }`; parent-indirect alone → the parent's `IntegratedOtherwise`; parent first-parent while the default contains the tip → parent's `NoSeparateHistory`; parent direct while the default contains the tip → parent's `MergedDirectly { after_indirect: false }` | `classify_names_every_integration_and_tries_candidates_in_order` (extended; the only edit to its existing content is `after_indirect: false` on the old expectation, plus two setup values that are now captured instead of discarded) |
+| C4/C5, the `fix/sniff` shape (E1): `merged_into = M104`, fork `W1` = `merge_base(M104^1, tip)`, entries = `+89` plus the branch's own 5 commits, W1 on no lane and absent from the Mermaid text, merge laid out on `main` with parents `d13` and the sniff tip, the lane's first laid-out commit parentless (nothing substituted), `GitGraphPlan::incomplete` true, no hidden lanes | `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment` |
+| C6: the deferred direct merge's fork is drawable (the parent was fast-forwarded into `main`) → merge and fork both drawn, `GraphFacts::incomplete` and `GitGraphPlan::incomplete` both false | `a_deferred_direct_merge_with_a_drawn_fork_is_complete` |
+| the parent has the tip on its first-parent chain while `main` contains it too → a label on the parent's lane | `a_tip_on_the_parents_first_parent_chain_is_labeled_there_while_main_contains_it` |
+| C2: shallow, unknown earlier candidate → `Err(GatherGap)` even beside a later direct merge; the gathered base view has no merge edge and has the notice. A gap after a weak result → that weak result | `a_shallow_unknown_earlier_candidate_is_a_gap_even_beside_a_later_direct_merge` (a new test: the existing shallow fixture has no merge and no recorded parent) |
+| child merged into its parent; an indirect branch with no stronger result | `a_child_merged_into_its_parent_merges_on_the_parent_lane`, `an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_the_notice` (unedited, passing) |
+
+**Regression proof.** On unchanged code, the `fix/sniff` test failed on
+`merged_into` (`left: None, right: Some(<M104>)`), and so did the C6 test.
+Both pass after the change.
+
+**Departure: where the notice comes from.** The plan's Wave 3 bullet reads
+"`incomplete == true`" for the `fix/sniff` shape. After the fix, every Git
+query in that shape verifies, so `GraphFacts::incomplete` is `false`. The
+notice is still shown: `GitGraphPlan::incomplete` is the OR of the facts'
+flag and `GitGraph`'s own finding that it cannot attach the lane at `W1`,
+which C5 relies on. That plan flag is what the terminal notice reads. The
+test asserts `plan.incomplete` and does not pin `GraphFacts::incomplete`.
+The spec's outcome, "the incomplete-history notice is shown", holds.
+Phase 3's component assertion ("`GitGraphPlan::incomplete == true` only
+because of the `W1` fork") matches this exactly.
+
+**C6 fixture note.** `merge_base(C^1, tip)` lands on a drawn lane only when
+the parent reached `main` by fast-forward. Had the parent been merged with a
+merge commit, the fork would be that merge's second parent, which is
+undrawable like `W1`.
+
+### Phase 2 close
+
+Gates:
+
+- `worktree/`: `just test` 757 passed, 30 skipped (the existing skips).
+  `just lint` clean. `cargo clippy -p worktree-cli --all-targets -- -D
+  warnings` clean, also with `--features terminal-tests`.
+  `just check-tier-coverage worktree`: 0 stranded.
+- `biscuit-visualized`: `just test` 116 passed, `just lint` clean. Linux and
+  native Windows cross-check pass.
+- `biscuit-terminal`: `just test` 3344 passed, 55 skipped, `just lint`
+  clean.
+- All new tests are L1 unit tests with no tier marker. The `worktree-cli`
+  unit tests run twice (lib and `wt` bin targets), as every `git_graph` test
+  does.
+
+Skill: the `commands/git_graph.rs` bullet in `.claude/skills/worktree/SKILL.md`
+now states the strength order, the deferred fork rule, where the notice comes
+from, and collision-only spacing. The full docs and skills sweep
+(`biscuit-visualized/docs/mermaid-gitgraph.md`,
+`biscuit-terminal/docs/components/git_graph.md`,
+`worktree/docs/git-graph.md`, the `biscuit-visualized` and `biscuit-terminal`
+skills) remains in Phase 4 as planned.
+
+Not run in Phase 2: `worktree` cross-OS (Phase 3, Wave 5); the Kitty L2 and
+perf reruns (Phase 3, Wave 4). No pre-existing failures.
