@@ -414,3 +414,19 @@ I1 table unless noted.
   inside Darkmatter now`, pinned by `compose_phase6`.
 - `nested_span_regression/commit.md`: bytes unchanged; its byte-pinning test
   passes.
+
+## Phase 6: reproduction re-run
+
+The spec's reproduction script, run on 2026-09-28 with the worktree's
+`target/debug/md` in a scratch directory (stdin closed):
+
+| Command | Before the fix | After the fix |
+| ------- | -------------- | ------------- |
+| `md compose repro.md --set '{"note":"see {{…}} siblings"}'` | exit 1, `interpolation failed`, "Defined in:" the document | exit 1, `interpolation failed` on `note`; the error now says "The value came from a command-line override (`--set`), not from the document." Command-line setters stay templates (N1); only the attribution changed (R5). |
+| `md compose repro.md --set '{"note":"$(echo INJECTED)"}'` | shell approval requested | unchanged: `Approval required for 'echo INJECTED'` (a person-typed setter is authored input, N1) |
+| `md compose esc.md` | `Body: fixed claudine` | `Body: fixed {{ area }}`, exit 0 (R1.3) |
+
+Data-origin values holding the same text (the Claudine runtime paths and
+inline agent writes) are covered by `agent_text_is_data` and
+`darkmatter::data_origin`, not by this script, which only exercises the
+command-line channel.

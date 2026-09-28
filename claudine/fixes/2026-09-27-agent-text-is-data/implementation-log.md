@@ -22,6 +22,7 @@ packages:
     - darkmatter-cli
     - claudine
     - claudine-cli
+    - dmls
 source_files_during_phase_2:
     - darkmatter/lib/src/markdown/compose/value_origin.rs
     - darkmatter/lib/src/markdown/compose/body_origin.rs
@@ -167,6 +168,58 @@ docs_updated_during_phase_4:
     - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/lib/src/markdown/literal_token.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - claudine/lib/src/composition/closure.rs
+    - claudine/lib/src/composition/closure/persist.rs
+    - claudine/lib/src/composition/closure/persist/tests.rs
+    - claudine/lib/src/composition/closure/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/schema.rs
+    - claudine/lib/src/composition/file_detail.rs
+    - claudine/lib/src/composition/guardrails.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/wrap_inline_compose.rs
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/timeline.md
 ---
@@ -919,3 +972,225 @@ reader changed.
   from the in-memory source, not a fresh disk read, so the test cannot
   observe B14 as written. Handed to Phase 5 to redesign (spec
   `message_to_agent`).
+
+## Phase 5
+
+- Started 2026-09-28. Changes are in `darkmatter` (lib), `dmls`, `claudine`
+  (lib), and `claudine-cli`.
+
+### Log (in order)
+
+- **Darkmatter locator** (`schemas/simplified/source.rs`, frontmatter mode
+  only): an empty value followed by a same-indent `- ` line is an indentless
+  sequence; an empty value with nothing deeper is a null scalar with an empty
+  span; a sequence-item map aligns with its first key (wide `-   k:` markers).
+  The closed v1 schema grammar is unchanged. `DecodedScalar::empty` added.
+- **`locate_frontmatter_leaves`** (`hash/write.rs`, public): per-top-level-node
+  location as spike S2 recommended, with `FrontmatterPathSegment`, `LeafSpan`,
+  `UnlocatedLeaf{path,line,reason}`, `UnlocatedLeafReason`, and
+  `LeafLocateError::{Document, Unlocated}`. The guard compares the decoded
+  source text with a parse of the trimmed YAML (what compose reads).
+  - Departure from S2: a `|+` block that ends the frontmatter is **located**,
+    not rejected. With the trimmed-YAML guard both sides agree, and the payload
+    is what compose reads. Tested.
+- **N6 pending classifiers (Darkmatter).**
+  - New `literal_token::holds_pending_syntax(&str)`: `{{`/`$(` present and the
+    leaf is not a whole valid token. Shared by `format.rs`
+    (`is_pending_expression_value`), `schemas/mod.rs` (`scan_pending_values`),
+    and compose `schema_validation.rs`.
+  - `schema_validation.rs`: `value_pending_composition` now takes the key and
+    the request's `DataPaths` and judges `authored_view` only. `DataPaths` is
+    threaded through `prepare_caller_projection`, `run_with_registry`,
+    `verify_projection_stability`, `ensure_projection_stable`,
+    `caller_classification_instance`, and `build_validation_instance`
+    (`provenance.data()` from the pipeline). Data is judged, never deferred.
+  - `schemas/rewrite.rs`: removed the lexical `{{`/`$(` skip in
+    `rewrite_file_value`; the key-level `composition_pending` set (checked by
+    the caller) is the authority, and it is now origin-aware.
+  - `validate_with_options` validates the token-decoded instance and computes
+    pending on the raw one.
+  - The `expression` format validator parses the decoded text of a whole token.
+  - DMLS `expression_diagnostics` skips a whole-token value (data, and its
+    encoded bytes cannot anchor a parse error).
+  - Finding: a data value like `{{x}}.md` is **not a valid file reference**
+    (`biscuit_file` reads `{{NAME}}` as a variable). Phase 4's dropped row
+    therefore fails for a real reason once data is judged; the new test uses
+    `$(x).md`.
+- **Claudine `closure/persist.rs`** (new): `repair_agent_frontmatter`,
+  `encode_agent_values`, and `AgentFrontmatterRejection` (one error type for
+  both, with `line`, `property`, `reason`, `agent_edit`).
+  - Repair implements N12 lexically on top-level nodes. Reading of N12 made
+    concrete: a value starting with `"`, `'`, `[`, or `{` is quoted only when it
+    does not parse (so valid quoted scalars and flow collections are never
+    touched); `& * ! % @` and a backtick always quote; `- `, `? `, `: ` at the
+    start also quote (not in N12's list, always a YAML error otherwise); a core
+    number/bool/null before a ` #` comment is left alone.
+  - A duplicate top-level key is located lexically (the YAML parser only names
+    the mapping). `serde_yaml_ng::Value` is used for the reparse because a
+    JSON map silently keeps the last duplicate.
+  - The encoder compares the delta's raw values (same parser on both sides) to
+    decide ownership, so an agent that rewrites a stored token as its decoded
+    text is re-encoded to the same token, and a raw look-alike is encoded once
+    more. The splice is verified by re-parsing.
+- **Closure wiring** (`closure.rs`): repair → restore → encode → decoded delta
+  → hash → `atomic_write` (N7). `InlineArtifact::frontmatter_delta` now holds
+  what composition reads (tokens decoded), so `inline_completion_instance`
+  needs no change. New `CompositionError::InlineAgentFrontmatterRejected`
+  (code `document.invalid_frontmatter`, origin Provider, detail `doc`,
+  `property`, `problems`); any closure error already rolls back
+  (`loop_control.rs`).
+  - Behavior change: a duplicate owned key (`prompt` twice) is now this
+    agent-attributed rejection instead of `InlineArtifactEditFailed`; the
+    existing closure test was updated.
+- **Readers (N6 amendment, Claudine).**
+  - `schema/mod.rs`: `value_needs_composition` uses
+    `holds_pending_syntax`; validation judges the token-decoded instance while
+    deferral reads the raw one. New `pre_validate_layered_for_mode` takes
+    `LayeredOverrides`, so a data override key is judged, never deferred;
+    `drop_invalid_optionals_with_origin` and `is_composition_independent(…,
+    data_keys)` carry the same rule. The sequence JIT
+    (`cli/.../sequence/jit.rs`) uses the layered entry point. The public
+    `pre_validate_schema[_for_mode]` and `drop_invalid_optionals` keep their
+    signatures and treat every override as authored (their callers pass
+    person-typed setters).
+  - `classify.rs`: the status report validates decoded text.
+  - `sequence/mod.rs` (`resolve_sequence_plan_with`) and
+    `sequence/preflight/mod.rs` (`step_state`) read stored tokens as their
+    text, so an expression source and the approved shell bytes see what
+    composition sees.
+  - `sequence/grammar.rs`: a `sequence:` value that begins a token is
+    refused as `SequenceInvalid` (plan option "reject"; decoding would let data
+    choose the steps).
+  - `file_detail.rs`: `name` and `description` show decoded text.
+  - One helper for all of these: `closure::stored_text` (and
+    `opens_stored_token`). `override_boundary_guard::runtime_layers_never_encode_a_literal_token`
+    forbids any `literal_token` reference in `sequence/`, so the readers go
+    through the persistence module instead of the guard being narrowed.
+  - `load_prompt`'s stored markdown feeds only the lifecycle nested-span check
+    on lifecycle keys, which are author-owned; no change.
+- **B14 (effect-engine writes).** `lifecycle/executor.rs::dispatch_side_effect`
+  passes the value of `set_`/`merge_`/`append_`/`prepend_frontmatter` through
+  `closure::persisted_data` (same N9 gate; keys never encoded). The in-memory
+  mirror stays raw. The sequence `side_effect:` path dispatches through the same
+  function. Every written value is the product of an evaluation, so all of them
+  are data; this includes an authored `{{{ x }}}` literal, whose result is
+  `{{ x }}` text (R1.3).
+- **Guardrails.** `DEFAULT_GUARDRAILS` gains the plain-scalar rule; the
+  2026-09-06 text is `SHIPPED_GUARDRAILS_2026_09_06` in
+  `HISTORICAL_SHIPPED_GUARDRAILS`, so materialized copies upgrade.
+- **Error guards.** The first cut built a rejection `reason` from a typed
+  `MarkdownError` (repair's fence error) and a `LiteralTokenError` (decoded
+  delta); `error_guards` refused both. Fixed without allowlist entries: a
+  near-miss fence is left for `restore_properties_text` to report (typed
+  `InlineArtifactEditFailed`), `encode_agent_values` returns
+  `EncodeError::{Rejected, Frontmatter(MarkdownError)}`, and the decoded delta
+  keeps a malformed token raw (as every other reader does). The corpus gained a
+  `document.invalid_frontmatter` entry.
+- **B14 red test redesigned** as the spec message asked: run 1 persists, and
+  run 2 (a fresh `compose`, reading the file from disk) renders the text. It
+  also asserts the on-disk token.
+
+### Departures and decisions
+
+- **N12 made concrete** (see the repair entry above): the indicator rule
+  applies to values that do not already parse, so valid quoted scalars and
+  flow collections are never touched, as R4 requires.
+- **`|+` at the end of frontmatter is supported**, not rejected (S2 said
+  reject). The trimmed-YAML guard agrees with the decoder, and the payload is
+  what compose reads. A clipped block that ends the frontmatter is likewise
+  stored without its final newline, which is what compose reads there.
+- **Ownership compares raw parsed values** (the delta's own parser), not
+  decoded ones as I2 Table C suggested. Comparing decoded values would leave an
+  agent's rewrite of a token into raw template text un-encoded; comparing raw
+  values re-encodes it to the same token.
+- **Sequence indexes are compared by position.** An agent inserting at the
+  front of a list owns every shifted string; an authored `{{ … }}` item shifted
+  that way is encoded and stops being a template. Documented here only; no
+  shipped document relies on it.
+- **The Claudine pre-validators judge data only on the sequence JIT path.**
+  The interactive/harness entry points pass person-typed setters, so they keep
+  treating overrides as authored. Darkmatter's compose-time validation is
+  origin-aware for every path, so a data value that the pre-validator defers is
+  still judged at prepare time.
+- **An expression-typed field holding decoded data** that contains `{{` is
+  still accepted lexically by the Darkmatter `expression` format validator
+  (a string-only callback cannot see origin). A raw token is decoded and
+  parsed. Edge case; recorded, not fixed.
+- **`{{x}}.md` is not a valid file reference** (biscuit-file variables), so
+  Phase 4's dropped row cannot pass for any origin; the test uses `$(x).md`.
+- **Behavior changes visible to users:** a duplicate owned key and malformed
+  YAML written by the agent now report `InlineAgentFrontmatterRejected`
+  (agent-attributed, with the line) instead of `InlineArtifactEditFailed`.
+  Three existing tests changed expectations (`closure::tests::reports_a_duplicate_owned_key…`,
+  CLI `inline_completion_lifecycle::a_duplicate_owned_key_is_refused_and_rolled_back`,
+  `wrap_inline_compose::inline_compose_keeps_agent_frontmatter_and_refuses_a_malformed_document`).
+
+### Requirement → test mapping
+
+| Requirement | Tests |
+| ----------- | ----- |
+| Leaf locator: every S2 row, indentless sequences, empty values, wide markers, CRLF, flow items, anchors/aliases/tags/merges, nested sequences, per-node isolation, line reporting | darkmatter `hash::write::leaf_tests::*` (9) |
+| Repair matrix (N12): control row + one edit per shape (colons, ` #`, tab-`#`, trailing `:`, `*`, backtick, `!`, `- `, broken quote, backslash; valid plain/quoted/number/number+comment/float/bool/null/`~`/empty/flow seq/flow map/block scalar; bad nesting) | claudine `closure::persist::tests::repair_walks_every_value_shape_from_one_fixture` |
+| Repair: unchanged key untouched; owned property never repaired; duplicate key line + agent; missing `---`; CRLF; block scalar formatting | `persist::tests::an_unchanged_key_is_never_rewritten…`, `a_changed_key_is_repaired_and_an_owned_property_is_not`, `duplicate_keys_name_the_line_and_the_agent`, `a_missing_closing_delimiter_is_refused`, `crlf_line_endings_survive_a_repair`, `a_block_scalar_keeps_its_formatting` |
+| Encoder (N8/N9): gate, authored bytes kept, changed-container leaves only, stored token left alone, rewritten token re-encoded, raw look-alike encoded once, CRLF, block scalar replaced, unlocatable leaves refused with line | `persist::tests::only_owned_values_that_could_instruct_become_tokens`, `a_changed_container_owns_only_its_changed_string_leaves`, `a_stored_token_is_left_alone_and_a_raw_look_alike_is_encoded_once`, `encoding_keeps_crlf_and_replaces_a_changed_block_scalar`, `an_unlocatable_owned_value_is_refused_with_its_line` |
+| Closure order (N7), decoded delta, coherent hash, repeated read/write/read, rollback of unrepairable edits (incl. CRLF) | `closure::tests::agent_values_are_repaired_encoded_hashed_and_reported_decoded`, `stored_tokens_survive_a_second_run_byte_for_byte`, `an_unrepairable_edit_is_refused_without_writing` |
+| Spec L1 inline (end to end): tokens for `summary`/`cmd`, quoted `note`/`title`, completion schema sees decoded (pattern rejects token spelling), `md hash --diff` agreement, run 2 reads exact text, authored `{{ area }}` fills in, tokens keep bytes, no approval | CLI `agent_text_is_data::inline_agent_values_are_stored_as_data_and_read_back_exactly`, `inline_agent_added_frontmatter_survives_a_second_run` (un-ignored) |
+| Spec L1 inline unrepairable: duplicate key / bad nesting name the line and agent; rollback restores bytes | CLI `unrepairable_agent_frontmatter_names_the_line_and_rolls_back` |
+| CRLF and block scalar formatting kept end to end | CLI `crlf_and_block_scalar_documents_keep_their_formatting` |
+| N6 Darkmatter: data never pending; decoded token judged; file ref from data resolves | darkmatter `data_origin::a_data_value_holding_template_text_is_validated_not_deferred` (mutation-checked), `a_data_file_reference_holding_template_text_resolves`; `schemas::tests::validate_with_options_judges_a_literal_token_by_its_text`; `format` tests `pending_expression_values_are_classified_lexically`, `expression_validation_parses_the_text_a_literal_token_holds` |
+| N6 DMLS: a token is not parsed as an expression | dmls `a_literal_token_is_not_parsed_as_an_expression` (mutation-checked) |
+| N6 Claudine: token judged by text and dropped when invalid; data override judged, authored deferred | `schema::tests::a_stored_literal_token_is_judged_by_its_text`, `a_data_override_is_judged_and_an_authored_one_is_deferred` |
+| Sequence readers: expression source reads token text; token refused as a `sequence:` source; approved shell bytes use decoded text | `sequence::tests::an_expression_source_reads_a_stored_token_as_its_text`, `a_stored_token_is_not_a_sequence_source`; `preflight::tests::shell::a_stored_token_resolves_to_its_text_in_approved_bytes` (mutation-checked) |
+| `file_detail` shows decoded text | `file_detail::tests::a_stored_literal_token_shows_its_text` |
+| B14: effect writes store data as tokens; next run renders exact text | CLI `set_frontmatter_persisted_agent_data_survives_next_preparation` (un-ignored, redesigned, mutation-checked), `set_frontmatter_argument_from_agent_data_is_not_reresolved` (asserts decoded text); lib `persist::tests::persisted_data_encodes_only_gated_string_leaves_and_never_keys` |
+| Guardrail plain-scalar rule and migration | `guardrails::tests` (default contents; every historical text migrates) |
+| New error code corpus and guards | CLI `error_guards::*` |
+
+Input-robustness matrix (the repair and encoder read agent-written YAML; the
+load-bearing field is each agent-added or changed value):
+
+| Shape | Outcome |
+| ----- | ------- |
+| absent (key removed) | a `Deletion` in the delta; nothing repaired or encoded |
+| explicit null (`k:`, `k: null`, `k: ~`) | untouched; null in the tree; never encoded |
+| wrong type, whole field (number where a string is expected) | untouched; the completion schema judges it |
+| wrong type, one element (`[a, 3]`) | string items judged by the gate; the number untouched |
+| wrong type, every element (`[1, 2]`) | untouched |
+| empty (`[]`, `{}`, `""`) | untouched; parses as empty |
+| duplicate key | refused with the second key's line, agent-attributed; rollback |
+| trailing or invalid content (bad nesting, missing `---`) | refused with the line; rollback |
+
+These rows are covered by `repair_walks_every_value_shape_from_one_fixture`
+(one fixture, one edit per row, plus a control row), the duplicate and
+missing-delimiter tests, and the encoder tests. Code smells grepped: no
+`#[serde(default)]`, `filter_map(.. as_str())`, or `unwrap_or_default()` on a
+load-bearing parse in `persist.rs`. The decoders' `unwrap_or_else(|_| raw)`
+fallbacks are deliberate: a malformed token stays raw so composition reports
+it with its location.
+
+### Gates
+
+- macOS, `cd claudine`: `just test` passed 7538 tests, 9 skipped; no
+  `#[ignore = "red until` markers remain anywhere in `claudine/` or
+  `darkmatter/`. `just lint` passes (only the existing macOS linker note).
+  `just test-l2` passed 251 + 3.
+- macOS, `cd darkmatter`: `just test` passed 8580 tests (DMLS included), 12
+  skipped. `just lint` passes.
+- `just cross-check`:
+  - `darkmatter --os windows` (leaf_tests, literal_token, data_origin,
+    validate_with_options, pending_expression): 57/57.
+  - `claudine --os windows` (closure::, composition::schema::, file_detail,
+    guardrails, stored-token tests): 153/154. The one failure,
+    `composition::schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message`,
+    is **pre-existing**: it fails identically on an unmodified HEAD worktree
+    (`ctx.repo_root` renders `B:/…` while the test expects `Path::display()`'s
+    `B:\…`). Not related to this fix; not fixed here.
+  - `claudine-cli --os linux` (agent_text_is_data, wrap_inline_compose,
+    inline_completion_lifecycle, error_guards, override_boundary_guard): 81/81.
+- No new `#[cfg]`. The new CLI rows live in the existing `#[cfg(unix)]`
+  `agent_text_is_data` module (fake-agent convention); every library test runs
+  on every OS. CRLF is covered at the locator, repair, encoder, closure, and CLI
+  levels.
+- Housekeeping: the baseline check used a temporary `p5-baseline` worktree,
+  since removed; its Windows clone directory
+  (`B:\coding\shazam--p5-baseline`) is left on `build-win-native`.

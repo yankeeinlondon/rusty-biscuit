@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
 total_phases: 6
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: true
 spec: 2026-09-27-agent-text-is-data
@@ -10,6 +10,7 @@ packages:
     - darkmatter-cli
     - claudine
     - claudine-cli
+    - dmls
 source_files_during_phase_1:
     - claudine/cli/tests/l1/agent_text_is_data.rs
     - claudine/cli/tests/l1/main.rs
@@ -171,6 +172,58 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/lib/src/markdown/literal_token.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/source.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/yaml_scalar.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - claudine/lib/src/composition/closure.rs
+    - claudine/lib/src/composition/closure/persist.rs
+    - claudine/lib/src/composition/closure/persist/tests.rs
+    - claudine/lib/src/composition/closure/tests.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/render/schema.rs
+    - claudine/lib/src/composition/file_detail.rs
+    - claudine/lib/src/composition/guardrails.rs
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/grammar.rs
+    - claudine/lib/src/composition/sequence/mod.rs
+    - claudine/lib/src/composition/sequence/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/jit.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/error_guards.rs
+    - claudine/cli/tests/l1/inline_completion_lifecycle.rs
+    - claudine/cli/tests/l1/wrap_inline_compose.rs
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/state-management/side-effects.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Plan: agent-produced text is data, never instructions
@@ -247,7 +300,7 @@ data-origin values. Phase 2 verifies this with a workspace-wide caller check.
 - [x] Property test: `decode(encode(s)) == s` for arbitrary Unicode, including
       strings that look like tokens. A malformed token fails with a source
       location.
-- [ ] Claudine loop, sequence, inline, inline-unrepairable, and lifecycle
+- [x] Claudine loop, sequence, inline, inline-unrepairable, and lifecycle
       acceptance tests from the spec exist and pass. So does the regression
       test that `--set '{"x":"{{ title }}"}'` still fills in.
 - [ ] No authored prompt in the repository depends on fixed-point rescanning.
@@ -809,7 +862,7 @@ runtime layers.
 
 ### Wave 1 (parallel)
 
-- [ ] **Narrow YAML repair** (`rust-developer`)
+- [x] **Narrow YAML repair** (`rust-developer`)
       - Add `repair_agent_frontmatter(candidate, original) -> Result<String,
         RepairError>`. It works lexically on top-level keys only, following
         N12, and preserves CRLF.
@@ -820,7 +873,7 @@ runtime layers.
       - Unit tests: nested map, block scalar, duplicate keys, CRLF, a value
         that is already valid YAML, `title: Fix: colons`, and
         `note: see issue #42`.
-- [ ] **Leaf encoder** (`rust-developer`)
+- [x] **Leaf encoder** (`rust-developer`)
       - Add `encode_agent_values(restored, original, delta) -> Result<String,
         EncodeError>`. Ownership follows N8 and the encoding gate follows N9.
         Nested leaves use the span API chosen in S2.
@@ -828,7 +881,7 @@ runtime layers.
       - An unchanged stored token, or an unchanged authored value, keeps its
         original bytes.
       - Encode from the raw agent value exactly once.
-- [ ] **Decoded readers** (`rust-developer`)
+- [x] **Decoded readers** (`rust-developer`)
       - Route every I2 reader through N6's `decode_literal_tokens`. This
         includes the schema pre-validation and `drop_invalid_optionals`, whose
         composition-tolerant rule must not treat a token as a pending `{{`
@@ -837,7 +890,7 @@ runtime layers.
       - Apply the N6 amendment to the `contains("{{")` "pending" checks
         (Darkmatter schema/DMLS sites and Claudine `value_needs_composition`)
         and to `sequence/grammar.rs:122`.
-- [ ] **Effect-engine frontmatter writes** (`rust-developer`; I2 B14, author
+- [x] **Effect-engine frontmatter writes** (`rust-developer`; I2 B14, author
       to confirm)
       - `set_frontmatter`/`merge_`/`append_`/`prepend_frontmatter` writes of
         Data-origin strings go through the same encoder gate as the closure
@@ -847,7 +900,7 @@ runtime layers.
 
 ### Wave 2 (depends on Wave 1)
 
-- [ ] **Closure wiring** (`rust-developer`)
+- [x] **Closure wiring** (`rust-developer`)
       - In `reconcile_inline_artifact_with_evidence` (`closure.rs:107-157`),
         apply N7's order (repair, restore, encode, hash, `atomic_write`).
       - `inline_completion_instance` (`completion.rs:300/319`) reads decoded
@@ -855,7 +908,7 @@ runtime layers.
       - A repair or encode error goes to the existing rollback path
         (`loop_control.rs:288/2306`) with an agent-attributed diagnostic that
         uses the R5 source variant.
-- [ ] **Guardrails** (`rust-developer`)
+- [x] **Guardrails** (`rust-developer`)
       - Add the plain-scalar rule to `DEFAULT_GUARDRAILS`
         (`claudine/lib/src/composition/guardrails.rs:25`): quote a value, or
         use a separate comment line, when `#` is meant as a comment.
@@ -864,7 +917,7 @@ runtime layers.
 
 ### Wave 3
 
-- [ ] **Inline acceptance tests** (`feature-tester-rust`)
+- [x] **Inline acceptance tests** (`feature-tester-rust`)
       - **Inline:** the fake agent adds `summary: fixed {{…}} parsing`,
         `note: see issue #42`, `cmd: "$(echo X)"`, and `title: Fix: colons`.
         The run succeeds, and the file is valid YAML: `summary` and `cmd` are
@@ -878,8 +931,8 @@ runtime layers.
 
 ### Checkpoint 5
 
-- [ ] `cd claudine && just test && just lint && just test-l2` is green.
-- [ ] Every red test from Phase 1 now passes, and no `#[ignore = "red until`
+- [x] `cd claudine && just test && just lint && just test-l2` is green.
+- [x] Every red test from Phase 1 now passes, and no `#[ignore = "red until`
       markers remain.
 
 ---
@@ -890,7 +943,7 @@ Depends on Phases 2–5.
 
 ### Wave 1 (parallel)
 
-- [ ] **Darkmatter docs** (`Documenter`)
+- [x] **Darkmatter docs** (`Documenter`)
       - Files: `darkmatter/docs/inline/interpolation.md` (literals `:187-271`;
         replace the fixed-point description), `inline/fm-interpolation.md`,
         `inline/fm-shell-expansion.md`, `inline/shell-expansion.md`,
@@ -901,10 +954,10 @@ Depends on Phases 2–5.
         migrate, authored-source shell detection, the origin-aware guards, the
         token format, and how to hand-edit a token without creating a template.
         Add the N13 follow-up note.
-- [ ] **Darkmatter skill** (`Documenter`)
+- [x] **Darkmatter skill** (`Documenter`)
       - `.claude/skills/darkmatter/SKILL.md` (`:261`, `:294`), `compose.md`
         (`:408-412`, `:671`), `frontmatter.md`, and `errors.md`.
-- [ ] **Claudine docs and skill** (`Documenter`)
+- [x] **Claudine docs and skill** (`Documenter`)
       - Docs: `claudine/docs/topics/flow-control/looping.md`,
         `topics/frontmatter-properties.md`, `topics/composition.md`
         (guardrails `:168-172`), `topics/lifecycle.md` (update the

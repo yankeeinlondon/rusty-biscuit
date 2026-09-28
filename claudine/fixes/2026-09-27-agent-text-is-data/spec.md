@@ -37,41 +37,42 @@ related:
     - 2026-09-20-lifecycle-handoff-gaps
 human_review: false
 message_to_agent: |-
-    Phase 4 is complete (see implementation-log.md "## Phase 4"). What Phase 5
-    builds on:
-    - Runtime values reach Darkmatter through ONE boundary:
-      `claudine::composition::LayeredOverrides` (runtime_state.rs), built by
-      `layered_set_overrides`, carried on `PrepareOptions` /
-      `CallerInputLayers` as `set_overrides` + `data_override_keys` (use
-      `layered_overrides()` / `set_layered_overrides()`), and handed over only
-      by `LayeredOverrides::apply_to`. `cli/tests/l1/override_boundary_guard.rs`
-      fails on any other `with_set_overrides`/`with_data_overrides`/
-      `with_override_layers` call, and on any `literal_token` use in
-      runtime_state.rs, looping/, sequence/, cli wrap/sequence, or
-      wrap/overlay.rs. Encoding for persistence (closure.rs, the lifecycle
-      effect-engine writes) is outside that list on purpose.
-    - The `proxy.with:` overlay is per-document: `PrepareOptions::proxy_overlay`
-      (lowest data layer). Never put it in `CallerInputLayers`; the sequence
-      step overlay rides there as data and must survive an in-place proxy.
-    - The lifecycle executor scans authored text once (`evaluate_operand`); the
-      surviving-span guard and `LifecycleEvaluationReason::SurvivingSpan` are
-      gone. A `proxy.with:` value for a lifecycle key that still holds `{{`
-      fails closed. Pre-flight-stamped shell commands carry
-      `ShellAction::pre_resolved` and run as approved.
-    - Still yours (N6 amendment): the "pending composition" classifiers treat a
-      data value containing `{{` as pending. In Darkmatter
-      `schema_validation.rs` a data file reference named `{{x}}.md` still fails
-      (`caller_classification_instance`, `value_pending_composition`, and the
-      sites listed in the plan). Claudine `value_needs_composition` likewise.
-    - The two `#[ignore = "red until phase 5"]` tests in
-      cli/tests/l1/agent_text_is_data.rs are the only remaining ones.
-      `set_frontmatter_persisted_agent_data_survives_next_preparation` is no
-      longer blocked by B15: it now exits 0, but iteration 2 renders
-      `Note: [none]`. A loop iteration prepares from the in-memory source, not
-      a fresh disk read, so the test as written cannot observe B14. Redesign it
-      when you fix B14 so the persisted value is read back from disk (for
-      example a second `compose` run, or a sequence step, which re-reads the
-      live file).
+    Phase 5 is complete (see implementation-log.md "## Phase 5"). For Phase 6:
+    - Docs already updated in Phase 5 (extend, do not duplicate):
+      claudine/docs/topics/composition.md (closure Repair/Encode steps and the
+      guardrail plain-scalar rule), claudine/docs/topics/state-management/
+      side-effects.md (effect writes store data as tokens),
+      darkmatter/docs/inline/interpolation.md (holds_pending_syntax,
+      locate_frontmatter_leaves), darkmatter/docs/topics/schemas/definition.md
+      (data is never pending). The claudine SKILL.md has a new
+      "Inline persistence" row.
+    - Behavior to document that the plan's Phase 6 list does not name:
+      * Every value a lifecycle set_/merge_/append_/prepend_frontmatter
+        writes is data, so a string holding `{{`/`$(` is stored as a token.
+        An author can no longer write a template into a file with those
+        effects (an authored `{{{ x }}}` literal writes the text `{{ x }}` as
+        data). This was I2 B14 "author to confirm"; implemented as planned.
+      * Agent-written malformed YAML and duplicate keys now fail as
+        CompositionError::InlineAgentFrontmatterRejected (code
+        document.invalid_frontmatter, line + agent attribution), not
+        InlineArtifactEditFailed.
+      * A `sequence:` value that is a literal token is refused
+        (SequenceInvalid).
+      * Ownership compares list items by index: inserting at the front of an
+        authored list encodes shifted `{{ … }}` items.
+      * A clipped or kept block scalar that ends the frontmatter is stored as
+        compose reads it (no final newline); S2's "reject `|+` at the end" was
+        not needed.
+    - Known limits, recorded rather than fixed: the Darkmatter `expression`
+      format validator is string-only, so decoded data holding `{{` in an
+      expression-typed field is still accepted lexically; Claudine's public
+      pre_validate_schema[_for_mode] treats overrides as authored (only the
+      sequence JIT uses the origin-aware pre_validate_layered_for_mode).
+    - Pre-existing, unrelated, Windows only: claudine lib test
+      composition::schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message
+      fails on native Windows at the unmodified HEAD too (ctx.repo_root renders
+      `B:/…`, the test expects `Path::display()`'s `B:\…`). Do not attribute it
+      to this fix in the final validation.
 ---
 
 # Agent-Produced Text Is Data, Never Instructions
