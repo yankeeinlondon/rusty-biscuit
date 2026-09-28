@@ -228,7 +228,7 @@ success:
     {{ ctx.area ? "Review in " + ctx.area + " completed" : "Review completed" }}
 ```
 
-The document body and mixed frontmatter strings rescan their output, so the same construction resolves there. The rule applies only to the single-pass lifecycle surfaces. To emit literal braces, use `{{{ … }}}`.
+Darkmatter's document body and mixed frontmatter strings are single-pass too: the same construction there emits the braces as literal text. Preparation refuses it only on the lifecycle surfaces. To emit literal braces, use `{{{ … }}}`.
 
 #### Object-valued arguments
 
