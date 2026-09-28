@@ -385,7 +385,7 @@ fn fast_forward_moves_a_checked_out_default_branch_after_the_update() {
     assert_eq!(fixture.git(&fixture.main, &["rev-parse", "main"]), pushed);
     assert_eq!(fs::read_to_string(fixture.main.join("file.txt")).expect("file"), "second\n", "the tree moved too");
     assert!(caption.contains("main is in sync with origin/main (updated from origin just now)"), "{caption}");
-    assert!(!caption.contains("run wt --ff"), "{caption}");
+    assert!(!caption.contains("to fast-forward it"), "{caption}");
     assert!(!caption.contains("fast-forwarded"), "{caption}");
 }
 
@@ -438,7 +438,7 @@ fn fast_forward_refuses_a_diverged_branch_and_suggests_nothing() {
 
     let caption = run(&fixture, &["list"]);
     assert!(caption.contains("main has diverged from origin/main (1 commit ahead, 1 commit behind)"), "{caption}");
-    assert!(!caption.contains("run wt --ff"), "no suggestion when diverged: {caption}");
+    assert!(!caption.contains("to fast-forward it"), "no suggestion when diverged: {caption}");
 }
 
 #[test]

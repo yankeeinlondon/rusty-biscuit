@@ -255,13 +255,14 @@ fn caption_variants_read_as_ruled() {
         let rendered = list_table::render(&facts, &plain_terminal(), NOW);
         rendered.lines().nth(1).unwrap().trim().to_string()
     };
-    assert_eq!(caption(0, 7), "main  is 7 commits behind  origin/main  (checked just now)");
-    assert_eq!(caption(0, 1), "main  is 1 commit behind  origin/main  (checked just now)");
-    assert_eq!(caption(3, 0), "main  is 3 commits ahead of  origin/main  (checked just now)");
-    assert_eq!(caption(0, 0), "main  is in sync with  origin/main  (checked just now)");
+    // A check this run made that found the tracking ref current adds no suffix.
+    assert_eq!(caption(0, 7), "main  is 7 commits behind  origin/main");
+    assert_eq!(caption(0, 1), "main  is 1 commit behind  origin/main");
+    assert_eq!(caption(3, 0), "main  is 3 commits ahead of  origin/main");
+    assert_eq!(caption(0, 0), "main  is in sync with  origin/main");
     assert_eq!(
         caption(3, 7),
-        "main  has diverged from  origin/main  (3 commits ahead, 7 commits behind) (checked just now)"
+        "main  has diverged from  origin/main  (3 commits ahead, 7 commits behind)"
     );
 
     let example = Example::new();
@@ -661,9 +662,17 @@ fn every_row() -> Vec<(&'static str, RemoteStatus)> {
 #[test]
 fn the_caption_is_one_sentence_with_a_dim_italic_suffix() {
     let example = Example::new();
-    let colored = list_table::render(&example.facts(), &color_terminal(), NOW);
+    let facts = TableFacts {
+        remote: Some(RemoteFacts {
+            default_branch: "main",
+            tracking_tip: Some(TRACKING_TIP),
+            status: RemoteStatus::Fetched,
+        }),
+        ..example.facts()
+    };
+    let colored = list_table::render(&facts, &color_terminal(), NOW);
     let caption = colored.lines().nth(1).unwrap();
-    let suffix_at = caption.find("(checked just now)").expect("suffix");
+    let suffix_at = caption.find("(updated from origin just now)").expect("suffix");
     let before = &caption[..suffix_at];
     let styles = &before[before.rfind("origin/main").expect("badge")..];
     assert!(styles.contains("\u{1b}[2m") && styles.contains("\u{1b}[3m"), "dim italic suffix: {caption:?}");
@@ -900,7 +909,7 @@ fn the_credentials_line_is_dim_and_directly_follows_the_caption() {
     let facts = TableFacts { credential_line: Some(line), ..example.facts() };
     let colored = list_table::render(&facts, &color_terminal(), NOW);
     let lines: Vec<&str> = colored.lines().collect();
-    assert!(lines[1].contains("checked just now"), "{colored}");
+    assert!(lines[1].contains("origin/main"), "the caption: {colored}");
     assert!(lines[2].contains("\u{1b}[2m") && lines[2].contains("didn't accept GITHUB_TOKEN"), "{colored}");
     assert!(lines[3].trim().is_empty(), "then the blank line before the table: {colored}");
 
@@ -968,6 +977,20 @@ fn closing_notes_snapshot() {
         cases.push((format!("--ff refused: {label}"), notes(TableFacts { ff_notice: Some(notice), ..example.facts() })));
     }
     insta::assert_snapshot!("closing_notes", labeled(cases));
+}
+
+#[test]
+fn commands_in_the_closing_notes_are_in_reverse_video() {
+    let example = Example::new();
+    let facts = TableFacts {
+        ff_suggestion: Some(FfSuggestion { behind: 3 }),
+        fallback_notice: Some(vec!["GH_TOKEN".to_string()]),
+        ..example.facts()
+    };
+    let colored = list_table::render_notes(&facts, &terminal_at(400, true)).expect("notes");
+    for command in [" wt --ff ", " --ignore-api "] {
+        assert!(colored.contains(&format!("\u{1b}[7m{command}")), "{command:?} in reverse video: {colored:?}");
+    }
 }
 
 #[test]

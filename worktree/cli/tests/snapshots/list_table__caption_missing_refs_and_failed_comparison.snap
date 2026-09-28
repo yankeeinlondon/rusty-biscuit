@@ -3,10 +3,10 @@ source: worktree/cli/tests/list_table.rs
 expression: labeled(cases)
 ---
 ## no comparison, tracking ref present / checked this run, no variance
-origin/main  (checked just now)
+origin/main
 
 ## no tracking ref / checked this run, no variance
-No local tracking ref  origin/main  (checked just now)
+No local tracking ref  origin/main
 
 ## no comparison, tracking ref present / variance; the fetch succeeded
 origin/main  (updated from origin just now)

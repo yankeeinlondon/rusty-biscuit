@@ -6,22 +6,22 @@ expression: labeled(cases)
 (none)
 
 ## fast-forward suggestion
- - main is 3 commits behind origin/main; run wt --ff to fast-forward it.
+ - main is 3 commits behind origin/main; run  wt --ff  to fast-forward it.
 
 
 ## fast-forward suggestion, one commit
- - main is 1 commit behind origin/main; run wt --ff to fast-forward it.
+ - main is 1 commit behind origin/main; run  wt --ff  to fast-forward it.
 
 
 ## fallback notice
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
- - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
 ## suggestion before the notice
- - main is 3 commits behind origin/main; run wt --ff to fast-forward it.
+ - main is 3 commits behind origin/main; run  wt --ff  to fast-forward it.
  - Git checked origin using `ls-remote`; this can take longer than the provider API.
- - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use --ignore-api to use Git directly for this repository.
+ - Set GH_TOKEN or GITHUB_TOKEN to let wt try the provider API, or use  --ignore-api  to use Git directly for this repository.
 
 
 ## --ff refused: dirty checkout

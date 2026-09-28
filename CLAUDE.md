@@ -77,11 +77,35 @@
 - Before adding a CI run, matrix cell, fixture, or gate, ask what question it
   answers and whether something cheaper answers the same question.
 - Never trigger a full-scope run to learn UI behavior or ruleset semantics that
-  could be read or reasoned out. CI turnaround here runs to hours, so a
-  speculative cell is not a small cost.
+  could be read or reasoned out. A speculative cell costs wall-clock time
+  (see "Estimating CI duration" below) and runner minutes.
 - This is the upstream question — should the cell exist at all. "Evidence Reuse
   and Execution Constraints" below is the downstream one — must an existing
   cell re-run.
+
+### Estimating CI duration
+
+Estimate from the scope, never from a general impression. Count the cells
+`just ci-local --plan` marks `execute ci` for the environments the event runs
+(a pull request runs Linux, and macOS unless reused), then read the band.
+Measured on first-attempt, successful `ci.yml` pull-request runs,
+2026-09-18 → 2026-09-28 (n=24), start to finish:
+
+| Executing cells | Typical duration |
+| --------------- | ---------------- |
+| 0–5             | 5–25 min         |
+| 6–30            | 30–45 min        |
+| more than 30, or `ci:all-os` | 60–100 min |
+
+Two runs in the middle band took 66 and 83 min, so give the band as the
+estimate and allow up to about 1.5 h before treating a run as stuck.
+
+By event across all outcomes (same period): pull request median 34 min (p90
+83), push to `main` median 40 min (p90 78, adds Windows), nightly schedule
+about 2 h (114–140 min, adds WSL2). Pull requests before 2026-09-18, which ran
+every environment, had a median of 2.5 h (p90 4.6 h); those figures no longer
+apply. Refresh the figures with `gh run list --workflow ci.yml --status
+completed` when the schedule or runners change.
 
 ## Evidence Reuse and Execution Constraints
 

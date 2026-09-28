@@ -21,7 +21,7 @@ The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktre
 
 The second owned cost center is graph data collection in [`worktree/cli/src/commands/git_graph.rs`](../../worktree/cli/src/commands/git_graph.rs).
 
-- [`gather`](../../worktree/cli/src/commands/git_graph.rs) reads whether the repository is shallow once, then works in three stages, each stage's branches concurrently: it classifies every drawn branch (one `merge-base --is-ancestor` per candidate lane, plus `rev-list --first-parent --parents` and `rev-list --ancestry-path` for a merged branch) and finds its fork (`merge-base`); it builds every branch lane (`log --first-parent`); then it builds the default lane. Each fork, merge, or label commit outside a lane's window costs one `rev-list --first-parent --count`, and a lane's anchors are verified together in one `log --no-walk`. See [git-graph.md](./git-graph.md).
+- [`gather`](../../worktree/cli/src/commands/git_graph.rs) reads whether the repository is shallow once, then works in three stages, each stage's branches concurrently: it classifies every drawn branch (one `merge-base --is-ancestor` per candidate lane, plus `rev-list --first-parent --parents` and `rev-list --ancestry-path` for a merged branch) and finds its fork (`merge-base`); it builds every branch lane (`log --first-parent`), classifying the lane's boundary (the first commit below it) the same way, so a branch that kept going after its merge is extended through that merge; then it builds the default lane. Each fork, merge, or label commit outside a lane's window costs one `rev-list --first-parent --count`, and a lane's anchors are verified together in one `log --no-walk`. See [git-graph.md](./git-graph.md).
 - Graph data is only gathered when the terminal reports inline-image support. On non-image terminals the entire graph-data path is skipped.
 - `GitGraph` measures each trimming candidate with the renderer (`GitGraph::plan`). That cost is in the `graph image render` stage, never in `list gather` or the table.
 
@@ -121,11 +121,11 @@ For contention-free wall-clock measurement of the SLA, run perf tests serially v
 Asserts the subprocess-count bounds the optimization guarantees. Runs in the ambient `rusty-biscuit` checkout so the counts reflect real worktree scale:
 
 - `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
-- The base-view `gather` on that fixture, where every branch has only the default lane as a candidate, issues one `rev-parse` (the shallow check), one `merge-base --is-ancestor` and one fork `merge-base` per branch, and one `git log` per branch plus one for the default lane.
+- The base-view `gather` on that fixture, where every branch has only the default lane as a candidate, issues one `rev-parse` (the shallow check); per branch, two `merge-base --is-ancestor` (its tip and its lane's boundary), one fork `merge-base`, and one `rev-list` (the boundary's first-parent chain); and one `git log` per branch plus one for the default lane.
 
 ### `graph_and_verbose_share_one_merge_base` (unit test, `git_graph/tests.rs`)
 
-Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one merge base, shared by the graph's fork and the verbose details, one `merge-base --is-ancestor` (the branch's classification), and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
+Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one merge base, shared by the graph's fork and the verbose details, two `merge-base --is-ancestor` (the branch's tip and its lane's boundary), and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
 
 ### `perf_full_command_non_image_meets_sla` (integration test, `tests/perf_command_sla.rs`)
 
@@ -238,6 +238,22 @@ A later change (2026-09-28) made tag spacing collision-driven and let a later la
 
 - **Gather rises 14 ms on the observed shape**, and the ranges do not overlap. The branch its parent contains only indirectly is now also checked against `main`, which merged it directly, and that merge's anchors are then placed on the default lane. The other fixtures moved within noise.
 - **Render is unchanged.** None of these fixtures has colliding tags (the observed shape's `main` and `origin/main` share one commit), so each is laid out once.
+
+A later change (2026-09-28) draws a branch that kept going after its merge as one lane: each branch lane's boundary is classified, and while another lane merged it directly, the lane is extended through that merge and the next older boundary is classified. Same host, command, and profile, 10 samples, two runs each, median (min–max). *Before* is the envelope of two runs before the change:
+
+| Fixture | Size | `graph gather` before | after, run 1 | after, run 2 | `graph image render` after |
+|---|---|---:|---:|---:|---:|
+| floor | 120×40 | 9.8–14.1 ms | 10.6 ms (10.2–10.6) | 11.1 ms (10.2–12.9) | 346.0 / 349.3 ms |
+| ordinary | 120×40 | 38.7–54.9 ms | 54.2 ms (52.5–56.5) | 52.1 ms (48.8–54.6) | 354.1 / 350.1 ms |
+| older essential connections | 120×40 | 123.5–140.4 ms | 177.2 ms (174.6–179.3) | 175.3 ms (163.3–184.1) | 351.9 / 349.6 ms |
+| multiple selected branches | 120×40 | 59.6–72.6 ms | 74.0 ms (69.2–75.9) | 72.1 ms (68.6–81.0) | 352.5 / 351.4 ms |
+| observed sparse lanes | 200×60 | 74.9–88.8 ms (one run) | 112.2 ms (103.4–118.5) | 109.5 ms (102.5–181.1) | 357.0 / 356.6 ms |
+
+- **Call budget.** An ordinary unmerged lane whose boundary is an ordinary fork pays at most **2** extra Git calls when the lane is shorter than its 5-commit window (`merge-base --is-ancestor` and one `rev-list --first-parent --parents`), and at most **3** otherwise (plus `rev-list --ancestry-path`, skipped when the boundary is on the candidate's first-parent chain), plus one more `--is-ancestor` for each candidate lane tried before the one holding the boundary. Each merge the walk accepts adds a fixed number of calls; no call is made per historical commit, and each boundary is classified once per gathering. `perf_subprocess_counts_meet_sla` pins the exact counts.
+- **Floor and ordinary stay inside the earlier envelope**; ordinary sits near its top, which is the two added calls per lane.
+- **Older essential connections rises about 40 ms.** Its one lane is merged, so its boundary, 5,000 first-parent commits down `main`, is classified. That classification's `rev-list --first-parent --parents` walks those commits inside Git: one call, a long walk.
+- **Observed sparse lanes rises about 30 ms.** `fix/wt-ux` now accepts one merge, which re-reads its window and classifies the next boundary, and every lane classifies its boundary. Git calls in the base view go from 24 to 40 (`log` 5 → 11, `rev-list` 10 → 16, `merge-base --is-ancestor` 4 → 8; `merge-base`, `for-each-ref`, and `rev-parse` unchanged), and the incomplete-history notice this shape used to show is gone.
+- **Render is unchanged**, and every full-command SLA test still passes (`just -d worktree test-perf`, 30 passed).
 
 ## `git status` Cost (Investigated, Not Changed)
 

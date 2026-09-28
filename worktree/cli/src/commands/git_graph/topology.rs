@@ -43,13 +43,44 @@ pub(super) enum Integration {
 /// Where a lane's history ends.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum Extent<'a> {
-    /// A branch lane: its tip's first-parent chain until history reachable
-    /// from these commits. Older commits fold into a leading `+N`.
-    Until(&'a [&'a str]),
-    /// The default lane, which runs to the root. It is drawn down to its
-    /// oldest anchor plus that anchor's first parent (so a merge is never the
-    /// lane's first commit). `cap_window`: the window, too, stops there.
-    Open { cap_window: bool },
+    /// A branch lane: the window [`History::lane_window`] read. Older commits
+    /// fold into a leading `+N`.
+    Until(&'a LaneWindow),
+    /// The default lane, which runs to the root, showing its newest `window`
+    /// commits. It is drawn down to its oldest anchor plus that anchor's
+    /// first parent (so a merge is never the lane's first commit).
+    /// `cap_window`: the window, too, stops there.
+    Open { window: usize, cap_window: bool },
+}
+
+/// A branch lane's newest commits before its stop history, read once so the
+/// boundary lookup and the lane's entries share it.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct LaneWindow {
+    /// Newest first.
+    shown: Vec<Commit>,
+    /// Commits on the lane; `shown.len()` when they could not be counted.
+    length: usize,
+    /// Whether `length` was read or is a lower bound (a gap).
+    counted: bool,
+    /// Lane commits past `shown` whose positions are already verified.
+    known: Vec<Boundary>,
+}
+
+impl LaneWindow {
+    /// Commits at verified positions the lane places without asking Git.
+    pub fn with_known(mut self, known: Vec<Boundary>) -> Self {
+        self.known = known;
+        self
+    }
+}
+
+/// The first commit on a lane tip's first-parent chain inside its stop
+/// history, `distance` first parents below the tip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Boundary {
+    pub sha: String,
+    pub distance: usize,
 }
 
 /// A lane's entries, oldest first.
@@ -158,6 +189,12 @@ impl History {
             }
             return Ok(Some(Integration::NoSeparateHistory { candidate }));
         }
+        // Every commit on the chain descends from `tip`, so when its oldest
+        // commit's first parent is `tip`, the leading run is the whole chain
+        // and `--ancestry-path` would only confirm it.
+        if chain.last().and_then(|(_, parents)| parents.first()).is_some_and(|parent| parent == tip) {
+            return Ok(Some(Integration::NoSeparateHistory { candidate }));
+        }
         let descendants: HashSet<String> = parse_object_ids(
             &git_command(&["rev-list", "--ancestry-path", &range, "--"]).map_err(|_| GatherGap)?,
         )?
@@ -186,31 +223,24 @@ impl History {
         }))
     }
 
-    /// The first-parent chain of `tip` within `extent`: the newest `window`
-    /// commits, every anchor on the chain at its real position, and `+N`
-    /// squares for the runs between them.
+    /// The first-parent chain of `tip` within `extent`: its newest commits,
+    /// every anchor on the chain at its real position, and `+N` squares for
+    /// the runs between them.
     ///
-    /// An anchor's position is `rev-list --first-parent --count A..tip`,
-    /// verified by one batched lookup of `tip~<position>`; an anchor that fails
-    /// is not on this lane and is left out of [`LaneHistory::placed`]. `Err` is
-    /// only for a lane whose newest commits cannot be read.
-    pub fn first_parent_entries(&self, tip: &str, extent: Extent, window: usize, anchors: &[&str]) -> Result<LaneHistory, GatherGap> {
-        let stop = match extent {
-            Extent::Until(stop) => stop,
-            Extent::Open { .. } => &[][..],
-        };
-        let mut shown = self.newest(tip, stop, window)?;
-        let mut gap = false;
-        let length = match extent {
-            Extent::Until(_) if shown.len() < window => Some(shown.len()),
-            Extent::Until(_) => match count_first_parent(tip, stop) {
-                Some(count) => Some(count.max(shown.len())),
-                None => {
-                    gap = true;
-                    Some(shown.len())
-                }
+    /// An anchor the window already verified ([`LaneWindow::with_known`]) is
+    /// placed as is. Any other anchor's position is `rev-list --first-parent
+    /// --count A..tip`, verified by one batched lookup of `tip~<position>`; an
+    /// anchor that fails
+    /// is not on this lane and is left out of [`LaneHistory::placed`]. A default
+    /// lane whose newest commits cannot be read is a gap that still places its
+    /// anchors, so the lane keeps every verified fork, merge, and label.
+    pub fn first_parent_entries(&self, tip: &str, extent: Extent, anchors: &[&str]) -> LaneHistory {
+        let (mut shown, length, mut gap, known) = match extent {
+            Extent::Until(lane) => (lane.shown.clone(), Some(lane.length), !lane.counted, lane.known.as_slice()),
+            Extent::Open { window, .. } => match self.newest(tip, &[], window) {
+                Ok(shown) => (shown, None, false, &[][..]),
+                Err(GatherGap) => (Vec::new(), None, true, &[][..]),
             },
-            Extent::Open { .. } => None,
         };
 
         let mut anchors: Vec<&str> = anchors.iter().copied().collect::<HashSet<_>>().into_iter().collect();
@@ -222,10 +252,23 @@ impl History {
                 Some((anchor.to_string(), position))
             })
             .collect();
+        let mut beyond: BTreeMap<usize, Commit> = BTreeMap::new();
+        for boundary in known {
+            if anchors.contains(&boundary.sha.as_str()) && !placed.contains_key(&boundary.sha) {
+                placed.insert(boundary.sha.clone(), boundary.distance);
+                beyond.insert(
+                    boundary.distance,
+                    Commit {
+                        sha: boundary.sha.clone(),
+                        time: None,
+                        first_parent: None,
+                    },
+                );
+            }
+        }
         // A branch lane shorter than its window is fully shown, so no other
         // anchor can be on it.
         let may_be_beyond = !matches!(length, Some(length) if length <= shown.len());
-        let mut beyond: BTreeMap<usize, Commit> = BTreeMap::new();
         let unplaced: Vec<&str> = anchors.iter().copied().filter(|anchor| !placed.contains_key(*anchor)).collect();
         if may_be_beyond && !unplaced.is_empty() {
             let (verified, failed) = Self::locate(tip, &unplaced, shown.len(), length);
@@ -236,7 +279,7 @@ impl History {
             }
         }
 
-        if let Extent::Open { cap_window } = extent
+        if let Extent::Open { cap_window, .. } = extent
             && let Some(&oldest) = placed.values().max()
         {
             if cap_window {
@@ -269,12 +312,97 @@ impl History {
             // A shallow count stops at the boundary, so `+N` is a lower bound.
             gap = true;
         }
-        Ok(LaneHistory {
+        LaneHistory {
             entries,
             last_active,
             placed: placed.into_keys().collect(),
             gap,
+        }
+    }
+
+    /// A branch lane's newest `window` commits before `stop`'s history, and
+    /// its length: counted only when the window is full, since a shorter
+    /// window is the whole lane. A failed count is a gap in the window, not
+    /// an `Err`, which is only for a window that cannot be read.
+    pub fn lane_window(&self, tip: &str, stop: &[&str], window: usize) -> Result<LaneWindow, GatherGap> {
+        let shown = self.newest(tip, stop, window)?;
+        let (length, counted) = if shown.len() < window {
+            (shown.len(), true)
+        } else {
+            match count_first_parent(tip, stop) {
+                Some(count) => (count.max(shown.len()), true),
+                None => (shown.len(), false),
+            }
+        };
+        Ok(LaneWindow {
+            shown,
+            length,
+            counted,
+            known: Vec::new(),
         })
+    }
+
+    /// The lane's boundary: the first parent of its oldest commit. `None`
+    /// when the lane is empty or ends at a root commit.
+    ///
+    /// A fully shown lane already has that parent; otherwise one `log` reads
+    /// the parents of the lane's oldest commit, `tip~(length - 1)`. A missing
+    /// parent in a shallow clone is the shallow cut, not a root, so it is a
+    /// gap.
+    pub fn boundary(&self, tip: &str, lane: &LaneWindow) -> Result<Option<Boundary>, GatherGap> {
+        if !lane.counted {
+            return Err(GatherGap);
+        }
+        if lane.length == 0 {
+            return Ok(None);
+        }
+        let first_parent = if lane.shown.len() == lane.length {
+            lane.shown.last().and_then(|oldest| oldest.first_parent.clone())
+        } else {
+            let oldest = format!("{tip}~{}", lane.length - 1);
+            let output = git_command(&["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H %P", &oldest, "--"]).map_err(|_| GatherGap)?;
+            let mut lines = parse_parent_lines(&output)?.into_iter();
+            let (_, parents) = lines.next().ok_or(GatherGap)?;
+            parents.into_iter().next()
+        };
+        match first_parent {
+            Some(sha) => Ok(Some(Boundary {
+                sha,
+                distance: lane.length,
+            })),
+            None if self.shallow => Err(GatherGap),
+            None => Ok(None),
+        }
+    }
+
+    /// How many first parents below `tip` the commit `recorded` is, when it
+    /// is on `tip`'s first-parent chain. `None` for a value that is not a full
+    /// object ID (checked before any Git call), an object that is missing in
+    /// a complete clone, a non-commit, or a commit off the chain. A missing
+    /// object in a shallow clone may be beyond the cut, so it is a gap.
+    pub fn chain_distance(&self, tip: &str, recorded: &str) -> Result<Option<usize>, GatherGap> {
+        if !is_object_id(recorded) {
+            return Ok(None);
+        }
+        // `--ignore-missing` makes an unknown `recorded` count the whole
+        // chain instead of failing, so a failure here is a real one.
+        let distance: usize = git_command(&["rev-list", "--first-parent", "--count", "--ignore-missing", tip, "--not", recorded, "--"])
+            .map_err(|_| GatherGap)?
+            .trim()
+            .parse()
+            .map_err(|_| GatherGap)?;
+        let at = format!("{tip}~{distance}");
+        let found = git_command(&["log", "--no-walk=unsorted", "--ignore-missing", "--format=%H", &at, "--"]).map_err(|_| GatherGap)?;
+        if found.trim() == recorded {
+            return Ok(Some(distance));
+        }
+        if !self.shallow {
+            return Ok(None);
+        }
+        match git_command_allow_no_match(&["cat-file", "-e", recorded]) {
+            Ok(Some(_)) => Ok(None),
+            _ => Err(GatherGap),
+        }
     }
 
     /// The newest `window` commits of `tip`'s first-parent chain before

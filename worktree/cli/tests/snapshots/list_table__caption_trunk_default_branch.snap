@@ -3,7 +3,7 @@ source: worktree/cli/tests/list_table.rs
 expression: labeled(cases)
 ---
 ## checked this run, no variance
-trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (checked just now)
+trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind)
 
 ## variance; the fetch succeeded
 trunk  has diverged from  origin/trunk  (2 commits ahead, 5 commits behind) (updated from origin just now)

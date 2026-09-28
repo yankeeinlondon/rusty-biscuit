@@ -482,7 +482,9 @@ fn perf_subprocess_counts_meet_sla() {
     // Base view from the main checkout: one shallow check; per unmerged
     // branch, one `merge-base --is-ancestor` (its only candidate lane is the
     // default one) and one merge base; one log for the default lane plus one
-    // per branch.
+    // per branch. Each branch lane's boundary is classified too, which costs
+    // one more `--is-ancestor` and one first-parent chain (`rev-list`) when
+    // the boundary is an ordinary fork.
     let input = git_graph::GatherInput::from_list(&parse_worktree_state().expect("parse"));
     recorder::start_recording();
     let t0 = Instant::now();
@@ -494,8 +496,9 @@ fn perf_subprocess_counts_meet_sla() {
     assert!(verbose.is_none());
     let is_ancestor = recorder::count_matching(&base_calls, |args| args.get(1).map(String::as_str) == Some("--is-ancestor"));
     assert_eq!(count(&base_calls, "rev-parse"), 1, "got {base_calls:?}");
-    assert_eq!(is_ancestor, graph.lines.len(), "got {base_calls:?}");
+    assert_eq!(is_ancestor, 2 * graph.lines.len(), "got {base_calls:?}");
     assert_eq!(count(&base_calls, "merge-base") - is_ancestor, graph.lines.len(), "got {base_calls:?}");
+    assert_eq!(count(&base_calls, "rev-list"), graph.lines.len(), "got {base_calls:?}");
     assert_eq!(count(&base_calls, "log"), 1 + graph.lines.len(), "got {base_calls:?}");
     eprintln!("base view gather: {base_elapsed:.2?}, {} git calls", base_calls.len());
 }

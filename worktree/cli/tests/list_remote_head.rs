@@ -16,7 +16,7 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use perf_support::{refresh_workers, wait_for_refresh_workers};
-use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT};
+use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT, assert_checked_now};
 use serial_test::serial;
 use worktree::remote_head::{refresh_receipt_path, remote_head_lock_path};
 
@@ -39,7 +39,7 @@ fn a_push_elsewhere_is_fetched_by_the_worker_and_then_reads_as_behind_and_checke
 
     // The listing checks again and finds no variance.
     let caption = fixture.list();
-    assert!(caption.contains("main is 1 commit behind origin/main (checked just now)"), "{caption}");
+    assert_checked_now(&caption, "main is 1 commit behind origin/main");
     assert!(!caption.contains("tracking ref"), "{caption}");
     assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "in-sync");
     assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "its worker finished");
@@ -67,7 +67,7 @@ fn a_listing_fetches_a_variance_and_counts_from_the_fetched_tip() {
     // No variance now: checked, and nothing is fetched.
     let refs = fixture.git(&fixture.main, &["for-each-ref"]);
     let caption = fixture.list();
-    assert!(caption.contains("main is 1 commit behind origin/main (checked just now)"), "{caption}");
+    assert_checked_now(&caption, "main is 1 commit behind origin/main");
     assert_eq!(fixture.git(&fixture.main, &["for-each-ref"]), refs, "no fetch without a variance");
 }
 
@@ -122,7 +122,7 @@ fn a_manual_fetch_before_the_listing_is_checked_and_never_reported_as_a_move() {
     let pushed = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
     let caption = fixture.list();
 
-    assert!(caption.contains("main is 1 commit behind origin/main (checked just now)"), "{caption}");
+    assert_checked_now(&caption, "main is 1 commit behind origin/main");
     for claim in ["moved", "advanced", "differs"] {
         assert!(!caption.contains(claim), "nothing {claim}: {caption}");
     }
@@ -168,13 +168,13 @@ fn the_main_checkout_and_a_linked_worktree_share_one_live_head_store() {
     // From the linked worktree, `wt list` launches the worker for the main
     // checkout, which records into the main checkout's store.
     let caption = fixture.list_from(&fixture.linked);
-    assert!(caption.contains("main is in sync with origin/main (checked just now)"), "{caption}");
+    assert_checked_now(&caption, "main is in sync with origin/main");
     let tip = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
     assert_eq!(fixture.stored_head()["sha"], tip.as_str(), "stored at the main checkout's path");
 
     for dir in [&fixture.main, &fixture.linked] {
         let caption = fixture.list_from(dir);
-        assert!(caption.contains("(checked just now)"), "{dir:?}: {caption}");
+        assert_checked_now(&caption, "main is in sync with origin/main");
     }
     assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "every worker finished");
 }
@@ -205,7 +205,7 @@ fn a_check_still_running_at_the_deadline_is_still_checking_and_the_next_run_show
     assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "the worker finished");
     assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "in-sync", "and published");
     let caption = fixture.list();
-    assert!(caption.contains("main is in sync with origin/main (checked just now)"), "{caption}");
+    assert_checked_now(&caption, "main is in sync with origin/main");
     assert!(!caption.contains("running this command again"), "{caption}");
 }
 
@@ -228,7 +228,7 @@ fn a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_th
         "{caption}"
     );
     assert!(caption.contains("running this command again"), "{caption}");
-    assert!(!caption.contains("run wt --ff"), "no suggestion before the fetch finished: {caption}");
+    assert!(!caption.contains("to fast-forward it"), "no suggestion before the fetch finished: {caption}");
     assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), before);
     assert_eq!(fixture.stored_head()["sha"], pushed.as_str(), "the check was published before the fetch");
 

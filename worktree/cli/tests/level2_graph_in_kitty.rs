@@ -87,6 +87,7 @@ const SPARSE_SNIFF_COMMITS: usize = 94;
 /// The observed-shape history's named commits, by full SHA.
 struct SparseLanes {
     d2: String,
+    d5: String,
     w1: String,
     m103: String,
     m104: String,
@@ -192,24 +193,60 @@ impl Fixture {
         run_git(&repo, &["update-ref", "refs/heads/main", &m104]);
         run_git(&repo, &["update-ref", "refs/remotes/origin/main", &m104]);
         run_git(&repo, &["reset", "-q", "--hard", "main"]);
-        for (directory, branch, tip, parent) in [
-            ("wt-schema", "feat/schema-enhancement", schema.last().unwrap(), "main"),
-            ("wt-ux", "fix/wt-ux", synced.last().unwrap(), "main"),
-            ("wt-sniff", "fix/sniff", sniff.last().unwrap(), "fix/wt-ux"),
+        // Each record holds the commit its branch was created at, as `wt
+        // create` writes it.
+        for (directory, branch, tip, parent, base) in [
+            ("wt-schema", "feat/schema-enhancement", schema.last().unwrap(), "main", &d[2]),
+            ("wt-ux", "fix/wt-ux", synced.last().unwrap(), "main", &d[5]),
+            ("wt-sniff", "fix/sniff", sniff.last().unwrap(), "fix/wt-ux", &w1),
         ] {
-            run_git(&repo, &["branch", branch, tip]);
-            let worktree = fixture.path(directory);
-            run_git(&repo, &["worktree", "add", "-q", worktree.to_str().unwrap(), branch]);
-            fixture.worktrees.push(directory.to_string());
-            fixture.record_parent(branch, parent);
+            fixture.add_branch_worktree(directory, branch, tip);
+            fixture.record_parent(branch, parent, base);
         }
         fixture.sparse = Some(SparseLanes {
             d2: d[2].clone(),
+            d5: d[5].clone(),
             w1,
             m103,
             m104,
             b1,
         });
+        fixture
+    }
+
+    /// PR #105's shape (the L1 `continued_after_merge` history), with a
+    /// worktree per branch:
+    ///
+    /// ```text
+    /// main 1 - main 2 - d2 - d3 - d4 - P ---------------- C   (main, origin/main)
+    ///              \                    \                /
+    ///               w1 - w2 - w3 ------- S - x1 - … - x7 (B)  (fix/sniff-pr)
+    ///                                                    \
+    ///                                                     N   (fix/wt-ux)
+    /// ```
+    ///
+    /// `fix/sniff-pr` is recorded as created from `fix/wt-ux` at `B`;
+    /// `fix/wt-ux` has no record, as observed.
+    fn continued_after_merge() -> Self {
+        let mut fixture = Self::init();
+        let repo = fixture.main.clone();
+        let tree = git_output(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let d1 = git_output(&repo, &["rev-parse", "HEAD"]);
+        let d = chain_on(&repo, &tree, &d1, "d", 3);
+        let w = chain_on(&repo, &tree, &d1, "w", 3);
+        let p = commit_on(&repo, &tree, &[d.last().unwrap()], "P");
+        let sync = commit_on(&repo, &tree, &[w.last().unwrap(), &p], "Merge branch 'main' into fix/wt-ux");
+        let x = chain_on(&repo, &tree, &sync, "x", 7);
+        let b = x.last().unwrap().clone();
+        let c = commit_on(&repo, &tree, &[&p, &b], "Merge pull request #105 from fix/wt-ux");
+        let n = commit_on(&repo, &tree, &[&b], "N");
+
+        run_git(&repo, &["update-ref", "refs/heads/main", &c]);
+        run_git(&repo, &["update-ref", "refs/remotes/origin/main", &c]);
+        run_git(&repo, &["reset", "-q", "--hard", "main"]);
+        fixture.add_branch_worktree("wt-ux", "fix/wt-ux", &n);
+        fixture.add_branch_worktree("wt-sniff-pr", "fix/sniff-pr", &b);
+        fixture.record_parent("fix/sniff-pr", "fix/wt-ux", &b);
         fixture
     }
 
@@ -226,13 +263,22 @@ impl Fixture {
         root.join("worktree").join(real.file_name().expect("store file name"))
     }
 
-    fn record_parent(&self, branch: &str, parent: &str) {
+    /// Records `branch` as created from `parent` at `base_sha`.
+    fn record_parent(&self, branch: &str, parent: &str, base_sha: &str) {
         let origin = worktree::fork_origin::ForkOrigin {
             base_branch: parent.to_string(),
-            base_sha: git_output(&self.main, &["rev-parse", parent]),
+            base_sha: base_sha.to_string(),
             created_at: 1,
         };
         worktree::fork_origin::record(&self.fork_store(), branch, origin).expect("record the fork origin");
+    }
+
+    /// Creates `branch` at `tip` and checks it out in a new worktree.
+    fn add_branch_worktree(&mut self, directory: &str, branch: &str, tip: &str) {
+        run_git(&self.main, &["branch", branch, tip]);
+        let worktree = self.path(directory);
+        run_git(&self.main, &["worktree", "add", "-q", worktree.to_str().unwrap(), branch]);
+        self.worktrees.push(directory.to_string());
     }
 
     fn add_worktree(&mut self, directory: &str, branch: &str) -> PathBuf {
@@ -314,12 +360,52 @@ fn drawn_box(image: &RgbaImage, region: BoundingBox, color: impl Fn(&image::Rgba
     found
 }
 
-/// Kitty is never scheduled in CI, so this warning is the only trace of a
-/// pixel check that did not run; `.config/nextest.toml` shows this binary's
-/// output on success so it is seen.
-fn warn_pixels_unproven(reason: &str) {
-    let test = std::thread::current().name().unwrap_or("level2_graph_in_kitty").to_string();
-    eprintln!("WARNING: {test}: pixel check skipped: {reason}");
+/// The gate for every test that claims what Kitty drew: a private Kitty can
+/// be launched **and** its window can be read back. Without Screen Recording
+/// permission `screencapture` still succeeds with an empty window, which
+/// proves nothing, so such a host skips the whole test (a failure under
+/// `BISCUIT_TEST_REQUIRED_BACKENDS=kitty`) instead of passing on text alone.
+/// Kitty is never scheduled in CI; `.config/nextest.toml` shows this binary's
+/// output on success so the skip reason is seen.
+fn kitty_pixels_available() -> bool {
+    if !KittyInstance::can_launch() {
+        return false;
+    }
+    if !biscuit_test_harness::screen_capture_permitted() {
+        eprintln!(
+            "Kitty pixel check unavailable: this process lacks macOS Screen Recording permission \
+             (grant it to the terminal running the tests)"
+        );
+        return false;
+    }
+    true
+}
+
+/// A screenshot that holds no window contents at all, not even the table
+/// Kitty reports holding: macOS reports the window covered by another one,
+/// and Kitty does not render an occluded window. The graph was never observed,
+/// so the test must not pass on it.
+struct Unobserved(String);
+
+/// The graph checks of [`GraphRun::assert_graph_drawn`], or a visible skip of
+/// the calling test when Kitty's pixels could not be observed: a failure when
+/// `BISCUIT_TEST_REQUIRED_BACKENDS` names `kitty` (or
+/// `BISCUIT_TEST_LEVEL_REQUIRED=2`), exactly like an unavailable backend.
+macro_rules! graph_drawn_or_skip {
+    ($run:expr) => {
+        match $run.assert_graph_drawn() {
+            Ok(notice) => notice,
+            Err(Unobserved(reason)) => {
+                eprintln!("Kitty pixel check unavailable: {reason}");
+                match test_toolkit::evaluate_harness(Level::L2, false, Backend::Kitty) {
+                    test_toolkit::LevelDecision::Panic(message) => panic!("{reason}\n{message}"),
+                    test_toolkit::LevelDecision::Skip(message) => eprintln!("{message}"),
+                    test_toolkit::LevelDecision::Run => unreachable!("an unavailable harness never runs"),
+                }
+                return;
+            }
+        }
+    };
 }
 
 fn over_black(pixel: &image::Rgba<u8>) -> [u8; 3] {
@@ -460,8 +546,9 @@ impl GraphRun {
 
     /// The image `wt` asked for and the rows it left for it, measured on the
     /// screen text and on the pixels Kitty drew. Returns the hidden-lane count
-    /// from the elision notice, if there is one.
-    fn assert_graph_drawn(&self) -> Option<usize> {
+    /// from the elision notice, if there is one; call it through
+    /// [`graph_drawn_or_skip!`].
+    fn assert_graph_drawn(&self) -> Result<Option<usize>, Unobserved> {
         let (cell_w, cell_h) = self.cell;
         let image = &self.transmitted;
         assert!(
@@ -493,38 +580,28 @@ impl GraphRun {
             self.screen.join("\n")
         );
 
-        self.assert_pixels_match(legend, next);
+        self.assert_pixels_match(legend, next)?;
 
         // "Some history is not shown" may follow the image instead.
-        self.screen[next]
+        Ok(self.screen[next]
             .trim()
             .strip_suffix(" not shown")
             .and_then(|notice| notice.strip_suffix(" more worktrees").or_else(|| notice.strip_suffix(" more worktree")))
-            .map(|count| count.parse().expect("numeric hidden-lane count"))
+            .map(|count| count.parse().expect("numeric hidden-lane count")))
     }
 
     /// The drawn part of the transmitted PNG must appear exactly where the
     /// band below `legend` starts, and nothing may be drawn elsewhere in it.
-    /// Skipped with a warning when the screenshot cannot show what Kitty drew;
-    /// the text and APC checks above still hold.
-    fn assert_pixels_match(&self, legend: usize, next: usize) {
+    /// Mandatory: the test's gate ([`kitty_pixels_available`]) already skipped
+    /// a host without the capture permission, so the only way out without a
+    /// match is [`Unobserved`].
+    fn assert_pixels_match(&self, legend: usize, next: usize) -> Result<(), Unobserved> {
         let (cell_w, cell_h) = self.cell;
         let image = &self.transmitted;
-        if !biscuit_test_harness::screen_capture_permitted() {
-            warn_pixels_unproven("this process lacks macOS Screen Recording permission (grant it to the terminal running the tests)");
-            return;
-        }
         let png_box = drawn_box(&image.png, (0, 0, i64::from(image.png.width()), i64::from(image.png.height())), over_black)
             .expect("the transmitted graph is not blank");
         let shot_path = self.instance_screenshot_path();
-        let Some((screen_box, shot)) = self.wait_for_drawn_band(legend, next, &shot_path) else {
-            warn_pixels_unproven(&format!(
-                "the screenshot holds no window contents, not even the table Kitty reports on screen, so Kitty had not \
-                 drawn its window. Screenshot: {}",
-                shot_path.display()
-            ));
-            return;
-        };
+        let (screen_box, shot) = self.wait_for_drawn_band(legend, next, &shot_path)?;
         let (x0, y0) = self.grid_origin(&shot);
         let top = y0 + (legend as i64 + 1) * i64::from(cell_h);
         let expected = (png_box.0 + x0, png_box.1 + top, png_box.2 + x0, png_box.3 + top);
@@ -545,6 +622,7 @@ impl GraphRun {
         if self.evidence.is_none() {
             let _ = fs::remove_file(&shot_path);
         }
+        Ok(())
     }
 
     fn instance_screenshot_path(&self) -> PathBuf {
@@ -584,9 +662,9 @@ impl GraphRun {
 
     /// Screenshots the window until the band between `legend` and `next`
     /// holds drawn pixels (Kitty draws on its next frame), and returns their
-    /// bounding box and the screenshot. `None` when the last screenshot shows
-    /// nothing even where the table is, which proves nothing about the graph.
-    fn wait_for_drawn_band(&self, legend: usize, next: usize, path: &Path) -> Option<(BoundingBox, RgbaImage)> {
+    /// bounding box and the screenshot. Past the deadline, a table drawn
+    /// without a graph fails and an empty window is [`Unobserved`].
+    fn wait_for_drawn_band(&self, legend: usize, next: usize, path: &Path) -> Result<(BoundingBox, RgbaImage), Unobserved> {
         let cell_h = i64::from(self.cell.1);
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -600,7 +678,7 @@ impl GraphRun {
                 y0 + next as i64 * cell_h,
             );
             if let Some(found) = drawn_box(&shot, band, opaque) {
-                return Some((found, shot));
+                return Ok((found, shot));
             }
             if Instant::now() >= deadline {
                 let table = (band.0, y0, band.2, band.1);
@@ -609,7 +687,11 @@ impl GraphRun {
                     "Kitty drew the table but nothing where the graph belongs. Screenshot: {}",
                     path.display()
                 );
-                return None;
+                return Err(Unobserved(format!(
+                    "the screenshot holds no window contents, not even the table Kitty reports on screen; Kitty does \
+                     not render a window another window covers, so uncover it and rerun. Screenshot: {}",
+                    path.display()
+                )));
             }
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -622,14 +704,14 @@ impl GraphRun {
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
-    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+    require_level!(Level::L2, kitty_pixels_available(), Backend::Kitty);
 
     let fixture = Fixture::new();
     let run = GraphRun::new(&fixture, 100, 32);
 
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     run.assert_table_intact();
-    let hidden = run.assert_graph_drawn().unwrap_or_else(|| {
+    let hidden = graph_drawn_or_skip!(run).unwrap_or_else(|| {
         panic!("the capped graph should end with an elision notice:\n{}", run.screen.join("\n"))
     });
     assert!((1..BRANCHES.len()).contains(&hidden), "{hidden} hidden lanes of {}", BRANCHES.len());
@@ -640,14 +722,14 @@ fn level2_graph_height_cap_elides_lanes_in_a_short_kitty_window() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_fits_a_narrow_kitty_window() {
-    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+    require_level!(Level::L2, kitty_pixels_available(), Backend::Kitty);
 
     let fixture = Fixture::new();
     let run = GraphRun::new(&fixture, 56, 60);
 
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     run.assert_table_intact();
-    run.assert_graph_drawn();
+    graph_drawn_or_skip!(run);
 }
 
 /// A merged branch's lane, at both window sizes: the table stays intact, the
@@ -659,49 +741,65 @@ fn level2_graph_fits_a_narrow_kitty_window() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_draws_a_merged_branch_in_kitty() {
-    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+    require_level!(Level::L2, kitty_pixels_available(), Backend::Kitty);
 
     let fixture = Fixture::merged();
-    // Both windows' text and transmitted images are checked (and kept) before
-    // either screenshot, so a capture failure still leaves both PNGs.
-    let runs: Vec<GraphRun> = [(100, 32), (56, 60)]
-        .into_iter()
-        .map(|(columns, lines)| {
-            let mut run = GraphRun::new(&fixture, columns, lines);
-            run.keep_evidence("merged");
-            assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
-            let all = run.all.join("\n");
-            assert!(!all.contains("Some history is not shown"), "a merged branch is complete history:\n{all}");
-            run.assert_table_intact();
-            run
-        })
-        .collect();
-    for run in &runs {
-        assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
+    // One window at a time: macOS stops Kitty drawing a window the next one
+    // covers, and its later screenshot is empty.
+    for (columns, lines) in [(100, 32), (56, 60)] {
+        let mut run = GraphRun::new(&fixture, columns, lines);
+        run.keep_evidence("merged");
+        assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+        let all = run.all.join("\n");
+        assert!(!all.contains("Some history is not shown"), "a merged branch is complete history:\n{all}");
+        run.assert_table_intact();
+        assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
     }
 }
 
 /// The observed sparse-lanes history in a 200×60 window: the table stays
 /// intact, the image fits the window and the rows `wt` reserved, no lane is
-/// left out, and the only notice is "Some history is not shown" (for
-/// `fix/sniff`'s undrawn fork). The screenshot and the transmitted PNG are
-/// kept in the temp directory for inspection of the lane density and the
-/// merge edge; the plan itself is proven at L1 by
+/// left out, and there is no notice (`fix/wt-ux` draws `W1` merged into
+/// `M103`, and `fix/sniff` forks there). The screenshot and the transmitted
+/// PNG are kept in the temp directory for inspection of the lane density and
+/// the merge edges; the plan itself is proven at L1 by
 /// `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60`.
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_restores_lane_density_in_kitty() {
-    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+    require_level!(Level::L2, kitty_pixels_available(), Backend::Kitty);
 
     let fixture = Fixture::sparse_lanes();
     let mut run = GraphRun::new(&fixture, 200, 60);
     run.keep_evidence("sparse");
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     let all = run.all.join("\n");
-    assert!(all.contains("Some history is not shown"), "fix/sniff's fork is not drawn:\n{all}");
+    assert!(!all.contains("Some history is not shown"), "every fork and merge is drawn:\n{all}");
     assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
     run.assert_table_intact();
-    assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
+    assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
+}
+
+/// PR #105's shape in a 200×60 window: `fix/wt-ux` draws its earlier merge
+/// into `main` and continues, `fix/sniff-pr` is a label on that lane, and
+/// nothing is reported as not shown. The screenshot and the transmitted PNG
+/// are kept in the temp directory; the layout (merge parents, the commit after
+/// the merge source, labels) is proven at L1 by
+/// `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_graph_draws_a_branch_continued_after_its_merge_in_kitty() {
+    require_level!(Level::L2, kitty_pixels_available(), Backend::Kitty);
+
+    let fixture = Fixture::continued_after_merge();
+    let mut run = GraphRun::new(&fixture, 200, 60);
+    run.keep_evidence("continued");
+    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    let all = run.all.join("\n");
+    assert!(!all.contains("Some history is not shown"), "the continued branch is connected:\n{all}");
+    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    run.assert_table_intact();
+    assert_eq!(graph_drawn_or_skip!(run), None, "no lane is left out:\n{}", run.screen.join("\n"));
 }
 
 /// The observed-shape fixture is the history the plan describes (E1): merge
@@ -732,7 +830,8 @@ fn level2_sparse_lanes_fixture_has_the_observed_topology() {
     assert_eq!(git_output(repo, &["worktree", "list", "--porcelain"]).matches("worktree ").count(), 4);
 
     let store = worktree::fork_origin::ForkOriginStore::load_from(&fixture.fork_store());
-    assert_eq!(store.get("fix/sniff").map(|fork| fork.base_branch.as_str()), Some("fix/wt-ux"));
-    assert_eq!(store.get("fix/wt-ux").map(|fork| fork.base_branch.as_str()), Some("main"));
-    assert_eq!(store.get("feat/schema-enhancement").map(|fork| fork.base_branch.as_str()), Some("main"));
+    let record = |branch: &str| store.get(branch).map(|fork| (fork.base_branch.as_str(), fork.base_sha.as_str()));
+    assert_eq!(record("fix/sniff"), Some(("fix/wt-ux", sparse.w1.as_str())), "created at W1");
+    assert_eq!(record("fix/wt-ux"), Some(("main", sparse.d5.as_str())), "created at d5");
+    assert_eq!(record("feat/schema-enhancement"), Some(("main", sparse.d2.as_str())), "created at d2");
 }

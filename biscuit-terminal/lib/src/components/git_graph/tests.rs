@@ -305,7 +305,7 @@ fn merged_into_default() -> GitGraph {
                 .forked_at(sha("1111111"))
                 .with_tip(sha("bbbbbbb"))
                 .with_entries(commits(&["aaaaaaa", "bbbbbbb"]))
-                .merged_into(sha("mmmmmmm")),
+                .with_merge(sha("bbbbbbb"), sha("mmmmmmm")),
         )
         .with_current_branch("feat/x")
 }
@@ -333,6 +333,20 @@ fn a_lane_merged_into_the_default_lane_is_drawn_merging_at_its_commit() {
 }
 
 #[test]
+fn with_merge_appends_edges_oldest_first() {
+    let line = GraphLine::new("feat/x")
+        .with_merge(sha("b1b1b1b"), sha("c1c1c1c"))
+        .with_merge(sha("b2b2b2b"), sha("c2c2c2c"));
+    assert_eq!(
+        line.merges,
+        [
+            LaneMerge { source: sha("b1b1b1b"), destination: sha("c1c1c1c") },
+            LaneMerge { source: sha("b2b2b2b"), destination: sha("c2c2c2c") },
+        ]
+    );
+}
+
+#[test]
 fn a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane() {
     let graph = GitGraph::new("main", commits(&["1111111"]))
         .with_ref("main", sha("1111111"))
@@ -347,7 +361,7 @@ fn a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane() {
                 .forked_at(sha("ppppppp"))
                 .with_tip(sha("ccccccc"))
                 .with_entries(commits(&["ccccccc"]))
-                .merged_into(sha("qqqqqqq")),
+                .with_merge(sha("ccccccc"), sha("qqqqqqq")),
         )
         .with_current_branch("feat/child");
     let text = mermaid(&graph);
@@ -368,7 +382,7 @@ fn nested_merges() -> GitGraph {
                 .forked_at(sha("d1d1d1d"))
                 .with_tip(sha("w2w2w2w"))
                 .with_entries(commits(&["w1w1w1w", "w2w2w2w"]))
-                .merged_into(sha("m103000"))
+                .with_merge(sha("w2w2w2w"), sha("m103000"))
                 .with_last_active(10),
         )
         .with_line(
@@ -377,7 +391,7 @@ fn nested_merges() -> GitGraph {
                 .forked_at(sha("w2w2w2w"))
                 .with_tip(sha("s1s1s1s"))
                 .with_entries(vec![LaneEntry::Elided(96), LaneEntry::Commit(sha("s1s1s1s"))])
-                .merged_into(sha("m104000"))
+                .with_merge(sha("s1s1s1s"), sha("m104000"))
                 .with_last_active(20),
         )
         .with_current_branch("main")
@@ -405,7 +419,7 @@ fn a_merge_commit_can_also_be_a_fork_point() {
             GraphLine::new("side")
                 .forked_at(sha("aaaaaaa"))
                 .with_entries(commits(&["s1s1s1s"]))
-                .merged_into(sha("mmmmmmm")),
+                .with_merge(sha("s1s1s1s"), sha("mmmmmmm")),
         )
         .with_line(GraphLine::new("later").forked_at(sha("mmmmmmm")).with_entries(commits(&["l1l1l1l"])));
     let text = mermaid(&graph);
@@ -436,7 +450,7 @@ fn a_lane_merged_into_a_sibling_is_emitted_before_it() {
                 .with_parent("feat/p")
                 .forked_at(sha("1111111"))
                 .with_entries(commits(&["ccccccc"]))
-                .merged_into(sha("qqqqqqq"))
+                .with_merge(sha("ccccccc"), sha("qqqqqqq"))
                 .with_created_at(200),
         )
         .with_current_branch("feat/c");
@@ -452,7 +466,7 @@ fn a_merge_whose_destination_is_not_drawn_is_left_out_and_reported() {
         GraphLine::new("feat/x")
             .forked_at(sha("1111111"))
             .with_entries(commits(&["aaaaaaa"]))
-            .merged_into(sha("0ld0000")),
+            .with_merge(sha("aaaaaaa"), sha("0ld0000")),
     );
     let text = mermaid(&graph);
     assert!(!text.contains("merge"), "{text}");
@@ -466,7 +480,7 @@ fn a_merge_that_would_precede_its_lane_is_left_out_and_reported() {
         GraphLine::new("feat/x")
             .forked_at(sha("2222222"))
             .with_entries(commits(&["aaaaaaa"]))
-            .merged_into(sha("mmmmmmm")),
+            .with_merge(sha("aaaaaaa"), sha("mmmmmmm")),
     );
     let text = mermaid(&graph);
     assert!(text.contains(r#"commit id: "mmmmmmm""#), "{text}");
@@ -481,7 +495,7 @@ fn a_merge_at_the_start_of_the_default_lane_is_left_out_and_reported() {
         GraphLine::new("feat/x")
             .forked_at(sha("0ld0000"))
             .with_entries(commits(&["aaaaaaa"]))
-            .merged_into(sha("mmmmmmm")),
+            .with_merge(sha("aaaaaaa"), sha("mmmmmmm")),
     );
     let text = mermaid(&graph);
     assert!(text.contains(r#"commit id: "mmmmmmm""#), "{text}");
@@ -495,7 +509,7 @@ fn only_one_lane_merges_at_a_commit() {
         GraphLine::new(name)
             .forked_at(sha("1111111"))
             .with_entries(commits(&[commit]))
-            .merged_into(sha("mmmmmmm"))
+            .with_merge(sha(commit), sha("mmmmmmm"))
     };
     let graph = GitGraph::new("main", commits(&["1111111", "mmmmmmm"]))
         .with_line(merged("a", "aaaaaaa"))
@@ -596,7 +610,7 @@ fn trimming_never_elides_a_merge_destination() {
             GraphLine::new("feat/x")
                 .forked_at(sha("1111111"))
                 .with_entries(commits(&["aaaaaaa", "bbbbbbb"]))
-                .merged_into(sha("mmmmmmm")),
+                .with_merge(sha("bbbbbbb"), sha("mmmmmmm")),
         );
     let planned = plan(&graph, viewport(5, 40));
     assert!(planned.trimmed_commits > 0, "{planned:?}");
@@ -615,7 +629,7 @@ fn the_height_cap_keeps_a_merged_lanes_destination_lane() {
         .with_ref("main", sha("1111111"))
         .with_line(line("feat/p", None, "ppppppp", 1).with_entries(commits(&["ppppppp", "qqqqqqq"])))
         .with_line(line("feat/b", None, "bbbbbbb", 50))
-        .with_line(line("feat/x", None, "xxxxxxx", 90).merged_into(sha("qqqqqqq")))
+        .with_line(line("feat/x", None, "xxxxxxx", 90).with_merge(sha("xxxxxxx"), sha("qqqqqqq")))
         .with_current_branch("main");
     let planned = plan(&graph, viewport(200, 40));
     let text = &planned.mermaid;
@@ -637,6 +651,403 @@ fn tags_of_lanes_the_height_cap_leaves_out_are_not_reported_twice() {
     let planned = plan(&graph, viewport(200, 40));
     assert!(!planned.mermaid.contains("feat/a"), "{}", planned.mermaid);
     assert!(planned.hidden_lanes > 0);
+    assert!(!planned.incomplete);
+}
+
+// ---------------------------------------------------------------------------
+// Merges from inside a lane: segments, pauses, and dropped edges
+// ---------------------------------------------------------------------------
+
+/// Every `id: "…"` in emission order.
+fn emitted_ids(text: &str) -> Vec<&str> {
+    text.split("id: \"").skip(1).filter_map(|rest| rest.split('"').next()).collect()
+}
+
+fn assert_each_id_once(text: &str) {
+    let ids = emitted_ids(text);
+    let distinct: HashSet<&str> = ids.iter().copied().collect();
+    assert_eq!(ids.len(), distinct.len(), "an ID repeats: {text}");
+}
+
+/// `feat/x` merged into `main` at `c1c1c1c` from `b1b1b1b`, then continued
+/// with `after` (oldest first).
+fn continued_after_merge(after: Vec<LaneEntry>) -> GitGraph {
+    let mut entries = commits(&["b1b1b1b"]);
+    entries.extend(after);
+    GitGraph::new("main", commits(&["d1d1d1d", "p1p1p1p", "c1c1c1c", "m2m2m2m"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("d1d1d1d"))
+            .with_entries(entries)
+            .with_merge(sha("b1b1b1b"), sha("c1c1c1c")),
+    )
+}
+
+#[test]
+fn a_lane_merged_from_its_middle_pauses_at_the_source_and_resumes_after_the_merge() {
+    let graph = continued_after_merge(commits(&["n1n1n1n", "n2n2n2n"]));
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    branch feat/x
+    checkout feat/x
+    commit id: "b1b1b1b"
+    checkout main
+    commit id: "p1p1p1p"
+    merge feat/x id: "c1c1c1c"
+    checkout feat/x
+    commit id: "n1n1n1n"
+    commit id: "n2n2n2n"
+    checkout main
+    commit id: "m2m2m2m""#
+    );
+    assert_eq!(parents_of(&text, "c1c1c1c"), ["p1p1p1p", "b1b1b1b"]);
+    assert_eq!(parents_of(&text, "n1n1n1n"), ["b1b1b1b"]);
+    assert_eq!(parents_of(&text, "m2m2m2m"), ["c1c1c1c"]);
+    assert_eq!(lane_of_commit(&text, "n1n1n1n"), "feat/x");
+    assert!(!plan(&graph, viewport(400, 40)).incomplete);
+}
+
+#[test]
+fn a_square_folded_after_the_merge_source_hangs_from_the_source() {
+    let graph = continued_after_merge(vec![LaneEntry::Elided(2), LaneEntry::Commit(sha("n2n2n2n"))]);
+    let text = mermaid(&graph);
+    assert!(
+        text.contains(r#"    merge feat/x id: "c1c1c1c"
+    checkout feat/x
+    commit id: "+2" type: HIGHLIGHT
+    commit id: "n2n2n2n""#),
+        "{text}"
+    );
+    assert_eq!(parents_of(&text, "c1c1c1c"), ["p1p1p1p", "b1b1b1b"]);
+    assert_eq!(parents_of(&text, "+2"), ["b1b1b1b"]);
+    assert_eq!(parents_of(&text, "n2n2n2n"), ["+2"]);
+}
+
+#[test]
+fn children_forked_before_and_after_the_merge_source_hang_from_their_own_commits() {
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "p1p1p1p", "c1c1c1c"]))
+        .with_line(
+            GraphLine::new("src")
+                .forked_at(sha("d1d1d1d"))
+                .with_entries(commits(&["a1a1a1a", "b1b1b1b", "n1n1n1n"]))
+                .with_merge(sha("b1b1b1b"), sha("c1c1c1c")),
+        )
+        .with_line(GraphLine::new("early").forked_at(sha("a1a1a1a")).with_entries(commits(&["e1e1e1e"])))
+        .with_line(GraphLine::new("late").forked_at(sha("n1n1n1n")).with_entries(commits(&["l1l1l1l"])));
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    branch src
+    checkout src
+    commit id: "a1a1a1a"
+    branch early
+    checkout early
+    commit id: "e1e1e1e"
+    checkout src
+    commit id: "b1b1b1b"
+    checkout main
+    commit id: "p1p1p1p"
+    merge src id: "c1c1c1c"
+    checkout src
+    commit id: "n1n1n1n"
+    branch late
+    checkout late
+    commit id: "l1l1l1l"
+    checkout src
+    checkout main"#
+    );
+    assert_eq!(parents_of(&text, "e1e1e1e"), ["a1a1a1a"]);
+    assert_eq!(parents_of(&text, "c1c1c1c"), ["p1p1p1p", "b1b1b1b"]);
+    assert_eq!(parents_of(&text, "n1n1n1n"), ["b1b1b1b"]);
+    assert_eq!(parents_of(&text, "l1l1l1l"), ["n1n1n1n"]);
+    assert!(!plan(&graph, viewport(400, 60)).incomplete);
+}
+
+#[test]
+fn a_child_forked_at_the_merge_source_is_declared_before_the_merge() {
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "p1p1p1p", "c1c1c1c"]))
+        .with_line(
+            GraphLine::new("fix/wt-ux")
+                .forked_at(sha("d1d1d1d"))
+                .with_entries(commits(&["b1b1b1b", "n1n1n1n"]))
+                .with_merge(sha("b1b1b1b"), sha("c1c1c1c")),
+        )
+        .with_line(GraphLine::new("fix/sniff").forked_at(sha("b1b1b1b")).with_entries(commits(&["k1k1k1k"])))
+        .with_line(GraphLine::new("fix/sniff-pr").forked_at(sha("b1b1b1b")).with_tip(sha("b1b1b1b")));
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    branch fix/wt-ux
+    checkout fix/wt-ux
+    commit id: "b1b1b1b" tag: "fix/sniff-pr"
+    branch fix/sniff
+    checkout fix/sniff
+    commit id: "k1k1k1k"
+    checkout fix/wt-ux
+    checkout main
+    commit id: "p1p1p1p"
+    merge fix/wt-ux id: "c1c1c1c"
+    checkout fix/wt-ux
+    commit id: "n1n1n1n"
+    checkout main"#
+    );
+    let geometry = geometry_of(&text);
+    let source = geometry.commit("b1b1b1b").expect("the source is drawn");
+    assert!(source.tags.iter().any(|tag| tag.text == "fix/sniff-pr"), "{source:?}");
+    assert_eq!(parents_of(&text, "k1k1k1k"), ["b1b1b1b"]);
+    assert_eq!(parents_of(&text, "c1c1c1c"), ["p1p1p1p", "b1b1b1b"]);
+    assert_eq!(parents_of(&text, "n1n1n1n"), ["b1b1b1b"]);
+    assert!(!plan(&graph, viewport(400, 60)).incomplete);
+}
+
+#[test]
+fn a_lane_merged_twice_and_continued_draws_both_merges_in_source_order() {
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "p1p1p1p", "c1c1c1c", "p2p2p2p", "c2c2c2c"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("d1d1d1d"))
+            .with_entries(commits(&["b1b1b1b", "x1x1x1x", "b2b2b2b", "n1n1n1n"]))
+            .with_merge(sha("b1b1b1b"), sha("c1c1c1c"))
+            .with_merge(sha("b2b2b2b"), sha("c2c2c2c")),
+    );
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    branch feat/x
+    checkout feat/x
+    commit id: "b1b1b1b"
+    checkout main
+    commit id: "p1p1p1p"
+    merge feat/x id: "c1c1c1c"
+    checkout feat/x
+    commit id: "x1x1x1x"
+    commit id: "b2b2b2b"
+    checkout main
+    commit id: "p2p2p2p"
+    merge feat/x id: "c2c2c2c"
+    checkout feat/x
+    commit id: "n1n1n1n"
+    checkout main"#
+    );
+    assert_each_id_once(&text);
+    assert_eq!(parents_of(&text, "c1c1c1c"), ["p1p1p1p", "b1b1b1b"]);
+    assert_eq!(parents_of(&text, "x1x1x1x"), ["b1b1b1b"]);
+    assert_eq!(parents_of(&text, "c2c2c2c"), ["p2p2p2p", "b2b2b2b"]);
+    assert_eq!(parents_of(&text, "n1n1n1n"), ["b2b2b2b"]);
+    assert!(!plan(&graph, viewport(400, 40)).incomplete);
+}
+
+#[test]
+fn a_merge_into_a_sibling_that_merges_into_the_default_lane_emits_each_source_first() {
+    // Creation order alone would emit `lane/s`, and its merge commit `s2`,
+    // before `lane/a` has emitted the source `a1`.
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "p1p1p1p", "c1c1c1c"]))
+        .with_line(
+            GraphLine::new("lane/s")
+                .forked_at(sha("d1d1d1d"))
+                .with_entries(commits(&["s1s1s1s", "s2s2s2s", "s3s3s3s"]))
+                .with_merge(sha("s3s3s3s"), sha("c1c1c1c"))
+                .with_created_at(100),
+        )
+        .with_line(
+            GraphLine::new("lane/a")
+                .forked_at(sha("d1d1d1d"))
+                .with_entries(commits(&["a1a1a1a", "a2a2a2a"]))
+                .with_merge(sha("a1a1a1a"), sha("s2s2s2s"))
+                .with_created_at(200),
+        );
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    branch lane/a
+    checkout lane/a
+    commit id: "a1a1a1a"
+    checkout main
+    branch lane/s
+    checkout lane/s
+    commit id: "s1s1s1s"
+    merge lane/a id: "s2s2s2s"
+    checkout lane/a
+    commit id: "a2a2a2a"
+    checkout lane/s
+    commit id: "s3s3s3s"
+    checkout main
+    commit id: "p1p1p1p"
+    merge lane/s id: "c1c1c1c""#
+    );
+    assert_each_id_once(&text);
+    let ids = emitted_ids(&text);
+    let at = |id: &str| ids.iter().position(|emitted| *emitted == id).expect(id);
+    assert!(at("a1a1a1a") < at("s2s2s2s") && at("s3s3s3s") < at("c1c1c1c"), "{text}");
+    assert_eq!(parents_of(&text, "s2s2s2s"), ["s1s1s1s", "a1a1a1a"]);
+    assert_eq!(parents_of(&text, "a2a2a2a"), ["a1a1a1a"]);
+    assert_eq!(parents_of(&text, "c1c1c1c"), ["p1p1p1p", "s3s3s3s"]);
+    assert!(!plan(&graph, viewport(400, 60)).incomplete);
+}
+
+#[test]
+fn a_cycle_of_merges_draws_one_and_reports_the_other() {
+    // `lane/a` merges into `lane/s` and `lane/s` into `lane/a`: neither can be
+    // emitted through its source before the other's destination.
+    let graph = GitGraph::new("main", commits(&["d1d1d1d"]))
+        .with_line(
+            GraphLine::new("lane/a")
+                .forked_at(sha("d1d1d1d"))
+                .with_entries(commits(&["a1a1a1a", "a2a2a2a"]))
+                .with_merge(sha("a1a1a1a"), sha("s2s2s2s"))
+                .with_created_at(100),
+        )
+        .with_line(
+            GraphLine::new("lane/s")
+                .forked_at(sha("d1d1d1d"))
+                .with_entries(commits(&["s1s1s1s", "s2s2s2s"]))
+                .with_merge(sha("s1s1s1s"), sha("a2a2a2a"))
+                .with_created_at(200),
+        );
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    branch lane/s
+    checkout lane/s
+    commit id: "s1s1s1s"
+    checkout main
+    branch lane/a
+    checkout lane/a
+    commit id: "a1a1a1a"
+    checkout main
+    checkout lane/s
+    merge lane/a id: "s2s2s2s"
+    checkout lane/a
+    commit id: "a2a2a2a"
+    checkout lane/s"#
+    );
+    assert_eq!(text.matches("merge ").count(), 1, "{text}");
+    assert_each_id_once(&text);
+    let mut ids = emitted_ids(&text);
+    ids.sort_unstable();
+    assert_eq!(ids, ["a1a1a1a", "a2a2a2a", "d1d1d1d", "s1s1s1s", "s2s2s2s"]);
+    assert_eq!(parents_of(&text, "s2s2s2s"), ["s1s1s1s", "a1a1a1a"]);
+    assert_eq!(parents_of(&text, "a2a2a2a"), ["a1a1a1a"]);
+    assert!(plan(&graph, viewport(400, 60)).incomplete);
+}
+
+#[test]
+fn a_destination_emitted_before_its_source_is_a_plain_commit_and_the_source_does_not_pause() {
+    // The lane forks after its own merge destination (inconsistent input).
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "c1c1c1c", "p2p2p2p"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("p2p2p2p"))
+            .with_entries(commits(&["b1b1b1b", "n1n1n1n"]))
+            .with_merge(sha("b1b1b1b"), sha("c1c1c1c")),
+    );
+    let text = mermaid(&graph);
+    assert_eq!(
+        text,
+        r#"gitGraph
+    commit id: "d1d1d1d"
+    commit id: "c1c1c1c"
+    commit id: "p2p2p2p"
+    branch feat/x
+    checkout feat/x
+    commit id: "b1b1b1b"
+    commit id: "n1n1n1n"
+    checkout main"#
+    );
+    assert_eq!(parents_of(&text, "n1n1n1n"), ["b1b1b1b"]);
+    assert!(plan(&graph, viewport(400, 40)).incomplete);
+}
+
+#[test]
+fn a_merge_whose_source_is_not_on_its_lane_is_left_out_and_reported() {
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "p1p1p1p", "c1c1c1c"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("d1d1d1d"))
+            .with_entries(commits(&["b1b1b1b"]))
+            .with_merge(sha("p1p1p1p"), sha("c1c1c1c")),
+    );
+    let text = mermaid(&graph);
+    assert!(!text.contains("merge"), "{text}");
+    assert!(plan(&graph, viewport(400, 40)).incomplete);
+}
+
+/// `feat/x` (most active) merges from the middle of its lane into `feat/p`
+/// (least active); `feat/b` sits between them in activity.
+fn mid_lane_merge_into_a_branch_lane() -> GitGraph {
+    GitGraph::new("main", commits(&["1111111"]))
+        .with_ref("main", sha("1111111"))
+        .with_line(line("feat/p", None, "ppppppp", 1).with_entries(commits(&["ppppppp", "qqqqqqq"])))
+        .with_line(line("feat/b", None, "bbbbbbb", 50))
+        .with_line(
+            line("feat/x", None, "x1x1x1x", 90)
+                .with_entries(commits(&["x1x1x1x", "x2x2x2x"]))
+                .with_merge(sha("x1x1x1x"), sha("qqqqqqq")),
+        )
+        .with_current_branch("main")
+}
+
+#[test]
+fn the_height_cap_keeps_a_mid_lane_merges_destination_lane_with_its_source() {
+    // Half of 40 rows fits the default lane and two more: `feat/x` brings
+    // `feat/p`, so `feat/b` is left out.
+    let planned = plan(&mid_lane_merge_into_a_branch_lane(), viewport(200, 40));
+    let text = &planned.mermaid;
+    assert!(text.contains("branch feat/p") && text.contains(r#"merge feat/x id: "qqqqqqq""#), "{text}");
+    assert!(!text.contains("feat/b"), "{text}");
+    assert_eq!(planned.hidden_lanes, 1);
+    assert!(!planned.incomplete, "the cap's own note accounts for feat/b");
+    assert_eq!(parents_of(text, "qqqqqqq"), ["ppppppp", "x1x1x1x"]);
+    assert_eq!(parents_of(text, "x2x2x2x"), ["x1x1x1x"]);
+}
+
+#[test]
+fn the_height_cap_hides_a_source_lane_and_its_destination_lane_together() {
+    // Half of 26 rows fits the default lane and one more (12.5 rows);
+    // `feat/x` needs `feat/p` too, so neither is drawn, and the lane note, not
+    // the incomplete-history notice, accounts for the merge between them.
+    let planned = plan(&mid_lane_merge_into_a_branch_lane(), viewport(200, 26));
+    let text = &planned.mermaid;
+    for hidden in ["feat/x", "feat/p", "qqqqqqq", "x1x1x1x"] {
+        assert!(!text.contains(hidden), "{hidden} hidden: {text}");
+    }
+    assert_eq!(planned.hidden_lanes, 3);
+    assert!(!planned.incomplete, "{planned:?}");
+}
+
+#[test]
+fn trimming_never_folds_a_merge_source_or_its_destination() {
+    let graph = GitGraph::new("main", commits(&["d1d1d1d", "m1m1m1m", "m2m2m2m", "c1c1c1c", "m3m3m3m", "m4m4m4m"])).with_line(
+        GraphLine::new("feat/x")
+            .forked_at(sha("d1d1d1d"))
+            .with_entries(commits(&["x1x1x1x", "b1b1b1b", "x2x2x2x", "x3x3x3x", "n1n1n1n"]))
+            .with_merge(sha("b1b1b1b"), sha("c1c1c1c")),
+    );
+    let planned = plan(&graph, viewport(5, 40));
+    let text = &planned.mermaid;
+    assert!(planned.trimmed_commits > 0, "{planned:?}");
+    for trimmed in ["m1m1m1m", "m2m2m2m", "m3m3m3m", "x1x1x1x", "x2x2x2x", "x3x3x3x"] {
+        assert!(!text.contains(trimmed), "{trimmed} trimmed: {text}");
+    }
+    assert!(text.contains(r#"merge feat/x id: "c1c1c1c""#), "{text}");
+    assert_eq!(parents_of(text, "c1c1c1c")[1], "b1b1b1b", "{text}");
+    // The square after the source hangs from it.
+    let geometry = geometry_of(text);
+    let after_source = geometry
+        .commits
+        .iter()
+        .find(|commit| commit.lane == "feat/x" && commit.parents == ["b1b1b1b"])
+        .unwrap_or_else(|| panic!("a commit after b1b1b1b: {text}"));
+    assert!(after_source.id.starts_with('+'), "{after_source:?}");
     assert!(!planned.incomplete);
 }
 
@@ -901,7 +1312,7 @@ fn compressed_old_connections() -> GitGraph {
             .forked_at(sha("f0f0f0f"))
             .with_tip(sha("o2o2o2o"))
             .with_entries(vec![LaneEntry::Elided(40), LaneEntry::Commit(sha("o2o2o2o"))])
-            .merged_into(sha("m0m0m0m")),
+            .with_merge(sha("o2o2o2o"), sha("m0m0m0m")),
     )
     .with_current_branch("feat/old")
 }

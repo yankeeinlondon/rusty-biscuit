@@ -3,16 +3,16 @@ source: worktree/cli/tests/list_table.rs
 expression: labeled(cases)
 ---
 ## checked this run, no variance / behind
-main  is 3 commits behind  origin/main  (checked just now)
+main  is 3 commits behind  origin/main
 
 ## checked this run, no variance / ahead
-main  is 3 commits ahead of  origin/main  (checked just now)
+main  is 3 commits ahead of  origin/main
 
 ## checked this run, no variance / in sync
-main  is in sync with  origin/main  (checked just now)
+main  is in sync with  origin/main
 
 ## checked this run, no variance / diverged
-main  has diverged from  origin/main  (3 commits ahead, 2 commits behind) (checked just now)
+main  has diverged from  origin/main  (3 commits ahead, 2 commits behind)
 
 ## variance; the fetch succeeded / behind
 main  is 3 commits behind  origin/main  (updated from origin just now)

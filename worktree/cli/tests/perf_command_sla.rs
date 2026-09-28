@@ -49,7 +49,7 @@ fn perf_full_command_non_image_meets_sla() {
         let stderr = String::from_utf8_lossy(&output.stderr).split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(output.status.success(), "wt list should succeed:\n{stderr}");
         assert!(
-            stderr.contains("main is in sync with origin/main (checked just now)"),
+            stderr.contains("main is in sync with origin/main") && !stderr.contains("main is in sync with origin/main ("),
             "the listing waited for its worker's check:\n{stderr}"
         );
     };

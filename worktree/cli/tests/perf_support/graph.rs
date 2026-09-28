@@ -150,10 +150,17 @@ impl GraphFixture {
             None,
         );
         git(&fixture.main, &["update-ref", "refs/remotes/origin/main", "main"]);
-        for (branch, parent) in [("feat/schema-enhancement", "main"), ("fix/wt-ux", "main"), ("fix/sniff", "fix/wt-ux")] {
+        // Each record holds the commit its branch was created at, as `wt
+        // create` writes it: `d2` (`main~13`), `d5` (`main~10`), and `W1`
+        // (`M103^2`).
+        for (branch, parent, base) in [
+            ("feat/schema-enhancement", "main", "main~13"),
+            ("fix/wt-ux", "main", "main~10"),
+            ("fix/sniff", "fix/wt-ux", "main~2^2"),
+        ] {
             let origin = ForkOrigin {
                 base_branch: parent.to_string(),
-                base_sha: git_output(&fixture.main, &["rev-parse", parent]),
+                base_sha: git_output(&fixture.main, &["rev-parse", base]),
                 created_at: 1,
             };
             fork_origin::record(&fixture.fork_store(), branch, origin).expect("record the fork origin");

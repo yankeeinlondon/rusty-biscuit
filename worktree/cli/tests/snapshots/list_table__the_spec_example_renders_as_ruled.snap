@@ -3,7 +3,7 @@ source: worktree/cli/tests/list_table.rs
 expression: "plain(&Example::new())"
 ---
 
-  main  is 7 commits behind  origin/main  (checked just now)
+  main  is 7 commits behind  origin/main
 
 ┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
 │ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │

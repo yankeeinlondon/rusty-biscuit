@@ -53,13 +53,13 @@ Ahead/behind and merge comparisons use one **target**: whichever of the local de
 
 ### Caption
 
-The caption is one sentence: how the local default branch compares with `origin/<default>`, then, dim and italic in parentheses, what this run learned from `origin`. It needs an `origin` remote: without one, leftover `origin/*` refs produce no caption.
+The caption is one sentence: how the local default branch compares with `origin/<default>`, then, dim and italic in parentheses, what this run learned from `origin`. When this run's check found the tracking ref already current there is nothing to add, so the sentence ends at the comparison. It needs an `origin` remote: without one, leftover `origin/*` refs produce no caption.
 
 The comparison is `is N commits behind`, `is N commits ahead of`, `is in sync with`, or `has diverged from … (N commits ahead, M commits behind)`. Only the counts are colored. It says `local origin/main` in the two rows where this run could not bring the tracking ref up to date, so the counts may be old.
 
 | This run | Caption |
 |---|---|
-| Checked; no difference | `main is 3 commits behind origin/main (checked just now)` |
+| Checked; no difference | `main is 3 commits behind origin/main` |
 | Origin differed; the fetch succeeded | `main is 3 commits behind origin/main (updated from origin just now)`, counted from the fetched tip |
 | Origin differed; the fetch failed | `main is 3 commits behind local origin/main (origin differed when checked just now; fetch didn't finish within 60 s)` |
 | Still checking at 3 s | `main is 3 commits behind origin/main (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)` |
@@ -69,7 +69,7 @@ The comparison is `is N commits behind`, `is N commits ahead of`, `is in sync wi
 
 - **Reasons.** A failed check reads `origin didn't answer within 10 s`, `origin didn't accept Git's credentials`, or `couldn't check origin`; a failed fetch reads `fetch didn't finish within 60 s` or `fetch failed`. Other failures never claim that the host was unreachable or the machine offline, and Git's own error text, remote URLs, and credentials are never shown.
 - **What was last known.** The still-checking and check-failed rows end with `last checked with origin <age> ago` when an earlier answer is stored. Without one they fall back to `tracking ref last changed <age> ago`, from the ref's reflog; that dates the last change to the ref, not the last fetch or check. With neither, or with a timestamp in the future, they say `never checked with origin`.
-- **Missing refs.** Without a local default branch the sentence is `origin/main (…)`; without a tracking ref it is `No local tracking ref origin/main (…)`; and when the branch is absent on `origin` and the tracking ref has been pruned, only `main was absent on origin when checked just now` remains. An absent branch never reads as in sync with `origin`.
+- **Missing refs.** Without a local default branch the sentence is `origin/main`, and without a tracking ref `No local tracking ref origin/main`, each followed by the row's parenthesized text when it has one; and when the branch is absent on `origin` and the tracking ref has been pruned, only `main was absent on origin when checked just now` remains. An absent branch never reads as in sync with `origin`.
 
 Ages use the PR age units: `less than 1 min`, then minutes, hours below two days, then days.
 
@@ -134,12 +134,13 @@ When stderr is a terminal and `TERM_PROGRAM` (or `KITTY_WINDOW_ID`) names an ima
 Every line is its branch's first-parent history, so a merged branch's commits never appear on the default branch's line:
 
 - a branch merged with a merge commit keeps its own line, drawn merging into the branch it was merged into, at the merge commit;
+- a branch that got new commits after being merged stays one connected line: it merges at the merge commit and continues after it, and a branch still at the merged commit is a tag on that line;
 - a branch with no commits of its own (fast-forwarded, or created and not yet committed to) is a tag on its commit;
 - forks and merges older than the drawn commits stay visible, with the commits between them folded into `+N` squares.
 
 Each line shows its 5 newest commits; older ones fold into a `+N` square. Open PRs appear as `PR #n → target` tags. When `origin/<default>` has diverged from the local default branch it gets a line of its own.
 
-When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this. A branch that got new commits after being merged is one such case: its line is drawn without its connection, because the earlier merge is not reconstructed.
+When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this.
 
 There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view a graph taller than half the terminal keeps the most recently active lines and notes how many were left out. See [git-graph.md](../git-graph.md) for the design.
 
@@ -164,7 +165,7 @@ Commits are formatted as conventional commits when possible (e.g. `feat(scope): 
 
 ### Closing notes
 
-After a blank line, the output can end with up to three kinds of note, in this order.
+After a blank line, the output can end with up to three kinds of note, in this order. A command a note tells you to run (`wt --ff`, `--ignore-api`) is shown in reverse video, so it stands out as something to type. The examples below are plain text.
 
 - **Fast-forward suggestion.** When the local default branch is strictly behind `origin/<default>` (not diverged):
 

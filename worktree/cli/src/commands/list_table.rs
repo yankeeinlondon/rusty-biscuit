@@ -228,15 +228,17 @@ pub fn render_notes(facts: &TableFacts<'_>, terminal: &Terminal) -> Option<Strin
     }
     if let Some(suggestion) = &facts.ff_suggestion {
         lines.push(format!(
-            "{local} is {} behind {tracking}; run wt --ff to fast-forward it.",
-            commits(suggestion.behind)
+            "{local} is {} behind {tracking}; run {} to fast-forward it.",
+            commits(suggestion.behind),
+            command_badge("wt --ff")
         ));
     }
     if let Some(keys) = &facts.fallback_notice {
         lines.push("Git checked origin using `ls-remote`; this can take longer than the provider API.".to_string());
         lines.push(format!(
-            "Set {} to let wt try the provider API, or use --ignore-api to use Git directly for this repository.",
-            Prose::escape_text(&keys.join(" or "))
+            "Set {} to let wt try the provider API, or use {} to use Git directly for this repository.",
+            Prose::escape_text(&keys.join(" or ")),
+            command_badge("--ignore-api")
         ));
     }
     (!lines.is_empty()).then(|| notes_list(lines, terminal))
@@ -287,12 +289,16 @@ fn commits(n: usize) -> String {
 }
 
 /// The one-sentence caption: the comparison with the tracking ref, then what
-/// this run established in dim italics. Without a comparison (no local
+/// this run established in dim italics, omitted when a check this run made
+/// found the tracking ref current. Without a comparison (no local
 /// default branch, no tracking ref, or git could not compare) the sentence
 /// names what it can.
 pub fn caption_markup(caption: Option<&Caption>, remote: &RemoteFacts<'_>, now: u64) -> String {
     let tracking = remote_badge(&format!("origin/{}", remote.default_branch));
-    let suffix = format!("<dim><i>({})</i></dim>", Prose::escape_text(&status_text(remote, now)));
+    let suffix = match status_text(remote, now) {
+        Some(text) => format!(" <dim><i>({})</i></dim>", Prose::escape_text(&text)),
+        None => String::new(),
+    };
     let Some(caption) = caption else {
         return match (remote.status, remote.tracking_tip) {
             // Pruned: only the remote-absence observation is left to show.
@@ -300,8 +306,8 @@ pub fn caption_markup(caption: Option<&Caption>, remote: &RemoteFacts<'_>, now: 
                 "{} <dim><i>was absent on origin when checked just now</i></dim>",
                 local_badge(remote.default_branch)
             ),
-            (_, None) => format!("No local tracking ref {tracking} {suffix}"),
-            (_, Some(_)) => format!("{tracking} {suffix}"),
+            (_, None) => format!("No local tracking ref {tracking}{suffix}"),
+            (_, Some(_)) => format!("{tracking}{suffix}"),
         };
     };
     let local = local_badge(&caption.local);
@@ -320,14 +326,15 @@ pub fn caption_markup(caption: Option<&Caption>, remote: &RemoteFacts<'_>, now: 
             count(behind)
         ),
     };
-    format!("{comparison} {suffix}")
+    format!("{comparison}{suffix}")
 }
 
-/// The suffix's text, without parentheses or markup.
-fn status_text(remote: &RemoteFacts<'_>, now: u64) -> String {
+/// The suffix's text, without parentheses or markup. `None` for a check this
+/// run just made that found nothing to report: a fresh answer needs no date.
+fn status_text(remote: &RemoteFacts<'_>, now: u64) -> Option<String> {
     let differed = "origin differed when checked just now";
-    match remote.status {
-        RemoteStatus::CheckedNow => "checked just now".to_string(),
+    let text = match remote.status {
+        RemoteStatus::CheckedNow => return None,
         RemoteStatus::Fetched => "updated from origin just now".to_string(),
         RemoteStatus::FetchFailed { reason } => format!("{differed}; {}", fetch_reason(reason)),
         RemoteStatus::StillChecking { last } => format!(
@@ -344,7 +351,8 @@ fn status_text(remote: &RemoteFacts<'_>, now: u64) -> String {
             "{branch} was absent on origin when checked just now; origin/{branch} is a local tracking ref",
             branch = remote.default_branch
         ),
-    }
+    };
+    Some(text)
 }
 
 fn check_reason(reason: CheckFailure) -> String {
@@ -697,6 +705,11 @@ fn dirty_dot(dirty: DirtyStatus) -> &'static str {
 /// A local branch badge.
 fn local_badge(name: &str) -> String {
     format!("<bg-blue-800><white> {} </white></bg-blue-800>", Prose::escape_text(name))
+}
+
+/// A command the user can type, in reverse video.
+fn command_badge(command: &str) -> String {
+    format!("<inverse> {} </inverse>", Prose::escape_text(command))
 }
 
 /// A remote-tracking branch badge.
