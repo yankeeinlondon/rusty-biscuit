@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 4
+phase: 5
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -63,9 +63,65 @@ docs_updated_during_phase_4:
     - claudine/docs/topics/testing.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/building-an-agent-wrapper.md
+    - claudine/lib/README.md
+    - claudine/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/hook-actions.md
+    - .claude/skills/claudine/unified-hooks.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
 packages:
     - claudine-cli
     - claudine
+source_code:
+    - claudine/cli/tests/common/webhook_listener.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/lib/src/messaging/delivery.rs
+    - claudine/lib/src/messaging/delivery/tests.rs
+    - claudine/lib/src/messaging/mod.rs
+    - claudine/lib/src/messaging/send.rs
+    - claudine/lib/src/messaging/send/tests.rs
+    - claudine/lib/tests/l1/messaging_delivery.rs
+    - claudine/lib/tests/l1/messaging_spawn_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - Cargo.lock
+    - claudine/cli/src/shutdown.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/interrupt.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/tests/l1/exit_site_guard.rs
+    - claudine/cli/tests/l1/handle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+documentation:
+    - claudine/docs/topics/testing.md
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/building-an-agent-wrapper.md
+    - claudine/lib/README.md
+    - claudine/cli/README.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: outbound messages sent near process exit are silently dropped
@@ -150,11 +206,11 @@ The fix has three parts:
 - [x] A run that sends nothing takes no longer to exit than before. The drain
       returns immediately when nothing is pending.
 - [x] Exit codes are unchanged in every scenario, including `124` for `handle`.
-- [ ] R7 is done: the docs and the `claudine` skill no longer describe
+- [x] R7 is done: the docs and the `claudine` skill no longer describe
       messaging as fire-and-forget, and the incorrect "3-second timeout" claim
       is removed.
-- [ ] `just test`, `just test-l2`, and `just lint` in `claudine/` are green.
-- [ ] Spec frontmatter is updated to `status: implemented` and
+- [x] `just test`, `just test-l2`, and `just lint` in `claudine/` are green.
+- [x] Spec frontmatter is updated to `status: implemented` and
       `implemented: true`. The fix is **not** moved to `_completed`; the author
       does that.
 
@@ -540,7 +596,7 @@ conflicts)
 
 **Wave 8** (parallel)
 
-- [ ] **`docs/topics/messaging.md`**
+- [x] **`docs/topics/messaging.md`**
     - Explain the CLI drain (10 s total, shared across deliveries, a Warning
       for unfinished deliveries saying delivery is unknown, exit code
       unchanged), the cap from `handle`'s shared overall deadline, and the
@@ -548,24 +604,24 @@ conflicts)
       sequence diagram: send → track → command returns → drain → exit.
     - Remove the incorrect "3-second timeout /
       `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`" claim.
-- [ ] **`docs/topics/flow-control/lifecycle.md`**
+- [x] **`docs/topics/flow-control/lifecycle.md`**
     - Add one sentence near the `message` row in the communication-properties
       section: a message from a terminal event finishes or is reported as
       unfinished before an ordinary exit, within 10 s, and a timeout leaves
       delivery uncertain.
-- [ ] **`claudine` skill**
+- [x] **`claudine` skill**
     - Correct any messaging "fire-and-forget" wording and the 3-second claim in
       `.claude/skills/claudine/hook-actions.md`, `SKILL.md`, and
       `architecture.md`. Audio stays fire-and-forget; only messaging changes.
     - Add the tracker and the single-exit-path rule to `architecture.md`, plus
       a timeline entry.
-- [ ] **`docs/topics/signal-handling.md`**
+- [x] **`docs/topics/signal-handling.md`**
     - If the rules changed wording, note that a second Ctrl+C during the drain
       takes the force-exit rung.
 
 **Wave 9**
 
-- [ ] **Final gates**
+- [x] **Final gates**
     - Run `just lint`, `just test`, and `just test-l2` in `claudine/`. Grep the
       docs for stale "fire-and-forget" wording about messaging.
     - Finish `implementation-log.md` with the reproduction, spike outputs, any

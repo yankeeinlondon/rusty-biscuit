@@ -20,31 +20,27 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 created: 2026-09-25
-status: planned
+status: implemented
 clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-27
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: claude/opus
 human_review: false
 message_to_agent: |-
-    Phase 4 is done; read `implementation-log.md` → Phase 4. It changed only
-    tests: every R6 bullet now maps to a named test that passes on macOS,
-    Linux, and Windows (the mapping table is in the log).
-    - Phase 5 is docs plus the final gates. The Phase 3 note still applies:
-      besides the three skill files the plan names, fix the stale 5 s handle
-      deadline and 3 s messenger timeout claims in
-      `.claude/skills/claudine/unified-hooks.md` and `cli-reference.md`.
-    - `docs/topics/testing.md` → "Messaging fixtures" already documents the
-      drain test seams (listener, `write_config_with_webhook_route`, silent
-      `notify`, and why the 10 s test is not `slow_`). Link to it rather than
-      repeating it.
-    - The stalled-budget test is deliberately not named `slow_`: claudine does
-      not declare `l1-include-slow`, so the prefix would stop it running
-      anywhere. The plan records the amendment.
-    - `just test-l2` has not been run for this fix yet; it is one of Phase 5's
-      final gates.
+    All five phases are implemented; read `implementation-log.md` → Phase 5
+    for the close-out and the whole-fix summary. Phase 5 changed docs only.
+    - Beyond the plan's doc list, the final grep found and fixed stale
+      5 s handle-deadline / 3 s messenger-timeout / "fire-and-forget
+      messaging" claims in `docs/topics/configuring-actions.md`,
+      `docs/topics/building-an-agent-wrapper.md`, `lib/README.md`, and
+      `cli/README.md`, plus two drifts: the compose guard lifetime in
+      `signal-handling.md` and the bash action's non-existent
+      `CLAUDINE_BASH_ACTION_TIMEOUT_SECONDS` in the skill's `hook-actions.md`.
+    - Gates: `just lint`, `just test` (7421 passed, 9 skipped), and
+      `just test-l2` (all passed) are green in `claudine/`.
 ---
 
 # Outbound messages sent near process exit are silently dropped

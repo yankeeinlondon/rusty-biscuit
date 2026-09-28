@@ -62,9 +62,65 @@ docs_updated_during_phase_4:
     - claudine/docs/topics/testing.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/building-an-agent-wrapper.md
+    - claudine/lib/README.md
+    - claudine/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/hook-actions.md
+    - .claude/skills/claudine/unified-hooks.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
 packages:
     - claudine-cli
     - claudine
+source_code:
+    - claudine/cli/tests/common/webhook_listener.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/lib/src/messaging/delivery.rs
+    - claudine/lib/src/messaging/delivery/tests.rs
+    - claudine/lib/src/messaging/mod.rs
+    - claudine/lib/src/messaging/send.rs
+    - claudine/lib/src/messaging/send/tests.rs
+    - claudine/lib/tests/l1/messaging_delivery.rs
+    - claudine/lib/tests/l1/messaging_spawn_guard.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/Cargo.toml
+    - Cargo.lock
+    - claudine/cli/src/shutdown.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/interrupt.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/handle.rs
+    - claudine/cli/tests/l1/exit_site_guard.rs
+    - claudine/cli/tests/l1/handle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+documentation:
+    - claudine/docs/topics/testing.md
+    - claudine/docs/topics/messaging.md
+    - claudine/docs/dependencies.md
+    - claudine/docs/topics/signal-handling.md
+    - claudine/docs/pipeline.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/configuring-actions.md
+    - claudine/docs/topics/building-an-agent-wrapper.md
+    - claudine/lib/README.md
+    - claudine/cli/README.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-25-lifecycle-message-exit-race (5 phases)
@@ -619,3 +675,97 @@ unless noted.
   stands.
 - `docs/topics/testing.md` already describes the drain fixtures, so the
   Phase 5 messaging doc can link there for the test seams.
+
+## Phase 5
+
+- Started and finished 2026-09-27. This phase changed documentation only. No
+  source code changed.
+
+### What landed (R7)
+
+- `docs/topics/messaging.md`: removed the false claim that hook messages
+  have a 3-second timeout set by `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`. That
+  variable does not exist, and a hook message has no timeout of its own. Its
+  send is bounded only by `handle`'s overall deadline, through the exit
+  drain. Added a Mermaid sequence diagram (send → track → command returns →
+  drain → warn, flush, exit with the same code) and a link to
+  `testing.md#messaging-fixtures` for the test seams. The drain rules (10 s
+  shared budget, `handle` cap, unchanged exit code, warning text, and the
+  library's opt-in `drain_deliveries` contract) were written in Phases 2
+  and 3 and were checked again against `shutdown.rs` and `delivery.rs`.
+- `docs/topics/flow-control/lifecycle.md`: added one paragraph after the
+  Notification Fields table. A terminal-event `message`/`notify` finishes, or
+  is reported, before an ordinary exit, within 10 s. A timeout leaves
+  delivery unknown, and the exit code does not change.
+- `docs/topics/signal-handling.md`: added a new subsection, "Ctrl+C during
+  the exit drain". It covers the held compose guard, the drain ladder with its
+  notice text (checked against `interrupt.rs:451`), and the rule that a
+  second press, or the first after an earlier one, exits `130`. It has a
+  state diagram. **Drift fixed:** "The compose-scoped guard" still said the
+  guard is installed in `run_compose_inner`/`run_inline_compose_inner` and
+  removed by `Drop` when the subcommand ends. Since Phase 3 it is installed in
+  `run_composition_inner` and held by `shutdown::hold_interrupt_guard` until
+  exit.
+- Additional stale claims found by the Wave 9 grep, beyond the plan's list,
+  and fixed:
+  - `docs/topics/configuring-actions.md`: the intro and the `message` action
+    said messaging was "fire-and-forget". The `message` action now describes
+    the drain.
+  - `lib/README.md`: the `Message` row said "Fire-and-forget (tokio::spawn)",
+    and the lessons bullet claimed a 5 s deadline plus 3 s timeouts.
+  - `cli/README.md` and `docs/topics/building-an-agent-wrapper.md`: the same
+    5 s / 3 s claim.
+- `claudine` skill:
+  - `hook-actions.md`: changed the intro wording. The `message` action now
+    says "No per-action timeout" instead of the false 3 s claim. **Drift
+    fixed:** the `bash` action said it was "Fire-and-forget (`tokio::spawn`)"
+    with an override variable, `CLAUDINE_BASH_ACTION_TIMEOUT_SECONDS`, that
+    does not exist. The code awaits it inline with a fixed
+    `BASH_ACTION_TIMEOUT` of 3 s.
+  - `architecture.md` → Key Lessons: fixed the deadline (15 s, not 5 s) and
+    added two bullets, one on the delivery tracker and one on the single
+    ordinary-exit path, which records the exit-guard allowlist and the reason
+    the process must exit inside the runtime.
+  - `SKILL.md`: added a paragraph saying that messages are **not**
+    fire-and-forget and naming both guards. Audio wording is unchanged.
+  - `unified-hooks.md` and `cli-reference.md`: fixed the 5 s / 3 s claims
+    (the Phase 3 note).
+  - `timeline.md`: added a 2026-09-27 entry and bumped `last_updated`.
+- The skill files' stored `hash:` values were **not** restamped. They
+  already differed from `md hash` at `HEAD`, so nothing checks them, and
+  restamping would be unrelated churn.
+- Remaining "fire-and-forget" hits describe audio, the `FireAndForget`
+  action, provider-side hook protocols, and wrapper session reports. None
+  of them describes messaging, and all are correct. The 2026-04-14 timeline
+  entry keeps its original 5 s / 3 s wording because it is historical.
+
+### Final gates
+
+| Gate | Result |
+| --- | --- |
+| `just lint` (claudine) | exit 0 |
+| `just test` (claudine) | 7421 passed, 9 skipped (the same as Phase 4) |
+| `just test-l2` (claudine) | 243 passed (claudine-cli level2) + 3 passed; exit 0 |
+| Grep for messaging "fire-and-forget" / 3 s / 5 s in docs, READMEs, skill | clean, except the historical timeline entry |
+
+- No cross-OS run was needed in this phase because no code changed. The
+  Phase 3 and Phase 4 evidence for macOS, Linux, and Windows still applies.
+  WSL2 is the nightly CI leg.
+
+### Whole-fix summary
+
+- **Reproduction:** `compose_success_message_is_delivered_before_exit` was
+  written first. It was `#[ignore]`d on the old code, where the child exited
+  before the withheld reply (Phase 1 log), and passes unchanged on the fixed
+  code (Phase 3).
+- **Spikes:** see Phase 1 (Spikes A–C), including the ruling that terminal
+  `notify` is tracked.
+- **Rule amendments and departures:** amended Rule 8 (the drain ladder is
+  installed only when a delivery is running and no compose guard is held);
+  the exact per-file exit allowlist with site counts and no
+  `termination/windows.rs` entry (Phase 3); no separate `ShutdownHold` type
+  (Phase 3); the stalled-budget test is not named `slow_`, and "two stalled
+  deliveries" share one route (Phase 4); the extra stale-doc fixes above
+  (Phase 5).
+- **R6 test map:** complete in Phase 4 → "Requirement-to-test mapping
+  (R6, complete)".
