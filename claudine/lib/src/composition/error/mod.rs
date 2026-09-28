@@ -368,6 +368,23 @@ pub enum CompositionError {
     #[error("could not reconcile the inline document: {0}")]
     InlineArtifactEditFailed(#[source] MarkdownError),
 
+    /// The agent's frontmatter edit cannot be saved as written.
+    ///
+    /// Either it is not valid YAML after the closure's narrow repair (a
+    /// duplicate key, bad nesting, a missing delimiter), or a value the agent
+    /// wrote that must be stored as a literal token has no exact source span.
+    /// The caller rolls the document back to its pre-run bytes.
+    #[error(
+        "the agent's frontmatter edit to {} cannot be saved: {rejection}",
+        biscuit_file::to_portable_string(path)
+    )]
+    InlineAgentFrontmatterRejected {
+        /// The active document the agent edited.
+        path: PathBuf,
+        /// The line, value, and reason at fault.
+        rejection: Box<super::closure::AgentFrontmatterRejection>,
+    },
+
     /// The agent left the document body empty or semantically unchanged.
     ///
     /// The body half of the completion verdict (spec §D5). Never carries a

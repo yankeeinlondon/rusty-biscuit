@@ -85,6 +85,7 @@ impl BlockError for CompositionError {
             | CompositionError::MissingProperties { .. }
             | CompositionError::CompletionBodyUnchanged { .. }
             | CompositionError::CompletionSchemaFailed { .. }
+            | CompositionError::InlineAgentFrontmatterRejected { .. }
             | CompositionError::UnsupportedInteractiveSchema { .. } => schema::status_block(self),
 
             // Selection / target family.
@@ -381,6 +382,11 @@ impl Diagnostic for CompositionError {
                 "composition.invalid_file_reference"
             }
             CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
+            // The agent produced the document, so its output postcondition
+            // failed, not the author's document.
+            CompositionError::InlineAgentFrontmatterRejected { .. } => {
+                "document.invalid_frontmatter"
+            }
             CompositionError::CompletionSchemaFailed { .. } => "composition.completion_schema",
             CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
             CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
@@ -615,6 +621,13 @@ impl Diagnostic for CompositionError {
             CompositionError::AtomicWriteFailed { path, .. }
             | CompositionError::InlineRollbackFailed { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
+            }
+            // `document.invalid_frontmatter` declares `doc`, `property`,
+            // `problems`.
+            CompositionError::InlineAgentFrontmatterRejected { path, rejection } => {
+                base["doc"] = json!(biscuit_file::to_portable_string(path));
+                base["property"] = json!(rejection.property);
+                base["problems"] = json!([rejection.to_string()]);
             }
             // `io.read_failed` declares `path`.
             CompositionError::InlineArtifactUnreadable { path, .. } => {
