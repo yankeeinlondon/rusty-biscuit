@@ -10,7 +10,7 @@ use crate::fork_origin::ForkOriginStore;
 use crate::listing::{
     BranchComparisons, Caption, ParentComparison, RefTips, TreeRow, build_tree, compare_cached,
 };
-use crate::git::{git_command, git_command_in, repo_info};
+use crate::git::{git_command, git_command_in, git_from, repo_info};
 use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
 use crate::util::dasherize;
 
@@ -97,10 +97,17 @@ pub fn copy_source(entries: &[WorktreeEntry], fork_branch: Option<&str>) -> Copy
     }
 }
 
-/// Detect the default branch name (main or master).
+/// Detect the default branch name of the repository at the current directory;
+/// see [`default_branch_in`].
 pub fn default_branch() -> Result<String, WorktreeError> {
+    default_branch_in(Path::new("."))
+}
+
+/// Detect the default branch name of the repository at `repo`: the target of
+/// `origin/HEAD`, else a local `main` or `master`.
+pub fn default_branch_in(repo: &Path) -> Result<String, WorktreeError> {
     // Try symbolic-ref for the remote HEAD
-    if let Ok(output) = git_command(&["symbolic-ref", "refs/remotes/origin/HEAD"])
+    if let Ok(output) = git_from(repo, repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         && let Some(branch) = output.strip_prefix("refs/remotes/origin/")
     {
         return Ok(branch.to_string());
@@ -108,7 +115,7 @@ pub fn default_branch() -> Result<String, WorktreeError> {
 
     // Fall back to checking if main or master exist
     for candidate in &["main", "master"] {
-        if git_command(&["rev-parse", "--verify", candidate]).is_ok() {
+        if git_from(repo, repo, &["rev-parse", "--verify", candidate]).is_ok() {
             return Ok(candidate.to_string());
         }
     }
@@ -210,8 +217,8 @@ pub struct WorktreeList {
     pub statuses: Vec<WorktreeStatus>,
     /// The tip the `-> {default}` column compares against.
     pub target: Option<DefaultTarget>,
-    /// The local default branch against `origin/<default>`; `None` without
-    /// both refs.
+    /// The local default branch against its local tracking ref
+    /// `origin/<default>`; `None` without both refs.
     pub caption: Option<Caption>,
     /// The Branch column's rows, in display order.
     pub tree: Vec<TreeRow>,
@@ -300,6 +307,7 @@ pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeErr
             compare_cached(&cache, remote, local).map(|comparison| Caption {
                 local: default_branch.clone(),
                 remote: remote_name.clone(),
+                tracking_sha: remote.to_string(),
                 ahead: comparison.ahead,
                 behind: comparison.behind,
             })
@@ -1036,6 +1044,27 @@ branch refs/heads/fix/bug-42
         ]);
 
         assert_eq!(default_branch().expect("origin/HEAD is detectable"), "trunk");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn default_branch_in_answers_for_a_repository_other_than_the_cwd() {
+        let trunk_repo = temp_repo();
+        run_git(trunk_repo.path(), &["branch", "trunk"]);
+        run_git(trunk_repo.path(), &["update-ref", "refs/remotes/origin/trunk", "trunk"]);
+        run_git(trunk_repo.path(), &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/trunk",
+        ]);
+        let master_repo = temp_repo();
+        run_git(master_repo.path(), &["branch", "-m", "main", "master"]);
+        let elsewhere = temp_repo();
+        let _guard = DirGuard::enter(elsewhere.path());
+
+        assert_eq!(default_branch_in(trunk_repo.path()).unwrap(), "trunk");
+        assert_eq!(default_branch_in(master_repo.path()).unwrap(), "master");
+        assert_eq!(default_branch().unwrap(), "main");
     }
 
     #[test]

@@ -1,0 +1,8 @@
+[project]
+name = "fixture-root"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = ["local-lib @ file:///${PROJECT_ROOT}/local-lib"]
+
+[tool.pdm]
+distribution = false

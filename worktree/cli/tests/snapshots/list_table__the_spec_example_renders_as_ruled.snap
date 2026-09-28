@@ -3,21 +3,21 @@ source: worktree/cli/tests/list_table.rs
 expression: "plain(&Example::new())"
 ---
 
-  main  is 7 commits behind  origin/main
+  main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
 
-┌───────────────────┬──────────────────────────────────┬──────────────────┬─────────────────────┐
-│ Worktree          │ Branch                           │ ->  origin/main  │ -> parent           │
-├───────────────────┼──────────────────────────────────┼──────────────────┼─────────────────────┤
-│ ○ base repo       │  main                            │ —                │ —                   │
-│ ● fix-wt-ux       │ ├─ fix/wt-ux                     │ clean  PR #99    │ —                   │
-│ ● feat-theme      │ ├─ feat/theme                    │ clean            │ —                   │
-│ ○ feat-dark-fixes │ │  └─ feat/dark-fixes            │ clean            │ conflicts  PR #104  │
-│ ○ old-cleanup     │ └─ chore/old-cleanup             │ already in       │ —                   │
-│ ○ release-prep    │ release/prep  PR #7 → release/2  │ clean            │ —                   │
-│                   │ experiments (deleted)            │                  │                     │
-│ ● spike-parser    │ └┄ spike/parser                  │ conflicts        │ parent deleted      │
-│ ● bisect          │ detached @ a1b2c3d               │ —                │ —                   │
-└───────────────────┴──────────────────────────────────┴──────────────────┴─────────────────────┘
+┌───────────────────┬──────────────────────────────────┬──────────────────────┬───────────────────────────┐
+│ Worktree          │ Branch                           │ ->  origin/main      │ -> parent                 │
+├───────────────────┼──────────────────────────────────┼──────────────────────┼───────────────────────────┤
+│ ○ base repo       │  main                            │ —                    │ —                         │
+│ ● fix-wt-ux       │ ├─ fix/wt-ux                     │ clean +2 -1  PR #99  │ —                         │
+│ ● feat-theme      │ ├─ feat/theme                    │ clean +3             │ —                         │
+│ ○ feat-dark-fixes │ │  └─ feat/dark-fixes            │ clean +2 -1          │ conflicts +1 -3  PR #104  │
+│ ○ old-cleanup     │ └─ chore/old-cleanup             │ clean -4             │ —                         │
+│ ○ release-prep    │ release/prep  PR #7 → release/2  │ clean                │ —                         │
+│                   │ experiments (deleted)            │                      │                           │
+│ ● spike-parser    │ └┄ spike/parser                  │ conflicts +1 -3      │ parent deleted            │
+│ ● bisect          │ detached @ a1b2c3d               │ —                    │ —                         │
+└───────────────────┴──────────────────────────────────┴──────────────────────┴───────────────────────────┘
 
  Worktree   ○ clean    ● uncommitted files    ● uncommitted source files
- Branch     ├─ merges cleanly into parent    ├─ conflicts with parent    └┄ parent deleted
+ Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted

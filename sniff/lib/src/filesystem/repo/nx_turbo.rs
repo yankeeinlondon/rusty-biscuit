@@ -49,6 +49,7 @@ pub(super) fn detect_nx(
             None,
             evidence,
         )
+        .seeds
     };
     if seeds.is_empty() {
         seeds = discover_seeds_with_optional_index(
@@ -63,6 +64,7 @@ pub(super) fn detect_nx(
         standard: MonorepoStandard::Nx,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 
@@ -96,6 +98,7 @@ pub(super) fn detect_turborepo(
             None,
             evidence,
         )
+        .seeds
     };
     if seeds.is_empty() {
         seeds = discover_seeds_with_optional_index(
@@ -110,6 +113,7 @@ pub(super) fn detect_turborepo(
         standard: MonorepoStandard::Turborepo,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 
@@ -146,6 +150,7 @@ pub(super) fn detect_lerna(
             None,
             evidence,
         )
+        .seeds
     };
     if seeds.is_empty() {
         seeds = discover_seeds_with_optional_index(
@@ -160,6 +165,7 @@ pub(super) fn detect_lerna(
         standard: MonorepoStandard::Lerna,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 

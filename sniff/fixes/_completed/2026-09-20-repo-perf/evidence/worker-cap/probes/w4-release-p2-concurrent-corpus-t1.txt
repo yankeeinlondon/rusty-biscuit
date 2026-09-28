@@ -1,0 +1,22 @@
+start: 2026-09-26T19:32:49Z load: { 7.06 6.46 7.10 }
+concurrent: target=/Volumes/coding/wt/rusty-biscuit/fix-sniff threads=1 requests_per_thread=20 total_requests=20 wall_ms=711.9 throughput_rps=28.1
+request_latency: n=20 median_us=34872.6 min_us=34097.0 p95_us=38515.0 max_us=38980.9
+        0.83 real         0.81 user         1.34 sys
+            32063488  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                2694  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                 509  involuntary context switches
+         28110100932  instructions retired
+          8550036900  cycles elapsed
+            25772512  peak memory footprint
+end: 2026-09-26T19:32:50Z load: { 7.06 6.46 7.10 }

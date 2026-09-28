@@ -1,0 +1,18 @@
+// Disposable AC5 probe for 2026-09-20-repo-perf; never committed.
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use sniff::performance::{PerformanceCollector, with_current_collector};
+fn main() {
+    let root = PathBuf::from(std::env::args().nth(1).expect("root"));
+    let collector = PerformanceCollector::new_shared();
+    let info = with_current_collector(Some(Arc::clone(&collector)), || {
+        sniff::filesystem::repo::detect_repo_structure(&root)
+    })
+    .expect("detect")
+    .expect("repo");
+    let report = collector.snapshot(Duration::ZERO);
+    let walks = report.counters.iter().find(|(name, _)| name.as_str() == "filesystem.repo.nested_marker_walks").map(|(_, v)| *v);
+    eprintln!("nested_marker_walks={walks:?}");
+    println!("{}", serde_json::to_string_pretty(&info).unwrap());
+}

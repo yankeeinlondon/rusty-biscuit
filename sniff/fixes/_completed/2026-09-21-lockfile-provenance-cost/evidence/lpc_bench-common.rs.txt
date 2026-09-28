@@ -1,0 +1,35 @@
+// Shared driver for the lpc_bench scratch example (both trees).
+// usage: lpc_bench <case> <root> <in-process-warmups>
+// Prints one line: the elapsed nanoseconds of one timed call after the warmups.
+use std::path::Path;
+use std::time::Instant;
+
+fn time_case(case: &str, root: &Path, warmups: usize) -> u128 {
+    let lock = root.join("Cargo.lock");
+    let mut run = || -> bool {
+        match case {
+            "parse" => parse_lock(&lock).map(|v| v.len()).unwrap_or(0) > 0,
+            "detect-structure" => sniff::filesystem::repo::detect_repo_structure(root)
+                .expect("detect")
+                .is_some(),
+            "detect-provenance" => detect_provenance(root),
+            other => panic!("unknown case {other}"),
+        }
+    };
+    for _ in 0..warmups {
+        assert!(run(), "warmup produced no result");
+    }
+    let start = Instant::now();
+    let ok = std::hint::black_box(run());
+    let elapsed = start.elapsed().as_nanos();
+    assert!(ok, "timed call produced no result");
+    elapsed
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let case = &args[1];
+    let root = Path::new(&args[2]);
+    let warmups: usize = args[3].parse().expect("warmups");
+    println!("{}", time_case(case, root, warmups));
+}

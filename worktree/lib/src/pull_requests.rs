@@ -10,13 +10,13 @@
 //! makes the request under [`LIST_DEADLINE`]. A failure is never stored, so an
 //! authentication error cannot become "no open PRs".
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cache::{atomic_write, repo_cache_file};
+use crate::cache::{atomic_write, repo_cache_file, try_lock_sidecar};
 use crate::error::WorktreeError;
 use crate::git::git_from;
 
@@ -236,8 +236,14 @@ pub enum RefreshOutcome {
     LockFailed,
     /// `origin` is missing; no request was made.
     NoOrigin,
+    /// The default branch could not be resolved; no request was made (live
+    /// head only).
+    NoDefaultBranch,
     /// `origin` changed during the request, so the answer was discarded.
     OriginChanged,
+    /// The default branch changed during the request, so the answer was
+    /// discarded (live head only).
+    DefaultBranchChanged,
     /// The request failed; the store is untouched.
     Failed,
     /// The answer could not be written; the store is untouched.
@@ -259,7 +265,7 @@ pub fn refresh(
     clock: impl Fn() -> u64,
     connect: impl FnOnce(&str) -> Box<dyn OpenPrSource>,
 ) -> RefreshOutcome {
-    let Some(_lock) = (match try_lock(&pr_lock_path(store)) {
+    let Some(_lock) = (match try_lock_sidecar(&pr_lock_path(store)) {
         Ok(lock) => lock,
         Err(_) => return RefreshOutcome::LockFailed,
     }) else {
@@ -301,25 +307,6 @@ pub fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default()
-}
-
-/// The locked sidecar, `None` when another process holds it. Dropping the
-/// file releases the lock.
-fn try_lock(path: &Path) -> std::io::Result<Option<fs::File>> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(path)?;
-    if fs4::fs_std::FileExt::try_lock_exclusive(&file)? {
-        Ok(Some(file))
-    } else {
-        Ok(None)
-    }
 }
 
 fn fetch(origin: &str, fetched_at: u64, source: &dyn OpenPrSource) -> Result<StoreFile, String> {
@@ -655,7 +642,7 @@ mod tests {
         seed(&store, &root, ORIGIN, NOW, vec![pr(99, Some("o/r"), "fix/x", "main")]);
         let before = fs::read(&store).unwrap();
 
-        let holder = try_lock(&pr_lock_path(&store)).unwrap().expect("the first lock is free");
+        let holder = try_lock_sidecar(&pr_lock_path(&store)).unwrap().expect("the first lock is free");
         let (calls, source) = stub(Ok(Vec::new()));
         let (_, connect) = connector(source);
         assert_eq!(refresh(&store, &root, || NOW + 600, connect), RefreshOutcome::Contended);

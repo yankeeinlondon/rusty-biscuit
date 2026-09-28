@@ -81,12 +81,20 @@ Every changed path belongs to exactly one category, decided by `sniff::filesyste
 
 ### Package Attribution
 
-In a monorepo, each commit is attributed to the packages and package areas that own its changed files. Attribution uses the manifest-only _structure_ catalog (the same one `sniff repo packages` uses), and the `package`/`package-area` filters use the same ownership index.
+In a monorepo, each commit is attributed to the packages and package areas its changed files belong to. Attribution uses the manifest-only _structure_ catalog (the same one `sniff repo packages` uses), and the `package`/`package-area` filters resolve each path exactly as attribution does.
+
+Package directories and area directories are separate boundaries:
 
 - a file belongs to its **deepest** owning package only, so a nested package does not also attribute its parent
-- a file inside a package area but outside every package (for example `sniff/README.md`) is **unattributed**; there is no fallback to the area directory
-- the original path of a moved file counts too
+- a file belongs to the **deepest** area directory containing it, whether or not a package owns it; when areas nest (`claudine` and `claudine/rendezvous`), it belongs to the deepest one
+- a file inside an area directory but outside every package (for example `sniff/README.md` or a plan under `sniff/fixes/`) belongs to that area and to **no** package
+- where a package directory is also a nested package's area directory (`darkmatter/dmls`), that package's own files belong to the nested area: a change to `darkmatter/dmls/README.md` is attributed to the package `dmls` and the area `darkmatter/dmls`, so `--package-area darkmatter/dmls` keeps it (and `--package-area darkmatter` still does, since an area selects its nested areas)
+- the root area `""` has no directory: only a top-level package's files outside every area directory carry it, and a repository-root file such as `README.md` is unattributed
+- membership is by location only: a conventional-commit scope such as `planning(worktree)`, or a path that merely mentions an area (`.claude/skills/worktree/SKILL.md`, `worktree-other/README.md`), confers none
+- paths resolve lexically against the current package catalog, so deleted files and both ends of a moved file count
 - outside a monorepo there is no attribution, and a package or package-area filter is an error
+
+So `--package worktree` keeps commits touching `worktree/lib/`, while `--package-area worktree` keeps commits touching anything under `worktree/`, including its fixes, reviews, and README. An area selector also keeps nested areas (`claudine` selects `claudine/rendezvous`). Filters select whole commits: a count means matching commits, and a kept commit retains every changed file and its full attribution, including files outside the selected area.
 
 ## 3. Verbosity
 

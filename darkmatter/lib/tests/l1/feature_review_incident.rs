@@ -39,6 +39,7 @@ fn repository(prompt: &str) -> (TempDir, PathBuf, PathBuf) {
         "prompts/_ready.md",
         "prompts/_test-tiers.md",
         "prompts/_writing-clearly.md",
+        "prompts/_input-robustness.md",
     ] {
         std::fs::copy(checkout().join(transcluded), root.join(transcluded)).unwrap();
     }

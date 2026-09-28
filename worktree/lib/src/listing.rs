@@ -77,18 +77,16 @@ pub struct Comparison {
 /// What merging a branch into a target would do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeState {
-    /// Every commit on the branch is already on the target.
-    AlreadyIn,
-    /// The branch has commits the target lacks, and they merge cleanly.
+    /// Merging the branch into the target would not conflict (including when
+    /// it has nothing to merge).
     Clean,
     Conflicts,
 }
 
 impl Comparison {
     pub fn merge_state(&self) -> MergeState {
-        if self.ahead == 0 {
-            MergeState::AlreadyIn
-        } else if self.is_clean {
+        // A branch with nothing to merge cannot conflict, whatever `is_clean` says.
+        if self.ahead == 0 || self.is_clean {
             MergeState::Clean
         } else {
             MergeState::Conflicts
@@ -154,17 +152,21 @@ fn ahead_behind(target: &str, branch: &str) -> Option<(usize, usize)> {
     Some((ahead, behind))
 }
 
-/// The local default branch measured against `origin/<default>`, the one line
-/// above the table.
+/// The local default branch measured against its **local tracking ref**
+/// `origin/<default>`, as of the last fetch: the comparison that opens the
+/// caption above the table.
+/// Nothing here comes from the live remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caption {
     /// The local default branch, e.g. `main`.
     pub local: String,
-    /// Its origin peer, e.g. `origin/main`.
+    /// Its local tracking ref, e.g. `origin/main`.
     pub remote: String,
-    /// Local commits the remote lacks.
+    /// The tracking ref's tip, from the same ref snapshot as the counts.
+    pub tracking_sha: String,
+    /// Local commits the tracking ref lacks.
     pub ahead: usize,
-    /// Remote commits the local branch lacks.
+    /// Tracking-ref commits the local branch lacks.
     pub behind: usize,
 }
 
@@ -713,8 +715,9 @@ malformed
     #[test]
     fn merge_state_reads_ahead_first() {
         let state = |ahead, behind, is_clean| Comparison { ahead, behind, is_clean }.merge_state();
-        assert_eq!(state(0, 5, false), MergeState::AlreadyIn);
-        assert_eq!(state(0, 0, true), MergeState::AlreadyIn);
+        assert_eq!(state(0, 5, false), MergeState::Clean);
+        assert_eq!(state(0, 0, true), MergeState::Clean);
+        assert_eq!(state(0, 0, false), MergeState::Clean);
         assert_eq!(state(2, 0, true), MergeState::Clean);
         assert_eq!(state(2, 3, true), MergeState::Clean);
         assert_eq!(state(2, 3, false), MergeState::Conflicts);
@@ -725,6 +728,7 @@ malformed
         let caption = |ahead, behind| Caption {
             local: "main".into(),
             remote: "origin/main".into(),
+            tracking_sha: "f".repeat(40),
             ahead,
             behind,
         }
@@ -825,12 +829,21 @@ mod repo_tests {
         let target = list.target.clone().unwrap();
         assert_eq!((target.reference.as_str(), target.diverged), ("main", false));
         assert_eq!(list.caption.as_ref().unwrap().remote, "origin/main");
+        let fetched_tip = repo.sha("origin/main");
+        assert_eq!(list.caption.as_ref().unwrap().tracking_sha, fetched_tip);
+
+        // The caption reads only the local tracking ref: a push nobody has
+        // fetched leaves it in sync, at the old tracking tip.
+        let pushed = repo.push_commit_to_origin("main", "upstream.txt");
+        let list = list_worktrees().unwrap();
+        assert_eq!(caption_state(&list), Some(CaptionState::InSync));
+        assert_eq!(list.caption.as_ref().unwrap().tracking_sha, fetched_tip);
 
         // PR-driven: origin moved on; the column compares against origin.
-        repo.push_commit_to_origin("main", "upstream.txt");
         repo.git(&["fetch", "-q", "origin"]);
         let list = list_worktrees().unwrap();
         assert_eq!(caption_state(&list), Some(CaptionState::Behind(1)));
+        assert_eq!(list.caption.as_ref().unwrap().tracking_sha, pushed);
         assert_eq!(list.target.as_ref().unwrap().reference, "origin/main");
         assert_eq!(list.target.as_ref().unwrap().sha, repo.sha("origin/main"));
         assert_eq!(comparisons(&list, "fix/x").target.unwrap().behind, 1);
@@ -852,7 +865,7 @@ mod repo_tests {
 
     #[test]
     #[serial_test::serial]
-    fn the_target_column_reports_already_in_clean_and_conflicts() {
+    fn the_target_column_reports_clean_and_conflicts() {
         let repo = TestRepo::new();
         let _stores = stores(&repo);
         let _guard = DirGuard::enter(&repo.path());
@@ -871,7 +884,9 @@ mod repo_tests {
         repo.git(&["commit", "-q", "-am", "ours"]);
 
         let list = list_worktrees().unwrap();
-        assert_eq!(target_state(&list, "chore/merged"), MergeState::AlreadyIn);
+        let merged = comparisons(&list, "chore/merged").target.expect("target comparison");
+        assert_eq!(merged.ahead, 0, "chore/merged has nothing to merge");
+        assert_eq!(merged.merge_state(), MergeState::Clean);
         assert_eq!(target_state(&list, "feat/clean"), MergeState::Clean);
         assert_eq!(target_state(&list, "feat/conflict"), MergeState::Conflicts);
         assert!(!list.comparisons.contains_key("main"), "the default row has no comparison");
@@ -938,6 +953,37 @@ mod repo_tests {
         assert!(store.get("gone").is_none());
         assert_eq!(store.get("spike/parser").unwrap().base_branch, "experiments");
         assert_eq!(store.len(), 3);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn the_parent_column_measures_against_the_parents_local_tip() {
+        let repo = TestRepo::with_origin();
+        let _stores = stores(&repo);
+        let _guard = DirGuard::enter(&repo.path());
+        let base = repo.add_worktree("feat/base", "feat-base", "main");
+        fork(&repo, "feat/base", "main", 1);
+        repo.commit_in(&base, "base.txt");
+        repo.git(&["push", "-q", "origin", "feat/base"]);
+        let child = repo.add_worktree("feat/child", "feat-child", "feat/base");
+        fork(&repo, "feat/child", "feat/base", 2);
+        repo.commit_in(&child, "child.txt");
+
+        // The local parent and its remote-tracking copy move apart.
+        repo.commit_in(&base, "local.txt");
+        repo.push_commit_to_origin("feat/base", "remote-1.txt");
+        repo.push_commit_to_origin("feat/base", "remote-2.txt");
+        repo.git(&["fetch", "-q", "origin"]);
+        assert_ne!(repo.sha("feat/base"), repo.sha("origin/feat/base"));
+
+        let list = list_worktrees().unwrap();
+        match comparisons(&list, "feat/child").parent {
+            ParentComparison::Compared(Some(comparison)) => {
+                assert_eq!((comparison.ahead, comparison.behind), (1, 1), "against local feat/base");
+                assert_ne!(comparison.behind, 2, "origin/feat/base would give two behind");
+            }
+            other => panic!("feat/child should compare with feat/base, got {other:?}"),
+        }
     }
 
     #[test]

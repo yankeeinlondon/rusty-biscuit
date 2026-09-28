@@ -790,7 +790,7 @@ The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` 
 
 ## Migrating from the Retired Harness DSL
 
-Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**; its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md). A document that still declares any of these keys fails composition with a typed `RemovedValidationKey` diagnostic naming the offending key and its replacement surface:
+Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**; its gating, verification, and recovery roles are now expressed through the [lifecycle stack](flow-control/lifecycle.md). A document that still declares any of these keys fails composition with a typed `RemovedValidationKey` diagnostic naming the offending key and its replacement surface:
 
 | Removed key | Replacement |
 |-------------|-------------|
@@ -800,7 +800,7 @@ Earlier Claudine releases let composed documents declare `pre_checks`, `post_che
 | `handle` | a lifecycle `shell` action or other lifecycle action |
 | `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
-See [Composition — Migrating from the Retired Harness DSL](composition.md#migrating-from-the-retired-harness-dsl) for the full guidance and [lifecycle.md](lifecycle.md) for the replacement action catalog.
+See [Composition — Migrating from the Retired Harness DSL](composition.md#migrating-from-the-retired-harness-dsl) for the full guidance and [lifecycle.md](flow-control/lifecycle.md) for the replacement action catalog.
 
 ### Timeouts
 
@@ -902,7 +902,7 @@ the provider or affects hard-timeout behavior.
 
 ### Recovery
 
-Recovery is expressed through the lifecycle stacks — `failure` and `blocked` are its natural homes, but flow control is universal and every event may recover. The available lifecycle recovery actions are `retry`, `resume`, `proxy`, and `defer` (`defer` is parse-valid but not yet implemented). See [lifecycle.md](lifecycle.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
+Recovery is expressed through the lifecycle stacks — `failure` and `blocked` are its natural homes, but flow control is universal and every event may recover. The available lifecycle recovery actions are `retry`, `resume`, `proxy`, and `defer` (`defer` is parse-valid but not yet implemented). See [Flow Control](flow-control/flow-control.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
 ### Shell Policy
 

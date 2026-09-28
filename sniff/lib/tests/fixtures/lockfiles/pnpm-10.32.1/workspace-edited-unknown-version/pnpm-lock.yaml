@@ -1,0 +1,23 @@
+lockfileVersion: '99.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      local-lib:
+        specifier: link:./local-lib
+        version: link:local-lib
+
+  .tools/hidden: {}
+
+  packages/alpha:
+    dependencies:
+      '@fixture/beta':
+        specifier: workspace:*
+        version: link:../beta
+
+  packages/beta: {}

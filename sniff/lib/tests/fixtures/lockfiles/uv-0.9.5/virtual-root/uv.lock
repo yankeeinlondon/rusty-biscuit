@@ -1,0 +1,19 @@
+version = 1
+revision = 3
+requires-python = ">=3.9"
+
+[manifest]
+members = [
+    "alpha",
+    "beta",
+]
+
+[[package]]
+name = "alpha"
+version = "0.1.0"
+source = { editable = "packages/alpha" }
+
+[[package]]
+name = "beta"
+version = "0.1.0"
+source = { editable = "packages/beta" }

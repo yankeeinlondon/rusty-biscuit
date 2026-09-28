@@ -91,8 +91,34 @@ fn list_output_is_the_redesigned_table() {
 └─────────────┴───────────┴───────────┴───────────┘\n\
 \n\
 \x20Worktree   ○ clean    ● uncommitted files    ● uncommitted source files\n\
-\x20Branch     ├─ merges cleanly into parent    ├─ conflicts with parent    └┄ parent deleted\n"
+\x20Branch     └─ merges cleanly into parent    └─ conflicts with parent    └┄ parent deleted\n"
     );
+}
+
+/// `-w` sizes only the graph, never the counts' 100-column gate: captured
+/// output renders below 100 columns, and a wide `-w` does not add counts.
+#[test]
+fn a_wide_width_flag_does_not_show_the_counts() {
+    let repo = tempfile::tempdir().expect("create temp dir");
+    let main = repo.path().join("main");
+    let feature = repo.path().join("feature-a");
+    fs::create_dir(&main).expect("create main repo dir");
+    init_repo(&main);
+    commit(&main, "file.txt", "1\n");
+    run_git(&main, &["checkout", "-q", "-b", "feature-a"]);
+    commit(&main, "a.txt", "a\n");
+    run_git(&main, &["checkout", "-q", "main"]);
+    run_git(&main, &["worktree", "add", "-q", feature.to_str().unwrap(), "feature-a"]);
+
+    let home = Home::new();
+    for args in [&["list"][..], &["list", "-w", "200"], &["-w", "100%", "list"]] {
+        let output = home.wt(&main, args);
+        assert!(output.status.success(), "wt {args:?} should succeed");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let row = stderr.lines().find(|line| line.contains("○ feature-a")).expect("feature-a row");
+        let cells: Vec<&str> = row.split('│').map(str::trim).collect();
+        assert_eq!(cells[3], "clean", "wt {args:?}: {stderr}");
+    }
 }
 
 /// `wt create --from` writes the fork record; `wt list` reads it, nests the

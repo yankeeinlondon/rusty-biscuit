@@ -1,0 +1,138 @@
+diff --git a/sniff/lib/src/filesystem/repo/detection.rs b/sniff/lib/src/filesystem/repo/detection.rs
+index 2c5d38d4d..10bc51085 100644
+--- a/sniff/lib/src/filesystem/repo/detection.rs
++++ b/sniff/lib/src/filesystem/repo/detection.rs
+@@ -743,6 +743,7 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
+             resolve_acting_binary(standard.standard, &standard.root, &executable_index);
+     }
+ 
++    lpc_capture(&monorepo_layers, &seeds, &manifests);
+     // Upgrade provenance to `Lockfile` for ecosystems where the committed
+     // lockfile is a high-fidelity membership source.
+     for layer in &mut monorepo_layers {
+@@ -3655,3 +3656,125 @@ mod observation_index {
+         );
+     }
+ }
++
++// ---- lpc_corrob scratch harness (2026-09-21-lockfile-provenance-cost); identical in both trees; deleted after measurement ----
++thread_local! {
++    static LPC_ARMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
++    static LPC_CAPTURE: RefCell<Option<(Vec<MonorepoLayer>, Vec<PackageSeed>, ManifestStore)>> =
++        const { RefCell::new(None) };
++}
++
++/// Copy of the store as it stands at the corroboration point, with the three
++/// lockfile caches empty so every timed call reads and parses its lockfile.
++fn lpc_clone_store(s: &ManifestStore) -> ManifestStore {
++    ManifestStore {
++        cargo: RefCell::new(s.cargo.borrow().clone()),
++        npm: RefCell::new(s.npm.borrow().clone()),
++        pyproject: RefCell::new(s.pyproject.borrow().clone()),
++        pnpm_workspace: RefCell::new(s.pnpm_workspace.borrow().clone()),
++        go_mod: RefCell::new(s.go_mod.borrow().clone()),
++        raw_text: RefCell::new(s.raw_text.borrow().clone()),
++        cargo_locks: RefCell::default(),
++        pnpm_locks: RefCell::default(),
++        uv_locks: RefCell::default(),
++        root_configs: RefCell::new(s.root_configs.borrow().clone()),
++    }
++}
++
++/// Called immediately before the corroboration loop in `detect_repo_inner_with_shared`.
++fn lpc_capture(layers: &[MonorepoLayer], seeds: &[PackageSeed], manifests: &ManifestStore) {
++    if !LPC_ARMED.with(|a| a.get()) {
++        return;
++    }
++    assert!(
++        manifests.cargo_locks.borrow().is_empty()
++            && manifests.pnpm_locks.borrow().is_empty()
++            && manifests.uv_locks.borrow().is_empty(),
++        "a lockfile was already cached before the corroboration point"
++    );
++    LPC_CAPTURE.with(|c| {
++        *c.borrow_mut() = Some((layers.to_vec(), seeds.to_vec(), lpc_clone_store(manifests)));
++    });
++}
++
++/// Scratch benchmark hook. Runs `detect_repo_structure(root)` once (untimed) to
++/// capture the layers, seeds, and manifest store at the corroboration point,
++/// then performs `warmups + 1` calls of the selected step, each on fresh
++/// clones of the layers and seeds and a fresh store copy with cold lockfile
++/// caches (for a `*-manifests-cached` case the layers' member Cargo manifests
++/// are parsed into that copy before the timer starts), and returns the elapsed nanoseconds of the last call plus a
++/// description of the selected layers after that call.
++#[doc(hidden)]
++pub fn __lpc_bench(case: &str, root: &Path, warmups: usize) -> (u128, String) {
++    LPC_ARMED.with(|a| a.set(true));
++    let detected = crate::filesystem::repo::detect_repo_structure(root).expect("detect");
++    LPC_ARMED.with(|a| a.set(false));
++    assert!(detected.is_some(), "no repository detected");
++    let (layers, seeds, store) = LPC_CAPTURE
++        .with(|c| c.borrow_mut().take())
++        .expect("corroboration point was not reached");
++    let selected: Vec<MonorepoLayer> = layers
++        .into_iter()
++        .filter(|layer| match case {
++            "corroborate" | "corroborate-manifests-cached" => true,
++            "corroborate-cargo" | "corroborate-cargo-manifests-cached" => {
++                matches!(layer.authority, MonorepoStandard::CargoWorkspace)
++            }
++            "corroborate-pnpm" | "pnpm-parse" => {
++                matches!(layer.authority, MonorepoStandard::PnpmWorkspaces)
++            }
++            other => panic!("unknown case {other}"),
++        })
++        .collect();
++    assert!(!selected.is_empty(), "case {case} selected no layer");
++    let mut elapsed = 0;
++    let mut description = String::new();
++    for _ in 0..=warmups {
++        let mut layers_i = selected.clone();
++        let mut seeds_i = seeds.clone();
++        let store_i = lpc_clone_store(&store);
++        if case.ends_with("-manifests-cached") {
++            // Untimed: parse the member Cargo manifests the Cargo match reads,
++            // as package construction would after the corroboration point.
++            for layer in layers_i
++                .iter()
++                .filter(|l| matches!(l.authority, MonorepoStandard::CargoWorkspace))
++            {
++                for relative in &layer.packages {
++                    let key = normalize_layer_package_relative(relative);
++                    if let Some(seed) = seeds_i.iter().find(|s| s.relative == key) {
++                        let _ = store_i.cargo(&seed.path.join("Cargo.toml"));
++                    }
++                }
++            }
++        }
++        let start = std::time::Instant::now();
++        if case == "pnpm-parse" {
++            for layer in &layers_i {
++                let parsed = store_i.pnpm_lock(&layer.root.join("pnpm-lock.yaml"));
++                assert!(std::hint::black_box(parsed).is_some(), "pnpm lockfile did not parse");
++            }
++        } else {
++            for layer in &mut layers_i {
++                upgrade_provenance_with_lockfile(layer, &mut seeds_i, &store_i);
++            }
++        }
++        elapsed = start.elapsed().as_nanos();
++        std::hint::black_box((&layers_i, &seeds_i));
++        description = layers_i
++            .iter()
++            .map(|l| {
++                format!(
++                    "{:?}@{} packages={} lockfile_match={:?} provenance={:?}",
++                    l.authority,
++                    l.root.display(),
++                    l.packages.len(),
++                    l.lockfile_match,
++                    l.provenance
++                )
++            })
++            .collect::<Vec<_>>()
++            .join("; ");
++    }
++    (elapsed, description)
++}

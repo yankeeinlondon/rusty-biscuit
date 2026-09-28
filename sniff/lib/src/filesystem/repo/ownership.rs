@@ -86,14 +86,53 @@ impl PackageOwnershipIndex {
 
     /// Look up a path observed relative to the repository root.
     pub(crate) fn lookup_relative(&self, path: &Path) -> Option<usize> {
-        let absolute = normalize_path(&self.root.join(path));
-        self.lookup_normalized(&absolute)
+        self.lookup_normalized(&self.normalize_relative(path))
+    }
+
+    /// A root-relative path in this index's key frame, for callers that look
+    /// the same path up in a [`PackageAreaIndex`] too.
+    pub(crate) fn normalize_relative(&self, path: &Path) -> PathBuf {
+        normalize_path(&self.root.join(path))
     }
 
     /// The canonicalized observation root, for lexical prefix fallbacks that
     /// would otherwise re-canonicalize it per query.
     pub(crate) fn root(&self) -> &Path {
         &self.root
+    }
+}
+
+/// Deepest-area lookup over the package catalog's non-empty area directories,
+/// keyed in the same frame as [`PackageOwnershipIndex`].
+///
+/// The root area `""` has no directory of its own and is never a key, so it
+/// is reachable only through a top-level package's owner.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PackageAreaIndex {
+    areas: HashMap<PathBuf, usize>,
+}
+
+impl PackageAreaIndex {
+    /// `root` must be the ownership index's already-canonical root.
+    pub(crate) fn from_packages(root: &Path, packages: &[Package]) -> Self {
+        let mut areas = HashMap::new();
+        for (index, package) in packages.iter().enumerate() {
+            if !package.package_area.is_empty() {
+                areas
+                    .entry(normalize_path(&root.join(&package.package_area)))
+                    .or_insert(index);
+            }
+        }
+        Self { areas }
+    }
+
+    /// The index of a package carrying the deepest area directory that is
+    /// `dir` or one of its ancestors.
+    ///
+    /// Pass a file's parent directory: a file whose path equals an area
+    /// directory is beside that area, not inside it.
+    pub(crate) fn lookup_normalized(&self, dir: &Path) -> Option<usize> {
+        dir.ancestors().find_map(|ancestor| self.areas.get(ancestor).copied())
     }
 }
 
@@ -162,6 +201,33 @@ mod tests {
             }
         });
         assert_eq!(counts.get(counters::FS_CANONICALIZATIONS), 0);
+    }
+
+    fn package(relative: &str, package_area: &str) -> Package {
+        Package {
+            name: relative.rsplit('/').next().unwrap().to_string(),
+            path: PathBuf::from("/repo").join(relative),
+            relative: relative.to_string(),
+            package_area: package_area.to_string(),
+            ..Package::default()
+        }
+    }
+
+    #[test]
+    fn area_lookup_chooses_the_deepest_area_and_never_the_root_area() {
+        let packages = [
+            package("tool", ""),
+            package("apps/cli", "apps"),
+            package("apps/web/site", "apps/web"),
+        ];
+        let areas = PackageAreaIndex::from_packages(Path::new("/repo"), &packages);
+
+        assert_eq!(areas.lookup_normalized(Path::new("/repo/apps/web/docs")), Some(2));
+        assert_eq!(areas.lookup_normalized(Path::new("/repo/apps/web")), Some(2));
+        assert_eq!(areas.lookup_normalized(Path::new("/repo/apps")), Some(1));
+        assert_eq!(areas.lookup_normalized(Path::new("/repo/apps-other")), None);
+        assert_eq!(areas.lookup_normalized(Path::new("/repo")), None);
+        assert_eq!(areas.lookup_normalized(Path::new("/elsewhere/apps")), None);
     }
 
     #[cfg(unix)]

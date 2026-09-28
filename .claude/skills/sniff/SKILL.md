@@ -76,10 +76,16 @@ plans.
 | `minimal()` / `summary()` | Branch and dirty flag; no commits or worktrees |
 | `full()` | Commits, per-file stats, worktrees; no unified diffs or network |
 | `deep()` | Adds unified diffs, branch detail, containment, and explicit remote refresh |
-| `RepoRequest::structure()` | Membership and minimum package identity only |
-| `RepoRequest::focused(...)` | Selected manifest-backed facts without full inventory |
-| `RepoRequest::full()` | Inventory-backed enrichment and repository-wide observations |
+| `RepoRequest::structure()` | Membership and minimum package identity only; no lockfile corroboration |
+| `RepoRequest::focused(...)` | Selected manifest-backed facts without full inventory or lockfile corroboration |
+| `RepoRequest::full()` | Inventory-backed enrichment, lockfile corroboration, and repository-wide observations |
 
+`RepoRequest::with_lockfile_provenance(bool)` sets layer lockfile
+corroboration on any tier; a serialized request without the field keeps it.
+Every `MonorepoLayer` carries a required `lockfile` observation (it replaced
+`lockfile_match`); only an exact `match` upgrades provenance. Read the
+lockfile pipeline in [architecture.md](architecture.md#lockfile-observation-pipeline)
+before touching `filesystem/repo/lockfile/` or parsing JSON with comments.
 `GitMetadataRequest` narrows legacy coarse requests; it never widens them.
 `metadata: None` derives legacy behavior and is required for serialized-plan
 compatibility.
@@ -162,6 +168,7 @@ filesystem walks, Git diff/blob work, or interpreting archived baselines.
 | Add or change a detector/category/install implementation | [extending.md](extending.md) |
 | Service detection | [services.md](services.md) |
 | Scoped addresses, default gateways, ICMP probes | [network.md](network.md) |
+| Fixtures, CLI test harnesses, suite audits | [testing.md](testing.md) |
 | Adding detection capabilities | [extending.md](extending.md) |
 
 Load only the reference matching the active subsystem.
@@ -187,36 +194,6 @@ shared `_lint` (`--all-targets -D warnings`, no features) rejects. Before
 handoff, also run `cargo clippy -p sniff --all-targets -- -D warnings` and the
 same for `sniff-cli`.
 
-The CLI's `test-fixtures` feature is L2-only. Ordinary local L1 leaves it off;
-`just test-l2` and CI's reusable all-tier build enable it.
-
-Test-suite audits and performance evidence for this area run through the
-shared `tools/test-audit` tool with
-`sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json`, which keeps the
-`remote`, `network`, and `test-fixtures` selections apart and declares the
-2026-07-22 production-caching boundary no counter comparison may span; see the
-`rust-testing` skill's `test-audit-tooling.md`.
-
-Use exact original regression inputs and assert dependent projections and work
-counters, not only the immediate return value. For repository/config/parser
-artifacts, include passive corpus coverage plus an end-to-end CLI test through
-the real shipped artifact. Do not run workspace-wide Cargo gates for a
-Sniff-only change; include only dependency-derived downstream packages.
-
-Level 1 `sniff-cli` integration tests obtain the binary through
-`cli/tests/common::SniffCliFixture`. Its default command pins disposable
-cwd/home/config/cache/install roots and a bounded PATH; use the named
-`host_path` and `fake_only_path` PATH escapes with a call-site `//` comment
-naming the tool observed or the absence proved — `cli/tests/l1/spawn_site_guard.rs`
-scans for one and fails the suite without it. The `ambient_context` CWD escape
-needs no comment: it accepts only a directory the test built, inside the fixture
-workspace (builder form) or the system temporary root (fluent forms), and
-panics otherwise. Live-child tests use `command_std`, and parent-side Git setup
-uses the fixture Git command so inherited plumbing and host Git configuration
-cannot contaminate the repository.
-
-Level 2 Sniff terminal tests run only through `just test-l2`, which serializes
-the shared broker pane. After sending a command, poll the complete final
-`CapturedFrame` predicate with `cli/tests/common::capture_until`; do not add a
-fixed readiness sleep or treat prompt appearance alone as proof that styling
-and layout finished rendering.
+Read [testing.md](testing.md) for the CLI `test-fixtures` feature, suite
+audits, regression-input rules, real-tool lockfile fixtures, and the L1/L2
+CLI harnesses.

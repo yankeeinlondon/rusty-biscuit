@@ -302,6 +302,10 @@ fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_p
         include_str!("../../../../prompts/_test-tiers.md"),
     );
     write(
+        &fixture.cwd().join("prompts/_input-robustness.md"),
+        include_str!("../../../../prompts/_input-robustness.md"),
+    );
+    write(
         &fixture.cwd().join("prompts/_implement/implement-plan.md"),
         include_str!("../fixtures/shipped_implement_route/_implement/implement-plan.md"),
     );

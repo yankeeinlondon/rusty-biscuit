@@ -1,0 +1,22 @@
+start: 2026-09-26T19:32:48Z load: { 6.28 6.30 7.04 }
+concurrent: target=tiny threads=14 requests_per_thread=400 total_requests=5600 wall_ms=1212.6 throughput_rps=4618.3
+request_latency: n=5600 median_us=2883.5 min_us=1594.9 p95_us=4027.5 max_us=6466.4
+        1.22 real         1.44 user        12.30 sys
+            19054592  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               46460  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+               73070  involuntary context switches
+         51294299050  instructions retired
+         51809245888  cycles elapsed
+            13107776  peak memory footprint
+end: 2026-09-26T19:32:49Z load: { 7.06 6.46 7.10 }

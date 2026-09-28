@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# usage: bracket.sh <run> <side:prof>...
+set -euo pipefail
+run=$1; shift
+B=/tmp/repo-perf-phase4/bin
+R=/tmp/repo-perf-phase4/raw
+mkdir -p "$R"
+export CRITERION_HOME=/tmp/repo-perf-phase4/criterion
+export SNIFF_BENCH_NESTED_CORPUS=/Volumes/coding/wt/rusty-biscuit/fix-sniff
+cd /Volumes/coding/wt/rusty-biscuit/fix-sniff/sniff/lib
+for cell in "$@"; do
+  side=${cell%%:*}; prof=${cell##*:}
+  log="$R/$side-$prof-$run.log"
+  {
+    echo "start: $(date -u +%FT%TZ) load: $(sysctl -n vm.loadavg)"
+    echo "binary: $side-$prof-perf sha256 $(shasum -a 256 $B/$side-$prof-perf | cut -d' ' -f1)"
+    "$B/$side-$prof-perf" --bench --save-baseline "$side-$prof-$run" '^nested_marker_walk_corpus/' 2>&1
+    echo "end: $(date -u +%FT%TZ) load: $(sysctl -n vm.loadavg)"
+  } > "$log"
+  for case in serial_reference production detect_repo_structure; do
+    cp "$CRITERION_HOME/nested_marker_walk_corpus/$case/$side-$prof-$run/sample.json" "$R/$side-$prof-$run-$case.sample.json"
+  done
+  grep -E "^(start|end)|walked_entries|time:" "$log" | sed "s/^/[$side-$prof-$run] /"
+done

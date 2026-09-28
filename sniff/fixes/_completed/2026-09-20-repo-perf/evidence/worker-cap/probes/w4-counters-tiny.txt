@@ -1,0 +1,8 @@
+root=/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/repo-perf-tiny-72400 repo_detected=true
+filesystem.io.bytes_read=207
+filesystem.io.canonicalizations=13
+filesystem.io.file_opens=5
+filesystem.io.metadata_probes=35
+filesystem.io.read_dirs=2
+filesystem.repo.manifest_parses=4
+filesystem.repo.nested_marker_walks=1

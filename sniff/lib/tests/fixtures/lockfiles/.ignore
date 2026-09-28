@@ -1,0 +1,7 @@
+# Keeps these real-tool lockfile fixtures (2026-09-26-lockfile-corroboration)
+# out of Sniff's own repository walks. Without it, `sniff repo` on this monorepo
+# reports every fixture as a nested workspace layer, because the nested-marker
+# walk has no fixture-directory exclusion. `ignore`-crate walkers (Sniff, rg,
+# fd) honor this file; git does not, so every fixture stays tracked. Tests copy
+# a fixture into a temporary directory before detecting it.
+/*/

@@ -1,0 +1,14 @@
+// Scratch example for 2026-09-21-lockfile-provenance-cost (identical in both trees).
+// usage: lpc_corrob <case> <root> <in-process-warmups>
+// stdout: elapsed nanoseconds of one timed call after the warmups.
+// stderr: the selected layers after the timed call (authority, packages, lockfile_match, provenance).
+use std::path::Path;
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let warmups: usize = args[3].parse().expect("warmups");
+    let (ns, description) =
+        sniff::filesystem::repo::detection::__lpc_bench(&args[1], Path::new(&args[2]), warmups);
+    eprintln!("{description}");
+    println!("{ns}");
+}

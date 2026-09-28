@@ -1,7 +1,6 @@
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::instrument;
 
@@ -10,7 +9,8 @@ use crate::filesystem::file_types::{
     ProgrammingLanguageStats,
 };
 use crate::filesystem::repo::detection::canonicalize_path;
-use crate::filesystem::repo::ownership::PackageOwnershipIndex;
+use crate::filesystem::repo::lockfile::StandaloneLockfileObservation;
+use crate::filesystem::repo::ownership::{PackageAreaIndex, PackageOwnershipIndex};
 use crate::filesystem::repo::standard::{
     DetectedStandard, MonorepoLayer, MonorepoStandard, PackageProvenance,
 };
@@ -145,6 +145,11 @@ pub struct RepoInfo {
     /// orchestrators riding on top. A forest, even for single-root repos.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub monorepo_layers: Vec<MonorepoLayer>,
+    /// Poetry, PDM, and Composer lockfiles at the repository root or a
+    /// discovered package root, which no workspace layer covers. Always
+    /// serialized, `[]` when none exists.
+    #[serde(default)]
+    pub standalone_lockfiles: Vec<StandaloneLockfileObservation>,
 }
 
 /// A package within a monorepo.
@@ -424,8 +429,7 @@ impl RepoInfo {
     /// Find the package area that contains `dir`.
     ///
     /// First checks if `dir` is inside a specific package, then falls back to
-    /// checking whether it sits anywhere within a package area directory.
-    /// Returns `None` when `dir` is outside every known package area, and
+    /// the deepest package area directory containing it. Returns `None` when `dir` is outside every known package area, and
     /// `Some("")` inside a package that sits directly under the repo root.
     pub fn package_area_for_dir(&self, dir: &Path) -> Option<&str> {
         let packages = self.packages.as_deref()?;
@@ -448,27 +452,11 @@ impl RepoInfo {
             return Some(&pkg.package_area);
         }
 
-        // Fall back to checking package area directories. The top-level `""`
-        // area has no directory of its own; joining it would match every path.
-        let areas: HashSet<&str> = packages
-            .iter()
-            .map(|p| p.package_area.as_str())
-            .filter(|a| !a.is_empty())
-            .collect();
-
-        for area in &areas {
-            let area_path = ownership_index.root().join(area);
-            if dir.starts_with(&area_path) {
-                // Return a reference with the right lifetime by finding the
-                // original &str in the packages vec
-                return packages
-                    .iter()
-                    .find(|p| p.package_area == *area)
-                    .map(|p| p.package_area.as_str());
-            }
-        }
-
-        None
+        // Otherwise the deepest area directory containing `dir`, so nested
+        // areas resolve the same way on every call.
+        let areas = PackageAreaIndex::from_packages(ownership_index.root(), packages);
+        let index = areas.lookup_normalized(dir)?;
+        Some(&packages[index].package_area)
     }
 }
 
@@ -493,6 +481,9 @@ pub(crate) struct PackageScanResult {
 }
 
 /// Detect repository configuration in the given directory.
+///
+/// Runs [`RepoRequest::full`](crate::request::RepoRequest::full), which includes lockfile corroboration of each
+/// workspace layer.
 ///
 /// ## Examples
 ///
@@ -522,18 +513,30 @@ pub fn detect_repo(root: &Path) -> Result<Option<RepoInfo>> {
 
 /// Shallow repository detection for topology and package identity.
 ///
-/// Package managers, dependencies, test runners, features, languages,
-/// frameworks, and file lists are empty. Call [`detect_repo_with_request`]
-/// with [`RepoRequest::focused`] for selected manifest-backed details, or
+/// Runs [`RepoRequest::structure`]: package managers, dependencies, test
+/// runners, features, languages, frameworks, and file lists are empty, and no
+/// lockfile is read, so layer and package provenance stay manifest-derived and
+/// a present lockfile reports [`LockfileStatus::NotRequested`] in
+/// [`MonorepoLayer::lockfile`]. Call
+/// [`detect_repo_with_request`] with [`RepoRequest::focused`] for selected
+/// manifest-backed details or with
+/// [`RepoRequest::with_lockfile_provenance`] for lockfile corroboration, or
 /// [`detect_repo`] for complete enrichment.
 ///
 /// [`RepoRequest::structure`]: crate::request::RepoRequest::structure
+/// [`RepoRequest::focused`]: crate::request::RepoRequest::focused
+/// [`RepoRequest::with_lockfile_provenance`]: crate::request::RepoRequest::with_lockfile_provenance
+/// [`LockfileStatus::NotRequested`]: crate::filesystem::repo::LockfileStatus::NotRequested
+/// [`MonorepoLayer::lockfile`]: crate::filesystem::repo::MonorepoLayer::lockfile
 #[instrument(skip_all, fields(root = %root.display()))]
 pub fn detect_repo_structure(root: &Path) -> Result<Option<RepoInfo>> {
     super::detection::detect_repo_inner(root, true).map(|(info, _inventory)| info)
 }
 
 /// Detect a repository using a caller-selected detail request.
+///
+/// Workspace layers are corroborated against their lockfiles only when
+/// `request` [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance).
 pub fn detect_repo_with_request(
     root: &Path,
     request: &crate::request::RepoRequest,
@@ -546,10 +549,11 @@ pub fn detect_repo_with_request(
 ///
 /// [`detect_repo_structure`] returns `Ok(None)` for an ordinary single-package
 /// project (a `Cargo.toml` with `[package]` but no `[workspace]`, or a lone
-/// `package.json`, `pyproject.toml`, or `go.mod`). This function preserves the
-/// shallow semantics of [`detect_repo_structure`]. Use
-/// [`detect_repo_with_request_or_root_package`] when selected package details
-/// are required.
+/// `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, or
+/// `composer.json`). This function preserves the
+/// shallow semantics of [`detect_repo_structure`], which reads no lockfile
+/// for corroboration. Use [`detect_repo_with_request_or_root_package`]
+/// when selected package details or lockfile corroboration are required.
 ///
 /// ## Returns
 ///
@@ -626,6 +630,7 @@ mod tests {
                     ..Package::default()
                 },
             ]),
+            standalone_lockfiles: Vec::new(),
         };
 
         assert_eq!(
@@ -770,6 +775,7 @@ mod tests {
                     ..Package::default()
                 },
             ]),
+            standalone_lockfiles: Vec::new(),
         }
     }
 
@@ -839,6 +845,30 @@ mod tests {
     }
 
     #[test]
+    fn an_unowned_directory_in_nested_areas_resolves_to_the_deepest_area() {
+        let mut repo = monorepo_with_areas();
+        repo.packages.as_mut().unwrap().push(Package {
+            path: PathBuf::from("/repo/sniff/plugins/one"),
+            relative: "sniff/plugins/one".to_string(),
+            package_area: "sniff/plugins".to_string(),
+            name: "one".to_string(),
+            ..Package::default()
+        });
+        // Areas were once scanned from a `HashSet`, so the nested answer
+        // varied between calls; repeat to catch any order dependence.
+        for _ in 0..8 {
+            assert_eq!(
+                repo.package_area_for_dir(Path::new("/repo/sniff/plugins/docs")),
+                Some("sniff/plugins")
+            );
+            assert_eq!(
+                repo.package_area_for_dir(Path::new("/repo/sniff/docs")),
+                Some("sniff")
+            );
+        }
+    }
+
+    #[test]
     fn area_for_dir_falls_back_to_directory_name_for_unwired_area() {
         // `reaper/lib` exists on disk but is not yet a workspace member, so no
         // package carries the "reaper" area. The area still resolves from the
@@ -892,7 +922,9 @@ mod tests {
             authority,
             orchestrators: Vec::new(),
             provenance: crate::filesystem::repo::standard::PackageProvenance::Globbed,
-            lockfile_match: None,
+            lockfile: crate::filesystem::repo::LockfileObservation::not_applicable(
+                crate::filesystem::repo::LockfileReason::NoLockfileSource,
+            ),
             root_is_package: false,
             packages: Vec::new(),
         }

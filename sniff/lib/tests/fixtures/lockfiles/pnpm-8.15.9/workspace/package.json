@@ -1,0 +1,1 @@
+{ "name": "fixture-root", "private": true, "dependencies": { "local-lib": "link:./local-lib" } }

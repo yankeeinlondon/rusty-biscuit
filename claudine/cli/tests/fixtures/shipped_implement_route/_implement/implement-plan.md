@@ -12,6 +12,7 @@ $schema:
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
     log: file -> the implementation's log file
     is_last: boolean -> a boolean flag based on 
+    in_loop: boolean -> set by the `review-loop` sequence; when true this step opts out once the spec is marked `implemented`
 yolo: true
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
 phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
@@ -35,6 +36,12 @@ spec: |-
 log: "{{ dirname(spec || plan) + '/implementation-log.md' }}"
 initialize:
     stack:
+        # Inside the review-loop sequence the step list is static; a plan whose
+        # spec is already implemented opts out here and launches nothing.
+        - when: "in_loop && spec && frontmatter(spec, 'implemented') == true"
+          action:
+              - message: "implementation skipped: `{{parent_dir(spec)}}` is already marked implemented"
+              - skip
         - action:
             - ensure_file: "{{log}}"
         - when: "phase != 1"
@@ -172,6 +179,8 @@ behavior:
 - add at least one end-to-end test using the real shipped artifact and normal
 invocation path
 - include a repeated read/write/read round trip when values are persisted
+
+::file "../_input-robustness.md"
 
 A broad test suite passing does not substitute for a targeted regression test.
 Before declaring the phase complete, report the requirement-to-test mapping,

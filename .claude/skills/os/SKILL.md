@@ -105,6 +105,12 @@ push mode.
   (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures outside the
   archived paths, toolchain lookups) breaks there. Reproduce with the recipe in
   [wsl.md](wsl.md); the fix for binaries is `biscuit_test_harness::bin_exe!`.
+- **Red on Linux and WSL, green on macOS and Windows, only an order differs:**
+  `read_dir` order. APFS and NTFS return entries sorted by name; ext4 returns
+  hash order (`lib` before `app`). Sniff's leaf-marker layers (Bazel, Pants,
+  Buck2) list `MonorepoLayer::packages` in walk order, so a complete-JSON
+  assertion must sort those lists; `lockfile_provenance::normalized_any`
+  does so only for `provenance == "leaf-markers"` (2026-09-26).
 - **Red only on `windows-latest`:** GitHub's runner has an 8.3 short-name TEMP
   (`RUNNER~1`) that no developer machine has, plus verbatim `\\?\` spellings
   from `canonicalize`. Read the path-spelling traps in
@@ -152,6 +158,11 @@ push mode.
 - `#[cfg(unix)]` and `#[cfg(windows)]` test the **target**, not the build
   host. A `#![cfg(unix)]` inside a test file does not stop Cargo building that
   test's dev-dependencies for a Windows target; gate the dependency graph.
+- On Linux (and WSL2), `sysinfo`'s process table also lists every **thread**
+  of a process, each with the process's own argv. A test that counts processes
+  by argv over-counts as soon as the process spawns a thread, while macOS and
+  Windows count it once. Filter with `process.thread_kind().is_none()`
+  (`worktree/cli/tests/perf_support::refresh_workers`).
 - Never override `CARGO_TARGET_DIR` on the `BUILD_WIN` host; its checkout
   pins the target dir to the `W:` volume for a reason ([build-hosts.md](build-hosts.md)).
 

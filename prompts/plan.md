@@ -85,6 +85,8 @@ Your high level task is to convert the following documents into a high confidenc
     - this allows the implementation team to check off items in the plan as they complete them
 - plans should ALWAYS start with Phase 1 (not Phase 0 or something else non-standard)
 
+::file "./_input-robustness.md"
+
 ## Closure
 
 - Save the plan as "{{plan}}"

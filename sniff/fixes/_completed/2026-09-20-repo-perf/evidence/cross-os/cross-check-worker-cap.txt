@@ -1,0 +1,573 @@
+# Review cycle 2 (worker cap), 2026-09-26: just cross-check sniff --os <os> nested::tests --no-capture
+# windows: from the --os all run (linux/wsl legs of that run failed on host setup; rerun below)
+
+== windows (build-win-native, archive d87d7c740d5a8a4d from windows-latest) ==
+cross-check-tree: 65f8e6d437bd18fd6b5038d01a26141e4d0f5aab
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 7.76s
+warning: unused import: `KEY_ALL_ACCESS`
+   --> sniff\lib\src\programs\windows_apps.rs:291:48
+    |
+291 |         use winreg::enums::{HKEY_CURRENT_USER, KEY_ALL_ACCESS};
+    |                                                ^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `index`
+   --> sniff\lib\src\executable_index.rs:676:13
+    |
+676 |         let index = ExecutableIndex {
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_index`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `index`
+   --> sniff\lib\src\executable_index.rs:717:13
+    |
+717 |         let index = ExecutableIndex {
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_index`
+
+warning: function `stage_raw_path` is never used
+    --> sniff\lib\tests\l1\git_parity.rs:1843:4
+     |
+1843 | fn stage_raw_path(repo: &git2::Repository, bytes: &[u8], content: &[u8]) {
+     |    ^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: linker stdout:    Creating library B:\coding\shazam--fix-sniff\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-847c6ac836b2b21b.lib and object B:\coding\shazam--fix-sniff\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\l1-847c6ac836b2b21b.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: linker stdout:    Creating library B:\coding\shazam--fix-sniff\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\examples\work_counts.lib and object B:\coding\shazam--fix-sniff\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\examples\work_counts.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `sniff` (test "l1") generated 2 warnings
+warning: `sniff` (example "work_counts") generated 1 warning
+warning: linker stdout:    Creating library B:\coding\shazam--fix-sniff\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\sniff-ce74b72981b3269f.lib and object B:\coding\shazam--fix-sniff\rusty-biscuit\target\x86_64-pc-windows-msvc\debug\deps\sniff-ce74b72981b3269f.exp
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `sniff` (lib test) generated 4 warnings (run `cargo fix --lib -p sniff --tests` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 18.63s
+   Archiving 2 binaries, 4 linked paths, and 2 standard libraries to B:\coding\shazam--fix-sniff\cross-check-shazam-9118-1790451691-build\build-sniff-windows-latest-d87d7c740d5a8a4d.tar.zst
+    Archived 545 files to B:\coding\shazam--fix-sniff\cross-check-shazam-9118-1790451691-build\build-sniff-windows-latest-d87d7c740d5a8a4d.tar.zst in 0.63s
+Produced 1 archive(s) on `windows-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 62 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `d87d7c740d5a8a4d` for `windows-latest` — digest `20b7dfec4a82f50a`, produced on `windows-latest`.
+cross-check-key: d87d7c740d5a8a4d
+cross-check-digest: 20b7dfec4a82f50a
+
+Testing sniff package
+
+ℹ️ using cargo-nextest nextest run
+  Extracting 2 binaries and 4 linked paths to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-v9lUsh
+   Extracted 545 files to \\?\C:\Users\ken\AppData\Local\Temp\nextest-archive-v9lUsh in 0.91s
+warning: ignoring --test-threads because --no-capture is specified
+────────────
+ Nextest run ID dff5bc43-21dc-428e-bbc4-5475df831636 with nextest profile: ci
+    Starting 21 tests across 2 binaries (1986 tests skipped)
+       START [         ] ( 1/21) sniff filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters
+
+test filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters ... ok
+
+
+        PASS [   0.024s] ( 1/21) sniff filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters
+       START [         ] ( 2/21) sniff filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling
+
+test filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling ... ok
+
+
+        PASS [   0.045s] ( 2/21) sniff filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling
+       START [         ] ( 3/21) sniff filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk
+
+test filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk ... ok
+
+
+        PASS [   0.032s] ( 3/21) sniff filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk
+       START [         ] ( 4/21) sniff filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates
+
+test filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates ... ok
+
+
+        PASS [   0.057s] ( 4/21) sniff filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates
+       START [         ] ( 5/21) sniff filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth
+
+test filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth ... ok
+
+
+        PASS [   0.078s] ( 5/21) sniff filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth
+       START [         ] ( 6/21) sniff filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request
+
+threads = Some(1): 1 distinct worker thread(s) admitted 522 entries
+threads = None: 4 distinct worker thread(s) admitted 522 entries
+threads = Some(4): 4 distinct worker thread(s) admitted 522 entries
+test filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request ... ok
+
+
+        PASS [   0.599s] ( 6/21) sniff filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request
+       START [         ] ( 7/21) sniff filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation
+
+test filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation ... ok
+
+
+        PASS [   0.038s] ( 7/21) sniff filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation
+       START [         ] ( 8/21) sniff filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration
+
+test filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration ... ok
+
+
+        PASS [   0.284s] ( 8/21) sniff filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration
+       START [         ] ( 9/21) sniff filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows
+
+test filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows ... ok
+
+
+        PASS [   0.018s] ( 9/21) sniff filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows
+       START [         ] (10/21) sniff filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes
+
+test filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes ... ok
+
+
+        PASS [   0.018s] (10/21) sniff filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes
+       START [         ] (11/21) sniff filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed
+
+test filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed ... ok
+
+
+        PASS [   0.045s] (11/21) sniff filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed
+       START [         ] (12/21) sniff filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers
+
+test filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers ... ok
+
+
+        PASS [   0.033s] (12/21) sniff filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers
+       START [         ] (13/21) sniff filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics
+
+test filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics ... ok
+
+
+        PASS [   0.108s] (13/21) sniff filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics
+       START [         ] (14/21) sniff filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture
+
+test filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture ... ok
+
+
+        PASS [   0.180s] (14/21) sniff filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture
+       START [         ] (15/21) sniff filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate
+
+test filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate ... ok
+
+
+        PASS [   0.025s] (15/21) sniff filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate
+       START [         ] (16/21) sniff filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate
+
+test filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate ... ok
+
+
+        PASS [   0.018s] (16/21) sniff filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate
+       START [         ] (17/21) sniff filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk
+
+test filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk ... ok
+
+
+        PASS [   0.042s] (17/21) sniff filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk
+       START [         ] (18/21) sniff filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree
+
+test filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree ... ok
+
+
+        PASS [   0.031s] (18/21) sniff filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree
+       START [         ] (19/21) sniff filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk
+
+test filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk ... ok
+
+
+        PASS [   0.036s] (19/21) sniff filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk
+       START [         ] (20/21) sniff filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules
+
+test filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules ... ok
+
+
+        PASS [   0.049s] (20/21) sniff filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules
+       START [         ] (21/21) sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts
+
+test filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts ... ok
+
+
+        PASS [   1.719s] (21/21) sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts
+────────────
+     Summary [   3.509s] 21 tests run: 21 passed, 1986 skipped
+
+✅  all tests passing in sniff package
+
+cross-check-exit: 0
+cross-check-duration: 58
+
+# linux rerun after clearing stale read-only kache links in the standing clone
+warning: in the working copy of 'sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/cross-check-nested-tests.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: sniff @ origin/main (1314bd63f) + 180 changed file(s) as 23597f088
+os: linux(build-linux)   extra nextest args: nested::tests --no-capture
+mode: archive — planned keys:
+  linux    9b49f8e45fbd990a produced on ubuntu-latest, consumed as ubuntu-latest
+
+clone: build-linux:/home/build/coding/shazam--fix-sniff
+
+== linux (build-linux, archive 9b49f8e45fbd990a from ubuntu-latest) ==
+cross-check-tree: 4d4a7341653f1699dc486482dd7d36dd173b7595
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 18.79s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.98s
+   Archiving 2 binaries, 2 linked paths, and 2 standard libraries to /home/build/coding/shazam--fix-sniff/cross-check-shazam-20525-1790451842-build/build-sniff-ubuntu-latest-9b49f8e45fbd990a.tar.zst
+    Archived 562 files to /home/build/coding/shazam--fix-sniff/cross-check-shazam-20525-1790451842-build/build-sniff-ubuntu-latest-9b49f8e45fbd990a.tar.zst in 0.19s
+Produced 1 archive(s) on `ubuntu-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 62 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `9b49f8e45fbd990a` for `ubuntu-latest` — digest `fae18666fe4a1b20`, produced on `ubuntu-latest`.
+cross-check-key: 9b49f8e45fbd990a
+cross-check-digest: fae18666fe4a1b20
+
+Testing sniff package
+
+ℹ️ using cargo-nextest nextest run
+  Extracting 2 binaries and 2 linked paths to /tmp/nextest-archive-jkFWhu
+   Extracted 562 files to /tmp/nextest-archive-jkFWhu in 0.24s
+warning: ignoring --test-threads because --no-capture is specified
+────────────
+ Nextest run ID ba4c4ab9-d3c9-46b5-8f61-5347ecab0f8e with nextest profile: ci
+    Starting 23 tests across 2 binaries (2002 tests skipped)
+       START [         ] ( 1/23) sniff filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root
+
+test filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root ... ok
+
+
+        PASS [   0.008s] ( 1/23) sniff filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root
+       START [         ] ( 2/23) sniff filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters
+
+test filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters ... ok
+
+
+        PASS [   0.006s] ( 2/23) sniff filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters
+       START [         ] ( 3/23) sniff filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling
+
+test filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling ... ok
+
+
+        PASS [   0.010s] ( 3/23) sniff filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling
+       START [         ] ( 4/23) sniff filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk
+
+test filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk ... ok
+
+
+        PASS [   0.010s] ( 4/23) sniff filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk
+       START [         ] ( 5/23) sniff filesystem::repo::nested::tests::an_unreadable_directory_is_skipped_and_the_walk_continues
+
+test filesystem::repo::nested::tests::an_unreadable_directory_is_skipped_and_the_walk_continues ... ok
+
+
+        PASS [   0.011s] ( 5/23) sniff filesystem::repo::nested::tests::an_unreadable_directory_is_skipped_and_the_walk_continues
+       START [         ] ( 6/23) sniff filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates
+
+test filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates ... ok
+
+
+        PASS [   0.012s] ( 6/23) sniff filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates
+       START [         ] ( 7/23) sniff filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth
+
+test filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth ... ok
+
+
+        PASS [   0.010s] ( 7/23) sniff filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth
+       START [         ] ( 8/23) sniff filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request
+
+threads = Some(1): 1 distinct worker thread(s) admitted 522 entries
+threads = None: 4 distinct worker thread(s) admitted 522 entries
+threads = Some(4): 4 distinct worker thread(s) admitted 522 entries
+test filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request ... ok
+
+
+        PASS [   0.022s] ( 8/23) sniff filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request
+       START [         ] ( 9/23) sniff filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation
+
+test filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation ... ok
+
+
+        PASS [   0.010s] ( 9/23) sniff filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation
+       START [         ] (10/23) sniff filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration
+
+test filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration ... ok
+
+
+        PASS [   0.019s] (10/23) sniff filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration
+       START [         ] (11/23) sniff filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows
+
+test filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows ... ok
+
+
+        PASS [   0.004s] (11/23) sniff filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows
+       START [         ] (12/23) sniff filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes
+
+test filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes ... ok
+
+
+        PASS [   0.004s] (12/23) sniff filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes
+       START [         ] (13/23) sniff filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed
+
+test filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed ... ok
+
+
+        PASS [   0.009s] (13/23) sniff filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed
+       START [         ] (14/23) sniff filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers
+
+test filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers ... ok
+
+
+        PASS [   0.010s] (14/23) sniff filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers
+       START [         ] (15/23) sniff filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics
+
+test filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics ... ok
+
+
+        PASS [   0.011s] (15/23) sniff filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics
+       START [         ] (16/23) sniff filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture
+
+test filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture ... ok
+
+
+        PASS [   0.018s] (16/23) sniff filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture
+       START [         ] (17/23) sniff filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate
+
+test filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate ... ok
+
+
+        PASS [   0.007s] (17/23) sniff filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate
+       START [         ] (18/23) sniff filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate
+
+test filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate ... ok
+
+
+        PASS [   0.004s] (18/23) sniff filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate
+       START [         ] (19/23) sniff filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk
+
+test filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk ... ok
+
+
+        PASS [   0.008s] (19/23) sniff filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk
+       START [         ] (20/23) sniff filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree
+
+test filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree ... ok
+
+
+        PASS [   0.007s] (20/23) sniff filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree
+       START [         ] (21/23) sniff filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk
+
+test filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk ... ok
+
+
+        PASS [   0.007s] (21/23) sniff filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk
+       START [         ] (22/23) sniff filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules
+
+test filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules ... ok
+
+
+        PASS [   0.010s] (22/23) sniff filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules
+       START [         ] (23/23) sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts
+
+test filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts ... ok
+
+
+        PASS [   0.215s] (23/23) sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts
+────────────
+     Summary [   0.436s] 23 tests run: 23 passed, 2002 skipped
+
+✅  all tests passing in sniff package
+
+cross-check-exit: 0
+cross-check-duration: 38
+
+cross-check summary for sniff:
+  linux    pass
+
+# wsl rerun after starting the stopped guest
+warning: in the working copy of 'sniff/fixes/2026-09-20-repo-perf/evidence/cross-os/cross-check-nested-tests.txt', CRLF will be replaced by LF the next time Git touches it
+cross-check: sniff @ origin/main (1314bd63f) + 180 changed file(s) as 329e1b511
+os: wsl(build-win)   extra nextest args: nested::tests --no-capture
+mode: archive — planned keys:
+  wsl      2c3310dd8c316974 produced on ubuntu-latest, consumed as wsl2-ubuntu
+
+clone: build-win:/home/ken/coding/shazam--fix-sniff
+
+== wsl (build-win, archive 2c3310dd8c316974 from ubuntu-latest) ==
+cross-check-tree: 4d4a7341653f1699dc486482dd7d36dd173b7595
+cross-check-dirty: 0
+    Finished `release` profile [optimized] target(s) in 35.97s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 54s
+   Archiving 2 binaries, 2 linked paths, and 2 standard libraries to /home/ken/coding/shazam--fix-sniff/cross-check-shazam-21898-1790451886-build/build-sniff-ubuntu-latest-2c3310dd8c316974.tar.zst
+    Archived 562 files to /home/ken/coding/shazam--fix-sniff/cross-check-shazam-21898-1790451886-build/build-sniff-ubuntu-latest-2c3310dd8c316974.tar.zst in 0.36s
+Produced 1 archive(s) on `ubuntu-latest`.
+Table could not be rendered in 80 columns. Wrapping columns need at least 62 content columns after fixed and non-wrapping columns are reserved.
+Accepted build `2c3310dd8c316974` for `wsl2-ubuntu` — digest `86b6d3aa2e93877e`, produced on `ubuntu-latest`.
+cross-check-key: 2c3310dd8c316974
+cross-check-digest: 86b6d3aa2e93877e
+
+Testing sniff package
+
+ℹ️ using cargo-nextest nextest run
+  Extracting 2 binaries and 2 linked paths to /tmp/nextest-archive-HcJvgr
+   Extracted 562 files to /tmp/nextest-archive-HcJvgr in 0.36s
+warning: ignoring --test-threads because --no-capture is specified
+────────────
+ Nextest run ID c0fd59a2-39d5-449e-9f1f-17be2058e850 with nextest profile: ci
+    Starting 23 tests across 2 binaries (2002 tests skipped)
+       START [         ] ( 1/23) sniff filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root
+
+test filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root ... ok
+
+
+        PASS [   0.016s] ( 1/23) sniff filesystem::repo::nested::tests::a_marker_named_symlinked_root_registers_no_candidate_outside_the_root
+       START [         ] ( 2/23) sniff filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters
+
+test filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters ... ok
+
+
+        PASS [   0.014s] ( 2/23) sniff filesystem::repo::nested::tests::a_missing_root_keeps_the_callers_counters
+       START [         ] ( 3/23) sniff filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling
+
+test filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling ... ok
+
+
+        PASS [   0.019s] ( 3/23) sniff filesystem::repo::nested::tests::a_symlinked_starting_root_walks_like_its_target_under_the_link_spelling
+       START [         ] ( 4/23) sniff filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk
+
+test filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk ... ok
+
+
+        PASS [   0.019s] ( 4/23) sniff filesystem::repo::nested::tests::an_empty_root_records_one_logical_walk
+       START [         ] ( 5/23) sniff filesystem::repo::nested::tests::an_unreadable_directory_is_skipped_and_the_walk_continues
+
+test filesystem::repo::nested::tests::an_unreadable_directory_is_skipped_and_the_walk_continues ... ok
+
+
+        PASS [   0.019s] ( 5/23) sniff filesystem::repo::nested::tests::an_unreadable_directory_is_skipped_and_the_walk_continues
+       START [         ] ( 6/23) sniff filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates
+
+test filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates ... ok
+
+
+        PASS [   0.024s] ( 6/23) sniff filesystem::repo::nested::tests::empty_root_only_and_missing_roots_register_no_candidates
+       START [         ] ( 7/23) sniff filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth
+
+test filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth ... ok
+
+
+        PASS [   0.021s] ( 7/23) sniff filesystem::repo::nested::tests::every_marker_name_registers_its_standards_at_any_depth
+       START [         ] ( 8/23) sniff filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request
+
+threads = Some(1): 1 distinct worker thread(s) admitted 522 entries
+threads = None: 4 distinct worker thread(s) admitted 522 entries
+threads = Some(4): 4 distinct worker thread(s) admitted 522 entries
+test filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request ... ok
+
+
+        PASS [   0.044s] ( 8/23) sniff filesystem::repo::nested::tests::every_visitor_flushes_its_work_into_the_request
+       START [         ] ( 9/23) sniff filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation
+
+test filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation ... ok
+
+
+        PASS [   0.018s] ( 9/23) sniff filesystem::repo::nested::tests::fallback_walk_records_one_logical_walk_per_invocation
+       START [         ] (10/23) sniff filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration
+
+test filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration ... ok
+
+
+        PASS [   0.037s] (10/23) sniff filesystem::repo::nested::tests::git_ignore_rules_apply_under_an_isolated_git_configuration
+       START [         ] (11/23) sniff filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows
+
+test filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows ... ok
+
+
+        PASS [   0.011s] (11/23) sniff filesystem::repo::nested::tests::marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows
+       START [         ] (12/23) sniff filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes
+
+test filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes ... ok
+
+
+        PASS [   0.011s] (12/23) sniff filesystem::repo::nested::tests::nested_marker_predicate_matches_fixed_names_and_solution_suffixes
+       START [         ] (13/23) sniff filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed
+
+test filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed ... ok
+
+
+        PASS [   0.018s] (13/23) sniff filesystem::repo::nested::tests::non_directory_symlinks_are_admitted_and_directory_links_are_not_followed
+       START [         ] (14/23) sniff filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers
+
+test filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers ... ok
+
+
+        PASS [   0.019s] (14/23) sniff filesystem::repo::nested::tests::non_unicode_basenames_are_not_markers
+       START [         ] (15/23) sniff filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics
+
+test filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics ... ok
+
+
+        PASS [   0.021s] (15/23) sniff filesystem::repo::nested::tests::prune_hidden_and_marker_named_directories_keep_their_semantics
+       START [         ] (16/23) sniff filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture
+
+test filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture ... ok
+
+
+        PASS [   0.048s] (16/23) sniff filesystem::repo::nested::tests::public_structure_detection_matches_the_serial_baseline_on_a_nested_fixture
+       START [         ] (17/23) sniff filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate
+
+test filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate ... ok
+
+
+        PASS [   0.014s] (17/23) sniff filesystem::repo::nested::tests::root_marker_does_not_register_a_candidate
+       START [         ] (18/23) sniff filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate
+
+test filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate ... ok
+
+
+        PASS [   0.011s] (18/23) sniff filesystem::repo::nested::tests::root_marker_from_supplied_evidence_registers_no_candidate
+       START [         ] (19/23) sniff filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk
+
+test filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk ... ok
+
+
+        PASS [   0.015s] (19/23) sniff filesystem::repo::nested::tests::serial_reference_walk_matches_the_production_walk
+       START [         ] (20/23) sniff filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree
+
+test filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree ... ok
+
+
+        PASS [   0.014s] (20/23) sniff filesystem::repo::nested::tests::supplied_evidence_and_the_fallback_walk_agree
+       START [         ] (21/23) sniff filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk
+
+test filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk ... ok
+
+
+        PASS [   0.014s] (21/23) sniff filesystem::repo::nested::tests::supplied_evidence_starts_no_fallback_walk
+       START [         ] (22/23) sniff filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules
+
+test filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules ... ok
+
+
+        PASS [   0.017s] (22/23) sniff filesystem::repo::nested::tests::walked_marker_names_follow_the_platform_case_rules
+       START [         ] (23/23) sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts
+
+test filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts ... ok
+
+
+        PASS [   0.364s] (23/23) sniff filesystem::repo::nested::tests::wide_tree_parity_holds_across_repeats_and_worker_counts
+────────────
+     Summary [   0.851s] 23 tests run: 23 passed, 2002 skipped
+
+✅  all tests passing in sniff package
+
+cross-check-exit: 0
+cross-check-duration: 168
+cross-check: publishing no receipt — the remote tested tree 4d4a73416 is not this head's tree 1acae5637; a patched or older tree is not evidence for this head
+
+cross-check summary for sniff:
+  wsl      pass

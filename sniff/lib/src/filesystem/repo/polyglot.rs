@@ -97,6 +97,7 @@ fn into_outcomes(
             standard,
             root: ws.root,
             seeds: ws.seeds,
+            incomplete: false,
         })
         .collect()
 }

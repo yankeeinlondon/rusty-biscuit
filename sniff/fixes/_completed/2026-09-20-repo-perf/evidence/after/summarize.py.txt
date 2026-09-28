@@ -1,0 +1,26 @@
+import json, glob, os, statistics, re, collections
+R = "/tmp/repo-perf-phase4/raw"
+rows = {}
+for f in sorted(glob.glob(f"{R}/*.sample.json")):
+    m = re.match(r"(baseline|after)-(release|debug)-(r\d)-(.*)\.sample\.json", os.path.basename(f))
+    side, prof, run, case = m.groups()
+    d = json.load(open(f))
+    per = [t / i / 1e6 for t, i in zip(d["times"], d["iters"])]
+    rows[(prof, case, side, run)] = (len(per), int(d["iters"][0]), statistics.median(per), min(per), max(per))
+print("| profile | case | side | bracket | samples | iters/sample | median ms | min ms | max ms | spread % |")
+print("|---|---|---|---|---:|---:|---:|---:|---:|---:|")
+for k in sorted(rows, key=lambda k: (k[0] != "debug", k[1], k[2] != "baseline", k[3])):
+    n, it, med, lo, hi = rows[k]
+    print(f"| {k[0]} | {k[1]} | {k[2]} | {k[3]} | {n} | {it} | {med:.2f} | {lo:.2f} | {hi:.2f} | {100*(hi-lo)/med:.1f} |")
+print()
+print("| profile | case | side | bracket medians ms | median of medians ms | bracket spread % |")
+print("|---|---|---|---|---:|---:|")
+agg = collections.defaultdict(list)
+for (prof, case, side, run), v in sorted(rows.items()):
+    agg[(prof, case, side)].append(v[2])
+mm = {}
+for k in sorted(agg, key=lambda k: (k[0] != "debug", k[1], k[2] != "baseline")):
+    meds = agg[k]; mom = statistics.median(meds); mm[k] = (mom, min(meds), max(meds))
+    print(f"| {k[0]} | {k[1]} | {k[2]} | {', '.join(f'{x:.2f}' for x in meds)} | {mom:.2f} | {100*(max(meds)-min(meds))/mom:.1f} |")
+print()
+print(json.dumps({"|".join(k): v for k, v in mm.items()}, indent=1))

@@ -1,7 +1,8 @@
 //! The facts and primitives behind `wt remove`: what removing a worktree
 //! would delete ([`inventory`]), whether deleting its branch would lose
-//! commits ([`safety`]), the live remote checks ([`live_remote`], [`remote`]),
-//! and the move-first handoff record ([`handoff`]).
+//! commits ([`safety`]), the live remote checks ([`remote`], over the shared
+//! [`crate::live_remote`] transport), and the move-first handoff record
+//! ([`handoff`]).
 //!
 //! Every git call addresses the repository with `git -C` and runs from the
 //! base checkout, never from inside the worktree being removed. The rules are
@@ -10,7 +11,6 @@
 pub mod handoff;
 pub mod included;
 pub mod inventory;
-pub mod live_remote;
 pub mod remote;
 pub mod safety;
 

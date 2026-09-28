@@ -1,0 +1,6 @@
+{
+    "name": "fixture/fixture-root",
+    "description": "lockfile fixture",
+    "type": "project",
+    "require": {}
+}

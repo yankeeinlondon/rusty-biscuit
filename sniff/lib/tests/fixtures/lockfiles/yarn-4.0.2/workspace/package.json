@@ -1,0 +1,13 @@
+{
+  "name": "fixture-root",
+  "private": true,
+  "packageManager": "yarn@4.0.2",
+  "workspaces": [
+    "packages/*",
+    ".tools/hidden"
+  ],
+  "dependencies": {
+    "local-lib": "link:./local-lib",
+    "portal-lib": "portal:./portal-lib"
+  }
+}

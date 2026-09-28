@@ -1,0 +1,8 @@
+[package]
+name = "alpha"
+version = "0.3.0"
+edition = "2018"
+
+[dependencies]
+itoa = { path = "../beta" }
+itoa_registry = { package = "itoa", version = "1" }

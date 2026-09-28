@@ -1,0 +1,21 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: "labeled(vec![(\"fresh matching (30 s)\", observe(Some(TRACKING_TIP), fresh)),\n(\"fresh differing (30 s)\", observe(Some(OTHER_TIP), fresh)),\n(\"fresh absent (30 s)\", observe(None, fresh)),\n(\"stale matching (3 days)\", observe(Some(TRACKING_TIP), stale)),\n(\"stale differing (3 days)\", observe(Some(OTHER_TIP), stale)),\n(\"stale absent (3 days)\", observe(None, stale)),])"
+---
+## fresh matching (30 s)
+main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked less than 1 min ago.
+
+## fresh differing (30 s)
+main  is 7 commits behind local tracking ref  origin/main .  origin/main  differs from the remote head observed less than 1 min ago; run git fetch origin to update local tracking refs.
+
+## fresh absent (30 s)
+main  is 7 commits behind local tracking ref  origin/main .  main  was absent on origin when checked less than 1 min ago.
+
+## stale matching (3 days)
+main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 3 days ago.
+
+## stale differing (3 days)
+main  is 7 commits behind local tracking ref  origin/main .  origin/main  differs from the remote head observed 3 days ago; run git fetch origin to update local tracking refs.
+
+## stale absent (3 days)
+main  is 7 commits behind local tracking ref  origin/main .  main  was absent on origin when checked 3 days ago.

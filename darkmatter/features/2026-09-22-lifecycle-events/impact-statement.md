@@ -165,4 +165,4 @@ Paths below are relative to the repository root and identify the implementation 
 - `claudine/cli/src/commands/wrap/composition/pipeline.rs` and `harness_orch/loop_control/`: initialization, catch paths, terminal downgrade, proxy, retry/resume, and host wiring.
 - `darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs`: existing shell-approval lifecycle; this is approval orchestration, not an existing equivalent of Claudine's seven-event engine.
 - `darkmatter/docs/schemas/{claudine,claudine-types}.yaml` and `darkmatter/dmls/src/overlay/schema.rs`: existing passive authoring integration to preserve and extend.
-- `claudine/docs/topics/lifecycle.md` and the Claudine/Darkmatter skill references: behavioral contracts and architecture context, checked against source where relevant.
+- `claudine/docs/topics/flow-control/lifecycle.md` and the Claudine/Darkmatter skill references: behavioral contracts and architecture context, checked against source where relevant.

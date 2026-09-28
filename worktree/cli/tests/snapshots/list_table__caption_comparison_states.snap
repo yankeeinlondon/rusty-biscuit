@@ -1,0 +1,21 @@
+---
+source: worktree/cli/tests/list_table.rs
+expression: "labeled(vec![(\"in sync\", state(0, 0)), (\"behind by one\", state(0, 1)),\n(\"behind\", state(0, 7)), (\"ahead by one\", state(1, 0)),\n(\"ahead\", state(3, 0)), (\"diverged\", state(3, 7)),])"
+---
+## in sync
+main  is in sync with local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+
+## behind by one
+main  is 1 commit behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+
+## behind
+main  is 7 commits behind local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+
+## ahead by one
+main  is 1 commit ahead of local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+
+## ahead
+main  is 3 commits ahead of local tracking ref  origin/main .  origin/main  matched the remote when checked 2 min ago.
+
+## diverged
+main  has diverged from local tracking ref  origin/main : 3 commits ahead, 7 commits behind.  origin/main  matched the remote when checked 2 min ago.

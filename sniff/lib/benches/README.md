@@ -182,6 +182,20 @@ Parameterised by package count (10, 100, optionally 500).
 |-----------|------------------|
 | `package_boundary_refresh/<count>` | `refresh_package_boundaries()` on a Cargo workspace with `<count>` packages. Structure and inventory are prepared outside the timed loop. Measures only boundary-assignment logic. Throughput: `<count>` elements. |
 
+## nested_marker_walk_corpus
+
+Requires `--features bench-internals`. Registers only when
+`SNIFF_BENCH_NESTED_CORPUS` names a checkout. It is manual evidence for
+`2026-09-20-repo-perf`: it has no CI ID and makes no portable timing
+assertion. Before the timed cases, it prints the corpus's walked-entry,
+marker, and candidate counts to stderr. It uses 20 flat samples per case.
+
+| Benchmark | What it measures |
+|-----------|------------------|
+| `serial_reference` | The frozen pre-parallelization serial nested-marker walk, collecting every entry and then grouping. It is the in-process "before" side. |
+| `production` | The production `walk_for_nested_markers` fallback walk, work counters included. |
+| `detect_repo_structure` | Public `detect_repo_structure(<corpus>)`, which takes the fallback walk because it receives no supplied marker evidence. |
+
 ## specification workload matrix
 
 The `workloads_*` groups are the production-shaped families required by the
@@ -211,6 +225,7 @@ the selected benchmark and outside its timed `b.iter` loop.
 |----------|--------|
 | `SNIFF_BENCH_DEEP_DIRTY=1` | Includes the `1000` dirty-file row in `git_dirty_scaling` |
 | `SNIFF_BENCH_DEEP_REPO=1` | Includes the `500` package row in `repo_package_boundaries` |
+| `SNIFF_BENCH_NESTED_CORPUS=<dir>` | Registers `nested_marker_walk_corpus` against `<dir>` (needs `bench-internals`) |
 
 ## What These Timings Are Worth
 

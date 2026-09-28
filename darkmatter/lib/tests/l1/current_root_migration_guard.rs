@@ -36,8 +36,6 @@ const SKIPPED_DIRS: [&str; 4] = ["target", "node_modules", "features", "fixes"];
 const ALLOWLIST: &[(&str, usize)] = &[
     // Skills explaining the clean break (R29–R33).
     (".claude/skills/claudine/SKILL.md", 2),
-    (".claude/skills/claudine/composition.md", 2),
-    (".claude/skills/claudine/lifecycle.md", 2),
     (".claude/skills/darkmatter/compose.md", 2),
     // Exception: a Rust field chain, `current.env.push(..)` on a local named
     // `current`, not the document spelling. The literal scan cannot tell
