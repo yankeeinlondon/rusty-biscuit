@@ -8,7 +8,7 @@
 //! sparse-lanes history) with `TERM_PROGRAM=ghostty`. Nothing is asserted
 //! about the durations (the graph has no numeric budget; reviewers compare the
 //! recorded medians); the tests prove both stages run on every shape and
-//! print their medians.
+//! print their medians and min–max spreads.
 //!
 //! A pseudo-terminal never answers terminal queries. Ghostty is the
 //! Kitty-protocol emulator whose image path asks no cursor-position question
@@ -78,6 +78,13 @@ fn list_perf_in_pty(fixture: &GraphFixture, columns: u32, rows: u32) -> String {
     text
 }
 
+/// `min–max` of the samples.
+fn spread(values: &[Duration]) -> String {
+    let min = values.iter().min().expect("a sample");
+    let max = values.iter().max().expect("a sample");
+    format!("{min:.1?}–{max:.1?}")
+}
+
 fn median(mut values: Vec<Duration>) -> Duration {
     values.sort();
     values[values.len() / 2]
@@ -106,14 +113,19 @@ fn stage_samples(fixture: &GraphFixture, columns: u32, rows: u32, samples: usize
 #[serial]
 fn perf_graph_stages_are_reported_for_every_graph_fixture() {
     let samples = samples();
-    let mut table = vec![format!("| Fixture | Samples | {GATHER} (median) | {RENDER} (median) |"), "|---|---|---|---|".into()];
+    let mut table = vec![
+        format!("| Fixture | Samples | {GATHER} (median, min–max) | {RENDER} (median, min–max) |"),
+        "|---|---|---|---|".into(),
+    ];
     for fixture in GraphFixture::all() {
         let (gathers, renders) = stage_samples(&fixture, 120, 40, samples);
         table.push(format!(
-            "| {} | {samples} | {:.1?} | {:.1?} |",
+            "| {} | {samples} | {:.1?} ({}) | {:.1?} ({}) |",
             fixture.name,
-            median(gathers),
-            median(renders)
+            median(gathers.clone()),
+            spread(&gathers),
+            median(renders.clone()),
+            spread(&renders)
         ));
     }
     println!("{}", table.join("\n"));
@@ -128,11 +140,6 @@ fn perf_graph_stages_for_the_observed_sparse_lanes_at_200x60() {
     let samples = samples();
     let fixture = GraphFixture::observed_sparse_lanes();
     let (gathers, renders) = stage_samples(&fixture, 200, 60, samples);
-    let spread = |values: &[Duration]| {
-        let min = values.iter().min().expect("a sample");
-        let max = values.iter().max().expect("a sample");
-        format!("{min:.1?}–{max:.1?}")
-    };
     println!(
         "| Fixture | Size | Samples | {GATHER} (median, min–max) | {RENDER} (median, min–max) |\n|---|---|---|---|---|\n| {} | 200×60 | {samples} | {:.1?} ({}) | {:.1?} ({}) |",
         fixture.name,
@@ -173,7 +180,8 @@ fn observed_sparse_lanes_graph_fixture_has_the_observed_topology() {
     assert_eq!(git(&["worktree", "list", "--porcelain"]).matches("worktree ").count(), 4);
 
     let store = worktree::fork_origin::ForkOriginStore::load_from(&fixture.fork_store());
-    assert_eq!(store.get("fix/sniff").map(|fork| fork.base_branch.as_str()), Some("fix/wt-ux"));
-    assert_eq!(store.get("fix/wt-ux").map(|fork| fork.base_branch.as_str()), Some("main"));
-    assert_eq!(store.get("feat/schema-enhancement").map(|fork| fork.base_branch.as_str()), Some("main"));
+    let record = |branch: &str| store.get(branch).map(|fork| (fork.base_branch.clone(), fork.base_sha.clone()));
+    assert_eq!(record("fix/sniff"), Some(("fix/wt-ux".to_string(), w1)), "created at W1");
+    assert_eq!(record("fix/wt-ux"), Some(("main".to_string(), at("main~10"))), "created at d5");
+    assert_eq!(record("feat/schema-enhancement"), Some(("main".to_string(), at("main~13"))), "created at d2");
 }
