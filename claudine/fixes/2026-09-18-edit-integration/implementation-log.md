@@ -34,6 +34,18 @@ docs_updated_during_phase_3:
     - claudine/fixes/2026-09-18-edit-integration/spec.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/spawn_site_guard.rs
+    - claudine/cli/tests/level2/level2_edit_interactive_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/cli/tests/real/main.rs
+    - claudine/cli/tests/real/real_pi_interactive_startup.rs
+docs_updated_during_phase_4:
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+    - claudine/fixes/2026-09-18-edit-integration/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - claudine-cli
 ---
@@ -356,3 +368,149 @@ The dispatch-inventory edit, plan, log, and spec changes are uncommitted.
   `.claude/skills/claudine` found no current page stating the old Goose,
   Kilo, Antigravity, or Pi interactive shapes. Phase 5 still owes the
   research notes (Pi `--` floor) and the timeline entry.
+
+## Phase 4
+
+Started and finished 2026-09-28 on macOS (dev Mac). Phase 4 adds the
+terminal-backed coverage: an L2 file driving `--edit -i` through a detached
+tmux session with fake providers, and an opt-in `real_` file driving the
+installed Pi. No production source changed. Unlike Phases 1–3, the live runs
+were possible: this session's policy still refused `tmux` and `pi` as direct
+commands, but `just test-l2` and `just test-real` ran them inside the tests.
+
+### What changed
+
+- **New L2 file** `claudine/cli/tests/level2/level2_edit_interactive_capture.rs`,
+  declared `#[cfg(unix)]` in `level2/main.rs` (N9). Each case builds its own
+  `CliProcessFixture` and runs `claudine` under `env -i` from a launcher
+  script in the shared tmux pane, following `level2_provider_overlay_capture.rs`.
+  The fake editor is named by bare `EDITOR=fake-editor` (Claudine splits the
+  editor command on whitespace) and acts on a `mode` file: `write`, `empty`,
+  or `fail` (exit 3), copying its starting buffer to `seed.md` first. The fake
+  provider records one file per argument (so a multiline argument survives
+  intact), the argument count, both TTY checks, non-TTY stdin, and one line
+  per launch. `TMPDIR` keeps the editor buffer inside the fixture.
+- **New real file** `claudine/cli/tests/real/real_pi_interactive_startup.rs`,
+  declared `#[cfg(unix)]` in `real/main.rs`. It is gated in the body (no
+  `#[ignore]`, per the `rust-testing` skill) on `CLAUDINE_CONTRACT_REAL=1`,
+  `pi` on `PATH`, and tmux. Each test runs `claudine pi … -i` in its own owned
+  tmux session, waits for the deterministic `claudine-probe` model
+  (`tests/fixtures/steering/pi-probe.ts`) to answer the first turn, types a
+  second turn, waits for that answer, checks that `probe.json` saw exactly
+  the two user turns, then quits with Ctrl+C. A `pi` shim in the fixture `bin`
+  records Claudine's argv and `exec`s the real Pi, so each test also asserts
+  that the argv ends in `-- <message>`.
+- **Guard amended** (`claudine/cli/tests/l1/spawn_site_guard.rs`,
+  `a_terminal_tier_name_must_match_the_resource_the_file_owns`). The guard
+  failed the real file: any file that builds an emulator session must be
+  named `level2_`/`level3_`, on the premise that `just test` otherwise selects
+  it. A `real_` name also keeps a file out of `just test`, so the premise does
+  not hold for it. The unlabeled check now skips `real_` files; the
+  mislabeled check is unchanged. The alternative, a `level2_` name inside the
+  `real` binary, would carry two tier markers.
+
+### Real Pi result (AC12, #9200)
+
+`just test-real real_pi_interactive_startup::` on Pi **0.87.1**
+(`/Users/ken/.bun/bin/pi`): **4 passed**. The four cases are the direct
+`"<p>" -i` prompt, `--edit -i` with a multiline bullet prompt, a ~2 KB prompt,
+and a prompt starting with `@`. Each first turn was submitted from argv, and
+the TUI took a second turn in the same session.
+
+- **#9200 did not reproduce** at 2 KB on 0.87.1. This evidence resolves the
+  Pi human-review item, and the plan's Pi task is ticked.
+- **Negative control for `@`.** With the leading-space rule temporarily
+  disabled in `profile/pi.rs`, the `@` test failed: Claudine passed
+  `["--", "@TEMPLATE_NONCE is not a file"]` and Pi never answered. The rule is
+  load-bearing. `pi.rs` was restored (`git diff` empty), and the test passed
+  again.
+
+### Departures and findings
+
+- **Pi's fixture model comes from `settings.json`, not Pi flags.** The first
+  attempt passed Pi's flags after Claudine's `--`
+  (`claudine pi "<p>" -i -- --offline --provider claudine-probe …`). Pi
+  received `pi -- --offline … -- <p>` and read every flag as a message. The
+  test now writes `defaultProvider`, `defaultModel`, `defaultThinkingLevel`,
+  `extensions`, and `sessionDir` to `settings.json` in `PI_CODING_AGENT_DIR`
+  and sets `PI_OFFLINE=1`, so Claudine's argv holds only wrapper arguments.
+  Passing the flags without `--` was rejected: Claudine's positional-prompt
+  scan knows only `COMMON_VALUE_TAKING_FLAGS`, so in the `--edit` case (no
+  positional) `claudine-probe` would be taken as the seed prompt.
+- **Finding, out of scope (Rule 3): a user `--` after the positional reaches
+  the provider verbatim.** Claudine keeps the `--` literal in the provider
+  argv. Every provider then reads the "opaque" arguments after it as
+  positionals, not options. A profile that appends its own `--` (Pi
+  interactive, and Codex and Kilo for `-`-prefixed prompts) produces two
+  separators. Reproduction: `claudine pi "hello" -i -- --offline` launches
+  `pi -- --offline -- hello`. File it in Phase 5 next to the N6 defect.
+- **`prompt empty; aborted` is invisible by default.** It is `log::info`,
+  which prints only when tracing is enabled (`RUST_LOG` or `--debug info`),
+  not under `-v`. The AC3 test runs `claudine --debug info codex --edit -i
+  seed` to observe it, and also asserts `opening fake-editor for prompt...`.
+  The default silent clean exit is existing behavior (R3) and was not
+  changed. Phase 5 docs should not promise that message without `--debug`.
+- **The editor diagnostic is a status block.** AC4 asserts its fields
+  (`EditorError: editor exited with error`, `Editor: fake-editor`,
+  `Exit code: 3`) rather than the one-line `Display` text.
+- **Nextest's 30 s slow-timeout bounds the real tests.** The turn wait is
+  20 s. Each test took about 2.3 s.
+
+### Requirement → test mapping
+
+| Requirement | Test (tier) |
+|---|---|
+| AC1/AC2: `--edit --interactive`, `--edit -i "seed"`, and `"seed" --edit -i` launch interactive Codex with the edited text as the leading positional, a TTY on stdin and stdout, no stdin feed, no `exec`, no leaked wrapper flag or seed, and no conflict text. The editor started from the seed (or empty) | `level2_edit_interactive_capture::level2_tmux_edit_interactive_delivers_the_edited_prompt_as_the_first_turn` (L2) |
+| AC8: a multiline prompt starting with `- ` reaches Codex whole after `--` | `…::level2_tmux_edit_interactive_delivers_a_bullet_prompt_after_end_of_options` (L2) |
+| AC3: an empty buffer exits 0, logs the abort, and launches nothing | `…::level2_tmux_edit_interactive_empty_buffer_aborts_without_launching` (L2) |
+| AC4: editor exit 3 shows the typed diagnostic, exits 1, and launches nothing | `…::level2_tmux_edit_interactive_editor_failure_launches_nothing` (L2) |
+| AC6: `--dry-run --edit -i` runs the editor; the header shows `Codex`, the prompt, and `Interactive`; `[DRY RUN]` appears; exit 0 with no `codex` on `PATH` | `…::level2_tmux_edit_interactive_dry_run_previews_without_a_provider` (L2) |
+| AC9 (first half): plain `--edit` launches `exec` with the prompt on stdin | `…::level2_tmux_edit_without_interactive_stays_non_interactive` (L2) |
+| Repaired profile through the pipeline: Pi gets `-- <bullet prompt>`, a TTY on stdin, and no print-mode flag | `…::level2_tmux_pi_edit_interactive_passes_the_prompt_on_argv_and_keeps_the_terminal` (L2) |
+| AC12: real Pi submits the direct and the edited startup prompt and stays interactive | `real_pi_interactive_startup::real_pi_direct_interactive_prompt_is_the_first_turn`, `…::real_pi_edited_interactive_prompt_is_the_first_turn` (real) |
+| #9200: a ~2 KB positional message | `…::real_pi_two_kilobyte_interactive_prompt_is_the_first_turn` (real) |
+| A prompt starting with `@` stays a message | `…::real_pi_interactive_prompt_starting_with_at_is_a_message` (real) |
+| The tier-name guard admits a `real_` file with an emulator session | `spawn_site_guard::a_terminal_tier_name_must_match_the_resource_the_file_owns` (L1, amended) |
+
+- **Regression proof.** With `conflicts_with = "interactive"` temporarily
+  restored on `WrapperArgs::edit`, 6 of the 7 L2 tests failed. The plain
+  `--edit` control passed, as it should. `flags.rs` was restored (`git diff`
+  empty). The `@` negative control is described above.
+- **Placement.** Both files are compiled by declared binaries (`level2`,
+  `real`) and selected by live recipes, since every test path starts with
+  `level2_` or `real_`. `just check-tier-coverage claudine` reports 0 stranded.
+
+### Gates (Checkpoint 4)
+
+- `just test-l2 edit_interactive_capture` (macOS, tmux): **7 passed**.
+- `just test-real real_pi_interactive_startup::` (macOS, Pi 0.87.1):
+  **4 passed**.
+- `cd claudine && just test` (macOS): **7739 passed, 9 skipped, 0 failed**.
+  The first run failed only on the tier-name guard (resolved above).
+- `cd claudine && just lint`: clean. The only output is the long-standing
+  macOS linker `__eh_frame` warning. `just lint` does not enable
+  `terminal-tests` or `real-tests`, so the new files were also checked
+  directly. `cargo clippy -p claudine-cli --test real --features real-tests
+  -- -D warnings` is clean. `cargo clippy … --features terminal-tests`
+  reports nothing in the new L2 file but fails on a **pre-existing**
+  `needless_lifetimes` lint in `level2_dry_run_metadata_capture.rs:283`,
+  which this phase did not touch.
+- **OS.** Both new files are Unix-only. The L1 change is a filename rule with
+  no OS dependence, so `just cross-check` (which runs L1 only) was not run.
+  Linux L2 evidence comes from the PR CI leg, as the plan's checkpoint
+  states. The `real_` tier does not run in CI.
+
+### Skill update not made
+
+The session's permission policy refused the write to
+`.claude/skills/claudine/SKILL.md`. The intended addition goes after the
+sentence ending "so any raw spawn is now simply a failure." in the L1 spawn
+contract paragraph:
+
+> The same guard requires a test file that builds an emulator session
+> (`TmuxHarness`, `WezTermHarness`, …) to be named `level2_`/`level3_`; a
+> `real_` file is exempt, since `just test` already excludes it, so a
+> real-provider test may drive its provider's TUI in tmux
+> (`real/real_pi_interactive_startup.rs`).
+
+Phase 5 should apply it along with its planned skill edits.

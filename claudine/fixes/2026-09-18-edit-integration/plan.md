@@ -35,6 +35,18 @@ docs_updated_during_phase_3:
     - claudine/fixes/2026-09-18-edit-integration/spec.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/spawn_site_guard.rs
+    - claudine/cli/tests/level2/level2_edit_interactive_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/cli/tests/real/main.rs
+    - claudine/cli/tests/real/real_pi_interactive_startup.rs
+docs_updated_during_phase_4:
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+    - claudine/fixes/2026-09-18-edit-integration/spec.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - claudine-cli
 ---
@@ -309,7 +321,7 @@ provider blocked under N2 skips its repair task until the author rules.
 - [x] **Antigravity repair** (`profile/antigravity.rs`)
   - Interactive: `--prompt-interactive <p>` (or `=<p>` per S1). Non-interactive
     stays `--print` last on argv. Update the profile comment.
-- [ ] **Pi repair** (`profile/pi.rs`)
+- [x] **Pi repair** (`profile/pi.rs`)
   - Interactive: `AppendArgs(["--", prompt])` per S2, with the S3 size guard.
     Non-interactive stays stdin. Rewrite the stale 0.80.3 comment to state
     both channels and the minimum version.
@@ -317,6 +329,9 @@ provider blocked under N2 skips its repair task until the author rules.
     the size guard. Left open until upstream issue #9200 is ruled on by the
     author or checked live (Phase 4 real Pi test with a prompt of about 2 KB);
     see the implementation log.*
+  - *Closed in Phase 4 (2026-09-28): `real_pi_interactive_startup.rs` passed
+    on Pi 0.87.1 for the direct, edited, ~2 KB, and `@`-prefixed prompts.
+    #9200 did not reproduce.*
 - [ ] **Kimi resolution** (`profile/kimi.rs`)
   - If S1 found a surface, repair to it. If N2 fired, leave the code, add
     nothing, and wait for the author's ruling. Do not tick the fleet
@@ -349,7 +364,7 @@ row from its table: try it locally once, then revert.
 
 Depends on Phase 2. The Pi and repaired-profile assertions depend on Phase 3.
 
-- [ ] **L2 edit-interactive capture** (`claudine/cli/tests/level2/level2_edit_interactive_capture.rs`, registered in `level2/main.rs`)
+- [x] **L2 edit-interactive capture** (`claudine/cli/tests/level2/level2_edit_interactive_capture.rs`, registered in `level2/main.rs`)
   - Harness: `biscuit_test_harness::TerminalHarness` in a **detached tmux**
     session. Launch under `env -i` with only fixture variables, following
     `level2_provider_overlay_capture.rs`. Gate with `require_level!`. Never
@@ -377,7 +392,7 @@ Depends on Phase 2. The Pi and repaired-profile assertions depend on Phase 3.
   - Also cover one repaired provider end to end (Pi fake stub:
     `--` + prompt on argv, stdin is a TTY) to prove that Phase 3 output flows
     through the real pipeline.
-- [ ] **Real Pi startup test** (`claudine/cli/tests/real/real_pi_interactive_startup.rs`, AC12)
+- [x] **Real Pi startup test** (`claudine/cli/tests/real/real_pi_interactive_startup.rs`, AC12)
   - Opt-in `real-tests` tier, following `real_pi_steering.rs`. Run real `pi`
     in detached tmux, once with `claudine pi "Reply READY" -i` and once with
     `--edit -i` using a fake editor. Assert that the TUI shows the reply and

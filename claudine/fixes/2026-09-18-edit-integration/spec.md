@@ -19,24 +19,6 @@ human_review_items:
         Cons: it adds a second, Kimi-only launch path, which the spec explicitly forbids. It is also fragile (`--continue` picks "the most recent session", which is unsafe if two runs overlap) and splits one conversation across two processes.
 
       **Recommendation: A.** It is the only option that is both truthful and inside the spec's rule against new delivery paths. When Kimi ships an initial-prompt option, the refusal is replaced by that option.
-    - |-
-      **Pi may crash on long first messages passed on the command line. Should Pi's fix wait for a live check?**
-
-      The only way to give Pi a first message and keep its interactive screen is on the command line (`pi -- "<message>"`). Sending it through standard input makes Pi switch to one-shot mode. A report on Pi's issue tracker (#9200, versions 0.83.0 and 0.85.1) says Pi is killed immediately, with no output, when one command-line message is about 1 KB or longer. Upstream closed the report without investigating it. Edited prompts are often longer than 1 KB. This session could not run Pi to check, because running provider programs was not permitted. This should be settled before Phase 3's Pi repair, because it decides what that repair looks like.
-
-      - **A. Check it live first.** Run `pi -- "<about 2 KB of text>"` once in a terminal on this Mac (Pi 0.87.1). If it works, go ahead with the command-line fix and its normal size guard.
-        Pros: a quick test that settles the question.
-        Cons: needs a person, or a session that is allowed to run `pi`.
-      - **B. Go ahead with the command-line fix now, with the normal size guard (768 KB).**
-        Pros: no delay.
-        Cons: if the report is right, most edited prompts would crash Pi's interactive mode.
-      - **C. Pass the prompt as a temporary file (Pi's `@file` syntax) instead.**
-        Pros: avoids the command-line length problem entirely.
-        Cons: it is a new delivery mechanism, which the plan's rules exclude. It needs temporary-file handling inside the Pi profile, and it has not been confirmed that `@file` content is submitted as the first message in interactive mode.
-
-      **Recommendation: A**, falling back to C only if the crash reproduces. A single 2 KB test decides the question, and the plan's Phase 4 real Pi test should include a prompt of that size in any case.
-
-      **Update after Phase 3 (2026-09-28):** the command-line fix is now in the code, with the 768 KB guard. That is the code both A and B lead to. The Phase 3 session still could not run Pi. The old standard-input route never produced an interactive session, so this change cannot make any prompt worse, and a short prompt should now work. The Pi task stays open. Your choice now decides only whether the live 2 KB check (by you, or by the Phase 4 real Pi test) is required before this fix is closed, or whether C replaces it.
 message_to_agent: |-
   Phase 1 (rulings and spikes) is done. Read `spike-interactive-startup.md` in this directory before Phase 3. Phase 2 (wrapper validation) does not depend on any of the open items below and can proceed as planned.
 
@@ -60,6 +42,14 @@ message_to_agent: |-
   12. Phase 4 L2: the fleet test lives in `profile/tests/positional.rs` (`every_provider_delivers_an_interactive_startup_prompt`, table keyed by `Provider::as_slug()`). For the L2 Pi stub case, expect argv `-- <prompt>` and no stdin seed.
   13. `claudine/docs/providers/dispatch-inventory.json` must match `cli/src` byte for byte. Any new `Provider::X` in `cli/src` or `lib/src`, including `#[cfg(test)]` files under `src/`, needs a regeneration: `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` in `claudine/`. Phase 3's session could not set that variable, so it hand-edited 12 `direct-ref` records. The byte-compare test passes. Integration tests under `cli/tests/` are not scanned.
   14. Commit `57968bb03` was made by a separate process during Phase 3. It contains the Phase 3 source changes. Its message wrongly says "Phase 2" and claims the whole fleet is covered, which is not true while Kimi and Pi are open. Correct it at review time if the history is rewritten.
+
+  Phase 4 (terminal-backed coverage) is done; see the implementation log's `## Phase 4`. Only the Kimi ruling (N2) remains open for the author.
+
+  15. Pi is settled. `real_pi_interactive_startup.rs` passed on Pi 0.87.1 for the direct, edited, ~2 KB, and `@`-prefixed prompts: each first turn was submitted and the TUI took a second turn. #9200 did not reproduce, so the Pi human-review item was removed and the plan's Pi task is ticked. A negative control showed the leading-space `@` rule is required. Phase 5's Pi research note can state `-- <message>` as live-verified on 0.87.1 (0.84.3 minimum per the changelog).
+  16. File a second `_unscheduled` fix next to N6's: a user `--` after the positional is forwarded to the provider verbatim. `claudine pi "hello" -i -- --offline` launches `pi -- --offline -- hello`, so the provider reads the "opaque" arguments as positionals, and profiles that append their own `--` (Pi interactive, Codex/Kilo for `-`-prefixed prompts) emit two separators. Observed live in Phase 4. Not fixed (Rule 3).
+  17. Docs: `prompt empty; aborted` and `opening <editor> for prompt...` are `log::info`, printed only with `RUST_LOG` or `--debug info` (not `-v`). By default an empty buffer exits 0 silently. Do not document the message as always shown.
+  18. The skill write to `.claude/skills/claudine/SKILL.md` was refused by Phase 4's permissions. The log's "Skill update not made" section holds the sentence to add (the spawn-site guard now exempts `real_` files that build an emulator session). Apply it with Phase 5's skill edits.
+  19. Pre-existing, not from this fix: `cargo clippy -p claudine-cli --tests --features terminal-tests -- -D warnings` fails on `needless_lifetimes` in `level2_dry_run_metadata_capture.rs:283`. `just lint` does not enable that feature, so it stays hidden. Mention it rather than fix it.
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28
