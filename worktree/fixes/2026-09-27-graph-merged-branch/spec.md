@@ -33,52 +33,54 @@ related:
     - 2026-09-27-list-freshness-ux
 human_review: false
 message_to_agent: |-
-    Phase 3 (git discovery in worktree-cli) is done; read implementation-log.md's
-    "## Phase 3" first. What Phase 4 must rely on or finish:
+    Phase 4 (rendered evidence, cross-OS, performance) is done except one
+    environment-blocked item; read implementation-log.md's "## Phase 4".
 
-    - Gathering: `commands/git_graph.rs` `assemble` (classify in parallel, then
-      branch lanes in parallel, then the default lane from leftover anchors);
-      the git helpers are `commands/git_graph/topology.rs`. `GraphFacts` now has
-      `incomplete`, passed on through `with_incomplete_history()`.
-    - The fixtures you need for the end-to-end layout evidence already exist as
-      unit-test builders in `cli/src/commands/git_graph/tests.rs`
-      (`merged_via_merge_commit`, `nested_parent_merged_into_default`,
-      `old_connections`, `shallow_clone`, ...). They are private to that test
-      module; an integration test cannot call them, so either add the layout
-      assertions beside them (they already call `to_git_graph().plan_with`) or
-      port the builders.
-    - KITTY L2 COULD NOT BE VERIFIED in the Phase 3 session: both
-      `level2_graph_in_kitty` tests failed at the screenshot step with a capture
-      that has window chrome but no contents, which the test attributes to the
-      calling terminal lacking macOS Screen Recording permission. Phase 4's
-      screenshot evidence needs a session that has it; a failure of this shape
-      is not a graph regression.
-    - LINUX CROSS-CHECK: `./scripts/cross-check.sh --os linux <pkg>` (archive
-      mode) fails on build-linux before compiling repository code
-      (`target/release/deps/*.rmeta is not writeable`, stale kache links in the
-      fix-wt-ux clone; see the os skill's build-hosts.md). Add a build flag
-      (`--features terminal-tests` for worktree-cli, `--features image` for
-      biscuit-terminal) to take the native path; it runs `perf_` tests too.
-      Phase 3 results: Linux 493 passed, Windows 420 passed.
-    - The `a_shallow_clone_lists_with_the_incomplete_history_notice_...` binary
-      test cannot assert zero upload-pack runs: the listing's own live-head
-      worker always checks origin. It asserts the graph adds none.
-    - Known visible consequence of R4 (not a bug; Phase 5 docs must state it):
-      a branch continued after its merge is an unconnected lane plus "Some
-      history is not shown", because its fork (the old merged tip) is on no
-      first-parent lane.
-    - Plan deviations recorded as amendments: R4-A2 (merged-into-parent fork
-      against C^1), anchors verified with `log --no-walk --ignore-missing`
-      instead of a `rev-parse` batch, stage 2 split into branch lanes then the
-      default lane, and CONTEXT_COMMITS replaced by "oldest anchor + its first
-      parent". Perf (Phase 4): classification adds one `merge-base
-      --is-ancestor` per candidate lane per branch, and anchors beyond a window
-      add one `rev-list --count` each (on threads) plus one batched `log`.
-    - Still open from Phase 2: biscuit-terminal's `just lint` does not enable
-      `image` (which compiles git_graph); also run `cargo clippy -p
-      biscuit-terminal --features image --all-targets -- -D warnings`. The
-      layout helper is `MermaidDiagram::gitgraph_geometry()` (#[doc(hidden)],
-      `tag_overlaps()`). Docs are Phase 5: `worktree/docs/git-graph.md` and
+    - KITTY SCREENSHOT STILL UNVERIFIED (third session in a row). The new
+      `level2_graph_draws_a_merged_branch_in_kitty` passes every check before
+      the screenshot at 100x32 and 56x60; the screenshot has window chrome and
+      no contents (the calling terminal lacks macOS Screen Recording
+      permission), and the two older Kitty tests fail at the same step. The
+      transmitted PNGs were inspected instead and are kept in
+      `spikes/phase4-kitty-output/`. Plan task "Kitty L2 extension" and
+      Checkpoint 4's screenshot item are left unchecked. The hand-off report
+      must say a human needs to run
+      `BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`
+      from a terminal with that permission and look at
+      `$TMPDIR/wt-graph-merged-{100x32,56x60}-screenshot.png`.
+    - Acceptance-trace names for Phase 5: the Wave 7 layout test is
+      `commands::git_graph::tests::gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`
+      (in `cli/src/commands/git_graph/tests.rs`, not `cli/tests/`, because
+      the fixtures and `gather` are private there); the Kitty test is
+      `level2_graph_in_kitty::level2_graph_draws_a_merged_branch_in_kitty`.
+      R12's `origin/very-long-exact-branch-reference-beta` became the local
+      branch `fix/very-long-exact-branch-reference-beta`, because `wt list`
+      draws no remote ref except `origin/<default>`.
+    - `worktree-cli` now has `biscuit-visualized` (image) as a
+      dev-dependency; `docs/dependencies.md` already records it.
+    - Performance is recorded in `worktree/docs/performance-testing.md`
+      ("Graph Stages"): `graph gather` roughly doubles (+4.6 to +56.8 ms,
+      from added sequential git spawns at about 5 ms each), render
+      unchanged; every `just test-perf` gate passes. That doc's graph
+      bullets are already current; git-graph.md is still Phase 5's.
+    - Out-of-scope finding, logged only: at 56 columns the `wt list` TABLE
+      wraps its `-> parent` header cell when a branch name is ~46
+      characters. No phase touched the table.
+    - Carried over from Phase 3 and still true: Linux cross-check needs a
+      build flag (native path); biscuit-terminal's `just lint` does not
+      enable `image`, so also run `cargo clippy -p biscuit-terminal
+      --features image --all-targets -- -D warnings`; biscuit-visualized on
+      Windows needs `--features image` (CI-excluded, archive mode refuses).
+    - Carried over from Phase 3 for the Phase 5 docs: a branch continued
+      after its merge is an unconnected lane plus "Some history is not
+      shown" (its fork, the old merged tip, is on no first-parent lane);
+      the docs must state it. Plan deviations to describe as current
+      behavior: R4-A2 (merged-into-parent fork measured against C^1),
+      anchors verified with `log --no-walk --ignore-missing`, stage 2 split
+      into branch lanes then the default lane, and the focused view's
+      context being "oldest anchor + its first parent". The shallow-clone
+      binary test asserts the graph adds no upload-pack run (the listing's
+      own worker always checks origin). `worktree/docs/git-graph.md` and
       `biscuit-terminal/docs/components/git_graph.md` still describe merged
       branches as tags.
 references:

@@ -45,6 +45,17 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_4:
+    - Cargo.lock
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+docs_updated_during_phase_4:
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
     - biscuit-visualized
@@ -913,3 +924,253 @@ every fixture. `just test-perf meets_sla`: all six pass
 - Skipped or failing and not caused by this phase: `level2_graph_in_kitty`
   (environment: no Screen Recording permission); build-linux archive mode
   (environment: stale kache links). No pre-existing test failures otherwise.
+
+## Phase 4
+
+Rendered evidence, cross-OS, and performance, 2026-09-27. No production
+source changed in this phase; everything below is tests, a dev-dependency,
+evidence files, and docs.
+
+### End-to-end layout evidence (Wave 7, portable L1)
+
+`commands::git_graph::tests::gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`
+(`worktree/cli/src/commands/git_graph/tests.rs`). For each real-Git fixture it
+runs `gather`, `to_git_graph`, then `plan()` with the real measurement
+(`MermaidTheme::Default`) at 120×40 and 56×60 (`CellSize::FALLBACK`), and reads
+the layout the image is drawn from through
+`biscuit_visualized::mermaid::MermaidDiagram::gitgraph_geometry()`. Per
+viewport it asserts: not incomplete, no hidden lane, `tag_overlaps()` empty,
+every expected tag on the emitted ID of its exact SHA, both merge parents
+exact (the first may be a `+N` square once trimmed), the sorted tag texts
+identical at both viewports (no label shortened or dropped), a graph wider than
+56 columns at 120 is trimmed or shrunk at 56, and wider-than-viewport only once
+fully trimmed. With `ImageWidth::Characters(40)` it asserts `columns == 40`,
+`trimmed_commits == 0`, and the planned text equals the untrimmed text.
+
+| Fixture (view) | Viewport | Columns | Rows | Trimmed | Commit step | Natural width |
+|---|---|---|---|---|---|---|
+| observation 1 (focused, from `fix/wt-ux`) | 120×40 | 103 | 13 | 0 | 81.1 | 657 |
+| observation 1 (focused) | 56×60 | 103 | 13 | 2 | 81.1 | 657 |
+| observation 1 (base, from `main`) | 120×40 | 103 | 13 | 0 | 81.1 | 657 |
+| observation 1 (base) | 56×60 | 103 | 13 | 2 | 81.1 | 657 |
+| observation 2 (base) | 120×40 | 131 | 19 | 6 | 81.1 | 835 |
+| observation 2 (base) | 56×60 | 131 | 19 | 6 | 81.1 | 835 |
+| long labels (base) | 120×40 | 350 | 13 | 3 | 220.8 | 2,234 |
+| long labels (base) | 56×60 | 350 | 13 | 3 | 220.8 | 2,234 |
+
+The expected tags and merges, by full SHA:
+
+- observation 1: `main` on `d2`, `origin/main` on the merge; merge parents
+  `[d2, w2]`;
+- observation 2: `main` on `m103`, `origin/main` on `m104`; merges
+  `m103 ← [d1, w2]` and `m104 ← [m103, s12]`;
+- long labels (new fixture `long_labels`): `fix/very-long-exact-branch-reference-beta`
+  on `d3`, `main` on `d4`, `origin/main` on `d5` (three neighboring
+  default-lane commits), and `PR #104 → main` on the tip of
+  `feature/very-long-exact-branch-reference-alpha`'s lane.
+
+As Phase 2 predicted, at 56 columns the graph is trimmed and then shrunk
+(`columns` > 56 with every trimmable commit folded), and the tag-driven step
+keeps the width unchanged by trimming.
+
+Deviations (recorded; the spec is untouched):
+
+- **Placed beside the fixtures, not in `cli/tests/`.** The plan says
+  "`worktree-cli` integration test". The real-Git fixtures and `gather` are
+  private to `commands::git_graph` and its test module, so the test sits in
+  `git_graph/tests.rs` (compiled by the lib and bin targets, so it runs twice;
+  no `insta`). It still crosses every boundary the plan named: real Git,
+  gathering, `GitGraph::plan` with the real measurement, and the
+  `biscuit-visualized` layout.
+- **R12's second label is a local branch.** `wt list` draws no remote-tracking
+  ref other than `origin/<default>`, so `origin/very-long-exact-branch-reference-beta`
+  could never reach the graph. The fixture uses the same-length local branch
+  `fix/very-long-exact-branch-reference-beta` as a label on the default lane.
+- **New dev-dependency:** `biscuit-visualized` (workspace path, `image`
+  feature) in `worktree/cli/Cargo.toml`, for `gitgraph_geometry`. It was
+  already built through `biscuit-terminal`; `docs/dependencies.md` records it.
+
+Load-bearing check: before removing a temporary debug print, the emitted
+Mermaid for the long-label fixture showed the three long/ref labels on three
+adjacent default-lane commits and the PR tag on the lane tip, which are the
+cases the overlap assertion is meant to cover.
+
+### Kitty L2 extension (macOS)
+
+`worktree/cli/tests/level2_graph_in_kitty.rs`:
+
+- `Fixture` is now built by `init()` plus `new()` (the unchanged five-lane
+  fixture) or `merged()` (a `fix/wt-ux` worktree merged into `main` with a
+  merge commit). The table check reads the fixture's worktree names (sorted,
+  as `wt list` lists them) instead of the five constant branches.
+- New `level2_graph_draws_a_merged_branch_in_kitty` runs at 100×32 and 56×60.
+  Both windows' text and APC checks (table intact, rows ≤ half the window, no
+  "Some history is not shown") run and both images are kept before either
+  screenshot, then each window's image placement is checked. `GraphRun::keep_evidence`
+  keeps `wt-graph-merged-<cols>x<rows>-screenshot.png` and writes
+  `…-transmitted.png` in the temp directory.
+- The existing APC and reservation assertions are unchanged, and so are the
+  two existing tests.
+
+Two fixture changes made while bringing the test up, neither a graph defect:
+
+- A second, unmerged worktree was dropped from `merged()`. At 100×32 the base
+  view's half-height cap left it out ("1 more worktree not shown") under the
+  unchanged activity rule.
+- The merged branch was first `feature/very-long-exact-branch-reference-alpha`.
+  At 56 columns the **table** (not the graph) then wraps its header cell
+  (`-> paren` / `t`), which broke the test's one-row header parsing. The table
+  is outside this fix (no phase touched it), so the branch is now `fix/wt-ux`,
+  observation 1's name. Long neighboring labels are proven at L1. **Finding
+  outside this fix:** at 56 columns with a 46-character branch name, the
+  `wt list` table's header wraps inside the `-> parent` cell.
+
+Run: `BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli
+--features terminal-tests -E 'binary(level2_graph_in_kitty)'`.
+
+**Not verified: the screenshot step.** Every check before it passes for both
+sizes of the new test (the table, the `c=` columns ≤ window, the PNG's width =
+columns × cell width, reserved rows = Kitty's rows, the text band). The window
+screenshot again has window chrome and no contents, the calling terminal's
+missing macOS Screen Recording permission that Phase 3 recorded, and the two
+existing tests fail at the same step. This non-interactive session cannot grant
+it. The image placement on screen therefore still needs one run from a
+terminal with that permission.
+
+Inspected instead, the PNGs `wt` transmitted to Kitty (the image Kitty is asked
+to draw), copied to
+`spikes/phase4-kitty-output/wt-graph-merged-{100x32,56x60}-transmitted.png`:
+
+- 100×32: `fix/wt-ux` has its own lane, forks from `main` at `ba05020`
+  (`main 2`), holds `e20cd78` and `508303f`, and its merge edge enters `main`
+  at `a19e7b6`, the commit labeled `main`. The default lane is
+  `851fe51 → ba05020 → bf985a8 → a19e7b6` with no branch commit on it. One
+  label; nothing overlaps.
+- 56×60: the same, with `851fe51`, `bf985a8`, and `e20cd78` folded into `+1`
+  squares. The merge edge and the `main` label are unchanged.
+
+(`main 1`/`main 2` short SHAs differ per run; the fixture has fixed topology
+but not fixed timestamps.)
+
+### Cross-OS L1
+
+`./scripts/cross-check.sh` from this worktree (throwaway commit over
+`origin/fix/wt-ux`; the banner reads `+ 1238 changed file(s)` because the
+remote branch is behind the local one).
+
+| OS | Package | How | Result |
+|---|---|---|---|
+| Linux (`build-linux`) | biscuit-visualized | `--features image` (native path) | 98 passed |
+| Linux | biscuit-terminal | `--features image` | 3,073 passed, 2 skipped |
+| Linux | worktree | `--features count-git` | 307 passed |
+| Linux | worktree-cli | `--features terminal-tests` | 496 passed (both targets of the new layout test pass; Kitty L2 skips) |
+| native Windows (`build-win-native`) | biscuit-visualized | archive mode refused (`the plan resolves no single windows-latest build`: the package is CI-excluded, `gates = false`); rerun with `--features image` | 98 passed |
+| native Windows | biscuit-terminal | archive (CI features) | 3,003 passed, 58 skipped |
+| native Windows | worktree | archive | 288 passed |
+| native Windows | worktree-cli | archive | 422 passed, 47 skipped (new layout test PASS in lib and bin, about 12 s each: Windows process spawns) |
+| macOS (this host) | worktree | `just test` | 746 passed, 29 skipped |
+
+- Linux used a build flag on every package to take the native path, because
+  archive mode on this clone hits the stale kache links the `os` skill records.
+- No Windows `git` path spelling or `LC_ALL` difference surfaced: the new test
+  compares SHAs, display-ID prefixes, and tag texts only.
+- WSL2 is left to the nightly schedule, as planned.
+
+### Performance (after)
+
+Same command as Phase 1, same fixtures, unchanged:
+`WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`
+(release, 10 samples, one warm-up, medians). Run twice: once while the
+cross-checks were running remotely, once on its own. The second run is
+recorded; the first agreed within 5%.
+
+| Fixture | `graph gather` before | after | Δ | `graph image render` before | after | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| floor | 5.9 ms | 10.5 ms | +4.6 ms | 352.4 ms | 347.0 ms | −1.5% |
+| ordinary | 20.2 ms | 39.1 ms | +18.9 ms | 351.2 ms | 356.1 ms | +1.4% |
+| older essential connections | 69.5 ms | 126.3 ms | +56.8 ms | 353.3 ms | 351.8 ms | −0.4% |
+| multiple selected branches | 32.4 ms | 65.3 ms | +32.9 ms | 351.8 ms | 355.2 ms | +1.0% |
+
+(First run: 10.8 / 39.6 / 130.8 / 63.6 ms gather; 348.0 / 353.7 / 350.5 /
+356.3 ms render.)
+
+**Explanation of the gather regression**, from a `GIT_TRACE` of one sample per
+fixture: each git spawn costs about 5 ms on this host, and gathering is now a
+chain of dependent stages rather than one concurrent round.
+
+- floor: `rev-parse --is-shallow-repository` + the default lane's `log` (was
+  the `log` alone). The +4.6 ms is that one spawn.
+- ordinary (two branches): shallow check → per branch `merge-base
+  --is-ancestor` → fork `merge-base` → branch `log` → default `log` → one
+  anchor `rev-list --first-parent --count` → one `log --no-walk`. About 10
+  calls on a chain of about 7, against about 5 calls on a chain of 2 before.
+- older essential connections: as ordinary, plus `rev-list --first-parent
+  --parents` and `rev-list --ancestry-path` over the 3,000-commit span of the
+  merged branch, and two anchor counts over 5,000 first-parent commits.
+- multiple selected branches: about 30 calls (7 `--is-ancestor`, 7 fork
+  `merge-base`s, 2 classifications with both `rev-list` walks, 7 branch `log`s,
+  counts, and the verifying `log`) on the same chain length.
+
+These are the costs Phase 3's message predicted (one `--is-ancestor` per
+candidate per branch, the merged-branch walks, one `rev-list --count` per
+out-of-window anchor, and one batched `log`). None of them are avoidable
+without dropping a check that R4, R6, or R9 requires. The one latency that
+could be cut is the shallow check, which runs before stage 1 but is only
+consulted when an answer is "no"; running it concurrently with stage 1 would
+save one spawn (about 5 ms). Not done: it is an optimization the plan does not
+call for, and the graph has no numeric budget.
+
+**Render:** unchanged within ±1.5%. It is dominated by the pseudo-terminal's
+fixed ~350 ms (floor row), which hides the two-pass layout.
+
+**Existing gates:** `just test-perf meets_sla`: 6 passed
+(`perf_full_command_non_image_meets_sla` 1.68 s test time, both cache paths,
+the three `perf_pr_request` gates). Full `just test-perf` (worktree-cli, serial):
+29 passed, including `perf_subprocess_counts_meet_sla` (lib and bin), the
+held-check and held-fetch waits, and the 60 s `--ff` deadline case.
+
+`worktree/docs/performance-testing.md` gains a "Graph Stages" section with the
+table and explanation. It also corrects two statements Phase 3 left stale: the
+"Graph Data Collection" bullet (it described one `merge-base` and one `log` per
+branch) and the descriptions of `perf_subprocess_counts_meet_sla` and
+`graph_and_verbose_share_one_merge_base` (their counts changed in Phase 3).
+
+### Checkpoint 4
+
+- [x] Layout evidence passes on macOS, Linux, and native Windows (above).
+- [ ] **Open:** the Kitty screenshot. The transmitted PNGs are inspected and
+  kept (paths above); the on-screen capture needs a terminal with macOS
+  Screen Recording permission. Run
+  `BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`
+  from such a terminal and inspect
+  `$TMPDIR/wt-graph-merged-{100x32,56x60}-screenshot.png`.
+- [x] The before/after table is recorded (here and in
+  `worktree/docs/performance-testing.md`), and the gather regression is
+  explained.
+
+### Requirement-to-test mapping, targeted tests, and skips (Phase 4 summary)
+
+| Requirement (plan Wave 7) | Test / evidence |
+|---|---|
+| Zero tag overlaps on gathered graphs at 120×40 and 56×60 | `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` (`tag_overlaps()` empty) |
+| Every expected label on the emitted ID of its exact SHA | same test, `Evidence::tags` per fixture |
+| Merge parents exact | same test, `Evidence::merges` (observation 1, both observation-2 merges) |
+| 56 columns: trimmed or shrunk, no label shortened | same test (tag-text sets equal across viewports; trimmed/shrunk assertion) |
+| `--width 40` never trimmed | same test (`columns == 40`, `trimmed_commits == 0`, untrimmed text) |
+| Merged-branch Kitty run at 100×32 and 56×60, APC and reservation kept | `level2_graph_in_kitty::level2_graph_draws_a_merged_branch_in_kitty` (all pre-screenshot checks pass; screenshot step blocked) |
+| Visual inspection | transmitted PNGs in `spikes/phase4-kitty-output/` (inspected above) |
+| Cross-OS L1 | the cross-OS table above |
+| Performance after, existing gates | the performance table above; `just test-perf` 29 passed |
+
+- Targeted tests added: 1 L1 (runs in both `worktree-cli` targets), 1 L2
+  (`level2_` marker; `worktree-cli`'s `test-l2` recipe is live;
+  `just check-tier-coverage worktree`: 0 stranded).
+- Broader gates: `just test` in `worktree` (746 passed, 29 skipped: the
+  tier-filtered `perf_` and L2 tests), `just lint` in `worktree`, `cargo clippy
+  -p worktree-cli -p worktree --all-targets --features
+  worktree-cli/terminal-tests -- -D warnings` (clean; covers the L2 file),
+  `just test-perf`, and the Linux and Windows runs above.
+- Failing and not caused by this phase: the three `level2_graph_in_kitty`
+  tests at the screenshot step (environment: no Screen Recording permission);
+  Windows archive mode for the CI-excluded `biscuit-visualized` (rerun
+  natively, green).

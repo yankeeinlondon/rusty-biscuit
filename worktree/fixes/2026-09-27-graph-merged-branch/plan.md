@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -46,6 +46,17 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
     - .claude/skills/os/build-hosts.md
+source_files_during_phase_4:
+    - Cargo.lock
+    - worktree/cli/Cargo.toml
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+docs_updated_during_phase_4:
+    - worktree/docs/performance-testing.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
     - biscuit-visualized
@@ -405,7 +416,7 @@ Goal: produce evidence the spec says source snapshots cannot provide, and confir
 
 **Wave 7** (concurrent)
 
-- [ ] **End-to-end layout evidence** (portable L1, `worktree-cli` integration test)
+- [x] **End-to-end layout evidence** (portable L1, `worktree-cli` integration test)
   - For the observation fixtures and a long-label fixture (R12 names as branches and worktrees), run gathering, then `to_git_graph`, then `plan()` at 120×40 and 56×60, then the `biscuit-visualized` layout.
   - Assert:
     - zero tag overlaps;
@@ -419,20 +430,20 @@ Goal: produce evidence the spec says source snapshots cannot provide, and confir
   - Save the screenshot and inspect it: the merged lane is visible, the merge edge is at the labeled commit, and no labels overlap.
   - Record the file paths in the log.
   - Run with `BISCUIT_TEST_REQUIRED_BACKENDS` set so a missing backend fails instead of skipping.
-- [ ] **Cross-OS L1**
+- [x] **Cross-OS L1**
   - Run `just test` for `biscuit-visualized`, `biscuit-terminal`, and `worktree` on Linux and native Windows through the hosts in the `os` skill (for example `./scripts/cross-check.sh --os windows worktree-cli`). WSL2 is covered by the nightly schedule.
   - Record the results.
   - Watch for Windows `git` path spelling in fixtures and `LC_ALL` differences in git stderr.
-- [ ] **Performance (after)**
+- [x] **Performance (after)**
   - Rerun the Phase 1 fixtures unchanged. Record `graph gather` and `graph image render (biscuit-terminal)` medians beside the baseline, with deltas and an explanation of any regression. The two-pass layout and anchor distance calls are the expected costs.
   - Confirm `perf_command_sla` and the other existing perf gates still pass.
   - Add the table to `worktree/docs/performance-testing.md`.
 
 **Checkpoint 4**
 
-- [ ] Layout evidence passes on macOS, Linux, and Windows.
+- [x] Layout evidence passes on macOS, Linux, and Windows.
 - [ ] The Kitty screenshot has been inspected, and its path is recorded.
-- [ ] The before/after table is recorded and every regression is explained.
+- [x] The before/after table is recorded and every regression is explained.
 
 ## Phase 5 — Documentation, Skills, and Review Readiness
 
