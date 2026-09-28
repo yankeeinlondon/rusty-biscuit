@@ -309,7 +309,7 @@ pub(crate) fn interpolation_block(
             // the on-disk path, or the resolved text + origin key for late
             // binding (DM2 event-time resolution has no stable file region).
             match source {
-                SourceRef::OnDisk(_) | SourceRef::OnDiskSpan { .. } => {
+                SourceRef::OnDisk(_) | SourceRef::OnDiskSpan { .. } | SourceRef::Supplied { .. } => {
                     push_on_disk_locus(&mut body, key, expression, source);
                 }
                 SourceRef::Effective {
@@ -372,6 +372,7 @@ pub(crate) fn interpolation_block(
                         body.push(context.excerpt_prose(span.line(), 2, "markdown"));
                     }
                 }
+                SourceRef::Supplied { .. } => push_on_disk_locus(&mut body, key, expression, source),
                 _ => {}
             }
             let (headline, hint) = match cause {
@@ -408,8 +409,9 @@ pub(crate) fn interpolation_block(
 /// Appends the on-disk locus of a failing expression: the linked file, the
 /// authored line and column when known ([`SourceRef::OnDiskSpan`]), and an
 /// excerpt — of the receiving frontmatter key for a keyed error, else of the
-/// authored body line. A late-binding [`SourceRef::Effective`] source has no
-/// locus and adds nothing.
+/// authored body line. A [`SourceRef::Supplied`] value names who supplied it
+/// instead of the document, and a late-binding [`SourceRef::Effective`] source
+/// has no locus and adds nothing.
 fn push_on_disk_locus(
     body: &mut Vec<Prose>,
     key: Option<&str>,
@@ -440,6 +442,12 @@ fn push_on_disk_locus(
             } else {
                 body.push(context.excerpt_prose(span.line(), 2, "markdown"));
             }
+        }
+        SourceRef::Supplied { supplier } => {
+            body.push(Prose::new(format!(
+                "The value came from {}, not from the document.",
+                Prose::escape_text(supplier)
+            )));
         }
         SourceRef::Effective { .. } => {}
     }

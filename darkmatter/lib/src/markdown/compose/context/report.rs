@@ -93,6 +93,12 @@ pub struct ComposeReport {
     /// "raw because composition failed". Empty when no keys were deferred.
     pub deferred_frontmatter_keys: std::collections::HashSet<String>,
 
+    /// Which bytes of the composed body are data, when the compose ended
+    /// before the transclusion directive parse (an inline-pre-only compose,
+    /// such as preflight discovery). A caller that scans that body for
+    /// instructions must skip them. Never merged from a child report.
+    pub(crate) body_data: Option<crate::markdown::compose::body_origin::DataRanges>,
+
     /// Reads of roots unknown when they were evaluated (spec Requirement 4).
     /// Frontmatter pass 1 runs before the final state and schema exist, so
     /// these are candidates, not warnings: each document's pipeline
@@ -596,8 +602,8 @@ pub(crate) enum WarningSubject {
         /// The normalized root name.
         name: String,
     },
-    /// One expression, once per source document no matter how many times a
-    /// rescan evaluates it.
+    /// One expression, once per source document no matter how many times it
+    /// is reported.
     Expression {
         /// Source document; `None` until the document's pipeline attributes it.
         document: Option<PathBuf>,
@@ -608,21 +614,14 @@ pub(crate) enum WarningSubject {
     },
 }
 
-/// Where an expression was first observed in a scanned text.
+/// Where an expression was observed in a scanned text.
 ///
-/// Byte offsets into the text as the caller supplied it, never into the
-/// buffer a rescan rewrites.
+/// Byte offsets into the text as the caller supplied it. Every expression is
+/// authored: a scan never reads text an expression produced.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ExpressionOrigin {
     /// The expression is authored in the scanned text.
     Authored(std::ops::Range<usize>),
-    /// A replacement generated the expression; `span` is where the rescan at
-    /// `pass` first observed it. Kept distinct from `Authored` so a generated
-    /// expression never aliases an authored one at the same offsets.
-    Generated {
-        pass: usize,
-        span: std::ops::Range<usize>,
-    },
 }
 
 impl WarningSubject {
@@ -896,20 +895,6 @@ mod tests {
 
         let messages: Vec<&str> = report.warnings.iter().map(|w| w.message.as_str()).collect();
         assert_eq!(messages, ["a", "b"]);
-    }
-
-    #[test]
-    fn a_generated_origin_never_aliases_an_authored_one_at_the_same_offsets() {
-        let mut report = ComposeReport::new();
-        report.add_warning(authored_failure(0..17, "authored"));
-        report.add_warning(ComposeWarning::expression_failure(
-            "interpolation",
-            "generated",
-            ComposeWarning::EXPRESSION_PARSE_FAILURE_CODE,
-            ExpressionOrigin::Generated { pass: 1, span: 0..17 },
-        ));
-
-        assert_eq!(report.warnings.len(), 2);
     }
 
     /// `in_scope` only scopes expression failures; a root warning's identity

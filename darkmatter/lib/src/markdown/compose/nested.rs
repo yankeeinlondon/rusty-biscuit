@@ -199,7 +199,7 @@ impl NestedCompose {
         }
         // `--set` overrides target the root document's frontmatter, and the
         // preflight graph's edges belong to the caller, not this content.
-        options.set_overrides = None;
+        options.clear_root_overrides();
         options.preflight_graph = None;
         let context = runtime.context_epoch.context_for_source(
             options.context(),

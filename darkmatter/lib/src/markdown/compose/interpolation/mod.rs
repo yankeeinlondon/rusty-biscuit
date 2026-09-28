@@ -85,5 +85,5 @@ pub use super::expression::EvaluationLookup as InterpolationLookup;
 pub use evaluator::{EvalResult, EvalValue, Evaluator};
 pub(crate) use rewrite::{
     ExpressionFailurePolicy, LocatedInterpolationError, ScanMode, convert_literals, interpolate_text,
-    interpolate_text_located, interpolate_value, interpolate_value_located,
+    interpolate_text_in, interpolate_value, interpolate_value_located,
 };

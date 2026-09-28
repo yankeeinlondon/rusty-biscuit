@@ -35,8 +35,8 @@ pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 #[derive(Debug, Clone)]
 pub enum SourceRef {
     /// Compose-time: the error maps to a file, but the expression's authored
-    /// position could not be proven (for example, a rescan found it in a
-    /// replacement value).
+    /// position could not be proven (for example, it sits in text an authored
+    /// replacement value inserted).
     OnDisk(SourceContext),
     /// Compose-time: an expression at a proven authored position in a file —
     /// in the body, or inside a frontmatter value.
@@ -50,6 +50,14 @@ pub enum SourceRef {
         context: SourceContext,
         /// Where the `{{ … }}` sits in `context.content`.
         span: AuthoredSpan,
+    },
+    /// Compose-time: the failing value was supplied from outside the document
+    /// — a command-line override, an agent's edit — so the document is not
+    /// where it was defined and no excerpt of it is shown.
+    Supplied {
+        /// Who supplied the value, as a noun phrase that completes "The value
+        /// came from …", for example ``a command-line override (`--set`)``.
+        supplier: String,
     },
     /// Late-binding or body text: no stable on-disk locus; carry the text.
     Effective {
@@ -378,7 +386,7 @@ impl MarkdownError {
     /// keeps the late-binding presentation rather than linking a non-file.
     ///
     /// Errors that are not `Interpolation`, or whose `source` is already
-    /// `OnDisk`/`OnDiskSpan`, pass through unchanged.
+    /// `OnDisk`/`OnDiskSpan`/`Supplied`, pass through unchanged.
     pub(crate) fn with_on_disk_source(self, ctx: &SourceContext) -> Self {
         match self {
             MarkdownError::Interpolation {
@@ -402,6 +410,29 @@ impl MarkdownError {
                     cause,
                 }
             }
+            other => other,
+        }
+    }
+
+    /// Attributes a [`MarkdownError::Interpolation`] to the value's supplier
+    /// ([`SourceRef::Supplied`]) instead of the document.
+    ///
+    /// Every other variant passes through unchanged.
+    pub(crate) fn with_supplier(self, supplier: impl Into<String>) -> Self {
+        match self {
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                cause,
+                ..
+            } => MarkdownError::Interpolation {
+                key,
+                expression,
+                source: Box::new(SourceRef::Supplied {
+                    supplier: supplier.into(),
+                }),
+                cause,
+            },
             other => other,
         }
     }

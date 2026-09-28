@@ -21,7 +21,7 @@ use super::{
     context, frontmatter_interpolation, frontmatter_shell_expansion, perf, remote,
     schema_validation, shell_expansion, transclusion,
 };
-use super::body_origin::BodyOrigin;
+use super::body_origin::BodyProvenance;
 use serde_json::{Map, Value};
 use std::path::Path;
 use tracing::{info, instrument, trace};
@@ -115,10 +115,11 @@ impl Markdown {
     /// Frontmatter is resolved in a fixed order before the body stages run:
     /// **Interp pass 1 → Schema Validation → Shell Expansion → Interp pass 2**.
     /// Pass 1 resolves `{{ }}` against seed values; schema validation and
-    /// coercion run next; `$(...)` frontmatter values then expand; pass 2
-    /// resolves any keys that were deferred because they referenced
-    /// shell-pending values. Read-side functions and `doc.*` are available in
-    /// both passes.
+    /// coercion run next; authored `$(...)` frontmatter values then expand;
+    /// pass 2 resolves only the keys that were deferred because they
+    /// referenced shell-pending values. Every authored value is scanned once
+    /// and its result is data (see [`value_origin`](super::value_origin)).
+    /// Read-side functions and `doc.*` are available in both passes.
     ///
     /// Executes operations in four phases:
     /// 1. **Inline Pre** (serial): TextReplacement, PageBlocks, Interpolation, ShellExpansion, ShellBlocks
@@ -170,11 +171,8 @@ impl Markdown {
             let mut report = ComposeReport::new();
             let mut perf = perf::PerfCollector::new(options.perf_enabled);
 
-            let pre_interpolation_snapshot = prepare_frontmatter_for_compose(
-                self,
-                &options,
-                options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
-            );
+            let mut provenance = prepare_frontmatter_for_compose(self, &options);
+            let mut deferred_keys = Vec::new();
 
             // Caller file parameters are invocation-owned semantic inputs.
             // Project them from their captured origins before the
@@ -212,17 +210,21 @@ impl Markdown {
                 let fm_authored_ctx = self.loaded_source_context_for_errors();
                 let fm_report = frontmatter_interpolation::interpolate_frontmatter_located(
                     self.frontmatter_mut(),
+                    &mut provenance,
                     options.context(),
                     options.expression_failure_policy(),
-                    shell_expansion_enabled,
+                    frontmatter_interpolation::FrontmatterPass::First {
+                        defer_shell_pending: shell_expansion_enabled,
+                    },
                     Some(options.frontmatter_resolution_context()),
                     &options.exclude_keys,
                     &options.name_coercion_keys,
                 )
                 .map_err(|failure| {
-                    failure.into_anchored(fm_authored_ctx).with_on_disk_source(&fm_source_ctx)
+                    attribute_frontmatter_failure(failure, &options, fm_authored_ctx, &fm_source_ctx)
                 })?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
+                deferred_keys = fm_report.deferred_keys;
                 report.add_warnings(fm_report.warnings);
                 add_frontmatter_candidates(&mut report, "frontmatter-interpolation", fm_report.missing_roots);
                 if let Some(start) = fm_start {
@@ -326,7 +328,7 @@ impl Markdown {
                     self.frontmatter_mut(),
                     &options,
                     runtime,
-                    pre_interpolation_snapshot.as_ref(),
+                    &mut provenance,
                     &fse_ctx,
                 )?;
                 report.frontmatter_shell_expansions_applied = fse_report.replacements;
@@ -346,24 +348,28 @@ impl Markdown {
 
                 // Second interpolation pass: templated keys that referenced
                 // shell-pending values were deferred above. Now that shell
-                // expansion has produced concrete values, resolve them.
+                // expansion has produced concrete values, resolve exactly those
+                // keys from their authored text. Every other value, shell
+                // output included, is data and is not scanned again.
                 if options.is_enabled(ComposeOperation::FrontmatterInterpolation)
                     && fse_report.replacements > 0
+                    && !deferred_keys.is_empty()
                 {
                     let fm_start = perf.is_enabled().then(std::time::Instant::now);
                     let fm_source_ctx = self.full_source_context_for_errors();
                     let fm_authored_ctx = self.loaded_source_context_for_errors();
                     let fm_report = frontmatter_interpolation::interpolate_frontmatter_located(
                         self.frontmatter_mut(),
+                        &mut provenance,
                         options.context(),
                         options.expression_failure_policy(),
-                        false,
+                        frontmatter_interpolation::FrontmatterPass::Deferred(&deferred_keys),
                         Some(options.frontmatter_resolution_context()),
                         &options.exclude_keys,
                         &options.name_coercion_keys,
                     )
                     .map_err(|failure| {
-                        failure.into_anchored(fm_authored_ctx).with_on_disk_source(&fm_source_ctx)
+                        attribute_frontmatter_failure(failure, &options, fm_authored_ctx, &fm_source_ctx)
                     })?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.add_warnings(fm_report.warnings);
@@ -474,7 +480,9 @@ impl Markdown {
             }
 
             let mut transclusion_ran = false;
-            let mut body_origin = BodyOrigin::capture(self);
+            // Body provenance lives until the transclusion directive parse,
+            // the last stage that scans this body for instructions.
+            let mut body = Some(BodyProvenance::capture(self));
             for operation in ComposeOperation::default_order() {
                 trace!(operation = ?operation, enabled = options.is_enabled(*operation), "compose: checking operation");
                 if !options.is_enabled(*operation) {
@@ -485,6 +493,13 @@ impl Markdown {
                 match operation.phase() {
                     ComposePhase::InlinePre => {
                         let op_start = perf.is_enabled().then(std::time::Instant::now);
+                        let Some(body) = body.as_mut() else {
+                            return Err(crate::markdown::types::MarkdownError::Transform(
+                                "internal error: an inline-pre stage ran after the body's \
+                                 provenance ended"
+                                    .to_string(),
+                            ));
+                        };
                         self.run_inline_pre_operation(
                             *operation,
                             &effective_state,
@@ -492,7 +507,8 @@ impl Markdown {
                             runtime,
                             &mut report,
                             &mut perf,
-                            &mut body_origin,
+                            body,
+                            provenance.data(),
                         )?;
                         if let Some(start) = op_start
                             && let Some(kind) = operation.perf_metric()
@@ -513,6 +529,9 @@ impl Markdown {
                             })
                             .collect::<Vec<_>>();
 
+                        let body = body
+                            .take()
+                            .unwrap_or_else(|| BodyProvenance::capture(self));
                         self.run_transclusion_phase(
                             &enabled_transclusion_ops,
                             &effective_state,
@@ -520,6 +539,7 @@ impl Markdown {
                             runtime,
                             &mut report,
                             &mut perf,
+                            body,
                         )?;
                         transclusion_ran = true;
                     }
@@ -545,6 +565,8 @@ impl Markdown {
                     }
                 }
             }
+
+            report.body_data = body.map(|body| body.data);
 
             super::unknown_identifiers::reconcile(
                 &mut report,
@@ -573,6 +595,29 @@ impl Markdown {
 
         result
     }
+}
+
+/// Attributes a frontmatter interpolation failure to where its value came
+/// from: a key a caller override supplied names the override (R5); any other
+/// key is anchored to its authored span in the document.
+fn attribute_frontmatter_failure(
+    failure: frontmatter_interpolation::LocatedFrontmatterError,
+    options: &ComposeOptions,
+    authored: Option<biscuit_terminal::errors::SourceContext>,
+    on_disk: &biscuit_terminal::errors::SourceContext,
+) -> crate::markdown::types::MarkdownError {
+    let supplied_by_override = match failure.error.as_ref() {
+        crate::markdown::types::MarkdownError::Interpolation { key: Some(key), .. } => options
+            .set_overrides
+            .as_ref()
+            .and_then(Value::as_object)
+            .is_some_and(|overrides| overrides.contains_key(key)),
+        _ => false,
+    };
+    if supplied_by_override {
+        return (*failure.error).with_supplier("a command-line override (`--set`)");
+    }
+    failure.into_anchored(authored).with_on_disk_source(on_disk)
 }
 
 /// Records frontmatter unknown-root reads, each located at its top-level key.

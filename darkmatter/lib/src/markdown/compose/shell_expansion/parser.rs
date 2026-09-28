@@ -2,8 +2,10 @@
 
 use super::tokenize::{ShellToken, parse_pipeline, tokenize};
 use super::types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionError};
+use crate::markdown::compose::body_origin::DataRanges;
 use crate::markdown::compose::parse_utils::{
-    directive_prefix_len, find_code_regions, is_in_code_region,
+    authored_directive, directive_prefix_len, find_code_regions, is_in_code_region,
+    structural_view,
 };
 use biscuit_terminal::errors::SourceContext;
 
@@ -35,7 +37,24 @@ pub fn parse_directives(
     ctx: SourceContext,
     line_offset: usize,
 ) -> Result<Vec<ShellDirective>, ShellExpansionError> {
-    let code_regions = find_code_regions(content);
+    parse_directives_in(content, None, ctx, line_offset)
+}
+
+/// [`parse_directives`] over a body whose `data` bytes were inserted by an
+/// earlier stage.
+///
+/// A directive counts only when its line start, prefix, and `::shell` keyword
+/// are authored; code regions are found in the masked view. Data may supply a
+/// command's arguments but never its shape: a directive whose executable,
+/// chain operators, or redirections come from data fails.
+pub(crate) fn parse_directives_in(
+    content: &str,
+    data: Option<&DataRanges>,
+    ctx: SourceContext,
+    line_offset: usize,
+) -> Result<Vec<ShellDirective>, ShellExpansionError> {
+    let structural = structural_view(content, data);
+    let code_regions = find_code_regions(&structural);
     let mut directives = Vec::new();
 
     let mut byte_offset = 0;
@@ -57,7 +76,10 @@ pub fn parse_directives(
             // container — a block quote, a list item, or the document root.
             let prefix_len = directive_prefix_len(line);
             let after = line[prefix_len..].trim_end();
-            if let Some(command_text) = after.strip_prefix("::shell ") {
+            let keyword_end = line_start + prefix_len + "::shell".len();
+            if let Some(command_text) = after.strip_prefix("::shell ")
+                && authored_directive(data, line_start, keyword_end)
+            {
                 let indent = line[..prefix_len].to_string();
 
                 // Parse the command
@@ -105,6 +127,24 @@ pub fn parse_directives(
                     }
                 })?;
 
+                if let Some(data) = data {
+                    let command_start = keyword_end + 1;
+                    let command_range = command_start..command_start + command_text.len();
+                    if data.intersects(&command_range) {
+                        let masked = &structural[command_range];
+                        if let Some(change) = data_changed_shape(&pipeline, masked, true, &ctx) {
+                            return Err(ShellExpansionError::ParseDirective {
+                                ctx: Box::new(ctx.clone()),
+                                origin: ShellCommandOrigin::Body { line: file_line },
+                                message: format!(
+                                    "inserted data {change}; interpolation may supply a \
+                                     command's arguments, never its executable or structure"
+                                ),
+                            });
+                        }
+                    }
+                }
+
                 let raw_command = pipeline.display_string();
                 let executable = pipeline.actions[0].command.executable.clone();
                 let args = pipeline.actions[0].command.args.clone();
@@ -129,6 +169,52 @@ pub fn parse_directives(
     }
 
     Ok(directives)
+}
+
+/// How inserted data changed a command's shape, if it did.
+///
+/// `masked` is the command text with every data byte masked (see
+/// [`DataRanges::masked`]); masking keeps whitespace, so it tokenizes into the
+/// same words as the real command unless data contributed quoting, an
+/// operator, a redirection, or the executable itself.
+///
+/// `directive_options` strips the leading `::shell` error-handling options, as
+/// the directive parser does; a `::shell-block` command has none.
+pub(crate) fn data_changed_shape(
+    real: &super::types::ShellPipeline,
+    masked: &str,
+    directive_options: bool,
+    ctx: &SourceContext,
+) -> Option<String> {
+    let masked = tokenize(masked, ctx)
+        .and_then(|tokens| {
+            let shell_tokens = if directive_options {
+                extract_options_from_tokens(&tokens, 0, ctx)?.1
+            } else {
+                tokens
+            };
+            parse_pipeline(&shell_tokens, ctx)
+        })
+        .ok();
+    let Some(masked) = masked else {
+        return Some("changes how the command is quoted or parsed".to_string());
+    };
+    if masked.actions.len() != real.actions.len() {
+        return Some(format!(
+            "changes the command from {} action(s) to {}",
+            masked.actions.len(),
+            real.actions.len()
+        ));
+    }
+    for (masked, real) in masked.actions.iter().zip(&real.actions) {
+        if masked.command.executable != real.command.executable {
+            return Some(format!("supplies the executable `{}`", real.command.executable));
+        }
+        if masked.operator != real.operator || masked.command.redirection != real.command.redirection {
+            return Some("adds a chain operator or redirection".to_string());
+        }
+    }
+    None
 }
 
 /// Known directive option names for error handling.

@@ -5,6 +5,7 @@
 //! their references remain valid until they are eventually normalized
 //! back to portable forms in the Finalization stage.
 
+use super::body_origin::{EditOrigin, TextEdit};
 use crate::markdown::Markdown;
 use crate::markdown::compose::util::document_resolution_context;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
@@ -34,11 +35,22 @@ use tracing::trace;
 /// this is an error rather than the warn-and-preserve that
 /// [`normalize_links`](super::link_normalization::normalize_links) applies
 /// after transclusion.
+#[cfg(test)]
 pub fn link_resolve(
     markdown: &mut Markdown,
     options: &ComposeOptions,
     report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
+    link_resolve_with_edits(markdown, options, report).map(drop)
+}
+
+/// [`link_resolve`], also returning the edits it made to the body, in order.
+/// A rewritten target inside data stays data.
+pub(crate) fn link_resolve_with_edits(
+    markdown: &mut Markdown,
+    options: &ComposeOptions,
+    report: &mut ComposeReport,
+) -> MarkdownResult<Vec<TextEdit>> {
     let source = options.source.clone();
     let content = markdown.content();
 
@@ -85,7 +97,7 @@ pub fn link_resolve(
     trace!("Records to resolve: {}", to_resolve.len());
 
     if to_resolve.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     // Sort by span start descending for safe in-place replacement
@@ -93,6 +105,7 @@ pub fn link_resolve(
 
     let mut new_content = content.to_string();
     let mut applied_count = 0;
+    let mut edits = Vec::new();
 
     let base_dir = match &source {
         ComposeSource::File(path) => path.parent(),
@@ -123,6 +136,11 @@ pub fn link_resolve(
             if let Some((start, end)) = super::find_target_range(&new_content, &record, &raw_target)
             {
                 new_content.replace_range(start..end, &abs_path_str);
+                edits.push(TextEdit {
+                    range: start..end,
+                    replacement_len: abs_path_str.len(),
+                    origin: EditOrigin::Inherit,
+                });
                 applied_count += 1;
             }
         }
@@ -133,7 +151,9 @@ pub fn link_resolve(
         *markdown.content_mut() = new_content;
     }
 
-    Ok(())
+    // Targets were rewritten end to start.
+    edits.reverse();
+    Ok(edits)
 }
 
 fn resolve_absolute(

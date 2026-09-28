@@ -30,8 +30,8 @@ use crate::markdown::compose::frontmatter_shell_expansion::{
     directive_reachable_pipelines, parse_shell_value, scan_frontmatter,
 };
 use crate::markdown::compose::prepare_frontmatter_for_compose;
+use crate::markdown::compose::value_origin::FrontmatterProvenance;
 use crate::markdown::compose::shell_expansion::alias::resolve_alias;
-use crate::markdown::compose::shell_expansion::parser::parse_directives;
 use crate::markdown::compose::expression::ExpressionFinder;
 use crate::markdown::compose::expression::{Expr, ResolutionContext, parse};
 use crate::markdown::compose::icmp::PlannedIcmpProbe;
@@ -327,7 +327,11 @@ fn collect_recursive(
     scan_one_frontmatter(markdown, &discovery, &source_file, seen, entries, &mut local_entries)?;
 
     let authored_ctx = markdown.full_source_context_for_errors();
-    let authored_pending = pending_shell_literals(markdown, &authored_ctx);
+    let authored_pending = pending_shell_literals(
+        markdown,
+        &FrontmatterProvenance::all_authored(markdown.frontmatter()),
+        &authored_ctx,
+    );
     detect_authored_dynamic_target(
         markdown.content(),
         &authored_pending,
@@ -370,7 +374,14 @@ fn collect_recursive(
     inline_options.defer_shell_pending_schema_problems = true;
     inline_options.defer_missing_runtime_context = true;
     inline_options.defer_expression_failures = true;
-    let (prepared, _) = markdown.compose_with(inline_options)?;
+    let (prepared, prepared_report) = markdown.compose_with(inline_options)?;
+    // The bytes of the prepared body that interpolation inserted. Discovery
+    // reads the body through the same data-aware scanners as the compose pass,
+    // so the approval set is exactly what can execute.
+    let body_data = prepared_report.body_data.unwrap_or_else(|| {
+        crate::markdown::compose::body_origin::DataRanges::none_for(prepared.content())
+    });
+    body_data.ensure_describes(prepared.content())?;
     let line_offset = prepared.frontmatter_line_count();
     let prepared_ctx = prepared.full_source_context_for_errors();
 
@@ -391,11 +402,17 @@ fn collect_recursive(
     // frontmatter-shell expansion cannot be approved condition-blind: its
     // approved shape (with `$(...)`) differs from its executed shape. Reject it
     // here rather than letting it surface as a late `NotPreApproved`.
-    let pending = pending_shell_literals(&prepared, &prepared_ctx);
+    let prepared_provenance = prepare_frontmatter_for_compose(&mut markdown.clone(), options);
+    let pending = pending_shell_literals(&prepared, &prepared_provenance, &prepared_ctx);
     detect_dynamic_command_shape(prepared.content(), &pending, &prepared_ctx, line_offset)?;
 
     // ── Body `::shell` directives ──────────────────────────────────
-    let directives = parse_directives(prepared.content(), prepared_ctx.clone(), line_offset)?;
+    let directives = crate::markdown::compose::shell_expansion::parser::parse_directives_in(
+        prepared.content(),
+        Some(&body_data),
+        prepared_ctx.clone(),
+        line_offset,
+    )?;
     for directive in directives {
         let line = directive.origin.line_number();
         for (raw_action, exe_raw, args_raw) in directive_action_iter(&directive) {
@@ -423,7 +440,8 @@ fn collect_recursive(
     // flattened Transform string — and a document that fails to scan has no
     // well-formed shell block to approve anyway. Skip discovery on a scan
     // failure and let the compose pass produce the real, styled error.
-    let pairs = block_pairs::scan_block_pairs(prepared.content()).unwrap_or_default();
+    let pairs = block_pairs::scan_block_pairs_in(prepared.content(), Some(&body_data))
+        .unwrap_or_default();
     for pair in pairs {
         if !matches!(pair.kind, block_pairs::BlockOpenKind::Shell) {
             continue;
@@ -431,6 +449,16 @@ fn collect_recursive(
         let body_text = &prepared.content()[pair.body_span.clone()];
         let commands = split_logical_commands(body_text, pair.start_line + 1)
             .map_err(|e| crate::markdown::types::MarkdownError::Transform(e.to_string()))?;
+        if body_data.intersects(&pair.body_span) {
+            super::super::shell_blocks::reject_data_shaped_commands(
+                &commands,
+                &body_data.masked(prepared.content())[pair.body_span.clone()],
+                pair.start_line + 1,
+                body_text,
+                line_offset,
+                Some(source_file.clone()),
+            )?;
+        }
         for command in commands {
             for action in &command.pipeline.actions {
                 let exe_raw = action.command.executable.clone();
@@ -461,8 +489,9 @@ fn collect_recursive(
     // ── Recurse into referenced children (condition-blind) ─────────
     let transclusion_opts = options.transclusion_options();
 
-    for directive in transclusion::parse_directives_with_line_offset(
+    for directive in transclusion::parse_directives_in(
         prepared.content(),
+        Some(&body_data),
         prepared_ctx.clone(),
         line_offset,
     )? {
@@ -497,9 +526,12 @@ fn collect_recursive(
             transclusion::ResolvedTarget::File { path, .. } => {
                 let mut child = Markdown::try_from(path.as_path())?;
                 apply_child_overrides(&mut child, &directive.options);
+                let mut child_options = options.clone().with_accepted_source_file(path.clone());
+                child_options.inherited_origin =
+                    transclusion::child_inherited_origin(&directive.options);
                 let child = collect_recursive(
                     &child,
-                    &options.clone().with_accepted_source_file(path.clone()),
+                    &child_options,
                     seen,
                     entries,
                     icmp,
@@ -521,9 +553,12 @@ fn collect_recursive(
                 };
                 let mut child = Markdown::from(body);
                 apply_child_overrides(&mut child, &directive.options);
+                let mut child_options = options.clone().with_source_url(url.clone());
+                child_options.inherited_origin =
+                    transclusion::child_inherited_origin(&directive.options);
                 let child = collect_recursive(
                     &child,
-                    &options.clone().with_source_url(url.clone()),
+                    &child_options,
                     seen,
                     entries,
                     icmp,
@@ -625,7 +660,7 @@ fn collect_recursive(
         let mut nested_options = options.clone();
         nested_options.source = root.0.clone();
         nested_options.source_derivation = root.1;
-        nested_options.set_overrides = None;
+        nested_options.clear_root_overrides();
         let child = Markdown::from(content);
         let mut node = collect_recursive(
             &child,
@@ -699,7 +734,7 @@ fn scan_one_frontmatter(
     local_entries: &mut Vec<ShellCommandEntry>,
 ) -> MarkdownResult<()> {
     let mut fm_clone = markdown.clone();
-    let pre_interpolation_snapshot = prepare_frontmatter_for_compose(&mut fm_clone, options, true);
+    let mut provenance = prepare_frontmatter_for_compose(&mut fm_clone, options);
     let mut preflight_exclude_keys = options.exclude_keys.clone();
     preflight_exclude_keys.insert("$schema".to_string());
     let mut best_effort_missing_context = None;
@@ -722,6 +757,7 @@ fn scan_one_frontmatter(
         // `file_exists()` or `frontmatter()`.
         best_effort_missing_context = interpolate_frontmatter_best_effort(
             fm_clone.frontmatter_mut(),
+            &mut provenance,
             options.context(),
             true,
             Some(options.frontmatter_resolution_context()),
@@ -748,13 +784,15 @@ fn scan_one_frontmatter(
     // A key left raw because it read an uncaptured runtime context group is not
     // a dynamic shape: the compose pass fails that key in frontmatter
     // interpolation whatever the document's conditions, so report that error.
-    if let Err(error) = detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &scan_ctx) {
+    if let Err(error) =
+        detect_dynamic_frontmatter_command_shape(fm_clone.frontmatter(), &provenance, &scan_ctx)
+    {
         return Err(best_effort_missing_context.unwrap_or(error));
     }
 
     let candidates = scan_frontmatter(
         fm_clone.frontmatter(),
-        pre_interpolation_snapshot.as_ref(),
+        &provenance,
         &scan_ctx,
         &preflight_exclude_keys,
     )?;
@@ -840,13 +878,14 @@ fn scan_one_frontmatter(
 /// as a `NotPreApproved` "bug in the pre-flight scanner".
 fn detect_dynamic_frontmatter_command_shape(
     frontmatter: &crate::markdown::frontmatter::Frontmatter,
+    provenance: &FrontmatterProvenance,
     ctx: &biscuit_terminal::errors::SourceContext,
 ) -> MarkdownResult<()> {
     for (key, value) in frontmatter.as_map().iter() {
         let serde_json::Value::String(s) = value else {
             continue;
         };
-        if !s.trim_start().starts_with("$(") {
+        if !provenance.is_authored_shell_candidate(key) {
             continue;
         }
         let locations = ExpressionFinder::find_all_plain(s);
@@ -882,11 +921,13 @@ fn detect_dynamic_frontmatter_command_shape(
 /// command via `{{ doc.key }}` interpolation, which is the dynamic-shape case.
 fn pending_shell_literals(
     prepared: &Markdown,
+    provenance: &FrontmatterProvenance,
     ctx: &biscuit_terminal::errors::SourceContext,
 ) -> Vec<(String, String)> {
     let mut pending = Vec::new();
     for (key, value) in prepared.frontmatter().as_map().iter() {
         if let serde_json::Value::String(s) = value
+            && provenance.is_authored_shell_candidate(key)
             && s.starts_with("$(")
             && matches!(parse_shell_value(s, key, None, ctx), Ok(Some(_)))
         {
@@ -1326,7 +1367,11 @@ mod tests {
     fn authored_target_and_pending_shell_data_identify_the_same_dependency() {
         let md: Markdown = "---\nchild: \"$(printf child.md)\"\n---\n::file {{child}}\n".into();
         let ctx = md.full_source_context_for_errors();
-        let pending = pending_shell_literals(&md, &ctx);
+        let pending = pending_shell_literals(
+            &md,
+            &FrontmatterProvenance::all_authored(md.frontmatter()),
+            &ctx,
+        );
         assert_eq!(pending, vec![("child".to_string(), "$(printf child.md)".to_string())]);
 
         let directive = crate::markdown::compose::directives_api::scan_darkmatter_directives(

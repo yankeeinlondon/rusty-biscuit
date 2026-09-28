@@ -3,7 +3,7 @@
 use super::super::super::Markdown;
 use super::super::super::types::{AuthoredSpan, MarkdownError, MarkdownResult};
 use super::super::context::effective_state as state;
-use super::super::body_origin::BodyOrigin;
+use super::super::body_origin::{BodyOrigin, BodyProvenance};
 use super::super::directive_targets::rewrite_directive_targets;
 use super::super::interpolation;
 use super::super::shell_expansion;
@@ -20,11 +20,14 @@ use tracing::debug;
 /// Fenced and indented code blocks are skipped by default; set
 /// `interpolate_code_blocks` (via options or frontmatter) to scan them too.
 ///
+/// The body is scanned once: text an expression or literal inserts, like any
+/// data an earlier stage inserted, is never scanned again.
+///
 /// A span that cannot be parsed or evaluated fails the stage regardless of
 /// `ComposeOptions::fail_fast`, and the body is left unrewritten. Only the
 /// shell-command discovery pass defers such failures to warnings. The failure
-/// is anchored to its authored span when `origin` (the map from the current
-/// body back to the loaded text) proves one.
+/// is anchored to its authored span when `body.origin` (the map from the
+/// current body back to the loaded text) proves one.
 ///
 /// ## Returns
 ///
@@ -35,9 +38,9 @@ pub(crate) fn run_stage(
     options: &ComposeOptions,
     runtime: &shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
-    origin: Option<&BodyOrigin>,
+    body: &mut BodyProvenance,
 ) -> MarkdownResult<usize> {
-    use interpolation::{Evaluator, ScanMode, interpolate_text_located};
+    use interpolation::{Evaluator, ScanMode, interpolate_text_in};
 
     let scan_mode = if resolve_interpolate_code_blocks(markdown, options) {
         ScanMode::Plain
@@ -59,9 +62,11 @@ pub(crate) fn run_stage(
     let evaluator = Evaluator::new(&lookup)
         .with_presentation_values(state.presentation_values())
         .observing_missing_roots();
-    let origin = origin.filter(|origin| origin.describes(markdown.content()));
+    body.data.ensure_describes(markdown.content())?;
+    let origin = body.origin.as_ref().filter(|origin| origin.describes(markdown.content()));
     let targets = rewrite_directive_targets(
         markdown.content(),
+        Some(&body.data),
         &evaluator,
         markdown.frontmatter_line_count(),
     )
@@ -71,8 +76,10 @@ pub(crate) fn run_stage(
     // skipped nullable target; a second warning would report one issue twice.
     drop(evaluator.take_missing_roots());
     let origin = origin.map(|origin| origin.after_edits(&targets.edits, &targets.output));
-    let result = interpolate_text_located(
+    let data = body.data.after_edits(&targets.edits, &targets.output);
+    let result = interpolate_text_in(
         &targets.output,
+        Some(&data),
         &evaluator,
         scan_mode,
         options.expression_failure_policy(),
@@ -80,9 +87,10 @@ pub(crate) fn run_stage(
     )
     .map_err(|failure| anchor_authored_failure(markdown, origin.as_ref(), failure))?;
 
-    if targets.replacements > 0 || result.replacements > 0 {
-        *markdown.content_mut() = result.output;
-    }
+    let data = data.after_edits(&result.edits, &result.output);
+    body.origin = origin.as_ref().map(|origin| origin.after_edits(&result.edits, &result.output));
+    body.data = data;
+    *markdown.content_mut() = result.output;
     report.add_warnings(result.warnings);
     let authored = markdown.loaded_source_context_for_errors();
     // The scanner evaluates spans end to start; restore document order so the
@@ -119,9 +127,9 @@ pub(crate) fn run_stage(
 /// Anchors a body failure to its authored span when `origin` proves one.
 ///
 /// `origin` maps the text the failing span indexes back to the loaded
-/// document. A rescan-generated expression has no span, and one inside text an
-/// earlier stage inserted has no origin; either keeps its file-only
-/// presentation instead of a guessed position.
+/// document. An expression inside text an earlier stage inserted (an authored
+/// replacement value) has no origin and keeps its file-only presentation
+/// instead of a guessed position.
 fn anchor_authored_failure(
     markdown: &Markdown,
     origin: Option<&BodyOrigin>,

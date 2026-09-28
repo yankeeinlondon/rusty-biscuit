@@ -139,6 +139,16 @@ pub struct ComposeOptions {
     /// these values always win regardless of what the frontmatter says.
     pub(crate) set_overrides: Option<serde_json::Value>,
 
+    /// Override values that overwrite frontmatter keys as **data**: never
+    /// scanned for `{{ … }}`, `{{{ … }}}`, or whole-value `$( … )`. Applied
+    /// after [`set_overrides`](Self::set_overrides), so a key present in both
+    /// is data.
+    pub(crate) data_overrides: Option<serde_json::Value>,
+
+    /// Origin of the values this document receives from the document that
+    /// transcludes it. Never propagated to grandchildren.
+    pub(crate) inherited_origin: InheritedOrigin,
+
     /// Raw caller overrides and their per-property authoring contexts.
     pub(crate) caller_input_records: CallerInputRecords,
 
@@ -495,6 +505,8 @@ impl std::fmt::Debug for ComposeOptions {
             .field("source", &self.source)
             .field("external_state", &self.external_state)
             .field("set_overrides", &self.set_overrides)
+            .field("data_overrides", &self.data_overrides)
+            .field("inherited_origin", &self.inherited_origin)
             .field("caller_input_records", &self.caller_input_records)
             .field("max_transclusion_depth", &self.max_transclusion_depth)
             .field("allow_remote_transclusion", &self.allow_remote_transclusion)
@@ -774,6 +786,8 @@ impl ComposeOptions {
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
+            data_overrides: None,
+            inherited_origin: InheritedOrigin::default(),
             caller_input_records: CallerInputRecords::new(),
             caller_file_provenance: std::collections::HashMap::new(),
             max_transclusion_depth: 16,
@@ -947,10 +961,85 @@ impl ComposeOptions {
     }
 
     /// Sets override values that overwrite existing frontmatter keys.
+    ///
+    /// These values are **authored**: a person wrote them, so they are
+    /// templates exactly like the document's own frontmatter. Use
+    /// [`with_data_overrides`](Self::with_data_overrides) for values an
+    /// operation produced.
     #[must_use]
     pub fn with_set_overrides(mut self, overrides: serde_json::Value) -> Self {
         self.set_overrides = Some(overrides);
         self
+    }
+
+    /// Sets override values that overwrite existing frontmatter keys as
+    /// **data**.
+    ///
+    /// A data value is inserted verbatim and never scanned: its `{{ … }}` is
+    /// not evaluated, its `{{{ … }}}` is not converted, and a whole-value
+    /// `$( … )` is not a shell command. Data overrides apply after
+    /// [`with_set_overrides`](Self::with_set_overrides), so a key present in
+    /// both is data.
+    #[must_use]
+    pub fn with_data_overrides(mut self, overrides: serde_json::Value) -> Self {
+        self.data_overrides = Some(overrides);
+        self
+    }
+
+    /// Sets top-level overrides from ordered, origin-tagged layers.
+    ///
+    /// A later layer's key replaces an earlier layer's key, and each key takes
+    /// the origin of the layer that supplied it. Replaces any overrides set
+    /// earlier by [`with_set_overrides`](Self::with_set_overrides) or
+    /// [`with_data_overrides`](Self::with_data_overrides).
+    ///
+    /// ## Examples
+    ///
+    /// ```
+    /// use darkmatter::markdown::Markdown;
+    /// use darkmatter::markdown::compose::{ComposeOptions, OverrideLayer};
+    /// use serde_json::json;
+    ///
+    /// let md: Markdown = "---\ntitle: t\n---\n{{ user }} / {{ output }}\n".into();
+    /// let options = ComposeOptions::new().with_override_layers([
+    ///     OverrideLayer::authored(json!({ "user": "{{ title }}" })),
+    ///     OverrideLayer::data(json!({ "output": "{{ title }}" })),
+    /// ]);
+    /// let (composed, _) = md.compose_with(options).unwrap();
+    /// assert_eq!(composed.content().trim(), "t / {{ title }}");
+    /// ```
+    #[must_use]
+    pub fn with_override_layers(
+        mut self,
+        layers: impl IntoIterator<Item = super::super::value_origin::OverrideLayer>,
+    ) -> Self {
+        use super::super::value_origin::OverrideOrigin;
+        let mut authored = serde_json::Map::new();
+        let mut data = serde_json::Map::new();
+        for layer in layers {
+            let Some(values) = layer.values.as_object() else {
+                continue;
+            };
+            for (key, value) in values {
+                authored.remove(key);
+                data.remove(key);
+                match layer.origin {
+                    OverrideOrigin::Authored => authored.insert(key.clone(), value.clone()),
+                    OverrideOrigin::Data => data.insert(key.clone(), value.clone()),
+                };
+            }
+        }
+        self.set_overrides = Some(serde_json::Value::Object(authored));
+        self.data_overrides = Some(serde_json::Value::Object(data));
+        self
+    }
+
+    /// Clears the caller overrides that target the root document, for a
+    /// compose of other content (`as_markdown`) under these options.
+    pub(crate) fn clear_root_overrides(&mut self) {
+        self.set_overrides = None;
+        self.data_overrides = None;
+        self.inherited_origin = InheritedOrigin::default();
     }
 
     /// Installs immutable raw caller values with their per-property origins.
@@ -2083,6 +2172,51 @@ fn graph_context_fingerprint(ctx: &ComposeContext) -> u64 {
 /// though the values are not equivalent. Enum discriminants are explicit stable
 /// bytes here, never `Debug` output (which the spec prohibits as a canonical
 /// encoding). The buffer is xxHashed via `biscuit-hash`.
+/// Origin of the values a transcluded document receives from its parent.
+///
+/// A root compose leaves every field at its default: `--state` is authored,
+/// and the document's frontmatter is its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(crate) struct InheritedOrigin {
+    /// Origin of [`ComposeOptions::external_state`]. A parent's composed
+    /// values are data in its children.
+    pub(crate) external_state: super::super::value_origin::OverrideOrigin,
+    /// Origin of [`ComposeOptions::one_off_replace`].
+    pub(crate) one_off_replace: super::super::value_origin::OverrideOrigin,
+    /// Frontmatter leaves a directive `set` overlay wrote as data before this
+    /// document was composed.
+    pub(crate) frontmatter_data: super::super::value_origin::DataPaths,
+}
+
+impl InheritedOrigin {
+    fn encode(&self, enc: &mut GraphIdentityEncoder) {
+        use super::super::value_origin::{OverrideOrigin, ValuePathSegment};
+        let tag = |origin: OverrideOrigin| match origin {
+            OverrideOrigin::Authored => 0,
+            OverrideOrigin::Data => 1,
+        };
+        enc.tag(tag(self.external_state));
+        enc.tag(tag(self.one_off_replace));
+        let paths = self.frontmatter_data.paths();
+        enc.count(paths.len());
+        for path in paths {
+            enc.count(path.len());
+            for segment in path {
+                match segment {
+                    ValuePathSegment::Key(key) => {
+                        enc.tag(0);
+                        enc.str(key);
+                    }
+                    ValuePathSegment::Index(index) => {
+                        enc.tag(1);
+                        enc.u64(*index as u64);
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct GraphIdentityEncoder {
     buf: Vec<u8>,
 }
@@ -2356,6 +2490,8 @@ impl ComposeOptions {
             source,
             external_state,
             set_overrides,
+            data_overrides,
+            inherited_origin,
             caller_input_records,
             caller_file_provenance,
             max_transclusion_depth,
@@ -2475,6 +2611,16 @@ impl ComposeOptions {
             }
             None => enc.tag(0),
         }
+        enc.field("data_overrides");
+        match data_overrides {
+            Some(v) => {
+                enc.tag(1);
+                enc.str(&canonical_json_sorted(v));
+            }
+            None => enc.tag(0),
+        }
+        enc.field("inherited_origin");
+        inherited_origin.encode(&mut enc);
         enc.field("caller_input_records");
         enc.count(caller_input_records.len());
         for (property, record) in caller_input_records {
@@ -2869,6 +3015,16 @@ impl ComposeOptions {
             }
             None => cenc.tag(0),
         }
+        cenc.field("data_overrides");
+        match data_overrides {
+            Some(v) => {
+                cenc.tag(1);
+                cenc.str(&canonical_json_sorted(v));
+            }
+            None => cenc.tag(0),
+        }
+        cenc.field("inherited_origin");
+        inherited_origin.encode(&mut cenc);
         cenc.field("caller_input_records");
         cenc.count(caller_input_records.len());
         for (property, record) in caller_input_records {

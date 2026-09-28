@@ -3,6 +3,8 @@
 //! Provides a [`Cursor`] for tokenizing directive lines and helpers
 //! for detecting code regions that should be skipped during scanning.
 
+use super::body_origin::DataRanges;
+use std::borrow::Cow;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// A lightweight cursor for parsing directive lines character by character.
@@ -391,6 +393,23 @@ pub(crate) fn strip_blockquote_prefix(line: &str) -> &str {
     } else {
         line
     }
+}
+
+/// `content` as a scanner that detects Markdown or directive structure must
+/// read it: every data byte masked (see [`DataRanges::masked`]), so inserted
+/// data can neither open a code fence nor spell a directive.
+pub(crate) fn structural_view<'a>(content: &'a str, data: Option<&DataRanges>) -> Cow<'a, str> {
+    match data {
+        Some(data) => data.masked(content),
+        None => Cow::Borrowed(content),
+    }
+}
+
+/// Whether the directive whose line starts at `line_start` and whose keyword
+/// ends at `keyword_end` was authored: neither the line break that starts its
+/// line, nor its indentation or container prefix, nor its keyword is data.
+pub(crate) fn authored_directive(data: Option<&DataRanges>, line_start: usize, keyword_end: usize) -> bool {
+    data.is_none_or(|data| !data.intersects(&(line_start.saturating_sub(1)..keyword_end)))
 }
 
 /// Finds byte ranges of inline code and fenced code blocks.

@@ -21,7 +21,7 @@ use crate::markdown::compose::toc_linking;
 use biscuit_terminal::errors::SourceContext;
 
 use crate::markdown::compose::transclusion::{
-    DirectiveKind, TransclusionRuntime, parse_directives, parse_frontmatter_refs,
+    DirectiveKind, TransclusionRuntime, parse_frontmatter_refs,
 };
 use crate::markdown::compose::{
     ComposeOperation, ComposeOptions, ComposeSource, EffectiveStateBuilder, ResolvingLookup,
@@ -288,7 +288,8 @@ fn build_node(
     // Always run InlinePre preparation (rec #2): page blocks, interpolation,
     // shell expansion, and text replacement can affect references even in
     // leaf documents with no transclusions.
-    let prepared_content = prepare_content(md, options)?;
+    let (prepared_content, body_data) = prepare_content(md, options)?;
+    let body_data = body_data.as_ref();
 
     let ctx = {
         let base = md.source_context_for_errors();
@@ -308,6 +309,18 @@ fn build_node(
     } else {
         ReferenceSet::default()
     };
+    // A reference an expression inserted is data: validation still checks it,
+    // but a missing target warns instead of failing the run.
+    if let Some(data) = body_data {
+        for record in &mut local_references.records {
+            if data.intersects(&record.origin.span) {
+                record.attributes.insert(
+                    DATA_ORIGIN_ATTRIBUTE.to_string(),
+                    serde_json::Value::String("data".to_string()),
+                );
+            }
+        }
+    }
 
     // Parse transclusion directives and build child nodes
     let mut child_insertions = Vec::new();
@@ -350,7 +363,12 @@ fn build_node(
     );
 
     // Block directives
-    if let Ok(directives) = parse_directives(&prepared_content, ctx.clone()) {
+    if let Ok(directives) = crate::markdown::compose::transclusion::parse_directives_in(
+        &prepared_content,
+        body_data,
+        ctx.clone(),
+        0,
+    ) {
         for directive in &directives {
             // Evaluate `when=` condition — skip directive entirely if false.
             if let Some(ref when_expr) = directive.options.when_expr {
@@ -451,7 +469,7 @@ fn build_node(
     // ::toc-linking directives generate synthesized TOC hyperlinks AND
     // create child graph nodes for follow-mode expansion.
     if let Ok(toc_directives) =
-        crate::markdown::compose::toc_linking::parse_directives(&prepared_content)
+        crate::markdown::compose::toc_linking::parse_directives_in(&prepared_content, body_data)
     {
         let transclusion_options = options.compose.transclusion_options();
 
@@ -596,7 +614,10 @@ fn build_node(
     // ::file-links directives emit reference records but do not create
     // child insertions (they are not followable transclusions).
     if let Ok(file_links_directives) =
-        crate::markdown::compose::file_links::parse_file_links_directives(&prepared_content)
+        crate::markdown::compose::file_links::parse_file_links_directives_in(
+            &prepared_content,
+            body_data,
+        )
     {
         for directive in &file_links_directives {
             if extract_references {
@@ -873,7 +894,7 @@ pub(super) fn prepare_content_for_validation(
         }
         _ => options.clone(),
     };
-    prepare_content(md, &node_options)
+    prepare_content(md, &node_options).map(|(content, _)| content)
 }
 
 /// Prepare content by running only InlinePre operations.
@@ -881,10 +902,14 @@ pub(super) fn prepare_content_for_validation(
 /// Starts from the caller's `ComposeOptions` (rec #3) to preserve
 /// external state, overrides, cache settings, shell settings, and per-node
 /// source provenance, then restricts to InlinePre-only operations.
+///
+/// ## Returns
+///
+/// The prepared body and which of its bytes are data.
 fn prepare_content(
     md: &Markdown,
     options: &ReferenceGraphOptions,
-) -> MarkdownResult<String> {
+) -> MarkdownResult<(String, Option<crate::markdown::compose::body_origin::DataRanges>)> {
     let inline_pre_options = options.compose.clone().only(&[
         ComposeOperation::TextReplacement,
         ComposeOperation::PageBlocks,
@@ -892,9 +917,13 @@ fn prepare_content(
         ComposeOperation::ShellExpansion,
     ]);
 
-    let (result, _report) = md.compose_with(inline_pre_options)?;
-    Ok(result.content().to_string())
+    let (result, report) = md.compose_with(inline_pre_options)?;
+    Ok((result.content().to_string(), report.body_data))
 }
+
+/// The attribute that marks a reference found in data (text an expression
+/// or shell command inserted) rather than in authored text.
+pub(crate) const DATA_ORIGIN_ATTRIBUTE: &str = "darkmatter-origin";
 
 /// Detect literal content in frontmatter prologue/epilogue values.
 ///

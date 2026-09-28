@@ -389,6 +389,13 @@ pub fn run_compose(
 
                     // All errors are allowed — defer report for stderr after content
                     Some(report)
+                } else if report.issues.iter().any(|i| {
+                    i.severity == ReferenceSeverity::Warning
+                        && i.code == darkmatter::markdown::reference::validate::ReferenceIssueCode::MissingLocalTarget
+                }) {
+                    // Warnings (such as a missing link inside inserted data)
+                    // never fail the run; report them after the content.
+                    Some(report)
                 } else {
                     None
                 }
@@ -676,9 +683,25 @@ pub fn run_compose(
         use biscuit_terminal::components::renderable::TerminalRenderable as _;
         use darkmatter::markdown::reference::validate::ValidationReportView;
         let term = term_cell.get_or_init(Terminal::default);
-        let formatted = ValidationReportView::new(report).render(term);
+        let formatted = ValidationReportView::new(report.clone()).render(term);
         if !formatted.is_empty() {
             eprint!("\n{formatted}");
+        }
+        // The view lists errors only; a warning (a missing link inside text an
+        // expression inserted) is reported line by line.
+        use biscuit_terminal::components::prose::Prose;
+        use biscuit_terminal::prelude::{Status, StatusState};
+        use darkmatter::markdown::reference::validate::{ReferenceIssueCode, ReferenceSeverity};
+        for issue in report.issues.iter().filter(|i| {
+            i.severity == ReferenceSeverity::Warning && i.code == ReferenceIssueCode::MissingLocalTarget
+        }) {
+            let status = Status::from_prose(format!(
+                "{} <dim>(line {}, inside inserted text)</dim>",
+                Prose::escape_text(&issue.message),
+                issue.origin.line,
+            ))
+            .state(StatusState::Warning);
+            eprintln!("{}", status.render(term));
         }
     }
 

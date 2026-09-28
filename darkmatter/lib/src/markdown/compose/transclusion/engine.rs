@@ -1435,8 +1435,15 @@ impl<'a> TransclusionEngine<'a> {
         } else {
             cache::hashing::context_hash(&child_context)
         };
+        // The overlay's origin decides whether the child scans its values, so
+        // two directives with equal values but different origins compose
+        // differently.
+        let overlay_origin = match directive_options.values_origin {
+            crate::markdown::compose::OverrideOrigin::Authored => 0,
+            crate::markdown::compose::OverrideOrigin::Data => 1,
+        };
         let cache_key = format!(
-            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}",
+            "compose:{:016x}:{:016x}:{:016x}:{:016x}:{:016x}:{overlay_origin}",
             cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
             state_identity.state_hash,
             context_hash,
@@ -1455,6 +1462,7 @@ impl<'a> TransclusionEngine<'a> {
             _ => None,
         };
         let path_buf = path.to_path_buf();
+        let inherited_origin = child_inherited_origin(directive_options);
 
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
@@ -1465,6 +1473,7 @@ impl<'a> TransclusionEngine<'a> {
                     .with_one_off_replace(one_off.clone())
                     .with_request_context(child_context.clone());
                 child_options.external_state = Some(inherited.clone());
+                child_options.inherited_origin = inherited_origin.clone();
                 child_options = child_options.with_accepted_source_file(path_buf.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
@@ -1634,6 +1643,9 @@ impl<'a> TransclusionEngine<'a> {
         content
     }
 
+    /// The parent's composed values, handed to a child as defaults. They are
+    /// data in the child ([`child_inherited_origin`]): the parent already
+    /// scanned every authored value once.
     fn build_child_external_state(&self, state: &EffectiveState) -> Value {
         let mut inherited: Map<String, Value> = state.data().clone().into_iter().collect();
 
@@ -1663,6 +1675,31 @@ impl<'a> TransclusionEngine<'a> {
             .get("IGNORE_INVALID")
             .and_then(|raw| parse_bool(raw))
             .unwrap_or(false)
+    }
+}
+
+/// Origin of what a transcluded child receives from the directive that
+/// transcludes it: the parent's composed state is always data, and the
+/// directive's `set` and one-off `replace` values are data when the directive
+/// options held inserted data ([`transclusion::BlockOptions::values_origin`]).
+pub(crate) fn child_inherited_origin(
+    directive_options: &transclusion::BlockOptions,
+) -> crate::markdown::compose::context::options::InheritedOrigin {
+    use crate::markdown::compose::OverrideOrigin;
+    use crate::markdown::compose::value_origin::{DataPaths, ValuePathSegment};
+    let mut frontmatter_data = DataPaths::default();
+    if directive_options.values_origin == OverrideOrigin::Data {
+        if let Some(object) = &directive_options.set_object {
+            frontmatter_data.mark_leaves(&mut Vec::new(), &Value::Object(object.clone()));
+        }
+        for (name, value) in &directive_options.set_properties {
+            frontmatter_data.mark_leaves(&mut vec![ValuePathSegment::Key(name.clone())], value);
+        }
+    }
+    crate::markdown::compose::context::options::InheritedOrigin {
+        external_state: OverrideOrigin::Data,
+        one_off_replace: directive_options.values_origin,
+        frontmatter_data,
     }
 }
 

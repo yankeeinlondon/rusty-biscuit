@@ -65,14 +65,32 @@ fn ternary_condition_without_context_fails_loudly() {
     );
 }
 
+/// The provenance of a frontmatter whose values are authored: `snapshot` is
+/// its pre-interpolation text when given, otherwise the current values are.
+pub(super) fn test_provenance(
+    frontmatter: &Frontmatter,
+    snapshot: Option<&std::collections::HashMap<String, String>>,
+) -> crate::markdown::compose::value_origin::FrontmatterProvenance {
+    match snapshot {
+        Some(snapshot) => crate::markdown::compose::value_origin::FrontmatterProvenance::new(
+            snapshot.clone(),
+            Default::default(),
+        ),
+        None => crate::markdown::compose::value_origin::FrontmatterProvenance::all_authored(
+            frontmatter,
+        ),
+    }
+}
+
 #[allow(dead_code)]
 fn scan_frontmatter(
     frontmatter: &Frontmatter,
     pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
 ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
+    let provenance = test_provenance(frontmatter, pre_interpolation_snapshot);
     super::scan_frontmatter(
         frontmatter,
-        pre_interpolation_snapshot,
+        &provenance,
         &test_ctx(),
         &std::collections::HashSet::new(),
     )
@@ -85,11 +103,12 @@ fn execute_frontmatter_shell_expansion(
     runtime: &mut PipelineRuntime,
     pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
+    let mut provenance = test_provenance(frontmatter, pre_interpolation_snapshot);
     super::execute_frontmatter_shell_expansion(
         frontmatter,
         options,
         runtime,
-        pre_interpolation_snapshot,
+        &mut provenance,
         &test_ctx(),
     )
 }
@@ -360,6 +379,7 @@ fn leak_guard_rejects_surviving_whole_value_candidate() {
 
     let err = super::validate_no_whole_value_shell_leak(
         &fm,
+        &Default::default(),
         &test_ctx(),
         &std::collections::HashSet::new(),
     )
@@ -393,6 +413,7 @@ fn leak_guard_trims_before_classifying() {
     assert!(
         super::validate_no_whole_value_shell_leak(
             &fm,
+            &Default::default(),
             &test_ctx(),
             &std::collections::HashSet::new()
         )
@@ -416,6 +437,7 @@ fn leak_guard_ignores_plain_and_mixed_values() {
     assert!(
         super::validate_no_whole_value_shell_leak(
             &fm,
+            &Default::default(),
             &test_ctx(),
             &std::collections::HashSet::new()
         )
@@ -433,6 +455,7 @@ fn leak_guard_rejects_padded_malformed_whole_value() {
 
     let err = super::validate_no_whole_value_shell_leak(
         &fm,
+        &Default::default(),
         &test_ctx(),
         &std::collections::HashSet::new(),
     )
@@ -469,6 +492,7 @@ fn leak_guard_rejects_padded_no_command_whole_value() {
 
     let err = super::validate_no_whole_value_shell_leak(
         &fm,
+        &Default::default(),
         &test_ctx(),
         &std::collections::HashSet::new(),
     )
@@ -496,6 +520,7 @@ fn leak_guard_padded_trailing_literal_stays_lenient() {
     assert!(
         super::validate_no_whole_value_shell_leak(
             &fm,
+            &Default::default(),
             &test_ctx(),
             &std::collections::HashSet::new()
         )

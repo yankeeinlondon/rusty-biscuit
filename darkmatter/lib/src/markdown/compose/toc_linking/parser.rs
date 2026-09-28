@@ -10,7 +10,19 @@ use crate::markdown::normalize::HeadingLevel;
 pub fn parse_toc_linking_directives(
     content: &str,
 ) -> Result<Vec<TocLinkingDirective>, TocLinkingError> {
-    let code_regions = find_code_regions(content);
+    parse_toc_linking_directives_in(content, None)
+}
+
+/// [`parse_toc_linking_directives`] over a body whose `data` bytes were inserted by an earlier stage:
+/// a directive counts only when its line start, prefix, and keyword are
+/// authored, and code regions are found in the masked view.
+pub(crate) fn parse_toc_linking_directives_in(
+    content: &str,
+    data: Option<&crate::markdown::compose::body_origin::DataRanges>,
+) -> Result<Vec<TocLinkingDirective>, TocLinkingError> {
+    let code_regions = find_code_regions(
+        &crate::markdown::compose::parse_utils::structural_view(content, data),
+    );
     let mut directives = Vec::new();
 
     let bytes = content.as_bytes();
@@ -30,7 +42,13 @@ pub fn parse_toc_linking_directives(
 
         if trimmed.starts_with("::toc-linking") {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
-            if !is_in_code_region(first_non_ws, &code_regions) {
+            if !is_in_code_region(first_non_ws, &code_regions)
+                && crate::markdown::compose::parse_utils::authored_directive(
+                    data,
+                    line_start,
+                    first_non_ws + "::toc-linking".len(),
+                )
+            {
                 let indent = &content[line_start..first_non_ws];
                 let inferred_indent = if indent.is_empty() {
                     infer_indent_from_previous_line(content, line_start)

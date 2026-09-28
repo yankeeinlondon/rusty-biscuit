@@ -111,6 +111,12 @@ pub struct BlockOptions {
     /// remain in `set_object` / `set_properties` so they can still apply
     /// under permissive mode.
     pub deferred_set_errors: Vec<DeferredSetError>,
+
+    /// Origin of the `set` and one-off `replace` values: data when the
+    /// directive's options hold text an earlier stage inserted (for example
+    /// `set.note="{{ note }}"` after body interpolation), so the child never
+    /// scans it again.
+    pub values_origin: crate::markdown::compose::OverrideOrigin,
 }
 
 /// A parser-recorded set-override error whose severity is resolved later.

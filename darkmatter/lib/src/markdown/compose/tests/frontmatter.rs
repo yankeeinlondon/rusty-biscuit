@@ -129,9 +129,9 @@ fn test_frontmatter_interpolation_disabled() {
         .unwrap();
 
     assert_eq!(report.frontmatter_interpolations_applied, 0);
-    // body interpolation resolves {{spec}} to {{base}}/spec.md and then
-    // recursively resolves {{base}} in the same pass.
-    assert!(composed.content().contains("/path/spec.md"));
+    // Body interpolation inserts the unscanned `spec` value once; the
+    // `{{base}}` it contains is data and is not evaluated.
+    assert!(composed.content().contains("{{base}}/spec.md"), "{}", composed.content());
 }
 
 #[test]

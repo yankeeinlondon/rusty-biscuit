@@ -5,7 +5,10 @@ use super::types::{
     TransclusionError,
 };
 use crate::markdown::FrontmatterMap;
-use crate::markdown::compose::parse_utils::{Cursor, find_code_regions, is_in_code_region};
+use crate::markdown::compose::body_origin::DataRanges;
+use crate::markdown::compose::parse_utils::{
+    Cursor, authored_directive, find_code_regions, is_in_code_region, structural_view,
+};
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 
@@ -42,7 +45,24 @@ pub(crate) fn parse_directives_with_line_offset(
     ctx: SourceContext,
     line_offset: usize,
 ) -> Result<Vec<BlockDirective>, TransclusionError> {
-    let code_regions = find_code_regions(content);
+    parse_directives_in(content, None, ctx, line_offset)
+}
+
+/// [`parse_directives_with_line_offset`] over a body whose `data` bytes were
+/// inserted by an earlier stage.
+///
+/// A directive counts only when its line start, prefix, and keyword are
+/// authored, and code regions are found in the masked view, so data can
+/// neither create nor hide a directive. Data in the target is expected
+/// (`::file {{ path }}`); data in the options makes the option values data
+/// ([`BlockOptions::values_origin`]).
+pub(crate) fn parse_directives_in(
+    content: &str,
+    data: Option<&DataRanges>,
+    ctx: SourceContext,
+    line_offset: usize,
+) -> Result<Vec<BlockDirective>, TransclusionError> {
+    let code_regions = find_code_regions(&structural_view(content, data));
     let mut directives = Vec::new();
 
     let bytes = content.as_bytes();
@@ -62,8 +82,22 @@ pub(crate) fn parse_directives_with_line_offset(
 
         if is_block_directive_line(trimmed) {
             let first_non_ws = line_start + line.len().saturating_sub(line.trim_start().len());
-            if !is_in_code_region(first_non_ws, &code_regions) {
-                let (kind, raw_target, options) = parse_directive_line(trimmed, line_number, &ctx)?;
+            let keyword_len = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+            if !is_in_code_region(first_non_ws, &code_regions)
+                && authored_directive(data, line_start, first_non_ws + keyword_len)
+            {
+                let (kind, raw_target, mut options) =
+                    parse_directive_line(trimmed, line_number, &ctx)?;
+                if let Some(data) = data {
+                    let after_keyword = first_non_ws + keyword_len;
+                    let options_start = content[after_keyword..line_end]
+                        .find(raw_target.as_str())
+                        .filter(|_| !raw_target.is_empty())
+                        .map_or(after_keyword, |at| after_keyword + at + raw_target.len());
+                    if data.intersects(&(options_start..line_end)) {
+                        options.values_origin = crate::markdown::compose::OverrideOrigin::Data;
+                    }
+                }
                 directives.push(BlockDirective {
                     kind,
                     raw_target,

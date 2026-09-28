@@ -32,6 +32,7 @@ use super::expression::{
     scalar_string,
 };
 use super::frontmatter_interpolation::FrontmatterSeedState;
+use super::value_origin::{DataPaths, FrontmatterProvenance};
 use super::interpolation::{Evaluator, ExpressionFailurePolicy, ScanMode, interpolate_text};
 use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
@@ -1242,9 +1243,16 @@ fn split_at_chain_operators(input: &str) -> Vec<&str> {
 ///
 /// Only examines top-level keys — nested objects and arrays are ignored.
 /// Keys present in `exclude_keys` are skipped entirely (DM1 passthrough).
+///
+/// A key is a candidate only when its **authored** value is a whole-value
+/// `$( … )` ([`authored_shell_candidate`]). Interpolation may have supplied the
+/// command's arguments since; it cannot have created the shape, and a data
+/// value is never a candidate however it reads.
+///
+/// [`authored_shell_candidate`]: super::value_origin::authored_shell_candidate
 pub(crate) fn scan_frontmatter(
     frontmatter: &Frontmatter,
-    pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+    provenance: &FrontmatterProvenance,
     ctx: &SourceContext,
     exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
@@ -1252,14 +1260,12 @@ pub(crate) fn scan_frontmatter(
     let fm = frontmatter.as_map();
 
     for (key, value) in fm.iter() {
-        if exclude_keys.contains(key) {
+        if exclude_keys.contains(key) || !provenance.is_authored_shell_candidate(key) {
             continue;
         }
         // Only process top-level string values
         if let Value::String(s) = value {
-            let original = pre_interpolation_snapshot
-                .and_then(|map| map.get(key))
-                .map(|s| s.as_str());
+            let original = provenance.authored_source(key);
 
             if let Some(mut directive) = parse_shell_value(s, key, original, ctx)? {
                 directive.line = frontmatter_key_line(ctx, key);
@@ -1287,17 +1293,17 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     frontmatter: &mut Frontmatter,
     options: &ComposeOptions,
     runtime: &mut PipelineRuntime,
-    pre_interpolation_snapshot: Option<&HashMap<String, String>>,
+    provenance: &mut FrontmatterProvenance,
     ctx: &SourceContext,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx, &options.exclude_keys)?;
+    let candidates = scan_frontmatter(frontmatter, provenance, ctx, &options.exclude_keys)?;
 
     if candidates.is_empty() {
-        // No directives to execute, but a scan-skipped whole-value `$(...)`
-        // (e.g. one behind leading whitespace) could still be sitting in
-        // frontmatter. Enabled shell expansion must never leave a raw
-        // expansion-form value behind, so guard even on the no-op path.
-        validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
+        // No directives to execute, but an authored whole-value `$(...)` the
+        // scan did not take could still be sitting in frontmatter. Enabled
+        // shell expansion must never leave a raw authored expansion-form value
+        // behind, so guard even on the no-op path.
+        validate_no_whole_value_shell_leak(frontmatter, provenance.data(), ctx, &options.exclude_keys)?;
         return Ok(FrontmatterShellExpansionReport {
             replacements: 0,
             approvals_used: 0,
@@ -1451,13 +1457,15 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     for (_, key, execution) in executions {
         let (stdout, exec_warnings) = execution?;
         warnings.extend(exec_warnings);
+        // Shell output is data: it is never scanned for `{{ … }}` or `$( … )`.
+        provenance.data_mut().mark_key(&key);
         fm_mut.insert(key, Value::String(stdout.trim().to_string()));
     }
 
-    // Post-expansion leak guard: after replacements, no top-level value may
-    // still be a whole-value `$(...)` candidate (e.g. command output that
-    // reproduced `$( … )`). Such a value is leaked executable state, not text.
-    validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
+    // Post-expansion leak guard: after replacements, no authored top-level
+    // value may still be a whole-value `$(...)` candidate. Command output that
+    // reproduced `$( … )` is data and is kept as text.
+    validate_no_whole_value_shell_leak(frontmatter, provenance.data(), ctx, &options.exclude_keys)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
@@ -1841,15 +1849,15 @@ fn interpolate_branch_text(
     Ok(rewrite.output)
 }
 
-/// Post-expansion leak guard for top-level frontmatter string values.
+/// Post-expansion leak guard for authored top-level frontmatter string values.
 ///
-/// After enabled frontmatter shell expansion has run, no top-level value may
-/// still be a whole-value `$(...)` shell-expansion candidate. A surviving
-/// candidate means executable state leaked as raw syntax — e.g. a command whose
-/// own output reproduced `$( … )`, or a `$(...)` value behind leading
-/// whitespace that the strict-start scan skipped. Frontmatter values that are
-/// exactly an expansion form are executable state, not text, and must resolve
-/// or fail loudly rather than reach the composed document verbatim.
+/// After enabled frontmatter shell expansion has run, no **authored** top-level
+/// value may still be a whole-value `$(...)` shell-expansion candidate. A
+/// surviving candidate means executable state leaked as raw syntax. Authored
+/// values that are exactly an expansion form are executable state, not text,
+/// and must resolve or fail loudly rather than reach the composed document
+/// verbatim. A data value (shell output, an interpolation result, a data
+/// override) is exempt however it reads: it was never an instruction.
 ///
 /// Candidate recognition is delegated to [`is_whole_value_shell_candidate`],
 /// which reuses [`parse_shell_value`] so the `$( … )` grammar and supported
@@ -1865,11 +1873,12 @@ fn interpolate_branch_text(
 /// key.
 fn validate_no_whole_value_shell_leak(
     frontmatter: &Frontmatter,
+    data: &DataPaths,
     ctx: &SourceContext,
     exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<(), ShellExpansionError> {
     for (key, value) in frontmatter.as_map().iter() {
-        if exclude_keys.contains(key) {
+        if exclude_keys.contains(key) || data.is_data_key(key) {
             continue;
         }
         if let Value::String(s) = value {

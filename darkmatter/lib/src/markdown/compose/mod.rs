@@ -103,6 +103,7 @@ mod schema_validation;
 pub mod subtree;
 mod unknown_identifiers;
 mod util;
+pub(crate) mod value_origin;
 
 #[cfg(test)]
 mod type_tests;
@@ -159,6 +160,7 @@ pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
+pub use value_origin::{OverrideLayer, OverrideOrigin};
 pub use perf::{
     ComposePerfMetric, ComposePerfReport, ComposeStage, ShellCommandSpan, redact_shell_command,
 };

@@ -8,9 +8,9 @@
 use super::Markdown;
 use super::context;
 use super::context::options::ComposeOptions;
+use super::value_origin::{DataPaths, FrontmatterProvenance, OverrideOrigin, ValuePathSegment};
 use biscuit_file::{FileResolutionContext, PathPosition};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::trace;
 
@@ -209,21 +209,30 @@ fn get_attribute_name_for_syntax(
 /// Applies pre-effective-state frontmatter preparation shared by runtime
 /// compose and shell-command discovery.
 ///
-/// This mutates frontmatter with external-state defaults and `--set`
-/// overrides using the same rules the real compose pipeline uses. When
-/// requested, it also captures the post-merge/pre-interpolation string
-/// snapshot used for frontmatter shell executable provenance checks.
+/// This mutates frontmatter with external-state defaults, the directive `set`
+/// overlay's origin, authored `--set` overrides, and data overrides using the
+/// same rules the real compose pipeline uses.
+///
+/// ## Returns
+///
+/// The frontmatter's provenance: which leaves are data, and the authored text
+/// of every other top-level string before any scan. The authored text is the
+/// only input to the whole-value `$( … )` shell decision (R1.2).
 pub(crate) fn prepare_frontmatter_for_compose(
     markdown: &mut Markdown,
     options: &ComposeOptions,
-    capture_pre_interpolation_snapshot: bool,
-) -> Option<HashMap<String, String>> {
+) -> FrontmatterProvenance {
+    let mut data = options.inherited_origin.frontmatter_data.clone();
+
     // Apply external state as defaults using deep-merge: nested keys
     // from external state fill in missing values at every level, not
     // just top-level keys. Frontmatter values take precedence.
     if let Some(external) = options.external_state.as_ref() {
         let fm = markdown.frontmatter_mut().as_map_mut();
         let current = Value::Object(fm.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+        if options.inherited_origin.external_state == OverrideOrigin::Data {
+            mark_external_leaves(&mut data, &mut Vec::new(), external, &current);
+        }
         let merged = context::effective_state::deep_merge(external, &current);
         if let Value::Object(map) = merged {
             *fm = map.into_iter().collect();
@@ -235,17 +244,52 @@ pub(crate) fn prepare_frontmatter_for_compose(
         let fm = markdown.frontmatter_mut().as_map_mut();
         for (key, value) in overrides {
             fm.insert(key.clone(), value.clone());
+            data.clear_key(key);
+        }
+    }
+    if let Some(overrides) = options.data_overrides.as_ref().and_then(Value::as_object) {
+        let fm = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in overrides {
+            fm.insert(key.clone(), value.clone());
+            data.mark_key(key);
         }
     }
 
-    capture_pre_interpolation_snapshot.then(|| {
-        markdown
-            .frontmatter()
-            .as_map()
-            .iter()
-            .filter_map(|(key, value)| value.as_str().map(|s| (key.clone(), s.to_string())))
-            .collect()
-    })
+    let authored = markdown
+        .frontmatter()
+        .as_map()
+        .iter()
+        .filter(|(key, _)| !data.is_data_key(key))
+        .filter_map(|(key, value)| value.as_str().map(|s| (key.clone(), s.to_string())))
+        .collect();
+    FrontmatterProvenance::new(authored, data)
+}
+
+/// Marks each leaf the external-state deep merge takes from `external` rather
+/// than from `current` (see [`context::effective_state::deep_merge`]: the
+/// document wins, and `null` or a missing key falls back to the external value).
+fn mark_external_leaves(
+    data: &mut DataPaths,
+    path: &mut Vec<ValuePathSegment>,
+    external: &Value,
+    current: &Value,
+) {
+    match (external, current) {
+        (Value::Object(external), Value::Object(current)) => {
+            for (key, external_value) in external {
+                path.push(ValuePathSegment::Key(key.clone()));
+                match current.get(key) {
+                    None => data.mark(path.clone()),
+                    Some(current_value) => {
+                        mark_external_leaves(data, path, external_value, current_value)
+                    }
+                }
+                path.pop();
+            }
+        }
+        (_, Value::Null) if !external.is_null() => data.mark(path.clone()),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
