@@ -35,6 +35,8 @@ human_review_items:
         Cons: it is a new delivery mechanism, which the plan's rules exclude. It needs temporary-file handling inside the Pi profile, and it has not been confirmed that `@file` content is submitted as the first message in interactive mode.
 
       **Recommendation: A**, falling back to C only if the crash reproduces. A single 2 KB test decides the question, and the plan's Phase 4 real Pi test should include a prompt of that size in any case.
+
+      **Update after Phase 3 (2026-09-28):** the command-line fix is now in the code, with the 768 KB guard. That is the code both A and B lead to. The Phase 3 session still could not run Pi. The old standard-input route never produced an interactive session, so this change cannot make any prompt worse, and a short prompt should now work. The Pi task stays open. Your choice now decides only whether the live 2 KB check (by you, or by the Phase 4 real Pi test) is required before this fix is closed, or whether C replaces it.
 message_to_agent: |-
   Phase 1 (rulings and spikes) is done. Read `spike-interactive-startup.md` in this directory before Phase 3. Phase 2 (wrapper validation) does not depend on any of the open items below and can proceed as planned.
 
@@ -50,6 +52,14 @@ message_to_agent: |-
   7. New seam: `wrapper_stages::reject_interactive_timeouts(args, interactive_requested)` runs at the end of Stage 2, before the editor. `validate_timeout_constraints` is now `(args, non_interactive_requested)` and holds only the post-edit "can only be used in non-interactive mode" rules. Do not re-add interactive checks there.
   8. `claudine/cli/tests/l1/wrap_basics.rs` has a local `write_marker_executable` helper (sh or `.cmd` stub that only creates a marker file) plus `marker_editor_path`. Reuse them for the Phase 5 drift test `getting_started_edit_interactive_form_is_accepted`. Any `codex --edit …` L1 test now needs a `codex` stub on the fixture PATH, because binary resolution (Stage 1) runs before the editor.
   9. Phase 5: the `--edit` help line changed to "Draft the initial prompt in an external editor; combine with -i for an interactive session". `claudine/docs/getting-started/index.md` still quotes the old sentence ("Open the prompt in an external editor before launching the provider"); update it in the getting-started task.
+
+  Phase 3 (interactive delivery repairs and fleet test) is done except for the Kimi and Pi rulings; see the implementation log's `## Phase 3`.
+
+  10. Interactive shapes now: Goose `run --text <p> --interactive` (with `run` inserted at argv index 0 when absent; `--text=<p>` for a `-` prefix), Kilo `--prompt <p>` / `--prompt=<p>`, Antigravity `--prompt-interactive <p>` / `=<p>`, Pi `-- <p>` (a leading `@` gets a leading space: `-- " @…"`). Non-interactive shapes are unchanged. Kimi is untouched (N2 unruled).
+  11. Pi's code landed before #9200 was settled, because this session also could not run `pi` or `tmux`. The plan's Pi task is deliberately unticked. Phase 4's `real_pi_interactive_startup.rs` must include a prompt of about 2 KB and a prompt starting with `@`, confirm that `initialMessages` auto-submits, and record the outcome. If the crash reproduces, change only the interactive branch of `profile/pi.rs`.
+  12. Phase 4 L2: the fleet test lives in `profile/tests/positional.rs` (`every_provider_delivers_an_interactive_startup_prompt`, table keyed by `Provider::as_slug()`). For the L2 Pi stub case, expect argv `-- <prompt>` and no stdin seed.
+  13. `claudine/docs/providers/dispatch-inventory.json` must match `cli/src` byte for byte. Any new `Provider::X` in `cli/src` or `lib/src`, including `#[cfg(test)]` files under `src/`, needs a regeneration: `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` in `claudine/`. Phase 3's session could not set that variable, so it hand-edited 12 `direct-ref` records. The byte-compare test passes. Integration tests under `cli/tests/` are not scanned.
+  14. Commit `57968bb03` was made by a separate process during Phase 3. It contains the Phase 3 source changes. Its message wrongly says "Phase 2" and claims the whole fleet is covered, which is not true while Kimi and Pi are open. Correct it at review time if the history is rewritten.
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28

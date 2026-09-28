@@ -22,6 +22,19 @@ docs_updated_during_phase_2:
     - claudine/fixes/2026-09-18-edit-integration/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/cli/src/commands/wrap/profile/antigravity.rs
+    - claudine/cli/src/commands/wrap/profile/goose.rs
+    - claudine/cli/src/commands/wrap/profile/kilo.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+docs_updated_during_phase_3:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+    - claudine/fixes/2026-09-18-edit-integration/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - claudine-cli
 ---
@@ -286,29 +299,36 @@ since they are small and touch the same three files.
 Depends on G1. Each repair uses only the native form verified in S1/S2. A
 provider blocked under N2 skips its repair task until the author rules.
 
-- [ ] **Goose repair** (`profile/goose.rs`)
+- [x] **Goose repair** (`profile/goose.rs`)
   - Interactive: `run -t <prompt> --interactive`. Handle a leading `-` per S1
     (for example `--text=<p>`). Non-interactive shape unchanged.
-- [ ] **Kilo repair** (`profile/kilo.rs`)
+- [x] **Kilo repair** (`profile/kilo.rs`)
   - Interactive: the `--prompt` form, mirroring OpenCode's attached-value
     handling for a leading `-` (`positional.rs:174`). Keep `-- <p>` and the
     `ARG_MAX_HEADROOM` guard for `run`.
-- [ ] **Antigravity repair** (`profile/antigravity.rs`)
+- [x] **Antigravity repair** (`profile/antigravity.rs`)
   - Interactive: `--prompt-interactive <p>` (or `=<p>` per S1). Non-interactive
     stays `--print` last on argv. Update the profile comment.
 - [ ] **Pi repair** (`profile/pi.rs`)
   - Interactive: `AppendArgs(["--", prompt])` per S2, with the S3 size guard.
     Non-interactive stays stdin. Rewrite the stale 0.80.3 comment to state
     both channels and the minimum version.
+  - *Code landed 2026-09-28 (Phase 3), including the `@`-prefix handling and
+    the size guard. Left open until upstream issue #9200 is ruled on by the
+    author or checked live (Phase 4 real Pi test with a prompt of about 2 KB);
+    see the implementation log.*
 - [ ] **Kimi resolution** (`profile/kimi.rs`)
   - If S1 found a surface, repair to it. If N2 fired, leave the code, add
     nothing, and wait for the author's ruling. Do not tick the fleet
     definition-of-done item until it is resolved.
-- [ ] **Confirm the unchanged five**
+  - *N2 still unruled at Phase 3 (2026-09-28): `kimi.rs` untouched; the fleet
+    table's Kimi row pins today's `--prompt` argv with a comment saying it is
+    not a verified interactive form.*
+- [x] **Confirm the unchanged five**
   - Claude, Codex, Gemini, Qwen, and OpenCode: no code change unless S1
     disproves the current form. If it does, repair in the same pattern and
     log it.
-- [ ] **Fleet test** (`profile/tests/positional.rs`, AC7 and AC8)
+- [x] **Fleet test** (`profile/tests/positional.rs`, AC7 and AC8)
   - Add `every_provider_delivers_an_interactive_startup_prompt` per N7. For
     each provider it asserts the exact interactive `PromptDelivery` shape from
     the expectation table, for (a) a plain prompt and (b) a multiline Markdown

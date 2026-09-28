@@ -21,6 +21,19 @@ docs_updated_during_phase_2:
     - claudine/fixes/2026-09-18-edit-integration/plan.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - claudine/cli/src/commands/wrap/profile/antigravity.rs
+    - claudine/cli/src/commands/wrap/profile/goose.rs
+    - claudine/cli/src/commands/wrap/profile/kilo.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+docs_updated_during_phase_3:
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+    - claudine/fixes/2026-09-18-edit-integration/spec.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - claudine-cli
 ---
@@ -193,3 +206,153 @@ changed; Kimi's N2 ruling and Pi's #9200 question do not touch this phase.
   filters work; use those with `cross-check`.
 - No pre-existing failures were seen. No skill change: the `cli-reference`
   `--edit` row and the timeline entry belong to Phase 5.
+
+## Phase 3
+
+Started and finished 2026-09-28 on macOS (dev Mac). Phase 3 repairs the
+interactive startup-prompt delivery of the profiles the Phase 1 spike found
+defective, and adds the fleet test. Both human-review items from Phase 1 (Kimi
+under N2, Pi upstream issue #9200) were **still unruled** when this phase ran.
+
+### What changed
+
+| Provider | Interactive delivery before → after | Non-interactive |
+|---|---|---|
+| Goose | `… run -t <p>` (one-shot) → `run --text <p> --interactive …`; `--text=<p>` for a `-`-prefixed prompt | unchanged: `run -t <p>` |
+| Kilo | `-- <p>` (read as a project directory) → `--prompt <p>`; `--prompt=<p>` for a `-`-prefixed prompt | unchanged: `run -- <p>` |
+| Antigravity | `--print <p>` (headless one-shot) → `--prompt-interactive <p>`; `--prompt-interactive=<p>` for a `-`-prefixed prompt | unchanged: `--print <p>` last |
+| Pi | `Stdin(<p>)` (forces print mode) → `-- <p>`; a prompt starting with `@` becomes `-- " @…"` | unchanged: `Stdin(<p>)` |
+| Kimi | unchanged (`--prompt <p>`), per N2 | unchanged (`WireRpc`) |
+| Claude, Codex, Gemini, Qwen, OpenCode | unchanged, no code touched | unchanged |
+
+- **Goose places `run` first in interactive mode.** When the argv has no
+  `run` (the interactive entrypoint adds none), the delivery now inserts
+  `run --text <p> --interactive` at index 0 rather than appending `run -t <p>`
+  last. Any flag already on the argv, including the profile's own
+  `--system <p>`, then parses as a `run` option instead of a root option.
+  When `run` is present, the text and `--interactive` go right after it.
+  Before this change, interactive Goose with an append system prompt produced
+  `goose --system X run -t p`.
+- **Kilo's size guard now covers both modes.** One `ARG_MAX_HEADROOM`
+  (768 KiB) check runs before either branch. Its message now says "on the
+  command line" rather than "as a positional argument", since the
+  interactive value is a flag value.
+- **Pi.** Per-profile 768 KiB guard (S3, Rule 2). The error suggests running
+  without `-i`, which is correct for Pi because its non-interactive path is
+  stdin. The stale 0.80.3 comment ("`--` is rejected") is replaced. The
+  profile docblock states the 0.84.3 minimum for interactive sessions.
+- **Pi `@` decision (open point 3b from Phase 1).** After `--`, Pi still reads
+  a token starting with `@` as a file argument. A leading space is prepended
+  only to a prompt whose **first** character is `@`, so the prompt stays a
+  message. A mid-prompt `@name` is untouched. A refusal was rejected because
+  it would be a new provider-specific error, and a leading space is harmless
+  to the model. Not live-verified (see "Evidence limits").
+- **Kimi.** N2 is unruled, so `kimi.rs` is untouched. The fleet table's Kimi
+  row pins today's `--prompt` argv. A comment on the row says it is not a
+  verified interactive form. When the author rules, that row and `kimi.rs`
+  change together.
+
+### Departure: Pi repair implemented before #9200 was settled
+
+The Phase 1 message said "do not finalize the Pi repair until it is ruled or
+checked live". This session's permission policy again refused `pi` and `tmux`
+(`pi --version` and `tmux -V` both need approval), so the live check was not
+possible. The repair was implemented anyway, because every option the author
+can choose, except C (temporary `@file`, which the plan's rules exclude),
+ships this same argv code. The stdin path it replaces is broken by source for
+**every** interactive prompt, since a piped stdin always forces print mode.
+The plan's Pi task is therefore **left unticked**, with a note saying the code
+landed and finalization waits on the #9200 ruling or the Phase 4 real Pi test
+with a prompt of about 2 KB. If that test reproduces the crash, only the
+interactive branch of `pi.rs` changes.
+
+### Departure: dispatch inventory edited by hand
+
+The fleet table first used `Provider::X` keys. The table and the new
+per-profile tests added 13 sites to `claudine/docs/providers/dispatch-inventory.json`,
+and `dispatch_inventory_matches_committed_file` failed. The documented
+regeneration (`CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::`)
+was refused by this session's permission policy in every spelling tried
+(`VAR=1 cmd`, `env VAR=1 cmd`). Two fixes:
+
+1. The fleet table is keyed by `Provider::as_slug()` strings, so it adds no
+   `tuple-array` (conditional-class) site. A missing row still fails, through
+   the `PROVIDER_COUNT` length check and the per-provider lookup.
+2. The 12 remaining new sites are plain `profile(Provider::X)` references
+   (`direct-ref`, `reference` class, `exempt_candidate: true`, lines 848–997
+   of `positional.rs`). They were added to the JSON by hand in the generator's
+   exact record shape and sort position. `sites`, `provider_refs`,
+   `by_form.direct-ref`, and `by_dispatch_class.reference` each rose by 12.
+   The byte-comparing test now passes, which proves the hand edit equals the
+   generator's output.
+
+### Commit made outside this session
+
+During this phase, commit `57968bb03` ("feat(claudine-cli): support
+interactive startup prompts across the fleet") appeared on the branch. It
+contains the five profile and test source files as they stand now. This
+session did not stage or commit anything. The commit came from a separate
+process. Its message has two errors to fix at review:
+
+- it says "this implements Phase 2", but this is Phase 3;
+- it says the change "ships the startup-prompt promise the spec owed every
+  provider in the fleet", which overstates it: Kimi is still unresolved (N2),
+  and Pi's promise waits on #9200.
+
+The dispatch-inventory edit, plan, log, and spec changes are uncommitted.
+
+### Requirement → test mapping
+
+| Requirement | Test (all L1 unit, `claudine-cli` bin, `commands::wrap::profile::tests::positional::`) |
+|---|---|
+| Every provider has an interactive startup delivery that matches its expected native form, for a plain prompt and for a multiline prompt starting with `- ` (AC7, AC8). No provider uses stdin or wire RPC interactively, and no stdin seed is produced. A provider with no row fails | `every_provider_delivers_an_interactive_startup_prompt` |
+| Goose interactive: `run` first, `--text`, `--interactive`, other flags after; follows an existing `run`; attached `--text=` for a bullet | `goose_interactive_prompt_leads_with_run_so_other_flags_parse_as_run_options`, `goose_interactive_prompt_follows_an_existing_run_entrypoint` |
+| Goose non-interactive unchanged (with and without `run` on the argv) | `goose_non_interactive_prompt_shape_is_unchanged`; existing `goose_resume_uses_run_with_explicit_session_id`, `test_goose_non_interactive_no_duplicate_run` |
+| Kilo interactive uses `--prompt` / `--prompt=` | `kilo_interactive_prompt_uses_prompt_flag_not_the_project_positional` |
+| Kilo non-interactive stays `run -- <p>` | `kilo_non_interactive_prompt_stays_positional_after_run` |
+| Kilo size guard in both modes, with the boundary value accepted | `kilo_rejects_an_oversized_prompt_in_both_modes` |
+| Antigravity interactive uses `--prompt-interactive` / `=` | `antigravity_interactive_prompt_uses_prompt_interactive_not_print` |
+| Antigravity non-interactive keeps `--print <p>` last, after `--output-format json` | `antigravity_non_interactive_prompt_stays_print_last` |
+| Pi interactive `-- <p>` for plain and bullet prompts, stdin not seeded | `pi_interactive_prompt_is_a_positional_message_after_end_of_options` |
+| Pi leading `@` gets a leading space; mid-prompt `@` is untouched | `pi_interactive_prompt_starting_with_at_is_not_read_as_a_file` |
+| Pi interactive size guard (boundary accepted) | `pi_interactive_rejects_a_prompt_too_large_for_argv` |
+| Pi non-interactive stays stdin whatever the prefix or size | `pi_non_interactive_prompt_stays_on_stdin_whatever_its_size_or_prefix` |
+| The five unchanged providers and Kimi keep their shapes | fleet test rows; existing `claude_/codex_/opencode_/gemini_/qwen_…` and `kimi_interactive_continues_using_prompt_argv_flag` tests |
+
+- **Regression proof (by construction, not re-run).** The pre-Phase-3
+  profiles emit `run -t <p>` (Goose), `-- <p>` (Kilo), `--print <p>`
+  (Antigravity), and `Stdin` (Pi). Each differs from its fleet row, and Pi
+  also trips the no-stdin assertion, so the fleet test fails on the old code.
+- **Checkpoint 3 row-deletion check.** With the Pi row deleted, the fleet test
+  failed with "one expectation row per provider". The row was restored.
+- **Placement.** All new tests live in `profile/tests/positional.rs`, which the
+  `claudine` bin target compiles as `#[cfg(test)] mod positional`. No path
+  segment carries a tier marker, so they run in L1 (`just test`).
+- **End-to-end coverage** of a repaired profile through the real pipeline
+  (a Pi stub receiving `-- <p>` with a TTY on stdin) is Phase 4's L2 task.
+  The live Pi behavior, including #9200 and whether `initialMessages`
+  auto-submits, is Phase 4's `real_pi_interactive_startup.rs`.
+
+### Evidence limits
+
+- No live provider or tmux run was possible (see the Pi departure above). The
+  Goose, Kilo, and Antigravity forms rest on the Phase 1 spike's
+  source, docs, and research tiers. A human-permitted pass over the spike doc's
+  "Outstanding live checks" is still recommended before Phase 5 describes
+  per-provider behavior as verified.
+- **OS.** The change builds argv vectors only: no paths, processes, or
+  `cfg` branches. `just cross-check` was not run for this phase. CI's
+  Linux and macOS legs cover the unit tests, and the Windows leg runs
+  after merge.
+
+### Gates (Checkpoint 3)
+
+- `cd claudine && just test` (macOS): **7739 passed, 9 skipped, 0 failed**.
+  The first run failed only on `dispatch_inventory_matches_committed_file`
+  (resolved above).
+- `cd claudine && just lint`: clean. The only output is the long-standing
+  macOS linker `__eh_frame section too large` warning.
+- No docs or skill drift was found. `rg` over `claudine/docs` and
+  `.claude/skills/claudine` found no current page stating the old Goose,
+  Kilo, Antigravity, or Pi interactive shapes. Phase 5 still owes the
+  research notes (Pi `--` floor) and the timeline entry.
