@@ -103,17 +103,49 @@ fn already_emitted_wraps_once_and_delegates_display() {
 
 #[test]
 fn enrich_is_idempotent() {
-    let source = source_from("---\ntitle: x\n---\nbody\n");
-    let err = CompositionError::PromptPropertyMissing
+    let source = source_from("---\ntitle: x\nprompt: 42\n---\nbody\n");
+    let err = CompositionError::PromptPropertyWrongType("number".to_string())
         .enrich_frontmatter(&source, true)
         .enrich_frontmatter(&source, true);
-    // Wrapped exactly once — the inner is the bare missing-prompt error.
+    // Wrapped exactly once — the inner is the bare wrong-type error.
     match err {
         CompositionError::WithFrontmatter { inner, .. } => {
-            assert!(matches!(*inner, CompositionError::PromptPropertyMissing));
+            assert!(matches!(*inner, CompositionError::PromptPropertyWrongType(_)));
         }
         other => panic!("expected WithFrontmatter, got: {other:?}"),
     }
+}
+
+#[test]
+fn enrich_omits_the_excerpt_when_nothing_is_locatable() {
+    // `prompt` is absent by definition, so there is no line to focus.
+    let source = source_from("---\ntitle: x\n---\nbody\n");
+    let err = CompositionError::PromptPropertyMissing.enrich_frontmatter(&source, true);
+    assert!(matches!(err, CompositionError::PromptPropertyMissing), "got: {err:?}");
+
+    // A body-rooted compose failure points into the body, not the frontmatter.
+    let err = CompositionError::ComposeFailed(MarkdownError::Interpolation {
+        key: None,
+        expression: "nope".to_string(),
+        source: Box::new(darkmatter::markdown::SourceRef::Effective {
+            rendered: "nope".to_string(),
+            origin_key: None,
+        }),
+        cause: Box::new(darkmatter::markdown::compose::expression::ExpressionError::Parse(
+            "boom".to_string(),
+        )),
+    })
+    .enrich_frontmatter(&source, true);
+    assert!(err.frontmatter_excerpt().is_none(), "got: {err:?}");
+
+    // A schema problem on an undeclared, unset property.
+    let err = CompositionError::SchemaValidation {
+        source_path: PathBuf::from("review.md"),
+        message: "invalid".to_string(),
+        problems: vec!["/nope".to_string()],
+    }
+    .enrich_frontmatter(&source, true);
+    assert!(err.frontmatter_excerpt().is_none(), "got: {err:?}");
 }
 
 #[test]
@@ -165,7 +197,7 @@ fn enrich_frontmatter_fence_mismatch_highlights_line_one() {
 }
 
 #[test]
-fn enrich_frontmatter_parse_regular_error_gets_block_only_excerpt() {
+fn enrich_frontmatter_parse_error_windows_the_reported_line() {
     let source = source_from("---\nprompt: |-\n    four spaces\n   three spaces\n---\nbody\n");
     let yaml_err: biscuit_file::YamlParseError =
         biscuit_file::serde_yaml_ng::from_str::<biscuit_file::serde_yaml_ng::Value>(
@@ -183,11 +215,9 @@ fn enrich_frontmatter_parse_regular_error_gets_block_only_excerpt() {
     };
     let err = CompositionError::FrontmatterParse(md_err).enrich_frontmatter(&source, true);
 
-    assert!(
-        matches!(err, CompositionError::WithFrontmatter { .. }),
-        "expected WithFrontmatter wrapper, got: {err:?}"
-    );
-    assert!(err.frontmatter_excerpt().is_some(), "expected excerpt attached");
+    let excerpt = err.frontmatter_excerpt().expect("a located parse error is excerpted");
+    // The parser reports YAML line 3 (`   three spaces`), which is source line 4.
+    assert_eq!(excerpt.highlighted_lines(), vec![4]);
 }
 
 #[test]
@@ -2743,4 +2773,136 @@ fn proxy_with_diagnostics_share_the_lifecycle_authoring_code_and_project_facets(
             "`message` facet must project for: {err:?}"
         );
     }
+}
+
+// -- Focused frontmatter excerpts (R6) ------------------------------------------
+
+const CLARIFY: &str = include_str!("../../../../../prompts/clarify.md");
+
+/// The 1-based line of the first line of `text` that starts with `prefix`.
+fn line_starting_with(text: &str, prefix: &str) -> usize {
+    text.lines()
+        .position(|line| line.starts_with(prefix))
+        .map(|idx| idx + 1)
+        .unwrap_or_else(|| panic!("no line starts with {prefix:?}"))
+}
+
+fn missing(name: &str) -> MissingProperty {
+    MissingProperty {
+        name: name.to_string(),
+        type_label: None,
+        description: None,
+        interactive_shape: None,
+    }
+}
+
+#[test]
+fn caller_input_schema_problem_in_clarify_highlights_the_arm_declaration() {
+    // The C5 report: `/spec` against the shipped `clarify.md` once rendered all
+    // 29 lines with nothing highlighted.
+    let source = source_from(CLARIFY);
+    let spec_line = line_starting_with(CLARIFY, "    - spec:");
+    let cases = [
+        CompositionError::SchemaValidation {
+            source_path: PathBuf::from("prompts/clarify.md"),
+            message: "no existing file matched reference `fix`".to_string(),
+            problems: vec!["/spec".to_string()],
+        },
+        CompositionError::UnresolvedFileReference {
+            source_path: PathBuf::from("prompts/clarify.md"),
+            property: "spec".to_string(),
+            provided: "fix".to_string(),
+            patterns: vec!["**/*spec*.md".to_string()],
+            is_array: false,
+            reason: "no existing file matched reference `fix`".to_string(),
+        },
+        CompositionError::MissingProperties {
+            source_path: PathBuf::from("prompts/clarify.md"),
+            missing: vec![missing("spec")],
+            frontmatter_description: None,
+            pointer_paths: Vec::new(),
+        },
+    ];
+
+    for err in cases {
+        let code = err.code();
+        let err = err.enrich_frontmatter(&source, true);
+        let excerpt = err.frontmatter_excerpt().expect("the declaration is locatable");
+        assert_eq!(excerpt.highlighted_lines(), vec![spec_line], "{code}");
+        let block_lines = CLARIFY.lines().skip(1).position(|l| l == "---").unwrap() + 2;
+        let shown: usize = excerpt.line_spans().iter().map(|(s, e)| e - s + 1).sum();
+        assert!(shown < block_lines, "{code}: {shown} of {block_lines} lines");
+    }
+}
+
+#[test]
+fn several_schema_problems_show_the_union_of_their_regions() {
+    let doc = "---\n$schema:\n  alpha: string(required)\n  beta: string\n  c: string\n  d: string\n  e: string\n  f: string\n  g: string\n  h: string\n  omega: string(required)\nbeta: 42\n---\nbody\n";
+    let source = source_from(doc);
+
+    let validation = CompositionError::SchemaValidation {
+        source_path: PathBuf::from("review.md"),
+        message: "invalid".to_string(),
+        problems: vec!["/alpha".to_string(), "/omega".to_string()],
+    }
+    .enrich_frontmatter(&source, true);
+    let excerpt = validation.frontmatter_excerpt().expect("both are declared");
+    assert_eq!(excerpt.highlighted_lines(), vec![3, 11]);
+    assert_eq!(excerpt.line_spans(), vec![(1, 6), (8, 13)]);
+
+    // Missing entries and raw-schema pointer paths focus the same way, and a
+    // same-named top-level key (`beta`, line 12) is shown with its declaration.
+    let missing_err = CompositionError::MissingProperties {
+        source_path: PathBuf::from("review.md"),
+        missing: vec![missing("alpha")],
+        frontmatter_description: None,
+        pointer_paths: vec!["/beta".to_string(), "/nope".to_string()],
+    }
+    .enrich_frontmatter(&source, true);
+    let excerpt = missing_err.frontmatter_excerpt().expect("declared properties");
+    assert_eq!(excerpt.highlighted_lines(), vec![3, 4, 12]);
+}
+
+#[test]
+fn inline_sequence_mismatch_focuses_prompt_and_sequence() {
+    let doc = "---\nprompt: Do it\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nsequence:\n  - task: x\n---\nbody\n";
+    let err = CompositionError::InlineComposeSequenceMismatch {
+        source_path: PathBuf::from("review.md"),
+    }
+    .enrich_frontmatter(&source_from(doc), true);
+
+    let excerpt = err.frontmatter_excerpt().expect("both keys are authored");
+    assert_eq!(excerpt.highlighted_lines(), vec![2, 10]);
+}
+
+#[test]
+fn shell_expansion_failure_is_excerpted_only_for_a_frontmatter_origin() {
+    use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
+
+    let doc = "---\ntitle: x\na: 1\nb: 2\nc: 3\nd: 4\ncmd: \"$(false)\"\n---\nbody\n::shell false\n";
+    let source = source_from(doc);
+    let failure = |origin| CompositionError::ShellExpansionFailed {
+        source_path: PathBuf::from("review.md"),
+        error: Box::new(ShellExpansionError::Denied {
+            ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
+                PathBuf::from("review.md"),
+                PathBuf::from("review.md"),
+                doc,
+            )),
+            command: "false".to_string(),
+            origin,
+        }),
+    };
+
+    let frontmatter = failure(ShellCommandOrigin::Frontmatter {
+        key: "cmd".to_string(),
+        line: Some(7),
+    })
+    .enrich_frontmatter(&source, true);
+    let excerpt = frontmatter.frontmatter_excerpt().expect("the key is authored");
+    assert_eq!(excerpt.highlighted_lines(), vec![7]);
+    assert_eq!(excerpt.line_spans(), vec![(4, 8)]);
+
+    let body = failure(ShellCommandOrigin::Body { line: 10 }).enrich_frontmatter(&source, true);
+    assert!(body.frontmatter_excerpt().is_none(), "got: {body:?}");
 }
