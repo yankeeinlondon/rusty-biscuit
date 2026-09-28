@@ -53,6 +53,7 @@ mod layout_fill;
 mod layout_flags;
 mod layout_style_frontmatter;
 mod md_process_fixture;
+mod prose_escape_guard;
 mod render_basic;
 mod rm;
 mod schema_about;

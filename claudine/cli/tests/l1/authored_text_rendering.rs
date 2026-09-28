@@ -11,10 +11,15 @@ use common::{CliProcessFixture, strip_ansi, write, write_dry_run_provider_stub};
 /// `claudine compose --dry-run <document>`; returns (stdout, stderr), both
 /// ANSI-stripped.
 fn dry_run(fixture: &CliProcessFixture, document: &Path, columns: &str) -> (String, String) {
+    dry_run_with(fixture, document, columns, &[])
+}
+
+fn dry_run_with(fixture: &CliProcessFixture, document: &Path, columns: &str, args: &[&str]) -> (String, String) {
     let output = fixture
         .command()
         .env("COLUMNS", columns)
         .args(["compose", "--dry-run"])
+        .args(args)
         .arg(document)
         .assert()
         .success()
@@ -82,9 +87,9 @@ fn description_document(fixture: &CliProcessFixture) -> std::path::PathBuf {
     document
 }
 
-/// The value-column text of the header table's `Description` row, one entry
-/// per rendered line, right-trimmed.
-fn description_cell(stderr: &str) -> Vec<String> {
+/// The value-column text of the header table's `field` row, one entry per
+/// rendered line, trimmed.
+fn field_cell(stderr: &str, field: &str) -> Vec<String> {
     let mut cell = Vec::new();
     let mut inside = false;
     for line in stderr.lines() {
@@ -92,10 +97,10 @@ fn description_cell(stderr: &str) -> Vec<String> {
         if cells.len() < 4 {
             continue;
         }
-        let field = cells[1].trim();
-        if field == "Description" {
+        let label = cells[1].trim();
+        if label == field {
             inside = true;
-        } else if !field.is_empty() {
+        } else if !label.is_empty() {
             inside = false;
         }
         if inside {
@@ -112,7 +117,7 @@ fn header_description_renders_exactly_as_authored() {
 
     let (_, stderr) = dry_run(&fixture, &document, "200");
     assert_eq!(
-        description_cell(&stderr).join("\n"),
+        field_cell(&stderr, "Description").join("\n"),
         DESCRIPTION,
         "{stderr}"
     );
@@ -125,7 +130,7 @@ fn header_description_keeps_every_character_at_a_narrow_width() {
     let document = description_document(&fixture);
 
     let (_, stderr) = dry_run(&fixture, &document, "40");
-    let rendered = description_cell(&stderr).join(" ");
+    let rendered = field_cell(&stderr, "Description").join(" ");
     let words = |text: &str| {
         text.split_whitespace()
             .map(str::to_string)
@@ -157,6 +162,66 @@ fn diagnostic_quotes_an_underscored_root_exactly() {
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(
         stderr.contains("unknown root '_loop_countx' in '{{ _loop_countx }}'"),
+        "{stderr}"
+    );
+}
+
+/// A file name that opens and closes `_` emphasis if it is read as markup.
+const UNDERSCORED_FILE: &str = "_pr_open_.md";
+/// A `model` value carrying emphasis delimiters, a tag, and a code span.
+const MARKUP_MODEL: &str = "_opus_ </i> `claude_x` *y*";
+/// A frontmatter `name`, which replaces the file name as the document label.
+const MARKUP_NAME: &str = "`_pr/open.md` </i> _draft_";
+
+fn header_document(fixture: &CliProcessFixture, file: &str, name: Option<&str>) -> std::path::PathBuf {
+    let document = fixture.cwd().join(file);
+    let name = name.map_or(String::new(), |name| format!("name: '{name}'\n"));
+    write(&document, &format!("---\n{name}model: '{MARKUP_MODEL}'\n---\nhello\n"));
+    document
+}
+
+#[test]
+fn header_document_label_and_model_render_exactly_as_authored() {
+    let fixture = CliProcessFixture::named("header-label-model");
+    // The `Model` row shows a model only once a provider is resolved.
+    write_dry_run_provider_stub(fixture.bin_dir(), "claude");
+    let from_file = header_document(&fixture, UNDERSCORED_FILE, None);
+    let named = header_document(&fixture, "named.md", Some(MARKUP_NAME));
+
+    for columns in ["200", "40"] {
+        for (document, label) in [(&from_file, UNDERSCORED_FILE), (&named, MARKUP_NAME)] {
+            let (_, stderr) = dry_run_with(&fixture, document, columns, &["--claude"]);
+            let words = |cell: Vec<String>| cell.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+            assert_eq!(words(field_cell(&stderr, "Document")), label, "{columns} columns:\n{stderr}");
+            assert_eq!(words(field_cell(&stderr, "Model")), MARKUP_MODEL, "{columns} columns:\n{stderr}");
+        }
+    }
+}
+
+/// A real run's header names the prompt file, and its source-file status line
+/// names the resolved file; both keep an underscored file name as written.
+#[test]
+fn run_header_and_source_status_keep_an_underscored_file_name() {
+    let fixture = CliProcessFixture::named("run-header-file-name");
+    fixture.seed_user_config();
+    common::drain_interrupt::write_one_line_claude(fixture.bin_dir());
+    let document = fixture.cwd().join(UNDERSCORED_FILE);
+    write(&document, "hello\n");
+
+    let output = fixture
+        .command()
+        .env("COLUMNS", "200")
+        .args(["compose", "--claude", UNDERSCORED_FILE])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let flat = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    assert!(flat.contains(&format!("prompt sourced from {UNDERSCORED_FILE}")), "{stderr}");
+    assert!(
+        flat.contains(&format!("the file reference was resolved to {UNDERSCORED_FILE} file")),
         "{stderr}"
     );
 }

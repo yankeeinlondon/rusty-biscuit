@@ -115,6 +115,7 @@ mod lifecycle_set_shell_values;
 #[cfg(unix)]
 mod prompt_reporting;
 mod propagated_context_fixtures;
+mod prose_escape_guard;
 mod protect_cli;
 mod provider_error_finalize;
 mod run_harness_loop_call_sites;
