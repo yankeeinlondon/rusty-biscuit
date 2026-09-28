@@ -58,8 +58,25 @@ struct Run {
 }
 
 impl Run {
+    /// The output with styling, gutter glyphs, and every run of whitespace
+    /// collapsed to one space, so a count does not depend on where the
+    /// terminal width wrapped a line: a long temporary path can push the wrap
+    /// point into [`REASON`].
+    fn collapsed(&self) -> String {
+        common::strip_ansi(&self.output)
+            .replace(['┃', '│'], " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Occurrences of `needle` in [`Run::collapsed`].
+    fn count(&self, needle: &str) -> usize {
+        self.collapsed().matches(needle).count()
+    }
+
     fn reason_count(&self) -> usize {
-        self.output.matches(REASON).count()
+        self.count(REASON)
     }
 
     fn error_line_count(&self) -> usize {
@@ -151,10 +168,32 @@ fn success_error_on_first_attempt_fails_with_one_diagnostic() {
         run.output
     );
     assert!(
-        run.output.contains("success communication"),
+        run.collapsed().contains("success communication"),
         "the already-emitted success communication is kept: {}",
         run.output
     );
+    assert_eq!(run.code, Some(1), "{}", run.output);
+    assert_eq!(run.error_line_count(), 1, "{}", run.output);
+    assert_eq!(run.reason_count(), 1, "{}", run.output);
+}
+
+/// R4's "`err.*` and the terminal block describe one error": `finalize` records
+/// `err.msg` to a file rather than the output, so the rendered count stays
+/// Claudine's own.
+#[test]
+fn success_error_reaches_err_msg_as_the_rendered_error() {
+    let fixture = fixture("downgrade-success-err-msg");
+    let doc = write_doc(
+        &fixture,
+        "success.md",
+        &format!(
+            "---\nsuccess:\n    stack:\n        - action:\n              - error: \"{REASON}\"\nfinalize:\n    stack:\n        - action:\n              - append_line: [\"err.log\", \"{{{{ err.msg }}}}\"]\n---\nbody\n"
+        ),
+    );
+
+    let run = compose(&fixture, &doc);
+
+    assert_eq!(lines_of(&fixture.cwd().join("err.log")), [REASON], "{}", run.output);
     assert_eq!(run.code, Some(1), "{}", run.output);
     assert_eq!(run.error_line_count(), 1, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);
@@ -352,8 +391,11 @@ fn sequence_step_downgrade_halts_under_fail_fast_true() {
         "the second step must not run: {}",
         run.output
     );
-    assert!(run.output.contains("step 1/2 failed"), "{}", run.output);
     assert_eq!(run.code, Some(1), "{}", run.output);
+    // The step-failure block is the one canonical rendering: it appears once,
+    // carries the reason once, and no separate `Error:` line repeats it.
+    assert_eq!(run.count("step 1/2 failed"), 1, "{}", run.output);
+    assert_eq!(run.error_line_count(), 0, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);
 }
 
@@ -374,13 +416,10 @@ fn sequence_step_downgrade_continues_and_fails_under_fail_fast_false() {
         "the second step still runs: {}",
         run.output
     );
-    assert!(run.output.contains("step 1/2 failed"), "{}", run.output);
-    assert!(
-        run.output.contains("1 succeeded, 1 failed"),
-        "{}",
-        run.output
-    );
+    assert_eq!(run.count("1 succeeded, 1 failed"), 1, "{}", run.output);
     assert_eq!(run.code, Some(1), "{}", run.output);
+    assert_eq!(run.count("step 1/2 failed"), 1, "{}", run.output);
+    assert_eq!(run.error_line_count(), 0, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);
 }
 
@@ -403,8 +442,10 @@ fn loop_iteration_downgrade_halts_under_fail_fast_true() {
         "the failed iteration halts the loop: {}",
         run.output
     );
-    assert!(run.output.contains("iteration failed"), "{}", run.output);
     assert_eq!(run.code, Some(1), "{}", run.output);
+    // The `iteration failed` block is the one canonical rendering.
+    assert_eq!(run.count("iteration failed"), 1, "{}", run.output);
+    assert_eq!(run.error_line_count(), 0, "{}", run.output);
     assert_eq!(run.reason_count(), 1, "{}", run.output);
 }
 

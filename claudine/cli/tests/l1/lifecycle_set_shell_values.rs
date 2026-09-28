@@ -62,11 +62,30 @@ struct Run {
     output: String,
 }
 
+impl Run {
+    /// The output with gutter glyphs and every run of whitespace collapsed to
+    /// one space, so a match does not depend on where the terminal width
+    /// wrapped a line (a long temporary path moves the wrap point).
+    fn collapsed(&self) -> String {
+        self.output
+            .replace(['┃', '│'], " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
 fn run(name: &str, whitelist: &[&str], args: &[&str]) -> Run {
     let fixture = CliProcessFixture::named(name);
     fixture.seed_user_config();
+    spawn(&fixture, DOCUMENT, whitelist, args)
+}
+
+/// Runs claudine in `fixture` against `document`, written as `doc.md`, with
+/// exactly `whitelist` approved.
+fn spawn(fixture: &CliProcessFixture, document: &str, whitelist: &[&str], args: &[&str]) -> Run {
     write_succeeding_claude(fixture.bin_dir());
-    write(&fixture.cwd().join("doc.md"), DOCUMENT);
+    write(&fixture.cwd().join("doc.md"), document);
     let policy: String = whitelist.iter().map(|command| format!("exact {command}\n")).collect();
     write(&fixture.cwd().join(".darkmatter-shell-whitelist"), &policy);
     let output = fixture
@@ -93,11 +112,11 @@ fn a_later_when_reads_the_typed_result_of_a_start_set() {
     let run = run("set-shell-result", &[FAILING, SUCCEEDING], &["compose", "--claude", "doc.md"]);
     assert_eq!(run.code, Some(0), "{}", run.output);
     assert!(
-        run.output.contains("diff code=128 ok=false fatal=true"),
+        run.collapsed().contains("diff code=128 ok=false fatal=true"),
         "{}",
         run.output
     );
-    assert!(!run.output.contains("unexpectedly"), "{}", run.output);
+    assert!(!run.collapsed().contains("unexpectedly"), "{}", run.output);
 }
 
 #[test]
@@ -106,9 +125,7 @@ fn pre_flight_approves_the_bare_command_before_anything_runs() {
     // and names the other by its bare bytes, with no suffix.
     let run = run("set-shell-unapproved", &[SUCCEEDING], &["compose", "--claude", "doc.md"]);
     assert_ne!(run.code, Some(0), "{}", run.output);
-    // Drop the error box's border glyphs and hard wraps so the command reads
-    // as one line.
-    let collapsed = run.output.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = run.collapsed();
     assert!(collapsed.contains(FAILING), "{collapsed}");
     assert!(!collapsed.contains("::result"), "{collapsed}");
     assert!(!collapsed.contains("diff code=128"), "{collapsed}");
@@ -123,5 +140,83 @@ fn a_dry_run_executes_no_lifecycle_assignment() {
     );
     assert_eq!(run.code, Some(0), "{}", run.output);
     // The authored stack is shown as written; the event never runs.
-    assert!(!run.output.contains("diff code=128"), "{}", run.output);
+    assert!(!run.collapsed().contains("diff code=128"), "{}", run.output);
+}
+
+/// A `set` whose command leaves a countable mark: each run appends one value
+/// to the fixture repository's local config.
+const MARKING: &str = "git config --add claudine.marker ran";
+
+fn marking_document() -> String {
+    format!(
+        "---\nstart:\n  stack:\n    - action:\n        - set:\n            marked: \"$({MARKING})::ok\"\n    - when: \"marked\"\n      action:\n        - stderr: \"marked={{{{ marked }}}}\"\n---\nBody.\n"
+    )
+}
+
+/// How many times [`MARKING`] ran in `fixture`'s repository.
+fn marks(fixture: &CliProcessFixture) -> usize {
+    let output = common::helper_command("git")
+        .arg("-C")
+        .arg(fixture.cwd())
+        .args(["config", "--get-all", "claudine.marker"])
+        .output()
+        .expect("git runs");
+    String::from_utf8_lossy(&output.stdout).lines().count()
+}
+
+fn marking_fixture(name: &str) -> CliProcessFixture {
+    let fixture = CliProcessFixture::named(name);
+    fixture.seed_user_config();
+    fixture.initialize_repository();
+    fixture
+}
+
+#[test]
+fn a_dry_run_runs_no_lifecycle_assignment_command() {
+    let fixture = marking_fixture("set-shell-dry-run-count");
+    let run = spawn(&fixture, &marking_document(), &[MARKING], &["compose", "--claude", "--dry-run", "doc.md"]);
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(marks(&fixture), 0, "{}", run.output);
+    assert!(!run.collapsed().contains("marked=true"), "{}", run.output);
+}
+
+#[test]
+fn a_real_run_runs_the_lifecycle_assignment_command_once() {
+    // The control for the dry run: the same document and approval, executed.
+    let fixture = marking_fixture("set-shell-real-run-count");
+    let run = spawn(&fixture, &marking_document(), &[MARKING], &["compose", "--claude", "doc.md"]);
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(marks(&fixture), 1, "{}", run.output);
+    assert_eq!(run.collapsed().matches("marked=true").count(), 1, "{}", run.output);
+}
+
+/// Composes a document whose `start` assigns `value` and returns the run.
+fn compose_set(name: &str, value: &str) -> Run {
+    let fixture = CliProcessFixture::named(name);
+    fixture.seed_user_config();
+    let document = format!(
+        "---\nstart:\n  stack:\n    - action:\n        - set:\n            v: \"{value}\"\n    - action:\n        - stderr: \"start ran\"\n---\nBody.\n"
+    );
+    spawn(&fixture, &document, &["git status"], &["compose", "--claude", "doc.md"])
+}
+
+#[test]
+fn an_unknown_set_suffix_fails_the_composition_and_lists_the_valid_ones() {
+    let run = compose_set("set-shell-bogus-suffix", "$(git status)::bogus");
+    assert_ne!(run.code, Some(0), "{}", run.output);
+    let collapsed = run.collapsed();
+    for fragment in ["`::bogus`", "`::ok`", "`::exit-code`", "`::result`", "`::timeout:<seconds>`", "`::no-cache`"] {
+        assert!(collapsed.contains(fragment), "missing {fragment}: {collapsed}");
+    }
+    assert!(!collapsed.contains("start ran"), "{collapsed}");
+}
+
+#[test]
+fn a_duplicate_result_suffix_fails_the_composition_naming_both() {
+    let run = compose_set("set-shell-duplicate-suffix", "$(git status)::ok::result");
+    assert_ne!(run.code, Some(0), "{}", run.output);
+    let collapsed = run.collapsed();
+    // Backticked, so the echoed value `$(git status)::ok::result` cannot match.
+    assert!(collapsed.contains("`::ok` and `::result`"), "{collapsed}");
+    assert!(!collapsed.contains("start ran"), "{collapsed}");
 }

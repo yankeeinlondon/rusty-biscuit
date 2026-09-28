@@ -27,6 +27,20 @@ fn helper_process_entrypoint() {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
+    // Exits 0 on its first run and 1 on every later one.
+    if let Some(marker) = mode.strip_prefix("first-ok:") {
+        let first = std::fs::OpenOptions::new().write(true).create_new(true).open(marker).is_ok();
+        std::process::exit(if first { 0 } else { 1 });
+    }
+    // Announces that it runs, then exits 0 once told to stop.
+    if let Some(dir) = mode.strip_prefix("await-stop:") {
+        let dir = Path::new(dir);
+        std::fs::write(dir.join("started"), "").expect("record start");
+        while !dir.join("stop").exists() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::process::exit(0);
+    }
     let path = mode.strip_prefix("count:").expect("count:<path>");
     use std::io::Write;
     std::fs::OpenOptions::new()
@@ -297,6 +311,65 @@ fn each_executed_assignment_has_a_fresh_result_cache() {
     let result = run(&config, &[LifecycleSignal::Start, LifecycleSignal::Success], &map(json!({})), &MockShell::new(0));
     assert_eq!(repo.runs(), 3, "`success` runs the command again after `start`");
     assert_eq!(result.mutations.get("c"), Some(&json!(true)));
+}
+
+#[test]
+fn a_later_event_recaptures_a_changed_result() {
+    let repo = Repo::new();
+    let value = format!(
+        "$({})::ok",
+        helper(&format!("first-ok:{}", repo.dir.path().join("ran-once").display()))
+    );
+    let frontmatter = json!({
+        "start": { "stack": [ { "action": [ { "set": { "at_start": value } } ] } ] },
+        "success": { "stack": [ { "action": [ { "set": { "at_success": value } } ] } ] },
+    });
+    let config = prepared(&repo, &frontmatter);
+    let result = run(&config, &[LifecycleSignal::Start, LifecycleSignal::Success], &map(json!({})), &MockShell::new(0));
+    assert_eq!(result.outcome, LifecycleEventOutcome::default());
+    assert_eq!(result.mutations.get("at_start"), Some(&json!(true)));
+    assert_eq!(
+        result.mutations.get("at_success"),
+        Some(&json!(false)),
+        "`success` reads the command's new answer, not `start`'s"
+    );
+}
+
+#[test]
+fn an_interruption_while_a_set_command_runs_fails_the_set() {
+    let repo = Repo::new();
+    let dir = repo.dir.path().to_path_buf();
+    let config = prepared(
+        &repo,
+        &start(json!([{ "action": [{
+            "set": { "v": format!("$({})::ok::timeout:60", helper(&format!("await-stop:{}", dir.display()))) },
+            "no_error": true,
+        }] }])),
+    );
+
+    // Stands in for the user's Ctrl+C: Claudine records the interruption, and
+    // the signal the terminal delivers to the process group ends the command.
+    // Setting the flag alone cannot end a running command.
+    let interrupter = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !dir.join("started").exists() {
+            assert!(std::time::Instant::now() < deadline, "the `set` command never started");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        crate::interrupt::mark_interrupted();
+        std::fs::write(dir.join("stop"), "").unwrap();
+    });
+    let began = std::time::Instant::now();
+    let result = run(&config, &[LifecycleSignal::Start], &map(json!({})), &MockShell::new(0));
+    let elapsed = began.elapsed();
+    interrupter.join().unwrap();
+    crate::interrupt::clear_for_tests();
+
+    assert!(result.outcome.action_error.is_none(), "{:?}", result.outcome);
+    let error = result.outcome.evaluation_error.expect("`no_error` cannot forgive an interruption");
+    assert!(error.msg.contains("interrupted"), "{}", error.msg);
+    assert!(!result.mutations.contains_key("v"), "the command exited 0, yet nothing is written");
+    assert!(elapsed < std::time::Duration::from_secs(30), "returned after {elapsed:?}");
 }
 
 #[test]
