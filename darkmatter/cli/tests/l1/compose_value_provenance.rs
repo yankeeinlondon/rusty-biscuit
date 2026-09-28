@@ -284,3 +284,56 @@ fn directive_set_value_from_file_data_reaches_child_verbatim() {
         .success()
         .stdout(predicate::str::contains("Actor: see {{…}}"));
 }
+
+/// R2 end to end: tokens holding a template, a command, and a token
+/// look-alike print verbatim. Stdin is not a terminal, so a shell approval
+/// request would fail the run.
+#[test]
+fn literal_tokens_compose_to_their_exact_text() {
+    use darkmatter::markdown::literal_token::{encode, encode_yaml_scalar};
+
+    let fixture = CliProcessFixture::named("literal_tokens_compose_to_their_exact_text");
+    let md_path = fixture.write_file(
+        "cwd/tokens.md",
+        &format!(
+            "---\narea: claudine\nsummary: {}\ncmd: {}\nlookalike: {}\n---\n\
+             S={{{{ summary }}}} C={{{{ cmd }}}} L={{{{ lookalike }}}} A={{{{ area }}}}\n",
+            encode_yaml_scalar("fixed {{ area }} parsing"),
+            encode_yaml_scalar("$(echo X)"),
+            encode_yaml_scalar(&encode("x")),
+        ),
+    );
+
+    fixture
+        .command()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "S=fixed {{{{ area }}}} parsing C=$(echo X) L={} A=claudine",
+            encode("x")
+        )));
+}
+
+/// R2 end to end: a malformed token fails with its location, and is never
+/// read as an expression.
+#[test]
+fn malformed_literal_token_fails_with_its_location() {
+    let fixture = CliProcessFixture::named("malformed_literal_token_fails_with_its_location");
+    let md_path = fixture.write_file(
+        "cwd/bad.md",
+        "---\ntitle: t\nnote: \"{{!data:v2:YQ}}\"\n---\nx\n",
+    );
+
+    fixture
+        .command()
+        .arg("compose")
+        .arg(&md_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("malformed literal token"))
+        .stderr(predicate::str::contains("unsupported literal token version `v2`"))
+        .stderr(predicate::str::contains("line: 3, column: 8"))
+        .stderr(predicate::str::contains("parse error").not());
+}

@@ -55,6 +55,7 @@ mod layout_matrix;
 mod layout_snapshots;
 mod lifecycle_control_flow_spike;
 mod link_interpolation_integration;
+mod literal_token;
 mod meta_schema_phase1;
 mod meta_schema_phase3;
 mod meta_schema_phase4;
