@@ -5,11 +5,24 @@ implemented_by: claude/opus
 started_phase: 1
 packages:
     - worktree-cli
+    - biscuit-terminal
 source_files_during_phase_1:
     - worktree/cli/src/commands/git_graph/tests.rs
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_2:
+    - biscuit-terminal/docs/components/git_graph.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
 ---
 
 # Implementation Log for 2026-09-28-graph-continued-after-merge (5 phases)
@@ -179,3 +192,63 @@ sanity test proves the shape a later phase's behavior test depends on:
 | New branch at a merged tip (+ control) | `new_branch_at_merged_tip()` | record at the boundary, `old` deleted |
 | `B` integrated indirectly | `indirect_boundary()` | `t1` reaches main only through `O` |
 | Shallow boundary crossing / older boundary fails | `shallow_merged_twice(1 / 2)` | which commits the clone has |
+
+## Phase 2
+
+`GraphLine` merges API. Behavior-neutral (A3): no Mermaid string, snapshot, or
+plan assertion changed.
+
+### Changes
+
+- `biscuit-terminal` (`components/git_graph.rs`, `prelude.rs`): new
+  `pub struct LaneMerge { source, destination }` (full SHAs), exported beside
+  `GraphLine` and from the prelude. `GraphLine::merged_into` (field and
+  builder) is removed; `GraphLine::merges: Vec<LaneMerge>` (oldest first) and
+  `with_merge(source, destination)` replace it. A private
+  `GraphLine::merge_destination()` returns `merges.last()`'s destination, and
+  `arrange` (both the sibling-order closure and the merge table) and
+  `lane_ancestors` read it, which is exactly the old single tip-sourced edge.
+  Phase 3 replaces these three reads when it generalizes emission; `source`
+  is not read by the component yet.
+- `worktree-cli` `assemble`: `line.with_merge(placement.tip.clone(), merge)`
+  (A2: the tip edge's source is the placement's full tip SHA).
+- Component tests: the 13 `.merged_into(x)` calls became
+  `.with_merge(<that line's tip>, x)`, where the tip is the line's `with_tip`
+  SHA or, without one, its newest commit.
+- `worktree-cli` tests: the 20 `.merged_into` assertions go through
+  `merge_destinations(line) -> Vec<&String>` (defined beside `line()`), as
+  the plan asks. `Some(&x)` became `[&x]`, `None` became an empty `Vec`.
+  Clippy's `needless_borrow` rejected `merge_destinations(&line)` where the
+  binding is already a `&GraphLine`, so every call passes the reference as is.
+
+### Tests added
+
+| Requirement | Test |
+|---|---|
+| `with_merge` appends edges oldest first (A1) | `biscuit-terminal` `git_graph::tests::with_merge_appends_edges_oldest_first` |
+| The gathered tip edge's source is the branch tip (A2) | `worktree-cli` `git_graph::tests::a_merged_current_branch_keeps_its_lane_and_merges_at_its_merge_commit` now asserts `merges == [LaneMerge { source: w2, destination: merge }]` |
+| Behavior-neutral (A3) | every existing byte-exact Mermaid assertion in both crates passes unchanged; `git diff` of both test files shows no expected-string edits |
+
+Both run in L1 (`just test`); neither name carries a tier marker.
+
+### Docs and skills
+
+`GraphLine::merged_into` was named in `biscuit-terminal/docs/components/git_graph.md`,
+`.claude/skills/worktree/SKILL.md`, and `.claude/skills/biscuit-terminal/components.md`.
+Each now names `with_merge`, and the component doc says only a line's latest
+merge is drawn, with drawing every merge from its own source marked
+**planned** (Phase 5 writes the full behavior). `worktree/docs/git-graph.md`
+does not name the API and is unchanged.
+
+### Verification
+
+- `just test` in `biscuit-terminal`: 3345 passed, 55 skipped (49
+  `git_graph::tests` ran).
+- `just test` in `worktree`: 770 passed, 30 skipped.
+- `just lint` in `biscuit-terminal` and `worktree`: clean.
+- `rg merged_into` over `*.rs` and `*.md` outside `_completed/` and this fix's
+  directory: only unrelated `worktree/lib/src/remove/safety.rs` and
+  `worktree/cli/tests/remove.rs` test names, and the `worktree-cli` fixture
+  name `nested_parent_merged_into_default` (English, not the API).
+- No cross-OS run: the change is a type rename with no path, process, or
+  platform code, so it carries no OS-specific risk.

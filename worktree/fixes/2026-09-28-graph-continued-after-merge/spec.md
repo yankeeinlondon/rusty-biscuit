@@ -37,7 +37,13 @@ related:
     - 2026-09-27-graph-sparse-lanes
 human_review: false
 message_to_agent: |-
-    Reviewed inline. The remaining PR badge question is separate from merge reconstruction and does not block implementation.
+    Phase 2 is done: `GraphLine::merged_into` is gone; `GraphLine::merges: Vec<LaneMerge { source, destination }>`
+    (oldest first) and `with_merge(source, destination)` replace it. Inside `GitGraph`, a private
+    `GraphLine::merge_destination()` (`merges.last()`'s destination) is read in exactly three places:
+    the `merge_lane` closure and the merge table in `arrange`, and `lane_ancestors`. Phase 3a replaces those
+    reads and removes the helper; `LaneMerge::source` is not read anywhere yet. In worktree-cli tests, assert
+    merges through `merge_destinations(line)` (pass a `&GraphLine`; clippy rejects `&&`). The component doc
+    marks multi-edge drawing as **planned**; Phase 3a/5 must remove that marker when it lands.
 
     Phase 1 (2026-09-28) is done; read implementation-log.md "## Phase 1" first.
     - Spike S1 confirmed D2 and D6: pausing the source lane at B makes B the merge's second parent, and a resumed commit or +N square follows B. biscuit-visualized needs no change.

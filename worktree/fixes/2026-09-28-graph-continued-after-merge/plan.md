@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-28
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 packages:
@@ -29,6 +29,21 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
 packages_touched_during_phase_1:
+    - worktree-cli
+source_files_during_phase_2:
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - biscuit-terminal/lib/src/prelude.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_2:
+    - biscuit-terminal/docs/components/git_graph.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+packages_touched_during_phase_2:
+    - biscuit-terminal
     - worktree-cli
 ---
 
@@ -273,11 +288,11 @@ Behavior-neutral (A3). This phase is sequential because both crates depend on it
 
 ### Wave 2
 
-- [ ] **Introduce `LaneMerge`** (`biscuit-terminal/lib/src/components/git_graph.rs`, `prelude.rs`)
+- [x] **Introduce `LaneMerge`** (`biscuit-terminal/lib/src/components/git_graph.rs`, `prelude.rs`)
     - add `LaneMerge`, `GraphLine::merges`, and `with_merge`; remove `merged_into` (field and builder)
     - internally, `arrange` and `lane_ancestors` read `merges.last()` for exactly today's behavior (a single tip-sourced edge). Phase 3 generalizes this
     - update the `//!` and `///` docs that name `merged_into` (module "Lanes and tags" section, the field docs)
-- [ ] **Migrate callers**
+- [x] **Migrate callers**
     - `biscuit-terminal/lib/src/components/git_graph/tests.rs`: `.merged_into(x)` becomes `.with_merge(<tip>, x)`
     - `worktree/cli/src/commands/git_graph.rs` `assemble`: `line.with_merge(placement.tip, merge)`
     - `worktree/cli/src/commands/git_graph/tests.rs`: assertions on `.merged_into` go through one helper, `merge_destinations(line) -> Vec<&String>`, so Phase 4 can extend them
@@ -285,7 +300,7 @@ Behavior-neutral (A3). This phase is sequential because both crates depend on it
 
 **Checkpoint 2**
 
-- [ ] `just test` and `just lint` pass in `biscuit-terminal` and `worktree`, and no Mermaid string, snapshot, or plan assertion changed.
+- [x] `just test` and `just lint` pass in `biscuit-terminal` and `worktree`, and no Mermaid string, snapshot, or plan assertion changed.
 
 ## Phase 3 — Emission and Reconstruction
 
