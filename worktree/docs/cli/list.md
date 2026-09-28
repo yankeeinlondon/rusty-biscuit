@@ -128,10 +128,18 @@ With no stored answer for the current `origin` (the first run, a cleared cache, 
 
 When stderr is a terminal and `TERM_PROGRAM` (or `KITTY_WINDOW_ID`) names an image-capable terminal (Kitty, iTerm2, Ghostty, WezTerm, Warp, Konsole), a branch graph is drawn below the table. It is not drawn for a detached current worktree.
 
-- **A feature branch is checked out**: the current branch forked from the default branch (or from its recorded parent branch, which then gets a line of its own), with two shared commits before the fork.
-- **The default branch is checked out**: the default branch's 10 newest commits, and a line for every worktree branch. A branch that is already in the default branch is a tag rather than a line.
+- **A feature branch is checked out**: the current branch forked from the default branch (or from its recorded parent branch, which then gets a line of its own), and the default branch down to just below the oldest fork or merge.
+- **The default branch is checked out**: the default branch's 10 newest commits, and a line for every worktree branch.
+
+Every line is its branch's first-parent history, so a merged branch's commits never appear on the default branch's line:
+
+- a branch merged with a merge commit keeps its own line, drawn merging into the branch it was merged into, at the merge commit;
+- a branch with no commits of its own (fast-forwarded, or created and not yet committed to) is a tag on its commit;
+- forks and merges older than the drawn commits stay visible, with the commits between them folded into `+N` squares.
 
 Each line shows its 5 newest commits; older ones fold into a `+N` square. Open PRs appear as `PR #n → target` tags. When `origin/<default>` has diverged from the local default branch it gets a line of its own.
+
+When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this. A branch that got new commits after being merged is one such case: its line is drawn without its connection, because the earlier merge is not reconstructed.
 
 There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view a graph taller than half the terminal keeps the most recently active lines and notes how many were left out. See [git-graph.md](../git-graph.md) for the design.
 
