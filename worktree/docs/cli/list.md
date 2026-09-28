@@ -134,12 +134,13 @@ When stderr is a terminal and `TERM_PROGRAM` (or `KITTY_WINDOW_ID`) names an ima
 Every line is its branch's first-parent history, so a merged branch's commits never appear on the default branch's line:
 
 - a branch merged with a merge commit keeps its own line, drawn merging into the branch it was merged into, at the merge commit;
+- a branch that got new commits after being merged stays one connected line: it merges at the merge commit and continues after it, and a branch still at the merged commit is a tag on that line;
 - a branch with no commits of its own (fast-forwarded, or created and not yet committed to) is a tag on its commit;
 - forks and merges older than the drawn commits stay visible, with the commits between them folded into `+N` squares.
 
 Each line shows its 5 newest commits; older ones fold into a `+N` square. Open PRs appear as `PR #n → target` tags. When `origin/<default>` has diverged from the local default branch it gets a line of its own.
 
-When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this. A branch that got new commits after being merged is one such case: its line is drawn without its connection, because the earlier merge is not reconstructed.
+When local history cannot establish a connection (in a shallow clone, for instance), or something the graph should show cannot be drawn at its own commit, the graph shows what it could verify followed by a dim "Some history is not shown". It never fetches more history for this.
 
 There is no minimum terminal width: the graph is sized from its natural width and the terminal's cell size, trims commits into `+N` squares to fit, and shrinks only when even the trimmed graph is too wide. In the base view a graph taller than half the terminal keeps the most recently active lines and notes how many were left out. See [git-graph.md](../git-graph.md) for the design.
 
