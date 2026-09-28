@@ -1260,6 +1260,395 @@ fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_the_notice() 
     assert!(!mermaid(&graph).contains("merge "));
 }
 
+/// Records `branch` as created from `parent` at `base_sha`, as `wt create`
+/// does.
+fn forked_at(store: &mut ForkOriginStore, branch: &str, parent: &str, base_sha: &str, created_at: u64) {
+    store.insert(
+        branch,
+        ForkOrigin {
+            base_branch: parent.to_string(),
+            base_sha: base_sha.to_string(),
+            created_at,
+        },
+    );
+}
+
+/// `<sha> <parent>…`, as Git reads the commit in `path`.
+fn parent_line(path: &Path, sha: &str) -> String {
+    git_output(path, &["rev-list", "--parents", "-n", "1", sha])
+}
+
+/// A new repository with one commit `r` on `main`; returns its directory,
+/// path, `r`, and `r`'s tree for [`commit_on`].
+fn repo_with_root() -> (tempfile::TempDir, PathBuf, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let r = commit(&path, "r");
+    let tree = git_output(&path, &["rev-parse", "HEAD^{tree}"]);
+    (dir, path, r, tree)
+}
+
+/// Points each branch at its tip, then moves the `main` checkout with it.
+fn set_branches(path: &Path, tips: &[(&str, &str)]) {
+    for (branch, tip) in tips {
+        run_git(path, &["update-ref", &format!("refs/heads/{branch}"), tip]);
+    }
+    run_git(path, &["reset", "-q", "--hard", "main"]);
+}
+
+/// Where the local `main` is in [`continued_after_merge`]; `origin/main` is
+/// always the merge `C`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalMain {
+    /// At `C`, as after `wt --ff`.
+    AtMerge,
+    /// At `P`, one merge behind `origin/main`.
+    Behind,
+    /// At `P'`, a commit on `P` that `origin/main` does not have.
+    Diverged,
+}
+
+/// `fix/wt-ux`'s commits after it merges `main` back (`S`), up to `B`.
+const CONTINUED_AFTER_SYNC: usize = 7;
+
+/// PR #105's shape, observed on 2026-09-28 (`b47a046` is `P`, `eeb7154` is
+/// `B`, `85852c0` is `C`, `572ef7d` is `N`):
+///
+/// ```text
+/// r - d1 - d2 - d3 - d4 - P ------------------- C   (main, origin/main)
+///      \                   \                   /
+///       w1 - w2 - w3 ------ S - x1 - … - x7 (B)     (fix/sniff-pr at B)
+///                                            \
+///                                             N    (fix/wt-ux)
+/// ```
+///
+/// `fix/wt-ux` merged `main` back at `S`, so `merge-base(C^1, B)` is `P`,
+/// and it has more than [`LINE_WINDOW`] commits up to `B`. `fix/sniff-pr`
+/// has the record `wt create` wrote for it (`fix/wt-ux` at `B`); `fix/wt-ux`
+/// has none, as observed.
+struct ContinuedAfterMerge {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+    /// `r`, `d1..d4`.
+    d: Vec<String>,
+    /// `w1..w3`.
+    w: Vec<String>,
+    p: String,
+    sync: String,
+    /// `x1..x7`; `x7` is `B`.
+    x: Vec<String>,
+    c: String,
+    n: String,
+    /// `P'`, only in [`LocalMain::Diverged`].
+    p_prime: Option<String>,
+    local_main: LocalMain,
+    forks: ForkOriginStore,
+}
+
+impl ContinuedAfterMerge {
+    /// `B`: the merged tip, and `fix/sniff-pr`.
+    fn b(&self) -> &String {
+        self.x.last().expect("x commits")
+    }
+
+    fn branches(&self) -> [&'static str; 3] {
+        ["main", "fix/wt-ux", "fix/sniff-pr"]
+    }
+}
+
+fn continued_after_merge(local_main: LocalMain) -> ContinuedAfterMerge {
+    let (dir, path, r, tree) = repo_with_root();
+    let mut d = vec![r.clone()];
+    d.extend(chain_on(&path, &tree, &r, "d", 4));
+    let w = chain_on(&path, &tree, &d[1], "w", 3);
+    let p = commit_on(&path, &tree, &[&d[4]], "P");
+    let sync = commit_on(&path, &tree, &[&w[2], &p], "Merge branch 'main' into fix/wt-ux");
+    let x = chain_on(&path, &tree, &sync, "x", CONTINUED_AFTER_SYNC);
+    let b = x.last().unwrap().clone();
+    let c = commit_on(&path, &tree, &[&p, &b], "Merge pull request #105 from fix/wt-ux");
+    let n = commit_on(&path, &tree, &[&b], "N");
+    let p_prime = (local_main == LocalMain::Diverged).then(|| commit_on(&path, &tree, &[&p], "P'"));
+    let main = match local_main {
+        LocalMain::AtMerge => c.clone(),
+        LocalMain::Behind => p.clone(),
+        LocalMain::Diverged => p_prime.clone().unwrap(),
+    };
+    set_branches(&path, &[("main", &main), ("fix/wt-ux", &n), ("fix/sniff-pr", &b)]);
+    set_origin_main(&path, &c);
+    let mut forks = ForkOriginStore::default();
+    forked_at(&mut forks, "fix/sniff-pr", "fix/wt-ux", &b, 30);
+    ContinuedAfterMerge { _dir: dir, path, d, w, p, sync, x, c, n, p_prime, local_main, forks }
+}
+
+#[test]
+#[serial_test::serial]
+fn continued_after_merge_fixture_has_the_observed_topology() {
+    for local_main in [LocalMain::AtMerge, LocalMain::Behind, LocalMain::Diverged] {
+        let repo = continued_after_merge(local_main);
+        let at = |rev: &str| git_output(&repo.path, &["rev-parse", rev]);
+        let first_parents = |tip: &str| git_output(&repo.path, &["rev-list", "--first-parent", tip]);
+
+        assert_eq!(parent_line(&repo.path, &repo.c), format!("{} {} {}", repo.c, repo.p, repo.b()), "{local_main:?}");
+        assert_eq!(parent_line(&repo.path, &repo.sync), format!("{} {} {}", repo.sync, repo.w[2], repo.p), "{local_main:?}");
+        assert_eq!(parent_line(&repo.path, &repo.n), format!("{} {}", repo.n, repo.b()), "{local_main:?}");
+        assert_eq!(parent_line(&repo.path, &repo.w[0]), format!("{} {}", repo.w[0], repo.d[1]), "{local_main:?}");
+        assert_eq!(at("refs/remotes/origin/main"), repo.c, "{local_main:?}");
+        let expected_main = match repo.local_main {
+            LocalMain::AtMerge => &repo.c,
+            LocalMain::Behind => &repo.p,
+            LocalMain::Diverged => {
+                let p_prime = repo.p_prime.as_ref().expect("P'");
+                assert_eq!(parent_line(&repo.path, p_prime), format!("{p_prime} {}", repo.p));
+                p_prime
+            }
+        };
+        assert_eq!(at("main"), *expected_main, "{local_main:?}");
+        assert_eq!(at("HEAD"), *expected_main, "the main checkout is on main: {local_main:?}");
+        assert_eq!(at("fix/wt-ux"), repo.n, "{local_main:?}");
+        assert_eq!(at("fix/sniff-pr"), *repo.b(), "{local_main:?}");
+
+        // B is on fix/wt-ux's first-parent chain, not on main's or origin/main's.
+        assert!(first_parents("fix/wt-ux").lines().any(|sha| sha == repo.b()), "{local_main:?}");
+        assert!(!first_parents("refs/remotes/origin/main").lines().any(|sha| sha == repo.b()), "{local_main:?}");
+        assert_eq!(git_output(&repo.path, &["merge-base", &repo.p, repo.b()]), repo.p, "the fork measured against B: {local_main:?}");
+        let up_to_b: usize = git_output(&repo.path, &["rev-list", "--first-parent", "--count", &format!("{}..{}", repo.d[1], repo.b())]).parse().unwrap();
+        assert_eq!(up_to_b, 3 + 1 + CONTINUED_AFTER_SYNC, "{local_main:?}");
+        assert!(up_to_b > LINE_WINDOW, "{local_main:?}");
+
+        let sniff = repo.forks.get("fix/sniff-pr").expect("fix/sniff-pr's record");
+        assert_eq!((sniff.base_branch.as_str(), &sniff.base_sha), ("fix/wt-ux", repo.b()), "{local_main:?}");
+        assert!(repo.forks.get("fix/wt-ux").is_none(), "fix/wt-ux has no record, as observed");
+        for branch in repo.branches() {
+            assert_eq!(at(branch).len(), 40, "{branch} exists");
+        }
+    }
+}
+
+/// `b` merged twice, then continued:
+///
+/// ```text
+/// r - d1 - p1 - C1 - p2 - C2   (main)
+///      \       /         /
+///       b1 ----- b2 -----
+///                  \
+///                   n          (b)
+/// ```
+struct MergedTwice {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+    d1: String,
+    b1: String,
+    p1: String,
+    c1: String,
+    b2: String,
+    p2: String,
+    c2: String,
+    n: String,
+}
+
+fn merged_twice_and_continued() -> MergedTwice {
+    let (dir, path, r, tree) = repo_with_root();
+    let d1 = commit_on(&path, &tree, &[&r], "d1");
+    let b1 = commit_on(&path, &tree, &[&d1], "b1");
+    let p1 = commit_on(&path, &tree, &[&d1], "p1");
+    let c1 = commit_on(&path, &tree, &[&p1, &b1], "Merge branch 'b'");
+    let b2 = commit_on(&path, &tree, &[&b1], "b2");
+    let p2 = commit_on(&path, &tree, &[&c1], "p2");
+    let c2 = commit_on(&path, &tree, &[&p2, &b2], "Merge branch 'b' again");
+    let n = commit_on(&path, &tree, &[&b2], "n");
+    set_branches(&path, &[("main", &c2), ("b", &n)]);
+    MergedTwice { _dir: dir, path, d1, b1, p1, c1, b2, p2, c2, n }
+}
+
+#[test]
+#[serial_test::serial]
+fn merged_twice_fixture_has_two_merges_of_one_lane() {
+    let repo = merged_twice_and_continued();
+    let first_parents = |tip: &str| git_output(&repo.path, &["rev-list", "--first-parent", tip]);
+
+    assert_eq!(parent_line(&repo.path, &repo.c1), format!("{} {} {}", repo.c1, repo.p1, repo.b1));
+    assert_eq!(parent_line(&repo.path, &repo.c2), format!("{} {} {}", repo.c2, repo.p2, repo.b2));
+    assert_eq!(parent_line(&repo.path, &repo.b1), format!("{} {}", repo.b1, repo.d1));
+    assert_eq!(parent_line(&repo.path, &repo.b2), format!("{} {}", repo.b2, repo.b1));
+    assert_eq!(parent_line(&repo.path, &repo.n), format!("{} {}", repo.n, repo.b2));
+    assert_eq!(git_output(&repo.path, &["rev-parse", "main"]), repo.c2);
+    assert_eq!(git_output(&repo.path, &["rev-parse", "b"]), repo.n);
+    let main_chain = first_parents("main");
+    let b_chain = first_parents("b");
+    for source in [&repo.b1, &repo.b2] {
+        assert!(!main_chain.lines().any(|sha| sha == source), "{source} is off main's first-parent chain");
+        assert!(b_chain.lines().any(|sha| sha == source), "{source} is on b's first-parent chain");
+    }
+}
+
+/// A branch created at an already merged tip: `old` was merged at `C` and
+/// deleted, and `new` was then created at its tip `b1` (the record says so)
+/// and got `n1`. Topology alone reads the same as `old` continued.
+///
+/// ```text
+/// r - d1 - p - C   (main)
+///      \      /
+///       b1 ---     (old, deleted)
+///         \
+///          n1      (new)
+/// ```
+struct NewBranchAtMergedTip {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+    d1: String,
+    b1: String,
+    p: String,
+    c: String,
+    n1: String,
+    /// `new`'s record: `main` at `b1`.
+    forks: ForkOriginStore,
+}
+
+fn new_branch_at_merged_tip() -> NewBranchAtMergedTip {
+    let (dir, path, r, tree) = repo_with_root();
+    let d1 = commit_on(&path, &tree, &[&r], "d1");
+    let b1 = commit_on(&path, &tree, &[&d1], "b1");
+    let p = commit_on(&path, &tree, &[&d1], "p");
+    let c = commit_on(&path, &tree, &[&p, &b1], "Merge branch 'old'");
+    let n1 = commit_on(&path, &tree, &[&b1], "n1");
+    set_branches(&path, &[("main", &c), ("new", &n1)]);
+    let mut forks = ForkOriginStore::default();
+    forked_at(&mut forks, "new", "main", &b1, 20);
+    NewBranchAtMergedTip { _dir: dir, path, d1, b1, p, c, n1, forks }
+}
+
+#[test]
+#[serial_test::serial]
+fn new_branch_at_merged_tip_fixture_records_its_creation_at_the_merged_tip() {
+    let repo = new_branch_at_merged_tip();
+
+    assert_eq!(parent_line(&repo.path, &repo.c), format!("{} {} {}", repo.c, repo.p, repo.b1));
+    assert_eq!(parent_line(&repo.path, &repo.b1), format!("{} {}", repo.b1, repo.d1));
+    assert_eq!(parent_line(&repo.path, &repo.n1), format!("{} {}", repo.n1, repo.b1));
+    assert_eq!(git_output(&repo.path, &["rev-parse", "new"]), repo.n1);
+    assert!(git_output(&repo.path, &["branch", "--list", "old"]).is_empty(), "the merged branch is gone");
+    let record = repo.forks.get("new").expect("new's record");
+    assert_eq!((record.base_branch.as_str(), &record.base_sha), ("main", &repo.b1));
+    assert_eq!(
+        git_output(&repo.path, &["rev-list", "--first-parent", "--count", &format!("{}..new", repo.b1)]),
+        "1",
+        "the record is new's lane boundary, one commit below its tip"
+    );
+}
+
+/// `t`'s old tip `t1` reached `main` only through `other`'s merge `O`, and
+/// `t` then continued with `t2`.
+///
+/// ```text
+/// r - d1 - d2 ---------- C   (main)
+///      \ \              /
+///       \ o1 ------- O       (other)
+///        \          /
+///         t1 -------
+///           \
+///            t2              (t)
+/// ```
+struct IndirectBoundary {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+    d1: String,
+    d2: String,
+    t1: String,
+    o1: String,
+    o: String,
+    c: String,
+    t2: String,
+}
+
+fn indirect_boundary() -> IndirectBoundary {
+    let (dir, path, r, tree) = repo_with_root();
+    let d1 = commit_on(&path, &tree, &[&r], "d1");
+    let t1 = commit_on(&path, &tree, &[&d1], "t1");
+    let o1 = commit_on(&path, &tree, &[&d1], "o1");
+    let o = commit_on(&path, &tree, &[&o1, &t1], "Merge branch 't' into other");
+    let d2 = commit_on(&path, &tree, &[&d1], "d2");
+    let c = commit_on(&path, &tree, &[&d2, &o], "Merge branch 'other'");
+    let t2 = commit_on(&path, &tree, &[&t1], "t2");
+    set_branches(&path, &[("main", &c), ("other", &o), ("t", &t2)]);
+    IndirectBoundary { _dir: dir, path, d1, d2, t1, o1, o, c, t2 }
+}
+
+#[test]
+#[serial_test::serial]
+fn indirect_boundary_fixture_reaches_main_only_through_another_merge() {
+    let repo = indirect_boundary();
+
+    assert_eq!(parent_line(&repo.path, &repo.c), format!("{} {} {}", repo.c, repo.d2, repo.o));
+    assert_eq!(parent_line(&repo.path, &repo.o), format!("{} {} {}", repo.o, repo.o1, repo.t1));
+    assert_eq!(parent_line(&repo.path, &repo.t2), format!("{} {}", repo.t2, repo.t1));
+    assert_eq!(parent_line(&repo.path, &repo.t1), format!("{} {}", repo.t1, repo.d1));
+    assert_eq!(git_output(&repo.path, &["rev-parse", "t"]), repo.t2);
+    let main_chain = git_output(&repo.path, &["rev-list", "--first-parent", "main"]);
+    assert!(!main_chain.lines().any(|sha| sha == repo.t1 || sha == repo.o), "neither t1 nor O is on main's first-parent chain");
+    assert_eq!(git_output(&repo.path, &["merge-base", "main", "t"]), repo.t1, "t's old tip is in main");
+}
+
+/// A `--depth <depth>` clone of [`merged_twice_and_continued`], with local
+/// `main` and `b`.
+///
+/// - depth 1: the clone has `C2` and `n` only, so `b`'s own boundary `b2`
+///   is past the shallow cutoff.
+/// - depth 2: the clone has `C2`, `p2`, `b2`, and `n`, so the later merge
+///   (`b2` into `C2`) can be verified and the older boundary `b1` is past the
+///   cutoff.
+struct ShallowMergedTwice {
+    source: MergedTwice,
+    _dir: tempfile::TempDir,
+    clone: PathBuf,
+}
+
+fn shallow_merged_twice(depth: usize) -> ShallowMergedTwice {
+    let source = merged_twice_and_continued();
+    let dir = tempfile::tempdir().unwrap();
+    let clone = dir.path().join("clone");
+    // `file:///C:/…` on Windows, `file:///tmp/…` elsewhere.
+    let source_path = source.path.to_string_lossy().replace('\\', "/");
+    let url = format!("file://{}{source_path}", if source_path.starts_with('/') { "" } else { "/" });
+    let depth = depth.to_string();
+    run_git(dir.path(), &["clone", "-q", "--depth", &depth, "--no-single-branch", &url, clone.to_str().unwrap()]);
+    run_git(&clone, &["branch", "b", "origin/b"]);
+    ShallowMergedTwice { source, _dir: dir, clone }
+}
+
+#[test]
+#[serial_test::serial]
+fn shallow_merged_twice_fixtures_cut_history_where_expected() {
+    let has = |clone: &Path, sha: &str| {
+        Command::new("git")
+            .current_dir(clone)
+            .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
+            .status()
+            .expect("git should be installed")
+            .success()
+    };
+    let visible_parents = |clone: &Path, sha: &str| git_output(clone, &["log", "--no-walk", "--format=%P", sha]);
+
+    let crossing = shallow_merged_twice(1);
+    let repo = &crossing.source;
+    assert_eq!(git_output(&crossing.clone, &["rev-parse", "--is-shallow-repository"]), "true");
+    assert_eq!(git_output(&crossing.clone, &["rev-parse", "main", "b"]), format!("{}\n{}", repo.c2, repo.n));
+    assert!(!has(&crossing.clone, &repo.b2), "b's boundary is past the cutoff");
+    assert_eq!(visible_parents(&crossing.clone, &repo.n), "", "n's parent is cut");
+
+    let older = shallow_merged_twice(2);
+    let repo = &older.source;
+    assert_eq!(git_output(&older.clone, &["rev-parse", "--is-shallow-repository"]), "true");
+    for present in [&repo.c2, &repo.p2, &repo.b2, &repo.n] {
+        assert!(has(&older.clone, present), "{present} is in the depth-2 clone");
+    }
+    for absent in [&repo.b1, &repo.c1] {
+        assert!(!has(&older.clone, absent), "{absent} is past the cutoff");
+    }
+    assert_eq!(visible_parents(&older.clone, &repo.c2), format!("{} {}", repo.p2, repo.b2), "the later merge is verifiable");
+    assert_eq!(visible_parents(&older.clone, &repo.b2), "", "the older boundary b1 is cut");
+}
+
 /// Main: `r`, `a1..a10`, then `side` forks, main gets `b1..b3`, merges
 /// `side` (8 commits), and moves on 20 commits. Fork and merge are far
 /// outside every window.
