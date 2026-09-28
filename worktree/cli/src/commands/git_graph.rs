@@ -433,7 +433,7 @@ impl Placement {
     }
 }
 
-/// Classifies one selected branch (R4) against its recorded parent's lane,
+/// Classifies one selected branch against its recorded parent's lane,
 /// the default lane, and a diverged `origin/<default>` line, in that order.
 fn place(history: &History, tips: &DefaultTips, selected: &Selected) -> Placement {
     let tip = selected.tip;

@@ -1221,12 +1221,11 @@ fn first_parent_entries_place_only_anchors_on_the_lane() {
 // ---------------------------------------------------------------------------
 
 const ALPHA: &str = "feature/very-long-exact-branch-reference-alpha";
-/// R12's second long label is `origin/very-long-exact-branch-reference-beta`;
-/// `wt list` draws no remote-tracking ref but `origin/<default>`, so the same
-/// length arrives here as a local branch.
+/// A label as long as `origin/very-long-exact-branch-reference-beta`; `wt list`
+/// draws no remote-tracking ref but `origin/<default>`, so it is a local branch.
 const BETA: &str = "fix/very-long-exact-branch-reference-beta";
 
-/// R12's long labels as `wt list` meets them: `ALPHA` is an unmerged lane
+/// Long labels as `wt list` meets them: `ALPHA` is an unmerged lane
 /// with an open PR, `BETA` is a label on the default lane beside `main`, and
 /// `origin/main` is one commit ahead of `main`.
 ///
