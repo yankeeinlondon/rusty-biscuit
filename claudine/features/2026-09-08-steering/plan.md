@@ -1,3 +1,8 @@
+---
+total_phases: 8
+start_phase: 1
+implemented: false
+---
 # Steering implementation plan
 
 Status: Ready for non-interactive execution; implementation phases not started.
@@ -75,29 +80,31 @@ interface, and reviewed adapter implementation are separate gates.
 
 **Work**
 
-1. Add shared steering and execution-interface vocabulary to
+- [ ] 1. Add shared steering and execution-interface vocabulary to
    [catalog-types](../../catalog-types/src/lib.rs), keeping transport, encoding,
    operation intent, receipt strength, execution state, and delivery state distinct.
    Define typed runtime request/result and identity contracts in the Claudine
    library. Preserve explicit unknown and partial-interruption outcomes.
-2. Extend [research loading](../../gen/src/inputs.rs),
+- [ ] 2. Extend [research loading](../../gen/src/inputs.rs),
    [field ownership](../../gen/src/registry.rs), catalog coercion, and
    [Rust emission](../../gen/src/emit/mod.rs). Consume the existing steering
    records and execution selections rather than reauthoring provider facts.
-3. Extend the maintained checker with deterministic activation applicability:
+- [ ] 3. Extend the maintained checker with deterministic activation applicability:
    exact provider/version/OS/profile/origin/state/operation, adapter revision,
    and required assertion coverage. Represent reviewed adapter bindings by
    implemented identifiers, separate from the generated factual catalog.
    Add typed assertion/adapter references if the current prose-only assertion
    lists cannot support deterministic decisions; preserve historical records as
    evidence without automatically making them activation grants.
-4. Derive manual and automatic eligibility from operation effects, delivery
+- [ ] 4. Derive manual and automatic eligibility from operation effects, delivery
    boundaries, access, compatibility, and applicable verification. A next-turn
    follow-up is not active-loop rescue. A terminal-only response cannot satisfy
    prompt return-after-acceptance without separately established early acceptance.
-5. Regenerate affected catalog/provider artifacts and update their existing drift
+- [ ] 5. Regenerate affected catalog/provider artifacts and update their existing drift
    and hash baselines. Keep all unimplemented or insufficiently verified bindings
    unavailable, with an actionable reason.
+- [ ] Validation: generator/catalog unit tests; all-roster steering check;
+   deterministic regeneration; negative activation fixtures.
 
 **Validation:** Generator/catalog unit tests; maintained steering check for all
 roster providers; deterministic regeneration; negative fixtures for missing IDs,
