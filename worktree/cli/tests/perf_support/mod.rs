@@ -309,6 +309,7 @@ impl MixedFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": now - age.as_secs(),
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+            "writer": "refresh",
             "source_repo": source_repo,
             "pull_requests": [{
                 "number": number,
@@ -334,6 +335,7 @@ impl MixedFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": unix_now() - age.as_secs(),
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+            "writer": "refresh",
             "source_repo": source_repo,
             "pull_requests": [],
         });

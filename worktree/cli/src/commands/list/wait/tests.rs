@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,6 +30,12 @@ thread_local! {
     static LAUNCHES: RefCell<Vec<LaunchArgs>> = const { RefCell::new(Vec::new()) };
     /// When each launched worker exits, by launch order; `None` never.
     static EXITS: RefCell<Vec<Option<Duration>>> = const { RefCell::new(Vec::new()) };
+    /// Every receipt the wait discarded, in order.
+    static DISCARDED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+fn discarded() -> Vec<String> {
+    DISCARDED.with(|discarded| discarded.borrow().clone())
 }
 
 fn now() -> Duration {
@@ -75,6 +81,9 @@ struct Fake {
     early_probes: Cell<usize>,
     /// Whether the current worker has exited, as the probe sees it.
     worker_alive: Box<dyn Fn() -> bool>,
+    /// A real PR store (and its `origin`) read the way [`StoreEnv`] reads it,
+    /// in place of `pr_lock` and `pr_answer`.
+    real_prs: Option<(PathBuf, String)>,
 }
 
 impl Fake {
@@ -82,6 +91,7 @@ impl Fake {
         CLOCK.with(|clock| clock.set(Duration::ZERO));
         LAUNCHES.with(|launches| launches.borrow_mut().clear());
         EXITS.with(|exits| exits.borrow_mut().clear());
+        DISCARDED.with(|discarded| discarded.borrow_mut().clear());
         Self {
             store: Box::new(store),
             receipt: Box::new(|_, _| None),
@@ -95,7 +105,13 @@ impl Fake {
                 let exit = EXITS.with(|exits| exits.borrow().get(launched.wrapping_sub(1)).copied().flatten());
                 launched > 0 && exit.is_none_or(|at| now() < at)
             }),
+            real_prs: None,
         }
+    }
+
+    fn real_pr_store(mut self, store: &Path, origin: &str) -> Self {
+        self.real_prs = Some((store.to_path_buf(), origin.to_string()));
+        self
     }
 
     /// The launched workers exit at these times.
@@ -135,6 +151,10 @@ impl WaitEnv for Fake {
         (self.receipt)(now(), attempt)
     }
 
+    fn discard_receipt(&self, attempt_id: &str) {
+        DISCARDED.with(|discarded| discarded.borrow_mut().push(attempt_id.to_string()));
+    }
+
     fn head_lock_held(&self) -> bool {
         if (self.worker_alive)() {
             self.early_probes.set(self.early_probes.get() + 1);
@@ -143,11 +163,17 @@ impl WaitEnv for Fake {
     }
 
     fn pr_lock_held(&self) -> bool {
-        (self.pr_lock)(now())
+        match &self.real_prs {
+            Some((store, _)) => pr_lock_held(store),
+            None => (self.pr_lock)(now()),
+        }
     }
 
     fn pr_publication(&self) -> Option<String> {
-        (self.pr_answer)(now()).map(str::to_string)
+        match &self.real_prs {
+            Some((store, origin)) => refresh_publication(store, origin),
+            None => (self.pr_answer)(now()).map(str::to_string),
+        }
     }
 
     fn elapsed(&self) -> Duration {
@@ -434,6 +460,17 @@ fn a_forced_wait_relaunches_once_when_a_contending_holder_published_nothing() {
         launches(),
         [LaunchArgs { attempt: OURS.into(), force: true }, LaunchArgs { attempt: SECOND.into(), force: true }]
     );
+    assert_eq!(discarded(), [OURS, SECOND], "each launched attempt's receipt is discarded once the wait ends");
+}
+
+#[test]
+fn an_ordinary_wait_discards_no_receipt() {
+    let fake = Fake::new(|_| with(attempt(OURS, Phase::Checking, Some(Outcome::InSync)))).exits(&[Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, false, launching);
+
+    assert!(matches!(end, WaitEnd::Finished { receipt: None, .. }), "{end:?}");
+    assert!(discarded().is_empty());
 }
 
 #[test]
@@ -461,6 +498,279 @@ fn a_forced_wait_reports_a_pr_failure_when_the_relaunch_is_contended_too() {
     );
     assert!(at >= ms(3_000), "the second holder was waited for too: {at:?}");
     assert_eq!(launches().len(), 2, "one relaunch, no more");
+}
+
+/// A real PR store for the contended-holder race: a repository whose
+/// `origin` the store binds to, and the writers a launch stub runs.
+mod racing_writers {
+    use std::process::Command;
+
+    use worktree::pull_requests::{
+        CachedPrs, OpenPrSource, OpenPullRequest, RefreshOutcome, Writer, fetch_and_publish, refresh, select_cached,
+        stored_publication,
+    };
+
+    use super::*;
+
+    pub(super) const ORIGIN: &str = "https://prs.example.invalid/owner/repo.git";
+
+    thread_local! {
+        /// The store and repository the launch stubs write through.
+        static REAL: RefCell<Option<(PathBuf, PathBuf)>> = const { RefCell::new(None) };
+    }
+
+    pub(super) struct Repo {
+        _dir: tempfile::TempDir,
+        pub(super) store: PathBuf,
+    }
+
+    pub(super) fn repo() -> Repo {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(&root).expect("repo dir");
+        for args in [&["init", "-q"][..], &["remote", "add", "origin", ORIGIN]] {
+            let status = Command::new("git").arg("-C").arg(&root).args(args).status().expect("git runs");
+            assert!(status.success(), "git {args:?}");
+        }
+        let store = dir.path().join("cache").join("abc.prs.json");
+        REAL.with(|real| *real.borrow_mut() = Some((store.clone(), root)));
+        Repo { _dir: dir, store }
+    }
+
+    /// Answers `answer`, running `during` inside the request.
+    struct Source {
+        answer: Result<u64, PrFailure>,
+        during: Option<Box<dyn Fn()>>,
+    }
+
+    impl OpenPrSource for Source {
+        fn source_repo(&self) -> Option<String> {
+            Some("owner/repo".into())
+        }
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+            if let Some(during) = &self.during {
+                during();
+            }
+            self.answer.clone().map(|number| {
+                vec![OpenPullRequest {
+                    number,
+                    url: None,
+                    source_repo: Some("owner/repo".into()),
+                    source_branch: "feat".into(),
+                    target_branch: "main".into(),
+                }]
+            })
+        }
+    }
+
+    /// A holder's forced refresh answering `answer` runs inside an ordinary
+    /// listing's miss request, which then returns PR 1: the holder takes the
+    /// lock after the listing began and releases it before the listing
+    /// stores. Then the worker is launched as [`launching`] launches it.
+    fn with_holder_inside_a_listing(
+        main: &Path,
+        args: &LaunchArgs,
+        answer: Result<u64, PrFailure>,
+    ) -> std::io::Result<WorkerHandle> {
+        let (store, root) = REAL.with(|real| real.borrow().clone()).expect("racing_writers::repo()");
+        let (holder_store, holder_root) = (store.clone(), root.clone());
+        let listing = Source {
+            answer: Ok(1),
+            during: Some(Box::new(move || {
+                let holder = Source { answer: answer.clone(), during: None };
+                let outcome =
+                    refresh(&holder_store, &holder_root, unix_now, true, |_| Box::new(holder) as Box<dyn OpenPrSource>);
+                assert!(matches!(outcome, RefreshOutcome::Refreshed | RefreshOutcome::Failed(_)), "{outcome:?}");
+            })),
+        };
+        fetch_and_publish(&store, &root, ORIGIN, unix_now(), &listing).expect("answered").expect("same origin");
+        launching(main, args)
+    }
+
+    pub(super) fn holder_fails_inside_a_listing(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        with_holder_inside_a_listing(main, args, Err(PrFailure::Other))
+    }
+
+    pub(super) fn holder_answers_inside_a_listing(main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        with_holder_inside_a_listing(main, args, Ok(2))
+    }
+
+    pub(super) fn stored(repo: &Repo) -> (Vec<u64>, Option<Writer>) {
+        let CachedPrs::Fresh(listing) = select_cached(&repo.store, Some(ORIGIN), unix_now()) else {
+            panic!("an answer is stored");
+        };
+        let writer = stored_publication(&repo.store, ORIGIN, unix_now()).map(|publication| publication.writer);
+        (listing.pull_requests.iter().map(|pr| pr.number).collect(), writer)
+    }
+}
+
+/// Two overlapping forced runs over real stores: run A's worker holds the
+/// head lock and records a PR credentials failure; run B, launched while A's
+/// receipt waits to be read, is contended, follows A's attempt, and writes
+/// its own receipt after A's. With one receipt file per repository B's write
+/// replaced A's, and A lost its PR failure line.
+mod overlapping_runs {
+    use worktree::pull_requests::origin_digest;
+    use worktree::remote_head::{begin_attempt, finish_attempt, receipt_path_beside, write_receipt};
+
+    use super::*;
+
+    pub(super) const ORIGIN: &str = "https://github.com/owner/repo.git";
+
+    thread_local! {
+        /// The remote-head store and PR store, and run B's end.
+        static STORES: RefCell<Option<(PathBuf, PathBuf)>> = const { RefCell::new(None) };
+        static B_END: RefCell<Option<WaitEnd>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn credentials_rejected() -> PrFailure {
+        PrFailure::CredentialsRejected { key: Some("GITHUB_TOKEN".into()) }
+    }
+
+    fn stores() -> (PathBuf, PathBuf) {
+        STORES.with(|stores| stores.borrow().clone()).expect("overlapping_runs::run")
+    }
+
+    fn receipt_for(id: &str, head: HeadStatus, prs: PrStatus) -> Receipt {
+        Receipt {
+            attempt_id: id.into(),
+            origin_digest: origin_digest(ORIGIN),
+            branch: BRANCH.into(),
+            finished_at: unix_now(),
+            head,
+            prs,
+        }
+    }
+
+    fn forced(digest: &str) -> WaitRequest<'_> {
+        WaitRequest { main: Path::new("/repo"), origin_digest: digest, branch: BRANCH, force: true, budget: FORCED_BUDGET }
+    }
+
+    /// Run A's worker: checks in sync, fails its PR half, writes its receipt;
+    /// then run B happens before run A reads anything.
+    fn run_a_worker(_main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        let (head, prs) = stores();
+        let attempt = Attempt::begin(args.attempt.clone(), origin_digest(ORIGIN), BRANCH.into(), unix_now());
+        begin_attempt(&head, &attempt).expect("attempt");
+        finish_attempt(&head, &args.attempt, Outcome::InSync, None).expect("outcome");
+        let failed = PrStatus::Failed { failure: credentials_rejected() };
+        write_receipt(&receipt_path_beside(&head, &args.attempt).expect("path"), &receipt_for(&args.attempt, HeadStatus::Ok, failed))
+            .expect("receipt A");
+
+        let digest = origin_digest(ORIGIN);
+        let env = StoreEnv::new(head, prs, ORIGIN.into());
+        let b = wait(forced(&digest), &env, run_b_worker, &mut |_| {});
+        B_END.with(|end| *end.borrow_mut() = Some(b.end));
+        Ok(WorkerHandle::new(|| true))
+    }
+
+    /// Run B's worker: the head lock was held (by A), its PR half ran after
+    /// A's released the PR lock, and it writes its receipt after A's.
+    fn run_b_worker(_main: &Path, args: &LaunchArgs) -> std::io::Result<WorkerHandle> {
+        let (head, _) = stores();
+        let receipt = receipt_for(&args.attempt, HeadStatus::AdoptedElsewhere, PrStatus::Ok);
+        write_receipt(&receipt_path_beside(&head, &args.attempt).expect("path"), &receipt).expect("receipt B");
+        Ok(WorkerHandle::new(|| true))
+    }
+
+    /// Runs A (and B inside it); returns both ends and the files left.
+    pub(super) fn run() -> (WaitEnd, WaitEnd, Vec<String>) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let head = dir.path().join("abc.remote-head.json");
+        let prs = dir.path().join("abc.prs.json");
+        STORES.with(|stores| *stores.borrow_mut() = Some((head.clone(), prs.clone())));
+
+        let digest = origin_digest(ORIGIN);
+        let a = wait(forced(&digest), &StoreEnv::new(head, prs, ORIGIN.into()), run_a_worker, &mut |_| {});
+
+        let b = B_END.with(|end| end.borrow_mut().take()).expect("run B ran");
+        let left = std::fs::read_dir(dir.path())
+            .expect("dir")
+            .map(|entry| entry.expect("entry").file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains("receipt"))
+            .collect();
+        (a.end, b, left)
+    }
+}
+
+#[test]
+fn overlapping_forced_runs_each_read_their_own_receipt() {
+    let (a, b, left) = overlapping_runs::run();
+
+    let WaitEnd::Finished { attempt: followed_by_a, receipt: Some(a_receipt) } = a else {
+        panic!("run A read no receipt: {a:?}");
+    };
+    assert_eq!(a_receipt.prs, PrStatus::Failed { failure: overlapping_runs::credentials_rejected() });
+    let failure = match &a_receipt.prs {
+        PrStatus::Failed { failure } => failure,
+        other => panic!("{other:?}"),
+    };
+    assert!(
+        super::super::credential_line(overlapping_runs::ORIGIN, None, Some(failure)).is_some(),
+        "run A still gets its PR failure line"
+    );
+
+    let WaitEnd::Finished { attempt: followed_by_b, receipt: Some(b_receipt) } = b else {
+        panic!("run B read no receipt: {b:?}");
+    };
+    assert_eq!((b_receipt.head, b_receipt.prs), (HeadStatus::AdoptedElsewhere, PrStatus::Ok));
+    assert_ne!(b_receipt.attempt_id, a_receipt.attempt_id);
+    assert_eq!(followed_by_b.id, followed_by_a.id, "B followed A's attempt");
+
+    assert!(left.is_empty(), "each run deletes its own receipt: {left:?}");
+}
+
+/// The attempt of the latest launch, finished in sync.
+fn latest_launch_in_sync() -> StoreState {
+    let id = launches().last().map_or_else(|| OURS.to_string(), |args| args.attempt.clone());
+    with(attempt(&id, Phase::Checking, Some(Outcome::InSync)))
+}
+
+/// Review 3: the holder's request fails, and an ordinary listing whose
+/// request overlapped it stores its answer once the lock is free. That
+/// publication is not the holder's, so it never completes the PR half.
+#[test]
+fn a_forced_wait_never_takes_a_listings_answer_for_a_contending_holders() {
+    let repo = racing_writers::repo();
+    let fake = Fake::new(|_| latest_launch_in_sync())
+        .receipts(|_, for_attempt| Some(receipt(&for_attempt.id, HeadStatus::Ok, PrStatus::Contended)))
+        .real_pr_store(&repo.store, racing_writers::ORIGIN)
+        .exits(&[Some(ms(10)), Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, true, racing_writers::holder_fails_inside_a_listing);
+
+    assert_eq!(
+        racing_writers::stored(&repo),
+        (vec![1], Some(worktree::pull_requests::Writer::Listing)),
+        "the listing's answer was stored after each failed holder"
+    );
+    let failed = PrStatus::Failed { failure: PrFailure::Other };
+    assert_eq!(
+        end,
+        WaitEnd::Finished {
+            attempt: attempt(SECOND, Phase::Checking, Some(Outcome::InSync)),
+            receipt: Some(receipt(SECOND, HeadStatus::Ok, failed)),
+        },
+        "a listing's publication is not the holder's success"
+    );
+    assert_eq!(launches().len(), 2, "one relaunch, no more");
+}
+
+/// Control: when the holder does publish, the overlapping listing's older
+/// answer is not stored over it, and the wait takes the holder's answer.
+#[test]
+fn a_forced_wait_takes_a_contending_holders_answer_that_an_overlapping_listing_left_alone() {
+    let repo = racing_writers::repo();
+    let fake = Fake::new(|_| latest_launch_in_sync())
+        .receipts(|_, for_attempt| Some(receipt(&for_attempt.id, HeadStatus::Ok, PrStatus::Contended)))
+        .real_pr_store(&repo.store, racing_writers::ORIGIN)
+        .exits(&[Some(ms(10))]);
+
+    let (end, _, _) = run(&fake, true, racing_writers::holder_answers_inside_a_listing);
+
+    assert_eq!(racing_writers::stored(&repo), (vec![2], Some(worktree::pull_requests::Writer::Refresh)));
+    assert!(matches!(end, WaitEnd::Finished { receipt: Some(Receipt { prs: PrStatus::Contended, .. }), .. }), "{end:?}");
+    assert_eq!(launches().len(), 1, "the holder's answer needs no second request");
 }
 
 #[test]

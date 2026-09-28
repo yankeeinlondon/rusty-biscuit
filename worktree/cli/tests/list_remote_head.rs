@@ -92,7 +92,7 @@ fn a_forced_worker_records_the_given_attempt_and_a_receipt_for_both_halves() {
     const ID: &str = "00112233445566778899aabbccddeeff";
     let fixture = Fixture::new();
     let pushed = fixture.commit_and_push("second");
-    let receipt_path = fixture.cache_file(refresh_receipt_path(&fixture.main).expect("receipt path"));
+    let receipt_path = fixture.cache_file(refresh_receipt_path(&fixture.main, ID).expect("receipt path"));
 
     // Unforced: the attempt runs under the given id, and no receipt is written.
     fixture.run_worker(&["--attempt", ID]);

@@ -163,7 +163,7 @@ fn gather_remote(
         force: flags.forced(),
         budget: if flags.forced() { seams.forced_budget } else { seams.wait_budget },
     };
-    let env = StoreEnv::new(main, stores.head.to_path_buf(), stores.prs.to_path_buf(), origin.clone());
+    let env = StoreEnv::new(stores.head.to_path_buf(), stores.prs.to_path_buf(), origin.clone());
     let progress = Progress::on_stderr();
     let waited = wait::wait(request, &env, seams.launch, &mut |phase| progress.show(phase));
     progress.finish();

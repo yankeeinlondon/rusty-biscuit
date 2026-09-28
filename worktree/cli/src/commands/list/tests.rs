@@ -503,7 +503,10 @@ mod gather {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use worktree::pull_requests::{OpenPrSource, OpenPullRequest, PrListing, fetch_and_publish, origin_digest, unix_now};
+    use worktree::pull_requests::{
+        CachedPrs, OpenPrSource, OpenPullRequest, PrListing, RefreshOutcome, fetch_and_publish, origin_digest, refresh,
+        select_cached, unix_now,
+    };
     use worktree::remote_head::{Attempt, Outcome, PrFailure, begin_attempt, finish_attempt};
 
     use super::super::wait::WaitEnd;
@@ -774,6 +777,47 @@ mod gather {
 
         assert_eq!(numbers(&listing), [8]);
         assert!(!listing.is_stale_at(unix_now()));
+    }
+
+    /// Answers PR 7 only after a forced worker (another listing's `wt -r`)
+    /// has stored PR 8 under the refresh lock.
+    struct Overtaken;
+
+    impl OpenPrSource for Overtaken {
+        fn source_repo(&self) -> Option<String> {
+            Some("owner/repo".into())
+        }
+        fn fetch(&self) -> Result<Vec<OpenPullRequest>, PrFailure> {
+            record(Event::Fetch);
+            let worker = WORKER.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("fixture");
+            let outcome = refresh(&worker.pr_store, &worker.repo, unix_now, true, |_| {
+                Box::new(Seed(8)) as Box<dyn OpenPrSource>
+            });
+            assert_eq!(outcome, RefreshOutcome::Refreshed);
+            Ok(open_pr(7))
+        }
+    }
+
+    fn overtaken(_origin: &str) -> Box<dyn OpenPrSource> {
+        record(Event::Connect);
+        Box::new(Overtaken)
+    }
+
+    /// Review 3: the miss request's older answer must not replace the one a
+    /// forced worker published while it was in flight.
+    #[test]
+    #[serial_test::serial]
+    fn a_miss_answer_overtaken_by_a_forced_worker_leaves_the_newer_answer_shown_and_stored() {
+        let fixture = Fixture::new();
+
+        let listing = fixture.gather_prs(overtaken);
+
+        assert_eq!(requests(), 1);
+        assert_eq!(numbers(&listing), [8], "the listing shows the newer answer");
+        let CachedPrs::Fresh(stored) = select_cached(&fixture.store, Some(ORIGIN), unix_now()) else {
+            panic!("an answer is stored");
+        };
+        assert_eq!(numbers(&stored), [8], "and the store keeps it");
     }
 
     #[test]

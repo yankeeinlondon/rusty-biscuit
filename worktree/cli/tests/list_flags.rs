@@ -19,8 +19,28 @@ use clap::Parser as _;
 use perf_support::{FakeGitea, GiteaReply, MixedFixture, RemoveOnDrop, wait_for_refresh_workers};
 use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT, assert_no_spinner};
 use serial_test::serial;
-use worktree::remote_head::refresh_receipt_path;
 use worktree_cli::{Cli, Commands};
+
+/// The completion receipts (`<repo hash>.refresh-receipt.<attempt id>.json`)
+/// beside `store`, whose name ends in `suffix`, with their contents.
+fn receipts_beside(store: &std::path::Path, suffix: &str) -> Vec<(std::path::PathBuf, serde_json::Value)> {
+    let name = store.file_name().expect("file name").to_string_lossy().into_owned();
+    let prefix = format!("{}refresh-receipt.", name.strip_suffix(suffix).expect("store name"));
+    let Ok(entries) = fs::read_dir(store.parent().expect("store dir")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+        .map(|entry| {
+            let document = fs::read(entry.path())
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or(serde_json::Value::Null);
+            (entry.path(), document)
+        })
+        .collect()
+}
 
 /// Whitespace collapsed, so wrapped lines read as one.
 fn collapsed(text: &str) -> String {
@@ -127,12 +147,8 @@ fn refresh_waits_for_both_halves_and_asks_again_despite_young_answers() {
     assert!(stderr.contains("PR #7"), "this run shows the answer it waited for:\n{stderr}");
     assert!(!stderr.contains("PR #99"), "{stderr}");
     assert!(!collapsed(&stderr).contains("running this command again"), "nothing was left running: {stderr}");
-    let receipt = fixture.pr_store().with_file_name(
-        refresh_receipt_path(fixture.main()).expect("receipt path").file_name().expect("file name"),
-    );
-    assert!(receipt.exists(), "the worker wrote its receipt before wt -r rendered");
     assert!(wait_for_refresh_workers(fixture.main(), 0, Duration::from_secs(2)).is_empty(), "both halves ended");
-    let _ = fs::remove_file(receipt);
+    assert_eq!(receipts_beside(&fixture.pr_store(), "prs.json"), [], "wt -r deleted the receipt it read");
 }
 
 /// How old the PR answer stored before `wt -r` launches is.
@@ -152,11 +168,9 @@ enum Seeded {
 fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String, usize) {
     let fixture = MixedFixture::new().with_gitea_origin();
     let _cleanup = RemoveOnDrop(fixture.pr_store());
-    let receipt = fixture.pr_store().with_file_name(
-        refresh_receipt_path(fixture.main()).expect("receipt path").file_name().expect("file name"),
-    );
-    let _receipt_cleanup = RemoveOnDrop(receipt.clone());
-    let _ = fs::remove_file(&receipt);
+    for (stale, _) in receipts_beside(&fixture.pr_store(), "prs.json") {
+        let _ = fs::remove_file(stale);
+    }
     if let Seeded::Old = seeded {
         fixture.seed_pr_store(Duration::from_secs(2 * 3_600), 99, "divergent-0");
     }
@@ -183,11 +197,12 @@ fn refresh_against_a_holder(holder_reply: GiteaReply, seeded: Seeded) -> (String
         .spawn()
         .expect("wt -r");
     let deadline = Instant::now() + WORKER_WAIT;
+    // wt -r keeps its receipt until its wait ends, which is after the
+    // holder's lock opens.
     let contended = loop {
-        let recorded = fs::read(&receipt)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|receipt| receipt["prs"]["kind"] == "contended");
+        let recorded = receipts_beside(&fixture.pr_store(), "prs.json")
+            .iter()
+            .any(|(_, receipt)| receipt["prs"]["kind"] == "contended");
         if recorded || Instant::now() >= deadline {
             break recorded;
         }
@@ -246,9 +261,7 @@ fn refresh_on_a_local_origin_fetches_and_reports_like_a_listing() {
 
     assert!(caption.contains("main is 1 commit behind origin/main (updated from origin just now)"), "{caption}");
     assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed);
-    let receipt = fixture.cache_file(refresh_receipt_path(&fixture.main).expect("receipt path"));
-    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt).expect("a receipt")).expect("json");
-    assert_eq!(receipt["head"], "ok", "{receipt}");
+    assert_eq!(receipts_beside(&fixture.head_store(), "remote-head.json"), [], "wt -r deleted the receipt it read");
 }
 
 /// The worker can write nothing, so it records no attempt and no receipt:

@@ -9,12 +9,15 @@
 //! is never a finished check: it is adopted only when another attempt is
 //! running under the lock, and is otherwise [`WaitEnd::Unavailable`].
 //!
-//! A forced run's contended PR half is complete only when the holder
+//! A forced run's contended PR half is complete only when a refresh
 //! published an answer after launch, which the stored answer's publication
-//! id shows (`fetched_at` is whole seconds and can repeat): a released lock
-//! proves only that the holder's request ended, and a failed or skipped
-//! request stores nothing. Without that answer the run relaunches once; a
-//! second such contention ends as a PR failure.
+//! id and writer show (`fetched_at` is whole seconds and can repeat): a
+//! released lock proves only that the holder's request ended, and a failed
+//! or skipped request stores nothing. An ordinary listing's miss answer does
+//! not count: it can be stored whenever the lock is momentarily free, such as
+//! just after a failed holder releases it, and its request may predate this
+//! run. Without a refresh's answer the run relaunches once; a second such
+//! contention ends as a PR failure.
 //!
 //! The core ([`wait`]) is pure over [`WaitEnv`], so tests script the store,
 //! the locks, and the clock.
@@ -24,10 +27,10 @@ use std::process::Child;
 use std::time::{Duration, Instant};
 
 use biscuit_terminal::components::spinner::{Spinner, SpinnerHandle};
-use worktree::pull_requests::{pr_lock_held, stored_publication, unix_now};
+use worktree::pull_requests::{Writer, pr_lock_held, stored_publication, unix_now};
 use worktree::remote_head::{
     ATTEMPT_MAX_AGE, Attempt, FallbackReason, HeadStatus, Phase, PrFailure, PrStatus, Receipt, StoreState,
-    load_receipt, new_attempt_id, read_store, refresh_lock_held, refresh_receipt_path,
+    load_receipt, new_attempt_id, read_store, receipt_path_beside, refresh_lock_held,
 };
 
 /// How long ordinary listing waits for the attempt (Decision 1).
@@ -88,14 +91,19 @@ pub trait WaitEnv {
     fn store(&self) -> StoreState;
     /// The completion receipt for `attempt`, if one matches it.
     fn receipt(&self, attempt: &Attempt) -> Option<Receipt>;
+    /// Deletes attempt `attempt_id`'s receipt, if any; called once the wait
+    /// is over for every forced attempt it launched.
+    fn discard_receipt(&self, attempt_id: &str);
     /// Takes the lock for an instant: probe only when no worker of ours can
     /// be about to take it.
     fn head_lock_held(&self) -> bool;
     /// As [`WaitEnv::head_lock_held`], for the PR lock.
     fn pr_lock_held(&self) -> bool;
     /// The publication id of the stored PR answer for the current `origin`
-    /// (`worktree::pull_requests::stored_publication`). It changes with every
-    /// successful write, whereas `fetched_at` can repeat within a second.
+    /// (`worktree::pull_requests::stored_publication`) when a refresh wrote
+    /// it, and `None` for a listing's answer or no answer. It changes with
+    /// every successful write, whereas `fetched_at` can repeat within a
+    /// second.
     fn pr_publication(&self) -> Option<String>;
     /// Time since the wait began.
     fn elapsed(&self) -> Duration;
@@ -127,11 +135,32 @@ pub struct Waited {
 
 /// Launches the worker and follows its attempt; `on_phase` sees every phase
 /// the followed attempt enters, including the first.
+///
+/// Under `force`, the receipt of every attempt it launched is discarded
+/// before it returns: each is read only by this run.
 pub fn wait(
     request: WaitRequest<'_>,
     env: &dyn WaitEnv,
     launch: WorkerLaunch,
     on_phase: &mut dyn FnMut(Phase),
+) -> Waited {
+    let mut launched = Vec::new();
+    let waited = launch_and_follow(request, env, launch, on_phase, &mut launched);
+    if request.force {
+        for attempt_id in &launched {
+            env.discard_receipt(attempt_id);
+        }
+    }
+    waited
+}
+
+/// [`wait`], recording each launched attempt id in `launched`.
+fn launch_and_follow(
+    request: WaitRequest<'_>,
+    env: &dyn WaitEnv,
+    launch: WorkerLaunch,
+    on_phase: &mut dyn FnMut(Phase),
+    launched: &mut Vec<String>,
 ) -> Waited {
     let mut follow = Follow { request, env, on_phase, last: None, pr_retried: false };
     let mut worker = None;
@@ -143,7 +172,10 @@ pub fn wait(
         let pr_before = env.pr_publication();
         let args = LaunchArgs { attempt: token.clone(), force: request.force };
         match launch(request.main, &args) {
-            Ok(handle) => worker = Some(handle),
+            Ok(handle) => {
+                launched.push(token.clone());
+                worker = Some(handle);
+            }
             Err(_) => return Waited { end: WaitEnd::Unavailable, worker },
         }
         let handle = worker.as_mut().expect("just launched");
@@ -168,9 +200,9 @@ impl Follow<'_, '_> {
     /// another origin or branch, and that holder has finished; or its PR
     /// half was contended and the holder published nothing.
     ///
-    /// `pr_before` is the stored PR answer's publication id at launch; a
-    /// contending holder published only if the id differs once its lock
-    /// opens.
+    /// `pr_before` is [`WaitEnv::pr_publication`] at launch; a contending
+    /// holder published only if a refresh's id is stored and differs once
+    /// its lock opens.
     fn run(
         &mut self,
         worker: &mut WorkerHandle,
@@ -336,15 +368,15 @@ impl Progress {
 /// The production [`WaitEnv`]: the real store, receipt, locks, and clock.
 pub struct StoreEnv {
     store: PathBuf,
-    receipt: Option<PathBuf>,
     pr_store: PathBuf,
     origin: String,
     started: Instant,
 }
 
 impl StoreEnv {
-    pub fn new(main: &Path, store: PathBuf, pr_store: PathBuf, origin: String) -> Self {
-        Self { store, receipt: refresh_receipt_path(main).ok(), pr_store, origin, started: Instant::now() }
+    /// Receipts are read beside the remote-head store `store`.
+    pub fn new(store: PathBuf, pr_store: PathBuf, origin: String) -> Self {
+        Self { store, pr_store, origin, started: Instant::now() }
     }
 }
 
@@ -354,7 +386,13 @@ impl WaitEnv for StoreEnv {
     }
 
     fn receipt(&self, attempt: &Attempt) -> Option<Receipt> {
-        load_receipt(self.receipt.as_deref()?, attempt)
+        load_receipt(&receipt_path_beside(&self.store, &attempt.id).ok()?, attempt)
+    }
+
+    fn discard_receipt(&self, attempt_id: &str) {
+        if let Ok(path) = receipt_path_beside(&self.store, attempt_id) {
+            let _ = std::fs::remove_file(path);
+        }
     }
 
     fn head_lock_held(&self) -> bool {
@@ -366,7 +404,7 @@ impl WaitEnv for StoreEnv {
     }
 
     fn pr_publication(&self) -> Option<String> {
-        stored_publication(&self.pr_store, &self.origin, unix_now())
+        refresh_publication(&self.pr_store, &self.origin)
     }
 
     fn elapsed(&self) -> Duration {
@@ -384,6 +422,13 @@ impl WaitEnv for StoreEnv {
     fn new_attempt_id(&self) -> Option<String> {
         new_attempt_id().ok()
     }
+}
+
+/// [`WaitEnv::pr_publication`] over the PR store at `pr_store`.
+fn refresh_publication(pr_store: &Path, origin: &str) -> Option<String> {
+    stored_publication(pr_store, origin, unix_now())
+        .filter(|publication| publication.writer == Writer::Refresh)
+        .map(|publication| publication.id)
 }
 
 #[cfg(test)]

@@ -25,7 +25,7 @@ use worktree::pull_requests::{
 };
 use worktree::remote_head::{
     HeadStatus, PrFailure, PrStatus, Receipt, new_attempt_id, refresh_receipt_path, remote_head_store_path,
-    write_receipt,
+    remove_stale_receipts, write_receipt,
 };
 use worktree::remote_update::{AttemptRequest, GitTransport, Seams, SniffBranchHeads, run_attempt};
 use worktree::worktree::default_branch_in;
@@ -79,7 +79,7 @@ pub fn run(repo: &Path, attempt: Option<&str>, force: bool) {
         api_preference::preference_path().is_some_and(|path| api_preference::load(&path).ignores_origin(origin))
     });
     // The receipt speaks for the origin and branch the attempt started with.
-    let receipt = match (force, origin, default_branch_in(&main), refresh_receipt_path(&main)) {
+    let receipt = match (force, origin, default_branch_in(&main), refresh_receipt_path(&main, &id)) {
         (true, Some(origin), Ok(branch), Ok(path)) => {
             Some(ReceiptTarget { path, attempt_id: id.clone(), origin_digest: origin_digest(&origin), branch })
         }
@@ -101,9 +101,10 @@ struct ReceiptTarget {
     branch: String,
 }
 
-/// Runs both halves ([`run_halves`]) and then, for a forced run, writes the
-/// receipt; a half that panicked is recorded as failed. The write is best
-/// effort: the foreground's wait is bounded without it.
+/// Runs both halves ([`run_halves`]) and then, for a forced run, sweeps
+/// stale receipts and writes this attempt's own; a half that panicked is
+/// recorded as failed. The write is best effort: the foreground's wait is
+/// bounded without it.
 fn run_and_record(
     main: &Path,
     receipt: Option<&ReceiptTarget>,
@@ -120,6 +121,7 @@ fn run_and_record(
             head: head.unwrap_or(HeadStatus::Failed),
             prs: prs.unwrap_or(PrStatus::Failed { failure: PrFailure::Other }),
         };
+        remove_stale_receipts(&target.path, std::time::SystemTime::now());
         let _ = write_receipt(&target.path, &receipt);
     }
 }
@@ -291,7 +293,7 @@ mod tests {
 
         fn receipt_target(&self) -> ReceiptTarget {
             ReceiptTarget {
-                path: self.root.path().join("refresh-receipt.json"),
+                path: self.root.path().join(format!("refresh-receipt.{ID}.json")),
                 attempt_id: ID.into(),
                 origin_digest: origin_digest(ORIGIN),
                 branch: "main".into(),

@@ -481,6 +481,7 @@ impl DesignFixture {
             "origin_digest": worktree::pull_requests::origin_digest(&origin),
             "fetched_at": fetched_at,
             "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+            "writer": "refresh",
             "source_repo": "owner/repo",
             "pull_requests": pull_requests,
         });
