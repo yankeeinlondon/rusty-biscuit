@@ -3018,6 +3018,7 @@ name = "darkmatter"
 version = "0.1.0"
 dependencies = [
  "aho-corasick",
+ "base64 0.22.1",
  "biscuit-browser-harness",
  "biscuit-file",
  "biscuit-hash",

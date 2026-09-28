@@ -99,7 +99,7 @@ pub use resolve_ctx::ResolutionContext;
 pub use lint::{ExpressionLint, ExpressionLintKind, is_whole_value_span, lint_expression, lint_spanned};
 pub use lexer::{
     ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
-    Lexer, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
+    Lexer, LiteralTokenLocation, LexerError, ParseMode, Token, identifier_prefix_start, lex_spanned,
 };
 pub use parser::{
     ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,

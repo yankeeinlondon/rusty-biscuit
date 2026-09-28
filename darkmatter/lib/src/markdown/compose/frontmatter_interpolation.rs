@@ -43,6 +43,7 @@ use super::expression::absence::MissingRoot;
 use super::{ComposeContext, ComposeWarning};
 use super::value_origin::{DataPaths, FrontmatterProvenance};
 use crate::markdown::frontmatter::Frontmatter;
+use crate::markdown::literal_token::{self, TokenError};
 use crate::markdown::types::{AuthoredSpan, MarkdownError, SourceRef};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -336,6 +337,73 @@ fn rewrite_value<L: EvaluationLookup>(
         // Number, Bool, Null — pass through
         other => Ok((other.clone(), 0, vec![])),
     }
+}
+
+/// Replaces each authored whole-leaf literal token below `segments` with the
+/// string it holds and records the leaf's path, so the decoded text is data.
+///
+/// A malformed token, or one that is not the whole leaf, fails under every
+/// policy, best-effort included: it never falls back to expression parsing.
+/// The failure's path is relative to the top-level key, which the caller adds.
+fn decode_authored_tokens(
+    value: &mut Value,
+    segments: &mut Vec<ValuePathSegment>,
+    data: &DataPaths,
+    decoded: &mut Vec<Vec<ValuePathSegment>>,
+) -> Result<(), LocatedFrontmatterError> {
+    if data.is_data(segments) {
+        return Ok(());
+    }
+    match value {
+        Value::String(s) => {
+            let Some((span, whole)) = literal_token::first_token(s) else {
+                return Ok(());
+            };
+            let outcome = if whole { literal_token::decode(s) } else { Err(TokenError::Embedded) };
+            match outcome {
+                Ok(text) => {
+                    *s = text;
+                    decoded.push(segments.clone());
+                }
+                Err(cause) => {
+                    return Err(LocatedFrontmatterError {
+                        error: Box::new(MarkdownError::Interpolation {
+                            key: None,
+                            expression: s[span.clone()].to_string(),
+                            source: Box::new(SourceRef::Effective {
+                                rendered: s[span.clone()].to_string(),
+                                origin_key: None,
+                            }),
+                            cause: Box::new(ExpressionError::MalformedLiteralToken(cause)),
+                        }),
+                        location: Some(FrontmatterExpressionLocation {
+                            path: segments[1..].to_vec(),
+                            scanned: s.clone(),
+                            span,
+                        }),
+                    });
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter_mut().enumerate() {
+                segments.push(ValuePathSegment::Index(index));
+                let outcome = decode_authored_tokens(item, segments, data, decoded);
+                segments.pop();
+                outcome?;
+            }
+        }
+        Value::Object(map) => {
+            for (key, item) in map.iter_mut() {
+                segments.push(ValuePathSegment::Key(key.clone()));
+                let outcome = decode_authored_tokens(item, segments, data, decoded);
+                segments.pop();
+                outcome?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// Converts the `{{{ … }}}` literals in every authored string of `value` to
@@ -739,6 +807,25 @@ fn interpolate_frontmatter_impl(
     exclude_keys: &HashSet<String>,
     name_coercion_keys: &[String],
 ) -> Result<FrontmatterInterpolationReport, LocatedFrontmatterError> {
+    // Pass 1 first decodes every authored whole-leaf literal token, so no scan
+    // below ever sees one. Excluded (event-time) keys keep their raw text for
+    // the caller that evaluates them.
+    if let FrontmatterPass::First { .. } = pass {
+        let mut decoded = Vec::new();
+        let data = provenance.data().clone();
+        for (key, value) in frontmatter.as_map_mut().iter_mut() {
+            if exclude_keys.contains(key) {
+                continue;
+            }
+            let mut segments = vec![ValuePathSegment::Key(key.clone())];
+            decode_authored_tokens(value, &mut segments, &data, &mut decoded)
+                .map_err(|failure| key_scoped_failure(key, failure))?;
+        }
+        for path in decoded {
+            provenance.data_mut().mark(path);
+        }
+    }
+
     // Pass 1 scans every authored seed's `{{{ … }}}` literals once, before any
     // key reads it, so a dependent sees the converted text as a data value.
     // Excluded (event-time) keys keep their long-standing conversion.

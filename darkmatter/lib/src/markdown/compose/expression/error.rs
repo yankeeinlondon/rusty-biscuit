@@ -399,6 +399,12 @@ pub enum ExpressionError {
         path: String,
     },
 
+    /// A literal token (`{{!data:…}}`) that is malformed, or that is not an
+    /// entire frontmatter string value. A token never falls back to
+    /// expression parsing, so this is authoring-fatal on every surface.
+    #[error("malformed literal token: {0}")]
+    MalformedLiteralToken(crate::markdown::literal_token::TokenError),
+
     /// Migration catch-all for the long tail of pure builtins not yet
     /// individually classified. Always carries the function name, so it is never
     /// *less* informative than today's string.
@@ -461,6 +467,9 @@ impl ExpressionError {
     ///   and has no authored fallback, so the reference can never resolve. Like
     ///   an unknown function, it is surfaced rather than rendered empty.
     ///
+    /// - [`MalformedLiteralToken`] — a token never falls back to expression
+    ///   parsing or to text, so a lenient caller cannot keep it either.
+    ///
     /// Every other variant (arity, arg-type, parse, arithmetic, generic
     /// [`Other`], …) is demoted to a `ComposeWarning` in lenient body
     /// interpolation. [`RemoteNotEnabled`] is
@@ -475,6 +484,7 @@ impl ExpressionError {
     /// [`FunctionContextNotCaptured`]: ExpressionError::FunctionContextNotCaptured
     /// [`ContextProjectionInvariant`]: ExpressionError::ContextProjectionInvariant
     /// [`ReservedRootPathUnknown`]: ExpressionError::ReservedRootPathUnknown
+    /// [`MalformedLiteralToken`]: ExpressionError::MalformedLiteralToken
     /// [`Other`]: ExpressionError::Other
     /// [`Malformed`]: FileRefFailure::Malformed
     /// [`NotFound`]: FileRefFailure::NotFound
@@ -486,6 +496,7 @@ impl ExpressionError {
             ExpressionError::Provider { .. } => true,
             ExpressionError::ContractViolation { .. } => true,
             ExpressionError::ReservedRootPathUnknown { .. } => true,
+            ExpressionError::MalformedLiteralToken(_) => true,
             ExpressionError::ContextNotCaptured { .. }
             | ExpressionError::FunctionContextNotCaptured { .. }
             | ExpressionError::ContextProjectionInvariant { .. }

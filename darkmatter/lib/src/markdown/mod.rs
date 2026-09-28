@@ -41,6 +41,7 @@ pub mod highlighting;
 pub mod inline;
 mod inline_html;
 pub mod language_grammar;
+pub mod literal_token;
 mod mapping_orders;
 pub mod normalize;
 pub mod output;

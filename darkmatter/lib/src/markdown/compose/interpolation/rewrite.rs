@@ -16,6 +16,7 @@ use crate::markdown::compose::expression::lint::whole_value_span;
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::compose::context::report::ExpressionOrigin;
+use crate::markdown::literal_token::{TOKEN_PREFIX, TokenError};
 use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
 
@@ -38,6 +39,35 @@ fn interpolation_error(expression: &str, cause: ExpressionError) -> MarkdownErro
         }),
         cause: Box::new(cause),
     }
+}
+
+/// A located failure for the literal token (`{{!data:…}}`) at `span` in
+/// `input`, which no scan accepts: composition decodes a token only as an
+/// entire authored frontmatter value, before any scan.
+fn literal_token_failure(
+    input: &str,
+    span: std::ops::Range<usize>,
+    cause: TokenError,
+) -> LocatedInterpolationError {
+    LocatedInterpolationError {
+        error: Box::new(interpolation_error(
+            &input[span.clone()],
+            ExpressionError::MalformedLiteralToken(cause),
+        )),
+        span: Some(span),
+    }
+}
+
+/// An expression whose source holds a token spelling, say inside a string
+/// literal, would return that spelling as text; N5 makes it malformed instead.
+fn expression_holds_token(loc: &ExpressionLocation) -> Option<LocatedInterpolationError> {
+    loc.expression.contains(TOKEN_PREFIX).then(|| LocatedInterpolationError {
+        error: Box::new(interpolation_error(
+            &loc.expression,
+            ExpressionError::MalformedLiteralToken(TokenError::Embedded),
+        )),
+        span: Some(loc.start..loc.end),
+    })
 }
 
 /// What a failing `{{ … }}` expression does to the text being rewritten.
@@ -186,6 +216,11 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
         ScanMode::Plain => ExpressionFinder::scan_plain(&view),
     };
     let straddles = |start: usize, end: usize| data.is_some_and(|data| data.intersects(&(start..end)));
+    // A token the masked view still shows was authored here, not as an entire
+    // frontmatter value, so it is malformed under either policy.
+    if let Some(token) = scan.tokens.first() {
+        return Err(literal_token_failure(input, token.start..token.end, TokenError::Embedded));
+    }
 
     // Expressions and literals never overlap; rewrite them end to start so
     // every byte before the current span is still the caller's text.
@@ -222,6 +257,9 @@ pub(crate) fn interpolate_text_in<L: EvaluationLookup>(
             }
             Found::Expression(loc) => loc,
         };
+        if let Some(failure) = expression_holds_token(&loc) {
+            return Err(failure);
+        }
         let origin = ExpressionOrigin::Authored(loc.start..loc.end);
         match parse(&loc.expression) {
             Ok(expr) => {
@@ -349,6 +387,9 @@ pub(crate) fn interpolate_value_located<L: EvaluationLookup>(
             error: Box::new(error),
             span: Some(loc.start..loc.end),
         };
+        if let Some(failure) = expression_holds_token(&loc) {
+            return Err(failure);
+        }
         let expr = parse(&loc.expression).map_err(|e| {
             located(interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string())))
         })?;

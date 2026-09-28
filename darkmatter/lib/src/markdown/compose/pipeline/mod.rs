@@ -193,6 +193,16 @@ impl Markdown {
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
 
+            // The pre-approval gate collects from the document as prepared,
+            // before any scan: after frontmatter pass 1 a produced value (an
+            // expression result, a decoded literal token) would read as
+            // authored text, and a `$( … )` it holds as a command to approve.
+            let preflight_source = (preflight_gate_applies(&options, runtime)
+                && !runtime
+                    .preflight_validated()
+                    .load(std::sync::atomic::Ordering::Acquire))
+            .then(|| self.clone());
+
             // Frontmatter Interpolation: resolve {{ }} in frontmatter values
             // before EffectiveState is built, since it mutates frontmatter
             // inputs that drive later stages.
@@ -307,12 +317,8 @@ impl Markdown {
             // compose (which disables shell execution) cannot recurse. A
             // frontmatter-surface compose checks its frontmatter commands only,
             // so it never dereferences the body graph.
-            if preflight_gate_applies(&options, runtime)
-                && !runtime
-                    .preflight_validated()
-                    .load(std::sync::atomic::Ordering::Acquire)
-            {
-                super::preflight::validate_pre_approved(self, &options)?;
+            if let Some(preflight_source) = &preflight_source {
+                super::preflight::validate_pre_approved(preflight_source, &options)?;
                 runtime
                     .preflight_validated()
                     .store(true, std::sync::atomic::Ordering::Release);
