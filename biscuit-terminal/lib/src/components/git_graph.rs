@@ -1,11 +1,10 @@
 //! Git branch topology drawn as a Mermaid `gitGraph` through [`MermaidDiagram`].
 //!
 //! Callers gather the git facts (lines of work with full commit SHAs, ref
-//! tips, open PRs) and hand them over typed; the component runs no git
-//! commands. It owns the lane/tag rule, lane ordering, elision markers, the
-//! `mermaid-rs-renderer` workarounds, and fitting the graph to the terminal by
-//! trimming. The design is item 5 ("Graph View") of the worktree fix
-//! `2026-09-24-ux-improvements`.
+//! tips, merge destinations, open PRs) and hand them over typed; the component
+//! runs no git commands. It owns the lane/tag rule, lane ordering, merges,
+//! elision markers, the `mermaid-rs-renderer` workarounds, and fitting the
+//! graph to the terminal by trimming.
 //!
 //! ## Lanes and tags
 //!
@@ -13,16 +12,31 @@
 //! default branch, the current branch, its fork parent when that is not the
 //! default branch, and `origin/<default>` when it has commits of its own
 //! (it has diverged). With no current branch, or the default branch checked
-//! out, every line with commits of its own gets a lane. Every other ref whose
-//! tip is a drawn commit is a **tag** on that commit, and an open PR is a tag
-//! on its source branch's tip; the precise form is documented in
-//! `worktree/docs/cli/list.md`.
+//! out, every line with commits of its own gets a lane. A lane hangs from its
+//! fork commit, and a line [merged into](GraphLine::merged_into) a drawn commit
+//! is drawn merging there. Every other ref whose tip is a drawn commit is a
+//! **tag** on that commit, a line without commits is a tag on its own
+//! [tip](GraphLine::with_tip), and an open PR is a tag on its source branch's
+//! tip; the precise form is documented in `worktree/docs/cli/list.md`.
+//!
+//! ## Nothing undrawn is substituted
+//!
+//! A lane whose fork commit is not drawn (or unknown) is drawn unconnected,
+//! never from another commit. A tag whose commit is not drawn, and a merge whose
+//! destination is not drawn, are left out. Each of these, and a caller's own
+//! [`GitGraph::with_incomplete_history`], sets [`GitGraphPlan::incomplete`],
+//! which renders the dim notice "Some history is not shown". Lanes and tags the
+//! base view's height cap leaves out are counted by its own note instead.
 //!
 //! ## Renderer workarounds
 //!
 //! - `mermaid-rs-renderer` reads everything after `branch` or `merge` as the
-//!   branch name, attributes included, so no attributes are emitted on those
-//!   statements. Lane order is the order of the `branch` statements.
+//!   branch name, attributes included, so no attributes are emitted on
+//!   `branch`. A `merge` carries its ID and tags, and `biscuit-visualized`
+//!   restores the merge's second parent that this costs. The parser drops a
+//!   labeled merge into a lane with no commit yet, so a merge is emitted only
+//!   where its lane already has one. Lane order is the order of the `branch`
+//!   statements.
 //! - Its parser always names the first lane `main`, whatever the default
 //!   branch is called. The default branch is that lane, and its real name
 //!   appears as a tag when the caller passes its ref.
@@ -89,9 +103,14 @@ pub struct GraphLine {
     pub branch: String,
     /// The branch it forked from; `None` is the default branch.
     pub parent: Option<String>,
-    /// Full SHA of the commit it forked at. A line with no commits of its own
-    /// has its tip here.
+    /// Full SHA of the commit it forked at; `None` is an unknown connection,
+    /// and the lane is drawn unconnected.
     pub fork_sha: Option<String>,
+    /// Full SHA of the branch's own tip. A line without commits is labeled
+    /// here; a line with commits defaults to its newest drawn commit.
+    pub tip_sha: Option<String>,
+    /// Full SHA of the merge commit that brought the line into another lane.
+    pub merged_into: Option<String>,
     pub entries: Vec<LaneEntry>,
     /// Creation time (Unix seconds). Lanes forking at one commit are ordered
     /// by it, oldest first, and lines without one come last.
@@ -120,6 +139,18 @@ impl GraphLine {
         self
     }
 
+    pub fn with_tip(mut self, sha: impl Into<String>) -> Self {
+        self.tip_sha = Some(sha.into());
+        self
+    }
+
+    /// The merge commit on another lane that merged this line; its lane is
+    /// found by where that commit is drawn.
+    pub fn merged_into(mut self, sha: impl Into<String>) -> Self {
+        self.merged_into = Some(sha.into());
+        self
+    }
+
     pub fn with_entries(mut self, entries: Vec<LaneEntry>) -> Self {
         self.entries = entries;
         self
@@ -139,9 +170,10 @@ impl GraphLine {
         self.entries.iter().any(|entry| matches!(entry, LaneEntry::Commit(_)))
     }
 
-    /// The branch tip: its newest commit, or the fork commit when it has none.
+    /// The branch tip: [`tip_sha`](Self::tip_sha), else its newest commit;
+    /// never the fork commit.
     fn tip(&self) -> Option<&str> {
-        last_commit(&self.entries).or(self.fork_sha.as_deref())
+        self.tip_sha.as_deref().or_else(|| last_commit(&self.entries))
     }
 }
 
@@ -191,6 +223,9 @@ pub struct GitGraphPlan {
     pub hidden_lanes: usize,
     /// Commits the width cap moved into `+N` squares.
     pub trimmed_commits: usize,
+    /// Some history is not shown: an undrawn fork, merge, or tagged commit,
+    /// or the caller's [`GitGraph::with_incomplete_history`].
+    pub incomplete: bool,
 }
 
 /// A git graph for the terminal and the browser. See the module docs.
@@ -205,6 +240,7 @@ pub struct GitGraph {
     scale: f32,
     width: Option<ImageWidth>,
     theme: Option<MermaidTheme>,
+    incomplete_history: bool,
     layout: Layout,
 }
 
@@ -252,8 +288,30 @@ impl Draft {
 struct Layouted {
     lane_names: HashMap<LaneKey, String>,
     /// Children attached after each `(lane, entry index)`, in lane order.
+    /// Unconnected lanes are emitted after the default lane's first entry.
     children: HashMap<(LaneKey, usize), Vec<usize>>,
+    /// Lanes with no drawn fork, declared before the default lane's first
+    /// commit so their first commit has no parent.
+    unconnected: Vec<usize>,
+    /// Lanes merged at each drawn commit, in lane order.
+    merges: HashMap<String, Vec<usize>>,
     tags: HashMap<String, Vec<String>>,
+    /// Something the draft should show is not drawn.
+    incomplete: bool,
+}
+
+/// Mermaid text and whether it leaves history out.
+struct Emitted {
+    text: String,
+    incomplete: bool,
+}
+
+/// Emission progress: which lanes have been emitted in full, and `+N` IDs used.
+#[derive(Default)]
+struct EmitState {
+    finished: HashSet<LaneKey>,
+    elided_ids: HashSet<String>,
+    incomplete: bool,
 }
 
 impl GitGraph {
@@ -269,6 +327,7 @@ impl GitGraph {
             scale: DEFAULT_GIT_GRAPH_SCALE,
             width: None,
             theme: None,
+            incomplete_history: false,
             layout: Layout::default(),
         }
     }
@@ -315,11 +374,19 @@ impl GitGraph {
         self
     }
 
+    /// The caller could not establish some of the history it passed (an
+    /// unknown connection, for instance); the rendered graph carries the
+    /// incomplete-history notice.
+    pub fn with_incomplete_history(mut self) -> Self {
+        self.incomplete_history = true;
+        self
+    }
+
     /// The Mermaid instructions for the whole graph, with nothing trimmed.
     ///
     /// `None` when the default lane has no commit to hang the graph from.
     pub fn mermaid(&self) -> Option<String> {
-        self.emit(&self.full_draft())
+        self.emit(&self.full_draft()).map(|emitted| emitted.text)
     }
 
     /// Fits the graph to `viewport`, measuring each candidate with the theme
@@ -341,10 +408,12 @@ impl GitGraph {
     /// Lanes are trimmed first (base view only): past half the viewport's rows,
     /// the default lane is kept and other lanes are added most recently active
     /// first, each with its drawn ancestors, until the next would not fit.
-    /// Then, while the graph is wider than the viewport, commits that are not a
-    /// lane tip, a fork point, or tagged move into `+N` squares one at a time:
-    /// first a commit beside an existing square, else the oldest on the lane
-    /// showing the most commits. When measuring fails, nothing is trimmed.
+    /// A lane's drawn ancestors are the lanes holding its fork commit and its
+    /// merge destination, and its parent's lane. Then, while the graph is wider
+    /// than the viewport, commits that are not a lane tip, a fork point, a merge
+    /// destination, or tagged move into `+N` squares one at a time: first a
+    /// commit beside an existing square, else the oldest on the lane showing
+    /// the most commits. When measuring fails, nothing is trimmed.
     pub fn plan_with(
         &self,
         viewport: GraphViewport,
@@ -359,14 +428,15 @@ impl GitGraph {
         let rows_of = |size: NaturalSize| rows_for(scale, size.height);
 
         let mut draft = self.full_draft();
-        let full_text = self.emit(&draft)?;
-        let Some(full_size) = measure(&full_text) else {
+        let full = self.emit(&draft)?;
+        let Some(full_size) = measure(&full.text) else {
             return Some(GitGraphPlan {
-                mermaid: full_text,
+                mermaid: full.text,
                 columns: viewport.columns,
                 rows: 0,
                 hidden_lanes: 0,
                 trimmed_commits: 0,
+                incomplete: full.incomplete || self.incomplete_history,
             });
         };
 
@@ -377,21 +447,21 @@ impl GitGraph {
         }
         let hidden_lanes = eligible - draft.lanes.len();
 
-        let mut text = self.emit(&draft)?;
-        let mut size = measure(&text).unwrap_or(full_size);
+        let mut emitted = self.emit(&draft)?;
+        let mut size = measure(&emitted.text).unwrap_or(full_size);
         let mut trimmed_commits = 0;
         while trims_width && columns_of(size) > viewport.columns {
             let Some(next) = self.trim_one_commit(&draft) else {
                 break;
             };
-            let Some(next_text) = self.emit(&next) else {
+            let Some(next_emitted) = self.emit(&next) else {
                 break;
             };
-            let Some(next_size) = measure(&next_text) else {
+            let Some(next_size) = measure(&next_emitted.text) else {
                 break;
             };
             draft = next;
-            text = next_text;
+            emitted = next_emitted;
             size = next_size;
             trimmed_commits += 1;
         }
@@ -404,11 +474,12 @@ impl GitGraph {
             _ => columns_of(size),
         };
         Some(GitGraphPlan {
-            mermaid: text,
+            mermaid: emitted.text,
             columns,
             rows: rows_of(size),
             hidden_lanes,
             trimmed_commits,
+            incomplete: emitted.incomplete || self.incomplete_history,
         })
     }
 
@@ -423,20 +494,7 @@ impl GitGraph {
             .plan(GraphViewport::for_terminal(term, &self.layout))
             .ok_or_else(|| MermaidRenderError::DisplayError("the graph has no commits".into()))?;
         let result = self.diagram(&plan.mermaid).try_render(term)?;
-        Ok(self.with_hidden_lanes_note(result.output, plan.hidden_lanes, term))
-    }
-
-    fn with_hidden_lanes_note(&self, mut output: String, hidden_lanes: usize, term: &Terminal) -> String {
-        if hidden_lanes > 0 {
-            let noun = if hidden_lanes == 1 { "worktree" } else { "worktrees" };
-            let note = Prose::new(format!("<dim>{hidden_lanes} more {noun} not shown</dim>"));
-            if !output.ends_with('\n') {
-                output.push('\n');
-            }
-            output.push_str(note.render(term).trim_end());
-            output.push('\n');
-        }
-        output
+        Ok(with_notes(result.output, &plan, term))
     }
 
     fn diagram(&self, mermaid: &str) -> MermaidDiagram {
@@ -455,9 +513,12 @@ impl GitGraph {
             .is_none_or(|current| current == self.default_branch)
     }
 
-    /// Indices of the lines that get a lane under the lane rule.
-    fn eligible_lanes(&self) -> Vec<usize> {
-        let base_view = self.is_base_view();
+    /// Whether the view draws `branch`: every branch in the base view; the
+    /// current branch, its non-default parent, and `origin/<default>` otherwise.
+    fn in_view(&self, branch: &str) -> bool {
+        if self.is_base_view() {
+            return true;
+        }
         let current = self.current_branch.as_deref();
         let current_parent = current.and_then(|name| {
             self.lines
@@ -466,20 +527,23 @@ impl GitGraph {
                 .and_then(|line| line.parent.as_deref())
                 .filter(|parent| *parent != self.default_branch)
         });
-        let origin_peer = format!("origin/{}", self.default_branch);
+        Some(branch) == current || Some(branch) == current_parent || branch == format!("origin/{}", self.default_branch)
+    }
 
+    /// Indices of the first line per branch name, the default branch excluded.
+    fn distinct_lines(&self) -> impl Iterator<Item = (usize, &GraphLine)> + '_ {
         let mut seen = HashSet::new();
         self.lines
             .iter()
             .enumerate()
-            .filter(|(_, line)| seen.insert(line.branch.as_str()))
-            .filter(|(_, line)| line.branch != self.default_branch && line.has_commits())
-            .filter(|(_, line)| {
-                base_view
-                    || Some(line.branch.as_str()) == current
-                    || Some(line.branch.as_str()) == current_parent
-                    || line.branch == origin_peer
-            })
+            .filter(move |(_, line)| seen.insert(line.branch.as_str()))
+            .filter(|(_, line)| line.branch != self.default_branch)
+    }
+
+    /// Indices of the lines that get a lane under the lane rule.
+    fn eligible_lanes(&self) -> Vec<usize> {
+        self.distinct_lines()
+            .filter(|(_, line)| line.has_commits() && self.in_view(&line.branch))
             .map(|(index, _)| index)
             .collect()
     }
@@ -495,64 +559,65 @@ impl GitGraph {
         }
     }
 
-    /// The lane `index` hangs from: its fork commit wherever that is drawn,
-    /// else the start of its drawn parent lane, else the start of the default lane.
-    fn attach_point(&self, draft: &Draft, index: usize, positions: &HashMap<&str, (LaneKey, usize)>) -> (LaneKey, usize) {
-        let line = &self.lines[index];
-        if let Some(&(key, position)) = line.fork_sha.as_deref().and_then(|sha| positions.get(sha))
-            && key != Some(index)
-        {
-            return (key, position);
-        }
-        let parent_lane = line.parent.as_deref().and_then(|parent| {
-            draft
-                .lanes
-                .iter()
-                .find(|(other, _)| self.lines[*other].branch == parent)
-                .map(|(other, _)| Some(*other))
-        });
-        let key = parent_lane.filter(|key| *key != Some(index)).unwrap_or(None);
-        let first = first_commit_index(draft.entries(key)).unwrap_or(0);
-        (key, first)
+    /// Where lane `index` hangs from: its fork commit wherever that is drawn
+    /// on another lane; `None` (unconnected) when it is not.
+    fn attach_point(&self, index: usize, positions: &HashMap<&str, (LaneKey, usize)>) -> Option<(LaneKey, usize)> {
+        let (key, position) = *positions.get(self.lines[index].fork_sha.as_deref()?)?;
+        (key != Some(index)).then_some((key, position))
     }
 
     fn arrange(&self, draft: &Draft) -> Option<Layouted> {
         first_commit_index(&draft.default_entries)?;
+        let positions = drawn_positions(draft);
 
-        let mut positions: HashMap<&str, (LaneKey, usize)> = HashMap::new();
-        for key in draft.keys() {
-            for (position, entry) in draft.entries(key).iter().enumerate() {
-                if let LaneEntry::Commit(sha) = entry {
-                    positions.entry(sha.as_str()).or_insert((key, position));
-                }
-            }
-        }
-
-        // Attach every lane, breaking any cycle (inconsistent input) by moving
-        // the lane to the start of the default lane.
-        let mut attach: HashMap<usize, (LaneKey, usize)> = draft
+        // Attach every lane. A cycle (inconsistent input) is broken by
+        // leaving the lane that closes it unconnected.
+        let mut attach: HashMap<usize, Option<(LaneKey, usize)>> = draft
             .lanes
             .iter()
-            .map(|(index, _)| (*index, self.attach_point(draft, *index, &positions)))
+            .map(|(index, _)| (*index, self.attach_point(*index, &positions)))
             .collect();
-        let default_start = (None, first_commit_index(&draft.default_entries).unwrap_or(0));
         for (index, _) in &draft.lanes {
             let mut seen = HashSet::from([*index]);
-            let mut cursor = attach[index].0;
+            let mut cursor = attach[index].and_then(|point| point.0);
             while let Some(parent) = cursor {
                 if !seen.insert(parent) {
-                    attach.insert(*index, default_start);
+                    attach.insert(*index, None);
                     break;
                 }
-                cursor = attach.get(&parent).and_then(|point| point.0);
+                cursor = attach.get(&parent).copied().flatten().and_then(|point| point.0);
             }
         }
 
         let mut ordered: Vec<usize> = draft.lanes.iter().map(|(index, _)| *index).collect();
         ordered.sort_by_key(|index| (self.lines[*index].created_at.is_none(), self.lines[*index].created_at, *index));
         let mut children: HashMap<(LaneKey, usize), Vec<usize>> = HashMap::new();
+        let mut unconnected = Vec::new();
         for index in ordered {
-            children.entry(attach[&index]).or_default().push(index);
+            let point = attach[&index].unwrap_or_else(|| {
+                unconnected.push(index);
+                (None, 0)
+            });
+            children.entry(point).or_default().push(index);
+        }
+        let merge_lane = |index: usize| {
+            let destination = self.lines[index].merged_into.as_deref()?;
+            positions.get(destination).and_then(|(key, _)| *key)
+        };
+        for siblings in children.values_mut() {
+            emit_merged_lanes_first(siblings, &merge_lane, &|lane| attach.get(&lane).copied().flatten().and_then(|point| point.0));
+        }
+
+        let mut merges: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut incomplete = !unconnected.is_empty();
+        for (index, _) in &draft.lanes {
+            let Some(destination) = self.lines[*index].merged_into.as_deref() else {
+                continue;
+            };
+            match positions.get(destination) {
+                Some((key, _)) if *key != Some(*index) => merges.entry(destination.to_string()).or_default().push(*index),
+                _ => incomplete = true,
+            }
         }
 
         let mut lane_names = HashMap::from([(None, ROOT_LANE.to_string())]);
@@ -567,14 +632,39 @@ impl GitGraph {
             lane_names.insert(Some(*index), name);
         }
 
+        let (tags, unplaced) = self.tags(draft, &positions);
         Some(Layouted {
             lane_names,
             children,
-            tags: self.tags(draft, &positions),
+            unconnected,
+            merges,
+            tags,
+            incomplete: incomplete || unplaced,
         })
     }
 
-    fn tags(&self, draft: &Draft, positions: &HashMap<&str, (LaneKey, usize)>) -> HashMap<String, Vec<String>> {
+    /// Commits of lanes the draft leaves out under the height cap, whose
+    /// labels its own note accounts for.
+    fn hidden_commits(&self, draft: &Draft) -> HashSet<&str> {
+        self.eligible_lanes()
+            .into_iter()
+            .filter(|index| !draft.lanes.iter().any(|(drawn, _)| drawn == index))
+            .flat_map(|index| {
+                let line = &self.lines[index];
+                line.entries
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        LaneEntry::Commit(sha) => Some(sha.as_str()),
+                        LaneEntry::Elided(_) => None,
+                    })
+                    .chain(line.tip_sha.as_deref())
+            })
+            .collect()
+    }
+
+    /// Tags by commit, and whether any tag the view should show has no drawn
+    /// commit to sit on.
+    fn tags(&self, draft: &Draft, positions: &HashMap<&str, (LaneKey, usize)>) -> (HashMap<String, Vec<String>>, bool) {
         let drawn_tip = |key: LaneKey| last_commit(draft.entries(key));
         let lane_of = |branch: &str| {
             draft
@@ -596,69 +686,87 @@ impl GitGraph {
                 .map(|(_, sha)| sha.clone())
         };
 
+        let hidden = self.hidden_commits(draft);
         let mut tags: HashMap<String, Vec<String>> = HashMap::new();
-        let mut add = |sha: &str, tag: String| {
-            if positions.contains_key(sha) {
+        let mut unplaced = false;
+        // `accountable`: the view should show this tag, so an undrawn commit
+        // is reported rather than silently skipped.
+        let mut add = |sha: Option<&str>, tag: String, accountable: bool| match sha {
+            Some(sha) if positions.contains_key(sha) => {
                 let list = tags.entry(sha.to_string()).or_default();
                 if !list.contains(&tag) {
                     list.push(tag);
                 }
             }
+            Some(sha) if hidden.contains(sha) => {}
+            _ => unplaced |= accountable,
         };
 
         for (name, sha) in &self.refs {
             // A lane's label already names its own tip.
             let labels_it = lane_of(name).is_some_and(|key| drawn_tip(key) == Some(sha.as_str()));
             if !labels_it {
-                add(sha, name.clone());
+                add(Some(sha), name.clone(), true);
             }
         }
-        let mut seen = HashSet::new();
-        for line in &self.lines {
-            if !seen.insert(line.branch.as_str())
-                || line.branch == self.default_branch
-                || lane_of(&line.branch).is_some()
-                || line.has_commits()
-            {
+        for (_, line) in self.distinct_lines() {
+            if lane_of(&line.branch).is_some() || line.has_commits() {
                 continue;
             }
-            if let Some(tip) = line.tip() {
-                add(tip, line.branch.clone());
-            }
+            add(line.tip(), line.branch.clone(), self.in_view(&line.branch));
         }
         for pull_request in &self.pull_requests {
-            if let Some(tip) = tip_of(&pull_request.source_branch) {
-                add(
-                    &tip,
-                    format!("PR #{} → {}", pull_request.number, pull_request.target_branch),
-                );
-            }
+            let source = &pull_request.source_branch;
+            let tip = tip_of(source);
+            let accountable = tip.is_some() && self.in_view(source);
+            add(
+                tip.as_deref(),
+                format!("PR #{} → {}", pull_request.number, pull_request.target_branch),
+                accountable,
+            );
         }
-        tags
+        (tags, unplaced)
     }
 
-    fn emit(&self, draft: &Draft) -> Option<String> {
+    fn emit(&self, draft: &Draft) -> Option<Emitted> {
         let arranged = self.arrange(draft)?;
         let ids = commit_ids(draft);
-        let mut elided_ids = HashSet::new();
+        let mut state = EmitState::default();
         let mut lines = vec!["gitGraph".to_string()];
-        self.emit_lane(draft, None, &arranged, &ids, &mut elided_ids, &mut lines);
-        Some(lines.join("\n"))
+        if !arranged.unconnected.is_empty() {
+            for index in &arranged.unconnected {
+                lines.push(format!("    branch {}", arranged.lane_names[&Some(*index)]));
+            }
+            lines.push(format!("    checkout {ROOT_LANE}"));
+        }
+        self.emit_lane(draft, None, false, &arranged, &ids, &mut state, &mut lines);
+        Some(Emitted {
+            text: lines.join("\n"),
+            incomplete: arranged.incomplete || state.incomplete,
+        })
     }
 
+    /// Emits lane `key`'s entries, each followed by the lanes that hang from
+    /// it. `has_head`: the lane already has a commit to merge into (a
+    /// connected lane starts at its fork commit).
+    #[allow(clippy::too_many_arguments)]
     fn emit_lane(
         &self,
         draft: &Draft,
         key: LaneKey,
+        mut has_head: bool,
         arranged: &Layouted,
         ids: &HashMap<String, String>,
-        elided_ids: &mut HashSet<String>,
+        state: &mut EmitState,
         out: &mut Vec<String>,
     ) {
         for (position, entry) in draft.entries(key).iter().enumerate() {
             match entry {
                 LaneEntry::Commit(sha) => {
-                    let mut line = format!("    commit id: \"{}\"", ids[sha]);
+                    let mut line = match self.merged_lane(sha, has_head, arranged, state) {
+                        Some(merged) => format!("    merge {} id: \"{}\"", arranged.lane_names[&Some(merged)], ids[sha]),
+                        None => format!("    commit id: \"{}\"", ids[sha]),
+                    };
                     for tag in arranged.tags.get(sha).into_iter().flatten() {
                         line.push_str(&format!(" tag: \"{}\"", tag.replace('"', "'")));
                     }
@@ -668,20 +776,59 @@ impl GitGraph {
                     // Parents are found by ID, so a repeated `+N` gets
                     // trailing spaces, which do not show.
                     let mut id = format!("+{count}");
-                    while !elided_ids.insert(id.clone()) {
+                    while !state.elided_ids.insert(id.clone()) {
                         id.push(' ');
                     }
                     out.push(format!("    commit id: \"{id}\" type: HIGHLIGHT"));
                 }
             }
+            has_head = true;
             for child in arranged.children.get(&(key, position)).into_iter().flatten() {
                 let name = &arranged.lane_names[&Some(*child)];
-                out.push(format!("    branch {name}"));
+                let connected = !arranged.unconnected.contains(child);
+                if connected {
+                    out.push(format!("    branch {name}"));
+                }
                 out.push(format!("    checkout {name}"));
-                self.emit_lane(draft, Some(*child), arranged, ids, elided_ids, out);
+                self.emit_lane(draft, Some(*child), connected, arranged, ids, state, out);
                 out.push(format!("    checkout {}", arranged.lane_names[&key]));
             }
         }
+        state.finished.insert(key);
+    }
+
+    /// The lane merged at `sha`, when a merge can be drawn there: the merged
+    /// lane is already emitted in full and this lane has a commit to merge
+    /// into. A merge that cannot be drawn marks the graph incomplete; a second
+    /// lane merged at one commit is never drawn.
+    fn merged_lane(&self, sha: &str, has_head: bool, arranged: &Layouted, state: &mut EmitState) -> Option<usize> {
+        let merged = arranged.merges.get(sha)?;
+        let drawn = merged
+            .first()
+            .copied()
+            .filter(|lane| has_head && state.finished.contains(&Some(*lane)));
+        if drawn.is_none() || merged.len() > 1 {
+            state.incomplete = true;
+        }
+        drawn
+    }
+
+    /// The lanes lane `index` needs drawn: those holding its fork commit and
+    /// its merge destination, and its parent's lane.
+    fn lane_ancestors(&self, full: &Draft, index: usize, positions: &HashMap<&str, (LaneKey, usize)>) -> Vec<usize> {
+        let line = &self.lines[index];
+        let on_lane = |sha: Option<&str>| sha.and_then(|sha| positions.get(sha)).and_then(|(key, _)| *key);
+        let parent = line.parent.as_deref().and_then(|parent| {
+            full.lanes
+                .iter()
+                .map(|(other, _)| *other)
+                .find(|other| self.lines[*other].branch == parent)
+        });
+        [on_lane(line.fork_sha.as_deref()), on_lane(line.merged_into.as_deref()), parent]
+            .into_iter()
+            .flatten()
+            .filter(|other| *other != index)
+            .collect()
     }
 
     /// Keeps the default lane plus, most recently active first, each lane and
@@ -709,26 +856,21 @@ impl GitGraph {
                 .collect(),
         };
 
+        let positions = drawn_positions(&full);
         for candidate in candidates {
             if keep.contains(&candidate) {
                 continue;
             }
             let mut tentative = keep.clone();
-            let mut cursor = Some(candidate);
-            while let Some(index) = cursor {
-                if !tentative.insert(index) {
-                    break;
+            let mut pending = vec![candidate];
+            while let Some(index) = pending.pop() {
+                if tentative.insert(index) {
+                    pending.extend(self.lane_ancestors(&full, index, &positions));
                 }
-                cursor = self.lines[index].parent.as_deref().and_then(|parent| {
-                    full.lanes
-                        .iter()
-                        .map(|(other, _)| *other)
-                        .find(|other| self.lines[*other].branch == parent)
-                });
             }
             let fits = self
                 .emit(&draft_of(&tentative))
-                .and_then(|text| rows_of(&text))
+                .and_then(|emitted| rows_of(&emitted.text))
                 .is_some_and(|rows| rows <= max_rows);
             if !fits {
                 break;
@@ -739,10 +881,15 @@ impl GitGraph {
     }
 
     /// Moves one commit into a `+N` square, or `None` when every drawn commit
-    /// is a lane tip, a fork point, or tagged.
+    /// is a lane tip, a fork point, a merge destination, or tagged.
     fn trim_one_commit(&self, draft: &Draft) -> Option<Draft> {
         let arranged = self.arrange(draft)?;
-        let mut pinned: HashSet<(LaneKey, usize)> = arranged.children.keys().copied().collect();
+        let mut pinned: HashSet<(LaneKey, usize)> = arranged
+            .children
+            .iter()
+            .filter(|(_, lanes)| lanes.iter().any(|lane| !arranged.unconnected.contains(lane)))
+            .map(|(point, _)| *point)
+            .collect();
         for key in draft.keys() {
             let entries = draft.entries(key);
             if let Some(tip) = entries.iter().rposition(|entry| matches!(entry, LaneEntry::Commit(_))) {
@@ -750,7 +897,7 @@ impl GitGraph {
             }
             for (position, entry) in entries.iter().enumerate() {
                 if let LaneEntry::Commit(sha) = entry
-                    && arranged.tags.contains_key(sha)
+                    && (arranged.tags.contains_key(sha) || arranged.merges.contains_key(sha))
                 {
                     pinned.insert((key, position));
                 }
@@ -801,6 +948,77 @@ impl GitGraph {
 fn rows_for(scale: f32, natural_height: f32) -> u32 {
     ((natural_height * scale / SCALE_REFERENCE_TEXT_UNITS).ceil() as u32).max(1)
 }
+
+/// Reorders lanes that hang from one commit so a lane merged into a sibling,
+/// or into a lane hanging from that sibling, comes before it: a merge is drawn
+/// only after its lane's commits. Otherwise the order is kept. `hangs_from`
+/// must be acyclic (`arrange` breaks cycles first).
+fn emit_merged_lanes_first(
+    siblings: &mut Vec<usize>,
+    merge_lane: &dyn Fn(usize) -> Option<usize>,
+    hangs_from: &dyn Fn(usize) -> Option<usize>,
+) {
+    let target = |lane: usize, siblings: &[usize]| {
+        let mut cursor = merge_lane(lane);
+        while let Some(current) = cursor {
+            if siblings.contains(&current) {
+                return (current != lane).then_some(current);
+            }
+            cursor = hangs_from(current);
+        }
+        None
+    };
+    // Bounded: each move places a lane before its target; a cycle of targets
+    // (inconsistent input) stops after `len²` moves.
+    for _ in 0..siblings.len() * siblings.len() {
+        let misplaced = siblings.iter().enumerate().find_map(|(at, &lane)| {
+            let target_at = siblings.iter().position(|&other| Some(other) == target(lane, siblings))?;
+            (target_at < at).then_some((at, target_at))
+        });
+        let Some((at, target_at)) = misplaced else {
+            return;
+        };
+        let lane = siblings.remove(at);
+        siblings.insert(target_at, lane);
+    }
+}
+
+/// Where each drawn commit sits: its first lane and entry index.
+fn drawn_positions(draft: &Draft) -> HashMap<&str, (LaneKey, usize)> {
+    let mut positions = HashMap::new();
+    for key in draft.keys() {
+        for (position, entry) in draft.entries(key).iter().enumerate() {
+            if let LaneEntry::Commit(sha) = entry {
+                positions.entry(sha.as_str()).or_insert((key, position));
+            }
+        }
+    }
+    positions
+}
+
+/// Appends the dim notes below a rendered graph: lanes the height cap left
+/// out, then history not shown.
+fn with_notes(mut output: String, plan: &GitGraphPlan, term: &Terminal) -> String {
+    let mut notes = Vec::new();
+    if plan.hidden_lanes > 0 {
+        let noun = if plan.hidden_lanes == 1 { "worktree" } else { "worktrees" };
+        notes.push(format!("{} more {noun} not shown", plan.hidden_lanes));
+    }
+    if plan.incomplete {
+        notes.push(INCOMPLETE_HISTORY_NOTE.to_string());
+    }
+    for note in notes {
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(Prose::new(format!("<dim>{note}</dim>")).render(term).trim_end());
+        output.push('\n');
+    }
+    output
+}
+
+/// The notice under a graph whose [`GitGraphPlan::incomplete`] is set.
+pub const INCOMPLETE_HISTORY_NOTE: &str = "Some history is not shown";
 
 fn last_commit(entries: &[LaneEntry]) -> Option<&str> {
     entries.iter().rev().find_map(|entry| match entry {
@@ -854,14 +1072,15 @@ fn commit_ids(draft: &Draft) -> HashMap<String, String> {
 }
 
 impl TerminalRenderable for GitGraph {
-    /// The fitted graph as an image, followed by a dim note when lanes were
-    /// left out; the diagram's code block on terminals without images.
+    /// The fitted graph as an image, followed by dim notes when lanes or
+    /// history were left out; the diagram's code block on terminals without
+    /// images.
     fn render(&self, term: &Terminal) -> String {
         let Some(plan) = self.plan(GraphViewport::for_terminal(term, &self.layout)) else {
             return String::new();
         };
         let output = self.diagram(&plan.mermaid).render(term);
-        self.with_hidden_lanes_note(output, plan.hidden_lanes, term)
+        with_notes(output, &plan, term)
     }
 
     fn is_block_level(&self) -> bool {
