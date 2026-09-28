@@ -32,6 +32,8 @@ use worktree::pull_requests::{
 };
 use worktree::remote_head::{PrFailure, refresh_lock_held, remote_head_lock_path, remote_head_store_path};
 
+pub mod graph;
+
 /// Branches of each divergence shape in the mixed fixture. The total worktree
 /// count is `1 (main) + DIVERGENT + FAST_FORWARD + BEHIND`.
 pub const DIVERGENT_BRANCHES: usize = 4;

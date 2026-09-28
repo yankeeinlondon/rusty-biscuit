@@ -173,6 +173,15 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(worktree-cli) & test(=perf_fast_forward_against_a_held_fetch_reports_within_the_fetch_deadline)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# The graph-stage timings run `wt list` in a pseudo-terminal that never
+# answers terminal queries, so every run waits out about 2.5 s of query
+# timeouts. One sample per fixture (the default) needs about 12 s; a recorded
+# 10-sample run about 120 s. The 60s×5 = 300s ceiling covers the recorded run.
+# It runs only in `just test-perf` (`perf_`), serially.
+[[profile.default.overrides]]
+filter = 'package(worktree-cli) & test(=perf_graph_stages_are_reported_for_every_graph_fixture)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 [profile.local-evidence]
 # Evidence needs Nextest's machine-readable report without CI's runner-specific
 # concurrency caps. Test selection and failure policy inherit from the local
