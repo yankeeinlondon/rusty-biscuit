@@ -30,6 +30,21 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/rendering.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/cli/src/completion/autocomplete_ui.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine-cli
     - claudine
@@ -259,3 +274,184 @@ diffs was reviewed afterward.
 
 There are no skipped or pre-existing failures in the three gates. The 9, 55,
 and 12 skips are the usual gated tests (tier or feature).
+
+## Phase 3
+
+Phase 3 added the D1 union fallback, fixed the caller base directory on the
+late verdict (R4), made `Ctrl-C` cancel the single-file dialog, and added the
+R7.2, R7.3, R7.4, and R7.6 coverage. It ran in the main session with no
+subagents.
+
+### D1 union fallback (R2, N6)
+
+- `lib/.../schema/supplied.rs`: `supplied_file_shape` became
+  `supplied_file_arms`, which returns `SuppliedArms::Unique(shape)` or
+  `SuppliedArms::Undecided(arms)`. The arms are the applicable ones, or every
+  arm when none applies. Arm judging (R1 tolerance, eager relaxation) is
+  unchanged.
+- `SuppliedArms::eager_file_target(name)` returns a `FileTarget { is_array,
+  patterns }`.
+  - For an undecided union, every contending arm must declare `name` as an
+    eager `file(match)` with the same `is_array`.
+  - Patterns merge in arm order, then pattern order, de-duplicated.
+  - An arm that does not declare the property blocks the fallback. N6 said
+    "every arm that declares it". I tightened that because an arm with no
+    declaration makes the verdict depend on which arm wins, which is exactly
+    what R2 rules out.
+- The pending entry is built by a new shared `unresolved_caller_file(..)`.
+  That keeps the reason text in one place (`caller_no_match_reason`).
+- **Changed expectation:** the existing test
+  `supplied_files_leave_ambiguous_and_mismatched_union_arms_untouched` had a
+  case `[{spec: eager file(**/*.md)}, {spec: eager file(**/*spec*.md)}]`
+  expecting *no* pending entry. Ruling D1 now requires completion for exactly
+  that shape, so the case moved into
+  `undecided_union_deduplicates_patterns_in_arm_order`, where it expects the
+  merged `["**/*.md", "**/*spec*.md"]`. The other three cases in the test
+  (string alternative, conflicting discriminants, an arm without `spec`) are
+  unchanged and still expect nothing. The plan's claim that the existing tests
+  would pass unchanged did not hold for this one case. It is recorded in the
+  plan's changed-expectations table.
+- The inline tests grew past the 300-line placement budget
+  (`test_placement::repository_test_placement`), so they moved verbatim to
+  `schema/supplied/tests.rs`. The move only dedented them and deepened the
+  `include_str!` paths by one level.
+
+### Caller-origin late verdict (R4, N7)
+
+- **Departure from the plan:** the plan said to emit a typed
+  `UnresolvedFileReference` on the late path. A first version did that, and
+  two problems showed up:
+  - The error rendered as "composition failed", because that variant is an
+    internal signal that the CLI always downgrades before display. The late
+    path never reopens the chooser (S2).
+  - It needed a completion glob. A root union whose arms disagree on array
+    shape, or a bare eager `file` with no `match`, still named `…/prompts`,
+    and R4 says *every* surface.
+- The shipped fix is `rebase_caller_file_problems(&mut problems, records)` in
+  `supplied.rs`. For each problem that carries Darkmatter's `NoMatch` text on
+  a property that has a caller record, it re-resolves the raw value that the
+  message names against `record.origin()`. If the value is still unresolved,
+  it rewrites the message to the early pass's text, which names the caller's
+  base directory. It needs no schema metadata, and multi-problem messages keep
+  every problem.
+- It is called at the top of `translate_schema_failure`, and also in
+  `handle_retry_error`, which now takes the caller records. That was the one
+  cheap secondary site. `post_shell_validate` is still not covered; see
+  below.
+- `classify_unresolved_file_reference` (the pre-validator, used only by
+  documents without `initialize`) now handles root unions through
+  `supplied::file_reference_target`. It uses the arm that declares the
+  property as `file(match)`, or the D1 merge of several such arms. Its doc was
+  updated, and it shares the `NO_MATCH` constant.
+- The CLI's `downgrade_to_schema_validation` was briefly moved into the lib and
+  then moved back unchanged once the late path stopped needing it. There is no
+  net diff in `schema_interactive/`.
+
+### Early-failure ordering and `Ctrl-C` (R2, R3, N9)
+
+- No `prep.rs` change was needed. S1 had shown that every non-success outcome
+  of the supplied-file pass already returns before target selection; the gap
+  was only the empty pending list for unions. The comment at `prep.rs:176`
+  still states the contract accurately. The chooser already consumes the
+  `patterns` it is given, so the D1 merged globs needed no CLI change.
+- S1's open item was confirmed and fixed. `read_confirm_key` ignored `Ctrl-C`,
+  which arrives as a key in raw mode, so the `Use this file?` dialog kept
+  waiting. It now returns an error of `CANCELLED_KIND`, the same as the
+  `run_standalone` choosers, and the supplied-file pass reports it as
+  unresolved before the picker. The doc on `confirm_one_file` was updated.
+  The other caller, autocomplete (`operation_file.rs`), already mapped any
+  dialog error to `AutocompleteNotInteractive`, as it does for the chooser's
+  own `Ctrl-C`, so that is unchanged.
+
+### Tests added (all L1)
+
+| Requirement | Test | Regression proof |
+|---|---|---|
+| D1 merged patterns (N6) | `schema::supplied::tests::undecided_union_merges_every_arms_eager_file_patterns` | fails with the fallback disabled |
+| D1 de-duplication and arm order | `…::undecided_union_deduplicates_patterns_in_arm_order` | fails with the fallback disabled |
+| D1 negative cells: string, lazy, bare `file`, `file[]` arm, undeclared arm | `…::undecided_union_without_a_shared_eager_file_shape_has_no_fallback` | — (negative; the control is in the next row) |
+| D1: a resolvable literal gives no pending entry (with control) | `…::undecided_union_leaves_a_resolvable_literal_alone` | its control fails with the fallback disabled |
+| Pre-validator union classification | `schema::tests::provided_file_match_partial_in_a_union_reports_unresolved_file_reference` (single `file(match)` arm, D1 merge, array-shape conflict gives the generic error) | fails with the old `Union => None` |
+| R4 lib: the late verdict names the caller's base | `prepare::service::tests::late_caller_file_verdict_names_the_callers_base_directory` (array-disagreeing union, bare eager union, single schema; each with a resolvable-literal control) | fails with the rebase call removed |
+| R4 / R7.6 CLI, launch root, document in `prompts/`, after `initialize` | `compose_schema_cli::compose_late_caller_file_verdict_names_the_launch_directory` (asserts `events.log` proves the late verdict) | covered by the lib proof (same call site) |
+| R2 non-interactive, before `initialize` (templated sibling and D1) | `compose_schema_cli::compose_unresolved_caller_file_fails_before_initialize_when_non_interactive` (each with a control that runs `initialize`) | the D1 case fails with the fallback disabled (`initialize` runs) |
+| R7.2 two matches: chooser, pick, the pick reaches the provider | `level1_provided_partial_file_pty::union_partial_with_two_matches_opens_the_chooser_and_launches_the_pick` | — |
+| R7.3 zero candidates: error, picker never opens, no `initialize` | `…::union_partial_with_zero_matches_fails_before_the_provider_picker` | — |
+| R7.3 dialog before picker, then the picked provider gets the path | `…::union_partial_file_dialog_renders_before_the_provider_picker` (byte offset of `Use this file` < `KBD_ENHANCEMENT_PUSH`) | — |
+| R2 declined and `Ctrl-C` | `…::union_partial_declined_or_cancelled_fails_before_the_provider_picker` | the `Ctrl-C` case fails (hangs) without the `read_confirm_key` fix |
+| R7.4 D1 end to end, with and without `initialize` | `…::d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes` | the `initialize` variant fails with the fallback disabled; the other variant is carried by the pre-validator's union classification, so both surfaces are pinned |
+
+PTY tests assert on "picker never rendered" through the absence of
+`KBD_ENHANCEMENT_PUSH` and of the `Goose` option label. The picker has no
+title (S3). The chooser tests initialize a git repository in the fixture, so
+that labels are repository-relative and readable at the PTY's default width.
+
+### Manual check (Checkpoint 3)
+
+The debug build ran against the real `prompts/clarify.md` from the repo root,
+with a stub `claude`, a throwaway `HOME`, and silenced audio, driven by a
+Python `pty` harness:
+
+- `spec=union-partial`: the dialog appeared first, nothing launched before
+  the answer, and after `y` the stub's argv carried the chosen spec path.
+- `spec=fix`: the chooser opened at 0.3 s. Enter launched the stub with the
+  selected `fixes/…/spec.md`.
+- Non-TTY: relative and absolute spec paths launch, and `spec=fix` fails
+  early, naming the repo root.
+- Harness gotcha: an inline `run_standalone` prompt fails at once if the
+  driver does not answer its DSR (`ESC[6n`) and OSC 10/11 color queries. The
+  L1 harness does this in `common/pty.rs`. An ad-hoc driver must do it too, or
+  the chooser "fails", which the supplied pass reports as unresolved.
+
+### Found, not fixed (pre-existing; outside the spec's C1–C5)
+
+- **Darkmatter root-union caller projection judges relative caller paths from
+  the document's directory.**
+  - Reproduction: in a non-git directory, put the D1 two-arm document at
+    `prompts/p.md` and run `claudine compose --goose prompts/p.md
+    spec=fixes/x/spec.md` from the root, with that file existing. It fails
+    with `no existing file matched reference … while resolving from
+    …/prompts`.
+  - These work: an absolute path, the document at the launch root, and a
+    single (non-union) schema.
+  - Inside a git repo, the document without `initialize` fails even for an
+    absolute path (the value arrives relative). With `initialize` it
+    succeeds.
+  - Why the rebase does not apply: the value *does* resolve from the caller's
+    origin, so the verdict is not a caller `NoMatch`. It is
+    `collect_applicable_root_schema_fragments` /
+    `project_root_arm_caller_values`
+    (`darkmatter/lib/src/markdown/compose/schema_validation.rs:779`, `:932`)
+    selecting no arm and falling back to document-context resolution.
+  - Impact: the interactive chooser returns absolute paths, and the real
+    `clarify.md` (git repo, has `initialize`) works. A D1-shaped document in
+    a subdirectory, run without `initialize` inside a git repo, can still fail
+    after a successful pick.
+  - The R2 non-interactive L1 test uses an absolute path for its control
+    because of this.
+- **A Darkmatter union where a caller file's mode differs by arm** (for
+  example eager `file` in one arm, `string` or lazy `file` in the other, with
+  a templated discriminant) is refused with `caller file parameter … changed
+  file mode during composition`, even for valid paths. That is Darkmatter's
+  deliberate guard, noted here because it shaped the R4 fixtures.
+- `post_shell_validate` (`schema/mod.rs:221`) still reports Darkmatter's base
+  for caller values. It has no caller records, and compose fails before it for
+  these inputs (S2), so it was left alone.
+
+### Gates
+
+- `claudine/`: `just test` ran 7552 tests: 7552 passed, 9 skipped. The first
+  run failed only on the placement budget, which the test move fixed. `just
+  lint` exits 0; its only warning is the known macOS `__eh_frame` linker
+  message. `just check-tier-coverage claudine` reports nothing stranded.
+- Windows (`just cross-check claudine --os windows composition::schema
+  late_caller_file_verdict`): 96 of 97 passed, including every new lib test.
+  The one failure,
+  `composition::schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message`,
+  is a `/` versus `\` spelling in the shipped implement prompt's `git add`
+  command. That code is untouched by this phase, and the composition itself
+  succeeds, so it is unrelated. It is left for fix-forward per the Windows CI
+  policy.
+- The new CLI tests are `#[cfg(unix)]` (the PTY convention, and
+  `compose_schema_cli.rs`'s shell-stub convention). No new `cfg` appears in
+  production code.

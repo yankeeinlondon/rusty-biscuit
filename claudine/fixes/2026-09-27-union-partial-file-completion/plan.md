@@ -32,6 +32,21 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/rendering.md
+source_files_during_phase_3:
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/supplied/tests.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/prepare/service/tests.rs
+    - claudine/cli/src/completion/autocomplete_ui.rs
+    - claudine/cli/tests/l1/level1_provided_partial_file_pty.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
 packages:
     - claudine-cli
     - claudine
@@ -80,17 +95,17 @@ independent technical tracks that meet in Claudine's compose preparation:
 
 ### Definition of done
 
-- [ ] `claudine compose prompts/clarify.md spec=fix` (union schema, `doc:
+- [x] `claudine compose prompts/clarify.md spec=fix` (union schema, `doc:
       "{{spec || design}}"`, `initialize` stack) opens the glob+substring
       chooser or the `Use this file? (Y/n)` confirmation **before** any other
       prompt, and composes with the chosen path.
-- [ ] With zero candidates, a declined chooser, or a non-interactive run, the
+- [x] With zero candidates, a declined chooser, or a non-interactive run, the
       `no existing file matched reference` error prints **before** the
       provider picker, and the picker never renders.
-- [ ] The D1 two-arm `features`/`fixes` shape lists candidates from both trees.
+- [x] The D1 two-arm `features`/`fixes` shape lists candidates from both trees.
       Picking a `fixes` file makes the composed frontmatter validate against
       the `fixes` arm.
-- [ ] Every unresolved caller-supplied file reference names the caller's
+- [x] Every unresolved caller-supplied file reference names the caller's
       launch directory. The late verdict no longer reports `…/prompts` for
       `spec=fix` typed at the repo root.
 - [x] The provider picker renders inline below the cursor (no `\x1b[?1049h`)
@@ -685,7 +700,7 @@ This phase depends on Phase 2 (tolerant selection) and S1/S2.
 
 ### Wave 3 — lib (parallel)
 
-- [ ] **D1 union fallback** (`supplied.rs`; R2, N6)
+- [x] **D1 union fallback** (`supplied.rs`; R2, N6)
     - When `supplied_file_shape` returns `None` for a root union, compute the
       per-property fallback atom: every declaring arm has an eager
       `file(match)` with the same `is_array`, and the patterns are the
@@ -695,7 +710,7 @@ This phase depends on Phase 2 (tolerant selection) and S1/S2.
     - Unit tests: two-arm `features`/`fixes` gives the merged patterns;
       mixed `file`/`string` arms give no fallback; one arm non-eager gives no
       fallback; a resolvable literal gives no pending entry.
-- [ ] **Caller-origin late verdict** (`classify.rs` + the S2 site; R4, N7)
+- [x] **Caller-origin late verdict** (`classify.rs` + the S2 site; R4, N7)
     - For `NoMatch` problems on caller-owned properties, re-resolve against
       the caller record's origin. When the value is still unresolved, emit
       `UnresolvedFileReference` with `record.origin().base_dir()` in `reason`.
@@ -708,7 +723,7 @@ This phase depends on Phase 2 (tolerant selection) and S1/S2.
 
 ### Wave 4 — CLI ordering and L1 coverage (after Wave 3)
 
-- [ ] **Early-failure ordering** (`prep.rs`, `schema_interactive/supplied.rs`; R2, R3, N9)
+- [x] **Early-failure ordering** (`prep.rs`, `schema_interactive/supplied.rs`; R2, R3, N9)
     - Using S1, make sure every non-success outcome of the supplied-file pass
       (zero candidates, declined, cancelled, non-interactive) returns its error
       from `prep.rs:186` before target selection. This includes
@@ -719,23 +734,23 @@ This phase depends on Phase 2 (tolerant selection) and S1/S2.
       logic.
     - Update the comment block at `prep.rs:176-179` if the ordering contract
       it states changes.
-- [ ] **L1 PTY: fixed flow (R7.2)**
+- [x] **L1 PTY: fixed flow (R7.2)**
     - Extend the R7.1 fixture with a two-match variant: the chooser renders,
       the user picks, and the stub launches with the chosen path.
-- [ ] **L1 PTY: ordering (R7.3)**
+- [x] **L1 PTY: ordering (R7.3)**
     - No provider flag, several provider stubs, zero candidates: the error is
       printed, and the capture contains **no** picker title text. (Take the
       exact title string from `provider_option_to_choice` or the picker
       chrome, not from memory.)
     - No provider flag, one candidate: `Use this file? (Y/n)` appears in the
       capture **before** the picker title.
-- [ ] **L1 PTY: D1 (R7.4)**
+- [x] **L1 PTY: D1 (R7.4)**
     - Two-arm shape (`features/**/spec.md` / `fixes/**/spec.md`,
       discriminated by an optional `kind`) with `spec=cli` matching one file in
       each tree. The chooser lists both. Picking the `fixes` file launches the
       stub with that path, and composition succeeds (the `fixes` arm
       validates).
-- [ ] **L1: caller base directory (R4, R7.6)**
+- [x] **L1: caller base directory (R4, R7.6)**
     - Launch from the fixture repo root, with the document in `prompts/`, in
       a non-interactive run that reaches the late verdict. The message names
       the launch directory and does not contain `prompts` as the base. Use
@@ -744,9 +759,9 @@ This phase depends on Phase 2 (tolerant selection) and S1/S2.
 
 ### Checkpoint 3
 
-- [ ] R7.2, R7.3, R7.4, and R7.6 are green. The R7.1 and R7.7 tests are still
+- [x] R7.2, R7.3, R7.4, and R7.6 are green. The R7.1 and R7.7 tests are still
       green.
-- [ ] Manual check with a debug build against the real
+- [x] Manual check with a debug build against the real
       `prompts/clarify.md spec=fix`, using a stub `claude` on `PATH` in a PTY,
       as in the spec's reproduction: the chooser comes first, and the stub
       launches with the chosen spec.
@@ -840,6 +855,8 @@ in parallel with Phase 3: it touches `frontmatter_excerpt.rs` and
 
 | Test / snapshot | Was | Now | Reason |
 |---|---|---|---|
+| `schema::supplied::tests::supplied_files_leave_ambiguous_and_mismatched_union_arms_untouched` (Phase 3) | four union shapes, including `[{spec: eager file(**/*.md)}, {spec: eager file(**/*spec*.md)}]`, all give no pending entry | that one shape moved to `undecided_union_deduplicates_patterns_in_arm_order` and gives one entry with patterns `["**/*.md", "**/*spec*.md"]`; the other three shapes are unchanged | ruling D1: when every contending arm declares the property as the same eager `file(match)`, the existence check runs with the merged globs |
+| every `schema/supplied.rs` inline test (Phase 3) | inline `mod tests` in `supplied.rs` | the same tests, verbatim, in `schema/supplied/tests.rs`; `include_str!` paths are one level deeper | the inline-test budget (300 lines) in `test_placement::repository_test_placement` |
 | _(filled in by Phase 4/5)_ | | | |
 
 ### Checkpoint 5 (terminal state)
