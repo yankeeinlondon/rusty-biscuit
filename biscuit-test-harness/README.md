@@ -436,11 +436,18 @@ kitty.screenshot(&png_path)?;                // `screencapture -l`, no focus
   split it), so split long lines at the window width to get screen rows.
 - `screencapture` needs the Screen Recording permission for the terminal
   running the tests; without it the capture has no window contents. Check it
-  with `biscuit_test_harness::screen_capture_permitted()`. A capture can also
-  come back without contents while the permission is granted and the window
-  is in the background, so a test should tell an empty capture (nothing drawn
-  anywhere, not even text Kitty holds) from a wrong one and skip, not fail,
-  on the first.
+  with `biscuit_test_harness::screen_capture_permitted()` and fold it into
+  the `require_level!` availability of any test that asserts pixels, so the
+  host skips visibly (or fails under `BISCUIT_TEST_REQUIRED_BACKENDS=kitty`)
+  instead of passing on text alone.
+- Kitty does not render a window that another window covers (it saves energy
+  on occluded macOS windows), and `screencapture -l` then returns an empty
+  window even with the permission granted. A later instance can cover an
+  earlier one, so launch and screenshot one before the next. Tell an empty capture
+  (nothing drawn anywhere, not even text Kitty holds) from a wrong one: the
+  first proves nothing and must be a visible skip or failure, never a pass;
+  the second is a failure. `worktree/cli/tests/level2_graph_in_kitty.rs`
+  (`graph_drawn_or_skip!`) shows both.
 
 ## Level 3 — OS keyboard injection
 
