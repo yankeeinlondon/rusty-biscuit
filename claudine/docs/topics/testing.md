@@ -46,3 +46,31 @@ reported on stderr and retains worker ownership instead of exposing what it
 could not remove; it also panics unless the thread is already panicking.
 Tests that execute helpers must release blocked fixtures and observe completion
 before removing their spool. Never use the operator's real queue for test cleanup.
+
+## Messaging fixtures
+
+A test that needs a real outbound message uses the loopback webhook listener in
+`claudine/cli/tests/common/webhook_listener.rs`, never a real Discord or Slack
+endpoint. For example:
+
+```rust
+write_webhook_route(fixture.home());
+let listener = WebhookListener::start(ListenerMode::WithholdUntilReleased);
+let mut command = fixture.command_std();
+listener.apply_route_env(&mut command);
+// spawn, wait for listener.wait_for_request(..), then listener.release()
+```
+
+- `write_webhook_route` writes an active `discord_webhook` route that reads its
+  URL from an environment variable. The inline URL validator accepts only
+  production Discord hosts, and the environment-backed route keeps that
+  validation in the path under test.
+- `apply_route_env` points that variable at the listener, removes inherited
+  proxy variables, and sets `NO_PROXY`.
+- The URL's token is `dummy-token`. Redaction only recognizes
+  `https://discord.com/...` URLs, so an error string can print the loopback URL
+  verbatim; assert the token is absent where a test checks redaction.
+- `ListenerMode::Reply(status)` answers at once, `WithholdUntilReleased` holds
+  every reply until `release()`, and `NeverReply` never answers. One polling
+  thread serves every connection, so several held deliveries can be open at
+  once, and a watchdog stops the listener even if a test forgets to.
