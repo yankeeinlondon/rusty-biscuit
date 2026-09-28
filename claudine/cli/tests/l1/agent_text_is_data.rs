@@ -397,6 +397,42 @@ fn unrepairable_agent_frontmatter_names_the_line_and_rolls_back() {
     }
 }
 
+/// Review 1, "Malformed structured YAML is silently converted into text": a
+/// value that starts a quoted scalar or flow collection but does not close it
+/// is refused on its line and attributed to the agent, and the rollback
+/// restores the pre-run bytes; plain text with a `: ` is still repaired.
+#[test]
+fn malformed_structured_agent_values_are_refused_not_saved_as_text() {
+    let original = "---\nprompt: write it\ntitle: t\n---\nold body\n";
+    for value in ["\"half\" quoted", "'half' quoted", "[a, b", "{k: v"] {
+        let fixture = CliProcessFixture::named("agent-text-inline-malformed");
+        let md = fixture.cwd().join("doc.md");
+        fs::write(&md, original).unwrap();
+        whole_file_agent(
+            &fixture,
+            &md,
+            &format!("---\nprompt: write it\ntitle: t\nadded: {value}\n---\nnew body\n"),
+        );
+
+        let (code, stderr) = run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+
+        assert_ne!(code, 0, "{value}: stderr:\n{stderr}");
+        let flat = stderr.split_whitespace().filter(|word| *word != "┃").collect::<Vec<_>>().join(" ");
+        assert!(flat.contains("(line 4, `added`)"), "{value}: names the line:\n{stderr}");
+        assert!(flat.contains("The agent wrote this line"), "{value}: names the agent:\n{stderr}");
+        assert_eq!(fs::read_to_string(&md).unwrap(), original, "{value}: rolled back");
+    }
+
+    // Control: plain text the agent meant as a string is still repaired.
+    let fixture = CliProcessFixture::named("agent-text-inline-malformed");
+    let md = fixture.cwd().join("doc.md");
+    fs::write(&md, original).unwrap();
+    whole_file_agent(&fixture, &md, "---\nprompt: write it\ntitle: t\nadded: Fix: colons\n---\nnew body\n");
+    let (code, stderr) = run(&fixture, &["inline-compose", "--goose", md.to_str().unwrap()]);
+    assert_eq!(code, 0, "plain text repairs; stderr:\n{stderr}");
+    assert!(fs::read_to_string(&md).unwrap().contains("added: \"Fix: colons\"\n"));
+}
+
 /// Spec "inline, unrepairable YAML" formatting clause: CRLF and block scalar
 /// documents keep their formatting through repair and encoding.
 #[test]

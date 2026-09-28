@@ -17,69 +17,128 @@ fn parsed(document: &str) -> Value {
 
 // -- repair -----------------------------------------------------------------
 
+/// What the repair must do with one agent-added line.
+enum Expect {
+    /// Quoted as the given source text, reading back as the value.
+    Quoted(&'static str, Value),
+    /// Left byte-for-byte, reading back as the value.
+    Unchanged(Value),
+    /// Refused, naming the row's last line and the agent.
+    Rejected,
+}
+
 /// The input-shape matrix for one agent-added top-level value, walked from the
-/// same fixture with one edit per row. `Some(text)` is the string the value
-/// must read as after repair (quoted when needed); `None` means the line is
-/// left byte-for-byte.
+/// same fixture with one edit per row. Every YAML indicator that can open a
+/// value has a row: a structured form is never rewritten into text, so a
+/// malformed one is rejected rather than quoted.
 #[test]
 fn repair_walks_every_value_shape_from_one_fixture() {
+    use Expect::{Quoted, Rejected, Unchanged};
     // Control: the unedited fixture is returned unchanged.
     assert_eq!(repair_agent_frontmatter(ORIGINAL, ORIGINAL).unwrap(), ORIGINAL);
 
-    let rows: &[(&str, Option<&str>, Value)] = &[
-        // The spec's repair cases.
-        ("title2: Fix: colons", Some("\"Fix: colons\""), json!("Fix: colons")),
-        ("note: see issue #42", Some("\"see issue #42\""), json!("see issue #42")),
-        ("tabbed: see\t#42", Some("\"see\t#42\""), json!("see\t#42")),
-        ("ends: with colon:", Some("\"with colon:\""), json!("with colon:")),
-        ("alias: *not an alias*", Some("\"*not an alias*\""), json!("*not an alias*")),
-        ("tick: `code`", Some("\"`code`\""), json!("`code`")),
-        ("bang: !important", Some("\"!important\""), json!("!important")),
-        ("dash: - item", Some("\"- item\""), json!("- item")),
-        ("broken: \"half\" quoted", Some("\"\\\"half\\\" quoted\""), json!("\"half\" quoted")),
-        ("path: C:\\dir: x", Some("\"C:\\\\dir: x\""), json!("C:\\dir: x")),
+    let rows: Vec<(&str, Expect)> = vec![
+        // The spec's repair cases: plain text YAML would misread.
+        ("title2: Fix: colons", Quoted("\"Fix: colons\"", json!("Fix: colons"))),
+        ("note: see issue #42", Quoted("\"see issue #42\"", json!("see issue #42"))),
+        ("tabbed: see\t#42", Quoted("\"see\t#42\"", json!("see\t#42"))),
+        ("ends: with colon:", Quoted("\"with colon:\"", json!("with colon:"))),
+        ("path: C:\\dir: x", Quoted("\"C:\\\\dir: x\"", json!("C:\\dir: x"))),
+        // Reserved indicators open no YAML form, so the value is text.
+        ("tick: `code`", Quoted("\"`code`\"", json!("`code`"))),
+        ("at: @alice reviewed", Quoted("\"@alice reviewed\"", json!("@alice reviewed"))),
+        ("pct: %done", Quoted("\"%done\"", json!("%done"))),
         // Already valid YAML: never touched.
-        ("summary: fixed {{…}} parsing", None, json!("fixed {{…}} parsing")),
-        ("cmd: \"$(echo X)\"", None, json!("$(echo X)")),
-        ("single: 'a: b'", None, json!("a: b")),
-        ("count: 42", None, json!(42)),
-        ("count: 42 # the answer", None, json!(42)),
-        ("ratio: -1.5e3", None, json!(-1500.0)),
-        ("flag: true", None, json!(true)),
-        ("nothing: null", None, Value::Null),
-        ("tilde: ~", None, Value::Null),
-        ("empty:", None, Value::Null),
-        ("list: [a, b]", None, json!(["a", "b"])),
-        ("map: {k: v}", None, json!({"k": "v"})),
-        ("block: |\n  line one: x\n  line two #3", None, json!("line one: x\nline two #3\n")),
-        ("nested:\n  deep: a: b", None, Value::Null),
+        ("summary: fixed {{…}} parsing", Unchanged(json!("fixed {{…}} parsing"))),
+        ("cmd: \"$(echo X)\"", Unchanged(json!("$(echo X)"))),
+        ("single: 'a: b'", Unchanged(json!("a: b"))),
+        ("count: 42", Unchanged(json!(42))),
+        ("count: 42 # the answer", Unchanged(json!(42))),
+        ("ratio: -1.5e3", Unchanged(json!(-1500.0))),
+        ("negative: -5 apples", Unchanged(json!("-5 apples"))),
+        ("flag: true", Unchanged(json!(true))),
+        ("nothing: null", Unchanged(Value::Null)),
+        ("tilde: ~", Unchanged(Value::Null)),
+        ("empty:", Unchanged(Value::Null)),
+        ("comment: # todo: later", Unchanged(Value::Null)),
+        ("list: [a, b]", Unchanged(json!(["a", "b"]))),
+        ("map: {k: v}", Unchanged(json!({"k": "v"}))),
+        ("anchored: &a text: here", Rejected),
+        ("anchor: &a text", Unchanged(json!("text"))),
+        ("tagged: !!str 42", Unchanged(json!("42"))),
+        ("block: |\n  line one: x\n  line two #3", Unchanged(json!("line one: x\nline two #3\n"))),
+        // A structured form that is malformed: rejected, never quoted.
+        ("double: \"half\" quoted", Rejected),
+        ("single2: 'half' quoted", Rejected),
+        ("seq: [a, b", Rejected),
+        ("flow: {k: v", Rejected),
+        ("alias: *not an alias*", Rejected),
+        ("bang: !important note", Rejected),
+        ("dash: - item", Rejected),
+        ("complex: ? key", Rejected),
+        ("colon: : x", Rejected),
+        ("literal: | inline text", Rejected),
+        ("folded: > inline text", Rejected),
+        ("nested:\n  deep: a: b", Rejected),
     ];
-    for (line, repaired_value, reads_as) in rows {
+    for (line, expect) in &rows {
         let candidate = with_added(line);
         let key = line.split(':').next().unwrap();
         let result = repair_agent_frontmatter(&candidate, ORIGINAL);
-        if *line == "nested:\n  deep: a: b" {
-            // A multi-line node is outside the repair case; its bad nesting
-            // is reported, not guessed at.
-            let rejection = result.expect_err("bad nesting is refused");
-            assert_eq!(rejection.line, Some(6), "{rejection}");
-            assert!(rejection.agent_edit, "{rejection}");
-            continue;
-        }
-        let repaired = result.unwrap_or_else(|error| panic!("{line:?}: {error}"));
-        match repaired_value {
-            Some(quoted) => {
+        let (repaired, reads_as) = match expect {
+            Rejected => {
+                let rejection = result.expect_err(line);
+                let last_line = 5 + line.matches('\n').count();
+                assert_eq!(rejection.line, Some(last_line), "{line:?}: {rejection}");
+                assert!(rejection.agent_edit, "{line:?}: {rejection}");
+                continue;
+            }
+            Quoted(quoted, reads_as) => {
+                let repaired = result.unwrap_or_else(|error| panic!("{line:?}: {error}"));
                 assert!(
                     repaired.contains(&format!("{key}: {quoted}\n")),
                     "{line:?} repaired to:\n{repaired}"
                 );
+                (repaired, reads_as)
             }
-            None => assert_eq!(repaired, candidate, "{line:?} must be left alone"),
-        }
+            Unchanged(reads_as) => {
+                let repaired = result.unwrap_or_else(|error| panic!("{line:?}: {error}"));
+                assert_eq!(repaired, candidate, "{line:?} must be left alone");
+                (repaired, reads_as)
+            }
+        };
         assert_eq!(parsed(&repaired)[key], *reads_as, "{line:?}");
         // Unchanged author lines, comments included, keep their bytes.
         assert!(repaired.contains("authored: kept # a comment\n"), "{repaired}");
     }
+}
+
+/// The review's four malformed shapes: each names its line, its key, the
+/// form it started, and the agent, and none is turned into text.
+#[test]
+fn malformed_quoted_and_flow_values_are_rejected_not_quoted() {
+    for (line, form) in [
+        ("added: \"half\" quoted", "double-quoted string"),
+        ("added: 'half' quoted", "single-quoted string"),
+        ("added: [a, b", "flow sequence"),
+        ("added: {k: v", "flow mapping"),
+    ] {
+        let rejection = repair_agent_frontmatter(&with_added(line), ORIGINAL).expect_err(line);
+        assert_eq!(rejection.line, Some(5), "{line:?}: {rejection}");
+        assert_eq!(rejection.property.as_deref(), Some("added"), "{line:?}");
+        assert!(rejection.agent_edit, "{line:?}");
+        assert!(rejection.reason.contains(form), "{line:?}: {rejection}");
+        assert!(rejection.to_string().contains("written by the agent"), "{rejection}");
+    }
+}
+
+/// An alias is judged in the whole document, where its anchor lives.
+#[test]
+fn an_alias_to_an_anchor_in_the_document_is_left_alone() {
+    let candidate = with_added("base: &b shared\nref: *b");
+    let repaired = repair_agent_frontmatter(&candidate, ORIGINAL).unwrap();
+    assert_eq!(repaired, candidate);
+    assert_eq!(parsed(&repaired)["ref"], json!("shared"));
 }
 
 #[test]

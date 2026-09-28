@@ -72,10 +72,12 @@ pub enum EncodeError {
 /// differ from `original`'s), whose value is a single-line plain scalar, and
 /// which is not a closure-owned property, is ever touched. Its complete source
 /// value, `#` text and `: ` included, is wrapped in double quotes when it
-/// contains `: ` or ` #`, ends with `:`, or starts with a YAML indicator.
-/// Numbers, booleans, and nulls (optionally followed by a comment), quoted and
-/// block scalars, and valid flow collections are left alone. Line endings are
-/// kept.
+/// contains `: ` or ` #`, ends with `:`, or starts with a reserved indicator
+/// (`%`, `@`, or a backtick). Numbers, booleans, and nulls (optionally followed
+/// by a comment) are left alone, and so is every value that opens another
+/// YAML form (quoted or block scalar, flow collection, anchor, alias, tag,
+/// comment, `- `, `? `, `: `), valid or not: a malformed one is rejected, never
+/// turned into text. Line endings are kept.
 ///
 /// A document without frontmatter is returned unchanged.
 ///
@@ -83,8 +85,8 @@ pub enum EncodeError {
 ///
 /// Returns an [`AgentFrontmatterRejection`] naming the line when the
 /// frontmatter has no closing delimiter, or still does not parse as a mapping
-/// after the repair: a duplicate key, bad nesting, or syntax outside the
-/// repair case. Nothing is partially repaired. A near-miss fence is returned
+/// after the repair: a duplicate key, bad nesting, a malformed quoted scalar or
+/// flow collection, or other syntax outside the repair case. Nothing is partially repaired. A near-miss fence is returned
 /// unrepaired for the restore step to report.
 pub fn repair_agent_frontmatter(
     candidate: &str,
@@ -129,6 +131,15 @@ pub fn repair_agent_frontmatter(
             continue;
         }
         let value = &extraction.yaml[node.value.clone()];
+        if let Some(reason) = malformed_structure(value) {
+            let line = document_line(candidate, yaml_start + node.value.start);
+            return Err(AgentFrontmatterRejection {
+                line: Some(line),
+                property: Some(semantic_key(&node.key)),
+                reason,
+                agent_edit: true,
+            });
+        }
         if needs_quoting(value) {
             let range = yaml_start + node.value.start..yaml_start + node.value.end;
             repaired.replace_range(range, &double_quoted(value));
@@ -402,20 +413,19 @@ fn mapping_colon(line: &str) -> Option<usize> {
 }
 
 /// Whether an agent-written single-line value must be quoted to read as the
-/// text it spells (ruling N12).
+/// text it spells (ruling N12, narrowed by review 1 of the fix).
+///
+/// A value that opens a structured YAML form is never quoted, valid or not
+/// (spec R4): quoting a malformed one would silently turn the structure the
+/// agent attempted into a string, so it is left for the reparse to reject.
 fn needs_quoting(value: &str) -> bool {
-    if value.is_empty() || is_core_scalar(before_comment(value)) {
+    if value.is_empty() || opens_structure(value) || is_core_scalar(before_comment(value)) {
         return false;
     }
-    let parses = || serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&format!("k: {value}")).is_ok();
-    let mut chars = value.chars();
-    let first = chars.next().unwrap_or_default();
-    let indicator_then_space = matches!(chars.next(), None | Some(' ' | '\t'));
-    match first {
-        '"' | '\'' | '[' | '{' => !parses(),
-        '|' | '>' => false,
-        '&' | '*' | '!' | '%' | '@' | '`' => true,
-        '-' | '?' | ':' if indicator_then_space => true,
+    match value.chars().next() {
+        // Reserved indicators: no YAML form starts with one, so the value can
+        // only be text.
+        Some('%' | '@' | '`') => true,
         _ => {
             value.contains(": ")
                 || value.contains(" #")
@@ -423,6 +433,56 @@ fn needs_quoting(value: &str) -> bool {
                 || value.ends_with(':')
         }
     }
+}
+
+/// Whether `value` starts with an indicator that commits it to a YAML form
+/// other than a plain scalar: a quoted or block scalar, a flow collection, an
+/// anchor, alias, or tag, a comment, or a block sequence entry, complex key,
+/// or mapping value (`- `, `? `, `: `).
+fn opens_structure(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some('"' | '\'' | '[' | '{' | '|' | '>' | '&' | '*' | '!' | '#') => true,
+        Some('-' | '?' | ':') => matches!(chars.next(), None | Some(' ' | '\t')),
+        _ => false,
+    }
+}
+
+/// Why an agent-written single-line value that opens a structured YAML form
+/// cannot be read, or `None` when it reads (or is plain). The value is judged
+/// alone, as the closure's reparse would read it, so the rejection names its
+/// own line rather than wherever the parser gave up. An alias is not judged:
+/// its anchor lives elsewhere in the document, and the reparse reports it.
+fn malformed_structure(value: &str) -> Option<String> {
+    if !opens_structure(value) || value.starts_with('*') {
+        return None;
+    }
+    let parsed = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&format!("k: {value}"))
+        .and_then(serde_yaml_ng::from_value::<Value>);
+    parsed.is_err().then(|| {
+        let form = match value.chars().next() {
+            Some('"') => "a double-quoted string",
+            Some('\'') => "a single-quoted string",
+            Some('[') => "a flow sequence",
+            Some('{') => "a flow mapping",
+            Some('|' | '>') => "a block scalar",
+            Some('&') => "an anchor",
+            Some('!') => "a tag",
+            Some('-') => "a sequence entry",
+            Some('?') => "a complex key",
+            Some(':') => "a mapping value",
+            _ => "a YAML structure",
+        };
+        format!(
+            "the value starts {form} that is not valid YAML, so it is not saved as text; \
+             complete it, or quote the whole value if it is text"
+        )
+    })
+}
+
+/// The 1-based line of byte `offset` in `document`.
+fn document_line(document: &str, offset: usize) -> usize {
+    document[..offset].matches('\n').count() + 1
 }
 
 /// The part of a plain value before a ` #` comment, trimmed.
