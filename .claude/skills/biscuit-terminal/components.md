@@ -19,7 +19,7 @@ Every component owns a `Layout` for margins, alignment, word-wrap, and row-fill.
 | `BlockQuote` | `block_quote.rs` | Yes | Quoted text with left border and attribution |
 | `Compose` | `compose.rs` | No | Combine multiple renderables into one output |
 | `FileSystem` | `filesystem.rs` | Yes | File/directory tree rendering with icons and gitignore awareness |
-| `GitGraph` | `git_graph.rs` | Yes | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule and fits the terminal by trimming commits and lanes (`image` feature) |
+| `GitGraph` | `git_graph.rs` | Yes | Typed git topology as a Mermaid `gitGraph`: owns the lane/tag rule, merges, the no-substitution rule, and fits the terminal by trimming commits and lanes (`image` feature; see below) |
 | `GraphExpression` | `graph_expression.rs` | Yes | Graph diagrams via biscuit-visualized with terminal image display |
 | `InlineContent` | `inline_content.rs` | No | Inline concatenation of items without newlines |
 | `MermaidDiagram` | `mermaid.rs` | Yes | Mermaid diagram rendering via biscuit-visualized; defaults to `ImageWidth::Scale(1.0)` (body text one line tall), measured from the SVG before rasterizing |
@@ -212,6 +212,16 @@ New builder APIs for selective tree rendering:
 - `.with_root_icon(icon)` — `RootIconKind::Directory` or `RootIconKind::Repository`
 
 These are used by the `::file-links` compose directive to render bounded document trees.
+
+## GitGraph
+
+Full contract: `biscuit-terminal/docs/components/git_graph.md`. The caller runs git; the component never does.
+
+- `GraphLine::with_tip(sha)` is the branch's own tip. A line without commits is labeled there. `tip()` falls back to the newest drawn commit, **never** `fork_sha`. `forked_at` unset (`fork_sha == None`) means an unknown connection, not "tip here".
+- `GraphLine::merged_into(sha)` emits `merge <lane> id: "…" tag: "…"` at that commit on whatever lane draws it, only when the merged lane was already emitted in full and the destination lane has a head (the parser drops a labeled merge into a headless lane). `biscuit-visualized` restores the merge's second parent. Siblings hanging from one commit are reordered so a lane merged into a sibling is emitted first (`emit_merged_lanes_first`). A second lane merged at one commit is not drawn.
+- **No substitution:** a lane whose fork is undrawn or unknown is drawn unconnected (declared `branch` before the root lane's first commit), never from another lane's start. An undrawn tag, label, or merge destination is left out. Each sets `GitGraphPlan::incomplete`, as does the caller's `with_incomplete_history()`, and renders the dim `INCOMPLETE_HISTORY_NOTE` ("Some history is not shown") after the hidden-lanes note. Tags of lanes the height cap hid are not counted twice.
+- Trimming (`trim_one_commit`) never folds lane tips, forks, merge destinations, or tagged commits. The height cap (`fit_lanes`) keeps a lane's ancestors: the lanes holding its fork and merge commits, and its parent's lane.
+- `biscuit-visualized`'s tag spacing makes the widest tag set the commit step, so trimming often cannot narrow a long-label graph; it then shrinks. Prove tag placement with `biscuit_visualized::mermaid::MermaidDiagram::gitgraph_geometry()` (`tag_overlaps()`), never with Mermaid text.
 
 ## InlineContent
 
