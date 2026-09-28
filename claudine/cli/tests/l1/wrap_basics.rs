@@ -185,6 +185,44 @@ fn wrapper_rejects_interactive_timeouts_before_the_editor_opens() {
     }
 }
 
+/// The getting-started page advertises `claudine codex --edit -i` as the
+/// interactive editor form. The wrapper must accept it: without a terminal the
+/// only refusal is the editor's terminal requirement, never a flag conflict.
+#[test]
+fn getting_started_edit_interactive_form_is_accepted() {
+    const GETTING_STARTED: &str = include_str!("../../../docs/getting-started/index.md");
+    assert!(
+        GETTING_STARTED.contains("`claudine codex --edit -i`"),
+        "docs/getting-started/index.md must advertise `claudine codex --edit -i`"
+    );
+
+    let fixture = CliProcessFixture::named("wrap-basics-getting-started-edit-interactive");
+    fixture.seed_user_config();
+    let provider_marker = fixture.cwd().join("provider-ran");
+    let editor_marker = fixture.cwd().join("editor-ran");
+    write_marker_executable(fixture.bin_dir(), "codex", &provider_marker);
+    write_marker_executable(fixture.bin_dir(), "fake-editor", &editor_marker);
+
+    let assert = fixture
+        .command()
+        .env("EDITOR", marker_editor_path(fixture.bin_dir()))
+        .args(["codex", "--edit", "-i"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit requires an interactive terminal"));
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        !stderr.contains("cannot be used with"),
+        "the advertised form must not report a flag conflict; stderr was: {stderr}"
+    );
+    assert!(!editor_marker.exists(), "the editor must not open without a terminal");
+    assert!(
+        !provider_marker.exists(),
+        "the provider must not launch without a terminal"
+    );
+}
+
 /// A direct prompt with `-i` still selects an interactive launch: Codex
 /// receives the prompt without the non-interactive `exec` entrypoint.
 #[cfg(unix)]
