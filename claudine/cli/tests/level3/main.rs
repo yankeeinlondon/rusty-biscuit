@@ -11,6 +11,8 @@ mod common;
 
 #[cfg(target_os = "macos")]
 mod level3_auto_complete_chooser;
+#[cfg(target_os = "linux")]
+mod level3_drain_ctrl_c;
 #[cfg(target_os = "macos")]
 mod level3_lifecycle_ctrl_c;
 #[cfg(target_os = "linux")]

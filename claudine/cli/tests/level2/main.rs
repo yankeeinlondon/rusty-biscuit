@@ -18,6 +18,10 @@ mod level2_auto_complete_operation_file;
 #[cfg(unix)]
 mod level2_context_capture;
 #[cfg(unix)]
+mod level2_drain_ctrl_c_kitty;
+#[cfg(unix)]
+mod level2_drain_ctrl_c_tmux;
+#[cfg(unix)]
 mod level2_dry_run_approval_capture;
 #[cfg(unix)]
 mod level2_dry_run_metadata_capture;

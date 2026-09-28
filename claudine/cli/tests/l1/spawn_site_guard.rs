@@ -183,6 +183,8 @@ const EMULATOR_SESSION_APIS: &[&str] = &[
     "WezTermHarness",
     "KittyHarness",
     "AppleTerminalHarness",
+    // kitty on a private Xvfb display, for OS key presses.
+    "XvfbKitty",
     "shared_or_spawn",
 ];
 
@@ -1141,6 +1143,13 @@ fn the_resource_a_file_owns_decides_what_the_guard_governs() {
         Some(Exemption::EmulatorSession("WezTermHarness"))
     );
     assert!(excluded("an_unprefixed_capture.rs", TMUX));
+    assert_eq!(
+        exemption(
+            "level3_drain_ctrl_c.rs",
+            "let instance = XvfbKitty::launch(160, 50).unwrap();\n"
+        ),
+        Some(Exemption::EmulatorSession("XvfbKitty"))
+    );
 
     // The `real_` tier keeps its declared-tier exemption.
     assert_eq!(
