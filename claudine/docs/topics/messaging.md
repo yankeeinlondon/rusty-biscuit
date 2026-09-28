@@ -55,6 +55,38 @@ Message delivery is invoked two ways, both routing through the same `send` layer
   actions carry a hard **3-second timeout** by default (overridable via
   `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`).
 
+## Delivery tracking
+
+A send returns immediately; the delivery runs as a background task. Every such
+task, message or desktop notification, is registered with one process-wide
+delivery tracker in `claudine::messaging`, so a program can wait for it before
+it exits instead of killing it mid-send.
+
+A program that embeds the `claudine` library opts in by awaiting
+`drain_deliveries` before it exits, on the same Tokio runtime the sends ran on:
+
+```rust
+use claudine::messaging::{DELIVERY_DRAIN_BUDGET, drain_deliveries};
+
+let outcome = drain_deliveries(tokio::time::Instant::now() + DELIVERY_DRAIN_BUDGET).await;
+outcome.report(); // one Warning naming each delivery still sending
+```
+
+- One deadline covers every pending delivery, including any started while the
+  drain runs. With nothing pending the drain returns at once.
+- A delivery still running at the deadline is cancelled and listed in
+  `outcome.pending`. Whether it arrived is unknown. `report()` names it by its
+  route name, or as `desktop notification`, and never by URL, token, or body.
+- A delivery that fails while the drain waits reports its usual
+  "Failed to send …" warning. A delivery task that panics is reported the same
+  way. Neither is returned as an error.
+- Without an active Tokio runtime a send logs a warning and does nothing.
+
+**Planned:** the `claudine` CLI drains on every ordinary exit, within a
+10-second budget (`DELIVERY_DRAIN_BUDGET`) capped by `claudine handle`'s own
+deadline, and keeps the command's exit code. Until that lands, a message sent
+just before the CLI exits can still be lost.
+
 ## Desktop notifications
 
 Desktop notifications are intentionally **not** a messaging route. They are

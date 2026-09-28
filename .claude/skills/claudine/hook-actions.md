@@ -106,7 +106,7 @@ Send a message to the configured messaging destination (Discord, Slack, Signal, 
 | `message` | `string` | (required) | Markdown message with template interpolation |
 | `image` | `string?` | None | Path to an image to attach (Discord only) |
 
-**Behavior:** Fire-and-forget (`tokio::spawn`). Outbound send is async and does not block the event pipeline.
+**Behavior:** Async and non-blocking for the event pipeline. The send runs as a task registered with the process-wide delivery tracker (`messaging::delivery::track`), so `drain_deliveries` can wait for it before exit; a bare spawn in `messaging/` fails `lib/tests/l1/messaging_spawn_guard.rs`. The CLI's drain on exit is planned (see [Messaging](topics/messaging.md#delivery-tracking)).
 
 **Hook Handler Timeout:** When running inside `claudine handle`, messenger actions have a hard **3-second timeout** by default (overridable via `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`).
 

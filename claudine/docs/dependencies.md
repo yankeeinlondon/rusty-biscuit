@@ -13,6 +13,14 @@
   `test_layout` gate in its consolidated `l1` test binary. The dev entry adds
   no crate to the workspace; it brings `fs4` into the dev graph, which is
   already in `Cargo.lock`.
+- The `claudine` library enables Tokio's `test-util` feature in its dev
+  dependencies. It gives the delivery-tracker unit tests a paused clock, so a
+  10-second drain deadline is asserted exactly and costs no wall time.
+- The `claudine` library takes `proc-macro2` (with `span-locations`, as
+  `claudine-cli` already does) as a dev dependency for the messaging spawn
+  guard. The guard lexes `src/messaging/` instead of searching its text, so a
+  spawn named in a comment or string cannot trip it, and it reports the line
+  and column of a real one. Both crates are already in `Cargo.lock`.
 - All three crates take `biscuit-test-harness` as a dev dependency for
   `manifest_dir!`, which resolves the crate directory at run time. A fixture
   path baked in at compile time names the *building* host's checkout, which is

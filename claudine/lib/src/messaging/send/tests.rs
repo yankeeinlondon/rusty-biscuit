@@ -94,6 +94,29 @@ fn execute_resolved_message_with_no_route_is_noop() {
 }
 
 #[test]
+fn execute_resolved_message_without_a_runtime_does_not_panic() {
+    // A parallel sequence-group member thread has no Tokio runtime. The send
+    // used a bare `tokio::spawn`, which panicked there; now nothing is sent.
+    let messaging = RuntimeMessagingSettings {
+        user: Some(crate::messaging::ScopedMessagingSettings {
+            active: Some("alerts".to_string()),
+            configs: [(
+                "alerts".to_string(),
+                MessagingRouteConfig::DiscordWebhook {
+                    webhook_url: Some(
+                        "http://127.0.0.1:9/webhooks/1/dummy-token".to_string(),
+                    ),
+                    webhook_url_env: "UNUSED_WEBHOOK_URL".to_string(),
+                },
+            )]
+            .into(),
+        }),
+        repo: None,
+    };
+    execute_resolved_message("Build finished", None, None, None, &messaging);
+}
+
+#[test]
 fn execute_resolved_message_empty_text_is_noop() {
     let messaging = RuntimeMessagingSettings {
         user: None,

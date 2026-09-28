@@ -113,7 +113,9 @@ windows = { version = "0.62", features = [
 
 [dev-dependencies]
 dunce = "1"
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
+# `test-util` gives the delivery-tracker tests a paused clock, so deadline
+# assertions cost no wall time.
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "sync", "time", "test-util"] }
 serial_test = "3"
 serde_json = "1.0"
 criterion = "0.5"
@@ -122,6 +124,9 @@ rstest = "0.25"
 tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# The messaging spawn guard lexes source instead of grepping it, so a spawn
+# named in a comment or string never trips it and a real one always does.
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 
 [package.metadata.ci.native]
 ubuntu-latest = ["libasound2-dev"]

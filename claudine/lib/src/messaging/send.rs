@@ -2,7 +2,8 @@
 //!
 //! This module bridges Claudine's messaging configuration with the messenger
 //! library, handling template interpolation, provider construction, and
-//! fire-and-forget async dispatch.
+//! async dispatch. Every send runs as a task registered with the delivery
+//! tracker ([`super::delivery`]), so a program can wait for it before exiting.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -28,6 +29,7 @@ use secrecy::SecretString;
 use tracing::{debug, warn};
 
 use super::config::MessagingRouteConfig;
+use super::delivery::{DeliveryLabel, track};
 use super::resolve::{
     ResolvedMessagingRoute, RuntimeMessagingSettings, SignalRecipient, parse_signal_recipient,
     resolve_effective_route, resolve_image_path, resolve_secret,
@@ -106,11 +108,12 @@ fn redacted(error: &MessengerError) -> String {
 }
 
 /// Executes a message delivery by interpolating templates, resolving the route,
-/// and spawning an async task to send via the messenger library.
+/// and starting a tracked task that sends via the messenger library.
 ///
-/// This function returns immediately after spawning the async task. Errors are
-/// logged as warnings rather than propagated, following the fire-and-forget
-/// pattern used in `runner.rs::execute_speak()`.
+/// Returns as soon as the task starts. The task is registered under the
+/// route's name, so [`drain_deliveries`](super::drain_deliveries) can wait for
+/// it before the process exits. A send failure is reported as a stderr
+/// warning, not returned. Without an active Tokio runtime nothing is sent.
 ///
 /// ## Examples
 ///
@@ -159,8 +162,7 @@ pub fn execute_message(
         return;
     };
 
-    // Spawn async task for fire-and-forget sending
-    tokio::spawn(async move {
+    track(DeliveryLabel::Route(route.name.clone()), async move {
         if let Err(e) = send_payload(&route, payload).await {
             report_send_failure(&route, &e, "message");
         }
@@ -173,8 +175,8 @@ pub fn execute_message(
 /// and does not require an [`EventMeta`]. Designed for lifecycle notifications
 /// where the message text is a fixed string from frontmatter.
 ///
-/// Follows the same fire-and-forget pattern: spawns an async task and returns
-/// immediately. Missing routes are a no-op.
+/// Like [`execute_message`], it starts a tracked task under the route's name
+/// and returns immediately. Missing routes are a no-op.
 pub fn execute_resolved_message(
     text: &str,
     image: Option<&str>,
@@ -203,7 +205,7 @@ pub fn execute_resolved_message(
         return;
     };
 
-    tokio::spawn(async move {
+    track(DeliveryLabel::Route(route.name.clone()), async move {
         if let Err(e) = send_payload(&route, payload).await {
             report_send_failure(&route, &e, "lifecycle message");
         }
@@ -296,8 +298,12 @@ pub async fn test_webhook_connection(config: &MessagingRouteConfig) -> Result<()
 /// This helper is intentionally zero-config: it does not read Claudine
 /// messaging config, does not require an active route, and never returns an
 /// error to lifecycle code. Blank or whitespace-only titles are no-ops, and
-/// send failures are logged as operational warnings rather than propagated.
+/// send failures are reported as stderr warnings rather than propagated.
 /// Pass `None` for `body` to render a title-only notification.
+///
+/// The notification runs as a tracked task under
+/// [`DeliveryLabel::DesktopNotification`], so it is drained before exit like a
+/// message. Without an active Tokio runtime nothing is shown.
 ///
 /// Driver selection, capability detection, and OS integration are owned by
 /// `messenger::DesktopNotificationProvider::new(DesktopConfig::default())`.
@@ -307,17 +313,9 @@ pub fn execute_notification(title: &str, body: Option<&str>) {
         return;
     }
 
-    let handle = match tokio::runtime::Handle::try_current() {
-        Ok(h) => h,
-        Err(_) => {
-            tracing::warn!("Cannot execute desktop notification: no Tokio runtime active");
-            return;
-        }
-    };
-
     let owned_title = trimmed.to_string();
     let owned_body = body.map(str::to_string);
-    handle.spawn(async move {
+    track(DeliveryLabel::DesktopNotification, async move {
         if let Err(e) = send_desktop_notification(&owned_title, owned_body.as_deref()).await {
             report_notification_failure(&e);
         }
@@ -376,6 +374,26 @@ fn report_notification_failure(error: &MessagingError) {
     eprintln!("{rendered}");
 
     debug!(error = text, "desktop notification send failed");
+}
+
+/// Render a user-facing Status Warning for a delivery task that panicked.
+///
+/// Uses the same wording as the ordinary failure reports so a panic reads as
+/// one more failed delivery; it never changes the exit code.
+pub(super) fn report_delivery_panic(label: &DeliveryLabel) {
+    let body = match label {
+        DeliveryLabel::Route(name) => format!(
+            "Failed to send message via route <blue-500>{}</blue-500>: delivery task panicked",
+            prose_escape(name)
+        ),
+        DeliveryLabel::DesktopNotification => {
+            "Failed to send desktop notification: delivery task panicked".to_string()
+        }
+    };
+    let rendered = Status::from_prose(body)
+        .state(StatusState::Warning)
+        .render(&Terminal::default());
+    eprintln!("{rendered}");
 }
 
 /// Render a user-facing Status Warning describing a messaging send failure
@@ -489,7 +507,7 @@ fn redact_webhook_urls(input: &str) -> String {
 ///
 /// Covers `< >` (HTML-style tags), `{{ }}` (template syntax), and `**`
 /// (bold) which are the most likely to appear in reqwest/serde error strings.
-fn prose_escape(text: &str) -> String {
+pub(super) fn prose_escape(text: &str) -> String {
     text.replace('<', "\\<")
         .replace('>', "\\>")
         .replace("{{", "\\{{")
