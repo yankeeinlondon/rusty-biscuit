@@ -30,6 +30,13 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
     - biscuit-visualized
@@ -61,13 +68,13 @@ Source facts the plan relies on, read from `mermaid-rs-renderer` 0.3.1 (`src/lay
 
 ### What success looks like
 
-- [ ] In a real-Git fixture that mirrors the observed history, at 200×60, every affected branch lane (`feat/schema-enhancement`, `fix/wt-ux`, `fix/sniff` analogs) plans **more than its tip** after its `+N` square, and the laid-out `commit_step` equals the renderer's default.
-- [ ] The `fix/sniff` analog has `merged_into` = the default-lane merge commit, the merge edge is drawn, its fork (the old parent tip) is undrawn and never substituted, and the incomplete-history notice is shown.
-- [ ] Every existing classification fixture keeps its result (child merged into parent, fast-forwarded label, indirect integration with notice, shallow clone gap, deleted parent fallback).
-- [ ] Every existing `biscuit-visualized` spacing test keeps passing (neighboring long labels, `main`/`origin/main` one commit apart, stack of three, cross-lane), and new tests prove: single-commit tags give the default step, non-overlapping cross-lane tags give the default step, and a real collision gets the **smallest** step that restores the one-em gap (tight within tolerance).
-- [ ] `MERMAID_BACKEND` is bumped, and the cache test pins the new identifier.
-- [ ] The Kitty L2 test shows the restored density in the saved transmitted image with no overlapping labels.
-- [ ] `graph image render (biscuit-terminal)` timings are recorded before and after on the same fixture, terminal size, and build profile, with the spread across runs.
+- [x] In a real-Git fixture that mirrors the observed history, at 200×60, every affected branch lane (`feat/schema-enhancement`, `fix/wt-ux`, `fix/sniff` analogs) plans **more than its tip** after its `+N` square, and the laid-out `commit_step` equals the renderer's default.
+- [x] The `fix/sniff` analog has `merged_into` = the default-lane merge commit, the merge edge is drawn, its fork (the old parent tip) is undrawn and never substituted, and the incomplete-history notice is shown.
+- [x] Every existing classification fixture keeps its result (child merged into parent, fast-forwarded label, indirect integration with notice, shallow clone gap, deleted parent fallback).
+- [x] Every existing `biscuit-visualized` spacing test keeps passing (neighboring long labels, `main`/`origin/main` one commit apart, stack of three, cross-lane), and new tests prove: single-commit tags give the default step, non-overlapping cross-lane tags give the default step, and a real collision gets the **smallest** step that restores the one-em gap (tight within tolerance).
+- [x] `MERMAID_BACKEND` is bumped, and the cache test pins the new identifier.
+- [x] The Kitty L2 test shows the restored density in the saved transmitted image with no overlapping labels.
+- [x] `graph image render (biscuit-terminal)` timings are recorded before and after on the same fixture, terminal size, and build profile, with the spread across runs.
 - [ ] Docs and skills describe the new rules. `just test`/`just lint` pass in `biscuit-visualized`, `biscuit-terminal`, and `worktree`. The spec is marked implemented; the implementation is ready for review. Agents do not move the spec to `_completed`.
 
 ### Out of scope (restated from the spec)
@@ -215,25 +222,25 @@ Depends on both Phase 2 waves.
 
 ### Wave 4 (concurrent)
 
-- [ ] **Component plan assertions** (`git_graph/tests.rs`)
+- [x] **Component plan assertions** (`git_graph/tests.rs`)
     - gather `observed_sparse_lanes()` and plan with the real measurement at 200×60: every affected branch lane has ≥ 2 commits after its `+N` square (E3); `commit_step == default_gitgraph_commit_step()`; the `fix/sniff` lane merges into `M104`; no tag overlaps; tags on their SHAs; `GitGraphPlan::incomplete == true` only because of the `W1` fork
     - add the fixture to `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` so the 120×40 and 56×60 geometry checks cover it too
-- [ ] **Kitty L2**
+- [x] **Kitty L2**
     - add `level2_graph_restores_lane_density_in_kitty` using `Fixture::sparse_lanes()` at 200×60, with the existing text, APC, and screenshot checks, keeping the evidence as `wt-graph-sparse-200x60-{screenshot,transmitted}.png`
     - run it locally on macOS (needs Screen Recording permission) and inspect the transmitted PNG: density visibly restored, labels separate, merge edge from the `fix/sniff` lane into `main`
     - existing `level2_graph_*` tests keep passing
-- [ ] **Perf after**
+- [x] **Perf after**
     - rerun the Phase 1 perf case on the same host, profile, and size; record the after median and spread beside the baseline; note that the extra verification layout pass is the expected cost
 
 ### Wave 5
 
-- [ ] **Cross-OS proof**
+- [x] **Cross-OS proof**
     - load the `os` skill; run `just test` for `biscuit-visualized` and `worktree` on Linux and native Windows through the repo's cross-check hosts (`./scripts/cross-check.sh --os <os> <package>`), or record the qualifying receipts
     - font measurement differs by OS, so any density assertion that fails on one OS only is a finding. Fix the assertion's robustness (E3), never the OS.
 
 **Checkpoint 3**
 
-- [ ] Component, L2, perf, and cross-OS evidence are recorded in `implementation-log.md` with paths to the saved images.
+- [x] Component, L2, perf, and cross-OS evidence are recorded in `implementation-log.md` with paths to the saved images.
 
 ## Phase 4 — Documentation, Skills, and Review Readiness
 

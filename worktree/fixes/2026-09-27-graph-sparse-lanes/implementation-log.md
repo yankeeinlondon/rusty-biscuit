@@ -29,6 +29,13 @@ docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_3:
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
     - biscuit-visualized
@@ -473,3 +480,188 @@ skills) remains in Phase 4 as planned.
 
 Not run in Phase 2: `worktree` cross-OS (Phase 3, Wave 5); the Kitty L2 and
 perf reruns (Phase 3, Wave 4). No pre-existing failures.
+
+## Phase 3
+
+Host: macOS (Darwin 27.2.0), Apple M4 Max dev Mac. Date: 2026-09-28. All
+Phase 3 changes are tests. No production source changed.
+
+### Wave 4: component plan assertions (`worktree/cli/src/commands/git_graph/tests.rs`)
+
+- **New:** `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60`.
+  It gathers `observed_sparse_lanes()` in the base view and plans it with the
+  real measurement at 200×60 (Default theme, `CellSize::FALLBACK`). It
+  asserts:
+  - `GraphFacts::incomplete == false`;
+  - `commit_step == default_gitgraph_commit_step()` (E3);
+  - `hidden_lanes == 0` and the plan fits in 200 columns;
+  - at least 2 laid-out commits after the `+N` square on each of
+    `feat/schema-enhancement`, `fix/wt-ux`, and `fix/sniff` (E3), with the
+    `fix/sniff` tip last;
+  - the `merge fix/sniff` line at `M104`, laid out on `main` with the
+    `fix/sniff` tip as its second parent;
+  - no tag overlaps, and `main` and `origin/main` both on `M104`;
+  - `plan.incomplete` true, `W1` absent from the text, `fix/sniff`'s first
+    commit parentless, and the other two branch lanes connected. Together
+    these show the notice has one cause, the undrawn `W1` fork.
+
+  Helper: `after_square(geometry, lane)`.
+- **Extended:** `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`
+  now covers `observed_sparse_lanes()` at 120×40 and 56×60. `Evidence`
+  gained `incomplete` and `hidden_lanes: [usize; 2]`, because this fixture
+  is the first one that is legitimately incomplete and legitimately capped.
+  Every existing fixture passes `false` / `[0, 0]`, so its assertions are
+  unchanged. The `--width 40` "whole graph, scaled" check now plans at
+  120×60 instead of 120×40 and asserts `hidden_lanes == 0` there. At 40 rows
+  the height cap (out of scope) leaves out `feat/schema-enhancement`, and a
+  hidden lane can never equal `GitGraph::mermaid()`'s whole graph. For the
+  three older fixtures the change is a no-op, since none of them had a
+  hidden lane at 40 rows.
+- Report lines from this run (macOS):
+
+  | Fixture | Viewport | Columns | Rows | Trimmed | Step | Hidden |
+  |---|---|---|---|---|---|---|
+  | sparse-lanes base | 120×40 | 118 | 20 | 10 | 34.0 | 1 (`feat/schema-enhancement`) |
+  | sparse-lanes base | 56×60 | 105 | 26 | 22 | 34.0 | 0 |
+  | observation-1 / observation-2 / long-labels | unchanged from Phase 2 | | | | 57.7 / 57.7 / 127.6 | 0 |
+
+- **Regression proof.** I temporarily patched `spaced` in
+  `biscuit-visualized` back to the old widest-tag rule (`max(default,
+  widest + gap)` whenever any tag exists), then restored it; `git diff`
+  showed no change afterward. Under the old rule the new test failed at the
+  `commit_step` assertion. Phase 1's S2 recorded what the old plan looked
+  like: `feat/schema-enhancement` and `fix/wt-ux` kept only their tips
+  (1 < 2), so the density assertion fails under the old rule as well.
+
+#### Finding: the fixture's lane recency was host-dependent (fixed in the fixture)
+
+The first Linux cross-check failed
+`gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` at
+120×40: the height cap hid `fix/sniff` instead of
+`feat/schema-enhancement`, so the plan was complete and had no `M104` merge.
+The cause is not font measurement. `GitGraph` ranks lanes for the cap by
+`last_active`, the tip's `%ct` in whole seconds, with ties broken by lane
+order. `commit_on` used wall-clock dates, and the fixture's ~250
+`commit-tree` calls span one to two seconds, so on a faster host two tips
+landed in the same second and the tie went the other way. The fix is in the
+fixture, not the assertion: `commit_on` now stamps
+`GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` = `now + n` from a process-wide
+counter, so each commit is one second newer than the one before, and
+recency follows creation order on every host (`feat/schema-enhancement`'s
+tip is the oldest). Only `observed_sparse_lanes()` uses `commit_on`. The
+Kitty and perf builders are unaffected here: Kitty runs only at 200×60
+with no cap, and perf only times the stages.
+
+### Wave 4: Kitty L2 (`worktree/cli/tests/level2_graph_in_kitty.rs`)
+
+- **New:** `level2_graph_restores_lane_density_in_kitty`
+  (`Fixture::sparse_lanes()`, a 200×60 window). It keeps the evidence as
+  `wt-graph-sparse-200x60-{screenshot,transmitted}.png`. It checks: rows at
+  most half the window; the "Some history is not shown" notice and no "more
+  worktree(s) not shown" line; the table intact; and, through
+  `assert_graph_drawn`, the APC columns and rows, the PNG width equal to
+  columns × cell, the reserved rows, and the screenshot's drawn box where
+  the reservation starts. The test ends with no hidden lanes.
+- **Two harness fixes the new fixture exposed** (both in the same file):
+  - `assert_graph_drawn` parsed any line ending in " not shown" as the
+    hidden-lane count. "Some history is not shown" would have panicked on
+    `"Some".parse()`. It now accepts only `N more worktree(s) not shown`.
+  - `assert_table_intact` expected rows in sorted directory order. The table
+    follows the parent tree (`wt-sniff` sits under `wt-ux`), so the check is
+    now membership: exactly one row per worktree in the block after the
+    header, each with the header's borders. The earlier fixtures' behavior is
+    unchanged; their rows were sorted and still match.
+- Run: `BISCUIT_TEST_REQUIRED_BACKENDS=kitty cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`
+  gave 5 of 5 passing (the new test takes 5.1 s), and every existing
+  `level2_graph_*` test still passes.
+- **Visual inspection** of the kept images, copied to
+  `spikes/wt-graph-sparse-200x60-transmitted.png` and
+  `spikes/wt-graph-sparse-200x60-screenshot.png` (the originals are in
+  `$TMPDIR`):
+  - every branch lane shows its `+N` square followed by five commits:
+    `fix/sniff` `+89` plus 5, `feat/schema-enhancement` `+50` plus 5, and
+    `fix/wt-ux` `+63` plus 5;
+  - `main` shows a `+6` square plus seven commits up to `M104`;
+  - `main` and `origin/main` are stacked on `M104` and separate;
+  - the `fix/sniff` lane curves into `main` at `M104`, and its start is
+    unconnected;
+  - the notice line is under the image.
+
+  Before the fix, each lane kept only its tip (Phase 1 S2, step 81.05).
+
+### Wave 4: perf after
+
+Same command, host, profile, and size as the Phase 1 baseline:
+`WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
+Raw output: `spikes/perf-after-macos.txt`.
+
+| Fixture | Size | Samples | `graph gather` before → after (min–max) | `graph image render (biscuit-terminal)` before → after (min–max) |
+|---|---|---|---|---|
+| observed sparse lanes | 200×60 | 10 | 61.0 ms (58.8–70.3) → **75.2 ms (73.8–85.6)** | 351.4 ms (350.0–357.8) → **348.4 ms (341.7–351.6)** |
+
+120×40 medians, before → after:
+
+| Fixture | `graph gather` | `graph image render (biscuit-terminal)` |
+|---|---|---|
+| floor | 10.9 → 10.9 ms | 341.8 → 344.4 ms |
+| ordinary | 38.9 → 41.1 ms | 345.8 → 347.6 ms |
+| older essential connections | 130.9 → 135.4 ms | 347.6 → 344.0 ms |
+| multiple selected branches | 64.1 → 65.3 ms | 348.6 → 346.3 ms |
+
+- **Render:** unchanged within noise; the ranges overlap. As Phase 2
+  predicted, the observed shape has no colliding tag pair, so it gets one
+  layout and no verification pass. The plan's "extra verification pass"
+  cost applies only to graphs with colliding tags. None of the perf
+  fixtures has such a pair, so none of them shows it.
+- **Gather: +14.2 ms (+23%) on the observed shape.** The ranges do not
+  overlap, so the change is real. It is the expected cost of C1: the walk
+  no longer stops at `fix/wt-ux`'s indirect containment. It goes on to
+  evaluate `main` (the containment and first-parent/ancestry-path queries
+  for `M104`) and then builds the default-lane anchors for a merge that is
+  now drawn. The other fixtures moved 0–4.5 ms, which is within the 5–15%
+  noise band the `os` skill records.
+
+### Wave 5: cross-OS
+
+Hosts declared: `BUILD_LINUX=build-linux`, `BUILD_WIN=build-win-native`, and
+`BUILD_WSL=build-win`. WSL was not run; the plan asks for Linux and native
+Windows, and nothing here is archive-path-sensitive.
+
+| Package | OS | Command | Result |
+|---|---|---|---|
+| `biscuit-visualized` | Linux, Windows | Phase 2 `just cross-check biscuit-visualized --os …` | 116/116 each. Phase 3 does not touch the package, so that evidence is reused. |
+| `worktree-cli` | Linux | `just cross-check worktree-cli --os linux` | **Environment failure, not a test result:** build-linux's standing clone still has read-only kache links in `target/release` (`libthiserror-*.rmeta is not writeable`), exactly as the `os` skill's build-hosts page records for 2026-09-25..27. |
+| `worktree-cli` | Linux | `… --os linux --features terminal-tests` (the documented native-path workaround) | Run 1: 510/512 passed. The failure was `gathered_graphs_…` (lib and bin), from the recency tie above. After the fixture fix, run 2: **512/512 passed**. The native path includes the L2-feature and `perf_` tests. |
+| `worktree-cli` | native Windows | `just cross-check worktree-cli --os windows` | Run 1: 433/434, with 49 existing skips. The failure was `list_prs::a_held_live_head_check_holds_the_listing_only_until_its_deadline`, whose listing took 5.16 s against its 5 s bound. Phase 3 changes no listing, PR, or live-head code, and that test does not render a graph. Run 2, same tree plus the fixture fix: **434/434 passed**, with that test green. I recorded it as a one-off Windows timing miss in an unrelated, pre-existing test. |
+
+No density assertion failed on any single OS for font reasons. The only
+OS-divergent result was the recency tie, which was about host speed and is
+fixed in the fixture.
+
+### Phase 3 requirement-to-test mapping
+
+| Requirement | Test / evidence |
+|---|---|
+| E3 density at 200×60, `commit_step` = default | `commands::git_graph::tests::the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60` (lib and `wt` bin) |
+| `fix/sniff` merges into `M104`, fork undrawn, notice only from `W1` | same test |
+| 120×40 and 56×60 geometry (no overlaps, tags on SHAs, exact `M104` parents, unchanged tag text, explicit width untrimmed) | `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags` (sparse-lanes case) |
+| Kitty: restored density in the transmitted image, labels separate, merge edge | `level2_graph_restores_lane_density_in_kitty`, plus the inspected `spikes/wt-graph-sparse-200x60-*.png` |
+| Perf after | `perf_graph_stages_for_the_observed_sparse_lanes_at_200x60`, `spikes/perf-after-macos.txt` |
+| Cross-OS | the table above |
+
+### Phase 3 gates
+
+- `worktree/`: `just test` gave 759 passed and 30 skipped (the existing
+  skips); `just lint` is clean; `cargo clippy -p worktree-cli --features
+  terminal-tests --all-targets -- -D warnings` is clean; and `just
+  check-tier-coverage worktree` (repo root) reports 0 stranded.
+- New tests: the component test is L1 (no tier marker, in the
+  `git_graph::tests` module, compiled by both the lib and the `wt` bin
+  targets). The Kitty test is `level2_`, in the already-declared
+  `level2_graph_in_kitty` binary behind `terminal-tests`, and runs under
+  `just test-l2`.
+- Not rerun in Phase 3: the `biscuit-visualized` and `biscuit-terminal`
+  gates, because neither package changed after Phase 2.
+- Pre-existing or unrelated failures: the build-linux kache-link
+  environment failure (worked around), and the one-off Windows timing miss
+  in `list_prs` (it passed on rerun).
