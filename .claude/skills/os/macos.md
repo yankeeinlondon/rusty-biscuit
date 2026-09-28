@@ -67,6 +67,13 @@ conditions that masquerade as repository defects.
   resets `PATH` and drops `/usr/local/cargo/bin`, so every `cargo` call fails
   with "command not found" while a trailing pipe can still exit 0. `rust:1`
   has no `cargo-nextest`; `cargo test --test <name>` avoids a slow install.
+- **Linux Level 3 keyboard tests** that use `biscuit_test_harness::xvfb`
+  (a private `Xvfb` plus kitty, XTEST presses) run in the same container and
+  never touch the Mac's desktop. `rust:1` needs `xvfb kitty libgl1-mesa-dri`
+  on top of the packages above, and `cargo-nextest` from
+  `https://get.nexte.st/latest/linux-arm`. kitty 0.41 under Xvfb works with
+  software OpenGL and no window manager; `SetInputFocus` alone gives it focus
+  (2026-09-28). Its "Failed to connect to DBUS" log lines are harmless.
 - **Windows compile evidence:** the `x86_64-pc-windows-gnu` target; details
   and the msvc prohibition are in [windows.md](windows.md).
 - **Behavioral Windows and WSL2 evidence:** the build hosts

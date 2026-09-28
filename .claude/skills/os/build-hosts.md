@@ -8,7 +8,7 @@ were declared when you report.
 
 | Variable | Provides | Notes |
 |---|---|---|
-| `BUILD_LINUX` | Native Linux | Target of `just cross-check --os linux`. |
+| `BUILD_LINUX` | Native Linux | Target of `just cross-check --os linux`. Has `tmux` and `wezterm` but no `Xvfb`, `kitty`, or `xdotool` (checked 2026-09-28), so X11 Level 3 tests skip there; run them in Docker instead ([macos.md](macos.md)). Do not install packages on it. |
 | `BUILD_WIN` | Native Windows, PowerShell as the remote shell | Target of `just cross-check --os windows`. Git's stderr shows as a red `NativeCommandError`; harmless. |
 | `BUILD_WSL` | A WSL2 Ubuntu guest | Target of `just cross-check --os wsl`, which runs CI's archive mode ([wsl.md](wsl.md)). For ad hoc commands, non-login shells lack `~/.cargo/bin`; wrap them in `bash -lc`. |
 | `BUILD_MACOS` | A macOS host other than the current one | Target of `just cross-check --os macos`; same flow as Linux. |

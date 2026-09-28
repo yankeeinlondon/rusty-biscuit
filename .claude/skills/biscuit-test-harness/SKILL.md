@@ -29,7 +29,8 @@ Decision order (use the first that satisfies your requirement):
 ```
 Do you need to verify the *terminal's* input encoder (e.g. what bytes
 does bare Ctrl emit)?
-├── YES → Level 3. Use `cliclick` (macOS, RUN_LEVEL3=1, foreground).
+├── YES → Level 3 (RUN_LEVEL3=1). Linux: `xvfb::XvfbKitty` (private display,
+│         never takes the user's focus). macOS: `cliclick` (foreground).
 └── NO  → Level 2. Pick the backend:
     ├── Default → TmuxHarness (fully headless, portable, no GUI).
     ├── Graphics protocol / inline images / Kitty keyboard-protocol →
@@ -109,6 +110,7 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | `cliclick` (L3, macOS) | `cliclick` on `$PATH` — checks neither platform nor permission. Gate *additionally* on `cliclick::accessibility_trusted()`, which covers both. |
 | `xdotool` (L3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland reports unavailable and skips. |
 | `win_input` (L3, Windows) | Windows and a working `powershell`. |
+| `XvfbKitty` (L3, Linux) | `can_launch()`: `Xvfb` and `kitty` on `$PATH`. No `DISPLAY` or window manager. |
 
 `BISCUIT_TEST_LEVEL_REQUIRED=2` (or `3`) flips skips into hard failures, but
 all-or-nothing: it also panics the GUI backends a headless runner cannot host.
@@ -268,6 +270,7 @@ skips cleanly off its platform. Level 3 is the **only** way to verify
 | `src/cliclick.rs` | macOS | `cliclick` (Quartz `CGEvent`), plus System Events for modified chords |
 | `src/xdotool.rs` | Linux / X11 | `xdotool key` via the XTEST extension |
 | `src/win_input.rs` | Windows | PowerShell driving `SendKeys.SendWait` |
+| `src/xvfb.rs` | Linux | XTEST via `x11rb` on a **private** `Xvfb` display with its own kitty |
 
 Window selection is by **unique** title match on all three: zero or
 several matches is an error, never a first-match guess — injecting
@@ -285,6 +288,27 @@ Rules:
 - `xdotool` must never be passed `--window` — that switches it from
   XTEST to `XSendEvent`, whose flagged events terminals ignore as
   untrusted. Focus the window first, then inject globally.
+
+### A key press without the user's focus
+
+On Linux, `xvfb::XvfbKitty` gives a real OS key press without touching
+the user's desktop: it starts its own `Xvfb`, runs kitty there, focuses
+kitty *on that display* (`SetInputFocus`; no window manager needed), and
+presses through XTEST. `harness()` returns a `KittyHarness` for typing and
+capture; `press_ctrl('c')` is the key. It needs no `BISCUIT_L3_TAKE_FOCUS`,
+but it is still L3 (`level3_` name, `RUN_LEVEL3=1`) because the press is
+an OS key event. Example: `claudine/cli/tests/level3/level3_drain_ctrl_c.rs`.
+
+macOS and Windows have no such private desktop. macOS hands key events
+to the key window of the one login session only; a Ctrl+C posted to an
+unfocused kitty's pid with `CGEventPostToPid` never reached its pane
+(measured 2026-09-27). Windows `SendInput` reaches only the input
+desktop, the one the user sees. There, the closest no-focus press is
+`KittyHarness::send_key("ctrl+c")` on a `KittyInstance`: kitty encodes the
+key for the program's keyboard mode, as it does a physical press, and
+never raises the window. The OS input layer ahead of kitty is skipped, so
+that is **Level 2** evidence and belongs in a `level2_` file. Example:
+`claudine/cli/tests/level2/level2_drain_ctrl_c_kitty.rs`.
 
 ### Never steal focus outside a `level3_` file
 
