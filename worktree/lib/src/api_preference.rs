@@ -27,9 +27,14 @@ const LOCK_WAIT: Duration = Duration::from_secs(2);
 /// One repository as a provider API sees it.
 ///
 /// `port` is the port the provider's API answers on, not the Git transport's:
-/// SSH to a known provider host is 443, so its SSH and HTTPS remotes share one
-/// identity. Any other remote keeps its explicit port or its scheme's default,
-/// so two ports on one host stay distinct.
+/// SSH to a known provider host on the standard SSH port (none spelled, or 22)
+/// is 443, so its SSH and HTTPS remotes share one identity. Any other remote,
+/// including SSH to a known provider on an explicit nonstandard port, keeps
+/// its explicit port or its scheme's default, so two ports on one host stay
+/// distinct.
+///
+/// There is no scheme field: one host and port is one server, so an SSH and an
+/// HTTPS remote that spell the same explicit port already name the same one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoIdentity {
     /// Lowercase, with no user information.
@@ -42,12 +47,15 @@ pub struct RepoIdentity {
 impl RepoIdentity {
     /// The identity of `origin`'s fetch URL, or `None` when it names no
     /// host and repository (a local path, for example).
+    ///
+    /// Only an SSH remote of a known provider on the standard SSH port maps
+    /// to 443; an explicit nonstandard SSH port is kept (see [`RepoIdentity`]).
     pub fn from_origin(url: &str) -> Option<Self> {
         let identity = sniff::filesystem::git::remote_identity(url)?;
         let scheme = identity.scheme.to_ascii_lowercase();
         let port = match scheme.as_str() {
             "https" => identity.port.unwrap_or(443),
-            "ssh" if is_known_provider(url) => 443,
+            "ssh" if matches!(identity.port, None | Some(22)) && is_known_provider(url) => 443,
             "ssh" => identity.port.unwrap_or(22),
             "http" => identity.port.unwrap_or(80),
             "git" => identity.port.unwrap_or(9418),
@@ -227,6 +235,36 @@ mod tests {
         assert!(preferences.is_ignored(&default_port));
         assert!(!preferences.is_ignored(&other_port));
         assert!(!preferences.is_ignored(&other_path));
+    }
+
+    #[test]
+    fn a_known_provider_on_a_nonstandard_ssh_port_keeps_that_port() {
+        let https = RepoIdentity::from_origin("https://github.com/Owner/Repo.git").unwrap();
+        let port_2222 = RepoIdentity::from_origin("ssh://git@github.com:2222/Owner/Repo.git").unwrap();
+        let port_2200 = RepoIdentity::from_origin("ssh://git@github.com:2200/Owner/Repo.git").unwrap();
+        assert_eq!(port_2222, identity("github.com", 2222, "Owner/Repo"));
+        assert_eq!(port_2200.port, 2200);
+        assert_ne!(port_2222, https);
+        assert_ne!(port_2200, https);
+        assert_ne!(port_2222, port_2200);
+    }
+
+    #[test]
+    fn an_ignored_nonstandard_ssh_port_survives_a_round_trip_without_ignoring_other_ports() {
+        let (_dir, path) = store();
+        let recorded = "ssh://git@github.com:2222/Owner/Repo.git";
+        add(&path, &RepoIdentity::from_origin(recorded).unwrap()).unwrap();
+        let preferences = load(&path);
+
+        assert!(preferences.ignores_origin(recorded));
+        for origin in [
+            "ssh://git@github.com:2200/Owner/Repo.git",
+            "ssh://git@github.com:22/Owner/Repo.git",
+            "git@github.com:Owner/Repo.git",
+            "https://github.com/Owner/Repo.git",
+        ] {
+            assert!(!preferences.ignores_origin(origin), "{origin}");
+        }
     }
 
     #[test]
