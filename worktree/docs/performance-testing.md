@@ -21,7 +21,7 @@ The first owned cost center is [`list_worktrees`](../../worktree/lib/src/worktre
 
 The second owned cost center is graph data collection in [`worktree/cli/src/commands/git_graph.rs`](../../worktree/cli/src/commands/git_graph.rs).
 
-- [`gather`](../../worktree/cli/src/commands/git_graph.rs) collects, for the focused view, the current branch (and its recorded fork parent) with one `merge-base` each, and, for the base view, one `merge-base` and one `git log` per worktree branch, concurrently. See [git-graph.md](./git-graph.md).
+- [`gather`](../../worktree/cli/src/commands/git_graph.rs) reads whether the repository is shallow once, then works in three stages, each stage's branches concurrently: it classifies every drawn branch (one `merge-base --is-ancestor` per candidate lane, plus `rev-list --first-parent --parents` and `rev-list --ancestry-path` for a merged branch) and finds its fork (`merge-base`); it builds every branch lane (`log --first-parent`); then it builds the default lane. Each fork, merge, or label commit outside a lane's window costs one `rev-list --first-parent --count`, and a lane's anchors are verified together in one `log --no-walk`. See [git-graph.md](./git-graph.md).
 - Graph data is only gathered when the terminal reports inline-image support. On non-image terminals the entire graph-data path is skipped.
 - `GitGraph` measures each trimming candidate with the renderer (`GitGraph::plan`). That cost is in the `graph image render` stage, never in `list gather` or the table.
 
@@ -121,11 +121,11 @@ For contention-free wall-clock measurement of the SLA, run perf tests serially v
 Asserts the subprocess-count bounds the optimization guarantees. Runs in the ambient `rusty-biscuit` checkout so the counts reflect real worktree scale:
 
 - `list_worktrees()` resolves the default branch exactly once (one `symbolic-ref` call) and reads tips with one `for-each-ref`. Wall-clock is printed for observability; the full-command SLA that subsumes this piece is asserted by the integration test below.
-- The base-view `gather` issues exactly one `merge-base` per branch and one unique-tip `git log` per branch plus one for the default lane.
+- The base-view `gather` on that fixture, where every branch has only the default lane as a candidate, issues one `rev-parse` (the shallow check), one `merge-base --is-ancestor` and one fork `merge-base` per branch, and one `git log` per branch plus one for the default lane.
 
 ### `graph_and_verbose_share_one_merge_base` (unit test, `git_graph/tests.rs`)
 
-Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one `merge-base` and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
+Subprocess-count guard for the image-terminal `wt list -v` data-gather path (graph facts + verbose details) on a controlled feature-branch fixture: exactly one merge base, shared by the graph's fork and the verbose details, one `merge-base --is-ancestor` (the branch's classification), and zero `rev-parse --short`. Rasterization is excluded (this test never renders).
 
 ### `perf_full_command_non_image_meets_sla` (integration test, `tests/perf_command_sla.rs`)
 
@@ -204,6 +204,27 @@ Re-measured on 2026-09-27 after every listing began checking `origin` and waitin
 - **The PR-deadline case adds the miss request to the wait.** The foreground request (≤ 300 ms) settles before the worker is launched, so the worker finds the answer and never repeats it; the worker's check then fails at the stub's 400 ms close. Its bound is therefore 1 s plus the request deadline.
 - **The held cases prove no join.** The captured `.output()` returns while the worker is still held: the live-head lock is still taken (held check), or the worker process still runs and `upload-pack` has started exactly twice (held fetch). A held check uses `HoldingOrigin` (loopback smart HTTP); a held fetch uses `remote_fixture::UploadPackGate` on a local bare `origin`.
 - **`-r` and `--ff` wait for the whole attempt**, so their elapsed time is the worker's own deadline plus about 0.2 s: the transport's whole process tree is killed at the deadline, then the outcome and receipt are published and the listing renders. The `--ff` case has a 90 s nextest termination override in `.config/nextest.toml`, since the default ceiling is 30 s.
+
+## Graph Stages
+
+`graph gather` and `graph image render (biscuit-terminal)` appear in `wt list --perf` only when stderr is a terminal and `TERM_PROGRAM` names an image-capable emulator, so `tests/perf_graph_stages.rs` runs `wt list --perf` under `script` in a 120×40 pseudo-terminal, emulating Ghostty (other Kitty-protocol emulators wait out a 1 s cursor-position query there). The fixtures are `GraphFixture` in `tests/perf_support/graph.rs`, built through `git fast-import`. The test asserts only that both stages are reported: the graph has no numeric budget, and the full command's 1 s bound (`perf_full_command_non_image_meets_sla`) still applies. Record medians with:
+
+```sh
+WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release
+```
+
+Measured on the macOS development host (Apple M4 Max, git 2.55.0), release profile, 10 samples per fixture after one warm-up, medians. *Before* is the graph that drew merged branches as tags; *after* adds first-parent lanes, merge detection, anchors, and the tag-spacing layout (both 2026-09-27):
+
+| Fixture | `graph gather` before | after | change | `graph image render` before | after | change |
+|---|---:|---:|---:|---:|---:|---:|
+| floor (one commit) | 5.9 ms | 10.5 ms | +4.6 ms | 352.4 ms | 347.0 ms | −1.5% |
+| ordinary (3 worktrees, 50 commits, base view) | 20.2 ms | 39.1 ms | +18.9 ms | 351.2 ms | 356.1 ms | +1.4% |
+| older essential connections (fork 5,000 and merge 3,000 first-parent commits back, focused view) | 69.5 ms | 126.3 ms | +56.8 ms | 353.3 ms | 351.8 ms | −0.4% |
+| multiple selected branches (8 worktrees, 2 merged, base view) | 32.4 ms | 65.3 ms | +32.9 ms | 351.8 ms | 355.2 ms | +1.0% |
+
+- **Gather roughly doubles, by added sequential git calls.** Each `git` spawn costs about 5 ms here. The floor's whole rise is the one added shallow check. Elsewhere the stages run one after another: shallow check, then per branch the `--is-ancestor` check, the two `rev-list` walks for a merged branch, and the fork `merge-base`; then the branch lanes' `log`; then the default lane's `log`, its anchors' `rev-list --count` calls (concurrent), and the one verifying `log --no-walk`. Before, a branch cost one `merge-base` and one `log`, concurrently. The older-connections fixture adds the most, because its merge's `rev-list` walks and its anchor counts cross thousands of commits.
+- **Render is unchanged within noise.** It is dominated by about 350 ms of fixed cost that exists only in a pseudo-terminal: terminal detection waits for answers that never come (compare every row with the floor). The two-pass layout for tags stays below that noise.
+- **The full-command gates still pass** (`just -d worktree test-perf`, 2026-09-27), including `perf_full_command_non_image_meets_sla`, which never gathers a graph.
 
 ## `git status` Cost (Investigated, Not Changed)
 
