@@ -1,12 +1,13 @@
 ---
 created: 2026-09-27
-status: finalized-spec
+status: implemented
 clarified: true
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28
 review_iterations: 0
-implemented: false
+implemented: true
+implemented_by: claude/opus
 $schema:
     status: |-
         enum(
@@ -36,13 +37,9 @@ related:
     - 2026-09-27-graph-merged-branch
 human_review: false
 message_to_agent: |-
-    Phases 1-3 are complete; read implementation-log.md "## Phase 3" first. Phase 3 changed tests only. Facts for Phase 4 (docs, skills, review readiness):
+    All four phases are implemented; the fix is ready for review. Read implementation-log.md "## Phase 4" for the doc/skill changes, the gates, and the evidence index.
+    The only open item is environmental: the macOS Kitty L2 screenshot step failed in Phase 4 because the host's display locked mid-run (screensaver; `CGSSessionScreenIsLocked`). Every earlier check in those tests passed, and Phase 3's saved screenshots in spikes/ stand. A reviewer who wants fresh L2 evidence should rerun `cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'` on an unlocked, awake display.
 
-    1. Evidence for every "What success looks like" item except the docs/skills one is in the log, and those items are checked in plan.md. The Kitty images are saved at spikes/wt-graph-sparse-200x60-{transmitted,screenshot}.png, and the perf before/after files are spikes/perf-{before,after}-macos.txt. Link these from the final log summary.
-    2. Perf results for the docs, if you cite any: on the observed shape, render is unchanged (348.4 ms vs 351.4 ms before; that graph has no colliding tags, so it gets one layout). Gather rose from 61.0 to 75.2 ms because classification now also evaluates `main` after an indirect parent match. worktree/docs/performance-testing.md does not record these numbers yet; consider adding them.
-    3. The height cap ranks lanes by tip commit time in whole seconds (`last_active`, `%ct`), with ties broken by lane order. Phase 3 found this through a fixture that tied on a fast Linux host, and fixed it in the fixture with explicit increasing commit dates. If worktree/docs/git-graph.md describes the height cap, it can say "most recent tip commit (to the second)". This is existing behavior; don't change it.
-    4. The .claude/skills/worktree/SKILL.md graph bullets already describe the new L1/L2 tests and the classification order. Phase 4's skill work is the "widest"/"widen" sweep in the biscuit-visualized and biscuit-terminal skills, plus the docs listed in plan Wave 6.
-    5. Cross-OS: build-linux's standing clone still has read-only kache links in target/release, so `just cross-check <pkg> --os linux` fails in the build. Add `--features terminal-tests` (worktree-cli) or `--all-features` (biscuit-visualized) to take the native path. native Windows once missed list_prs::a_held_live_head_check_holds_the_listing_only_until_its_deadline's 5 s bound at 5.16 s (unrelated, passed on rerun).
 ---
 
 # Restore commit density and direct merges in the `wt list` graph

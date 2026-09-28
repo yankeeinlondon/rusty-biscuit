@@ -36,9 +36,43 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+source_code:
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+    - worktree/cli/tests/perf_support/graph.rs
+    - worktree/cli/tests/perf_graph_stages.rs
+    - worktree/fixes/2026-09-27-graph-sparse-lanes/spikes/s1-geometry/src/main.rs
+    - worktree/fixes/2026-09-27-graph-sparse-lanes/spikes/s1-geometry/run.sh
+documentation:
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+completed_phase: 4
+implemented: true
 packages:
     - worktree-cli
     - biscuit-visualized
+    - biscuit-terminal
 ---
 
 # Implementation Log for 2026-09-27-graph-sparse-lanes (4 phases)
@@ -665,3 +699,119 @@ fixed in the fixture.
 - Pre-existing or unrelated failures: the build-linux kache-link
   environment failure (worked around), and the one-off Windows timing miss
   in `list_prs` (it passed on rerun).
+
+## Phase 4
+
+Host: macOS (Darwin 27.2.0), dev Mac. Date: 2026-09-28. Phase 4 changed
+documentation and skills only. No source file changed.
+
+### Wave 6: documentation
+
+| File | Change |
+|---|---|
+| `biscuit-visualized/docs/mermaid-gitgraph.md` | "Tag spacing" rewritten: which pairs count (different commits, strict vertical overlap), the one-em gap, the smallest step (`default + shortfall / index distance`, max over pairs), verification and the widest-tag fallback, a Mermaid flowchart of the loop, and a table contrasting a same-commit `main`/`origin/main` stack (step 34) with the pair one commit apart (57.71, from S1). The "up to about 3.8×" paragraph is gone. RL behavior in 0.3.1 is stated. Backend identifier now `+bv3`. The geometry section names `index`/`x` and `default_gitgraph_commit_step()`. The test inventory lists the pair-rule, loop, and new real-layout tests. |
+| `biscuit-terminal/docs/components/git_graph.md` | The sizing paragraph now says only colliding labels widen the step, so a single long label no longer forces trimming or shrinking. |
+| `worktree/docs/git-graph.md` | "How each branch is classified" now describes strong answers (merged directly, no separate history) and the deferred weak answer (integrated otherwise), plus the rule for unknowns before and after a kept answer. The flowchart and table are updated. A new example, with a Mermaid gitGraph, covers the `fix/sniff` shape: merge drawn into `M104`, fork measured against `M104^1` and resolved to `W1`, lane unconnected, and the notice. The sizing sentence is replaced. The height cap names whole-second tip times and ties kept in lane order (Phase 3 message item 3). The tests section lists the new L1 and Kitty tests. The doc names no fix. |
+| `worktree/docs/performance-testing.md` | Adds the 2026-09-28 before/after table (observed shape at 200×60 with spreads, and the four 120×40 fixtures) and its reading. The stale "two-pass layout for tags" sentence now says a second pass runs only when tags collide. |
+
+### Wave 6: skills
+
+- `.claude/skills/biscuit-visualized/mermaid-rendering.md`: the tag-spacing
+  bullet now states the collision rule, `required_step`/`spaced`,
+  `SPACING_EPSILON`, `MAX_SPACING_PASSES`, the fallback, the font-size
+  finding, and RL parsing. Backend `+bv3`. The geometry bullet adds
+  `index`/`x` and `default_gitgraph_commit_step()`.
+- `.claude/skills/biscuit-visualized/SKILL.md`: the deep-dive pointer and the
+  dependency table (backend `+bv2` → `+bv3`).
+- `.claude/skills/biscuit-terminal/components.md`: the GitGraph trimming
+  bullet.
+- `.claude/skills/worktree/SKILL.md`: no change needed. Phases 2 and 3
+  already rewrote the `commands/git_graph.rs` bullet (classification order,
+  deferred indirect match, fork against `C^1`) and the spacing wording.
+  Re-read in Phase 4; it matches the code.
+
+### Wave 7: drift sweep
+
+`grep -rn "widest tag\|widest + \|widen" biscuit-visualized biscuit-terminal
+worktree .claude/skills` (`*.md`, `*.rs`, specs excluded), then `git grep
+"bv2\|widest tag" -- '*.md'`. What remains is accurate:
+
+- The widest-tag mentions in `mermaid/gitgraph.rs` (`spaced`'s doc and code),
+  in the docs' fallback bullet and flowchart, and in the skill describe
+  the fallback, which still exists.
+- `cache_tests.rs` names `+bv2` only to assert that the new key differs.
+- `gitgraph_tests.rs:649` "Formerly widened to the widest tag plus the gap" is
+  a Phase 2 historical note on a regression test. It is accurate, so it was
+  left alone.
+- Every other `widest`/`widen` hit is unrelated (list/table widths, CI scope,
+  refspecs).
+
+No comment-versus-code drift was found in source.
+
+### Wave 7: gates
+
+| Area | `just lint` | `just test` |
+|---|---|---|
+| `biscuit-visualized` | clean | 116/116 passed |
+| `biscuit-terminal` | clean | 3344 passed, 55 skipped (existing) |
+| `worktree` | clean | 759 passed, 30 skipped (existing) |
+
+**Kitty L2 (`binary(level2_graph_in_kitty)`), macOS: blocked by the host's
+display state, not by the code.**
+
+- Run 1 (`just test-l2 level2_graph`, fail-fast): `level2_graph_draws_a_merged_branch_in_kitty`
+  failed at the screenshot step, with a black capture.
+- Run 2 (`--no-fail-fast`, parallel): the fixture sanity test and
+  `level2_graph_restores_lane_density_in_kitty` passed, screenshot included.
+  The other three failed at the screenshot step (line 577, "nothing drawn
+  where the graph belongs").
+- Run 3 (`--test-threads 1`): all four window tests failed at that step,
+  including the sparse one that had passed minutes before.
+- Probe: a plain `screencapture -x` of the whole display returned the macOS
+  aerial screensaver, and `ioreg` reports `CGSSessionScreenIsLocked`. The
+  session locked partway through run 2, and a locked display gives window
+  captures with no contents.
+
+Every failure is at the last step. Each test first passed its text, APC,
+row-reservation, and table checks. Phase 3's saved screenshot evidence
+(`spikes/wt-graph-sparse-200x60-{transmitted,screenshot}.png`) stands. To
+reproduce, rerun on an unlocked, awake display:
+`cargo nextest run -p worktree-cli --features terminal-tests -E 'binary(level2_graph_in_kitty)'`.
+
+### Rulings amended and departures (whole fix)
+
+- R2 was amended after S1: 0.3.1 has no RL layout, so RL is proven
+  through synthetic `required_step` input and an RL-equals-LR geometry test
+  (Phase 1).
+- Phase 3's fixture fix gives commits increasing whole-second dates, because
+  of the height cap's recency tie on fast hosts. This is test-only, and the
+  behavior is unchanged.
+- No departure from the spec's behavior.
+
+### Evidence index
+
+- S1 geometry: `spikes/s1-geometry/` and `spikes/s1-geometry/output-macos.txt` (Phase 1).
+- S2 classification: `spikes/s2-classification/` (Phase 1).
+- Kitty images: `spikes/wt-graph-sparse-200x60-transmitted.png` and
+  `spikes/wt-graph-sparse-200x60-screenshot.png` (Phase 3).
+- Perf: `spikes/perf-before-macos.txt` and `spikes/perf-after-macos.txt`,
+  summarized in `worktree/docs/performance-testing.md` (Phases 1, 3, 4).
+- Cross-OS: the Phase 3 "Wave 5" table.
+
+### Phase 4 requirement-to-test mapping
+
+Phase 4 changed no behavior, so it adds no test. The docs describe
+behavior that these existing tests prove:
+
+| Documented rule | Test |
+|---|---|
+| Only colliding pairs on different commits widen the step, by the smallest amount | `biscuit-visualized` `required_step` unit tests; `tags_stacked_on_one_commit_keep_the_default_step`, `tags_on_lanes_apart_without_vertical_overlap_keep_the_default_step`, and `assert_minimal` in the real-layout tests |
+| Verification and fallback | `a_linear_placement_verifies_after_one_widening`, `a_placement_that_never_clears_falls_back_to_the_widest_tag` |
+| Backend `+bv3` | `cache_tests::cache_key_different_mermaid_backend` |
+| Direct merge beats an earlier indirect containment; fork from `C^1`; notice for an undrawn fork | `a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment` and the Phase 2 topology tests |
+| Density at 200×60 | `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60` |
+
+### Phase 4 close
+
+Implementation complete, ready for review. Nothing committed, and the spec
+stays in `fixes/`.

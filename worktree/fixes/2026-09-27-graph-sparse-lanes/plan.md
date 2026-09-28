@@ -37,9 +37,43 @@ docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-visualized/mermaid-rendering.md
+    - .claude/skills/biscuit-visualized/SKILL.md
+    - .claude/skills/biscuit-terminal/components.md
+source_code:
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - worktree/cli/src/commands/git_graph/topology.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/cli/tests/level2_graph_in_kitty.rs
+    - worktree/cli/tests/perf_support/graph.rs
+    - worktree/cli/tests/perf_graph_stages.rs
+    - worktree/fixes/2026-09-27-graph-sparse-lanes/spikes/s1-geometry/src/main.rs
+    - worktree/fixes/2026-09-27-graph-sparse-lanes/spikes/s1-geometry/run.sh
+documentation:
+    - biscuit-visualized/docs/mermaid-gitgraph.md
+    - biscuit-terminal/docs/components/git_graph.md
+    - worktree/docs/git-graph.md
+    - worktree/docs/performance-testing.md
+completed_phase: 4
+implemented: true
 packages:
     - worktree-cli
     - biscuit-visualized
+    - biscuit-terminal
 ---
 
 # Plan: restore commit density and direct merges in the `wt list` graph
@@ -75,7 +109,7 @@ Source facts the plan relies on, read from `mermaid-rs-renderer` 0.3.1 (`src/lay
 - [x] `MERMAID_BACKEND` is bumped, and the cache test pins the new identifier.
 - [x] The Kitty L2 test shows the restored density in the saved transmitted image with no overlapping labels.
 - [x] `graph image render (biscuit-terminal)` timings are recorded before and after on the same fixture, terminal size, and build profile, with the spread across runs.
-- [ ] Docs and skills describe the new rules. `just test`/`just lint` pass in `biscuit-visualized`, `biscuit-terminal`, and `worktree`. The spec is marked implemented; the implementation is ready for review. Agents do not move the spec to `_completed`.
+- [x] Docs and skills describe the new rules. `just test`/`just lint` pass in `biscuit-visualized`, `biscuit-terminal`, and `worktree`. The spec is marked implemented; the implementation is ready for review. Agents do not move the spec to `_completed`.
 
 ### Out of scope (restated from the spec)
 
@@ -246,29 +280,30 @@ Depends on both Phase 2 waves.
 
 ### Wave 6 (concurrent; disjoint files)
 
-- [ ] **`biscuit-visualized/docs/mermaid-gitgraph.md`**
+- [x] **`biscuit-visualized/docs/mermaid-gitgraph.md`**
     - replace the widest-tag formula and the "up to about 3.8×" paragraph with the collision-driven rule: which pairs count, the gap, minimality, the verification pass, the fallback, and the unchanged vertical/rotated behavior
     - add a Mermaid or table example contrasting an isolated long label (no widening) with `main`/`origin/main` one commit apart (widening); update the test inventory and the backend identifier
-- [ ] **`biscuit-terminal/docs/components/git_graph.md`**
+- [x] **`biscuit-terminal/docs/components/git_graph.md`**
     - fix the sizing paragraph (line ~110): only colliding labels widen the step, so a single long label no longer forces trimming
-- [ ] **`worktree/docs/git-graph.md`**
+- [x] **`worktree/docs/git-graph.md`**
     - the classification order with the direct-merge preference, and an example of the `fix/sniff` shape (merge drawn, fork undrawn, notice)
     - fix the spacing sentence (line ~166)
     - no reference to this fix by name or path
-- [ ] **Skills**
+- [x] **Skills**
     - `.claude/skills/worktree/SKILL.md`: the `commands/git_graph.rs` bullet (classification order, deferred indirect match, fork against `C^1` after an indirect parent) and the "widens commit spacing" wording
     - `.claude/skills/biscuit-visualized/` and `.claude/skills/biscuit-terminal/components.md` where they state the widest-tag rule (grep `widest`)
 
 ### Wave 7
 
-- [ ] **Drift sweep**
+- [x] **Drift sweep**
     - `grep -rn "widest tag\|widest + \|widen" biscuit-visualized biscuit-terminal worktree .claude/skills --include=*.md --include=*.rs` and fix every stale statement
-- [ ] **Review readiness**
+- [x] **Review readiness**
     - `just lint` and `just test` in all three areas; `just test-l2` for the graph binary on macOS
+    - Phase 4 note: lint and L1 pass in all three areas. The Kitty L2 screenshot step was blocked because the host's display locked mid-run. Every earlier check passed, and Phase 3's saved screenshots stand (see the log).
     - update the spec frontmatter: `status: implemented`, `implemented: true`, `implemented_by: claude/opus`
     - finish `implementation-log.md` (rulings amended, departures from the spec, evidence locations)
     - the final state is "implementation complete, ready for review". No commit unless asked, and no move to `_completed`.
 
 **Checkpoint 4**
 
-- [ ] Every "What success looks like" item above is checked, with its evidence linked from the implementation log.
+- [x] Every "What success looks like" item above is checked, with its evidence linked from the implementation log.
