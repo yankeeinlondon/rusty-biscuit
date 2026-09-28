@@ -2415,6 +2415,160 @@ pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     Ok(map.get(prop).map(stored_value).unwrap_or(Value::Null))
 }
 
+/// `try_frontmatter(file) -> { error, ok, value }` — `frontmatter(file)` as a
+/// value instead of a failure.
+///
+/// A file that reads and parses gives `{ ok: true, value: <frontmatter>,
+/// error: null }`. A file that is missing, unreadable, or whose frontmatter
+/// does not parse (invalid YAML, a duplicate key) gives `{ ok: false, value:
+/// null, error: <message> }`, so a document can report the problem instead of
+/// failing its composition. Parsing is `frontmatter()`'s: an opening fence
+/// that never closes is body text, which reads as empty frontmatter.
+pub fn try_frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("try_frontmatter", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Null);
+    }
+    let raw = require_string_expr("try_frontmatter", &args[0])?;
+    let (ok, value, error) = match load_markdown(raw, ctx, "try_frontmatter") {
+        Ok(md) => {
+            let object: serde_json::Map<String, Value> = md
+                .frontmatter()
+                .as_map()
+                .iter()
+                .map(|(key, value)| (key.clone(), stored_value(value)))
+                .collect();
+            (true, Value::Object(object), Value::Null)
+        }
+        Err(error) => (false, Value::Null, Value::String(error.to_string())),
+    };
+    let mut outcome = serde_json::Map::new();
+    outcome.insert("error".to_string(), error);
+    outcome.insert("ok".to_string(), Value::Bool(ok));
+    outcome.insert("value".to_string(), value);
+    Ok(Value::Object(outcome))
+}
+
+/// `find_files(pattern) -> file[] | Error` — every regular file a glob
+/// reference matches, as sorted absolute portable paths.
+///
+/// The path before the first segment holding `*`, `?`, or `[` is an ordinary
+/// file reference naming the directory to search (`&claudine/fixes`), and the
+/// rest is a glob matched against paths below it, where `*` stays within one
+/// segment and `**` crosses segments. A pattern without a wildcard names one
+/// file. A missing directory, like a missing file, matches nothing; so does a
+/// `null` pattern. Directory symlinks are not followed.
+pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
+    require_args_expr("find_files", args, 1)?;
+    if any_null(args) {
+        return Ok(Value::Array(Vec::new()));
+    }
+    let raw = require_string_expr("find_files", &args[0])?;
+    if is_remote_url(raw) {
+        return Err(expression_other(
+            "find_files",
+            format!("find_files() searches local directories and cannot search {raw:?}"),
+        ));
+    }
+    if raw.starts_with('%') {
+        return Err(expression_other(
+            "find_files",
+            format!("find_files() takes a glob, not a `%` recursive reference: {raw:?}"),
+        ));
+    }
+    let normalized = normalize_path_arg(raw);
+    let Some(wildcard) = normalized.find(['*', '?', '[']) else {
+        let found = resolve_arg("find_files", raw, ctx)?.filter(|path| path.is_file());
+        return Ok(Value::Array(
+            found
+                .map(|path| Value::String(biscuit_file::to_portable_string(&path)))
+                .into_iter()
+                .collect(),
+        ));
+    };
+    // A leading root sigil belongs to the directory even when a wildcard
+    // follows it directly (`&**/spec.md`).
+    let sigil_len = match normalized.as_bytes() {
+        [b'&' | b'^' | b'@', b'/', ..] => 2,
+        [b'&' | b'^' | b'@', ..] => 1,
+        _ => 0,
+    };
+    let (prefix, glob) = match normalized[sigil_len..wildcard].rfind('/') {
+        Some(slash) => {
+            let slash = sigil_len + slash;
+            (&normalized[..slash], &normalized[slash + 1..])
+        }
+        None => (&normalized[..sigil_len.min(1)], &normalized[sigil_len..]),
+    };
+    let matcher = globset::GlobBuilder::new(glob)
+        .literal_separator(true)
+        .build()
+        .map_err(|error| {
+            expression_other("find_files", format!("find_files() has an invalid glob {glob:?}: {error}"))
+        })?
+        .compile_matcher();
+    // A bare sigil names its root, which a reference spells with a `.` payload.
+    let directory_ref = match prefix {
+        "" | "&" | "^" | "@" => format!("{prefix}."),
+        other => other.to_string(),
+    };
+    let file_ref = biscuit_file::FileReference::new(&directory_ref).map_err(|error| {
+        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
+    })?;
+    let directory = super::resolve_ctx::resolve_document_directory(
+        &file_ref,
+        &ctx.base_dir,
+        &ctx.magic_paths,
+        ctx.file_resolution_context.as_ref(),
+    )
+    .map_err(|error| {
+        file_reference_error("find_files", raw, ctx, FileRefFailure::classify(&error), Some(error))
+    })?;
+    let mut matches = Vec::new();
+    if let Some(directory) = directory {
+        collect_glob_matches(&directory, &directory, &matcher, &mut matches).map_err(|error| {
+            expression_other("find_files", format!("find_files() could not search {raw:?}: {error}"))
+        })?;
+    }
+    matches.sort();
+    Ok(Value::Array(
+        matches
+            .iter()
+            .map(|path| Value::String(biscuit_file::to_portable_string(path)))
+            .collect(),
+    ))
+}
+
+/// Walks `directory` without following directory symlinks, collecting the
+/// regular files whose `/`-separated path below `root` matches `matcher`.
+fn collect_glob_matches(
+    root: &Path,
+    directory: &Path,
+    matcher: &globset::GlobMatcher,
+    matches: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            collect_glob_matches(root, &path, matcher, matches)?;
+            continue;
+        }
+        // A symlink counts when it points at a regular file.
+        if !(file_type.is_file() || (file_type.is_symlink() && path.is_file())) {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        if matcher.is_match(biscuit_file::to_portable_string(relative)) {
+            matches.push(path);
+        }
+    }
+    Ok(())
+}
+
 /// A value read from another document's frontmatter, with stored literal
 /// tokens decoded to the text they hold. The result is expression output, so
 /// it is data either way; a malformed token stays raw, as every other reader

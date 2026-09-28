@@ -304,6 +304,11 @@ impl<'a> ExpressionFinder<'a> {
     }
 
     /// Checks if a position is within a code region.
+    /// The fenced and indented code-block byte ranges this finder skips.
+    pub(crate) fn code_regions(&self) -> &[(usize, usize)] {
+        &self.code_regions
+    }
+
     fn is_in_code_region(&self, pos: usize) -> bool {
         self.code_regions
             .iter()
