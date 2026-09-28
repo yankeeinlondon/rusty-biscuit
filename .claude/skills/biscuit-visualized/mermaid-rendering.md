@@ -122,6 +122,15 @@ All standard Mermaid diagram types are supported:
 - **Mindmap** (`mindmap`)
 - **Git Graph** (`gitGraph`)
 
+## gitGraph Corrections
+
+`MermaidDiagram::compute_layout` (private; shared by `natural_size`, `render_svg`, and `gitgraph_geometry`) applies two corrections to every gitGraph, in `mermaid/gitgraph.rs`. Full contract: `biscuit-visualized/docs/mermaid-gitgraph.md`.
+
+- **Merge repair** (`repair_gitgraph_merges`, right after `parse_mermaid`): 0.3.1 reads everything after `merge` as the source lane's name, so `merge feat id: "M" tag: "v1"` loses its second parent. The source is recovered from the IR message `merged branch {suffix} into {lane}` and matched against declared lanes (the name, or the name + whitespace + `id:`/`tag:`/`type:`; exactly one). The second parent is the source lane's last earlier commit. Two-parent merges, and a single parent that already is the source tip, are left alone. No match, several, or an empty source lane is `MermaidError::RenderFailed`, never skipped. The parser *drops* a labeled merge into a lane with no commit yet; the repair cannot see it, so emit merges only into lanes with a head. A test pins the message format.
+- **Tag spacing** (`layout`): an `LR`/`RL` gitGraph with at least one tag, none rotated, is laid out twice with `commit_step = max(default, widest tag + TAG_GAP_EM × theme.font_size)` (`TAG_GAP_EM = 1.0`, a policy). Untagged, vertical (`TB`/`BT`; 0.3.1 ignores `gitGraph TB:`, only a separate direction line counts), and rotated-tag graphs keep the single pass, so rotated tags can still overlap. One global step from the widest tag makes long-label diagrams several times wider.
+- **Cache:** neither adds a key input; `MERMAID_BACKEND` is `mermaid-rs-renderer@0.3.x+bv2`. Bump `+bv<n>` whenever this layer changes output.
+- **Proof:** `#[doc(hidden)] MermaidDiagram::gitgraph_geometry()` returns `GitGraphGeometry` (commits with lane, repaired parents, tag bounds; `commit_step`, size) with `tag_boxes()` / `tag_overlaps()`. Use it, never Mermaid text snapshots, to prove tags do not overlap. Tests: `src/src/tests/gitgraph_tests.rs`.
+
 ## SVG Post-Processing
 
 The renderer applies fixes to the raw Mermaid SVG output:
@@ -149,5 +158,6 @@ pub enum MermaidError {
 |------|----------|
 | `biscuit-visualized/src/mermaid/mod.rs` | Module re-exports |
 | `biscuit-visualized/src/mermaid/render.rs` | `MermaidDiagram`, SVG post-processing |
+| `biscuit-visualized/src/mermaid/gitgraph.rs` | gitGraph merge repair, tag spacing, `GitGraphGeometry` |
 | `biscuit-visualized/src/mermaid/config.rs` | `MermaidTheme`, `MermaidConfig`, `QuadrantTheme` |
 | `biscuit-visualized/src/mermaid/error.rs` | `MermaidError` |
