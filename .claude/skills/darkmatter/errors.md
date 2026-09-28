@@ -10,6 +10,7 @@ description: Conventions for implementing rich, source-aware diagnostics in dark
 - Body Contract: Vec<Prose>
 - Escape User-Supplied Tokens
 - SourceContext for File-Origin Errors
+- Origin Attribution
 - Standard Structural Layout
 - Snapshot Tests
 - Adding a New Error Variant
@@ -90,6 +91,35 @@ anchor or else at the alias token — and report
 `SourceRef::OnDiskSpan` with an `AuthoredSpan` (range, line, column),
 falling back to file-only `SourceRef::OnDisk` when the proof fails rather
 than guessing.
+
+## Origin Attribution
+
+A value the document did not author must not be blamed on the document.
+`SourceRef` (in `markdown/types.rs`) has four sources:
+
+| Variant | Meaning | Rendered locus |
+| ------- | ------- | -------------- |
+| `OnDiskSpan { context, span }` | The failing construct is provably authored at `span` | "Defined in:" + line/column + excerpt |
+| `OnDisk(context)` | The file is known; the span is not provable | "Defined in:" + file (+ key excerpt) |
+| `Supplied { supplier }` | Supplied from outside the document | "The value came from {supplier}, not from the document." with no excerpt |
+| `Effective { .. }` | Late-binding text with no stable locus | nothing |
+
+- The pipeline's `attribute_frontmatter_failure` rewrites a frontmatter
+  interpolation failure on a key a `--set` override supplied with
+  ``MarkdownError::with_supplier("a command-line override (`--set`)")``. Other
+  failures are anchored to the document (`into_anchored`, then
+  `with_on_disk_source`, which passes a `Supplied` source through unchanged).
+- `supplier` is a noun phrase that completes "The value came from …". The
+  variant is generic, so a consumer can name another supplier (Claudine names
+  the agent).
+- Data (a data override, an expression result, a decoded token) is never
+  scanned, so it cannot produce an authoring error. Do not add a diagnostic
+  that inspects flattened text for `{{` or `$(`. Judge the authored view.
+- `ExpressionError::MalformedLiteralToken(TokenError)` renders its own
+  "malformed literal token" block through `push_on_disk_locus`: file, line,
+  column, and excerpt. Its hint tells the author to restore the tool-written
+  value or replace the whole token with ordinary text. It is
+  authoring-fatal, so a lenient policy cannot downgrade it.
 
 ## Standard Structural Layout
 

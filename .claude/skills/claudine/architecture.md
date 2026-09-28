@@ -506,7 +506,7 @@ wire-compatible behavior.
 
 Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions:
 
-- **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input, replaces document body with provider output
+- **Inline composition** (`--frontmatter-prompt`): reads frontmatter `prompt` field as input; the agent edits the document itself, then the closure repairs, restores, encodes, hashes, and writes it once (see Agent text is data below)
 - **Chained composition** (`--compose`): composes full document as prompt without file mutation
 
 The CLI executor under `cli/src/commands/wrap/composition/` keeps stable entry
@@ -532,6 +532,57 @@ Other concerns remain split by responsibility:
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
 
+### Agent text is data
+
+Anything a run *produces* (agent output, expression results, file reads) is
+data: it is never scanned again for `{{ … }}` or `$( … )`. Only text a person
+wrote (the document, `--set`/`key=value`, interactive answers) is a template.
+Claudine enforces this at two boundaries:
+
+- **In memory — `LayeredOverrides`** (`runtime_state.rs`). Runtime values stay
+  raw and typed (`outputs`, `_loop_*`, loop action results, lifecycle `set:`,
+  task `params`, group `variables`, the step overlay, and the per-document
+  `PrepareOptions::proxy_overlay`). `LayeredOverrides::apply_to` is the only
+  call to Darkmatter's `with_override_layers`, splitting keys into an authored
+  and a data layer. `cli/tests/l1/override_boundary_guard.rs` fails on any
+  other override hand-off and on any `literal_token` reference in the runtime
+  modules (`sequence/`, `looping/`, `runtime_state.rs`).
+- **On disk — literal tokens** (`composition/closure/persist.rs`). The inline
+  closure runs repair → `restore_properties_text` → encode → decoded
+  `FrontmatterDelta` → hash → one `atomic_write`.
+  - `repair_agent_frontmatter` quotes an agent-added/changed single-line plain
+    top-level scalar YAML would misread (`: `, ` #`, trailing `:`, leading
+    indicator); unparseable YAML and duplicate keys (owned keys included) fail
+    as `CompositionError::InlineAgentFrontmatterRejected`
+    (`document.invalid_frontmatter`, line, `agent_edit`) and roll back.
+  - `encode_agent_values` replaces each agent-owned string leaf holding `{{`
+    or `$(` (the N9 gate; keys never) with `encode_yaml_scalar`, located by
+    `darkmatter::markdown::hash::locate_frontmatter_leaves`. Ownership compares
+    raw parsed values, so a token rewritten as its text re-encodes to the same
+    token. **Lists compare by index**: an agent inserting at the front of an
+    authored list owns every shifted item, so a shifted `{{ … }}` item is
+    encoded. Unlocatable leaves (anchor, alias, tag, `<<`, plain flow item,
+    nested sequence) are refused, never encoded wholesale. A `|`/`|+` block
+    ending the frontmatter is stored as compose reads it (trimmed).
+  - `persisted_data` applies the same gate to the lifecycle
+    `set_`/`merge_`/`append_`/`prepend_frontmatter` writes
+    (`lifecycle/executor.rs::dispatch_side_effect`, also the sequence
+    `side_effect:` path); the in-memory mirror stays raw.
+  - Readers use `stored_text` / `opens_stored_token`: schema validation and
+    status (`schema/mod.rs`, `classify.rs`; `pre_validate_layered_for_mode`
+    judges data keys, never defers them; only the sequence JIT uses it),
+    sequence sources, pre-flight shell bytes, and `file_detail.rs`.
+  - `DEFAULT_GUARDRAILS` (`guardrails.rs`) carries the plain-scalar `#` rule;
+    the prior shipped text migrates via `HISTORICAL_SHIPPED_GUARDRAILS`.
+
+In the lifecycle executor, `evaluate_operand` interpolates an authored literal
+once and returns any other expression's result as data; the old
+`reject_surviving_spans` guard is gone. Strict DM2 still fails an unresolved
+authored span. Known limits: Darkmatter's `expression` format validator is
+string-only, so decoded data with `{{` in an expression-typed field passes
+lexically; the public `pre_validate_schema[_for_mode]` treats every override
+as authored.
+
 ### Sequences
 
 `lib/src/composition/sequence/` owns the normalized plan; `cli/src/commands/wrap/sequence/`
@@ -542,7 +593,10 @@ owns orchestration. The split follows the two execution phases:
   `<file-ref> [-> offset] [::op(args)]` source grammar. Data files load through
   `biscuit_file` and resolve through `FileReference::resolve_in_context` using
   the request-scoped `FileResolutionContext` derived for the authoring source;
-  string sources classify through `biscuit_file::ListFormat`.
+  string sources classify through `biscuit_file::ListFormat`. `grammar.rs`
+  refuses a `sequence:` value that opens a stored literal token
+  (`SequenceInvalid`); expression sources and pre-flight `step_state` read
+  stored tokens as their text via `closure::stored_text`.
 - `sequence/preflight/` — the recursive task-graph loader. Walks inline tasks,
   `kind: task` / `kind: group` / `kind: group-catalog` files, and every `prompt:`
   document, keeping a canonical-path ancestry stack so a cycle reports its whole
@@ -555,7 +609,9 @@ owns orchestration. The split follows the two execution phases:
 - `composition/runtime_state.rs` — `RuntimeState`, the invocation-local cell
   holding accumulated `set` mutations and the `outputs` accumulator.
   `layered_set_overrides` is the single place the four-layer precedence
-  (live frontmatter < user setters < mutations < reserved overlay) is encoded.
+  (live frontmatter < user setters < mutations < reserved overlay) is encoded;
+  it returns `LayeredOverrides`, which also records which keys are data (see
+  [Agent text is data](#agent-text-is-data)).
 - `wrap/sequence/{jit,iterate,phase1c,task_run,task_frames}.rs` — just-in-time
   composition at each step's turn. `phase1c`'s validation compose and execution
   both route through `jit::compose_step`, so "validated == executed" holds

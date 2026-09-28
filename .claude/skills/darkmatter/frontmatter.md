@@ -97,6 +97,79 @@ For "did the body meaningfully change", use the non-strict `Simple` body hash
 comparison: leading/trailing whitespace and blank lines are ignored, internal
 whitespace stays significant.
 
+`restore_properties_text` needs parseable YAML. A consumer repairing
+malformed YAML (Claudine's inline closure) repairs first and restores second.
+
+## Literal Tokens
+
+A frontmatter string an operation produced (agent output, an effect write) is
+persisted as **data** so a later compose does not read it as a template or
+shell command. The on-disk form is one whole-leaf, double-quoted scalar:
+
+```yaml
+summary: "{{!data:v1:Zml4ZWQge3sgYXJlYSB9fSBwYXJzaW5n}}"  # "fixed {{ area }} parsing"
+```
+
+The payload is the value's UTF-8 bytes in unpadded URL-safe base64. Decoding
+is canonical, and `{{!data:v1:}}` is the empty string. The API lives in
+`darkmatter::markdown::literal_token`:
+
+| Item | Use |
+| ---- | --- |
+| `encode(&str)` / `encode_yaml_scalar(&str)` | Bare token or the always-double-quoted YAML scalar. Round-trips every Unicode string. |
+| `decode(&str)` | One bare token to its text; `TokenError` otherwise. |
+| `decode_leaf(&str)` | `None` (no token), `Some(Ok(text))` (whole-leaf token), or `Some(Err(..))` (malformed or `Embedded`). |
+| `decode_literal_tokens(&Value)` | Decodes a loaded tree; `LiteralTokenError` carries the dotted path. |
+| `Frontmatter::decoded_literal_tokens()` | The per-document convenience. |
+| `holds_pending_syntax(&str)` | Lexical "still a template?" (`{{` or `$(` and not a whole valid token). A caller that already knows a value is data must not ask. |
+| `TOKEN_PREFIX`, `TOKEN_VERSION` | `{{!data:` and `v1`. |
+
+Rules consumers depend on:
+
+- **Loaders keep tokens encoded, and readers must decode.** `fm_get`,
+  `fm_parse`, and the raw YAML all show the token. Schema checks, reports, and
+  handoffs call `decode_literal_tokens`. Never feed decoded values back to
+  composition as authored text; use `ComposeOptions::with_data_overrides`
+  instead (see [compose.md](compose.md#inserted-text-is-data)). A tool outside
+  Darkmatter and Claudine that reads the YAML directly sees the token.
+- **The cross-document expression readers decode.** `frontmatter(path[,
+  prop])` and `markdown_title(path)` return a stored token as its text
+  (data, like any expression result); a malformed token comes back raw rather
+  than failing the expression.
+- **Composition decodes once.** Frontmatter pass 1 decodes each whole
+  authored leaf, and the text is data from then on. A malformed or embedded
+  token fails with `ExpressionError::MalformedLiteralToken` and its line and
+  column. It never falls through to expression or shell parsing.
+- **Encode by origin, never by appearance.** A raw string that already looks
+  like a token is encoded again. An unchanged stored token is left alone.
+- **Hand edits.** Replacing the token with plain text makes the value an
+  authored template again. To keep it as data, decode, edit, and re-encode
+  it. An author writes the token spelling as literal text with
+  `{{{!data:…}}}`.
+
+### Locating a Leaf for an In-Place Edit
+
+`hash::locate_frontmatter_leaves(document, &[Vec<FrontmatterPathSegment>])`
+returns one `LeafSpan { path, range, decoded }` per requested string leaf.
+`range` is the scalar's absolute byte range: quotes and a block scalar's
+header are included, and the final line break is excluded. Splicing an
+encoded scalar into exactly that range leaves every other byte and line
+ending intact. This, with `restore_properties_text`, is the sanctioned
+text-preserving writer. Do not build another YAML editor.
+
+- Each path is located within its own top-level property. An unmodeled
+  construct elsewhere never blocks it.
+- A span is returned only when its decoded text equals what compose reads.
+  For a clipped block scalar ending the frontmatter, `decoded` therefore lacks
+  the trailing newline.
+- Failure is all-or-nothing. `LeafLocateError::Document` means the
+  frontmatter is not a parseable block mapping. `LeafLocateError::Unlocated`
+  is the first path that failed, as an `UnlocatedLeaf { path, line, reason }`.
+  Its `UnlocatedLeafReason` is `Missing`, `NotAScalar`, `NodeProperties`
+  (anchor, alias, tag, or `<<` merge), or `UnsupportedShape` (a plain
+  flow-collection item, a multi-line flow collection, or a nested sequence).
+  Report the line rather than falling back to re-serializing the document.
+
 ## `style:` Frontmatter
 
 `darkmatter::style` owns the document-level `style:` schema and applicators.

@@ -37,9 +37,9 @@ Markdown presentation is retained separately and the raw record remains
 available for fresh preparation. Ordinary strings and document-authored file
 references keep their existing source-relative and repository-aware rules.
 
-1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing a whole-value `$(...)` are deferred to pass 2
-2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
-3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
+1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing an authored whole-value `$(...)` are deferred to pass 2; each string is scanned once (see [Inserted Text Is Data](#inserted-text-is-data))
+2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Data (a data override, an expression result, a decoded literal token) is never pending: it is judged now. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
+3. **Frontmatter Shell Expansion** - top-level frontmatter values whose *authored source* is a whole-value `$(cmd)` execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values
 5. **Text Replacement** - `replace:` frontmatter replaces literal strings
 6. **Page Blocks** - `::block`/`::end-block` conditional regions
@@ -406,6 +406,9 @@ Version: VERSION
 - `null` → empty string
 - Non-map `replace` silently skipped
 - Single-pass (replacements not re-scanned)
+- A value keeps the origin of its leaf: an authored value writes authored
+  text (so it can introduce a directive or `{{ … }}`), while a data or
+  inherited value writes data
 
 ## Interpolation
 
@@ -686,6 +689,105 @@ Compose keeps every backslash, and the Markdown renderer resolves the escape.
 Use it for prose that quotes Handlebars, Jinja, or similar syntax. Use
 `{{{ … }}}` when the composed output itself should contain `{{ … }}`.
 
+### Inserted Text Is Data
+
+Every authored span is scanned **once**. Produced text is data and is never
+scanned again for `{{ … }}`, `{{{ … }}}`, a whole-value `$( … )`, or a body
+directive. Produced text is:
+
+- an expression result, including a file read such as `frontmatter(log, 'k')`
+- shell output (frontmatter `$( … )`, `::shell`, `::shell-block`)
+- a `{{{ … }}}` escape's result
+- a data override (`with_data_overrides`, a `Data` override layer)
+- a decoded literal token
+- the composed values a parent hands to a transcluded child (via
+  `child_inherited_origin`, which joins the child cache key)
+
+Origin travels beside the value, never inside it. `compose/value_origin.rs`
+holds it for frontmatter: crate-private `DataPaths` (leaf paths) inside
+`FrontmatterProvenance`, which also snapshots the authored top-level strings.
+For the body, `body_origin::DataRanges` holds it inside `BodyProvenance`,
+which every body stage carries. `interpolate_text_in` scans the masked view
+once and converts literals in the same scan. `MAX_INTERPOLATION_DEPTH`, the
+rescan loop, and `ExpressionOrigin::Generated` no longer exist. Do not
+reintroduce a later stage that scans assembled text: a new scanner takes
+`Option<&DataRanges>` and reads `parse_utils::structural_view`, and a
+directive counts only when its line break, prefix, and keyword are authored.
+
+**Intentional behavior change (no fixed point).** Interpolation used to
+rescan inserted text until it stopped changing. Now:
+
+```yaml
+---
+area: claudine
+note: "fixed {{{ area }}}"
+---
+Body: {{ note }}
+```
+
+composes to `Body: fixed {{ area }}`, where it used to print
+`Body: fixed claudine`. An authored template that relied on the rescan must
+be rewritten at the source. Write adjacent authored spans
+(`{{ a }}{{ b }}`), or concatenate with `+` inside one expression.
+
+**Origin-aware guards.** Each guard judges authored syntax, never data. Do
+not reduce one to a raw string check on flattened text.
+
+- **Shell shape.** Frontmatter `$( … )` is a shell candidate only when the
+  key's **authored source** is a whole-value `$( … )`. The single predicate is
+  `FrontmatterProvenance::is_authored_shell_candidate` (crate-private). The runtime scan, the
+  pass-2 deferral, preflight collection, `pending_shell_literals`, and the
+  dynamic-shape detector all use it, whether or not shell expansion is
+  enabled. Interpolation may supply arguments but never create the command
+  shape.
+- **Post-expansion leak guard.** `validate_no_whole_value_shell_leak` skips
+  data paths, so shell output that looks like `$( … )` stays data.
+- **Body commands.** `data_changed_shape`
+  (`shell_expansion/parser.rs`) compares a command with its masked twin. Data
+  may not supply the executable, an action, an operator, or a redirection.
+  In a `::shell-block`, data may not split or join commands either.
+- **Strictness.** Authored unresolved whole values keep their strict error,
+  and mixed text keeps its lenient warning.
+- **Known gap.** A `::file … when="{{ cond }}"` condition built from data is
+  still evaluated.
+
+**Overrides and attribution.** `with_set_overrides` (`md compose --set`,
+`key=value`) values are **authored templates**, because a person typed them.
+`with_data_overrides` values are inert and apply after set overrides, so a
+key present in both is data. `with_override_layers([OverrideLayer::authored(..),
+OverrideLayer::data(..)])` folds ordered layers, and each top-level key takes
+the origin of the last layer that supplied it. It replaces both earlier
+setters. When a frontmatter interpolation fails on a key a `--set` override
+supplied, `attribute_frontmatter_failure` reports it as
+`SourceRef::Supplied` naming ``a command-line override (`--set`)``, not the
+document. See [errors.md](errors.md#origin-attribution).
+
+**Literal tokens.** A frontmatter string stored as
+`"{{!data:v1:<base64url>}}"` is data on disk (the codec is in
+`markdown::literal_token`, covered in [frontmatter.md](frontmatter.md#literal-tokens)).
+Pass 1's `decode_authored_tokens` pre-pass decodes each whole authored leaf
+at any depth once and marks it data. It is fatal even in best-effort
+preflight. `ExpressionFinder::scan` reports tokens in
+`ExpressionScanResult::tokens`, never as expressions. A token anywhere else
+is `ExpressionError::MalformedLiteralToken`, which is authoring-fatal under
+every policy and located by line and column:
+
+- a token in mixed text
+- a token with padding
+- a token in the body
+- a token inside an expression's string literal
+
+Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw token text.
+
+**Schema pending.** Data is final, so it is judged at validation and never
+deferred. `value_pending_composition` in `compose/schema_validation.rs`
+checks only the `DataPaths::authored_view`. The shared lexical test,
+`literal_token::holds_pending_syntax`, never treats a whole valid token as
+pending. Outside compose, `EffectiveSchema::validate_with_options` validates
+the token-decoded instance, while it computes pending on the raw one.
+
+See `darkmatter/docs/inline/interpolation.md#inserted-text-is-data`.
+
 ## ComposeReport
 
 ```rust
@@ -756,6 +858,10 @@ Shell approval and shell execution are separate concerns:
   plan and sends nothing. Every all-literal call in the authored source is
   recorded too, so untaken branches contribute. `md compose --shell` prints
   them.
+- Only an authored whole-value `$( … )` is a candidate. A `$( … )` an
+  expression produced, shell output, a data override, or a decoded literal
+  token is data and is never collected. The pre-approval gate collects from a
+  snapshot of the document taken before frontmatter pass 1 for the same reason.
 - Frontmatter interpolation runs before the root's pre-approved gate, so the
   first nested call there runs the gate against the root document first.
 
@@ -866,7 +972,8 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   an alias's definition from its own YAML tree
   (`yaml_scalar::decode_alias_definition`) instead of searching: the search
   is affordable here only because a frontmatter failure ends the run.
-- **Rescans** of replacement output have no authored span.
+- **Replacement output**: an expression an authored `replace:` value
+  introduced has no authored span, so it reports file-only.
 
 The helper takes an explicit
 `ExpressionFailurePolicy`; only `compose_subtree(..., Lenient)`, preflight's

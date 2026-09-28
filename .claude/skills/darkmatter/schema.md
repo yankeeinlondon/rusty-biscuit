@@ -47,6 +47,14 @@ declaration so Darkmatter and Claudine can select the right schema formally.
 SimplifiedSchema compiles to Draft 2020-12 JSON Schema. Composition validates
 after initial frontmatter interpolation and before shell expansion, then
 revalidates values deferred because they contained pending shell syntax.
+Only authored syntax is pending. Data is judged immediately, including a data
+override, an expression result, and a decoded literal token. The shared
+lexical test is `literal_token::holds_pending_syntax`, which never treats a
+whole valid token as pending. Validation checks the token-decoded instance. The
+`expression` format validator parses a token's decoded text. Being
+string-only, it cannot see origin, so decoded data holding `{{` in an
+expression-typed field is still accepted lexically. See
+[compose.md](compose.md#inserted-text-is-data).
 
 Validation-only APIs are passive and read-only. Composition may coerce declared
 scalar types and normalize a successful eager `file(eager)` value to its
