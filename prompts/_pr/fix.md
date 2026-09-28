@@ -43,10 +43,7 @@ success:
               - action: proxy
                 target: ../commit.md
                 with:
-                    # `commit.md` lists `ctx.staged_files` in its body, and `ctx` is the
-                    # start-of-run snapshot, so that list predates the fix was staged. A body
-                    # has no live `current`, so the real list travels in `message`.
-                    message: "These staged files repair local test failures that blocked the push of `{{ branch }}`. {{ frontmatter(report, 'summary') }} IMPORTANT: the staged-file list printed in this prompt was captured before the fix was staged, so it is out of date. Run `git diff --cached --name-only` for the real list. At handoff it was: {{ as_csv(frontmatter(report, 'staged')) }}."
+                    message: "These staged files repair local test failures that blocked the push of `{{ branch }}`. {{ frontmatter(report, 'summary') }}"
                     success:
                         success: "the fix is committed. Run the PR prompt again to push it; the pre-push hook reuses the passing evidence this run already produced"
                         message: "🗳️  the fix for the local test failures on `{{ branch }}` is committed. Run the PR prompt again to push it; the pre-push hook reuses the passing evidence this run already produced"

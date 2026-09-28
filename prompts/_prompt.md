@@ -14,11 +14,26 @@ $prompt:
 lifecycle: true
 flow: true
 testing: true
-# The defect warnings at the end are gated on this spec: each renders only while the spec is
-# still at this active path and its finding id is absent from the spec's `fixed:` list. Fixing
-# a defect means adding its id there; nothing in this file needs editing. `&` pins the
-# repository root, and is used because `ctx` is not available to a transcluded file.
-defects_spec: "&claudine/fixes/2026-09-20-lifecycle-handoff-gaps/spec.md"
+# The defect warnings at the end are gated on the fix `2026-09-20-lifecycle-handoff-gaps`,
+# found by its directory name anywhere under `claudine/fixes/`, so moving it between lifecycle
+# directories changes nothing here. A warning renders while its finding id is absent from the
+# spec's `fixed:` list and the spec's `status` is not `completed`. Fixing a defect means adding
+# its id there; nothing in this file needs editing. When the spec cannot be trusted (no match,
+# two matches, frontmatter that does not parse, a `status` or `fixed` of the wrong shape), a
+# notice says why and every warning renders: an unreadable list never hides a warning.
+defects_matches: "{{ find_files('&claudine/fixes/**/2026-09-20-lifecycle-handoff-gaps/spec.md') }}"
+defects_read: "{{ length(defects_matches) == 1 ? try_frontmatter(defects_matches[0]) : null }}"
+defects_spec: "{{ defects_read.value }}"
+defects_fixed: "{{ defects_spec.fixed }}"
+defects_status: "{{ defects_spec.status }}"
+defects_lookup_notice: "{{ length(defects_matches) == 0 ? 'no `spec.md` was found in a `2026-09-20-lifecycle-handoff-gaps` directory under `claudine/fixes/`' : length(defects_matches) > 1 ? 'more than one specification matched, so none was read: ' + as_csv(defects_matches) : !defects_read.ok ? 'its frontmatter could not be read: ' + defects_read.error : '' }}"
+defects_status_notice: "{{ defects_lookup_notice ? '' : !has_key(defects_spec, 'status') ? '`status` is missing' : is_null(defects_status) ? '`status` is null' : !is_string(defects_status) || defects_status == '' ? '`status` is not a non-empty string' : '' }}"
+# Counting the recognized ids catches a wrong-typed, unknown, or repeated entry without
+# filtering it out: the count falls short of the list's length.
+defects_known_ids: "{{ is_array(defects_fixed) ? (contains(defects_fixed, 'F1') ? 1 : 0) + (contains(defects_fixed, 'F2') ? 1 : 0) + (contains(defects_fixed, 'F3') ? 1 : 0) + (contains(defects_fixed, 'F4') ? 1 : 0) + (contains(defects_fixed, 'F5') ? 1 : 0) + (contains(defects_fixed, 'F6') ? 1 : 0) + (contains(defects_fixed, 'F7') ? 1 : 0) + (contains(defects_fixed, 'F8') ? 1 : 0) + (contains(defects_fixed, 'D1') ? 1 : 0) + (contains(defects_fixed, 'D2') ? 1 : 0) : 0 }}"
+defects_fixed_notice: "{{ defects_lookup_notice ? '' : !has_key(defects_spec, 'fixed') ? '`fixed` is missing' : is_null(defects_fixed) ? '`fixed` is null' : !is_array(defects_fixed) ? '`fixed` is not a list' : length(defects_fixed) != defects_known_ids ? '`fixed` holds an entry that is not one of the finding ids F1–F8, D1, D2, or holds one twice' : '' }}"
+defects_trusted: "{{ !defects_lookup_notice && !defects_status_notice && !defects_fixed_notice }}"
+defects_completed: "{{ !defects_lookup_notice && !defects_status_notice && defects_status == 'completed' }}"
 ---
 
 ## How Claudine Prompts Work
@@ -148,42 +163,65 @@ Rules that shape a design:
 - **Say what is out of bounds.** A stage that must not commit, push, or repair has to be told so, along with which stage does.
 - Claudine already appends a system prompt telling a non-interactive agent that nobody can answer it. Do not repeat that; add only what is specific to the task, such as where to record what it cannot ask.
 
-::block when="file_exists(defects_spec)"
+::block when="!defects_completed"
 
 ### Defects to design around
 
-Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-handoff-gaps`. The list is read from that specification when this prompt is composed, so an item that appears here has not been fixed. Do not copy a workaround out of `prompts/_pr/` for a defect that is not listed.
+Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-handoff-gaps`. The list is read from that specification's `status` and `fixed:` list when this prompt is composed, so an item that appears here has not been fixed. Do not copy a workaround out of `prompts/_pr/` for a defect that is not listed.
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F1')"
+::block when="!defects_trusted"
+**The defect list could not be read, so every known defect is listed below, including any that may already be fixed.** Confirm a defect against the specification before designing around it.
+
+::block when="defects_lookup_notice"
+- The specification lookup failed: {{ defects_lookup_notice }}.
+::end-block
+::block when="defects_status_notice"
+- The specification's {{ defects_status_notice }}.
+::end-block
+::block when="defects_fixed_notice"
+- The specification's {{ defects_fixed_notice }}.
+::end-block
+
+::end-block
+
+::block when="!defects_trusted || !contains(defects_fixed, 'F1')"
 - **`ctx` git state is reused across composition runs.** A proxy target, a later sequence step, a later loop iteration, and a retried attempt all see the first run's working tree. A hook that needs the present state reads `current`, and a body uses `::shell`.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F2')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F2')"
 - **A `proxy` fired from inside a looping document is recorded but not performed.** Use `retry` for bounded repetition when the document also has to hand off.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F3')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F3')"
 - **A shell command in a transcluded partial is not pre-approved when it interpolates a value that arrived through `proxy … with:`.** Keep such commands inline in the target.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F4')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F4')"
 - **An `error` in a `success` stack fires `failure` and `finalize`, but the process exits `0` and prints no error.** Put a `warn` beside it, and do not depend on the exit code.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F5')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F5')"
 - **A `ctx` property mentioned only in a transcluded file renders empty.** Claudine evaluates the properties found on the root page and does not look through `::file`. A partial that reads `ctx` works only when the prompt including it mentions the same property, so have a partial take what it needs through `set.<key>=` instead.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F7')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F6')"
+- **Some loop references describe a condition checked before each iteration.** It is checked after each iteration, against the state that iteration ran with, so a loop always runs at least once and `while: "n < 2"` counting from `0` runs three times. Count iterations by that rule, not by a page that says a loop can run zero times.
+::end-block
+
+::block when="!defects_trusted || !contains(defects_fixed, 'F7')"
 - **A `proxy` inside a sequence `prompt:` task is refused** with a "no owning coordinator" error. A sequence step cannot hand off; make the target its own step.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F8')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F8')"
 - **The `loop:` block's own `info`, `warn`, `message`, and stack cannot read the `_loop_*` values**, and referencing one there fails the run. Report loop progress from `start` or `success`, which can.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'D1')"
+::block when="!defects_trusted || !contains(defects_fixed, 'D1')"
 - **Interpolation literals are converted only in a file that also contains a real span.** A file whose every brace span is a literal reaches the agent with its triple braces intact. Give such a file one real span.
+::end-block
+
+::block when="!defects_trusted || !contains(defects_fixed, 'D2')"
+- **Claudine's run header can show a `description` wrongly.** Underscores are read as emphasis even inside inline code, so `_pr/open.md` can appear as `pr/open.md`, and a stray `</i>` can appear. A diagnostic that quotes a name such as `_loop_count` loses its underscore the same way. The source is right: read names from the file, and do not rename files or variables to suit the header.
 ::end-block
 
 ::end-block

@@ -115,13 +115,9 @@ failure:
     > {{about}}
 ::end-block
 
-<!-- Two constraints shape this section.
-     1. The shell blocks are inline on purpose. A shell command in a transcluded partial that
-        interpolates a value delivered by `proxy ... with:` (here `base`) is not pre-approved on
-        the proxy path, so moving them into a shared `::file` partial breaks the facts.
-     2. Git state comes from shell blocks, not `ctx.*`. `ctx` is the start-of-run snapshot, so
-        `ctx.dirty_files` would still list files that `commit.md` committed on the way here, and
-        the live `current` is available to lifecycle handlers but not to a document body. -->
+<!-- The shell blocks are inline on purpose. A command that fails inside a transcluded partial
+     drops the whole partial with only a warning, while an inline block either renders its
+     `when_error` text or stops the stage, so one missing tool cannot silently erase every fact. -->
 ## What Is Already Known
 
 These facts were gathered immediately before this session started. Use them as given rather than re-running the commands; re-check a fact only when something you did could have changed it.
@@ -130,10 +126,11 @@ These facts were gathered immediately before this session started. Use them as g
 
 ### Uncommitted changes
 
-The output of `git status --short`. Nothing between this paragraph and the next heading means the working tree is clean. Anything listed makes the pre-push hook replan from the working tree and withhold the evidence CI would otherwise reuse.
-
-::shell-block timeout=30 when_error="(could not be determined on this host)"
-git status --short
+::block when="length(ctx.dirty_files) == 0"
+The working tree is clean.
+::end-block
+::block when="length(ctx.dirty_files) > 0"
+These paths have uncommitted changes (staged, unstaged, or untracked): {{ as_csv(ctx.dirty_files) }}. They make the pre-push hook replan from the working tree and withhold the evidence CI would otherwise reuse.
 ::end-block
 
 ### Is local `{{base}}` current with `origin/{{base}}`?
