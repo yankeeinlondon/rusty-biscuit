@@ -9,7 +9,7 @@ refresh or should leave active use. A document can carry both kinds of rule:
 ```yaml
 ---
 last_updated: 2026-09-28
-content-policy:
+content_policy:
   - rule: ValidFor(3mo, @last_updated)
     action: refresh
   - rule: ValidUntil(2027-01-01)
@@ -70,14 +70,14 @@ the renewal must surface that conflict rather than silently move the deadline.
 A compact rule defaults to `refresh`:
 
 ```yaml
-content-policy:
+content_policy:
   - ValidFor(3mo, @last_updated)
 ```
 
 An explicit action can request retirement instead:
 
 ```yaml
-content-policy:
+content_policy:
   - rule: ValidFor(3mo, @last_updated)
     action: archive
 ```

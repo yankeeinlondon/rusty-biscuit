@@ -15,7 +15,7 @@ A document can need periodic refreshes and still have a fixed retirement date:
 ```yaml
 ---
 last_updated: 2026-09-28
-content-policy:
+content_policy:
   - rule: ValidFor(3mo, @last_updated)
     action: refresh
   - rule: ValidUntil(2027-01-01)
@@ -41,7 +41,7 @@ removal.
 A rule can use a compact string. Its default action is `refresh`:
 
 ```yaml
-content-policy:
+content_policy:
   - ValidFor(3mo, @last_updated)
 ```
 
@@ -52,13 +52,13 @@ default for an absent policy is `ValidFor(6mo)`; callers can replace it.
 There are two baseline forms:
 
 ```yaml
-content-policy:
+content_policy:
   - ValidFor(3mo, 2026-09-28)
 ```
 
 ```yaml
 last_updated: 2026-09-28
-content-policy:
+content_policy:
   - ValidFor(3mo, @last_updated)
 ```
 
