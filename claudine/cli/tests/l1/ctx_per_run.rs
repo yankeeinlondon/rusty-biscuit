@@ -142,6 +142,26 @@ fn field<'a>(line: &'a str, name: &str) -> &'a str {
         .unwrap_or_default()
 }
 
+/// Each `record_identity` line as `{label} staged={n}`, after asserting that
+/// every line reports the same, non-empty `cwd` and `root`: a hop never moves
+/// the launch identity.
+fn staged_with_stable_identity(lines: &[String]) -> Vec<String> {
+    let first = lines.first().map(String::as_str).unwrap_or_default();
+    for key in ["cwd", "root"] {
+        assert!(!field(first, key).is_empty(), "`{key}` is recorded: {lines:?}");
+        for line in lines {
+            assert_eq!(field(line, key), field(first, key), "`{key}`: {lines:?}");
+        }
+    }
+    lines
+        .iter()
+        .map(|line| {
+            let label = line.split(' ').next().unwrap_or_default();
+            format!("{label} staged={}", field(line, "staged"))
+        })
+        .collect()
+}
+
 /// The control: one run holds one observation, even after that run stages the
 /// file itself.
 #[test]
@@ -233,6 +253,44 @@ fn a_proxy_target_observes_a_branch_its_source_created() {
     }
 }
 
+/// A working-tree edit made between runs, with nothing staged, is the next
+/// run's `ctx.dirty_files`, while the run that made it keeps its own
+/// observation.
+#[test]
+fn a_proxy_target_observes_a_working_tree_edit_its_source_made() {
+    let fixture = repo("ctx-per-run-worktree");
+    let record_dirty = |label: &str| {
+        format!(
+            "        - action:\n              - append_line: [\"runs.log\", \"{label} dirty={{{{ ctx.dirty_files }}}} cwd={{{{ ctx.cwd }}}} root={{{{ ctx.repo_root }}}}\"]\n"
+        )
+    };
+    doc(
+        &fixture,
+        "target.md",
+        &format!("---\nsuccess:\n    stack:\n{}---\ntarget body\n", record_dirty("target")),
+    );
+    let file = doc(
+        &fixture,
+        "router.md",
+        &format!(
+            "---\nstart:\n    stack:\n{}        - action:\n              - append_line: [\"README.md\", \"edited\"]\n              - proxy: ./target.md\n---\nrouter body\n",
+            record_dirty("source")
+        ),
+    );
+
+    let run = run(&fixture, &["compose", "--claude", &file]);
+
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    let lines = runs(&fixture);
+    assert_eq!(lines.len(), 2, "{lines:?}\n{}", run.output);
+    assert!(field(&lines[0], "dirty").contains("\"a.txt\""), "{lines:?}");
+    assert!(!field(&lines[0], "dirty").contains("\"README.md\""), "{lines:?}");
+    assert!(field(&lines[1], "dirty").contains("\"README.md\""), "{lines:?}");
+    for key in ["cwd", "root"] {
+        assert_eq!(field(&lines[0], key), field(&lines[1], key), "`{key}`: {lines:?}");
+    }
+}
+
 /// A sequence step is a run: a later step observes what an earlier step staged.
 #[test]
 fn a_later_sequence_step_observes_an_earlier_steps_staging() {
@@ -241,7 +299,7 @@ fn a_later_sequence_step_observes_an_earlier_steps_staging() {
         doc(
             &fixture,
             name,
-            &format!("---\nsuccess:\n    stack:\n{}---\nstep body\n", record(label)),
+            &format!("---\nsuccess:\n    stack:\n{}---\nstep body\n", record_identity(label)),
         );
     }
     let file = doc(
@@ -253,7 +311,12 @@ fn a_later_sequence_step_observes_an_earlier_steps_staging() {
     let run = run(&fixture, &["sequence", "--claude", &file]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    assert_eq!(runs(&fixture), ["step1 staged=0", "step3 staged=1"], "{}", run.output);
+    assert_eq!(
+        staged_with_stable_identity(&runs(&fixture)),
+        ["step1 staged=0", "step3 staged=1"],
+        "{}",
+        run.output
+    );
 }
 
 /// A loop iteration is a run: iteration 2 observes what iteration 1 staged.
@@ -263,14 +326,14 @@ fn a_later_loop_iteration_observes_the_previous_iterations_staging() {
     let file = doc(
         &fixture,
         "loop.md",
-        "---\nn: 0\nloop:\n    while: \"n < 1\"\n    action: \"increment(n)\"\nsuccess:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"iteration{{ _loop_count }} staged={{ length(ctx.staged_files) }}\"]\n              - shell: \"git add a.txt\"\n---\nloop body\n",
+        "---\nn: 0\nloop:\n    while: \"n < 1\"\n    action: \"increment(n)\"\nsuccess:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"iteration{{ _loop_count }} staged={{ length(ctx.staged_files) }} cwd={{ ctx.cwd }} root={{ ctx.repo_root }}\"]\n              - shell: \"git add a.txt\"\n---\nloop body\n",
     );
 
     let run = run(&fixture, &["compose", "--claude", &file]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
     assert_eq!(
-        runs(&fixture),
+        staged_with_stable_identity(&runs(&fixture)),
         ["iteration1 staged=0", "iteration2 staged=1"],
         "{}",
         run.output
@@ -294,7 +357,7 @@ fn a_retry_attempt_observes_the_previous_attempts_staging() {
         "retry.md",
         &format!(
             "---\nsuccess:\n    stack:\n{}{}---\nbody\n",
-            record("attempt"),
+            record_identity("attempt"),
             first_attempt_stages("finalize", "              - retry: 1\n")
                 .replacen("finalize:\n    stack:\n", "", 1),
         )
@@ -304,7 +367,12 @@ fn a_retry_attempt_observes_the_previous_attempts_staging() {
     let run = run(&fixture, &["compose", "--claude", &file]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    assert_eq!(runs(&fixture), ["attempt staged=0", "attempt staged=1"], "{}", run.output);
+    assert_eq!(
+        staged_with_stable_identity(&runs(&fixture)),
+        ["attempt staged=0", "attempt staged=1"],
+        "{}",
+        run.output
+    );
 }
 
 /// A resume is a run: the resumed attempt observes what the first staged.
@@ -316,7 +384,7 @@ fn a_resumed_attempt_observes_the_previous_attempts_staging() {
         "resume.md",
         &format!(
             "---\nsuccess:\n    stack:\n{}{}failure:\n    stack:\n        - action:\n              - action: resume\n                message: \"again\"\n                max_attempts: 1\n---\nbody\n",
-            record("attempt"),
+            record_identity("attempt"),
             first_attempt_stages("success", "              - error: \"again\"\n")
                 .replacen("success:\n    stack:\n", "", 1),
         ),
@@ -325,7 +393,12 @@ fn a_resumed_attempt_observes_the_previous_attempts_staging() {
     let run = run(&fixture, &["compose", "--claude", &file]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    assert_eq!(runs(&fixture), ["attempt staged=0", "attempt staged=1"], "{}", run.output);
+    assert_eq!(
+        staged_with_stable_identity(&runs(&fixture)),
+        ["attempt staged=0", "attempt staged=1"],
+        "{}",
+        run.output
+    );
 }
 
 /// Each task of a serial group is a run: a member observes what the member
@@ -336,7 +409,7 @@ fn a_serial_group_member_observes_an_earlier_members_staging() {
     doc(
         &fixture,
         "read.md",
-        &format!("---\nsuccess:\n    stack:\n{}---\nmember body\n", record("member")),
+        &format!("---\nsuccess:\n    stack:\n{}---\nmember body\n", record_identity("member")),
     );
     let file = doc(
         &fixture,
@@ -347,7 +420,12 @@ fn a_serial_group_member_observes_an_earlier_members_staging() {
     let run = run(&fixture, &["sequence", "--claude", &file]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    assert_eq!(runs(&fixture), ["member staged=0", "member staged=1"], "{}", run.output);
+    assert_eq!(
+        staged_with_stable_identity(&runs(&fixture)),
+        ["member staged=0", "member staged=1"],
+        "{}",
+        run.output
+    );
 }
 
 /// A parallel group is one run for every sibling's first attempt: a sibling
@@ -362,7 +440,7 @@ fn parallel_siblings_share_one_capture_until_one_reenters() {
         "read.md",
         &format!(
             "---\nsuccess:\n    stack:\n{}finalize:\n    stack:\n        - when: \"!file_exists('marker.txt')\"\n          action:\n              - append_line: [\"marker.txt\", \"first\"]\n              - retry: 1\n---\nmember body\n",
-            record("member")
+            record_identity("member")
         ),
     );
     // `max_parallel: 1` admits the siblings in declaration order, so the shell
@@ -376,7 +454,12 @@ fn parallel_siblings_share_one_capture_until_one_reenters() {
     let run = run(&fixture, &["sequence", "--claude", &file]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
-    assert_eq!(runs(&fixture), ["member staged=0", "member staged=1"], "{}", run.output);
+    assert_eq!(
+        staged_with_stable_identity(&runs(&fixture)),
+        ["member staged=0", "member staged=1"],
+        "{}",
+        run.output
+    );
 }
 
 /// The line of `output` that starts with `marker`, trimmed of the prompt
@@ -402,18 +485,21 @@ fn darkmatter_composes(fixture: &CliProcessFixture, file: &str) -> String {
 
 /// A property mentioned only in a transcluded file is captured for the run
 /// and renders exactly as Darkmatter renders the same tree, however deep the
-/// file is and however its path is spelled.
+/// file is, however its path is spelled, whatever the parent already names,
+/// and beside a value the include overlays.
 #[test]
 fn a_partial_only_property_renders_as_darkmatter_renders_it() {
     const KID: &str =
         "KID os=[{{ ctx.os }}] branch=[{{ ctx.branch }}] staged=[{{ length(ctx.staged_files) }}]\n";
-    for (label, files) in [
+    for (label, kid, files) in [
         (
             "direct partial",
+            KID,
             vec![("parent.md", "Parent line.\n\n::file ./kid.md\n")],
         ),
         (
             "two levels deep",
+            KID,
             vec![
                 ("parent.md", "Parent line.\n\n::file ./sub/mid.md\n"),
                 ("sub/mid.md", "Middle line.\n\n::file ../kid.md\n"),
@@ -421,11 +507,25 @@ fn a_partial_only_property_renders_as_darkmatter_renders_it() {
         ),
         (
             "interpolated reference",
+            KID,
             vec![("parent.md", "---\nwhich: kid\n---\nParent line.\n\n::file ./{{ which }}.md\n")],
+        ),
+        // The F5 row where the parent's own mention used to decide the capture.
+        (
+            "parent names one of the kids properties",
+            "KID repo=[{{ ctx.repo }}] os=[{{ ctx.os }}]\n",
+            vec![("parent.md", "Parent repo={{ ctx.repo }}.\n\n::file ./kid.md\n")],
+        ),
+        (
+            "local overlay",
+            "---\nlabel: default\n---\nKID label=[{{ label }}] branch=[{{ ctx.branch }}] staged=[{{ length(ctx.staged_files) }}]\n",
+            vec![("parent.md", "Parent line.\n\n::file ./kid.md set.label=\"local\"\n")],
         ),
     ] {
         let fixture = repo(&format!("ctx-per-run-partial-{}", label.replace(' ', "-")));
-        doc(&fixture, "kid.md", KID);
+        // `ctx.repo` names the repository after its remote.
+        git(&fixture, &["remote", "add", "origin", "https://example.com/fixture/widget.git"]);
+        doc(&fixture, "kid.md", kid);
         for (name, content) in &files {
             doc(&fixture, name, content);
         }
@@ -437,6 +537,13 @@ fn a_partial_only_property_renders_as_darkmatter_renders_it() {
         let claudine = line_with(&run.output, "KID ");
         assert_eq!(claudine, line_with(&expected, "KID "), "{label}");
         assert!(!claudine.contains("[]"), "{label}: every value is captured: {claudine}");
+        match label {
+            "local overlay" => assert!(claudine.contains("label=[local]"), "{claudine}"),
+            "parent names one of the kids properties" => {
+                assert!(claudine.contains("repo=[widget]"), "{claudine}")
+            }
+            _ => {}
+        }
     }
 }
 
@@ -451,11 +558,14 @@ fn a_partial_shares_its_parents_observation() {
         "---\nstart:\n    stack:\n        - action:\n              - shell: \"git add a.txt\"\n---\nPARENT staged={{ length(ctx.staged_files) }}\n\n::file ./kid.md\n",
     );
 
-    let run = run(&fixture, &["compose", "--claude", "parent.md"]);
+    let run = run(&fixture, &["compose", "--claude", "--perf", "parent.md"]);
 
     assert_eq!(run.code, Some(0), "{}", run.output);
     assert_eq!(line_with(&run.output, "PARENT "), "PARENT staged=0", "{}", run.output);
     assert_eq!(line_with(&run.output, "KID "), "KID staged=0", "{}", run.output);
+    // Equal values could still come from two observations of an unchanged
+    // tree; one observation for the whole run is what makes them one.
+    assert_eq!(volatile_observations(&run.output), "file_changes", "{}", run.output);
 }
 
 /// The `--perf` note's volatile-observation list, with the note's hard wraps
@@ -553,4 +663,181 @@ fn current_is_observed_once_per_event() {
         "{}",
         run.output
     );
+}
+
+/// Commit `tick` with a fixture identity: a side effect that portably leaves
+/// a countable trace, one commit per execution.
+const TICK: &str =
+    "git -c user.name=Fixture -c user.email=fixture@example.com -c commit.gpgsign=false commit -q --allow-empty -m tick";
+
+fn commit_count(fixture: &CliProcessFixture) -> String {
+    let output = common::helper_command("git")
+        .arg("-C")
+        .arg(fixture.cwd())
+        .args(["rev-list", "--count", "HEAD"])
+        .output()
+        .expect("run git in the fixture");
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// Discovering a nested or interpolated include's `ctx` requirements reads
+/// it; it does not execute it. A body `::shell` in that include runs exactly
+/// once, when the run composes.
+#[test]
+fn discovering_an_include_executes_none_of_its_commands() {
+    let kid = format!("KID staged={{{{ length(ctx.staged_files) }}}}\n\n::shell {TICK}\n");
+    for (label, files) in [
+        (
+            "nested",
+            vec![
+                ("parent.md", "Parent line.\n\n::file ./sub/mid.md\n"),
+                ("sub/mid.md", "Middle line.\n\n::file ../kid.md\n"),
+            ],
+        ),
+        (
+            "interpolated",
+            vec![("parent.md", "---\nwhich: kid\n---\nParent line.\n\n::file ./{{ which }}.md\n")],
+        ),
+    ] {
+        let fixture = repo(&format!("ctx-per-run-discovery-{label}"));
+        write(
+            &fixture.cwd().join(".darkmatter-shell-whitelist"),
+            &format!("exact {TICK}\n"),
+        );
+        doc(&fixture, "kid.md", &kid);
+        for (name, content) in &files {
+            doc(&fixture, name, content);
+        }
+
+        let run = run(&fixture, &["compose", "--claude", "parent.md"]);
+
+        assert_eq!(run.code, Some(0), "{label}: {}", run.output);
+        assert_eq!(line_with(&run.output, "KID "), "KID staged=0", "{label}: {}", run.output);
+        assert_eq!(commit_count(&fixture), "2", "{label}: initial plus one tick\n{}", run.output);
+    }
+}
+
+/// Same-run extension is not a refresh: a group the root page names is
+/// captured before `initialize`, and an include naming the same group reads
+/// that capture rather than the tree `initialize` changed.
+#[test]
+fn an_include_reads_the_group_its_root_captured_before_initialize() {
+    let fixture = repo("ctx-per-run-include-shares-root-capture");
+    doc(&fixture, "part.md", "PART untracked={{ ctx.untracked_files }}\n");
+    let file = doc(
+        &fixture,
+        "staged.md",
+        &format!(
+            "---\n{INITIALIZE_WRITES}---\nBODY untracked={{{{ ctx.untracked_files }}}}\n\n::file ./part.md\n"
+        ),
+    );
+
+    let run = run(&fixture, &["compose", "--claude", &file]);
+
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert!(fixture.cwd().join("new.txt").exists(), "{}", run.output);
+    for marker in ["BODY ", "PART "] {
+        let line = line_with(&run.output, marker);
+        assert!(line.contains("a.txt") && !line.contains("new.txt"), "{line}\n{}", run.output);
+    }
+}
+
+/// The root page's frontmatter counts as the root page: a group named only in
+/// a lifecycle stack is captured before `initialize`, so an include that
+/// names it too does not take the include exception.
+#[test]
+fn a_lifecycle_only_property_is_captured_before_initialize() {
+    let fixture = repo("ctx-per-run-lifecycle-before-initialize");
+    doc(&fixture, "part.md", "PART untracked={{ ctx.untracked_files }}\n");
+    let file = doc(
+        &fixture,
+        "staged.md",
+        &format!(
+            "---\n{INITIALIZE_WRITES}success:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"root untracked={{{{ ctx.untracked_files }}}}\"]\n---\nStaged document.\n\n::file ./part.md\n"
+        ),
+    );
+
+    let run = run(&fixture, &["compose", "--claude", &file]);
+
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert!(fixture.cwd().join("new.txt").exists(), "{}", run.output);
+    let part = line_with(&run.output, "PART ");
+    assert!(part.contains("a.txt") && !part.contains("new.txt"), "{part}\n{}", run.output);
+    let lines = runs(&fixture);
+    assert_eq!(lines.len(), 1, "{lines:?}\n{}", run.output);
+    assert!(lines[0].contains("a.txt") && !lines[0].contains("new.txt"), "{lines:?}");
+}
+
+/// A transclusion cycle among files that name `ctx` ends in the existing cycle
+/// error, naming both files, under a dry run and a real run alike.
+#[test]
+fn a_transclusion_cycle_during_ctx_collection_is_the_cycle_error() {
+    let fixture = repo("ctx-per-run-cycle");
+    doc(&fixture, "a.md", "A root={{ ctx.repo_root }}\n\n::file ./b.md\n");
+    doc(&fixture, "b.md", "B root={{ ctx.repo_root }}\n\n::file ./a.md\n");
+
+    for args in [
+        &["compose", "--claude", "--dry-run", "a.md"][..],
+        &["compose", "--claude", "a.md"][..],
+    ] {
+        let run = run(&fixture, args);
+
+        assert_eq!(run.code, Some(1), "{args:?}: {}", run.output);
+        // The chain's paths wrap with the terminal; compare without layout.
+        let collapsed: String =
+            run.output.chars().filter(|c| !c.is_whitespace() && *c != '┃').collect();
+        assert!(collapsed.contains("TransclusionError:cycledetected"), "{}", run.output);
+        for name in ["a.md:line1", "b.md:line1"] {
+            assert!(collapsed.contains(name), "{args:?}: `{name}`\n{}", run.output);
+        }
+    }
+    assert!(runs(&fixture).is_empty());
+}
+
+/// An included file's lifecycle frontmatter keeps its boundaries: it parses,
+/// the parent does not run it, and the `ctx` it names is still part of the
+/// run's requirements.
+#[test]
+fn an_included_files_lifecycle_is_scanned_but_not_run() {
+    let fixture = repo("ctx-per-run-included-lifecycle");
+    doc(
+        &fixture,
+        "part.md",
+        "---\nsuccess:\n    stack:\n        - action:\n              - append_line: [\"runs.log\", \"part staged={{ length(ctx.staged_files) }}\"]\n---\nPART body\n",
+    );
+    doc(&fixture, "parent.md", "Parent line.\n\n::file ./part.md\n");
+
+    for args in [
+        &["compose", "--claude", "--dry-run", "--perf", "parent.md"][..],
+        &["compose", "--claude", "--perf", "parent.md"][..],
+    ] {
+        let run = run(&fixture, args);
+
+        assert_eq!(run.code, Some(0), "{args:?}: {}", run.output);
+        assert_eq!(line_with(&run.output, "PART "), "PART body", "{args:?}");
+        assert_eq!(volatile_observations(&run.output), "file_changes", "{args:?}: {}", run.output);
+    }
+    assert!(runs(&fixture).is_empty(), "the parent never runs the partial's lifecycle");
+}
+
+/// A sequence's static pre-flight is one discovery run, however many prompt
+/// documents it reads: three steps that each name a Git fact observe it once
+/// per step run plus once for the whole pre-flight, not once per document.
+#[test]
+fn sequence_preflight_observes_git_state_once_for_every_prompt_document() {
+    let fixture = repo("ctx-per-run-sequence-preflight");
+    for name in ["one.md", "two.md", "three.md"] {
+        doc(&fixture, name, "Staged: {{ length(ctx.staged_files) }}\n");
+    }
+    let file = doc(
+        &fixture,
+        "seq.md",
+        "---\nsequence:\n  - name: one\n    prompt: ./one.md\n  - name: two\n    prompt: ./two.md\n  - name: three\n    prompt: ./three.md\n---\n",
+    );
+
+    let run = run(&fixture, &["sequence", "--claude", "--perf", &file]);
+
+    assert_eq!(run.code, Some(0), "{}", run.output);
+    assert_eq!(volatile_observations(&run.output), "file_changes (4)", "{}", run.output);
 }

@@ -307,6 +307,11 @@ Before anything runs, Claudine walks the **entire task graph**:
   `doc.*`, `ctx.*`, `env.*`. A shell string referencing `outputs` or a
   runtime-mutated value is a typed preflight error — route that work through a
   `prompt` or `side_effect` task instead.
+- **Git working state is observed once for the whole walk.** Static preflight
+  is one discovery run: every referenced document (and every file it includes)
+  that names a Git fact such as `ctx.staged_files` reads the same observation.
+  Each step then observes Git state again when it runs, as its own composition
+  run, so a step still sees what earlier steps changed.
 - **Provider and model resolve once**, producing a per-step target vector.
 
 A preflight failure aborts the sequence regardless of `fail_fast`. Preparation

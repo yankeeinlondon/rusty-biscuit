@@ -1590,3 +1590,72 @@ fn runs_that_name_no_git_fact_observe_no_git_state() {
 
     assert!(invocation.work_snapshot().volatile_observations.is_empty());
 }
+
+/// Each new run builds exactly one prepared context and observes its volatile
+/// Git state once, while identity, topology, and host discovery happen once
+/// for the whole invocation however many runs ask for them.
+#[test]
+fn each_run_constructs_one_context_and_rediscovers_no_stable_evidence() {
+    let fixture = repo_with_unstaged_change();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.os }} {{ ctx.cpu_cores }} {{ ctx.staged_files }} {{ ctx.repo_root }}",
+    );
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let before = invocation.work_snapshot();
+
+    let runs: Vec<_> = (0..3)
+        .map(|_| {
+            let epoch = invocation.begin_document_epoch();
+            let _ = epoch.capture_launch_context(&requirements);
+            epoch
+        })
+        .collect();
+
+    for (index, epoch) in runs.iter().enumerate() {
+        let work = epoch.work_snapshot();
+        assert_eq!(work.launch_context_constructions, 1, "run {index}");
+        assert_eq!(work.launch_context_extensions, 0, "run {index}");
+        assert_eq!(work.volatile_observations.get("file_changes"), Some(&1), "run {index}");
+    }
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, before.git_root_discoveries);
+    assert_eq!(work.topology_probes, before.topology_probes);
+    assert_eq!(work.launch_context_constructions, before.launch_context_constructions + 3);
+    assert_eq!(work.volatile_observations.get("file_changes"), Some(&3));
+    for group in ["os", "hardware"] {
+        assert_eq!(work.runtime_evidence_captures.get(group), Some(&1), "`{group}`");
+        assert_eq!(work.runtime_evidence_reuses.get(group), Some(&2), "`{group}`");
+        assert!(!work.volatile_observations.contains_key(group), "`{group}` is stable");
+    }
+}
+
+/// Siblings that join one run share its repository observation but not a
+/// target identity: each layers its own `AGENT`/`MODEL` over the shared
+/// capture, and `ctx.agent`/`ctx.model` follow that sibling's layer alone.
+#[test]
+fn siblings_sharing_one_run_keep_their_own_target_identity() {
+    let fixture = repo_with_unstaged_change();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.staged_files }} {{ ctx.agent }} {{ ctx.model }}",
+    );
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let group = RunEvidence::default();
+    let _ = invocation.begin_document_epoch_in(&group).capture_launch_context(&requirements);
+    git(fixture.path(), &["add", "tracked.txt"]);
+
+    let siblings = [("claude", "sonnet"), ("codex", "gpt-5")].map(|(agent, model)| {
+        let mut context =
+            invocation.begin_document_epoch_in(&group).capture_launch_context(&requirements);
+        context.env_mut().insert("AGENT".to_string(), agent.to_string());
+        context.env_mut().insert("MODEL".to_string(), model.to_string());
+        (agent, model, context)
+    });
+
+    for (agent, model, context) in &siblings {
+        assert_eq!(staged_count(context), 0, "`{agent}` reads the group's capture");
+        let values = context.as_object();
+        assert_eq!(values.get("agent").and_then(serde_json::Value::as_str), Some(*agent));
+        assert_eq!(values.get("model").and_then(serde_json::Value::as_str), Some(*model));
+    }
+    assert_eq!(invocation.work_snapshot().volatile_observations.get("file_changes"), Some(&1));
+}

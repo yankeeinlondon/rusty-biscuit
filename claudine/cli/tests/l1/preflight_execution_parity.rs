@@ -350,3 +350,33 @@ fn an_unknowable_command_fails_preparation_despite_when_error_and_no_error() {
         result.output
     );
 }
+
+/// Lifecycle `no_error` covers a shell action that ran and failed. A command
+/// whose bytes were never approved did not run, so `no_error` must not turn
+/// the refusal into a skipped action: iteration 2 re-stamps the command with
+/// its own state and the run still fails. `git init` leaves a directory behind
+/// when it runs, which is how the row proves the refused bytes never launched.
+#[test]
+fn a_lifecycle_no_error_shell_does_not_absorb_an_unapproved_command() {
+    const LIFECYCLE: &str = "---\nn: 0\nloop:\n    while: \"n < 2\"\n    action: \"increment(n)\"\nsuccess:\n  stack:\n    - action: {action: shell, command: \"git init --quiet made-{{ n }}\", no_error: true}\n---\nbody\n";
+    let fixture = fixture("preflight-parity-no-error");
+    let result = run(
+        &fixture,
+        &[("loop.md", LIFECYCLE)],
+        &["git init --quiet made-0".to_string()],
+        &["compose", "--claude", "loop.md"],
+    );
+
+    assert!(
+        fixture.cwd().join("made-0").is_dir(),
+        "fixture check: iteration 1's approved command runs: {}",
+        result.output
+    );
+    assert!(!fixture.cwd().join("made-1").exists(), "{}", result.output);
+    assert_ne!(result.code, Some(0), "{}", result.output);
+    let collapsed = result.collapsed();
+    assert!(collapsed.contains("requires approval"), "{}", result.output);
+    // The terminal may break the command after its hyphen, so the refused
+    // bytes are matched with every space removed.
+    assert!(collapsed.replace(' ', "").contains("made-1"), "{}", result.output);
+}

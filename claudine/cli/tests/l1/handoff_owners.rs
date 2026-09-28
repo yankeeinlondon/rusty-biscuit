@@ -89,8 +89,13 @@ fn trail(event: &str, line: &str) -> String {
 
 /// A stack item appending `line` and then proxying to `./target.md`.
 fn trail_then_proxy(event: &str, line: &str) -> String {
+    trail_then_proxy_to(event, line, "./target.md")
+}
+
+/// A stack item appending `line` and then proxying to `target`.
+fn trail_then_proxy_to(event: &str, line: &str, target: &str) -> String {
     format!(
-        "{event}:\n    stack:\n        - action:\n              - append_line: [\"events.log\", \"{line}\"]\n              - proxy: ./target.md\n"
+        "{event}:\n    stack:\n        - action:\n              - append_line: [\"events.log\", \"{line}\"]\n              - proxy: {target}\n"
     )
 }
 
@@ -753,4 +758,156 @@ fn assert_no_false_cycle_on_target(run: &Run) {
         "{}",
         run.output
     );
+}
+
+/// Output with hard wraps and the error box's border glyphs removed, so a
+/// wrapped diagnostic reads as one line.
+fn collapsed(run: &Run) -> String {
+    run.output.replace('┃', " ").split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A target that fails after adoption: `success` raises, and `failure` hands
+/// off to `./other.md`, whose `start` hands straight back.
+fn write_failing_target_that_is_proxied_back_to(fixture: &CliProcessFixture) {
+    write_doc(
+        fixture,
+        "target.md",
+        &format!(
+            "---\n{}success:\n    stack:\n        - action:\n              - error: \"target rejected\"\n{}---\ntarget body\n",
+            trail("initialize", "target initialize"),
+            trail_then_proxy_to("failure", "target failure", "./other.md"),
+        ),
+    );
+    write_doc(
+        fixture,
+        "other.md",
+        &format!(
+            "---\n{}---\nother body\n",
+            trail_then_proxy_to("start", "other start", "./target.md")
+        ),
+    );
+}
+
+/// Committing is adopting: a target that fails after adoption stays on the
+/// chain, so the hop back to it is a cycle rather than a second entry at its
+/// `initialize`.
+fn assert_adopted_target_stays_recorded(run: &Run, events: Vec<String>, source_line: &str) {
+    assert_eq!(
+        events,
+        [source_line, "target initialize", "target failure", "other start"],
+        "{}",
+        run.output
+    );
+    // `compose` renders the refusal as a box and `sequence` as a one-line
+    // summary; both may break inside a word, so match with spaces removed.
+    let compact = collapsed(run).replace(' ', "");
+    assert!(compact.contains("formsacycle"), "{}", run.output);
+    assert!(
+        compact.contains("to`./target.md`"),
+        "the refused hop is the one back to the adopted target: {}",
+        run.output
+    );
+    assert_eq!(run.code, Some(1), "{}", run.output);
+}
+
+#[test]
+fn compose_an_adopted_target_that_fails_remains_recorded() {
+    let fixture = fixture("handoff-adopted-fails-compose");
+    write_failing_target_that_is_proxied_back_to(&fixture);
+    let source = write_doc(
+        &fixture,
+        "source.md",
+        &format!("---\n{}---\nsource body\n", trail_then_proxy("success", "source success")),
+    );
+
+    let run = compose(&fixture, &source);
+
+    assert_adopted_target_stays_recorded(&run, events(&fixture), "source success");
+}
+
+#[test]
+fn sequence_task_an_adopted_target_that_fails_remains_recorded() {
+    let fixture = fixture("handoff-adopted-fails-task");
+    write_failing_target_that_is_proxied_back_to(&fixture);
+    write_doc(
+        &fixture,
+        "step.md",
+        &format!("---\n{}---\nstep body\n", trail_then_proxy("start", "step start")),
+    );
+    let doc = write_doc(&fixture, "sequence.md", &sequence_doc(true, ""));
+
+    let run = run_sequence(&fixture, &doc);
+
+    assert_adopted_target_stays_recorded(&run, events(&fixture), "step start");
+    assert_eq!(run.output.matches("step 1/2 failed").count(), 1, "{}", run.output);
+}
+
+/// The terminal-event counterpart of the `start` row above: a handoff from the
+/// task document's `success` still runs setup and teardown once and publishes
+/// one `outputs` entry, the final target's.
+#[test]
+fn sequence_task_setup_teardown_and_output_run_once_across_a_terminal_handoff() {
+    let fixture = fixture("handoff-task-setup-teardown-terminal");
+    write_target(&fixture);
+    write_doc(
+        &fixture,
+        "step.md",
+        &format!("---\n{}---\nstep body\n", trail_then_proxy("success", "step success")),
+    );
+    let doc = write_doc(
+        &fixture,
+        "sequence.md",
+        &sequence_doc(
+            true,
+            "      setup:\n          - action:\n                - append_line: [\"events.log\", \"setup\"]\n      teardown:\n          - action:\n                - append_line: [\"events.log\", \"teardown\"]\n",
+        ),
+    );
+
+    let run = run_sequence(&fixture, &doc);
+
+    let mut expected = vec!["setup", "step success"];
+    expected.extend(TARGET_TRAIL);
+    expected.extend(["teardown", "second step outputs=1"]);
+    assert_eq!(events(&fixture), expected, "{}", run.output);
+    assert_step_one_succeeded_once(&run);
+    assert_eq!(run.code, Some(0), "{}", run.output);
+}
+
+/// Must match `claudine::composition::MAX_PROXY_HOPS`.
+const MAX_PROXY_HOPS: usize = 16;
+
+/// A chain of distinct documents longer than the hop limit is refused at the
+/// hop that would overflow it. The refusal is reported once, the refused
+/// target never starts, and the active chain the refusal reports ends at the
+/// last adopted document: the refused request left no entry behind.
+#[test]
+fn a_chain_past_the_hop_limit_is_refused_without_recording_the_refused_target() {
+    let fixture = fixture("handoff-hop-limit");
+    for i in 0..=MAX_PROXY_HOPS {
+        write_doc(
+            &fixture,
+            &format!("hop{i}.md"),
+            &format!(
+                "---\n{}---\nhop body\n",
+                trail_then_proxy_to("start", &format!("hop{i} start"), &format!("./hop{}.md", i + 1)),
+            ),
+        );
+    }
+
+    let run = compose(&fixture, &fixture.cwd().join("hop0.md"));
+
+    let adopted: Vec<String> = (0..MAX_PROXY_HOPS).map(|i| format!("hop{i} start")).collect();
+    assert_eq!(events(&fixture), adopted, "{}", run.output);
+    let compact = collapsed(&run).replace(' ', "");
+    assert_eq!(compact.matches("formsacycle").count(), 1, "{}", run.output);
+    assert!(compact.contains(&format!("hoplimitof{MAX_PROXY_HOPS}")), "{}", run.output);
+    let last_adopted = format!("hop{}.md`", MAX_PROXY_HOPS - 1);
+    assert!(compact.contains(&last_adopted), "the chain ends at {last_adopted}: {}", run.output);
+    assert_eq!(
+        compact.matches(&format!("hop{MAX_PROXY_HOPS}.md")).count(),
+        1,
+        "the refused target is named once, as the target, and is not on the chain: {}",
+        run.output
+    );
+    assert_eq!(run.code, Some(1), "{}", run.output);
 }

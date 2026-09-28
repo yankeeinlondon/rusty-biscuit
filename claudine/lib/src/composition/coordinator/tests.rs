@@ -905,9 +905,12 @@ mod commit_records_only_handoffs {
         assert_eq!(ledger.transitions().len(), 1);
     }
 
-    /// Committing is adopting: what the target does next is not the ledger's
-    /// concern, so a target that fails its `initialize` or validation stays in
-    /// the chain, and a later request for it is a cycle.
+    /// Committing is adopting: the ledger never learns what the target does
+    /// next, so there is no path by which a target that fails its
+    /// `initialize` or validation could leave the chain. Every later request
+    /// for the source or the target is a cycle and leaves the chain as the
+    /// commit left it. The CLI's `handoff_owners` suite runs a failing target
+    /// end to end.
     #[test]
     fn an_adopted_target_that_later_fails_stays_recorded() {
         let workspace = Workspace::new();
@@ -916,12 +919,20 @@ mod commit_records_only_handoffs {
             .commit(&mut ledger, "./target.md")
             .expect("the hop commits");
         drop(handoff);
+        let committed = snapshot(&ledger);
+        assert_eq!(
+            committed.0,
+            [workspace.path("source.md"), workspace.path("target.md")]
+        );
 
-        assert!(ledger.contains_document(&workspace.path("target.md")));
-        assert!(matches!(
-            workspace.commit(&mut ledger, "./target.md"),
-            Err(ProxyCommitError::Rejected(_))
-        ));
+        for adopted in ["./target.md", "./source.md"] {
+            let error = workspace
+                .commit(&mut ledger, adopted)
+                .expect_err("a document already on the chain is a cycle");
+            assert!(matches!(error, ProxyCommitError::Rejected(_)), "{adopted}: {error:?}");
+            assert_eq!(snapshot(&ledger), committed, "{adopted}");
+        }
+
         assert!(workspace.commit(&mut ledger, "./other.md").is_ok());
         assert_eq!(ledger.hops(), 2);
     }

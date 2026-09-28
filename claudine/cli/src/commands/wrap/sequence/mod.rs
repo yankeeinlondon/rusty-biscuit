@@ -86,6 +86,11 @@ fn approve_preflight_graph(
 
     // The document the graph walk is composing, so a failure can name it.
     let composing = std::cell::RefCell::new(None::<std::path::PathBuf>);
+    // This approval pass is one discovery run: every referenced document (and
+    // every file it includes) that names a Git fact reads one observation of
+    // it. Extending through the invocation instead makes each extension a run
+    // of its own, which re-observed the working tree once per prompt document.
+    let approval_epoch = invocation.begin_document_epoch();
     let compose_options = |path: &std::path::Path| {
         composing.replace(Some(path.to_path_buf()));
         let source_context = invocation
@@ -100,9 +105,9 @@ fn approve_preflight_graph(
         let requirements =
             darkmatter::markdown::compose::ContextRequirements::for_document(&document);
         let mut context = graph_context.clone();
-        invocation.extend_launch_context(&mut context, &requirements);
+        approval_epoch.extend_launch_context(&mut context, &requirements);
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
-            .with_context_authority(invocation.compose_context_authority())
+            .with_context_authority(approval_epoch.compose_context_authority())
             .with_source_file(path)
             .with_file_resolution_context(source_context.file_resolution_context().clone())
             .with_deferred_schema_verdict(true)

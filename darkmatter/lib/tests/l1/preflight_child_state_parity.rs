@@ -334,3 +334,45 @@ fn a_command_reading_a_lazy_root_is_an_unevaluated_dependency() {
         );
     }
 }
+
+/// `NotPreApproved` is a broken invariant, not a failed command: a
+/// `when_error` fallback covers a command that ran and failed, so it must not
+/// absorb a command execution refuses to launch. The block is composed inline
+/// and from a transcluded partial; neither yields the fallback text nor a
+/// "could not transclude" notice in place of the error.
+#[test]
+fn a_when_error_block_does_not_absorb_a_pre_approval_violation() {
+    const BLOCK: &str = "::shell-block when_error=\"(unavailable)\"\necho ran-{{ base }}\n::end-block\n";
+    let inline = format!("---\nbase: main\n---\n{BLOCK}");
+    for (name, files) in [
+        ("inline", vec![("target.md", inline.as_str())]),
+        (
+            "transcluded",
+            vec![("target.md", "---\nbase: main\n---\n::file ./part.md\n"), ("part.md", BLOCK)],
+        ),
+    ] {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = write_files(dir.path(), &files);
+        let document = Markdown::try_from(root.as_path()).expect("load root");
+
+        // Fixture check: with its bytes approved the block runs.
+        let (composed, _) = document
+            .compose_with(
+                base_options(&root, dir.path())
+                    .with_pre_approved_commands(HashSet::from(["echo ran-main".to_string()])),
+            )
+            .unwrap_or_else(|error| panic!("{name}: approved compose failed: {error}"));
+        assert!(composed.content().contains("ran-main"), "{name}: {}", composed.content());
+
+        let error = document
+            .compose_with(base_options(&root, dir.path()).with_pre_approved_commands(HashSet::new()))
+            .map(|(composed, _)| composed.content().to_string())
+            .expect_err("an unapproved command is a hard composition failure");
+        assert!(error.pre_approval_violation().is_some(), "{name}: {error:?}");
+        let rendered = error.to_string();
+        assert!(
+            !rendered.contains("(unavailable)") && !rendered.contains("Could not transclude"),
+            "{name}: {rendered}"
+        );
+    }
+}
