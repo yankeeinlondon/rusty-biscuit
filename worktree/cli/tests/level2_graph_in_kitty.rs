@@ -23,6 +23,10 @@ use test_toolkit::{Backend, Level, require_level};
 /// so the base view has one lane per branch.
 const BRANCHES: [&str; 5] = ["alpha", "bravo", "charlie", "delta", "echo"];
 
+/// The branch [`Fixture::merged`] merges into `main`, named as in the first
+/// observed merged-branch graph. Long neighboring labels are proven at L1.
+const MERGED: &str = "fix/wt-ux";
+
 /// A pixel counts as drawn when a channel is brighter than this. Kitty's
 /// default background (`--config NONE`) is black.
 const DRAWN: u8 = 48;
@@ -40,16 +44,16 @@ fn run_git(repo: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed in {repo:?}");
 }
 
-/// A main checkout on `main` with a linked worktree per branch in
-/// [`BRANCHES`]. `main` gains a commit after each fork, so every lane leaves
-/// the default lane at a different commit.
+/// A main checkout on `main` with linked worktrees.
 struct Fixture {
     parent: tempfile::TempDir,
     main: PathBuf,
+    /// Worktree directory names; the table lists them after `base repo`, sorted.
+    worktrees: Vec<String>,
 }
 
 impl Fixture {
-    fn new() -> Self {
+    fn init() -> Self {
         let parent = tempfile::tempdir().expect("create parent temp dir");
         let main = parent.path().join("main");
         fs::create_dir_all(&main).unwrap();
@@ -66,20 +70,57 @@ impl Fixture {
         ] {
             run_git(&main, &["config", key, value]);
         }
-        let commit = |dir: &Path, file: &str, message: &str| {
-            fs::write(dir.join(file), message).unwrap();
-            run_git(dir, &["add", "."]);
-            run_git(dir, &["commit", "-m", message]);
+        let fixture = Self {
+            parent,
+            main,
+            worktrees: Vec::new(),
         };
-        commit(&main, "main.txt", "main 1");
-        commit(&main, "main.txt", "main 2");
+        fixture.commit(&fixture.main, "main.txt", "main 1");
+        fixture.commit(&fixture.main, "main.txt", "main 2");
+        fixture
+    }
+
+    /// One lane per branch in [`BRANCHES`]. `main` gains a commit after each
+    /// fork, so every lane leaves the default lane at a different commit.
+    fn new() -> Self {
+        let mut fixture = Self::init();
         for branch in BRANCHES {
-            let worktree = parent.path().join(format!("wt-{branch}"));
-            run_git(&main, &["worktree", "add", worktree.to_str().unwrap(), "-b", branch]);
-            commit(&worktree, &format!("{branch}.txt"), &format!("work on {branch}"));
-            commit(&main, "main.txt", &format!("main after {branch}"));
+            let worktree = fixture.add_worktree(&format!("wt-{branch}"), branch);
+            fixture.commit(&worktree, &format!("{branch}.txt"), &format!("work on {branch}"));
+            fixture.commit(&fixture.main, "main.txt", &format!("main after {branch}"));
         }
-        Self { parent, main }
+        fixture
+    }
+
+    /// A worktree whose branch is merged into `main` with a merge
+    /// commit: the graph's merge edge, at the commit tagged `main`.
+    ///
+    /// ```text
+    /// main 1 - main 2 - main 3 ----- Merge (main)
+    ///                \              /
+    ///                 m1 - m2 -----   (MERGED, wt-merged)
+    /// ```
+    fn merged() -> Self {
+        let mut fixture = Self::init();
+        let merged = fixture.add_worktree("wt-merged", MERGED);
+        fixture.commit(&merged, "merged.txt", "merged 1");
+        fixture.commit(&merged, "merged.txt", "merged 2");
+        fixture.commit(&fixture.main, "main.txt", "main 3");
+        run_git(&fixture.main, &["merge", "--no-ff", "--no-edit", MERGED]);
+        fixture
+    }
+
+    fn add_worktree(&mut self, directory: &str, branch: &str) -> PathBuf {
+        let worktree = self.path(directory);
+        run_git(&self.main, &["worktree", "add", worktree.to_str().unwrap(), "-b", branch]);
+        self.worktrees.push(directory.to_string());
+        worktree
+    }
+
+    fn commit(&self, dir: &Path, file: &str, message: &str) {
+        fs::write(dir.join(file), message).unwrap();
+        run_git(dir, &["add", "."]);
+        run_git(dir, &["commit", "-m", message]);
     }
 
     fn path(&self, name: &str) -> PathBuf {
@@ -184,6 +225,10 @@ struct GraphRun {
     all: Vec<String>,
     transmitted: Transmitted,
     instance: KittyInstance,
+    worktrees: Vec<String>,
+    /// Where the screenshot and the transmitted PNG are kept for inspection;
+    /// `None` deletes the screenshot once it passes.
+    evidence: Option<String>,
 }
 
 impl GraphRun {
@@ -242,6 +287,8 @@ impl GraphRun {
             all,
             transmitted: parse_transmitted(&fs::read(&recording).expect("read the recording")),
             instance,
+            worktrees: fixture.worktrees.clone(),
+            evidence: None,
         }
     }
 
@@ -266,7 +313,9 @@ impl GraphRun {
         };
         let expected = borders(&rows[header]);
         let mut names = vec!["base repo".to_string()];
-        names.extend(BRANCHES.iter().map(|branch| format!("wt-{branch}")));
+        let mut worktrees = self.worktrees.clone();
+        worktrees.sort();
+        names.extend(worktrees);
         for (offset, name) in names.iter().enumerate() {
             let row = rows[header + 2 + offset].as_str();
             assert!(row.contains(&format!("○ {name}")), "row {offset} should be {name}: {row:?}\n{all}");
@@ -333,8 +382,10 @@ impl GraphRun {
             image.rows,
             shot_path.display()
         );
-        // Kept on failure for the message above.
-        let _ = fs::remove_file(&shot_path);
+        // Kept on failure for the message above, and as evidence when asked.
+        if self.evidence.is_none() {
+            let _ = fs::remove_file(&shot_path);
+        }
 
         self.screen[next]
             .trim()
@@ -344,12 +395,24 @@ impl GraphRun {
     }
 
     fn instance_screenshot_path(&self) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "wt-graph-{}x{}-{}.png",
-            self.columns,
-            self.lines,
-            std::process::id()
-        ))
+        let name = match &self.evidence {
+            Some(label) => format!("wt-graph-{label}-{}x{}-screenshot.png", self.columns, self.lines),
+            None => format!("wt-graph-{}x{}-{}.png", self.columns, self.lines, std::process::id()),
+        };
+        std::env::temp_dir().join(name)
+    }
+
+    /// Keeps this run's screenshot and writes the transmitted PNG beside it,
+    /// both named for `label`, and prints their paths.
+    fn keep_evidence(&mut self, label: &str) {
+        self.evidence = Some(label.to_string());
+        let png = std::env::temp_dir().join(format!("wt-graph-{label}-{}x{}-transmitted.png", self.columns, self.lines));
+        self.transmitted.png.save(&png).expect("save the transmitted PNG");
+        eprintln!(
+            "evidence: transmitted {} and screenshot {}",
+            png.display(),
+            self.instance_screenshot_path().display()
+        );
     }
 
     /// The cell grid's top-left pixel in a window screenshot: equal side
@@ -428,4 +491,35 @@ fn level2_graph_fits_a_narrow_kitty_window() {
     assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
     run.assert_table_intact();
     run.assert_graph_drawn();
+}
+
+/// A merged branch's lane, at both window sizes: the table stays intact, the
+/// image fits the window and the rows `wt` reserved, no lane is left out, and
+/// nothing is reported as not shown. The screenshot and
+/// the transmitted PNG are kept in the temp directory for visual inspection;
+/// the layout itself (merge parents, labels, overlaps) is proven at L1 by
+/// `gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_graph_draws_a_merged_branch_in_kitty() {
+    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+
+    let fixture = Fixture::merged();
+    // Both windows' text and transmitted images are checked (and kept) before
+    // either screenshot, so a capture failure still leaves both PNGs.
+    let runs: Vec<GraphRun> = [(100, 32), (56, 60)]
+        .into_iter()
+        .map(|(columns, lines)| {
+            let mut run = GraphRun::new(&fixture, columns, lines);
+            run.keep_evidence("merged");
+            assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+            let all = run.all.join("\n");
+            assert!(!all.contains("Some history is not shown"), "a merged branch is complete history:\n{all}");
+            run.assert_table_intact();
+            run
+        })
+        .collect();
+    for run in &runs {
+        assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
+    }
 }
