@@ -1,6 +1,6 @@
 # Configuring Actions
 
-Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions that run sequentially. Most actions are fire-and-forget; only `call` can return a response to influence agent behavior on blocking events.
+Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions that run sequentially. Most actions do not block the pipeline; only `call` can return a response to influence agent behavior on blocking events.
 
 ## Event Binding Structure
 
@@ -167,7 +167,7 @@ Spawn an external command asynchronously without waiting for completion or inspe
 
 ### `message`
 
-Send a message to the configured messaging destination (Slack, Discord, Signal, WhatsApp, or webhooks). Fire-and-forget -- delivery is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
+Send a message to the configured messaging destination (Slack, Discord, Signal, WhatsApp, or webhooks). Delivery runs in the background and does not block the pipeline, but the CLI waits for it before exiting, for up to 10 seconds (less under `claudine handle`'s deadline). A send still running then is reported with a warning that its delivery is unknown, and the exit code does not change (see [Messaging](messaging.md#the-cli-drains-before-every-ordinary-exit)). Empty messages after template interpolation are silently skipped.
 
 Requires messaging configuration in `settings.messaging` (see [Messaging Configuration](#messaging-configuration) below).
 

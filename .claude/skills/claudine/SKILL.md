@@ -13,6 +13,14 @@ The `claudine` executable intercepts Playa scheduler/delegate modes and the
 biscuit-speaks preparation-helper mode before normal CLI bootstrap, so queued
 audio is serialized and survives the requesting Claudine process.
 
+Outbound messages and desktop notifications are **not** fire-and-forget. Each
+send is registered with `messaging::delivery::track`, and every ordinary CLI
+exit goes through `cli/src/shutdown.rs::finish`, which drains them (10 s, or
+less under `handle`'s deadline) and warns about any whose delivery is unknown
+without changing the exit code. Never add a bare spawn in `lib/src/messaging/`
+or a direct `process::exit` in `cli/src`: guard tests fail on both. See
+[Messaging](topics/messaging.md#delivery-tracking).
+
 Audio tests must remain silent: real playback uses explicit zero volume and
 recognizable test speech with a pinned provider/voice. A fake agent does not
 suppress lifecycle audio. Tests of literal shipped prompts should set child-only

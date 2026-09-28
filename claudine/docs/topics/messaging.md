@@ -51,9 +51,10 @@ Message delivery is invoked two ways, both routing through the same `send` layer
 - **Lifecycle actions** — the `message` communication channel in a composition
   document's lifecycle stacks. See [Lifecycle](flow-control/lifecycle.md).
 - **Hook actions** — the `message` action fired on a normalized event (see the
-  Supported Actions reference). When running inside `claudine handle`, messenger
-  actions carry a hard **3-second timeout** by default (overridable via
-  `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`).
+  Supported Actions reference). A hook message has no timeout of its own: the
+  action starts the send and the handler moves on to its next action. Under
+  `claudine handle` the send is bounded by the handler's overall deadline,
+  through the exit drain described below.
 
 ## Delivery tracking
 
@@ -104,6 +105,24 @@ before the process ends.
 
 A delivery that did not finish in time is named in one warning on stderr, for
 example `Route alerts was still sending at exit; delivery is unknown`.
+
+```mermaid
+sequenceDiagram
+    participant Cmd as claudine command
+    participant Tracker as delivery tracker
+    participant Route as route (webhook, bot, desktop)
+    Cmd->>Tracker: send registers a task
+    Tracker->>Route: delivery runs in the background
+    Note over Cmd: the command keeps working
+    Cmd->>Cmd: command returns its exit code
+    Cmd->>Tracker: drain (10 s, or less under handle)
+    Route-->>Tracker: reply, or no reply before the deadline
+    Tracker-->>Cmd: pending deliveries, if any
+    Cmd->>Cmd: warn about pending, flush, exit with the same code
+```
+
+The tests for this path, and the loopback listener they use, are described in
+[Testing → Messaging fixtures](testing.md#messaging-fixtures).
 
 ## Desktop notifications
 

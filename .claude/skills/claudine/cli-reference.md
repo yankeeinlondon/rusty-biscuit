@@ -279,7 +279,7 @@ Process an incoming event from a provider hook. Reads JSON payload from stdin, a
 claudine handle <EVENT> [OPTIONS]
 ```
 
-**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **5-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Individual bash and messenger actions also have tighter 3s timeouts when running inside a hook handler.
+**Execution Deadline.** To prevent hook handlers from blocking the parent agent session, `claudine handle` enforces a hard **15-second deadline** by default (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`). When exceeded, the handler aborts with a diagnostic message to stderr and exits 124. Bash actions have a fixed 3 s timeout. Hook messages still sending are drained before exit, within the same deadline, and any that did not finish are reported as `delivery is unknown`.
 
 | Option | Description |
 |--------|-------------|

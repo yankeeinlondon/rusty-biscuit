@@ -9,7 +9,7 @@
 Use heading search to jump to the listed subsystem.
 
 
-Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions. Actions are executed sequentially in declaration order. Most actions are fire-and-forget, but `Call` can return a `HookResponse` to influence agent behavior on blocking events.
+Actions are the responses Claudine executes when an event fires during an agentic CLI session. Each event binding in `~/.claudine/config.json` specifies an ordered list of actions. Actions are executed sequentially in declaration order. Most actions do not block the event pipeline. Audio is handed to Playa's queue, and a `message` send runs in the background but is drained before the CLI exits. Only `Call` can return a `HookResponse` to influence agent behavior on blocking events.
 
 ## Supported Actions
 
@@ -82,9 +82,7 @@ Execute a shell command asynchronously without waiting for a result. Command and
 | `command` | `string` | (required) | Shell command string |
 | `params` | `string` | `""` | Template-interpolated parameters appended to the command |
 
-**Behavior:** Fire-and-forget (`tokio::spawn`). The command is spawned as a child process. Failures are logged as warnings.
-
-**Hook Handler Timeout:** When running inside `claudine handle`, bash actions have a hard **3-second timeout** by default (overridable via `CLAUDINE_BASH_ACTION_TIMEOUT_SECONDS`).
+**Behavior:** Awaited inline, bounded by a fixed **3-second timeout** (`dispatch::runner::bash::BASH_ACTION_TIMEOUT`, no environment override). The command is spawned as a child process. A failure or timeout is logged as a warning, and the next action runs.
 
 **Return payload:** None.
 
@@ -108,7 +106,7 @@ Send a message to the configured messaging destination (Discord, Slack, Signal, 
 
 **Behavior:** Async and non-blocking for the event pipeline. The send runs as a task registered with the process-wide delivery tracker (`messaging::delivery::track`), so `drain_deliveries` can wait for it before exit; a bare spawn in `messaging/` fails `lib/tests/l1/messaging_spawn_guard.rs`. Every ordinary CLI exit goes through `cli/src/shutdown.rs::finish`, which drains within 10 s (capped by `claudine handle`'s deadline) and keeps the exit code; `cli/tests/l1/exit_site_guard.rs` fails on any other direct exit (see [Messaging](topics/messaging.md#delivery-tracking)).
 
-**Hook Handler Timeout:** When running inside `claudine handle`, messenger actions have a hard **3-second timeout** by default (overridable via `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`).
+**No per-action timeout:** the action starts the send and returns. Under `claudine handle` the send is bounded only by the handler's overall deadline, through the exit drain. An unfinished send produces the warning `Route <name> was still sending at exit; delivery is unknown`, and the exit code is unchanged.
 
 **Return payload:** None.
 

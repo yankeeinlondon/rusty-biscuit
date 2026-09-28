@@ -69,9 +69,12 @@ run, Claudine must:
 ### The compose-scoped guard
 
 [`install_user_interrupt_guard`](../../cli/src/commands/compose/interrupt.rs) is
-called once at the top of `run_compose_inner` and `run_inline_compose_inner`.
-It returns an RAII [`UserInterruptGuard`] whose `Drop` removes the
-registered handler so the next subcommand starts with a clean slate.
+called once near the top of `run_composition_inner`, which serves both
+`compose` and `inline-compose`. It returns an RAII [`UserInterruptGuard`]
+whose `Drop` removes the registered handler. The run hands the guard to the
+CLI's shutdown path (`shutdown::hold_interrupt_guard`) at once, so it stays
+installed after the command returns and through the exit-time delivery drain
+(see [Ctrl+C during the exit drain](#ctrlc-during-the-exit-drain)).
 
 The handler itself runs in the signal-handling context, so it is restricted
 to async-signal-safe operations:
@@ -116,6 +119,35 @@ to async-signal-safe operations:
 `signal_hook::low_level::register` stacks handlers, so this compose-scoped
 guard composes cleanly with the per-iteration handler installed around
 each agent child by `wait_with_signal_and_early_termination`.
+
+### Ctrl+C during the exit drain
+
+Before any ordinary exit, the CLI waits up to 10 seconds for outbound
+messages and desktop notifications that are still sending (see
+[Messaging](messaging.md#the-cli-drains-before-every-ordinary-exit)). Ctrl+C
+keeps working during that wait:
+
+- After `compose` or `inline-compose`, the run's own guard is still installed,
+  so the ladder above applies unchanged.
+- After any other command (for example `sequence`) that left a delivery
+  running, the shutdown path installs the same ladder with a drain notice:
+  `User interrupted while waiting for outbound messages; press Ctrl+C again to
+  exit now`. With nothing pending, no handler is installed and the process
+  exits at once.
+- The first press prints the notice. A second press, or the first press after
+  one already made during the run, force-exits with `130`. Deliveries cut off
+  that way are not reported.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draining: command returns, a delivery is pending
+    Draining --> Exit: every delivery finished or 10 s passed
+    Draining --> Noticed: first Ctrl+C (notice printed)
+    Noticed --> Exit: drain ends
+    Noticed --> Forced: second Ctrl+C
+    Exit --> [*]: warn about unfinished sends, exit with the command's code
+    Forced --> [*]: exit 130
+```
 
 ### Process-scoped flag
 

@@ -131,6 +131,8 @@ Each lifecycle property is an object containing any of these fields:
 
 Most lifecycle output is written to stderr, messaging routes, or desktop notifications. The `stdout` channel is the lone exception: it writes to stdout, which is otherwise reserved for pipeable command output, so reach for it only when you specifically want lifecycle text on stdout.
 
+A `message` or `notify` sent from a terminal event (`success`, `failure`, `finalize`) finishes, or is reported as unfinished, before the process exits normally. Claudine waits at most 10 seconds for it. A send still running at that limit is reported with a warning, and whether it arrived is unknown. The exit code does not change. See [Messaging → The CLI drains before every ordinary exit](../messaging.md#the-cli-drains-before-every-ordinary-exit).
+
 ### Audio Ordering
 
 When both speech and an effect are configured, the order depends on which speech field is used:
