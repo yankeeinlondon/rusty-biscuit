@@ -46,7 +46,7 @@ print!("{}", graph.render(&Terminal::new()));
 |------|---------|
 | `LaneEntry::Commit(sha)` | A commit, by **full** SHA. The component shortens it for the label. |
 | `LaneEntry::Elided(n)` | `n` commits left out, drawn as one `+n` square. |
-| `GraphLine` | A branch and the commits it has that its parent lacks, oldest first; its parent (`None` is the default branch), fork commit, tip, merge commit, creation time, and tip time. |
+| `GraphLine` | A branch and the commits it has that its parent lacks, oldest first; its parent (`None` is the default branch), fork commit, tip, ordered merge edges, creation time, and tip time. |
 | `GraphLine::forked_at(sha)` | The commit the lane hangs from. Unset means the connection is unknown: the lane is drawn unconnected. |
 | `GraphLine::with_tip(sha)` | The branch's own tip. A line without commits is labeled here; a line with commits defaults to its newest drawn commit. The fork commit is never used as a tip. |
 | `GraphLine::with_merge(source, destination)` | Appends a `LaneMerge`: the commit `source` on this line was merged by the merge commit `destination` on another lane. The destination's lane is found by where that commit is drawn. Append oldest first; a line merged at its tip passes its tip as `source`. |

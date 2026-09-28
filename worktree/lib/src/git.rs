@@ -99,7 +99,12 @@ pub fn git_command_allow_no_match(args: &[&str]) -> Result<Option<String>, Workt
 
 fn git_command_status(args: &[&str], allow_no_match: bool) -> Result<Option<String>, WorktreeError> {
     #[cfg(any(test, feature = "count-git"))]
-    recorder::record(args);
+    {
+        recorder::record(args);
+        if recorder::injected_failure(args) {
+            return Err(WorktreeError::GitCommand("injected failure".to_string()));
+        }
+    }
 
     let output = Command::new("git")
         .args(args)
@@ -228,6 +233,38 @@ pub mod recorder {
         if let Some(ref mut log) = *guard {
             log.calls.push(args.iter().map(|s| s.to_string()).collect());
         }
+    }
+
+    /// Decides which calls [`fail_matching`] fails.
+    type FailWhen = Box<dyn Fn(&[&str]) -> bool + Send>;
+
+    static FAIL_WHEN: Mutex<Option<FailWhen>> = Mutex::new(None);
+
+    /// Makes every [`git_command`](super::git_command) and
+    /// [`git_command_allow_no_match`](super::git_command_allow_no_match) call
+    /// whose arguments `predicate` matches fail without running Git, until the
+    /// returned guard drops. Other runners are unaffected.
+    #[must_use = "the failure injection ends when the guard drops"]
+    pub fn fail_matching(predicate: impl Fn(&[&str]) -> bool + Send + 'static) -> FailureGuard {
+        *FAIL_WHEN.lock().expect("recorder mutex poisoned") = Some(Box::new(predicate));
+        FailureGuard(())
+    }
+
+    /// Ends a [`fail_matching`] injection when dropped.
+    pub struct FailureGuard(());
+
+    impl Drop for FailureGuard {
+        fn drop(&mut self) {
+            *FAIL_WHEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
+
+    pub fn injected_failure(args: &[&str]) -> bool {
+        FAIL_WHEN
+            .lock()
+            .expect("recorder mutex poisoned")
+            .as_ref()
+            .is_some_and(|predicate| predicate(args))
     }
 
     pub fn count_matching(calls: &[Vec<String>], predicate: impl Fn(&[String]) -> bool) -> usize {

@@ -1893,6 +1893,145 @@ fn a_branch_created_at_a_merged_tip_does_not_claim_the_old_merge() {
     assert!(!graph.incomplete);
 }
 
+// ---------------------------------------------------------------------------
+// A Git read that fails after an edge was accepted keeps every verified fact.
+// ---------------------------------------------------------------------------
+
+/// Whether `args` is the `log --first-parent` that reads the newest commits
+/// of `tip`'s lane before `stop` (none for the default lane).
+fn is_lane_read(args: &[&str], tip: &str, stop: &[&str]) -> bool {
+    let mut rest: Vec<&str> = Vec::new();
+    if !stop.is_empty() {
+        rest.push("--not");
+        rest.extend_from_slice(stop);
+    }
+    rest.push("--");
+    args.len() == 6 + rest.len() && args[..2] == ["log", "--first-parent"] && args[5] == tip && args[6..] == rest[..]
+}
+
+/// Gathers the base view while `fails` makes matching Git calls fail, and
+/// asserts that at least one call was failed.
+fn gather_failing(branches: &[&str], forks: ForkOriginStore, fails: impl Fn(&[&str]) -> bool + Send + Sync + Clone + 'static) -> GraphFacts {
+    recorder::start_recording();
+    let (graph, _) = {
+        let _failing = recorder::fail_matching(fails.clone());
+        gather(&input("main", branches, forks), true, false)
+    };
+    let calls = recorder::finish_recording();
+    assert!(
+        recorder::has_any_matching(&calls, |args| fails(&args.iter().map(String::as_str).collect::<Vec<_>>())),
+        "the injected failure never fired: {calls:?}"
+    );
+    graph.expect("a failed read keeps the graph")
+}
+
+/// `fix/wt-ux` still merges `B` into `C`, with both commits drawn, and the
+/// graph and its plan carry the notice.
+fn assert_edge_kept(graph: &GraphFacts, repo: &ContinuedAfterMerge) {
+    let wt_ux = line(graph, "fix/wt-ux");
+    assert_eq!(wt_ux.merges, [LaneMerge { source: repo.b().clone(), destination: repo.c.clone() }], "{graph:?}");
+    assert!(wt_ux.entries.contains(&LaneEntry::Commit(repo.b().clone())), "the source B is drawn: {:?}", wt_ux.entries);
+    assert!(graph.default_entries.contains(&LaneEntry::Commit(repo.c.clone())), "the destination C is drawn: {:?}", graph.default_entries);
+    assert!(graph.incomplete, "{graph:?}");
+    assert_no_repeated_commit(graph);
+    let plan = untrimmed_plan(graph, 120, 40);
+    assert!(has_merge(&plan.mermaid, "fix/wt-ux", &repo.c), "{}", plan.mermaid);
+    assert!(plan.incomplete, "{}", plan.mermaid);
+}
+
+/// The reread past an accepted merge fails: the lane keeps the window read
+/// before it, ending at the source `B`, and the edge.
+#[test]
+#[serial_test::serial]
+fn a_failed_reread_after_an_accepted_merge_keeps_the_edge_and_its_source() {
+    let repo = continued_after_merge(LocalMain::AtMerge);
+    let _guard = DirGuard::enter(&repo.path);
+    let (n, p) = (repo.n.clone(), repo.p.clone());
+
+    let graph = gather_failing(&repo.branches(), repo.forks.clone(), move |args| is_lane_read(args, &n, &[&p]));
+
+    assert_edge_kept(&graph, &repo);
+    let wt_ux = line(&graph, "fix/wt-ux");
+    assert_eq!(wt_ux.entries, commits(&[repo.b(), &repo.n]), "the last verified window, with B below it");
+    assert_eq!(wt_ux.fork_sha.as_ref(), Some(&repo.p), "merge-base(C^1, B)");
+    let sniff = line(&graph, "fix/sniff-pr");
+    assert_eq!(sniff.tip_sha.as_ref(), Some(repo.b()), "the child keeps its label at B");
+}
+
+/// Placing an anchor on a branch lane fails after its merge was accepted:
+/// only the child's fork there is omitted; the lane, its source, and the edge
+/// stay.
+#[test]
+#[serial_test::serial]
+fn a_failed_anchor_lookup_on_a_merged_lane_omits_only_that_connection() {
+    let repo = continued_after_merge(LocalMain::AtMerge);
+    let tree = git_output(&repo.path, &["rev-parse", &format!("{}^{{tree}}", repo.n)]);
+    let k = commit_on(&repo.path, &tree, &[&repo.x[1]], "K");
+    set_branches(&repo.path, &[("child", &k)]);
+    let mut forks = repo.forks.clone();
+    forked_at(&mut forks, "child", "fix/wt-ux", &repo.x[1], 40);
+    let branches = ["main", "fix/wt-ux", "fix/sniff-pr", "child"];
+    let _guard = DirGuard::enter(&repo.path);
+
+    // Without the failure, the child's fork `x2` splits the lane's `+7`.
+    let (graph, _) = gather(&input("main", &branches, forks.clone()), true, false);
+    let graph = graph.expect("base view");
+    assert!(line(&graph, "fix/wt-ux").entries.contains(&LaneEntry::Commit(repo.x[1].clone())), "{graph:?}");
+    assert!(!graph.incomplete, "{graph:?}");
+
+    let range = format!("{}..{}", repo.x[1], repo.n);
+    let graph = gather_failing(&branches, forks, move |args| args == ["rev-list", "--first-parent", "--count", range.as_str(), "--"]);
+
+    assert_edge_kept(&graph, &repo);
+    let wt_ux = line(&graph, "fix/wt-ux");
+    assert_eq!(wt_ux.entries, continued_lane(&repo), "verified entries are kept");
+    let child = line(&graph, "child");
+    assert_eq!(child.entries, commits(&[&k]));
+    assert_eq!(child.fork_sha.as_ref(), Some(&repo.x[1]), "the fork is verified, only its position is not");
+}
+
+/// The default lane's newest commits cannot be read: the lane still draws
+/// every anchor at its verified position, so the graph keeps the merge.
+#[test]
+#[serial_test::serial]
+fn a_failed_default_lane_read_keeps_the_graph_and_its_verified_anchors() {
+    let repo = continued_after_merge(LocalMain::AtMerge);
+    let _guard = DirGuard::enter(&repo.path);
+    let c = repo.c.clone();
+
+    let graph = gather_failing(&repo.branches(), repo.forks.clone(), move |args| is_lane_read(args, &c, &[]));
+
+    assert_edge_kept(&graph, &repo);
+    assert_eq!(graph.default_entries, commits(&[&repo.d[4], &repo.p, &repo.c]), "the tip, the fork, and the fork's first parent");
+    let wt_ux = line(&graph, "fix/wt-ux");
+    assert_eq!(wt_ux.entries, continued_lane(&repo));
+    assert_eq!(wt_ux.fork_sha.as_ref(), Some(&repo.p));
+}
+
+/// The diverged `origin/main` line's window cannot be read. That lane has no
+/// verified commit, so its merge `C` is not substituted anywhere: the edge is
+/// not drawn and the notice accounts for it, while `fix/wt-ux` keeps its lane.
+#[test]
+#[serial_test::serial]
+fn a_failed_origin_line_read_draws_no_substitute_merge() {
+    let repo = continued_after_merge(LocalMain::Diverged);
+    let _guard = DirGuard::enter(&repo.path);
+    let (c, p_prime) = (repo.c.clone(), repo.p_prime.clone().expect("P'"));
+
+    let graph = gather_failing(&repo.branches(), repo.forks.clone(), move |args| is_lane_read(args, &c, &[&p_prime]));
+
+    let wt_ux = line(&graph, "fix/wt-ux");
+    assert_eq!(wt_ux.entries, continued_lane(&repo));
+    assert_eq!(wt_ux.merges, [LaneMerge { source: repo.b().clone(), destination: repo.c.clone() }]);
+    assert!(line(&graph, "origin/main").entries.is_empty(), "{graph:?}");
+    assert!(!graph.default_entries.contains(&LaneEntry::Commit(repo.c.clone())), "C is not substituted onto main");
+    assert!(graph.incomplete);
+    assert_no_repeated_commit(&graph);
+    let plan = untrimmed_plan(&graph, 120, 40);
+    assert!(!has_merge(&plan.mermaid, "fix/wt-ux", &repo.c), "{}", plan.mermaid);
+    assert!(plan.incomplete);
+}
+
 /// A `--depth <depth>` clone of `source` with every branch local.
 fn shallow_clone_of(source: &Path, depth: usize, branches: &[&str]) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -2387,8 +2526,7 @@ fn first_parent_entries_place_only_anchors_on_the_lane() {
 
     // `side`'s commits are the merge's second parent: not on main's chain.
     let built = history
-        .first_parent_entries(main_tip, topology::Extent::Open { window: 3, cap_window: false }, &[&repo.side[1], &repo.a[5]])
-        .unwrap();
+        .first_parent_entries(main_tip, topology::Extent::Open { window: 3, cap_window: false }, &[&repo.side[1], &repo.a[5]]);
     assert!(built.placed.contains(&repo.a[5]));
     assert!(!built.placed.contains(&repo.side[1]), "an anchor off the chain is not placed");
     assert!(!built.entries.contains(&LaneEntry::Commit(repo.side[1].clone())));
@@ -2412,8 +2550,7 @@ fn first_parent_entries_place_only_anchors_on_the_lane() {
     let stop = [repo.a[10].as_str()];
     let window = history.lane_window(side_tip, &stop, 2).unwrap();
     let built = history
-        .first_parent_entries(side_tip, topology::Extent::Until(&window), &[&repo.side[2], &repo.a[9]])
-        .unwrap();
+        .first_parent_entries(side_tip, topology::Extent::Until(&window), &[&repo.side[2], &repo.a[9]]);
     assert_eq!(
         built.entries,
         vec![
@@ -2426,11 +2563,9 @@ fn first_parent_entries_place_only_anchors_on_the_lane() {
     );
     assert_eq!(built.placed, HashSet::from([repo.side[2].clone()]));
 
-    // An unreadable tip is the only error.
-    assert_eq!(
-        history.first_parent_entries(&"0".repeat(40), topology::Extent::Open { window: 3, cap_window: false }, &[]),
-        Err(topology::GatherGap)
-    );
+    // An unreadable tip is a gap with nothing to draw, never an error.
+    let unreadable = history.first_parent_entries(&"0".repeat(40), topology::Extent::Open { window: 3, cap_window: false }, &[]);
+    assert!(unreadable.entries.is_empty() && unreadable.gap, "{unreadable:?}");
 }
 
 // ---------------------------------------------------------------------------

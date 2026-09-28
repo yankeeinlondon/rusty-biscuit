@@ -231,12 +231,16 @@ impl History {
     /// placed as is. Any other anchor's position is `rev-list --first-parent
     /// --count A..tip`, verified by one batched lookup of `tip~<position>`; an
     /// anchor that fails
-    /// is not on this lane and is left out of [`LaneHistory::placed`]. `Err` is
-    /// only for a lane whose newest commits cannot be read.
-    pub fn first_parent_entries(&self, tip: &str, extent: Extent, anchors: &[&str]) -> Result<LaneHistory, GatherGap> {
+    /// is not on this lane and is left out of [`LaneHistory::placed`]. A default
+    /// lane whose newest commits cannot be read is a gap that still places its
+    /// anchors, so the lane keeps every verified fork, merge, and label.
+    pub fn first_parent_entries(&self, tip: &str, extent: Extent, anchors: &[&str]) -> LaneHistory {
         let (mut shown, length, mut gap, known) = match extent {
             Extent::Until(lane) => (lane.shown.clone(), Some(lane.length), !lane.counted, lane.known.as_slice()),
-            Extent::Open { window, .. } => (self.newest(tip, &[], window)?, None, false, &[][..]),
+            Extent::Open { window, .. } => match self.newest(tip, &[], window) {
+                Ok(shown) => (shown, None, false, &[][..]),
+                Err(GatherGap) => (Vec::new(), None, true, &[][..]),
+            },
         };
 
         let mut anchors: Vec<&str> = anchors.iter().copied().collect::<HashSet<_>>().into_iter().collect();
@@ -308,12 +312,12 @@ impl History {
             // A shallow count stops at the boundary, so `+N` is a lower bound.
             gap = true;
         }
-        Ok(LaneHistory {
+        LaneHistory {
             entries,
             last_active,
             placed: placed.into_keys().collect(),
             gap,
-        })
+        }
     }
 
     /// A branch lane's newest `window` commits before `stop`'s history, and

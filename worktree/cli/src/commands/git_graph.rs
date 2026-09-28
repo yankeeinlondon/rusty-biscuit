@@ -258,7 +258,7 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
     let gap = history_gap || tips_gap;
 
     if input.is_base_view() {
-        let graph = needs_graph.then(|| base_view(input, &history, &tips, gap)).flatten();
+        let graph = needs_graph.then(|| base_view(input, &history, &tips, gap));
         return (graph, None);
     }
 
@@ -275,11 +275,7 @@ pub fn gather(input: &GatherInput, needs_graph: bool, needs_verbose: bool) -> (O
         }),
         _ => None,
     };
-    let graph = if needs_graph {
-        focused_view(input, &history, &tips, gap, current, current_tip, base)
-    } else {
-        None
-    };
+    let graph = needs_graph.then(|| focused_view(input, &history, &tips, gap, current, current_tip, base));
     (graph, verbose)
 }
 
@@ -310,7 +306,7 @@ fn focused_view(
     current: &str,
     current_tip: &str,
     default_base: Result<Option<String>, GatherGap>,
-) -> Option<GraphFacts> {
+) -> GraphFacts {
     let parent = recorded_parent(input, current, |_| true);
     let mut selected = Vec::new();
     let mut refs = tips.refs(&input.default_branch);
@@ -346,7 +342,7 @@ fn focused_view(
 
 /// The default lane's newest commits and one line per worktree branch, each
 /// under its fork parent when that parent is also drawn.
-fn base_view(input: &GatherInput, history: &History, tips: &DefaultTips, gap: bool) -> Option<GraphFacts> {
+fn base_view(input: &GatherInput, history: &History, tips: &DefaultTips, gap: bool) -> GraphFacts {
     let mut seen = HashSet::new();
     let branches: Vec<&str> = input
         .branch_names
@@ -585,7 +581,8 @@ fn place(history: &History, classifications: &Classifications, tips: &DefaultTip
 /// Walks a lane's boundaries backward and extends it past each one that a
 /// candidate lane merged directly, until a boundary is an ordinary fork, was
 /// integrated otherwise, is at or below the branch's recorded creation
-/// commit, or cannot be established (a gap).
+/// commit, or cannot be established (a gap). `window` is `Err` only when the
+/// lane's first read failed, so an accepted edge always keeps its source.
 fn extend(history: &History, classifications: &Classifications, tip: &str, candidates: &[(LaneId, &str)], mut stop: Vec<String>, record: Option<&str>) -> Extension {
     let candidate_tips: Vec<&str> = candidates.iter().map(|(_, sha)| *sha).collect();
     let mut earlier: Vec<EarlierMerge> = Vec::new();
@@ -675,8 +672,16 @@ fn extend(history: &History, classifications: &Classifications, tip: &str, candi
             lane: lane_id,
         });
         known.push(boundary);
+        // A failed reread keeps the window already read: the accepted edge's
+        // source is its boundary, placed from `known` without asking Git.
+        match read(&next) {
+            Ok(wider) => window = Ok(wider),
+            Err(GatherGap) => {
+                gap = true;
+                break;
+            }
+        }
         stop = next;
-        window = read(&stop);
     }
     earlier.reverse();
     Extension {
@@ -709,7 +714,7 @@ fn assemble(
     refs: Vec<(String, String)>,
     current_branch: &str,
     mut incomplete: bool,
-) -> Option<GraphFacts> {
+) -> GraphFacts {
     let classifications = Classifications::default();
     let record = |branch: &str| input.forks.get(branch).map(|origin| origin.base_sha.as_str());
     let placements: Vec<Placement> = parallel(selected, |selected| place(history, &classifications, tips, selected, record(selected.branch)))
@@ -744,18 +749,19 @@ fn assemble(
     let lanes: HashMap<LaneId, LaneHistory> = parallel(&jobs, |(lane, tip, window)| {
         let read;
         let window = match window {
-            Some(window) => window.as_ref().map_err(|gap| *gap)?,
+            Some(window) => window.as_ref().ok()?,
             None => {
-                read = history.lane_window(tip, &local.into_iter().collect::<Vec<_>>(), LINE_WINDOW)?;
+                read = history.lane_window(tip, &local.into_iter().collect::<Vec<_>>(), LINE_WINDOW).ok()?;
                 &read
             }
         };
-        history.first_parent_entries(tip, Extent::Until(window), &anchors_for(lane))
+        Some(history.first_parent_entries(tip, Extent::Until(window), &anchors_for(lane)))
     })
     .into_iter()
     .zip(&jobs)
     .map(|(built, (lane, _, _))| {
-        let built = built.and_then(Result::ok).unwrap_or_else(|| LaneHistory {
+        // No window was ever read, so the lane verified no commit to keep.
+        let built = built.flatten().unwrap_or_else(|| LaneHistory {
             gap: true,
             ..LaneHistory::default()
         });
@@ -778,16 +784,14 @@ fn assemble(
         }
     }
     let default_anchors: Vec<&str> = default_anchors.iter().map(String::as_str).collect();
-    let default_built = history
-        .first_parent_entries(
-            &tips.lane_tip,
-            Extent::Open {
-                window: default_lane.window,
-                cap_window: default_lane.cap_window,
-            },
-            &default_anchors,
-        )
-        .ok()?;
+    let default_built = history.first_parent_entries(
+        &tips.lane_tip,
+        Extent::Open {
+            window: default_lane.window,
+            cap_window: default_lane.cap_window,
+        },
+        &default_anchors,
+    );
     incomplete |= default_built.gap || lanes.values().any(|built| built.gap);
 
     let mut lines = Vec::with_capacity(placements.len() + 1);
@@ -830,14 +834,14 @@ fn assemble(
         lines.push(line);
     }
 
-    Some(GraphFacts {
+    GraphFacts {
         default_branch: input.default_branch.clone(),
         default_entries: default_built.entries,
         lines,
         refs,
         current_branch: current_branch.to_string(),
         incomplete,
-    })
+    }
 }
 
 fn has_commits(entries: &[LaneEntry]) -> bool {
