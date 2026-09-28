@@ -35,7 +35,8 @@ build_id: "$(uuidgen)::no-cache"
 
 ## Rules
 
-- The **entire** frontmatter value must be the shell expression -- embedded expressions like `"prefix $(cmd) suffix"` are not supported.
+- The **entire** frontmatter value must be the shell expression -- embedded expressions like `"prefix $(cmd) suffix"` are not supported. Leading whitespace before `$(` is allowed.
+- The shape is read from the value **the author wrote**, before interpolation. See [Only Authored Commands Run](#only-authored-commands-run).
 - Only top-level string-valued frontmatter properties are scanned. Nested objects and array elements are ignored.
 - The optional `::timeout:<N>` suffix overrides the global shell timeout for that specific command. `N` must be a positive integer of seconds.
 - The optional `::no-cache` suffix bypasses the per-compose command cache so the command executes fresh at each occurrence. It combines with `::timeout:<N>` in either order (e.g. `$(uuidgen)::no-cache::timeout:5`).
@@ -78,7 +79,7 @@ two frontmatter interpolation passes and before EffectiveState construction:
 3. **Frontmatter Interpolation (pass 1)** -- resolve `{{ }}` expressions; defer keys that reference a whole-value `$(...)`
 4. **Schema Validation** -- validate/coerce frontmatter against `$schema` (values still holding `$(...)` are deferred)
 5. **Frontmatter Shell Expansion** -- execute `$(cmd)` expressions
-6. **Frontmatter Interpolation (pass 2)** -- resolve the keys deferred in pass 1 against the now-concrete shell-expanded values
+6. **Frontmatter Interpolation (pass 2)** -- resolve only the keys deferred in pass 1, from their authored source, against the now-concrete shell-expanded values; shell output itself is never scanned
 7. Build EffectiveState
 8. Body operations continue...
 
@@ -94,6 +95,38 @@ dir: "$(dirname {{file}})"
 After interpolation, the shell stage sees `$(dirname README.md)`.
 
 ## Security
+
+### Only Authored Commands Run
+
+A frontmatter value runs as a command only when **the value the author wrote**
+is a whole-value `$( … )`. Interpolation can fill in a command's arguments, but
+it cannot create the command shape, and text an operation produced is never
+treated as a command however it reads:
+
+| Value | Runs? |
+| --- | --- |
+| `dir: "$(dirname {{file}})"` | yes: authored `$( … )`, interpolated argument |
+| `cmd: "{{ '$(echo X)' }}"` | no: the expression's result is the text `$(echo X)` |
+| `cmd: "{{ frontmatter('n.md', 'note') }}"` where that note is `$(echo X)` | no: a file read is data |
+| a `--set` value of `$(echo X)` | yes: a person typed it, so it is authored and goes through approval |
+| a data override or a decoded [literal token](./interpolation.md#literal-tokens) holding `$(echo X)` | no |
+| shell output that prints `$(date)` | no: the output is stored as the text `$(date)` |
+
+```yaml
+---
+x: "$(echo X)"                # runs (after approval); x is `X`
+cmd: "{{ '$(echo Y)' }}"      # never runs; cmd is the text `$(echo Y)`
+---
+```
+
+Preflight approval and the real run make this decision with the same
+predicate, so the approval list for the document above holds `echo X` only.
+`md compose --shell` reports exactly that set. The decision does not depend on
+whether shell expansion is enabled, so preflight and the run agree in both
+modes.
+
+This is why the rule exists: a value that came from a file, a command, or an AI
+agent's output can contain `$( … )` without ever becoming a command.
 
 ### Executable Token Rule
 
@@ -122,6 +155,7 @@ Discovery and runtime execution use the same pre-compose frontmatter preparation
 - external state is merged first
 - `--set` overrides are applied next
 - frontmatter interpolation runs before scanning/execution
+- both decide whether a key is a command from its authored source value
 
 This keeps approval preflight aligned with the commands that real compose will execute.
 
@@ -133,14 +167,18 @@ Timeout failures follow the timeout behavior configured via `--allow-shell-timeo
 
 ### Post-Expansion Leak Guard
 
-When frontmatter shell expansion is enabled, a final pass over every top-level
-string value rejects any value that *still* trims to a whole-value `$(...)`
-candidate after expansion has run. This closes the residual leaks the
-strict-start scan cannot catch: command output that reproduces `$( … )` (e.g.
-`$(echo '$(date)')`), and a whole-value `$(...)` hidden behind leading
-whitespace that the start-of-value scan skips. A surviving whole-value
-candidate is a hard compose error tagged with the offending frontmatter key and
-its source line.
+When frontmatter shell expansion is enabled, a final pass over every
+**authored** top-level string value rejects any value that *still* trims to a
+whole-value `$(...)` candidate after expansion has run. An authored value that
+is exactly an expansion form is executable state: it must run or fail, never
+reach the composed frontmatter as raw syntax. A surviving whole-value candidate
+is a hard compose error tagged with the offending frontmatter key and its
+source line.
+
+The guard inspects unresolved authored syntax, not data. Shell output, an
+expression's result, a data override, and a decoded literal token are exempt
+however they read, so `out: "$(printf %s '$(date)')"` composes to the text
+`$(date)` rather than failing.
 
 The guard runs only when shell expansion is enabled. When frontmatter shell
 expansion is **explicitly disabled**, `$(...)` values are deferred unchanged and
@@ -152,6 +190,7 @@ untouched.
 
 - Only `stdout` is written back into frontmatter. Successful `stderr` output is ignored for value storage.
 - The `stdout` from a frontmatter shell command is trimmed of all surrounding whitespace (`.trim()`) before being stored as the frontmatter value.
+- The stored output is data. Pass 2, body interpolation, and transcluded children insert it as text and never evaluate a `{{ … }}` or run a `$( … )` it contains.
 
 ## Concurrency
 

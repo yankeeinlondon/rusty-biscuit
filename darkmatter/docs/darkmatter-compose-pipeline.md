@@ -14,7 +14,7 @@ block-beta
         fmInterpolate("<a href='./inline/fm-interpolation.md'>1. Frontmatter Interpolation — pass 1 🏁</a>")
         schemaValidation("<a href='./inline/schema-validation.md'>2. Schema Validation 🏁</a>")
         shellExp("<a href='./inline/fm-shell-expansion.md'>3. Frontmatter Shell Expansion 🏁</a>")
-        fmInterpolate2("<a href='./inline/fm-interpolation.md'>3b. Frontmatter Interpolation — pass 2 (post-shell) 🏁</a>")
+        fmInterpolate2("<a href='./inline/fm-interpolation.md'>3b. Frontmatter Interpolation — pass 2 (post-shell, deferred keys) 🏁</a>")
         textReplacement("<a href='./inline/text-replacement.md'>4. Text Replacement 🏁</a>")
         pageBlocks("<a href='./inline/page-blocks.md'>5. Page Blocks 🏁</a>")
         interpolation("<a href='./inline/interpolation.md'>6. Interpolation 🏁</a>")
@@ -101,6 +101,14 @@ shell expansion commands (or any other inline mutation) contained within the blo
 been removed.
 >
 > **Note:** approval and execution are deliberately separate. Pre-flight builds the **approval set** _condition-blind_ — it walks every branch (false page blocks, false-condition transclusions, both sides of a `$(...)` ternary) and approves every command that **could** run under any state, exactly once, up front. **Execution** is _condition-aware_: a command runs only when its branch is actually reached. So in the example above the dead-branch command is still approved (vetted once), but never executes while the condition is false. The governing invariant is `execution_set ⊆ approval_set`, which makes the execution-time gate a pure membership check that never prompts — see [pre-flight checks](./inline/preflight-checks.md).
+
+Each stage acts only on **authored** text, and each piece of authored text is scanned once. What a stage produces (an expression's value, shell output, a `{{{ … }}}` literal's braces, a file read) is data to every later stage, and to transcluded children: it is never evaluated, run, or parsed as a directive. The pipeline tracks this as origin beside the value (frontmatter paths and body byte ranges) rather than by escaping the text, and it fails closed if that tracking is ever lost. A frontmatter value that is a whole-value `$( … )` runs only when the author wrote it that way. See [Inserted Text Is Data](./inline/interpolation.md#inserted-text-is-data).
+
+```mermaid
+flowchart LR
+    A["authored {{ x }}"] -->|Interpolation| B["value of x (data)"]
+    B -->|"shell, directive, and transclusion stages:<br/>carried as text, never scanned"| O["composed output"]
+```
 
 ### 2. Transclusion
 

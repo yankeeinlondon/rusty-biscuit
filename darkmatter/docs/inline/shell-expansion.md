@@ -49,6 +49,25 @@ base: main
 
 The command that is approved is the command after interpolation. A value that changes from run to run therefore produces a command that needs approving again, unless a whitelist entry covers it by prefix.
 
+An interpolated value supplies **arguments only**. The directive, the program it runs, `&&`/`||`, and redirections must all be written in the document, so a value cannot choose what runs:
+
+```md
+::shell {{ exe }} --version        <!-- rejected: the program came from a value -->
+::shell echo {{ note }} && ls      <!-- fine, unless `note` itself contains `&&` -->
+```
+
+A value that holds `::shell …` on its own line is inserted as text; it cannot start a directive.
+
+## Output is data
+
+The inserted output is never scanned again. A command that prints `{{ area }}`, `::file other.md`, or `$(date)` puts exactly that text into the document:
+
+```md
+::shell printf %s '{{{ area }}} and ::file log.md'
+```
+
+composes to `{{ area }} and ::file log.md`, with nothing evaluated or transcluded. See [Inserted Text Is Data](./interpolation.md#inserted-text-is-data).
+
 ## When a command fails
 
 By default, a command that exits non-zero stops the composition:
