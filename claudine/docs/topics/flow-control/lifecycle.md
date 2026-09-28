@@ -756,6 +756,28 @@ success:
 
 The same holds for a `set:` value, a `proxy` `with:` value, a side-effect argument, and a shell command: a pre-flight-resolved command runs its approved bytes as they stand. The one exception is a `with:` value for a lifecycle key (see [Passing values with `with:`](flow-control-reference.md#passing-values-with-with)).
 
+What is still checked is the syntax **you** wrote. Every `{{ … }}` span in an authored lifecycle string must resolve when the event fires. Lifecycle evaluation is strict, so an unknown root or a malformed expression fails the event before any side effect dispatches, whether the span is the whole value or sits inside other text ([`LifecycleUndefinedVariable`](#lifecycleundefinedvariable)). The check never looks inside what a span returned, so an agent's words cannot trip it:
+
+| Value | Result |
+|-------|--------|
+| `info: "{{ spec_fil }}"` (authored typo) | fails: unknown root |
+| `info: "done: {{ spec_fil }}"` (authored typo in text) | fails: unknown root |
+| `info: "{{ note }}"` where `note` is `see {{ title }}` | prints `see {{ title }}` |
+
+Ordinary frontmatter and the body, which compose before the run, keep Darkmatter's rules: an unresolved whole value is an error, while an unresolved span in mixed text leaves the span in place with a warning. See [Whole-Value Frontmatter Expansion Is Executable State](../composition.md#whole-value-frontmatter-expansion-is-executable-state).
+
+#### Frontmatter an action writes is data
+
+`set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, and `prepend_frontmatter` write the **result** of evaluating their value, so what lands in the file is data. A string that contains `{{` or `$(` is stored as a literal token and reads back on the next run as the same text, never as a template:
+
+```yaml
+success:
+  stack:
+    - action: { set_frontmatter: ["state.md", "last_note", "{{ frontmatter('log.md', 'message_to_agent') }}"] }
+```
+
+This also means these effects cannot write a template into a file. An authored `{{{ title }}}` writes the text `{{ title }}` as data, and the next run shows those braces instead of the title. To give a file a template, author it in that file. The token format, and how to edit one by hand, are described in [Values an Agent Writes](../frontmatter-properties.md#values-an-agent-writes); [Side Effects](../state-management/side-effects.md) covers the verbs.
+
 ### `LifecycleUndefinedVariable`
 
 A reference to a genuinely-unknown root — a typo such as `{{spec_fil}}` for `{{spec_file}}` — fails the event closed at event-time via Darkmatter's strict mode. A *known* root that resolves to empty (`{{spec_file}}` when the key is legitimately absent) renders empty and does not error. To tolerate an unknown optional name, use explicit fallback syntax: `{{ maybe || '' }}`.

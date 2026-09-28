@@ -217,7 +217,7 @@ success:
           label: "phase-{{ iteration }}"
 ```
 
-`with:` values are evaluated once, in the current document, when the directive fires. Values the caller passed on the command line (`--set key=value`) still win over `with:`. The overlay applies only to this target and is not passed on to further handoffs. The [reference](flow-control-reference.md#passing-values-with-with) covers types, precedence, errors, and the security model.
+`with:` values are evaluated once, in the current document, when the directive fires, and the target receives the results as data: text an agent wrote stays text there, even if it contains `{{ … }}` or `$( … )`. Values the caller passed on the command line (`--set key=value`) still win over `with:`. The overlay applies only to this target and is not passed on to further handoffs. The [reference](flow-control-reference.md#passing-values-with-with) covers types, precedence, errors, and the security model.
 
 | Parameter | Required | Meaning |
 |-----------|----------|---------|

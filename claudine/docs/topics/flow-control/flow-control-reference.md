@@ -164,8 +164,9 @@ An overlay does not give a document a distinct identity for cycle detection.
 | Scope | The immediate proxy target | Whichever file the action names |
 | Lifetime | Discarded at the next hop | Until something rewrites it |
 | Visible to | That target's composition, events, schema, and body | Any later reader of the file |
+| A `{{ … }}` or `$( … )` in a resolved value | Data in the target; never evaluated | Stored as a literal token; read back as the same text |
 
-Use `with:` to parameterize the document you are handing to. Use `set_frontmatter` when the value must outlive the run.
+Use `with:` to parameterize the document you are handing to. Use `set_frontmatter` when the value must outlive the run. Neither can hand a template to another document: both deliver resolved values as data (see [Frontmatter an action writes is data](lifecycle.md#frontmatter-an-action-writes-is-data)).
 
 #### Trust model
 

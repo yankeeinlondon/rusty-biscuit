@@ -171,7 +171,9 @@ Steps:
    source produces a warning naming the file and migration, but the run
    continues and Claudine never overwrites it. The guardrails name the three closure-owned
    properties (`prompt`, `hash`, `last_updated`), the direct write-and-re-read
-   duty, the schema type duty, and the two-to-three-paragraph summary contract.
+   duty, the schema type duty, the plain-scalar rule (a `#` in a value the
+   agent writes is kept as text, so a comment needs a quoted value or its own
+   line), and the two-to-three-paragraph summary contract.
 5. **Prepare** — retain the launch-resolved schema and launch report
    (`PreparedComposition::launch_schema`) and the inline guard (native path,
    pre-run text, pre-run `Simple` hash) so the completion verdict never resolves
@@ -197,6 +199,20 @@ Steps:
      body hash (leading/trailing whitespace and blank lines ignored, internal
      whitespace significant). A trimmed-empty or unchanged body is refused and
      nothing is stamped or written.
+   - **Repair.** A top-level key the agent added or changed whose value is a
+     single-line plain scalar that YAML would misread is wrapped in double
+     quotes, keeping its whole text: `title: Fix: colons` becomes
+     `title: "Fix: colons"`, and `note: see issue #42` becomes
+     `note: "see issue #42"` (the `#` is text, not a comment). A value that
+     contains `: ` or ` #`, ends with `:`, or starts with a YAML indicator is
+     quoted; numbers, booleans, nulls, quoted and block scalars, valid flow
+     collections, unchanged keys, and the owned properties are never touched.
+     The whole frontmatter is then parsed again. A duplicate key, bad nesting,
+     a missing closing `---`, or anything else outside that repair fails with
+     `CompositionError::InlineAgentFrontmatterRejected` (code
+     `document.invalid_frontmatter`), which names the line and says whether the
+     agent wrote it. Nothing is written, and the rollback below restores the
+     baseline.
    - The three closure-owned nodes (`prompt`, `hash`, `last_updated`) are
      restored textually from the pre-run snapshot with Darkmatter's
      `restore_properties_text`. One warning is printed per property the agent
@@ -204,11 +220,38 @@ Steps:
      wrote is the deliverable and is kept — the 2026-09-01 drift-restoration
      semantics are inverted, because on-disk changes are now the product of the
      run rather than interference with it.
+   - **Encode.** Every string value the agent added or changed (compared by
+     value, so reformatting does not count; inside a new list or mapping, every
+     string) that contains `{{` or `$(` is replaced in place by a Darkmatter
+     literal token, `"{{!data:v1:<base64url>}}"`. The next run decodes it to
+     the agent's exact text as data, so `summary: fixed {{…}} parsing` never
+     becomes a template or a command. Other values stay readable YAML; an
+     unchanged value, including a token stored by an earlier run, keeps its
+     bytes; mapping keys are never encoded. A value that must be encoded but
+     has no exact source span (an anchor, alias, tag, `<<` merge, plain
+     flow-collection item, or nested sequence) is refused with the same
+     `InlineAgentFrontmatterRejected` error; the document is never encoded
+     wholesale. Tools that read the YAML file directly see the token, not the
+     text; see [Values an agent writes](frontmatter-properties.md#values-an-agent-writes)
+     for the on-disk contract and how to edit a token by hand.
+     - Only those two sequences are gated, because they are the only way
+       Darkmatter reads frontmatter text as an instruction. `note: see #42` or
+       `count: 3` stays exactly as the agent wrote it.
+     - List items are compared **by position**. An agent that inserts an item at
+       the front of an authored list changes every later index, so an authored
+       `{{ … }}` item that shifted is treated as the agent's, encoded, and stops
+       being a template. Append to a list whose items are templates, or keep
+       templates out of lists an agent edits.
+     - A clipped (`|`) or kept (`|+`) block scalar that ends the frontmatter is
+       stored as composition reads it: Darkmatter trims the frontmatter block
+       before parsing, so the value has no final newline there, and the token
+       holds exactly that value.
    - The agent's semantic top-level changes (addition, replacement, deletion;
      value-preserving reformatting is not a change) travel out as a
-     `FrontmatterDelta` for the completion instance. Owned properties are
-     excluded from it.
-   - Malformed YAML, a non-mapping root, or a duplicate owned key fails with
+     `FrontmatterDelta` for the completion instance, with tokens decoded. Owned
+     properties are excluded from it.
+   - A non-mapping root that survives the repair, or a frontmatter shape
+     `restore_properties_text` cannot edit, fails with
      `CompositionError::InlineArtifactEditFailed` without modifying the source.
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`), `hash` is
      stamped, and the file is written atomically exactly once.
@@ -226,7 +269,9 @@ hand-off ends the run, and the target's own run captures its own baseline.
 
 It restores the captured text atomically, before failure handling, on a non-zero
 provider exit, an interrupt/exit 130, a post-`start` launch failure, a closure
-parse/edit failure, a duplicate owned key, and an empty or unchanged body. A
+edit failure, frontmatter the agent wrote that cannot be repaired or encoded
+(`InlineAgentFrontmatterRejected`: malformed YAML, bad nesting, or a duplicate
+key, a duplicate owned key included), and an empty or unchanged body. A
 rollback stamps nothing — the document goes back with the `hash` and
 `last_updated` it had before the run. A *completion-schema* failure is the
 deliberate exception: the artifact stands, because discarding the agent's work
@@ -397,6 +442,11 @@ effective frontmatter as raw expansion syntax.
   disabled, the `$(...)` value is deferred unchanged. When enabled, a value
   that still trims to a whole-value `$(...)` candidate after the expansion pass
   is rejected as a leak.
+- **A stored literal token is data, not executable state.** A value such as
+  `summary: "{{!data:v1:…}}"` (written by the inline closure or a lifecycle
+  frontmatter effect) decodes to its text and is never evaluated or run, even
+  when that text is exactly `{{ x }}` or `$(echo X)`. See
+  [Values an agent writes](frontmatter-properties.md#values-an-agent-writes).
 
 This strictness is scoped to whole-value expansion only. **Mixed strings**
 (`"prefix {{ x }} suffix"`, `"literal $(echo ok)"`) and **body prose**

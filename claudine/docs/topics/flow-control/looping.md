@@ -212,6 +212,21 @@ In addition to the _mutation operations_ above, which change real state, the loo
 
 These variables can be referred to in interpolation, conditional page blocks, your `while`/`until` expression, your mutation operations, and the `start`, `success`, `failure`, and `finalize` lifecycle events.
 
+**Captured output is data.** `state.loop.last_output` holds the agent's text exactly as it was printed, and it stays that way everywhere it goes: in a condition, in an action value, in a lifecycle message, and in the next iteration's prompt. Agents often write template or shell syntax in their summaries; it is shown, never evaluated or run:
+
+```md
+---
+loop:
+  until: "contains(state.loop.last_output, 'DONE')"
+  max: 5
+---
+Continue from where you left off. Your last report was:
+
+{{ state.loop.last_output }}
+```
+
+If iteration 1 ends with `see {{…}} and $(rm -rf x)`, iteration 2's prompt contains exactly that text: no parse error, no shell approval, nothing run. The same holds for every value the loop produces, not only the ambient variables: a frontmatter key an action wrote, a value lifted from the composed document, and, inside a sequence, [`outputs`](sequences.md#the-outputs-array). Only values a person typed (`--set`, `key=value`, interactive answers) are templates; see [CLI overrides interact with looping](#cli-overrides-interact-with-looping).
+
 > **`state.loop.is_last` means "last permitted", not "last".** A loop usually ends because of something the iteration itself produced: the agent's output, an exit code, or a file it wrote that the condition reads through `frontmatter(...)`. Nothing can know that before the iteration runs, so `is_last` does not try. It is `true` only on the `max`-th pass. If you want a prompt to say "this is your final attempt" in a loop that runs a fixed number of times, test the count directly: `{{ state.loop.count == 3 }}`, or set `max: 3` and let `is_last` do it.
 >
 > **Planned.** The current engine instead *predicts* `is_last` by evaluating the condition before the iteration, which is exact for counter loops and silently wrong for every loop that ends on what the agent did, and which can raise when the condition reads a file the agent has not written yet. The cap-only definition above replaces it.
@@ -382,6 +397,8 @@ claudine compose loop_example.md iteration=1 --claude
 ```
 
 …is equivalent to authoring the document with `iteration: 1` in the frontmatter. Subsequent iterations carry that value through unless an action explicitly overwrites it.
+
+A setter is authored text, so a template in it fills in on every iteration: `--set '{"label":"{{ title }}"}'` renders the current `title` each time. Once an action overwrites that key, the key holds the action's result, which is data.
 
 ## Common errors
 

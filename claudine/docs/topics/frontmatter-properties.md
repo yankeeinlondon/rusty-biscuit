@@ -18,10 +18,58 @@ Claudine reads and acts on a number of YAML frontmatter properties across its co
 | `last_updated` | Auto-managed date stamp set during inline composition closure. One of the three closure-owned properties: an agent edit is restored from the pre-run snapshot with a warning, then re-stamped. Claudine edits its source node during the final atomic textual rewrite while preserving its existing quote style and every unmanaged authored frontmatter byte. A rollback restores the pre-run value and stamps nothing. | [composition.md](composition.md) | [`InlineClosurePlan`](../../lib/src/composition/types.rs) · [`InlineClosureResult`](../../lib/src/composition/closure.rs) · [`reconcile_inline_artifact`](../../lib/src/composition/closure.rs) · [`restore_properties_text`](../../../darkmatter/lib/src/markdown/hash/write.rs) |
 | `hash` | Auto-stamped Darkmatter `Simple` content hash (`<fm>-<body>`, 16 hex per segment) written textually on every successful `inline-compose` closure. Computed with `hash` and `last_updated` excluded, so re-running on an otherwise unchanged document is a fixed point. Forced to `Simple` regardless of any pre-existing `structured`/`detailed` value. One of the three closure-owned properties: an agent edit is restored with a warning before the fresh stamp. | [composition.md — `hash` property](composition.md#hash-property-auto-stamped) | [`reconcile_inline_artifact`](../../lib/src/composition/closure.rs) · [`apply_hash_save_text`](../../../darkmatter/lib/src/markdown/hash/write.rs) · [`inline_hash_options`](../../lib/src/composition/closure.rs) |
 | `fail_fast` | Controls error handling in sequence and loop composition. When `true` (default), execution stops after the first failure. When `false`, all steps/iterations run and the final exit code reflects any failure. Overridable by `--fail-fast` CLI flag. Also injected as `FAIL_FAST` env var per step. | [composition.md](composition.md) | [`SequencePlan.document_fail_fast`](../../lib/src/composition/types.rs) · [`LoopConfig.fail_fast`](../../lib/src/composition/types.rs) · [`resolve_fail_fast_from_env`](../../lib/src/composition/looping/config.rs) |
-| `sequence` | Defines a list of steps for sequence composition, where the same template is composed once per step with step-specific state injected. Accepts inline scalar/object lists or a string file reference to external YAML. Per-step overlay variables (`state`, `previous_state`, etc.) are injected as reserved overrides. | [composition.md](composition.md) · [flow-control/sequences.md](flow-control/sequences.md) | [`SequencePlan`](../../lib/src/composition/types.rs) · [`SequenceSource`](../../lib/src/composition/types.rs) · [`SequenceStep`](../../lib/src/composition/types.rs) · [`SequenceStepOverlay`](../../lib/src/composition/types.rs) · [`SequenceExecutionOptions`](../../lib/src/composition/types.rs) · [`resolve_sequence_plan`](../../lib/src/composition/sequence/mod.rs) · [`build_step_overlay`](../../lib/src/composition/sequence/mod.rs) |
+| `sequence` | Defines a list of steps for sequence composition, where the same template is composed once per step with step-specific state injected. Accepts inline scalar/object lists or a string file reference to external YAML. A stored literal token is refused (`SequenceInvalid`); see [Values an Agent Writes](#values-an-agent-writes). Per-step overlay variables (`state`, `previous_state`, etc.) are injected as reserved overrides. | [composition.md](composition.md) · [flow-control/sequences.md](flow-control/sequences.md) | [`SequencePlan`](../../lib/src/composition/types.rs) · [`SequenceSource`](../../lib/src/composition/types.rs) · [`SequenceStep`](../../lib/src/composition/types.rs) · [`SequenceStepOverlay`](../../lib/src/composition/types.rs) · [`SequenceExecutionOptions`](../../lib/src/composition/types.rs) · [`resolve_sequence_plan`](../../lib/src/composition/sequence/mod.rs) · [`build_step_overlay`](../../lib/src/composition/sequence/mod.rs) |
 | `loop` | Defines repeated-execution configuration for a composition document. A YAML object requiring `while` or `until`, optionally supporting `actions`, `max`, `fail_fast`, and `on_rate_limit`. Ambient variables are injected into each iteration's context. | [flow-control/looping.md](flow-control/looping.md) · [composition.md](composition.md) | [`LoopConfig`](../../lib/src/composition/types.rs) · [`LoopCondition`](../../lib/src/composition/types.rs) · [`LoopAction`](../../lib/src/composition/types.rs) · [`OnRateLimit`](../../lib/src/composition/types.rs) · [`AmbientVariable`](../../lib/src/composition/types.rs) · [`LoopExecutionOptions`](../../lib/src/composition/looping/types.rs) · [`LoopIterationContext`](../../lib/src/composition/looping/types.rs) · [`execute_loop`](../../lib/src/composition/looping/engine.rs) · [`resolve_loop_config`](../../lib/src/composition/looping/config.rs) |
 | `title` | A user-facing document title referenced in dry-run metadata tables and schema validation error reporting. Not interpreted for execution control. | [composition.md](composition.md) | [`DryRunRender`](../../cli/src/commands/wrap/composition/dry_run.rs) |
 | `description` | A human-readable summary of the document's purpose, shown in the dry-run metadata table and carried through `MissingProperties` and `SequenceMissingPropertiesStep` errors for identification. | [composition.md](composition.md) | [`DryRunRender.description`](../../cli/src/commands/wrap/composition/dry_run.rs) · [`MissingProperty.description`](../../lib/src/composition/error/mod.rs) |
+
+## Values an Agent Writes
+
+Text an agent produces is **data**: it is shown and passed on exactly as written, and never read back as a template or shell command. For frontmatter an agent writes to disk this needs a storage form, because YAML alone cannot record who wrote a value. Two writers use it: the [inline-compose closure](composition.md#inline-composition), for keys the agent added or changed in the document, and the lifecycle effects `set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, and `prepend_frontmatter` (see [Side Effects](state-management/side-effects.md)).
+
+When such a string contains `{{` or `$(`, it is stored as a Darkmatter **literal token**: `{{!data:v1:` plus the UTF-8 text in unpadded URL-safe base64, then `}}`, as a quoted YAML scalar (the inline closure uses double quotes; a lifecycle effect's YAML writer may use single quotes, which is equivalent). Any other value is written as ordinary YAML, and mapping keys are never encoded.
+
+```yaml
+# The agent wrote:   summary: fixed {{…}} parsing
+# The file stores:
+summary: "{{!data:v1:Zml4ZWQge3vigKZ9fSBwYXJzaW5n}}"
+```
+
+```mermaid
+flowchart LR
+    A["agent writes<br/>summary: fixed {{…}} parsing"] --> B["closure or effect<br/>encodes it"]
+    B --> C["file on disk<br/>summary: &quot;{{!data:v1:…}}&quot;"]
+    C -->|Claudine or Darkmatter reads| D["fixed {{…}} parsing<br/>(data, never evaluated)"]
+    C -->|other tools read the YAML| E["the token itself"]
+```
+
+- **Claudine and Darkmatter decode it.** Composition, `{{ summary }}` in a body, `$schema` validation (launch and completion), sequence sources, and the autocomplete file details all see `fixed {{…}} parsing`. The decoded text is data, so a token holding `$(echo X)` is never offered for approval.
+- **Other tools see the token.** A script, linter, or editor that reads the YAML directly gets `{{!data:v1:…}}`. Decode it before comparing or displaying the value.
+- **An unchanged token stays as it is.** A later run that leaves the key alone keeps the token's bytes; the file holds the token until someone edits it.
+
+A token is not accepted everywhere a string is. `sequence:` refuses a token (`SequenceInvalid`), because decoding it would let data choose the steps a run executes. Author the list, file reference, expression, or shell expansion directly.
+
+### Editing a token by hand
+
+Replacing the token with plain text makes the value **authored** again, and authored text is a template. Choose the replacement by what you want the value to do:
+
+| You want | Write |
+|----------|-------|
+| Plain text with no `{{` or `$(` | the text itself: `summary: fixed the parser` |
+| Text that keeps literal braces | the `{{{ … }}}` escape: `summary: "see {{{ title }}} for the rule"` (reads as `see {{ title }} for the rule`) |
+| A template that fills in | the raw span: `summary: "see {{ title }}"` (this now evaluates) |
+| The exact original text, edited | decode, edit, and re-encode the payload (below) |
+
+Writing the decoded text back verbatim, for example `summary: see {{ title }} for the rule`, turns the agent's words into an instruction on the next run. The payload is unpadded URL-safe base64, which the stock macOS `base64` does not decode correctly, so use Python:
+
+```sh
+# decode
+python3 -c 'import base64,sys; p=sys.argv[1]; print(base64.urlsafe_b64decode(p+"="*(-len(p)%4)).decode())' c2VlIHt7IHRpdGxlIH19IGZvciB0aGUgcnVsZQ
+# encode (then write "{{!data:v1:<output>}}")
+python3 -c 'import base64,sys; print(base64.urlsafe_b64encode(sys.argv[1].encode()).decode().rstrip("="))' 'see {{ title }} for the rule'
+```
+
+A token that is malformed, or that shares its value with other text (`"see {{!data:v1:YQ}}"`), fails composition with its line and column. The [Darkmatter interpolation reference](../../../darkmatter/docs/inline/interpolation.md#literal-tokens) lists every token rule.
 
 ## Lifecycle Notifications
 
@@ -86,7 +134,7 @@ Automatically injected into frontmatter during each loop iteration (not user-aut
 | `_loop_count` | 1-based iteration counter. `1` on the first iteration, incrementing by one each time. | [flow-control/looping.md](flow-control/looping.md) | [`AmbientVariable::Iteration`](../../lib/src/composition/types.rs) · [`LoopAmbient.iteration`](../../lib/src/composition/looping/expression.rs) · [`resolve_ambient`](../../lib/src/composition/looping/expression.rs) |
 | `_loop_is_first` | `true` on the first iteration, `false` on all subsequent iterations. | [flow-control/looping.md](flow-control/looping.md) | [`AmbientVariable::IsFirst`](../../lib/src/composition/types.rs) · [`LoopAmbient.is_first`](../../lib/src/composition/looping/expression.rs) |
 | `_loop_is_last` | A prediction made before the iteration runs: `true` when the condition already says "stop" against this iteration's state, or when this is the `max`-th iteration. It is wrong when the condition depends on something the iteration itself changes. | [flow-control/looping.md](flow-control/looping.md) | [`AmbientVariable::IsLast`](../../lib/src/composition/types.rs) · [`LoopAmbient.is_last`](../../lib/src/composition/looping/expression.rs) · [`compute_is_last`](../../lib/src/composition/looping/engine.rs) |
-| `_loop_last_output` | Captured stdout/composed output from the previous iteration. Empty string on the first iteration. | [flow-control/looping.md](flow-control/looping.md) | [`AmbientVariable::LastOutput`](../../lib/src/composition/types.rs) · [`LoopAmbient.last_output`](../../lib/src/composition/looping/expression.rs) |
+| `_loop_last_output` | Captured stdout/composed output from the previous iteration. Empty string on the first iteration. The raw text is data: a `{{ … }}` or `$( … )` the agent wrote is rendered as written, never evaluated. | [flow-control/looping.md](flow-control/looping.md) | [`AmbientVariable::LastOutput`](../../lib/src/composition/types.rs) · [`LoopAmbient.last_output`](../../lib/src/composition/looping/expression.rs) |
 | `_loop_last_exit_code` | Process-style exit code (0 = success, non-zero = failure) from the previous iteration. `0` on the first iteration. Only meaningful with `fail_fast: false`. | [flow-control/looping.md](flow-control/looping.md) | [`AmbientVariable::LastExitCode`](../../lib/src/composition/types.rs) · [`LoopAmbient.last_exit_code`](../../lib/src/composition/looping/expression.rs) |
 
 ## Sequence Overlay Variables

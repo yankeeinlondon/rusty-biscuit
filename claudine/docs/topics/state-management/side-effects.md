@@ -62,6 +62,26 @@ Frontmatter is the YAML metadata between `---` lines at the start of a Markdown 
 | `append_frontmatter`    | Adds a value to the end of an array and returns the updated array.                                  |
 | `prepend_frontmatter`   | Adds a value to the beginning of an array and returns the updated array.                            |
 
+When a Claudine lifecycle action or sequence `side_effect:` writes a value
+with `set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, or
+`prepend_frontmatter`, that value was produced by evaluating the action, so it
+is **data**. Each string in it that contains `{{` or `$(` is written as a
+Darkmatter literal token, and the next run reads it back as the exact text
+instead of scanning it as a template:
+
+```yaml
+success:
+  stack:
+    - action: {set_frontmatter: ["doc.md", "note", "{{ frontmatter('log.md', 'message') }}"]}
+```
+
+If `log.md` holds `message: see {{…}} siblings`, `doc.md` receives
+`note: '{{!data:v1:c2VlIHt74oCmfX0gc2libGluZ3M}}'`, and `{{ note }}` in the
+next run renders `see {{…}} siblings`. Strings without those two sequences,
+numbers, and mapping keys are written as they are. The in-memory value that
+later actions in the same stack read stays raw. A tool that reads the YAML
+file directly sees the token.
+
 ### Files and directories
 
 These operations return the resulting absolute path.
