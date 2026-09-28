@@ -1,23 +1,22 @@
-//! R4: Ctrl+C during the exit-time delivery drain.
+//! R4: Ctrl+C during the exit-time delivery drain, for every command in
+//! `common::drain_interrupt`: a first press prints a notice and the drain
+//! carries on; a second press takes the compose force-exit rung and exits
+//! `130` at once, well inside the 10 s drain budget.
 //!
-//! A first press prints a notice and the drain carries on; a second press
-//! takes the compose force-exit rung and exits `130` at once, well inside the
-//! 10 s drain budget. `compose` keeps its own interrupt guard through the
-//! drain; `sequence` has none after it returns, so the shutdown path installs
-//! the same ladder with its own notice.
-//!
-//! Unix sends `SIGINT` to the process through `common::signal::SignalledRun`.
-//! Windows spawns `claudine` in `CREATE_NEW_PROCESS_GROUP` and sends
-//! `CTRL_BREAK_EVENT` to that group, the pattern `sequence_ctrl_c_windows`
-//! documents. Neither opens a window, so nothing takes focus.
+//! Each press is a control event sent straight to the process, which
+//! isolates the handler logic on every OS. Unix sends `SIGINT` through
+//! `common::signal::SignalledRun`. Windows spawns `claudine` in
+//! `CREATE_NEW_PROCESS_GROUP` and sends `CTRL_BREAK_EVENT` to that group, the
+//! pattern `sequence_ctrl_c_windows` documents. Neither opens a window, so
+//! nothing takes focus. A press typed into a terminal is the L2
+//! `level2_drain_ctrl_c_tmux.rs` and `level2_drain_ctrl_c_kitty.rs` tests; an
+//! OS key press is the L3 `level3_drain_ctrl_c.rs` test.
 
 use crate::common;
-use crate::lifecycle_message_drain::write_one_line_claude;
 
 use common::CliProcessFixture;
-use common::webhook_listener::{ListenerMode, WebhookListener, write_webhook_route};
-use common::write;
-use std::process::Command;
+use common::drain_interrupt::{DrainCommand, PENDING_REPORT};
+use common::webhook_listener::{ListenerMode, WebhookListener};
 use std::time::Duration;
 
 /// Ceiling on every wait for a notice, a request, or an exit.
@@ -35,68 +34,25 @@ const STILL_DRAINING: Duration = Duration::from_secs(1);
 /// otherwise run for most of its 10 s budget.
 const FORCE_EXIT_WITHIN: Duration = Duration::from_secs(3);
 
-/// The notice `compose`'s own guard prints on a first press.
-const COMPOSE_NOTICE: &str = "User interrupted compose operation";
-
-/// The notice the shutdown path's drain ladder prints on a first press.
-const DRAIN_NOTICE: &str = "User interrupted while waiting for outbound messages";
-
-/// Which command the scenario runs.
-enum Scenario {
-    Compose,
-    Sequence,
-}
-
-impl Scenario {
-    /// Write the document, and return the command to run it plus the stderr
-    /// text that shows the command's own work is done.
-    fn prepare(&self, fixture: &CliProcessFixture, listener: &WebhookListener) -> (Command, &'static str) {
-        write_webhook_route(fixture.home());
-        write_one_line_claude(fixture.bin_dir());
-        let (subcommand, document, finished) = match self {
-            Self::Compose => (
-                "compose",
-                "---\nsuccess:\n  message: \"drain-interrupt-marker\"\n---\nSay hello.\n",
-                "no tool calls",
-            ),
-            Self::Sequence => (
-                "sequence",
-                "---\nsequence:\n  - only\nsuccess:\n  message: \"drain-interrupt-marker\"\n---\nRun step {{ state.name }}\n",
-                "Sequence finished",
-            ),
-        };
-        let path = fixture.cwd().join("interrupt.md");
-        write(&path, document);
-        let mut command = fixture.command_std();
-        listener.apply_route_env(&mut command);
-        command.args([subcommand, "--claude", path.to_str().expect("UTF-8 path")]);
-        (command, finished)
-    }
-
-    fn first_press_notice(&self) -> &'static str {
-        match self {
-            Self::Compose => COMPOSE_NOTICE,
-            Self::Sequence => DRAIN_NOTICE,
-        }
-    }
-}
-
-/// Run `scenario` against a route that never replies, press Ctrl+C twice
+/// Run `command` against a route that never replies, press Ctrl+C twice
 /// during the drain, and check each press's effect.
-fn second_press_during_the_drain_exits_130(scenario: Scenario, name: &str) {
+fn second_press_during_the_drain_exits_130(command: DrainCommand, name: &str) {
     let fixture = CliProcessFixture::named(name);
     let listener = WebhookListener::start(ListenerMode::NeverReply);
-    let (command, finished_marker) = scenario.prepare(&fixture, &listener);
-    let mut run = platform::Run::spawn(command, fixture.workspace_path());
+    let args = command.prepare(fixture.home(), fixture.bin_dir(), fixture.cwd());
+    let mut child = fixture.command_std();
+    listener.apply_route_env(&mut child);
+    child.args(&args);
+    let mut run = platform::Run::spawn(child, fixture.workspace_path());
 
     listener
         .wait_for_request(WAIT)
         .unwrap_or_else(|| panic!("the message was never sent; stderr:\n{}", run.stderr()));
-    run.wait_for_stderr(finished_marker, WAIT);
+    run.wait_for_stderr(command.finished_marker(), WAIT);
     std::thread::sleep(SETTLE);
 
     run.press();
-    let noticed = run.wait_for_stderr(scenario.first_press_notice(), WAIT);
+    let noticed = run.wait_for_stderr(command.first_press_notice(), WAIT);
     run.assert_running_until(noticed + STILL_DRAINING);
 
     let second = run.press();
@@ -108,19 +64,29 @@ fn second_press_during_the_drain_exits_130(scenario: Scenario, name: &str) {
         exited_at.duration_since(second)
     );
     assert!(
-        !stderr.contains("still sending at exit"),
+        !stderr.contains(PENDING_REPORT),
         "a forced exit skips the drain's report; stderr:\n{stderr}"
     );
 }
 
 #[test]
 fn a_second_ctrl_c_during_the_compose_drain_exits_130() {
-    second_press_during_the_drain_exits_130(Scenario::Compose, "drain-interrupt-compose");
+    second_press_during_the_drain_exits_130(DrainCommand::Compose, "drain-interrupt-compose");
+}
+
+#[test]
+fn a_second_ctrl_c_during_the_inline_compose_drain_exits_130() {
+    second_press_during_the_drain_exits_130(DrainCommand::InlineCompose, "drain-interrupt-inline");
 }
 
 #[test]
 fn a_second_ctrl_c_during_the_sequence_drain_exits_130() {
-    second_press_during_the_drain_exits_130(Scenario::Sequence, "drain-interrupt-sequence");
+    second_press_during_the_drain_exits_130(DrainCommand::Sequence, "drain-interrupt-sequence");
+}
+
+#[test]
+fn a_second_ctrl_c_during_the_wrapper_drain_exits_130() {
+    second_press_during_the_drain_exits_130(DrainCommand::Wrapper, "drain-interrupt-wrapper");
 }
 
 #[cfg(unix)]

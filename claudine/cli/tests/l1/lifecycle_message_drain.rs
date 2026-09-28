@@ -28,26 +28,7 @@ pub(crate) const CHILD_WATCHDOG: Duration = Duration::from_secs(60);
 /// still waiting for it.
 pub(crate) const WITHHOLD_WINDOW: Duration = Duration::from_millis(1500);
 
-/// A `claude` stub that prints one successful result line and exits `0`.
-pub(crate) fn write_one_line_claude(bin_dir: &Path) {
-    #[cfg(unix)]
-    write_executable(
-        &bin_dir.join("claude"),
-        r#"#!/bin/sh
-cat > /dev/null 2>/dev/null
-printf '%s\n' '{"type":"result","subtype":"success","result":"done","session_id":"session-1","is_error":false}'
-exit 0
-"#,
-    );
-
-    #[cfg(windows)]
-    write(
-        &bin_dir.join("claude.cmd"),
-        "@echo off\r\n\
-echo {\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\",\"session_id\":\"session-1\",\"is_error\":false}\r\n\
-exit /b 0\r\n",
-    );
-}
+pub(crate) use common::drain_interrupt::write_one_line_claude;
 
 /// A `claude` stub like [`write_one_line_claude`] that first stays alive for
 /// about three seconds, long enough for a `start` message to finish.
@@ -575,25 +556,23 @@ fn sequence_last_step_success_message_is_delivered_before_exit() {
     );
 }
 
-/// R6: a terminal `notify` is tracked and drained, a failed notification
-/// keeps its existing warning, and the exit code is unchanged.
+/// A `compose --claude` run of a document whose `success` event sends the
+/// desktop notification `title`, with every host notification backend
+/// unreachable.
 ///
-/// The run is kept silent by making every desktop backend fail fast rather
-/// than by any override: Windows has no AppUserModelID configured and fails
-/// before touching the toast API; on Unix the `PATH` holds nothing but the
-/// fixture stubs, so neither a notification helper nor `osascript` can be
-/// found, and on Linux the D-Bus session address points nowhere. The
-/// *unfinished* case (the `desktop notification` label in the pending
-/// warning) needs a notification that stalls, which no silent host seam
-/// provides; the library's `delivery::tests` pin it.
-#[test]
-fn a_terminal_notify_is_drained_and_its_failure_reported_without_host_ui() {
-    let fixture = CliProcessFixture::named("lifecycle-notify-drain");
+/// Windows has no AppUserModelID configured and fails before touching the
+/// toast API; on Unix the `PATH` holds nothing but the fixture stubs, so
+/// neither a notification helper nor `osascript` can be found, and on Linux
+/// the D-Bus session address points nowhere. `stall` additionally sets the
+/// library's `test-fixtures` seam, which holds the send open before any
+/// backend is reached; the unreachable backends then only guard against a
+/// broken seam.
+fn spawn_silent_notify_compose(fixture: &CliProcessFixture, title: &str, stall: bool) -> PipedRun {
     write_one_line_claude(fixture.bin_dir());
     let prompt = fixture.cwd().join("notify.md");
     write(
         &prompt,
-        "---\nsuccess:\n  notify: \"drain-notify-title\"\n---\nSay hello.\n",
+        &format!("---\nsuccess:\n  notify: \"{title}\"\n---\nSay hello.\n"),
     );
 
     // Unix: `fake_only_path` is the silencing seam described above; the stub
@@ -606,7 +585,18 @@ fn a_terminal_notify_is_drained_and_its_failure_reported_without_host_ui() {
         .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/claudine-test-bus")
         .env_remove("XDG_RUNTIME_DIR")
         .args(["compose", "--claude", prompt.to_str().expect("UTF-8 prompt path")]);
-    let run = PipedRun::spawn(command, None);
+    if stall {
+        command.env("CLAUDINE_TEST_DESKTOP_NOTIFICATION", "stall");
+    }
+    PipedRun::spawn(command, None)
+}
+
+/// R6: a terminal `notify` is tracked and drained, a failed notification
+/// keeps its existing warning, and the exit code is unchanged.
+#[test]
+fn a_terminal_notify_is_drained_and_its_failure_reported_without_host_ui() {
+    let fixture = CliProcessFixture::named("lifecycle-notify-drain");
+    let run = spawn_silent_notify_compose(&fixture, "drain-notify-title", false);
 
     let finished = run.finish(CHILD_WATCHDOG);
     let stderr = &finished.stderr;
@@ -618,6 +608,51 @@ fn a_terminal_notify_is_drained_and_its_failure_reported_without_host_ui() {
     assert!(
         !stderr.contains("still sending at exit"),
         "a notification that failed fast is not pending:\n{stderr}"
+    );
+}
+
+/// R3/R6: a terminal `notify` that never finishes holds the exit for the
+/// 10-second drain budget, is then named by its safe `desktop notification`
+/// label as unknown, and leaves the exit code alone.
+///
+/// Like the stalled-route test above, this waits out the real budget under an
+/// ordinary L1 name. The stall seam exists only in `test-fixtures` builds.
+#[cfg(feature = "test-fixtures")]
+#[test]
+fn a_stalled_terminal_notify_is_reported_as_unknown_after_the_drain_budget() {
+    let fixture = CliProcessFixture::named("lifecycle-notify-stalled");
+    let run = spawn_silent_notify_compose(&fixture, "drain-stalled-notify-title", true);
+
+    // The run summary is printed once the agent exits, just before `success`
+    // fires, so the drain starts within moments of this point.
+    let run = run.await_stderr("no tool calls");
+    let agent_done = Instant::now();
+    let finished = run.finish(CHILD_WATCHDOG);
+    let waited = finished.exited_at.duration_since(agent_done);
+    let stderr = &finished.stderr;
+    assert_eq!(finished.status.code(), Some(0), "stderr:\n{stderr}");
+    assert!(
+        waited >= Duration::from_secs(8),
+        "the drain waited for the stalled notification ({waited:?})\n{stderr}"
+    );
+    assert!(
+        waited < Duration::from_secs(15),
+        "the drain gave up at its 10 s budget ({waited:?})\n{stderr}"
+    );
+
+    let warning = pending_warning(stderr)
+        .unwrap_or_else(|| panic!("no pending-delivery warning:\n{stderr}"));
+    assert_eq!(
+        warning, "Desktop notification was still sending at exit; delivery is unknown",
+        "the warning names only the safe label"
+    );
+    assert!(
+        !stderr.contains("drain-stalled-notify-title"),
+        "the notification text never reaches stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Failed to send"),
+        "an unfinished notification is not claimed to have failed:\n{stderr}"
     );
 }
 

@@ -35,6 +35,19 @@ pub const WEBHOOK_URL_ENV: &str = "DRAIN_TEST_WEBHOOK_URL";
 /// The secret segment of the listener's webhook URL.
 pub const DUMMY_TOKEN: &str = "dummy-token";
 
+/// Proxy variables that would otherwise intercept the loopback request.
+pub const PROXY_VARIABLES: [&str; 6] = [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+];
+
+/// The `NO_PROXY` value that keeps the listener's address direct.
+pub const NO_PROXY_LOOPBACK: &str = "127.0.0.1,localhost";
+
 /// How the listener answers each request it has read in full.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ListenerMode {
@@ -113,17 +126,10 @@ impl WebhookListener {
     /// proxy the host exports from intercepting the loopback request.
     pub fn apply_route_env<C: ConfigurableCommand>(&self, command: &mut C) {
         command.set_variable(WEBHOOK_URL_ENV.as_ref(), self.webhook_url().as_ref());
-        for proxy in [
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "ALL_PROXY",
-            "http_proxy",
-            "https_proxy",
-            "all_proxy",
-        ] {
+        for proxy in PROXY_VARIABLES {
             command.remove_variable(proxy.as_ref());
         }
-        command.set_variable("NO_PROXY".as_ref(), "127.0.0.1,localhost".as_ref());
+        command.set_variable("NO_PROXY".as_ref(), NO_PROXY_LOOPBACK.as_ref());
     }
 
     /// Let every withheld connection receive its `200`.
