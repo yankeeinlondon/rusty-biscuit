@@ -5,7 +5,7 @@ clarified: false
 reviewed: true
 reviewed_by: codex/gpt-6-astra
 reviewed_on: 2026-09-20
-review_iterations: 0
+review_iterations: 1
 needs_rulings: false
 implemented: false
 $schema:
@@ -31,7 +31,14 @@ $schema:
 # Finding ids (F1–F8, D1–D2) whose fix has landed, wherever it landed. `prompts/_prompt.md`
 # reads this list and stops warning agents about a defect once its id is here (R10).
 # Keep the key present even when empty: the guide's gates do not tolerate a missing list.
-fixed: []
+fixed:
+    - F2
+    - F4
+    - F6
+    - F7
+    - F8
+    - D1
+    - D2
 area: claudine
 packages:
     - claudine
@@ -39,6 +46,7 @@ packages:
     - darkmatter
     - darkmatter-cli
     - dmls
+    - biscuit-terminal
 related:
     - 2026-07-13-proxy-with
     - 2026-09-15-initialize-after-proxy
