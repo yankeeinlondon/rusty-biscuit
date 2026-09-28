@@ -1,6 +1,48 @@
 ---
 created: 2026-09-18
-status: draft-spec
+status: human-in-the-loop
+human_review: true
+human_review_items:
+    - |-
+      **Kimi cannot start an interactive session with a first message. What should `claudine kimi --edit -i` promise?**
+
+      The spec promises that every provider opens an interactive session with the edited text as the first message. Kimi Code's own docs say its only prompt option (`--prompt`) runs one prompt and exits. It has no positional message and no option that seeds an interactive session, and an open upstream feature request asks for exactly that. So today `claudine kimi "hello" -i` quietly runs a one-shot session instead of an interactive one. This must be decided before Phase 3 finishes, because Kimi's row in the new all-provider test must encode whichever answer you pick. Phase 2 does not depend on it.
+
+      - **A. Exclude Kimi from the all-provider promise, and have `claudine kimi … -i` with a prompt fail clearly before launch** (for example "Kimi cannot start an interactive session with an initial prompt; drop `-i` or start `kimi` without a prompt").
+        Pros: honest, predictable, and a small change. It also fixes the existing direct `claudine kimi "x" -i`, which silently does the wrong thing today.
+        Cons: this is a provider-specific exception, which the spec asked us to avoid, and it needs a one-line spec amendment.
+      - **B. Keep today's behavior: pass `--prompt`, and Kimi runs one turn and exits.**
+        Pros: no code change.
+        Cons: `-i` would be a lie for Kimi. The session is not interactive, and nothing tells the user.
+      - **C. Emulate it: run `kimi -p "…"`, then relaunch `kimi --continue` in the terminal.**
+        Pros: the user ends up in an interactive session holding the first answer.
+        Cons: it adds a second, Kimi-only launch path, which the spec explicitly forbids. It is also fragile (`--continue` picks "the most recent session", which is unsafe if two runs overlap) and splits one conversation across two processes.
+
+      **Recommendation: A.** It is the only option that is both truthful and inside the spec's rule against new delivery paths. When Kimi ships an initial-prompt option, the refusal is replaced by that option.
+    - |-
+      **Pi may crash on long first messages passed on the command line. Should Pi's fix wait for a live check?**
+
+      The only way to give Pi a first message and keep its interactive screen is on the command line (`pi -- "<message>"`). Sending it through standard input makes Pi switch to one-shot mode. A report on Pi's issue tracker (#9200, versions 0.83.0 and 0.85.1) says Pi is killed immediately, with no output, when one command-line message is about 1 KB or longer. Upstream closed the report without investigating it. Edited prompts are often longer than 1 KB. This session could not run Pi to check, because running provider programs was not permitted. This should be settled before Phase 3's Pi repair, because it decides what that repair looks like.
+
+      - **A. Check it live first.** Run `pi -- "<about 2 KB of text>"` once in a terminal on this Mac (Pi 0.87.1). If it works, go ahead with the command-line fix and its normal size guard.
+        Pros: a quick test that settles the question.
+        Cons: needs a person, or a session that is allowed to run `pi`.
+      - **B. Go ahead with the command-line fix now, with the normal size guard (768 KB).**
+        Pros: no delay.
+        Cons: if the report is right, most edited prompts would crash Pi's interactive mode.
+      - **C. Pass the prompt as a temporary file (Pi's `@file` syntax) instead.**
+        Pros: avoids the command-line length problem entirely.
+        Cons: it is a new delivery mechanism, which the plan's rules exclude. It needs temporary-file handling inside the Pi profile, and it has not been confirmed that `@file` content is submitted as the first message in interactive mode.
+
+      **Recommendation: A**, falling back to C only if the crash reproduces. A single 2 KB test decides the question, and the plan's Phase 4 real Pi test should include a prompt of that size in any case.
+message_to_agent: |-
+  Phase 1 (rulings and spikes) is done. Read `spike-interactive-startup.md` in this directory before Phase 3. Phase 2 (wrapper validation) does not depend on any of the open items below and can proceed as planned.
+
+  1. Evidence tier: the live tmux run of the real CLIs was NOT possible, because the Phase 1 session's permissions refused `tmux` and every provider binary. Verdicts come from upstream source, changelog, and docs, plus the in-repo research. The spike doc lists the live checks still owed.
+  2. N2 fired for Kimi (no interactive startup-prompt surface). The spec is `human-in-the-loop`. Do not add a refusal, fallback, or allowlist for Kimi until the author rules. Only Kimi's Phase 3 task and Kimi's row in the fleet expectation table wait on that ruling.
+  3. Pi: stdin forces print mode (source `main.ts resolveAppMode`), so interactive must be `AppendArgs(["--", prompt])`, which needs Pi 0.84.3 or later. Two open points: (a) upstream issue #9200, a reported SIGKILL for positional messages of about 993 bytes or more, is escalated to the author, so do not finalize the Pi repair until it is ruled or checked live; (b) after `--`, Pi still reads a token starting with `@` as a file, so decide and test how a prompt starting with `@` is handled.
+  4. Goose: clap `-t/--text` has no `allow_hyphen_values`, so use `--text=<prompt>` for a `-`-prefixed prompt, with `--interactive`. The same defect breaks the non-interactive `run -t <p>` path. That is outside this fix; file it in Phase 5 next to the N6 defect unless the author widens scope.
+  5. S3 correction: only Pi newly moves to argv. Antigravity and Goose already deliver on argv in both modes. Use a per-profile size guard for Pi.
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28
