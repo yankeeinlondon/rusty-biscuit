@@ -1879,7 +1879,7 @@ fn a_branch_created_at_a_merged_tip_does_not_claim_the_old_merge() {
     let graph = graph.expect("base view");
     let new = line(&graph, "new");
     assert_eq!(new.entries, commits(&[&repo.n1]));
-    assert_eq!(new.fork_sha.as_ref(), Some(&repo.b1), "today's fork, which no lane draws");
+    assert_eq!(new.fork_sha.as_ref(), Some(&repo.b1), "the ordinary fork (the old merged tip), which no lane draws");
     assert!(new.merges.is_empty(), "{new:?}");
     assert!(!graph.incomplete, "GitGraph's notice accounts for the undrawn fork");
 
