@@ -74,3 +74,15 @@ listener.apply_route_env(&mut command);
   every reply until `release()`, and `NeverReply` never answers. One polling
   thread serves every connection, so several held deliveries can be open at
   once, and a watchdog stops the listener even if a test forgets to.
+- `write_config_with_webhook_route(home, json)` writes the same route next to
+  other config keys. A `claudine handle` test uses it to add hook `actions`,
+  for example `{"actions": {"session_end": [{"type": "message", "message": "…"}]}}`.
+- A test of a desktop `notify` must stay silent without a production
+  override. Make every backend fail fast instead: on Unix, spawn with
+  `command_builder().fake_only_path()` so neither a notification helper nor
+  `osascript` is on `PATH`, and set `DBUS_SESSION_BUS_ADDRESS` to a missing
+  socket for Linux. Windows fails before the toast API because Claudine
+  configures no AppUserModelID.
+- A test that waits out the 10-second exit drain stays in L1 under an ordinary
+  name. Claudine does not declare `l1-include-slow`, so a `slow_` prefix
+  would leave the test running in no recipe at all.

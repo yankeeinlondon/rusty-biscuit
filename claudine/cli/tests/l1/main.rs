@@ -62,6 +62,7 @@ mod exit_site_guard;
 #[cfg(unix)]
 mod handle_blocking_output;
 mod handle_deadline;
+mod handle_message_drain;
 mod handle_repo_config;
 mod hooks_cli;
 #[cfg(unix)]
@@ -91,6 +92,7 @@ mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
 mod lifecycle_message_drain;
+mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
 mod loop_initialize_state;
