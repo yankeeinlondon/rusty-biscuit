@@ -37,31 +37,43 @@ related:
     - 2026-09-20-lifecycle-handoff-gaps
 human_review: false
 message_to_agent: |-
-    Phase 1 is complete. Before starting Phase 2, read the plan's new section
-    "Phase 1 amendments (from S1, S2, S3, I1, I2)". It amends N2, N4, N5, N6,
-    N8, and N10, and adds N14-N16. Phase 2 must honor:
-    - N4's body clause. Directive markers, shell-block command boundaries, and
-      executable tokens come only from authored text. Code-region detection
-      runs on a masked view where data bytes become `x`.
-    - Data ranges are tracked byte ranges beside `BodyOrigin` (spike S1). Drop
-      them right after the transclusion directive parse. Losing ranges is an
-      error, never a silent drop.
-    - Transcluded children receive the parent's composed values as Data
-      through `build_child_external_state`, and the data paths join the
-      transclusion cache key (I2 B4/B5).
-    - No topological key order is needed. Frontmatter key chains already
-      resolve in dependency order.
-    Red tests to un-ignore in Phase 2: every test in
-    `darkmatter/cli/tests/l1/compose_value_provenance.rs` marked
-    `red until phase 2`. There are 8. The child value override syntax is
-    `set.NAME="…"`; a bare `key=` is ignored. The 17 Claudine red tests are in
-    `claudine/cli/tests/l1/agent_text_is_data.rs` (Phase 4 and Phase 5).
-    Author confirmation is still pending, but none of it blocks Phase 2:
-    - N9, the encode-only-`{{`/`$(` gate
-    - B14, effect-engine frontmatter writes, planned for Phase 5
-    - B2/B11/B13, proposed out of scope
-    `inventory.md` has the migration table, the tests whose expectations
-    change, and the Table C reader list.
+    Phase 2 is complete (see implementation-log.md "## Phase 2"). What Phase 3
+    builds on:
+    - Frontmatter origin lives in `compose/value_origin.rs`: `DataPaths`
+      (leaf paths), `FrontmatterProvenance` (the authored top-level snapshot
+      plus data paths), and `authored_shell_candidate`, the single shell
+      predicate. `prepare_frontmatter_for_compose` returns the provenance, and
+      `interpolate_frontmatter_located` takes `&mut FrontmatterProvenance` and a
+      `FrontmatterPass` (`First { defer_shell_pending }` / `Deferred(&keys)`).
+      A token decoded in pass 1 should become a data leaf: mark its path with
+      `provenance.data_mut().mark(path)` and never hand it to `rewrite_value`.
+      Data leaves are already skipped by classification, rewrite, literal
+      conversion, the shell scan, and the leak guard.
+    - The body is single-pass (`interpolate_text_in` in
+      `interpolation/rewrite.rs`). Directive scanners read
+      `parse_utils::structural_view`, and `authored_directive` decides whether
+      a directive is authored. `MAX_INTERPOLATION_DEPTH` and
+      `ExpressionOrigin::Generated` are gone.
+    - N5's `{{!data:` check belongs in `ExpressionFinder::scan` and the
+      entry points of `interpolate_text_in`; both now run exactly once per
+      authored span.
+    - Public API added: `OverrideOrigin`, `OverrideLayer`,
+      `ComposeOptions::{with_data_overrides, with_override_layers}`, and
+      `SourceRef::Supplied { supplier }` (R5; Phase 5 can use it for "the
+      agent"). Phase 4 should pass Claudine's runtime layers through
+      `with_override_layers`.
+    - Claudine: `lifecycle_field_from_agent_written_file_is_sent_verbatim` is
+      green and un-ignored. It passes because Darkmatter no longer converts
+      `{{{ … }}}` in inserted text; a `{{ … }}` payload in that field still
+      needs N10 (Phase 4). 16 Claudine red tests remain ignored.
+    - `just cross-check` re-parses parenthesized nextest filtersets; pass
+      plain test-name filters instead.
+    Open decisions, none blocking Phase 3 (details in the log's "Departures"):
+    - `::file … when="…"` conditions built from inserted data are still
+      evaluated.
+    - Directive `set`/`replace` option values are data only when data falls
+      in the options region after the target.
+    - N9, B14, and B2/B11/B13 are still awaiting author confirmation.
 ---
 
 # Agent-Produced Text Is Data, Never Instructions

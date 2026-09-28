@@ -376,3 +376,41 @@ because it is the closure and rollback baseline.
    frontmatter writes of data-origin values?
 4. Decide B7: is `as_markdown` an explicit exception to R1?
 
+
+## Phase 2: changed expectations (applied)
+
+Each test below asserted the retired rescan. Its new expectation follows the
+I1 table unless noted.
+
+| Test | Change | Reason |
+| ---- | ------ | ------ |
+| `rewrite.rs` `located_failure_from_replacement_output_has_no_span` | Replaced by `replacement_output_is_never_parsed`: output `x\ny {{ > invalid }}`, strict, no error | Inserted text is data |
+| `rewrite.rs` `rescans_replacement_text_for_nested_interpolation` → `replacement_text_is_not_rescanned_for_nested_interpolation` | `in a package directory: {{pkg}}`, 1 replacement; the `+` form still gives `darkmatter` | I1 row |
+| `rewrite.rs` `rescans_false_branch_for_nested_interpolation` → `false_branch_is_not_rescanned_for_nested_interpolation` | `missing: {{fallback}}`, 1 replacement | I1 row |
+| `rewrite.rs` `rescan_loop_converts_introduced_literal` → `introduced_literal_is_not_converted` | `{{{ y }}}` verbatim | Literal conversion applies to authored literals only |
+| `rewrite.rs` `a_generated_failure_is_reported_once_and_distinct_from_an_authored_one` → `only_the_authored_failure_is_reported` | 1 warning, `Authored(10..27)` | `ExpressionOrigin::Generated` removed |
+| `context/report.rs` `a_generated_origin_never_aliases_an_authored_one_at_the_same_offsets` | Deleted | `Generated` variant removed |
+| `expression/lint.rs` `rewrite_generator::*` (8 tests) | Helper `rescanned` now performs the second scan explicitly | The tests pin "author intent" as the old two-pass result; the lint's `+` rewrite must still equal it |
+| `expression/lint.rs` `authority::rescanning_body_still_resolves_what_the_lint_describes` → `a_body_keeps_the_nested_span_the_lint_describes_literal` | Body renders `in {{pkg}}`; the lint's rewrite renders `in darkmatter` | Not in I1: found in Phase 2 |
+| `compose/tests/frontmatter.rs` `test_frontmatter_interpolation_disabled` | Body contains `{{base}}/spec.md` | Not in I1: the body inserted an unscanned frontmatter value and used to rescan it |
+| `lib/tests/l1/ternary_integration.rs` (3 tests) | Literal `{{pkg}}` / `{{fallback}}`; `+` form added to the first | I1 rows |
+| `lib/tests/l1/compose_phase6.rs` | Comment only; the fixture migrated | I1 row |
+| `lib/tests/l1/missing_ctx_capture.rs` `a_generated_expression_is_not_reported_at_an_authored_line` → `a_generated_expression_is_never_evaluated` | Composes; body `value={{ ctx.os }}` | I1 row |
+| `lib/tests/l1/compose_expression_failure_contract.rs` `a_failure_in_replacement_output_is_fatal_without_an_authored_span` → `replacement_output_is_data_and_never_fails` | Composes; `see call {{ f( }}` | I1 row |
+| `lib/tests/l1/benchmark_fixtures.rs` | Generator version `1.3.1`; manifest identities for `compose_interpolation_heavy` recomputed | The fixture's line 61 now uses `+` (`generate.sh` line 182 changed with it) |
+| `cli/tests/l1/compose_interpolation.rs` `test_compose_uncaptured_context_group_exits_nonzero_naming_variable_and_group` → `test_compose_generated_context_reference_is_data` | Exit 0; `os=[{{ ctx.os }}]` verbatim | Not in I1: a generated `ctx.*` reference is data, so it no longer needs a captured group |
+| `claudine/cli/tests/l1/wrap_compose_validation.rs` `synthesized_mixed_and_ordinary_frontmatter_values_still_launch` | `success.info` rewritten with `+`; asserts the prompt `Body in {{area}}` and `a in claudine b` | I1 row. The mixed nested literal on a lifecycle surface still meets Claudine's event-time surviving-span guard until Phase 4 (N10) |
+| `claudine/cli/tests/l1/agent_text_is_data.rs` `lifecycle_field_from_agent_written_file_is_sent_verbatim` | Un-ignored; green | The agent's `{{{ title }}}` was converted by Darkmatter's output-wide literal pass (S1 E8); single pass stops that. A `{{ … }}` payload in the same field still needs N10 |
+
+### Checkpoint 2: I1 files composed
+
+- `prompts/_add/add-expressions.md requirements='add foo'` (from a `git archive`
+  scratch tree): exit 0. `_no_formatting.md` and `_os.md` now transclude, and
+  `description` keeps its literal `` `{{ … }}` ``. The remaining two
+  `_Could not transclude …_` lines (`expression-engine.md`,
+  `darkmatter-expressions.md`) and their `…` warnings are the pre-existing
+  docs pages that author a bare `{{ … }}` in prose, as the I1 table predicted.
+- `darkmatter/benchmarks/fixtures/compose_interpolation_heavy.md`: `Nested:
+  inside Darkmatter now`, pinned by `compose_phase6`.
+- `nested_span_regression/commit.md`: bytes unchanged; its byte-pinning test
+  passes.

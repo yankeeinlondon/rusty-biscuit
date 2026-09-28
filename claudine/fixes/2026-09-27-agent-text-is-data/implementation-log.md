@@ -18,8 +18,80 @@ docs_created_during_phase_1:
     - claudine/fixes/2026-09-27-agent-text-is-data/spike-s3-token-lexer.md
 skills_files_updated_during_phase_1: []
 packages:
+    - darkmatter
     - darkmatter-cli
     - claudine-cli
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/value_origin.rs
+    - darkmatter/lib/src/markdown/compose/body_origin.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+    - darkmatter/lib/src/markdown/compose/inline/replacement.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/parse_utils.rs
+    - darkmatter/lib/src/markdown/compose/block_pairs.rs
+    - darkmatter/lib/src/markdown/compose/directives_api.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/replacement.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/parser.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/parser.rs
+    - darkmatter/lib/src/markdown/compose/file_links/mod.rs
+    - darkmatter/lib/src/markdown/compose/file_links/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/lint.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/reference/graph.rs
+    - darkmatter/lib/src/markdown/reference/validate.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/benchmark_fixtures.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/compose_phase6.rs
+    - darkmatter/lib/tests/l1/missing_ctx_capture.rs
+    - darkmatter/lib/tests/l1/ternary_integration.rs
+    - darkmatter/benchmarks/fixtures/compose_interpolation_heavy.md
+    - darkmatter/benchmarks/generate.sh
+    - darkmatter/benchmarks/manifest.yaml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/tests/l1/compose_interpolation.rs
+    - darkmatter/cli/tests/l1/compose_value_provenance.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/inline/interpolation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/inventory.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/errors.md
 ---
 
 # Implementation Log for 2026-09-27-agent-text-is-data (6 phases)
@@ -286,3 +358,171 @@ ignored red tests.
   - `looping.md` names `state.loop.last_output`, which actions cannot read.
 - **Claudine skill:** no update in Phase 1, since no behavior or workflow
   changed. Phase 6 owns the documentation updates.
+
+## Phase 2
+
+- Started and finished 2026-09-28. All changes are in `darkmatter` (lib and
+  CLI). Claudine changed only in two test files; its production code is
+  untouched.
+
+### What was built
+
+- **Origin types** (`compose/value_origin.rs`, new).
+  - `OverrideOrigin::{Authored, Data}` and `OverrideLayer` are public.
+  - `ComposeOptions::with_data_overrides` and `with_override_layers` are new.
+    `with_override_layers` folds ordered layers so each top-level key takes
+    the origin of the layer that supplied it. `with_set_overrides` stays
+    Authored.
+  - `DataPaths` is a leaf-level set of data paths.
+    `FrontmatterProvenance` pairs the authored top-level snapshot with the
+    data paths. `authored_shell_candidate` is the single shell predicate.
+- **Prepare** (`util.rs`): `prepare_frontmatter_for_compose` always returns
+  `FrontmatterProvenance`.
+  - Inherited external state from a parent is data, down to each leaf the
+    deep merge takes from it.
+  - An authored `--set` key clears its data mark; a data override key sets
+    one.
+  - The snapshot holds authored top-level strings only.
+  - New `ComposeOptions` fields `data_overrides` and `inherited_origin`
+    (`InheritedOrigin`) are classified in both identity encoders.
+- **Frontmatter single pass** (`frontmatter_interpolation.rs`).
+  - Classification and dependency analysis read an authored view in which
+    data leaves are `null`.
+  - `rewrite_value` skips data leaves and records every scanned leaf as data.
+    Seeds' `{{{ … }}}` are converted once, up front, and marked data.
+  - Pass 2 (`FrontmatterPass::Deferred`) scans only the keys pass 1 deferred.
+    Deferred keys are returned in the report. `convert_frontmatter_literals`
+    is removed.
+- **Shell shape from authored source** (`frontmatter_shell_expansion.rs`,
+  `preflight/collect.rs`).
+  - `scan_frontmatter`, the deferral mark, preflight `scan_one_frontmatter`,
+    `detect_dynamic_frontmatter_command_shape`, and `pending_shell_literals`
+    all decide on `is_authored_shell_candidate`.
+  - Shell output is marked data. The leak guard skips data keys, so it
+    checks authored unresolved values only.
+- **Body single pass**.
+  - `body_origin.rs` gains `DataRanges`, `EditOrigin`, and `BodyProvenance`.
+    `DataRanges` offers `after_edits`, `intersects`, `masked`, and a
+    fail-closed `ensure_describes`.
+  - `interpolate_text_in` scans once over the masked view and converts
+    literals in the same scan. It skips spans that touch data and reports a
+    data edit per replacement. `MAX_INTERPOLATION_DEPTH`, the rescan loop,
+    `reported`/`shift_reported`, and `ExpressionOrigin::Generated` are
+    deleted.
+  - Every body stage carries `BodyProvenance`: TextReplacement, PageBlocks,
+    directive targets, Interpolation, ShellExpansion, ShellBlocks, and
+    LinkResolve. The transclusion phase consumes it after the directive
+    parse. An inline-pre-only compose hands it back as
+    `ComposeReport::body_data`.
+- **Directive scanners**.
+  - These scanners take `Option<&DataRanges>`: `parse_directives_in` (shell),
+    `scan_block_pairs_in`, `parse_page_blocks_in`,
+    `scan_darkmatter_directives_in`, transclusion `parse_directives_in`,
+    toc-linking, and file-links.
+  - Code regions come from `structural_view`. A directive counts only when
+    `authored_directive` holds: its preceding line break, prefix, and keyword
+    are authored.
+  - `data_changed_shape` compares a command with its masked twin. For
+    `::shell` and each shell-block command, data may not supply the
+    executable, an action, an operator, or a redirection. For a shell block,
+    data may not split or join commands either.
+- **TextReplacement**: a `replace` value keeps the origin of its leaf. An
+  authored value still writes authored text (the macro use that
+  `discovers_directives_introduced_by_text_replacement` pins). Inherited and
+  one-off values follow `InheritedOrigin`.
+- **Transclusion**.
+  - `child_inherited_origin` makes the parent state data. It also makes the
+    directive's `set`/one-off `replace` values data when the directive's
+    options region held data (`BlockOptions::values_origin`, new field).
+  - The overlay origin joins the child cache key. Preflight children receive
+    the same origin.
+- **Reference graph and N14**. `prepare_content` returns the data ranges. A
+  reference inside data carries the `darkmatter-origin: data` attribute, and a
+  missing target there is a `Warning`. `md compose` prints those warnings
+  after the content and exits 0.
+- **R5**. `SourceRef::Supplied { supplier }` is a new public variant.
+  `attribute_frontmatter_failure` in `pipeline/mod.rs` attributes a failing
+  key that a `--set` override supplied to "a command-line override
+  (`--set`)". Blocks render "The value came from …, not from the document."
+  in place of "Defined in:" plus an excerpt. The variant is generic, so Phase
+  5 can pass "the agent".
+
+### Departures and decisions
+
+- **A replaced directive line keeps its terminator authored**
+  (`apply_replacements_with_edits`). Without this, the `\n` ending a
+  `::shell` line's output was data, and an authored `::file` on the next line
+  stopped being a directive (`preflight_lifecycle_carries_graph_into_transclusion`
+  caught it).
+- **Data masking maps data line breaks to spaces**, not the spike's "keep
+  whitespace". This way data cannot start a line in the masked view, which
+  makes "data cannot create or hide a directive" hold for code regions too.
+- **Data in a shell-block command that changes its line structure is an
+  error** ("splits or joins the block's commands"), not a silent join. This
+  is simpler and fail-closed.
+- **Directive options**: data counts only when it falls in the options
+  region after the target. So `::file {{ path }} set.x="y"` keeps `set.x`
+  authored.
+- **Not changed, noted**: a `::file … when="…"` condition built from inserted
+  data is still evaluated as an expression. `when="{{ cond }}"` is an
+  established DMLS-documented pattern. A candidate for a follow-up decision.
+- **Pre-existing, unrelated**: `md` only printed error-severity reference
+  issues. Warnings now print for the data-link case only.
+
+### Requirement → test mapping
+
+| Requirement | Tests |
+| ----------- | ----- |
+| R1 data payloads `{{ area }}`, `{{…}}`, `{{{ area }}}`, `$(echo X)` exact in frontmatter/body/transclusion, no approval; adjacent authored span evaluates | `lib/tests/l1/data_origin.rs::data_overrides_stay_exact_in_frontmatter_body_and_transclusion` |
+| Control row (N1) | `data_origin::authored_overrides_of_the_same_payloads_stay_templates`; CLI `set_value_template_still_fills_in`, `set_value_with_malformed_template_still_fails`, `set_value_shell_command_requires_approval_when_non_interactive` |
+| Layer precedence (N3) | `data_origin::override_layers_take_the_origin_of_the_winning_layer` |
+| `esc.md` | `data_origin::escaped_frontmatter_value_stays_literal_in_the_body`; CLI `escaped_expression_in_frontmatter_stays_literal_in_body`, `escaped_non_expression_in_frontmatter_stays_literal_in_body` |
+| Pass 2 only deferred (N4) | `data_origin::frontmatter_pass_two_scans_only_deferred_authored_keys` |
+| File reads are data (E7, E8) | `data_origin::a_file_read_is_not_rescanned_or_converted` |
+| R1.2 authored shell via preflight + approval; data not collected | `data_origin::only_an_authored_frontmatter_command_is_collected_and_approved` |
+| Produced `$( … )` shape and shell output stay data | `data_origin::produced_command_shapes_are_data` |
+| Interpolated executable / operator rejected (E5c) | `data_origin::a_body_executable_from_interpolation_is_rejected`, `a_body_pipeline_operator_from_interpolation_is_rejected`; existing `discovery_rejects_interpolated_frontmatter_executable` |
+| Shell block split/close (E5, E5b) | `data_origin::data_cannot_split_or_close_a_shell_block` |
+| Directives in data (E1–E4, B1) | `data_origin::directives_inside_data_are_text`; CLI `directive_in_interpolated_file_data_is_not_executed` |
+| Masked view (E6, B1) | `data_origin::a_data_fence_does_not_hide_an_authored_directive`; CLI `fence_in_interpolated_file_data_does_not_hide_authored_directive`; `body_origin::data_ranges::the_masked_view_hides_data_structure_and_keeps_offsets` |
+| Replacement leaf origin | `data_origin::replacement_values_keep_the_origin_of_their_leaf` |
+| B4/B5 child inheritance | `data_origin::a_child_receives_parent_values_as_data`; CLI `transcluded_child_does_not_reevaluate_inherited_escape`, `transcluded_child_prints_inherited_file_data_verbatim`, `directive_set_value_from_escape_is_not_reevaluated_in_child`, `directive_set_value_from_file_data_reaches_child_verbatim` |
+| `DataRanges` model, fail-closed, terminator | `body_origin::data_ranges::after_edits_matches_a_per_byte_model` (proptest), `a_map_for_other_text_fails_closed`, `an_empty_range_inside_data_intersects_it`, `a_replaced_line_keeps_its_terminator_authored` |
+| Single-pass rewrite unit | `rewrite.rs`: `replacement_output_is_never_parsed`, `replacements_report_one_data_edit_each`, `data_ranges_are_never_scanned` |
+| `DataPaths` | `value_origin::tests::*` (5) |
+| R5 | CLI `set_value_with_malformed_template_still_fails` (names the override, no "Defined in:"), `authored_malformed_template_still_names_the_document` |
+| N14 | CLI `missing_link_inside_inserted_text_warns` (data link exits 0 and warns; authored link exits 2) |
+| Strict whole-value / lenient mixed unchanged | Existing `compose_expression_failure_contract.rs` suite, unchanged and passing |
+
+All 8 Darkmatter `red until phase 2` tests are un-ignored and pass.
+
+### Gates
+
+- macOS, `cd darkmatter`:
+  - `just test`: 8546 passed, 12 skipped.
+  - `just lint`: pass.
+  - `just test-l2`: 3 + 18 + 69 passed.
+- macOS, `cd claudine`:
+  - `just test`: 7481 passed, 25 skipped. One expectation was migrated
+    (`wrap_compose_validation`), and one red test turned green and was
+    un-ignored.
+  - `just lint`: pass.
+- Cross-check, native Windows and Linux: the provenance-related selection
+  (`data_origin`, `body_origin`, `value_origin`, `rewrite`,
+  `frontmatter_interpolation`, `shell_block_integration`,
+  `ternary_integration`), 189 of 189 each.
+  - `just cross-check` re-parses parenthesized nextest filtersets through
+    `bash -c`, so plain name filters were used.
+- The remaining 16 Claudine red tests still fail as intended (Phases 4/5).
+- Checkpoint 2 migration check: see `inventory.md` § "Phase 2: changed
+  expectations".
+
+### Docs touched now (Phase 6 still owns the full write-up)
+
+- `darkmatter/docs/inline/interpolation.md` no longer describes a fixed-point
+  rescan. It gains "Inserted Text Is Data".
+- `claudine/docs/topics/flow-control/lifecycle.md` (one sentence) and the
+  `darkmatter` skill (`SKILL.md`, `compose.md`, `errors.md`): the rescan
+  statements were corrected.
+- The Claudine skill is unchanged. Claudine's behavior changes arrive in
+  Phases 4–5.

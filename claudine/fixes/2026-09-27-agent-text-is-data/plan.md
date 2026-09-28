@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
 total_phases: 6
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 spec: 2026-09-27-agent-text-is-data
@@ -24,6 +24,77 @@ docs_created_during_phase_1:
     - claudine/fixes/2026-09-27-agent-text-is-data/spike-s2-yaml-leaf-spans.md
     - claudine/fixes/2026-09-27-agent-text-is-data/spike-s3-token-lexer.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/value_origin.rs
+    - darkmatter/lib/src/markdown/compose/body_origin.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/mod.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+    - darkmatter/lib/src/markdown/compose/inline/replacement.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/parse_utils.rs
+    - darkmatter/lib/src/markdown/compose/block_pairs.rs
+    - darkmatter/lib/src/markdown/compose/directives_api.rs
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/src/markdown/compose/replacement.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/engine.rs
+    - darkmatter/lib/src/markdown/compose/page_blocks/parser.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/parser.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/parser.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/parser.rs
+    - darkmatter/lib/src/markdown/compose/file_links/mod.rs
+    - darkmatter/lib/src/markdown/compose/file_links/parser.rs
+    - darkmatter/lib/src/markdown/compose/expression/lint.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/src/markdown/reference/graph.rs
+    - darkmatter/lib/src/markdown/reference/validate.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/benchmark_fixtures.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/compose_phase6.rs
+    - darkmatter/lib/tests/l1/missing_ctx_capture.rs
+    - darkmatter/lib/tests/l1/ternary_integration.rs
+    - darkmatter/benchmarks/fixtures/compose_interpolation_heavy.md
+    - darkmatter/benchmarks/generate.sh
+    - darkmatter/benchmarks/manifest.yaml
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/tests/l1/compose_interpolation.rs
+    - darkmatter/cli/tests/l1/compose_value_provenance.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/inline/interpolation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/inventory.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/errors.md
 ---
 
 # Plan: agent-produced text is data, never instructions
@@ -85,16 +156,16 @@ data-origin values. Phase 2 verifies this with a workspace-wide caller check.
 
 ### Definition of done
 
-- [ ] `md compose esc.md` (spec reproduction) prints `Body: fixed {{ area }}`.
-- [ ] A value injected with **data** origin that contains `{{ area }}`, `{{…}}`,
+- [x] `md compose esc.md` (spec reproduction) prints `Body: fixed {{ area }}`.
+- [x] A value injected with **data** origin that contains `{{ area }}`, `{{…}}`,
       `{{{ area }}}`, or whole-value `$(echo X)` composes to exact text in
       frontmatter, body, and transcluded text. There is no evaluation, no parse
       error, and no shell approval.
-- [ ] `md compose repro.md --set '{"note":"see {{…}} siblings"}'` still
+- [x] `md compose repro.md --set '{"note":"see {{…}} siblings"}'` still
       fails, because command-line setters stay templates (ruling N1). The error
       now says the key came from `--set` and does not print the document as the
       definition site (R5).
-- [ ] An authored whole-value shell candidate is found by preflight and handled
+- [x] An authored whole-value shell candidate is found by preflight and handled
       by the normal approval policy. A command shape produced by interpolation
       is not. Shell output that looks like a command stays data.
 - [ ] Property test: `decode(encode(s)) == s` for arbitrary Unicode, including
@@ -429,7 +500,7 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
 
 ### Wave 1 (parallel)
 
-- [ ] **Origin-tagged overrides** (`rust-developer`)
+- [x] **Origin-tagged overrides** (`rust-developer`)
       - Add `OverrideOrigin`, the layered-override builder on `ComposeOptions`,
         and data-path tracking through `prepare_frontmatter_for_compose`
         (`compose/util.rs:216-240`). Keep `with_set_overrides` as Authored.
@@ -438,7 +509,7 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
         "original" shell text.
       - Search the whole workspace for `with_set_overrides` callers and confirm
         none needs Data.
-- [ ] **Frontmatter single pass** (`rust-developer`)
+- [x] **Frontmatter single pass** (`rust-developer`)
       - `interpolate_frontmatter_impl` / `rewrite_value`
         (`frontmatter_interpolation.rs:254/696`): an interpolated leaf becomes
         Data. Literal-escape results (`convert_frontmatter_literals`, `:476`)
@@ -447,7 +518,7 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
         resolution.
       - Keep typed whole-value results, null handling, and
         `is_whole_value_literal`.
-- [ ] **Shell shape from authored source** (`rust-developer`)
+- [x] **Shell shape from authored source** (`rust-developer`)
       - Add one predicate, `authored_shell_candidate`, used by:
         - runtime `scan_frontmatter` / `parse_shell_value`
           (`frontmatter_shell_expansion.rs:523/1245`)
@@ -463,7 +534,7 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
 
 ### Wave 2 (depends on Wave 1)
 
-- [ ] **Body and transclusion single pass** (`rust-developer`)
+- [x] **Body and transclusion single pass** (`rust-developer`)
       - Implement S1's chosen representation. `interpolate_text_located`
         (`interpolation/rewrite.rs:149`) scans authored text once; inserted
         text, literal-escape output, file reads, and shell output are Data.
@@ -488,7 +559,7 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
       - Apply N14: missing relative links inside data text warn.
       - Remove `ExpressionOrigin::Generated` along with
         `MAX_INTERPOLATION_DEPTH` (I1).
-- [ ] **R5 attribution** (`rust-developer`)
+- [x] **R5 attribution** (`rust-developer`)
       - Add `SourceRef` variants for command-line overrides (Authored override)
         so `with_on_disk_source` (`markdown/types.rs:382`) no longer rewrites
         them to `OnDisk`.
@@ -500,7 +571,7 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
 
 ### Wave 3
 
-- [ ] **Migration and tests** (`feature-tester-rust`)
+- [x] **Migration and tests** (`feature-tester-rust`)
       - Apply I1's migration table. Every authored template that relied on the
         rescan is rewritten into separate authored spans or expression
         concatenation. Update tests that asserted the rescan, recording each
@@ -527,11 +598,11 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
 
 ### Checkpoint 2
 
-- [ ] `cd darkmatter && just test && just lint` is green, and `just test-l2`
+- [x] `cd darkmatter && just test && just lint` is green, and `just test-l2`
       is green.
-- [ ] `md compose` on every file changed in I1 produces the output the
+- [x] `md compose` on every file changed in I1 produces the output the
       migration table expects.
-- [ ] Claudine still compiles and its L1 suite is unchanged (`cd claudine &&
+- [x] Claudine still compiles and its L1 suite is unchanged (`cd claudine &&
       just test`). Claudine has not opted into Data yet, so its behavior should
       not have changed.
 
