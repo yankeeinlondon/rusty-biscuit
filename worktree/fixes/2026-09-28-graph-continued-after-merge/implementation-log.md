@@ -1,0 +1,181 @@
+---
+spec: /Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-28-graph-continued-after-merge/spec.md
+plan: worktree/fixes/2026-09-28-graph-continued-after-merge/plan.md
+implemented_by: claude/opus
+started_phase: 1
+packages:
+    - worktree-cli
+source_files_during_phase_1:
+    - worktree/cli/src/commands/git_graph/tests.rs
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+---
+
+# Implementation Log for 2026-09-28-graph-continued-after-merge (5 phases)
+
+## Phase 1
+
+Rulings, spikes, fixtures, and baselines. No production code changed.
+
+### Spike S1: renderer segment semantics
+
+`worktree/fixes/2026-09-28-graph-continued-after-merge/spikes/s1-renderer-segments/`
+is a standalone crate (its own `[workspace]`, so the monorepo never builds it)
+that runs `MermaidDiagram::gitgraph_geometry` on hand-written Mermaid. Run it
+with `CARGO_TARGET_DIR=/tmp/wt-spike-s1-target cargo run -q` from that
+directory. Output on 2026-09-28 (layout index, lane, id, parents after
+`repair_gitgraph_merges`):
+
+| Case | Result |
+|---|---|
+| 1. `commit B` on `b`, `commit P` on main, `merge b id: "C"`, `checkout b`, `commit N` | `C` parents `[P, B]`; `N` parent `[B]` |
+| 2. As 1, with `commit id: "+2" type: HIGHLIGHT` before `N` | `+2` parent `[B]`; `N` parent `[+2]` |
+| 3. `b` merged twice (`B1`→`C1`, `B2`→`C2`) with commits between, then `N` | `C1` `[P1, B1]`, `B2` `[B1]`, `C2` `[P2, B2]`, `N` `[B2]`; no `RenderFailed` |
+| 4. `branch c` declared right after `commit B` (tagged `fix/sniff-pr`), before the merge | `c1` parent `[B]`; the tag stays on `B`; `C` `[P, B]`; `N` `[B]` |
+| 5. `a` merged into sibling `s` (`S3`), `a` resumed (`a2`), `s` later merged into main (`C`) | `S3` `[s2, A]`, `a2` `[A]`, `C` `[P, s4]`; SVG rows main (y=20), `s` (y=92), `a` (y=164), the order of the `branch` statements |
+
+SVGs of cases 1, 3, and 5 are kept beside the spike
+(`1-mid-lane-merge.svg`, `3-merged-twice.svg`, `5-merge-into-sibling.svg`).
+
+**D2 and D6 are confirmed.** The repair picks the source lane's newest commit
+before the merge, so pausing the source at `B` makes `B` the merge's second
+parent; `mermaid-rs-renderer` 0.3.1 leaves the source head at `B`, so a resumed
+commit or `+N` square follows `B`; a lane merged twice needs no change.
+`biscuit-visualized` needs no change.
+
+### Spike S2: boundary reproduction
+
+`spikes/s2-boundary/boundary.sh` builds each shape in a scratch repository
+with `commit-tree`, then walks G2 (boundary), G3 (classification with the fast
+path), G5 (stop replacement, fork), and G8 (record cutoff) with plain Git,
+counting every Git call. Run it with `./boundary.sh`.
+
+| Shape | Boundaries and answers | Result |
+|---|---|---|
+| E1 *behind* (main `P`, origin `C`) | `B` at n=1 → `MergedDirectly(C)`, `C^1 = P`; fork `merge-base(P, B) = P`; next boundary `d2` at n=12 → `NoSeparateHistory` (G3 fast path) | edge `(B, C)`, fork `P` ✓ |
+| E1 *diverged* (main `P'`) | same; `C` found on candidate 1 (`origin/main`); stops `[P', C]` → `[P, P']` | edge `(B, C)` on the origin line, fork `P` ✓ |
+| E1 `fix/sniff-pr` | tip `B` classified `NoSeparateHistory` against `fix/wt-ux` (G3) | label, no reconstruction ✓ |
+| Sparse lanes, `fix/wt-ux` | `W1` at n=68 → `MergedDirectly(M103)`, `C^1 = d12`; fork `d5`; next boundary `d5` at n=76 → `NoSeparateHistory` | edge `(W1, M103)`, fork `d5` ✓ |
+| Sparse lanes, `fix/wt-ux`, record `base_sha = d5` (E5) | the cutoff fires at the last boundary (`d = n = 76`) | same facts as with no record; two fewer calls |
+| Sparse lanes, `fix/wt-ux`, record = parent's final tip (today's L2 fixtures) | not on the chain → stale | same as no record ✓ (so E5 is about realism, not correctness) |
+| Sparse lanes, `fix/sniff` (stop `[d13]`) | `W1` at n=94 → `NoSeparateHistory` against `fix/wt-ux` | no edge; fork `W1` on `fix/wt-ux`'s lane, which now draws it ✓ |
+| Merged twice, then continued | `b2` → `C2` (fork `b1`), `b1` → `C1` (fork `d1`), `d1` → `NoSeparateHistory` | edges oldest first `(b1, C1)`, `(b2, C2)`, fork `d1` ✓ |
+| New branch at merged tip, record at `b1` | `d = n = 1` → cutoff before classifying | no edge ✓ |
+| Same, no record (control) | `b1` → `MergedDirectly(C)`; fork `d1` | edge reconstructed ✓ |
+| `B` integrated indirectly | `t1` → `IntegratedOtherwise` | no edge ✓ |
+| Shallow `--depth 2` of "merged twice" | `b2` → `MergedDirectly(C2)`, then the planned `is_ancestor(b2, C2^1)` is a shallow "no" → gap | **no edge at all** (see the G5 amendment) |
+| Same, without that check | edge `(b2, C2)` accepted; `merge-base(p2, b2)` empty (gap); `b2`'s parents are cut (gap) | first edge kept, notice ✓ |
+
+**Git call counts for one ordinary unmerged lane** (whole walk, including the
+calls today already makes):
+
+| Lane | Calls | Added over today |
+|---|---|---|
+| short (3 commits < `LINE_WINDOW`) | 1 `log`, 1 `merge-base --is-ancestor`, 1 `rev-list` | **+2** (+3 without G3: `rev-list --ancestry-path`) |
+| long (9 commits) | 2 `log`, 1 `merge-base --is-ancestor`, 2 `rev-list` | **+3** (the count `rev-list` and first `log` exist today) |
+| child forked on its recorded parent (candidates parent, main) | 3 | +2 |
+
+### Rulings confirmed or amended
+
+- **A1–A3, D1–D5, G1–G4, G6–G10, E1, E2, E4, E5, X1, X2:** confirmed; no
+  spike contradicted their premises.
+- **D6 confirmed:** no `biscuit-visualized` change (S1).
+- **G5 amended:** the separate `is_ancestor(B, C^1)` check is dropped.
+  Classification already proves it (`C` is the oldest first-parent commit
+  inside `--ancestry-path B..X`, so `C^1` does not descend from `B`; `C^1 = B`
+  would be `NoSeparateHistory`). In a shallow clone its "no" is always a gap,
+  which would stop every shallow reconstruction before its first edge and make
+  E3's "older boundary fails" fixture impossible. A stop whose `is_ancestor(B,
+  stop)` is a shallow gap is kept and sets `gap`.
+- **G8 confirmed**, with one observation: a realistic record at the true fork
+  (`d5`) fires the cutoff at the final ordinary boundary, which gives the same
+  facts as `NoSeparateHistory` there.
+- **P1 refined:** +2 / +3 measured; one more `--is-ancestor` for each
+  candidate tried before the one holding `B`.
+- **P2 refined:** run-to-run drift exceeds one run's spread (below), so the
+  regression rule uses the envelope of both baseline runs.
+- **E3:** the fixtures are built (next section); the shallow pair uses depth 1
+  and depth 2.
+
+The plan's rulings section carries these amendments.
+
+### L1 fixtures
+
+Added to `worktree/cli/src/commands/git_graph/tests.rs`, each with a topology
+sanity test that asserts nothing about the fixed behavior:
+
+| Builder | Sanity test |
+|---|---|
+| `continued_after_merge(LocalMain::{AtMerge, Behind, Diverged})` (E1) | `continued_after_merge_fixture_has_the_observed_topology` (all three variants: merge parents, `S` merging `P`, `origin/main = C`, local `main`, `B` on `fix/wt-ux`'s first-parent chain and not on `origin/main`'s, `merge-base(P, B) = P`, 11 commits up to `B` (> `LINE_WINDOW`), `fix/sniff-pr`'s record at `B`, no `fix/wt-ux` record) |
+| `merged_twice_and_continued()` | `merged_twice_fixture_has_two_merges_of_one_lane` |
+| `new_branch_at_merged_tip()` | `new_branch_at_merged_tip_fixture_records_its_creation_at_the_merged_tip` (the record is `b1`, one commit below `new`'s tip; `old` is deleted) |
+| `indirect_boundary()` | `indirect_boundary_fixture_reaches_main_only_through_another_merge` |
+| `shallow_merged_twice(depth)` | `shallow_merged_twice_fixtures_cut_history_where_expected` (depth 1: `b2` absent, `n`'s parent cut; depth 2: `C2`, `p2`, `b2`, `n` present, `b1`, `C1` absent, `b2`'s parent cut) |
+
+New helpers: `forked_at` (a record with a real `base_sha`), `parent_line`,
+`repo_with_root`, `set_branches`. Every fixture commit is made with
+`commit_on` (E4). These are unit tests in `commands::git_graph::tests` with no
+tier marker, so L1 runs them on both the library and binary targets (verified:
+both targets ran them).
+
+### Baselines (before)
+
+Host: Apple M4 Max, macOS 27.2 (26B5091g). Profile `release`, 10 samples,
+`WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`
+in `worktree/`, on unchanged graph code (HEAD `572ef7d26` plus this worktree's
+unrelated `list_table` edits).
+
+Run 1 (the plan's command; the 120×40 test prints medians only):
+
+| Fixture | graph gather (median) | graph image render (median) |
+|---|---|---|
+| floor (one commit) | 14.1 ms | 353.3 ms |
+| ordinary | 54.9 ms | 353.3 ms |
+| older essential connections | 140.4 ms | 345.6 ms |
+| multiple selected branches | 71.8 ms | 346.7 ms |
+| observed sparse lanes, 200×60 | 79.9 ms (74.9–88.8) | 353.3 ms (347.1–357.2) |
+
+Run 2 (the 120×40 test only, with a temporary edit adding min–max to its
+table; the edit was reverted with `git checkout` and the file is unchanged):
+
+| Fixture | graph gather (median, min–max) | graph image render (median, min–max) |
+|---|---|---|
+| floor (one commit) | 10.5 ms (9.8–12.0) | 348.4 ms (342.7–350.8) |
+| ordinary | 40.6 ms (38.7–44.8) | 352.4 ms (346.5–353.9) |
+| older essential connections | 128.3 ms (123.5–134.4) | 349.3 ms (344.6–351.9) |
+| multiple selected branches | 65.2 ms (59.6–72.6) | 349.6 ms (345.6–360.3) |
+
+The gather medians differ between runs by more than one run's spread (floor
+14.1 vs 10.5 ms, ordinary 54.9 vs 40.6 ms), so the P2 comparison uses both
+runs' envelope: floor gather 9.8–14.1 ms, ordinary gather 38.7–54.9 ms.
+
+**Call counts pinned today.**
+`the_base_view_gives_every_worktree_branch_a_line` asserts 5
+`merge-base --is-ancestor`, 3 `merge-base`, 4 `log`, 1 `rev-list`.
+`observed_sparse_lanes()`, base view (a scratch test, removed after the run):
+24 calls in total: 1 `for-each-ref`, 1 `rev-parse`, 5 `log`, 3 `merge-base`,
+4 `merge-base --is-ancestor`, 10 `rev-list`; `incomplete = false` in
+`GraphFacts` (the notice comes from `GitGraph`).
+
+### Verification
+
+- `just test` in `worktree`: 770 passed, 30 skipped.
+- `just lint` in `worktree`: clean.
+- No production code, docs, or skill changed; the OS risk is nil for this
+  phase (test-only fixtures; the shallow clone URL uses the existing
+  Windows-safe `file://` spelling).
+
+### Requirement-to-test mapping (Phase 1)
+
+Phase 1 changes no behavior, so it has no regression test. Each fixture's
+sanity test proves the shape a later phase's behavior test depends on:
+
+| Later requirement | Fixture | Proven now |
+|---|---|---|
+| PR #105 shape, base and focused views | `continued_after_merge(AtMerge)` | topology, records |
+| Same before `--ff` (behind, diverged) | `continued_after_merge(Behind / Diverged)` | local main, `origin/main` |
+| Merged twice, then continued | `merged_twice_and_continued()` | both merges, both sources off main's chain |
+| New branch at a merged tip (+ control) | `new_branch_at_merged_tip()` | record at the boundary, `old` deleted |
+| `B` integrated indirectly | `indirect_boundary()` | `t1` reaches main only through `O` |
+| Shallow boundary crossing / older boundary fails | `shallow_merged_twice(1 / 2)` | which commits the clone has |
