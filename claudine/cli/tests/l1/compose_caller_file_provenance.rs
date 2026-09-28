@@ -134,6 +134,9 @@ fn run_compose(
     strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr))
 }
 
+// `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` is compiled into the binary only by
+// `test-fixtures` builds, so this helper and its callers are too.
+#[cfg(feature = "test-fixtures")]
 fn run_compose_failure(
     fixture: &CliProcessFixture,
     cwd: &std::path::Path,
@@ -883,6 +886,7 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
     );
 }
 
+#[cfg(feature = "test-fixtures")]
 #[test]
 fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
     for (case, schema, expression, raw) in [
@@ -998,6 +1002,7 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
     }
 }
 
+#[cfg(feature = "test-fixtures")]
 #[test]
 fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
     let fixture = CliProcessFixture::named("caller-file-dynamic-array-diagnostic");

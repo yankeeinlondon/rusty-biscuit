@@ -19,6 +19,12 @@ path = "tests/l1/main.rs"
 name = "runtime_hot_paths"
 harness = false
 
+[features]
+# Process-level test seams, off in every default and installed build. Enabled
+# only through `claudine-cli`'s own `test-fixtures` feature, whose L1 tests
+# drive them from outside the process.
+test-fixtures = []
+
 [dependencies]
 # Internal
 claudine-catalog-types = { path = "../catalog-types" }

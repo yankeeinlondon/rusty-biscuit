@@ -110,10 +110,13 @@ _ensure-md:
 # development uses one Nextest invocation so its scheduler can use the whole
 # machine. CI keeps per-package invocations for distinct JUnit reports and
 # enables the daemon fixtures that pull bundled DuckDB into the build graph.
+# Both paths enable `claudine-cli/test-fixtures` (the package's declared
+# `local-features`): its fixture binaries and process-level test seams exist
+# only in that build, and the L1 tests that use them are gated on it.
 test *args="": _ensure-md
     #!/usr/bin/env bash
     set -euo pipefail
-    packages="claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
+    packages="claudine-catalog-types; claudine; claudine-contract; claudine-cli --features test-fixtures; claudine-gen"
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         just _test_all "claudine-catalog-types; claudine; claudine-contract; claudine-cli --features daemon-tests,terminal-tests,test-fixtures; claudine-gen --features terminal-tests" {{ args }}
     else

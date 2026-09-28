@@ -215,6 +215,32 @@ fn production_sources_pass_every_scan_backed_guard() {
     );
 }
 
+/// The scan skips only code that no shipped build compiles; a gate that also
+/// selects a platform or an ordinary feature keeps its item in scope.
+#[test]
+fn the_scan_skips_only_items_gated_to_a_test_build() {
+    let collapse = r#"fn report_macro(snapshot: &DiagnosticSnapshot) -> Report {
+        eyre!("launch detection failed: {}", snapshot.message)
+    }"#;
+    for (gate, skipped) in [
+        ("#[cfg(test)]", true),
+        (r#"#[cfg(feature = "test-fixtures")]"#, true),
+        (r#"#[cfg(all(unix, feature = "terminal-tests"))]"#, true),
+        ("#[cfg(any(test, unix))]", false),
+        (r#"#[cfg(feature = "attestation")]"#, false),
+        ("#[cfg(not(test))]", false),
+        ("#[cfg_attr(test, allow(dead_code))]", false),
+    ] {
+        let scan = source_scan::scan_text("lib/src/fixture.rs", &format!("{gate}\n{collapse}"));
+        assert_eq!(
+            scan.findings.is_empty(),
+            skipped,
+            "`{gate}` must {} the planted collapse",
+            if skipped { "skip" } else { "scan" }
+        );
+    }
+}
+
 #[test]
 fn a_failing_scan_backed_guard_is_reported_under_its_own_name() {
     // Non-vacuity for the merge itself. `production_sources_pass_every_scan_backed_guard`

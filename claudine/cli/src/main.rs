@@ -214,18 +214,9 @@ fn run_audio_worker_if_requested() -> Result<Option<i32>> {
 /// walker. Falls back to the CLI's generic `log::error` formatting
 /// (preserving the styled `Error:` label) when no cause in the chain
 /// implements `BlockError`.
-///
-/// Process-level tests may set `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` to capture
-/// the same structured diagnostic selected for rendering. Capture failures are
-/// deliberately ignored so this test seam cannot replace the original error.
 fn render_top_level_error(report: &Report) {
-    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT")
-        && let Some(snapshot) =
-            claudine::diagnostics::DiagnosticSnapshot::select(report.as_ref())
-        && let Ok(encoded) = serde_json::to_vec(&snapshot)
-    {
-        let _ = std::fs::write(path, encoded);
-    }
+    #[cfg(feature = "test-fixtures")]
+    write_diagnostic_snapshot_for_tests(report);
 
     // A lifecycle evaluation error already rendered its styled block to stderr
     // at its catch point (Decision #2), before any catch events fired. Suppress
@@ -241,6 +232,23 @@ fn render_top_level_error(report: &Report) {
         return;
     }
     log::error(&report.to_string());
+}
+
+/// Test seam, compiled only with the `test-fixtures` feature (never into a
+/// default or installed build): with `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT=<path>`
+/// set, writes the structured diagnostic selected for rendering to `<path>`.
+///
+/// Capture failures are deliberately ignored so this seam cannot replace the
+/// original error.
+#[cfg(feature = "test-fixtures")]
+fn write_diagnostic_snapshot_for_tests(report: &Report) {
+    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT")
+        && let Some(snapshot) =
+            claudine::diagnostics::DiagnosticSnapshot::select(report.as_ref())
+        && let Ok(encoded) = serde_json::to_vec(&snapshot)
+    {
+        let _ = std::fs::write(path, encoded);
+    }
 }
 
 fn run() -> Result<std::convert::Infallible> {

@@ -333,12 +333,28 @@ fn build_notification_message(title: &str, body: Option<&str>) -> Message {
     }
 }
 
+/// Test seam for process-level tests, compiled only with the `test-fixtures`
+/// feature (never into a default or installed build): with this variable set
+/// to `stall`, a desktop notification never finishes and never reaches the
+/// host's notification backend.
+///
+/// No host backend can be made to stall silently on every OS, yet the exit
+/// drain's timeout for a notification must be observable from the CLI. Any
+/// other value, or none, leaves sends untouched.
+#[cfg(feature = "test-fixtures")]
+const TEST_DESKTOP_NOTIFICATION_ENV: &str = "CLAUDINE_TEST_DESKTOP_NOTIFICATION";
+
 /// Build a transient messenger, register the desktop provider, and dispatch
 /// a notification to the current host OS.
 async fn send_desktop_notification(
     title: &str,
     body: Option<&str>,
 ) -> Result<(), MessagingError> {
+    #[cfg(feature = "test-fixtures")]
+    if std::env::var_os(TEST_DESKTOP_NOTIFICATION_ENV).is_some_and(|value| value == "stall") {
+        return std::future::pending().await;
+    }
+
     let mut messenger = Messenger::new();
     let provider = DesktopNotificationProvider::new(DesktopConfig::default());
     messenger.register(Box::new(provider));

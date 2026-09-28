@@ -11,6 +11,7 @@ mod common;
 
 mod agent_cwd;
 mod argv_normalization;
+mod cfg_gate;
 mod characterization_error_routes;
 mod cli_process_fixture;
 mod command_routing;
@@ -92,6 +93,8 @@ mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
 mod lifecycle_message_drain;
+#[cfg(windows)]
+mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
@@ -113,6 +116,9 @@ mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
 #[cfg(unix)]
 mod sequence_groups;
+// Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only
+// `test-fixtures` builds compile into the binary.
+#[cfg(feature = "test-fixtures")]
 mod sequence_initialize_include_preflight;
 #[cfg(unix)]
 mod sequence_jit;
@@ -134,6 +140,7 @@ mod skills_integration;
 mod spawn_site_guard;
 mod system_prompt_perf_bench;
 mod test_placement;
+mod test_seam_gate_guard;
 #[cfg(unix)]
 mod wrap_antigravity_exit_signal;
 mod wrap_basics;

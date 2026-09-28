@@ -26,7 +26,9 @@ required-features = ["test-fixtures"]
 daemon-tests = ["dep:rendezvous-daemon"]
 terminal-tests = []
 real-tests = []
-test-fixtures = []
+# Test-only fixture binaries and process-level seams (the library's included):
+# never part of a default build or `cargo install`.
+test-fixtures = ["claudine/test-fixtures"]
 
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
@@ -132,6 +134,11 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # build against. Unlike the daemon itself it carries no native dependency, so it
 # is available on every target.
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
+
+# A windowless Windows console (ConPTY) for the typed Ctrl+C drain test; already
+# built for unchained-ai and worktree-cli.
+[target.'cfg(windows)'.dev-dependencies]
+xpty = "0.3.6"
 
 [[test]]
 name = "l1"

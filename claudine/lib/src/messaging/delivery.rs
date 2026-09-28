@@ -12,7 +12,7 @@
 //! - Any helper in `messaging` that starts a delivery task must go through
 //!   [`track`]. A bare `tokio::spawn` there would let the task die silently
 //!   at exit. `lib/tests/l1/messaging_spawn_guard.rs` fails on any spawn in
-//!   `src/messaging/` outside this file.
+//!   `src/messaging/` other than the one inside [`track`].
 //! - A label is either a route *name* or the fixed desktop-notification
 //!   label. It can never hold a URL, token, image path, or message body, so a
 //!   pending-delivery warning cannot leak a secret.
