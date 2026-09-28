@@ -297,6 +297,12 @@ pub(super) fn approve_discovered_commands(
 /// is rejected with [`CompositionError::LifecycleShellResolution`] because its
 /// value does not yet exist.
 ///
+/// Each resolved action is marked [`ShellAction::pre_resolved`], so the
+/// executor runs the stamped bytes as they stand instead of interpolating the
+/// data they now contain a second time.
+///
+/// [`ShellAction::pre_resolved`]: super::lifecycle::ShellAction::pre_resolved
+///
 /// Positional `shell` actions (`shell: "..."`) and key/value `shell` actions
 /// (`{ action: shell, command: ... }`) with any `on_error:` text are covered.
 /// Non-string command expressions (e.g. a bare `command: "ctx.repo"` parsed as a
@@ -366,6 +372,7 @@ pub fn resolve_lifecycle_shell_commands(
                         source_path,
                     )?;
                 }
+                shell.pre_resolved = true;
             }
         }
     }

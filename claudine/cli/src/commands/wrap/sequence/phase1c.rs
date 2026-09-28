@@ -262,7 +262,7 @@ fn run_phase_1c_attempt(
                         frontmatter_description,
                         pointer_paths,
                     },
-                    effective_overrides: Some(step_set_overrides.clone()),
+                    effective_overrides: Some(step_set_overrides.to_value()),
                 });
                 // Continue so every step's missing properties are accumulated
                 // and the user fixes the whole sequence in one edit.

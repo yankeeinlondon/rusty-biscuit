@@ -733,9 +733,13 @@ pub fn validate_no_err_in_no_error_events(
 
     // Stack surfaces: an expression surface is rejected for a bare `err`
     // anywhere in its tree; a string literal (a single-parameter message body)
-    // is rejected for a bare `err` inside any of its `{{ … }}` spans.
+    // is rejected for a bare `err` inside any of its `{{ … }}` spans. Shell text
+    // stamped by pre-flight holds resolved data, not authored spans.
+    let stamped = pre_resolved_shell_texts(lifecycle);
     for surface in iter_stack_expression_surfaces(lifecycle) {
-        if surface.signal.can_carry_error() {
+        if surface.signal.can_carry_error()
+            || stamped.iter().any(|expr| std::ptr::eq(*expr, surface.expr))
+        {
             continue;
         }
         if surface_references_err(surface.expr) {
@@ -747,6 +751,26 @@ pub fn validate_no_err_in_no_error_events(
         }
     }
     Ok(())
+}
+
+/// The shell `command`/`on_error` expressions pre-flight (C3) already stamped
+/// with their resolved bytes ([`ShellAction::pre_resolved`]).
+fn pre_resolved_shell_texts(lifecycle: &LifecycleConfig) -> Vec<&Expr> {
+    let mut texts = Vec::new();
+    for signal in LifecycleSignal::ALL {
+        let Some(stack) = lifecycle.stack(signal) else {
+            continue;
+        };
+        for action in stack.iter().flat_map(|item| item.actions.iter()) {
+            if let LifecycleActionKind::Shell(shell) = &action.kind
+                && shell.pre_resolved
+            {
+                texts.push(&shell.command);
+                texts.extend(shell.on_error.as_ref());
+            }
+        }
+    }
+    texts
 }
 
 /// Whether an expression surface references the lifecycle `err` global, either

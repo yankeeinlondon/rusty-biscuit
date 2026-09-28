@@ -3346,11 +3346,6 @@ pub enum LifecycleEvaluationReason {
     /// error.
     #[default]
     Expression,
-    /// Resolution finished but a `{{ … }}` span survived in the rendered text.
-    SurvivingSpan {
-        /// The first surviving span, braces included.
-        span: String,
-    },
 }
 
 /// How a frontmatter-rooted error should be highlighted in the captured excerpt.

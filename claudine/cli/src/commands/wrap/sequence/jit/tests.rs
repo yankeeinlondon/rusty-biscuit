@@ -61,7 +61,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
     let step = compose_step(
         &source,
         &context,
-        &serde_json::json!({}),
+        &claudine::composition::LayeredOverrides::new(),
         &BTreeMap::new(),
         std::collections::HashSet::new(),
         false,
@@ -159,7 +159,10 @@ fn template_preflight_resolves_against_document_dir() {
         &env_overrides,
         &source_path,
         &md,
-        (&overrides, &Default::default()),
+        (
+            &claudine::composition::LayeredOverrides::authored(Some(&overrides)),
+            &Default::default(),
+        ),
         Some(launch_dir.path()),
         None,
         None,
@@ -213,7 +216,10 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         &env_overrides,
         &source_path,
         &md,
-        (&overrides, &Default::default()),
+        (
+            &claudine::composition::LayeredOverrides::authored(Some(&overrides)),
+            &Default::default(),
+        ),
         None,
         None,
         None,
@@ -319,7 +325,9 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         (
             // The sequence boundary receives an already materialized caller
             // value and must pass it through without re-anchoring it.
-            &serde_json::json!({ "caller_spec": materialized_caller }),
+            &claudine::composition::LayeredOverrides::authored(Some(
+                &serde_json::json!({ "caller_spec": materialized_caller }),
+            )),
             &Default::default(),
         ),
         Some(&launch_dir),
@@ -392,7 +400,7 @@ mod layering {
         let runtime = snapshot(&[("phase", json!("from-mutation"))], &[]);
 
         let merged = step_set_overrides(&plan, 0, Some(&user), Some(&runtime));
-        let map = merged.as_object().unwrap();
+        let map = merged.values();
 
         assert_eq!(map["phase"], json!("from-mutation"));
         assert_eq!(map["only_user"], json!("kept"));
@@ -412,7 +420,7 @@ mod layering {
         let runtime = snapshot(&[], &["first"]);
 
         let merged = step_set_overrides(&plan, 1, None, Some(&runtime));
-        assert_eq!(merged["outputs"], json!(["first"]));
+        assert_eq!(merged.values()["outputs"], json!(["first"]));
         assert!(
             !reserved_overlay(&plan, 1)
                 .as_object()
@@ -430,7 +438,7 @@ mod layering {
         let plan = two_step_plan(dir.path());
 
         let merged = step_set_overrides(&plan, 0, None, None);
-        assert_eq!(merged["outputs"], json!([]));
+        assert_eq!(merged.values()["outputs"], json!([]));
     }
 
     /// Both neighbors render on an interior step; a boundary neighbor is `null`

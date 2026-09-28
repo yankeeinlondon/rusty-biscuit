@@ -138,8 +138,8 @@ pub use resolve::{
     with_prompt_magic_roots, without_formal_sequence_keys,
 };
 pub use runtime_state::{
-    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
-    trim_transport_newline, with_initialized_outputs,
+    LayeredOverrides, OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState,
+    layered_set_overrides, trim_transport_newline,
 };
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,

@@ -440,7 +440,7 @@ fn run_one_step(
 fn compose_with_late_collection(
     run: &SequenceRunContext<'_>,
     live: &ResolvedCompositionSource,
-    set_overrides: &Value,
+    set_overrides: &composition::LayeredOverrides,
     env_overrides: &std::collections::BTreeMap<String, String>,
     allow_empty_body: bool,
 ) -> Result<jit::StepComposition, CompositionError> {
@@ -467,15 +467,16 @@ fn compose_with_late_collection(
         return first;
     }
 
-    let mut merged = match set_overrides {
-        Value::Object(map) => map.clone(),
-        _ => serde_json::Map::new(),
-    };
-    merged.extend(collected);
+    // Interactively collected values are typed by the user: authored.
+    let mut merged = set_overrides.clone();
+    merged.push(
+        darkmatter::markdown::compose::OverrideOrigin::Authored,
+        Some(&Value::Object(collected)),
+    );
     jit::compose_step(
         live,
         run.compose,
-        &Value::Object(merged),
+        &merged,
         env_overrides,
         run.approved.clone(),
         allow_empty_body,

@@ -501,6 +501,9 @@ pub struct EffectiveSelectionHints {
 pub struct CallerInputLayers {
     /// Frontmatter `--set` overrides (JSON object) the caller supplied.
     pub set_overrides: Option<serde_json::Value>,
+    /// Top-level keys of [`set_overrides`](Self::set_overrides) that are data
+    /// (see [`PrepareOptions::data_override_keys`][super::PrepareOptions]).
+    pub data_override_keys: std::collections::BTreeSet<String>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
@@ -562,6 +565,7 @@ impl CallerInputLayers {
     pub fn from_options(options: &super::PrepareOptions) -> Self {
         Self {
             set_overrides: options.set_overrides.clone(),
+            data_override_keys: options.data_override_keys.clone(),
             caller_input_records: options.caller_input_records.clone(),
             file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
             file_resolution_context: options.file_resolution_context.clone(),
@@ -570,10 +574,22 @@ impl CallerInputLayers {
         }
     }
 
+    /// The overrides with the origin of each key.
+    pub fn layered_overrides(&self) -> super::LayeredOverrides {
+        super::LayeredOverrides::from_parts(self.set_overrides.as_ref(), &self.data_override_keys)
+    }
+
+    /// Replace the overrides and their origins together.
+    pub fn set_layered_overrides(&mut self, overrides: super::LayeredOverrides) {
+        self.data_override_keys = overrides.data_keys().clone();
+        self.set_overrides = Some(overrides.to_value());
+    }
+
     /// Apply these layers onto `options` — the one assembly point every
     /// canonical preparation goes through.
     pub fn apply_to(&self, mut options: super::PrepareOptions) -> super::PrepareOptions {
         options.set_overrides = self.set_overrides.clone();
+        options.data_override_keys = self.data_override_keys.clone();
         options.caller_input_records = self.caller_input_records.clone();
         options.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         options.file_resolution_context = self.file_resolution_context.clone();

@@ -5,11 +5,13 @@
 //! ([`super::engine`]); the engine module holds the execution/routing/gate
 //! logic proper.
 
+use darkmatter::markdown::compose::OverrideOrigin;
 use serde_json::{Map, Value};
 
 use super::super::coordinator::SurfacedHandoff;
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleSignal;
+use super::super::runtime_state::LayeredOverrides;
 use super::super::types::OnRateLimit;
 use super::expression::LoopAmbient;
 use crate::stream::summary::RateLimitInfo;
@@ -55,15 +57,35 @@ pub struct LoopIterationContext {
 }
 
 impl LoopIterationContext {
-    /// Build `set_overrides` for prompt preparation.
+    /// Build the overrides for prompt preparation.
     ///
-    /// The returned object contains the current frontmatter plus read-only
-    /// ambient loop variables. Ambient variables intentionally shadow
-    /// frontmatter keys for the duration of an iteration.
-    pub fn as_set_overrides(&self) -> Value {
-        let mut overrides = self.frontmatter.clone();
-        insert_ambient_overrides(&mut overrides, &self.ambient);
-        Value::Object(overrides)
+    /// The result is `caller` — the run's own override layers — with the
+    /// current frontmatter and the read-only ambient loop variables on top.
+    /// Ambient variables intentionally shadow frontmatter keys for the duration
+    /// of an iteration.
+    ///
+    /// A frontmatter key is authored only while it still holds exactly the
+    /// value `caller` supplied as authored (a CLI setter carried through the
+    /// seed). Everything else was produced by the run — a control variable
+    /// lifted from the composed seed, a loop action result, an ambient value
+    /// such as `_loop_last_output` — so it is data, and its `{{ … }}` or
+    /// `$( … )` is never scanned again.
+    pub fn as_layered_overrides(&self, caller: &LayeredOverrides) -> LayeredOverrides {
+        let mut overrides = caller.clone();
+        for (key, value) in &self.frontmatter {
+            let typed_by_caller = caller.origin_of(key) == OverrideOrigin::Authored
+                && caller.values().get(key) == Some(value);
+            let origin = if typed_by_caller {
+                OverrideOrigin::Authored
+            } else {
+                OverrideOrigin::Data
+            };
+            overrides.insert(origin, key.clone(), value.clone());
+        }
+        let mut ambient = Map::new();
+        insert_ambient_overrides(&mut ambient, &self.ambient);
+        overrides.push(OverrideOrigin::Data, Some(&Value::Object(ambient)));
+        overrides
     }
 }
 

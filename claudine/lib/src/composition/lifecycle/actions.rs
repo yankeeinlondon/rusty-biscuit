@@ -556,6 +556,11 @@ pub struct ShellAction {
     pub command: Expr,
     /// Message to emit when the command exits non-zero.
     pub on_error: Option<Expr>,
+    /// `true` once pre-flight (C3) has stamped `command` and `on_error` with
+    /// their resolved bytes. Those bytes are what was approved and are run as
+    /// they stand: anything the resolution inserted is data and is never
+    /// interpolated again at event time.
+    pub pre_resolved: bool,
 }
 
 /// A side-effect action — a Darkmatter effect verb invoked by name with

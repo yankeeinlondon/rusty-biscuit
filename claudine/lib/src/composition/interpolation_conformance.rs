@@ -12,7 +12,8 @@
 //! [`overlap_cases`] enumerates the syntax both engines support and asserts they
 //! produce the *same* value from the *same* input and state. The `divergence_*`
 //! tests pin the two documented, intentional differences that keep the loop
-//! renderer separate. See `docs/topics/flow-control/looping.md`
+//! renderer separate; `mixed_string_stays_a_string_in_both_engines` pins a
+//! former third one that no longer exists. See `docs/topics/flow-control/looping.md`
 //! (§"When templates inside action values are rendered") and
 //! `docs/topics/composition.md` (§"Loop vs lifecycle interpolation") for the
 //! rationale.
@@ -223,12 +224,12 @@ fn loop_and_lifecycle_agree_on_shared_syntax() {
     }
 }
 
-/// Divergence 1 — the loop renderer re-parses a mixed-string result as JSON, so
-/// a concatenation that happens to form valid JSON lands typed; the lifecycle
-/// DM2 substrate keeps every mixed string as a string. Documented in
-/// `looping.md` ("After rendering, the result is re-parsed as JSON").
+/// A mixed string stays a string in both engines, even when the concatenation
+/// happens to form valid JSON: the inserted values are data, so the loop
+/// renderer no longer re-parses the result (`looping.md`, "When templates
+/// inside action values are rendered").
 #[test]
-fn divergence_mixed_string_json_reparse() {
+fn mixed_string_stays_a_string_in_both_engines() {
     let input = json!("{{a}}{{b}}");
     let frontmatter = obj(json!({ "a": 1, "b": 2 }));
     let context = prepared_context();
@@ -236,8 +237,8 @@ fn divergence_mixed_string_json_reparse() {
     let loop_result = loop_render(&input, &frontmatter).expect("loop renders");
     assert_eq!(
         loop_result,
-        json!(12),
-        "loop re-parses the concatenated `12` as a JSON number"
+        json!("12"),
+        "the loop keeps the concatenated `12` as a string"
     );
 
     let dm2_strict = dm2_render(
@@ -258,7 +259,7 @@ fn divergence_mixed_string_json_reparse() {
     assert_eq!(dm2_lenient, json!("12"), "DM2 mode does not change typing");
 }
 
-/// Divergence 2 — an unknown root in a mixed string is lenient in the loop
+/// Divergence 1 — an unknown root in a mixed string is lenient in the loop
 /// renderer (resolves empty, matching loop condition evaluation) but fails
 /// closed in lifecycle DM2 strict mode (no side effect dispatches with an
 /// unresolved reference).

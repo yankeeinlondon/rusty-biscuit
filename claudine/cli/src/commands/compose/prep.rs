@@ -628,7 +628,10 @@ pub(crate) fn prepare_and_run_active_document(
             &prepared_context,
             &document_epoch,
             &file_resolution_context,
-            set_overrides.as_ref(),
+            &crate::commands::wrap::overlay::proxy_caller_overrides(
+                current_overlay,
+                set_overrides.as_ref(),
+            ),
             &caller_input_records,
             &approval_options,
             &mut prep_substages,
@@ -697,7 +700,7 @@ fn eager_shell_preflight(
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
     document_epoch: &claudine::invocation_context::DocumentEpoch,
     file_resolution_context: &biscuit_file::FileResolutionContext,
-    set_overrides: Option<&serde_json::Value>,
+    overrides: &claudine::composition::LayeredOverrides,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     approval_options: &claudine::harness::ShellApprovalOptions,
     prep_substages: &mut Vec<crate::perf::SubstageTiming>,
@@ -726,9 +729,7 @@ fn eager_shell_preflight(
         // and reporting one here would render Darkmatter's raw error instead
         // of the typed one the direct route renders (AC28).
         .with_deferred_schema_verdict(true);
-        if let Some(overrides) = set_overrides {
-            opts = opts.with_set_overrides(overrides.clone());
-        }
+        opts = overrides.apply_to(opts);
         opts = opts.with_caller_input_records(caller_input_records.clone());
         opts
     };
@@ -1000,12 +1001,13 @@ fn build_and_run_loop(
                 // is its stabilized reread, taken here after the engine's
                 // `initialize`, and it owns the verdict.
                 let mut iteration_options = loop_prepare_options.clone();
-                iteration_options.set_overrides =
-                    Some(claudine::composition::layered_set_overrides(
-                        Some(&ctx.as_set_overrides()),
+                iteration_options.set_layered_overrides(
+                    claudine::composition::layered_set_overrides(
+                        ctx.as_layered_overrides(&loop_prepare_options.layered_overrides()),
                         Some(&runtime_state.snapshot()),
                         None,
-                    ));
+                    ),
+                );
                 match (staged, ctx.iteration) {
                     (Some(staged), 1) => {
                         let read = staged_boot::reread_and_audit(
@@ -1332,6 +1334,8 @@ fn execute_loop_or_single(
         // identical document invoked without `loop:` succeeded.
         defer_schema_verdict: schema_stage
             == claudine::composition::SchemaStage::DeferToStabilizedReread,
+        data_override_keys: Default::default(),
+        proxy_overlay: proxy_overlay.clone(),
     };
 
     let is_proxy_target = adopted_handoff.is_some();

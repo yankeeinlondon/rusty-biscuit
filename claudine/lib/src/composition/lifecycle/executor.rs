@@ -229,19 +229,6 @@ pub enum LifecycleExprError {
     /// the wrong shape.
     #[error("{0}")]
     Prose(String),
-
-    /// The post-DM2 leak guard: resolution finished, but a `{{ … }}` span
-    /// survived in the rendered text.
-    #[error(
-        "the rendered text still contains `{span}` after every interpolation pass; a \
-         `{{{{ … }}}}` inside a quoted string literal is text and is never interpolated on \
-         this surface, and a frontmatter value that holds template syntax is not \
-         re-expanded at event time"
-    )]
-    SurvivingSpan {
-        /// The first surviving span, braces included.
-        span: String,
-    },
 }
 
 impl LifecycleExprError {
@@ -920,9 +907,9 @@ impl StackExecutionContext<'_> {
     /// declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding
     /// global — that resolves to `null`/empty still renders empty.
     ///
-    /// After resolution, the post-DM2 leak guard rejects any recognized
-    /// `{{ … }}` span surviving in the result (e.g. a frontmatter value that is
-    /// itself raw template text), so no raw span reaches a dispatched side effect.
+    /// `s` is authored text and is scanned exactly once. Whatever the spans
+    /// insert is data: a frontmatter value or file content that itself holds
+    /// `{{ … }}` or `$( … )` is delivered verbatim, never expanded again.
     fn resolve_string_value(
         &self,
         s: &str,
@@ -931,13 +918,30 @@ impl StackExecutionContext<'_> {
         let state = self.build_state(fm, s);
         let globals = self.injected_globals();
         let value = Value::String(s.to_string());
-        let resolved = SubtreeCompose::new(&value, &state)
+        SubtreeCompose::new(&value, &state)
             .with_globals(globals)
             .with_resolution_context(self.resolution_context())
             .strict()
             .compose()
-            .map_err(|error| LifecycleExprError::Compose(Box::new(error)))?;
-        reject_surviving_spans(resolved)
+            .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
+    }
+
+    /// Evaluate one action operand at event time.
+    ///
+    /// An authored literal body with `{{ … }}` spans is a template: its spans
+    /// are interpolated once, through DM2. Every other expression — a
+    /// whole-value span such as `{{ frontmatter('log.md', 'note') }}` — yields
+    /// data, returned as is: text it produced is never scanned again, so an
+    /// agent-written `{{ … }}` or `$( … )` arrives exactly as written.
+    fn evaluate_operand(
+        &self,
+        expr: &Expr,
+        fm: &Map<String, Value>,
+    ) -> Result<Value, LifecycleExprError> {
+        match expr {
+            Expr::StringLiteral(text) if text.contains("{{") => self.resolve_string_value(text, fm),
+            _ => self.eval_expr(expr, fm),
+        }
     }
 
     /// Validate a resolved sound-effect name against the catalog immediately
@@ -1289,11 +1293,10 @@ impl StackExecutionContext<'_> {
 
     /// Evaluate a message expression to its display string at event-time.
     ///
-    /// A literal-default action body is an [`Expr::StringLiteral`]; a whole-value
-    /// `{{ … }}` span resolves to a typed expression. We evaluate the expression
-    /// (resolving multi-argument expression verbs), then interpolate any
-    /// `{{ … }}` spans surviving inside a literal through DM2 against the current
-    /// document `fm` plus the injected globals.
+    /// A literal-default action body is an [`Expr::StringLiteral`] whose
+    /// `{{ … }}` spans interpolate once through DM2 against the current document
+    /// `fm` plus the injected globals; a whole-value `{{ … }}` span resolves to
+    /// a typed expression whose result is data ([`Self::evaluate_operand`]).
     ///
     /// Fails closed (C4): a whole-value span (or a function argument) referencing
     /// a genuinely-unknown frontmatter root — a typo — errors before dispatch
@@ -1309,14 +1312,7 @@ impl StackExecutionContext<'_> {
                 "references undefined variable `{variable}`"
             )));
         }
-        let value = self.eval_expr(expr, fm)?;
-        let rendered = scalar_string(&value);
-        if rendered.contains("{{") {
-            self.resolve_string_value(&rendered, fm)
-                .map(|v| scalar_string(&v))
-        } else {
-            Ok(rendered)
-        }
+        self.evaluate_operand(expr, fm).map(|value| scalar_string(&value))
     }
 
     /// Emit a resolved communication message on the given channel.
@@ -1357,7 +1353,7 @@ impl StackExecutionContext<'_> {
                 "shell", &ShellRunError::BeforePreflight,
             )));
         }
-        let command = self.render_message(&shell.command, fm).map_err(|error| {
+        let command = self.render_shell_text(shell, &shell.command, fm).map_err(|error| {
             ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action("shell", &error))
         })?;
         match self.shell_runner.run(&command) {
@@ -1367,7 +1363,7 @@ impl StackExecutionContext<'_> {
             Ok(0) => Ok(()),
             Ok(code) => {
                 if let Some(on_error) = &shell.on_error {
-                    if let Ok(text) = self.render_message(on_error, fm) {
+                    if let Ok(text) = self.render_shell_text(shell, on_error, fm) {
                         self.emitter.emit_warn(&text, self.term);
                     }
                 }
@@ -1385,12 +1381,28 @@ impl StackExecutionContext<'_> {
         }
     }
 
+    /// The text of a shell action's `command` or `on_error`.
+    ///
+    /// A pre-flight-resolved literal is the approved byte string and runs as it
+    /// stands; everything else renders like a message body.
+    fn render_shell_text(
+        &self,
+        shell: &super::actions::ShellAction,
+        expr: &Expr,
+        fm: &Map<String, Value>,
+    ) -> Result<String, LifecycleExprError> {
+        match expr {
+            Expr::StringLiteral(text) if shell.pre_resolved => Ok(text.clone()),
+            _ => self.render_message(expr, fm),
+        }
+    }
+
     /// Dispatch a Darkmatter side effect by verb with positional, evaluated
     /// arguments.
     ///
-    /// String arguments carrying `{{ … }}` are interpolated at event-time
-    /// through DM2 (preserving whole-value typing), matching the literal-with-
-    /// interpolation rule of communication bodies. A frontmatter-mutating verb
+    /// Arguments follow the communication-body rule ([`Self::evaluate_operand`]):
+    /// an authored literal interpolates once, and a whole-value span keeps its
+    /// typed result, which is data and is never interpolated again. A frontmatter-mutating verb
     /// that targets the document mirrors its change onto `working` so a later
     /// action in the same stack reads the mutated value. Lifecycle `set`
     /// mappings use [`Self::dispatch_runtime_set`] instead of this positional
@@ -1405,15 +1417,7 @@ impl StackExecutionContext<'_> {
         // here is an evaluation error.
         let values = args
             .iter()
-            .map(|expr| {
-                let value = self.eval_expr(expr, working)?;
-                if let Value::String(s) = &value {
-                    if s.contains("{{") {
-                        return self.resolve_string_value(s, working);
-                    }
-                }
-                Ok(value)
-            })
+            .map(|expr| self.evaluate_operand(expr, working))
             .collect::<Result<Vec<_>, LifecycleExprError>>()
             .map_err(|error| {
                 ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(verb, &error))
@@ -1487,16 +1491,7 @@ impl StackExecutionContext<'_> {
         for (key, value) in set.iter() {
             let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
                 let value_property = format!("{property}.{key}{suffix}");
-                let reason = match &error {
-                    LifecycleExprError::SurvivingSpan { span } => {
-                        LifecycleEvaluationReason::SurvivingSpan { span: span.clone() }
-                    }
-                    LifecycleExprError::Evaluate(_)
-                    | LifecycleExprError::Compose(_)
-                    | LifecycleExprError::Prose(_) => {
-                        LifecycleEvaluationReason::Expression
-                    }
-                };
+                let reason = LifecycleEvaluationReason::Expression;
                 let diagnostic = CompositionError::LifecycleEvaluationError {
                     source_path: self.source_path.to_path_buf(),
                     event: self.signal.property_name().to_string(),
@@ -1795,6 +1790,7 @@ impl StackExecutionContext<'_> {
         for (key, value) in with.iter() {
             let resolved = walker
                 .resolve_with_value(value, fm)
+                .and_then(|resolved| reject_control_plane_template(key, resolved))
                 .map_err(|(suffix, error)| {
                     let err = CompositionError::LifecycleProxyWithEvaluationFailed {
                         source_path: self.source_path.to_path_buf(),
@@ -1855,9 +1851,9 @@ impl StackExecutionContext<'_> {
     /// `bool`/number/array/object/null; a mixed string interpolates through DM2
     /// and stays a string.
     ///
-    /// Fails closed the same way `render_message` does, and additionally
-    /// rejects a raw span surviving *anywhere* inside a resolved container — a
-    /// `{{ … }}` must never be deferred into target-time evaluation.
+    /// Fails closed the same way `render_message` does. The resolved value is
+    /// data: a `{{ … }}` inside it — at any depth of a container — reaches a
+    /// `set:` or a `proxy.with:` target as text, never as a template.
     fn resolve_typed_value(
         &self,
         expr: &Expr,
@@ -1868,14 +1864,7 @@ impl StackExecutionContext<'_> {
                 "references undefined variable `{variable}`"
             )));
         }
-        let value = self.eval_expr(expr, fm)?;
-        let value = match &value {
-            // A literal-default string may still carry `{{ … }}` spans (mixed
-            // interpolation); DM2 resolves them and rejects a surviving span.
-            Value::String(s) if s.contains("{{") => self.resolve_string_value(s, fm)?,
-            _ => value,
-        };
-        reject_surviving_spans_deep(value)
+        self.evaluate_operand(expr, fm)
     }
 
     /// Evaluate an optional expression to a display string.
@@ -2039,44 +2028,56 @@ fn collect_variable_paths(expr: &Expr, paths: &mut Vec<String>) {
     }
 }
 
-/// Post-DM2 dispatch-time leak guard (C4): reject a resolved value that still
-/// contains a recognized `{{ … }}` span.
+/// Refuse template syntax in a `with:` value that becomes lifecycle
+/// configuration in the target.
 ///
-/// Strict subtree compose fails on a malformed/unknown *template* span, but a
-/// resolved value can still carry raw braces when a referenced frontmatter key
-/// holds literal template text (e.g. `set_frontmatter` stored `"{{x}}"`). This
-/// catches that surviving span before the string reaches a side effect, so no
-/// messenger/TTS/sound/stderr/stdout/notify dispatch ever sends raw syntax.
-fn reject_surviving_spans(value: Value) -> Result<Value, LifecycleExprError> {
-    if let Value::String(s) = &value {
-        if let Some(span) = ExpressionFinder::find_all_plain(s).first() {
-            return Err(LifecycleExprError::SurvivingSpan {
-                span: s[span.start..span.end].to_string(),
-            });
-        }
+/// Every other overlay key reaches the target as a data layer, so a `{{ … }}`
+/// in it is text. A lifecycle key (`success:`, `loop:`, …) is different: the
+/// target reparses it as its own stack or loop, and Claudine evaluates those
+/// strings at event time, outside Darkmatter compose. Run-time data carrying
+/// template syntax there would become an instruction, so it fails closed. On
+/// failure returns the path suffix below the key, as
+/// [`StackExecutionContext::resolve_with_value`] does.
+fn reject_control_plane_template(
+    key: &str,
+    resolved: Value,
+) -> Result<Value, (String, LifecycleExprError)> {
+    if !super::LIFECYCLE_EVENT_KEYS.contains(&key) {
+        return Ok(resolved);
     }
-    Ok(value)
+    match first_template_span(&resolved, &mut String::new()) {
+        None => Ok(resolved),
+        Some((suffix, span)) => Err((
+            suffix,
+            LifecycleExprError::prose(format!(
+                "the value holds `{span}`, but `{key}` becomes the target's lifecycle \
+                 configuration, where template syntax would run as an instruction"
+            )),
+        )),
+    }
 }
 
-/// [`reject_surviving_spans`] extended through arrays and objects.
-///
-/// A whole-value span such as `{{ payload }}` resolves to a container the
-/// scalar guard never looks inside, so a nested raw span would otherwise ride
-/// into the overlay and become a second, target-time evaluation of source
-/// syntax.
-fn reject_surviving_spans_deep(value: Value) -> Result<Value, LifecycleExprError> {
+/// The path suffix and text of the first `{{ … }}` span anywhere in `value`.
+fn first_template_span(value: &Value, suffix: &mut String) -> Option<(String, String)> {
     match value {
-        Value::Array(items) => items
-            .into_iter()
-            .map(reject_surviving_spans_deep)
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        Value::Object(map) => map
-            .into_iter()
-            .map(|(k, v)| reject_surviving_spans_deep(v).map(|v| (k, v)))
-            .collect::<Result<Map<_, _>, _>>()
-            .map(Value::Object),
-        scalar => reject_surviving_spans(scalar),
+        Value::String(text) => ExpressionFinder::find_all_plain(text)
+            .first()
+            .map(|span| (suffix.clone(), text[span.start..span.end].to_string())),
+        Value::Array(items) => items.iter().enumerate().find_map(|(index, item)| {
+            let mark = suffix.len();
+            suffix.push_str(&format!("[{index}]"));
+            let found = first_template_span(item, suffix);
+            suffix.truncate(mark);
+            found
+        }),
+        Value::Object(map) => map.iter().find_map(|(key, item)| {
+            let mark = suffix.len();
+            suffix.push_str(&format!(".{key}"));
+            let found = first_template_span(item, suffix);
+            suffix.truncate(mark);
+            found
+        }),
+        _ => None,
     }
 }
 

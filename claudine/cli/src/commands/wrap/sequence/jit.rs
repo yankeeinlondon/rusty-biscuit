@@ -21,7 +21,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use claudine::composition::{
-    self, CompositionError, LIFECYCLE_EVENT_KEYS, PrepareOptions, PreparedComposition,
+    self, CompositionError, LIFECYCLE_EVENT_KEYS, LayeredOverrides, PrepareOptions,
+    PreparedComposition,
     ResolvedCompositionSource, ResolvedExecutionTarget, SequencePlan,
 };
 use serde_json::Value;
@@ -79,21 +80,26 @@ pub(super) struct StepComposition {
     pub(super) approved: HashSet<String>,
 }
 
-/// Fold this step's `set_overrides` from the four just-in-time layers.
+/// Fold this step's overrides from the four just-in-time layers.
 ///
 /// Lowest precedence first: user setters, accumulated runtime mutations, then
 /// the reserved per-step overlay. The live document's own frontmatter is
-/// Darkmatter's base and sits below all of them. Passing `runtime: None` yields
-/// the initial view — empty `outputs`, no mutations — which is what the
-/// validation pass and `--dry-run` compose against.
+/// Darkmatter's base and sits below all of them. Only the user setters are
+/// authored; the runtime layers and the overlay are data. Passing
+/// `runtime: None` yields the initial view — empty `outputs`, no mutations —
+/// which is what the validation pass and `--dry-run` compose against.
 pub(super) fn step_set_overrides(
     plan: &SequencePlan,
     step_index: usize,
     user_setters: Option<&Value>,
     runtime: Option<&composition::RuntimeSnapshot>,
-) -> Value {
+) -> LayeredOverrides {
     let overlay = reserved_overlay(plan, step_index);
-    composition::layered_set_overrides(user_setters, runtime, Some(&overlay))
+    composition::layered_set_overrides(
+        LayeredOverrides::authored(user_setters),
+        runtime,
+        Some(&overlay),
+    )
 }
 
 /// This step's reserved overlay alone — `state`, `previous`, `next`,
@@ -148,7 +154,7 @@ pub(super) fn step_env_overrides(
 pub(super) fn compose_step(
     source: &ResolvedCompositionSource,
     ctx: &StepComposeContext<'_>,
-    set_overrides: &Value,
+    set_overrides: &LayeredOverrides,
     env_overrides: &BTreeMap<String, String>,
     approved: HashSet<String>,
     allow_empty_body: bool,
@@ -159,7 +165,7 @@ pub(super) fn compose_step(
     // hide the property names the caller needs to collect or report.
     let pre = composition::pre_validate_schema_for_mode(
         source,
-        Some(set_overrides),
+        Some(&set_overrides.to_value()),
         ctx.launch_area,
         if ctx.inline_mode {
             composition::CompositionMode::InlineFrontmatterPrompt
@@ -169,9 +175,9 @@ pub(super) fn compose_step(
     )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
     let step_source = pre.source;
-    let step_overrides = pre
-        .set_overrides
-        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    // Pre-validation may drop invalid optional keys; the rest keep their origin.
+    let step_overrides =
+        LayeredOverrides::from_parts(pre.set_overrides.as_ref(), set_overrides.data_keys());
 
     let (compose_options, prepared_context, document_epoch) = build_template_preflight_options(
         env_overrides,
@@ -209,8 +215,10 @@ pub(super) fn compose_step(
     )?;
     approved.extend(template_preflight.approved_commands.iter().cloned());
 
-    let prepare_options = PrepareOptions {
-        set_overrides: Some(step_overrides),
+    let mut prepare_options = PrepareOptions {
+        set_overrides: None,
+        data_override_keys: Default::default(),
+        proxy_overlay: Default::default(),
         pre_approved_commands: Some(approved.clone()),
         env_overrides: env_overrides.clone(),
         perf_enabled: ctx.shared.perf,
@@ -233,6 +241,7 @@ pub(super) fn compose_step(
         invocation_context: Some(ctx.invocation.clone()),
         document_epoch,
     };
+    prepare_options.set_layered_overrides(step_overrides);
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed
     // `prompt` frontmatter becomes the agent prompt and the prepared closure is
@@ -270,7 +279,7 @@ pub(super) fn build_template_preflight_options(
     source_path: &Path,
     markdown: &darkmatter::markdown::Markdown,
     composition_inputs: (
-        &Value,
+        &LayeredOverrides,
         &darkmatter::markdown::compose::CallerInputRecords,
     ),
     launch_area: Option<&Path>,
@@ -328,7 +337,7 @@ pub(super) fn build_template_preflight_options(
     if let Some(launch_area) = launch_area {
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }
-    opts = opts.with_set_overrides(set_overrides.clone());
+    opts = set_overrides.apply_to(opts);
     opts = opts.with_caller_input_records(caller_input_records.clone());
     // Coerce `{{state}}`/`{{previous}}`/`{{next}}` to their `name` in string
     // context so a shell command's approved bytes match its executed bytes.

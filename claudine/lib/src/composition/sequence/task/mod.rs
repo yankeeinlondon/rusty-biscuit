@@ -50,7 +50,10 @@ use super::super::lifecycle::executor::StackExecutionContext;
 use super::super::lifecycle::{
     LifecycleSignal, parse_single_action_with_order, parse_task_action_stack_with_order,
 };
-use super::super::runtime_state::{RuntimeState, layered_set_overrides, trim_transport_newline};
+use super::super::runtime_state::{
+    LayeredOverrides, RuntimeState, layered_set_overrides, trim_transport_newline,
+};
+use darkmatter::markdown::compose::OverrideOrigin;
 use super::model::RuntimeMutation;
 use super::preflight::{PreflightAction, PreflightGraph, PreflightTask, property_child};
 use super::reserved;
@@ -182,9 +185,10 @@ pub struct PromptTaskRequest {
     /// `true` when the document's own frontmatter carries a string `prompt:`,
     /// making this an inline-compose run that rewrites the document's body.
     pub inline_compose: bool,
-    /// The fully layered `set_overrides` object: task `params` < sequence user
-    /// setters < accumulated runtime mutations < the reserved overlay.
-    pub set_overrides: Value,
+    /// The fully layered overrides: task `params` < sequence user setters <
+    /// accumulated runtime mutations < the reserved overlay. Only the user
+    /// setters are authored; evaluated `params` and every later layer are data.
+    pub set_overrides: LayeredOverrides,
     /// The evaluated `params` alone, for diagnostics and reporting.
     pub params: Map<String, Value>,
     /// Source document that authored `params`, used to retain their file origin.
@@ -823,20 +827,13 @@ impl TaskExecution<'_> {
     ///
     /// Precedence, lowest first: task `params`, sequence user setters,
     /// accumulated runtime mutations, the reserved overlay (spec → *Task
-    /// Resolution and Lifecycle Semantics*).
-    fn layered_overrides(&self, params: &Map<String, Value>) -> Value {
-        let mut base = params.clone();
-        if let Some(Value::Object(setters)) = self.user_setters {
-            for (key, value) in setters {
-                base.insert(key.clone(), value.clone());
-            }
-        }
+    /// Resolution and Lifecycle Semantics*). `params` were already evaluated
+    /// once against the task's state, so their results are data.
+    fn layered_overrides(&self, params: &Map<String, Value>) -> LayeredOverrides {
+        let mut base = LayeredOverrides::data(Some(&Value::Object(params.clone())));
+        base.push(OverrideOrigin::Authored, self.user_setters);
         let snapshot = self.runtime.map(|runtime| runtime.snapshot());
-        layered_set_overrides(
-            Some(&Value::Object(base)),
-            snapshot.as_ref(),
-            self.overlay,
-        )
+        layered_set_overrides(base, snapshot.as_ref(), self.overlay)
     }
 
     /// The per-command budget: the authored `timeout:`, else 30 seconds.
