@@ -700,13 +700,29 @@ fn a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view
 
 /// A commit on `tree` with `parents` (first parent first), made without
 /// touching the checkout; returns its full SHA.
+///
+/// Each commit is dated one second after the previous one, because the
+/// height cap ranks lanes by their tip's commit time in whole seconds: with
+/// wall-clock dates, a fast host gives several tips the same second and the
+/// hidden lane changes from host to host.
 fn commit_on(path: &Path, tree: &str, parents: &[&str], message: &str) -> String {
+    static SEQUENCE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("clock").as_secs() as i64;
+    let date = format!("{} +0000", now + SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let mut args = vec!["commit-tree", "-m", message];
     for parent in parents {
         args.extend(["-p", *parent]);
     }
     args.push(tree);
-    git_output(path, &args)
+    let output = Command::new("git")
+        .current_dir(path)
+        .args(&args)
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .output()
+        .expect("git should be installed");
+    assert!(output.status.success(), "git {args:?} failed in {path:?}");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 /// `count` commits after `from`, oldest first.
@@ -1711,6 +1727,10 @@ struct Evidence<'a> {
     tags: Vec<(&'a str, &'a str)>,
     /// `(merge, first parent, second parent)`.
     merges: Vec<(&'a str, &'a str, &'a str)>,
+    /// The plan's notice: some fork, merge, or tagged commit is not drawn.
+    incomplete: bool,
+    /// Lanes the height cap leaves out at 120×40 and at 56×60.
+    hidden_lanes: [usize; 2],
 }
 
 /// The laid-out commit emitted for `sha`. Display IDs are SHA prefixes of at
@@ -1749,11 +1769,11 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
     let mut report = Vec::new();
     let mut tag_texts: Option<Vec<String>> = None;
     let mut ordinary_columns = None;
-    for vp in [viewport(120, 40), viewport(56, 60)] {
+    for (vp, hidden_lanes) in [viewport(120, 40), viewport(56, 60)].into_iter().zip(expected.hidden_lanes) {
         let planned = graph.plan(vp).expect("a plan");
         let context = format!("{name} {}x{}:\n{}", vp.columns, vp.rows, planned.mermaid);
-        assert!(!planned.incomplete, "{context}");
-        assert_eq!(planned.hidden_lanes, 0, "{context}");
+        assert_eq!(planned.incomplete, expected.incomplete, "{context}");
+        assert_eq!(planned.hidden_lanes, hidden_lanes, "{context}");
         let geometry = geometry_of(&planned.mermaid);
         assert_eq!(geometry.tag_overlaps(), Vec::<(String, String)>::new(), "{context}");
 
@@ -1803,11 +1823,13 @@ fn assert_laid_out(name: &str, facts: &GraphFacts, prs: &PrListing, expected: &E
         ));
     }
 
+    // 60 rows: tall enough that the height cap hides no lane of any fixture.
     let explicit = facts
         .to_git_graph(prs, Some(ImageWidth::Characters(40)))
         .with_theme(MermaidTheme::Default)
-        .plan(viewport(120, 40))
+        .plan(viewport(120, 60))
         .expect("a plan");
+    assert_eq!(explicit.hidden_lanes, 0, "{name}");
     assert_eq!(explicit.columns, 40, "{name}");
     assert_eq!(explicit.trimmed_commits, 0, "{name}: an explicit width is never trimmed to");
     assert_eq!(explicit.mermaid, graph.mermaid().expect("mermaid"), "{name}: the whole graph, scaled");
@@ -1825,6 +1847,8 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
         let expected = Evidence {
             tags: vec![("main", &repo.d2), ("origin/main", &repo.merge)],
             merges: vec![(&repo.merge, &repo.d2, &repo.w2)],
+            incomplete: false,
+            hidden_lanes: [0, 0],
         };
         for (view, current) in [("observation-1 focused", "fix/wt-ux"), ("observation-1 base", "main")] {
             let (graph, _) = gather(&input(current, &["main", "fix/wt-ux"], ForkOriginStore::default()), true, false);
@@ -1844,6 +1868,8 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             &Evidence {
                 tags: vec![("main", &repo.m103), ("origin/main", &repo.m104)],
                 merges: vec![(&repo.m103, &repo.d1, &repo.w2), (&repo.m104, &repo.m103, sniff_tip)],
+                incomplete: false,
+                hidden_lanes: [0, 0],
             },
         ));
     }
@@ -1864,10 +1890,96 @@ fn gathered_graphs_lay_out_with_exact_merges_and_no_overlapping_tags() {
             &Evidence {
                 tags: vec![(BETA, &repo.d3), ("main", &repo.d4), ("origin/main", &repo.d5), ("PR #104 → main", &repo.a2)],
                 merges: vec![],
+                incomplete: false,
+                hidden_lanes: [0, 0],
+            },
+        ));
+    }
+
+    // Its only undrawn connection is `fix/sniff`'s fork `W1`. At 40 rows the
+    // height cap leaves out the least active lane, `feat/schema-enhancement`
+    // (its tip is the oldest; see `commit_on`).
+    let repo = observed_sparse_lanes();
+    {
+        let _guard = DirGuard::enter(&repo.path);
+        let (graph, _) = gather(&input("main", &repo.branches(), repo.forks.clone()), true, false);
+        report.extend(assert_laid_out(
+            "sparse-lanes base",
+            &graph.expect("a graph"),
+            &PrListing::default(),
+            &Evidence {
+                tags: vec![("main", &repo.m104), ("origin/main", &repo.m104)],
+                merges: vec![(&repo.m104, &repo.d[13], repo.sniff.last().expect("sniff commits"))],
+                incomplete: true,
+                hidden_lanes: [1, 0],
             },
         ));
     }
 
     // Recorded in the implementation log.
     eprintln!("{}", report.join("\n"));
+}
+
+/// The laid-out commits on `lane` after its leading `+N` square.
+fn after_square<'g>(geometry: &'g GitGraphGeometry, lane: &str) -> Vec<&'g CommitGeometry> {
+    let on_lane: Vec<&CommitGeometry> = geometry.commits.iter().filter(|commit| commit.lane == lane).collect();
+    let square = on_lane
+        .iter()
+        .position(|commit| commit.id.starts_with('+'))
+        .unwrap_or_else(|| panic!("{lane} has no +N square: {on_lane:?}"));
+    on_lane[square + 1..].to_vec()
+}
+
+/// The observed history at 200×60 with the real measurement: an isolated
+/// `main`/`origin/main` stack no longer widens the step, so every long lane
+/// keeps more than its tip after its `+N` square, and `fix/sniff` merges into
+/// `main` at `M104`.
+#[test]
+#[serial_test::serial]
+fn the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60() {
+    let repo = observed_sparse_lanes();
+    let _guard = DirGuard::enter(&repo.path);
+    let sniff_tip = repo.sniff.last().expect("sniff commits");
+
+    let (graph, _) = gather(&input("main", &repo.branches(), repo.forks.clone()), true, false);
+    let graph = graph.expect("base view");
+    assert!(!graph.incomplete, "gathering verified every connection it reports");
+
+    let plan = graph
+        .to_git_graph(&PrListing::default(), None)
+        .with_theme(MermaidTheme::Default)
+        .plan(viewport(200, 60))
+        .expect("a plan");
+    let context = plan.mermaid.clone();
+    let geometry = geometry_of(&plan.mermaid);
+    assert_eq!(geometry.commit_step, biscuit_visualized::mermaid::default_gitgraph_commit_step(), "{context}");
+    assert!(plan.columns <= 200, "{plan:?}");
+    assert_eq!(plan.hidden_lanes, 0, "{context}");
+
+    for lane in ["feat/schema-enhancement", "fix/wt-ux", "fix/sniff"] {
+        let kept = after_square(&geometry, lane);
+        assert!(kept.len() >= 2, "{lane} keeps more than its tip after its +N square: {kept:?}\n{context}");
+    }
+    let sniff_kept = after_square(&geometry, "fix/sniff");
+    assert!(sniff_tip.starts_with(sniff_kept.last().expect("kept").id.as_str()), "{context}");
+
+    assert!(has_merge(&plan.mermaid, "fix/sniff", &repo.m104), "{context}");
+    let merge = laid_out(&geometry, &repo.m104).expect("M104 drawn");
+    assert_eq!(merge.lane, "main", "{context}");
+    assert_eq!(merge.parents.len(), 2, "{merge:?}");
+    assert!(sniff_tip.starts_with(merge.parents[1].as_str()), "{merge:?}");
+
+    assert_eq!(geometry.tag_overlaps(), Vec::<(String, String)>::new(), "{context}");
+    let mut tags: Vec<&str> = merge.tags.iter().map(|tag| tag.text.as_str()).collect();
+    tags.sort_unstable();
+    assert_eq!(tags, ["main", "origin/main"], "both refs label M104: {context}");
+
+    // The notice's only cause: `fix/sniff` cannot attach at `W1`. Every other
+    // branch lane starts from a drawn commit.
+    assert!(plan.incomplete, "{context}");
+    assert!(!plan.mermaid.contains(&repo.w1()[..7]), "W1 is not drawn: {context}");
+    assert!(first_on_lane(&geometry, "fix/sniff").parents.is_empty(), "{context}");
+    for lane in ["feat/schema-enhancement", "fix/wt-ux"] {
+        assert!(!first_on_lane(&geometry, lane).parents.is_empty(), "{lane} is connected: {context}");
+    }
 }

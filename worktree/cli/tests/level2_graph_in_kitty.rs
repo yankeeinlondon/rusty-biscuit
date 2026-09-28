@@ -97,7 +97,7 @@ struct SparseLanes {
 struct Fixture {
     parent: tempfile::TempDir,
     main: PathBuf,
-    /// Worktree directory names; the table lists them after `base repo`, sorted.
+    /// Worktree directory names; the table lists them after `base repo`.
     worktrees: Vec<String>,
     /// Set by [`Fixture::sparse_lanes`].
     sparse: Option<SparseLanes>,
@@ -438,13 +438,13 @@ impl GraphRun {
         };
         let expected = borders(&rows[header]);
         let mut names = vec!["base repo".to_string()];
-        let mut worktrees = self.worktrees.clone();
-        worktrees.sort();
-        names.extend(worktrees);
-        for (offset, name) in names.iter().enumerate() {
-            let row = rows[header + 2 + offset].as_str();
-            assert!(row.contains(&format!("○ {name}")), "row {offset} should be {name}: {row:?}\n{all}");
-            assert_eq!(borders(row), expected, "{name}'s borders: {row:?}\n{all}");
+        names.extend(self.worktrees.iter().cloned());
+        // Rows follow the parent tree, so only the block's membership is fixed.
+        let block = &rows[header + 2..header + 2 + names.len()];
+        for name in &names {
+            let matching: Vec<&String> = block.iter().filter(|row| row.contains(&format!("○ {name} "))).collect();
+            assert_eq!(matching.len(), 1, "one row for {name}:\n{all}");
+            assert_eq!(borders(matching[0]), expected, "{name}'s borders: {:?}\n{all}", matching[0]);
         }
         assert!(rows[header + 2 + names.len()].starts_with('└'), "table bottom:\n{all}");
         assert!(all.contains("parent deleted"), "legend:\n{all}");
@@ -512,10 +512,11 @@ impl GraphRun {
             let _ = fs::remove_file(&shot_path);
         }
 
+        // "Some history is not shown" may follow the image instead.
         self.screen[next]
             .trim()
             .strip_suffix(" not shown")
-            .and_then(|notice| notice.split_whitespace().next())
+            .and_then(|notice| notice.strip_suffix(" more worktrees").or_else(|| notice.strip_suffix(" more worktree")))
             .map(|count| count.parse().expect("numeric hidden-lane count"))
     }
 
@@ -647,6 +648,29 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
     for run in &runs {
         assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
     }
+}
+
+/// The observed sparse-lanes history in a 200×60 window: the table stays
+/// intact, the image fits the window and the rows `wt` reserved, no lane is
+/// left out, and the only notice is "Some history is not shown" (for
+/// `fix/sniff`'s undrawn fork). The screenshot and the transmitted PNG are
+/// kept in the temp directory for inspection of the lane density and the
+/// merge edge; the plan itself is proven at L1 by
+/// `the_observed_graph_keeps_recent_commits_on_every_lane_at_200x60`.
+#[test]
+#[serial(level2_terminal)]
+fn level2_graph_restores_lane_density_in_kitty() {
+    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+
+    let fixture = Fixture::sparse_lanes();
+    let mut run = GraphRun::new(&fixture, 200, 60);
+    run.keep_evidence("sparse");
+    assert!(run.transmitted.rows <= run.lines / 2, "{} rows exceed half of {}", run.transmitted.rows, run.lines);
+    let all = run.all.join("\n");
+    assert!(all.contains("Some history is not shown"), "fix/sniff's fork is not drawn:\n{all}");
+    assert!(!all.contains("more worktree"), "no lane is left out:\n{all}");
+    run.assert_table_intact();
+    assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
 }
 
 /// The observed-shape fixture is the history the plan describes (E1): merge
