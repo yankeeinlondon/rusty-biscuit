@@ -52,6 +52,16 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_4:
+    - claudine/cli/tests/common/webhook_listener.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/handle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+    - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/testing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - claudine-cli
     - claudine
@@ -492,3 +502,120 @@ packages:
   defaults to **5 s** (the code default is 15 s) and repeat the "3 s messenger
   timeout". Phase 5's skill pass names only `hook-actions.md`, `SKILL.md`,
   and `architecture.md`, so add `unified-hooks.md` and `cli-reference.md`.
+
+## Phase 4
+
+- Started and finished 2026-09-27. Test-only phase: no production code
+  changed.
+
+### What landed
+
+- **`common/webhook_listener.rs`.** `write_config_with_webhook_route(home, json)`
+  writes the drain-test route next to other config keys, such as hook
+  `actions`. `write_webhook_route` now delegates to it.
+- **`l1/lifecycle_message_drain.rs`.** A `PipedRun` helper spawns
+  `claudine` with piped output. It streams stderr into a shared buffer so a
+  test can wait for a line while the child is alive. Every wait is bounded,
+  and dropping the helper kills a child that is still running. The file also
+  adds `pending_warning(stderr)`, which undoes the Status line's word wrap,
+  plus five tests (see the mapping below).
+- **`l1/handle_message_drain.rs` (new).** Three `claudine handle session_end`
+  cases driven by a hook config: delivered, stalled under a 2 s deadline, and
+  a handler past its deadline. In the last case the actions are
+  `[message, call sleep 8]` (`ping -n 9` on Windows). Actions run in order,
+  and a `call` is awaited under a Tokio timeout, so the handle deadline fires
+  while the message is still in flight.
+- **`l1/lifecycle_message_drain_interrupt.rs` (new).** R4 for `compose`
+  (compose guard held through the drain) and `sequence` (drain ladder
+  installed by `finish`). Unix uses `common::signal::SignalledRun`. Windows
+  uses a local `CREATE_NEW_PROCESS_GROUP` + `CTRL_BREAK_EVENT` runner with
+  file-captured output. Neither opens a window.
+- `docs/topics/testing.md`: the Messaging fixtures section now covers the new
+  helper, the silent desktop-notification seam, and the `slow_` trap below.
+
+### Findings and departures
+
+- **`slow_` would strand the stalled-budget test.** The plan says to name it
+  `slow_…`. Claudine does not declare `l1-include-slow` (only darkmatter's
+  packages do), so every recipe and CI leg filters `slow_` out, and
+  `check-tier-coverage` does not flag it. `wrap_sigint.rs` already records
+  this trap. The test keeps an ordinary L1 name, runs in about 10.4 s (inside
+  nextest's 30 s terminate limit), and is amended in `plan.md`.
+- **"Two stalled deliveries" uses one route.** Only one messaging route is
+  active per scope (`resolve_effective_route`), and the repo scope overrides
+  the user scope rather than adding to it. So the two deliveries are a
+  `success` and a `finalize` message on the same route. The warning reads
+  `Route drain-test, route drain-test were still sending at exit; delivery is unknown`.
+- **Top-level error trigger.** A `success` stack that calls an unknown
+  function (`{{ drain_test_unknown_fn() }}`) raises a lifecycle evaluation
+  error after `start` has sent. The error goes through `?`, renders, and
+  exits `1`. The test asserts the error block is on stderr *while* the
+  child is still waiting for the withheld `start` reply, so the drain runs
+  after the render.
+- **Sequence messaging needs an agent step.** This confirms Spike A: the
+  test uses a two-step agent sequence. `success` fires per step, and
+  `{{ state.name }}` distinguishes them.
+- **Terminal `notify` (Spike C ruling applied).** The CLI test covers the
+  *failed* path on all three OSes: the existing "Failed to send desktop
+  notification" warning, exit `0`, and no pending warning. It stays silent
+  through `fake_only_path()` on Unix (on this Mac `osascript` is in
+  `/usr/bin`, which the default fixture `PATH` includes), a dead D-Bus
+  address for Linux, and the missing AppUserModelID on Windows. The
+  *unfinished* notification label is pinned by the existing library tests
+  `delivery::tests::stalled_deliveries_share_one_deadline_and_are_aborted`
+  (a `DesktopNotification` entry is pending and aborted) and
+  `the_pending_warning_names_each_delivery_and_says_delivery_is_unknown`.
+  No new library test was needed.
+- **The R4 test is load-bearing.** With `finish`'s drain-ladder install
+  disabled (`false && has_pending_deliveries()`), the sequence case failed:
+  the first press was swallowed, so no notice appeared. The compose case
+  still passed because it uses its own held guard. `shutdown.rs` was
+  restored with no diff.
+- No production defect was found. The R5 report never contained the
+  dummy token.
+
+### Verification
+
+| OS | Command | Result |
+| --- | --- | --- |
+| macOS (local) | `cargo nextest run -p claudine-cli --features test-fixtures --test l1 -E 'test(message_drain)'` | 16/16 |
+| Linux (`build-linux`) | `just cross-check claudine-cli --os linux --features test-fixtures lifecycle_message_drain handle_message_drain` | 16/16 |
+| Windows native (`build-win-native`) | `just cross-check claudine-cli --os windows --features test-fixtures lifecycle_message_drain handle_message_drain` | 16/16, no warnings in the new files |
+
+- `just test` (claudine): 7421 passed, 9 skipped. That is 10 more than
+  Phase 3's 7411, and all 16 drain tests ran in L1. `test_placement`,
+  `spawn_site_guard`, and `exit_site_guard` pass.
+- `just lint` (claudine): exit 0. The only warning is the pre-existing macOS
+  linker `__eh_frame` notice.
+- `just check-tier-coverage claudine`: no stranded tests.
+- Not run in this phase: `just test-l2` (a Phase 5 final gate) and WSL2
+  (nightly CI leg). No test here is WSL-specific.
+
+### Requirement-to-test mapping (R6, complete)
+
+All tests are `claudine-cli::l1` and pass on macOS, Linux, and Windows
+unless noted.
+
+| R6 bullet | Test |
+| --- | --- |
+| Reproduce first / delivered before exit, exactly one POST with the `success` text | `lifecycle_message_drain::compose_success_message_is_delivered_before_exit` (control: `compose_start_message_reaches_the_listener_during_the_run`) |
+| `400` → "Failed to send lifecycle message", exit `0` (R5), no token | `lifecycle_message_drain::a_rejected_success_message_is_reported_and_the_exit_code_stays_zero` |
+| Never-reply → exit within the 10 s budget, R3 warning, exit `0`, shared budget, no token or body in the warning | `lifecycle_message_drain::stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown` |
+| `handle` hook message delivered before exit | `handle_message_drain::a_hook_message_is_delivered_before_the_handler_exits` |
+| `handle` stalled send uses only the rest of the deadline | `handle_message_drain::a_stalled_hook_message_waits_only_for_the_rest_of_the_handler_deadline` |
+| `handle` timed out still exits `124`, pending reported without extra wait | `handle_message_drain::a_handler_past_its_deadline_exits_124_and_reports_the_pending_message` |
+| `sequence` last step's `success` message received | `lifecycle_message_drain::sequence_last_step_success_message_is_delivered_before_exit` |
+| Terminal `notify` tracked and drained; failed → existing warning; silent | `lifecycle_message_drain::a_terminal_notify_is_drained_and_its_failure_reported_without_host_ui` |
+| Unfinished notification → safe `desktop notification` label | `claudine` lib `messaging::delivery::tests::{stalled_deliveries_share_one_deadline_and_are_aborted, the_pending_warning_names_each_delivery_and_says_delivery_is_unknown}` |
+| Top-level error after a send still drains, exit `1` | `lifecycle_message_drain::a_top_level_error_after_a_send_still_drains_and_exits_one` |
+| Second Ctrl+C during the drain → forced exit `130` (macOS, Linux, Windows) | `lifecycle_message_drain_interrupt::{a_second_ctrl_c_during_the_compose_drain_exits_130, a_second_ctrl_c_during_the_sequence_drain_exits_130}` |
+| R2 exit-site guard | `exit_site_guard::*` (Phase 3) |
+| R1 tracker guard for `messaging/` | `claudine` lib `l1 messaging_spawn_guard::*` (Phase 2) |
+
+### Notes for Phase 5
+
+- Nothing in this phase changes the Phase 5 doc list. The Phase 3 note about
+  stale 5 s / 3 s claims in `unified-hooks.md` and `cli-reference.md` still
+  stands.
+- `docs/topics/testing.md` already describes the drain fixtures, so the
+  Phase 5 messaging doc can link there for the test seams.

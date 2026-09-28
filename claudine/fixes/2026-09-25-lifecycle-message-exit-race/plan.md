@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 3
+phase: 4
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -53,6 +53,16 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/hook-actions.md
+source_files_during_phase_4:
+    - claudine/cli/tests/common/webhook_listener.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain.rs
+    - claudine/cli/tests/l1/handle_message_drain.rs
+    - claudine/cli/tests/l1/lifecycle_message_drain_interrupt.rs
+    - claudine/cli/tests/l1/main.rs
+docs_updated_during_phase_4:
+    - claudine/docs/topics/testing.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - claudine-cli
     - claudine
@@ -135,11 +145,11 @@ The fix has three parts:
       `claudine/cli/src` are the four allowlisted sites. The exit-site guard
       enforces this with an exact allowlist, and an allowlist entry that matches
       no live call site fails the guard.
-- [ ] Every R6 bullet has a passing test (L1 unless noted). The Ctrl+C test
+- [x] Every R6 bullet has a passing test (L1 unless noted). The Ctrl+C test
       runs on macOS, Linux, and Windows.
 - [x] A run that sends nothing takes no longer to exit than before. The drain
       returns immediately when nothing is pending.
-- [ ] Exit codes are unchanged in every scenario, including `124` for `handle`.
+- [x] Exit codes are unchanged in every scenario, including `124` for `handle`.
 - [ ] R7 is done: the docs and the `claudine` skill no longer describe
       messaging as fire-and-forget, and the incorrect "3-second timeout" claim
       is removed.
@@ -468,18 +478,23 @@ change in the implementation log before moving on.
 `lifecycle_message_drain.rs` or a sibling file, split by file to avoid edit
 conflicts)
 
-- [ ] **Failure reported (R5)**
+- [x] **Failure reported (R5)**
     - The listener replies `400`. Stderr contains "Failed to send lifecycle
       message", the exit code is `0`, and stderr does not contain
       `dummy-token`.
-- [ ] **Stalled route and shared budget (R3)**
+- [x] **Stalled route and shared budget (R3)**
     - Two stalled deliveries: two routes, or one lifecycle `message` plus a
       stalled second event. Assert that the run exits in no more than the
       10-second budget plus a margin, that the Warning names each route, says
       delivery is unknown, and contains neither the token nor the body, and
       that the exit code is `0`.
     - Name it `slow_...`. Add no production override.
-- [ ] **`handle` hook message**
+    - *Amended in Phase 4:* the test keeps an ordinary L1 name
+      (`stalled_deliveries_share_one_drain_budget_and_are_reported_as_unknown`).
+      Claudine does not declare `l1-include-slow`, so every recipe and CI leg
+      filters `slow_` tests out, and the marker would strand it. It takes
+      about 10.4 s, inside nextest's 30 s terminate limit.
+- [x] **`handle` hook message**
     - A hook `message` action, with the listener withholding the reply briefly
       and then releasing it. The POST arrives before the handler exits.
     - A second case sets `CLAUDINE_HANDLE_DEADLINE_SECONDS` small (for example
@@ -488,17 +503,17 @@ conflicts)
       `124` as appropriate.
     - A third case makes the handler work itself exceed the deadline. It
       asserts exit `124` and a pending-delivery warning with no extra wait.
-- [ ] **`sequence` last step**
+- [x] **`sequence` last step**
     - The last step's `success` sends a message, and the listener receives it
       before the process exits.
-- [ ] **Terminal `notify`**
+- [x] **Terminal `notify`**
     - Follow Spike C's ruling. At minimum, the unfinished notification is
       reported with the `desktop notification` label and no host UI appears.
-- [ ] **Top-level error after a send**
+- [x] **Top-level error after a send**
     - The document sends in `start`, and a later step fails with an error that
       propagates through `?`. The error block renders, the send is delivered
       (or reported), and the exit code stays `1`.
-- [ ] **Second Ctrl+C during drain (R4)**
+- [x] **Second Ctrl+C during drain (R4)**
     - With a stalled route, send one Ctrl+C after the drain starts: the notice
       appears and the drain continues. Send a second: the process exits `130`
       promptly, well before the 10 s budget.
@@ -510,7 +525,7 @@ conflicts)
 
 **Wave 7**
 
-- [ ] **Cross-OS evidence**
+- [x] **Cross-OS evidence**
     - Load the `os` skill. Run the new tests on native Windows and Linux via
       the hosts it lists, and on macOS locally. Record the results in the
       implementation log. Any single-OS failure gets a fix plus an `os` skill
@@ -518,7 +533,7 @@ conflicts)
 
 **Validation checkpoint 4**
 
-- [ ] Every R6 bullet maps to a named passing test. List the mapping in the
+- [x] Every R6 bullet maps to a named passing test. List the mapping in the
       implementation log.
 
 ## Phase 5: Documentation and close-out (R7)

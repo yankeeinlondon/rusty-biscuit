@@ -29,29 +29,22 @@ review_iterations: 0
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 3 is done; read `implementation-log.md` → Phase 3.
-    - Every ordinary exit now goes through `cli/src/shutdown.rs::finish(code)`:
-      drain (≤ 10 s, or `claudine handle`'s deadline if earlier) → `report()` →
-      flush → `process::exit`. Commands return `Result<i32>`; `async_main`
-      renders an `Err` first and exits `1` through the same path.
-    - The compose `UserInterruptGuard` is handed to
-      `shutdown::hold_interrupt_guard` when installed (`compose/prep.rs`), so it
-      is live during the drain. For sequence/wrappers `finish` installs
-      `install_drain_interrupt_guard()` only when
-      `claudine::messaging::has_pending_deliveries()` is true. Its first-press
-      notice reads "User interrupted while waiting for outbound messages; press
-      Ctrl+C again to exit now"; a user who pressed during the run force-exits
-      on the next press. Phase 4's R4 test should assert that notice text, then
-      exit `130` on the second press.
-    - `cli/tests/l1/exit_site_guard.rs` uses an exact per-file allowlist with
-      site counts; `wrap/exec/termination/windows.rs` has no entry (its exits
-      are inside a raw string). If a Phase 4 change adds a direct exit, it will
-      fail there by design.
-    - Filtered runs: `cargo nextest run -p claudine-cli --features test-fixtures
-      --test l1 -E '…'` locally; `just cross-check claudine-cli --os
-      windows|linux --features test-fixtures <name filters>` remotely (no `-E`).
-    - Phase 5: see the log's "Notes for Phase 4 and Phase 5" for stale 5 s /
-      3 s claims in skill files beyond the three the plan names.
+    Phase 4 is done; read `implementation-log.md` → Phase 4. It changed only
+    tests: every R6 bullet now maps to a named test that passes on macOS,
+    Linux, and Windows (the mapping table is in the log).
+    - Phase 5 is docs plus the final gates. The Phase 3 note still applies:
+      besides the three skill files the plan names, fix the stale 5 s handle
+      deadline and 3 s messenger timeout claims in
+      `.claude/skills/claudine/unified-hooks.md` and `cli-reference.md`.
+    - `docs/topics/testing.md` → "Messaging fixtures" already documents the
+      drain test seams (listener, `write_config_with_webhook_route`, silent
+      `notify`, and why the 10 s test is not `slow_`). Link to it rather than
+      repeating it.
+    - The stalled-budget test is deliberately not named `slow_`: claudine does
+      not declare `l1-include-slow`, so the prefix would stop it running
+      anywhere. The plan records the amendment.
+    - `just test-l2` has not been run for this fix yet; it is one of Phase 5's
+      final gates.
 ---
 
 # Outbound messages sent near process exit are silently dropped
