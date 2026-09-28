@@ -335,10 +335,12 @@ fn reports_a_duplicate_owned_key_without_mutating_the_document() {
 
     let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
 
-    assert!(
-        matches!(error, CompositionError::InlineArtifactEditFailed { .. }),
-        "expected a typed edit failure, got {error:?}"
-    );
+    // The agent wrote the second `prompt` line, so the refusal names it.
+    let CompositionError::InlineAgentFrontmatterRejected { rejection, .. } = &error else {
+        panic!("expected an agent-attributed rejection, got {error:?}");
+    };
+    assert_eq!(rejection.line, Some(3), "{rejection}");
+    assert!(rejection.agent_edit, "{rejection}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote);
 }
 
@@ -505,4 +507,117 @@ fn carried_evidence_still_refuses_an_empty_body() {
         reconcile_inline_artifact_with_evidence(&plan, "2026-09-06", true).unwrap(),
         InlineReconciliation::Rejected(BodyRejection::Empty)
     ));
+}
+
+// -- agent-written frontmatter: repair and literal tokens (R3, R4) ----------
+
+/// The spec's inline case through the closure: the agent adds four values,
+/// two of which YAML misreads and two of which would read as instructions.
+/// The file is valid YAML, `summary` and `cmd` are stored as tokens, `note`
+/// and `title` as quoted strings; the delta the completion schema sees holds
+/// the decoded text; and the stamped hash agrees with the written bytes.
+#[test]
+fn agent_values_are_repaired_encoded_hashed_and_reported_decoded() {
+    use darkmatter::markdown::literal_token::encode_yaml_scalar;
+
+    let dir = TempDir::new().unwrap();
+    let original = "---\nprompt: write it\narea_note: \"in {{ area }}\"\n---\nOld body\n";
+    let agent_wrote = concat!(
+        "---\n",
+        "prompt: write it\n",
+        "area_note: \"in {{ area }}\"\n",
+        "summary: fixed {{…}} parsing\n",
+        "note: see issue #42\n",
+        "cmd: \"$(echo X)\"\n",
+        "title: Fix: colons\n",
+        "---\n",
+        "New body\n",
+    );
+    let (file, plan) = agent_run(&dir, original, agent_wrote);
+
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(on_disk, artifact.text);
+    for line in [
+        "area_note: \"in {{ area }}\"\n".to_string(),
+        format!("summary: {}\n", encode_yaml_scalar("fixed {{…}} parsing")),
+        "note: \"see issue #42\"\n".to_string(),
+        format!("cmd: {}\n", encode_yaml_scalar("$(echo X)")),
+        "title: \"Fix: colons\"\n".to_string(),
+    ] {
+        assert!(on_disk.contains(&line), "missing {line:?} in:\n{on_disk}");
+    }
+
+    let reported: Vec<(String, serde_json::Value)> = artifact
+        .frontmatter_delta
+        .entries
+        .iter()
+        .map(|entry| match entry {
+            FrontmatterDeltaEntry::Addition { property, value } => {
+                (property.clone(), value.clone())
+            }
+            other => panic!("unexpected delta entry {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        vec![
+            ("summary".to_string(), serde_json::json!("fixed {{…}} parsing")),
+            ("note".to_string(), serde_json::json!("see issue #42")),
+            ("cmd".to_string(), serde_json::json!("$(echo X)")),
+            ("title".to_string(), serde_json::json!("Fix: colons")),
+        ]
+    );
+
+    let markdown: Markdown = on_disk.into();
+    let options = inline_hash_options();
+    let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+    let comparison = markdown.compare_hash(&stored, &options).unwrap();
+    assert!(!comparison.frontmatter_changed && !comparison.body_changed);
+}
+
+/// Read, write, read: a second closure over the first run's output, with the
+/// agent leaving the stored tokens alone, keeps their bytes.
+#[test]
+fn stored_tokens_survive_a_second_run_byte_for_byte() {
+    let dir = TempDir::new().unwrap();
+    let original = "---\nprompt: write it\n---\nOld body\n";
+    let first = "---\nprompt: write it\nsummary: fixed {{…}} parsing\n---\nFirst body\n";
+    let (file, plan) = agent_run(&dir, original, first);
+    let first_text = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap()).text;
+    let token_line = first_text.lines().find(|line| line.starts_with("summary:")).unwrap().to_string();
+
+    let second = first_text.replace("First body", "Second body");
+    let (_, plan) = agent_run(&dir, &first_text, &second);
+    let artifact = written(reconcile_inline_artifact(&plan, "2026-09-07").unwrap());
+
+    assert!(artifact.text.contains(&format!("{token_line}\n")), "{}", artifact.text);
+    assert!(artifact.frontmatter_delta.is_empty(), "{:?}", artifact.frontmatter_delta);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), artifact.text);
+}
+
+/// An unrepairable edit is refused before anything is written, with the line
+/// and the agent named. The caller's rollback then restores the baseline.
+#[test]
+fn an_unrepairable_edit_is_refused_without_writing() {
+    let dir = TempDir::new().unwrap();
+    let original = "---\nprompt: write it\ntitle: t\n---\nOld body\n";
+    for (agent_wrote, line) in [
+        ("---\nprompt: write it\ntitle: t\ntitle: again\n---\nNew body\n", 4),
+        ("---\nprompt: write it\ntitle: t\nmeta:\n  a: b: c\n---\nNew body\n", 5),
+        ("---\r\nprompt: write it\r\ntitle: t\r\nmeta:\r\n  a: b: c\r\n---\r\nNew body\r\n", 5),
+    ] {
+        let (file, plan) = agent_run(&dir, original, agent_wrote);
+        let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+        let CompositionError::InlineAgentFrontmatterRejected { rejection, .. } = &error else {
+            panic!("expected an agent-attributed rejection, got {error:?}");
+        };
+        assert_eq!(rejection.line, Some(line), "{rejection}");
+        assert!(rejection.agent_edit, "{rejection}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote, "nothing written");
+
+        restore_inline_baseline(&plan).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    }
 }
