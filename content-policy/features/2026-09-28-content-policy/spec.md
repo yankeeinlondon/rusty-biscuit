@@ -47,10 +47,42 @@ Sections labeled **proposed** are design choices, not implementation commitments
 The current reader-facing description is in
 [Policy Evaluation and Renewal](../../docs/topics/policy-lifecycle.md).
 
+## Decisions (2026-09-28 clarification)
+
+The owner settled these in a clarification session. Each is written into the
+body below, and its open question has been removed.
+
+1. **Renewal edits files with span-targeted byte edits** built on Biscuit
+   File's YAML helpers, with no spike first. It is the only approach that keeps
+   renewal in the library and preserves every unedited byte. See
+   [Renewal file editing](#renewal-file-editing).
+2. **Done means both increments**: time rules, then `FileChanged`, planned as
+   phases of one plan. `FileChanged` is what proves provider injection and
+   persisted fingerprints; explicit invalidation stays a later candidate. See
+   [Delivery Scope](#delivery-scope).
+3. **The default frontmatter key is `content_policy`** (snake_case), with no
+   kebab-case alias. Every repo-defined, multi-word, top-level frontmatter key
+   that Claudine or Darkmatter interprets is snake_case: 22 in Claudine (for
+   example `step_timeout` and `fail_fast`), 3 in Darkmatter (for example
+   `interpolate_code_blocks`), and `last_updated` in both. None is kebab-case.
+   Kebab-case appears only in Darkmatter's nested, CSS-like `style:` keys
+   (which also accept snake_case aliases) and in keys copied from external
+   formats, such as Claude Code's `argument-hint`. The key remains
+   caller-configurable. The package and crate names stay `content-policy` and
+   `content-policy-cli`.
+4. **Existing `Duration(...)` notes are migrated to `ValidFor(...)`** as a task
+   of this feature, and `Duration` gets no alias. Only six hand-written notes
+   use it, so migrating them is cheaper than carrying a second rule name. See
+   [Backwards compatibility](#backwards-compatibility).
+5. **The CLI is `policy`, with `check` and `renew` subcommands**, and the
+   yes/no flag is `--needs-action`, which prints `true`, `false`, or `unknown`
+   and exits `0` whenever a report was produced. An exit-code answer would let
+   a shell `if` read `unknown` as fresh. See [CLI Contract](#cli-contract).
+
 ## Agreed Model
 
 - Policies are declared in Markdown frontmatter under a configurable key,
-  initially `content-policy`.
+  `content_policy` by default.
 - Multiple rules combine as OR of triggers. Each rule has an action, defaulting
   to `refresh`.
 - Action precedence is fixed: `remove` > `archive` > `refresh`. Declaration
@@ -101,8 +133,8 @@ unqualified `ContentPolicy`.
 | Generation time and versions stored as **evidence**, not mutable policy fields | References resolve against an *evidence record*. For a Markdown document that record is the frontmatter; for a cache artifact it is the artifact manifest |
 | Deterministic under an injected clock | Evaluation time is an explicit input |
 | Calendar months/years define exact arithmetic and timezone | [Time Semantics](#time-semantics--proposed) |
-| Explicit stale action (recompute, warn, or fail) | Partly met. `refresh`/`archive`/`remove` describe what the *content* needs; warn-or-fail is left to the consumer. See [Open Questions](#open-questions) |
-| Minimum vocabulary: duration, explicit invalidation, source-content change, software/library version change, model retirement | Duration is in increment 1 and source-content change in increment 2. Explicit invalidation and model retirement are added to [Later Policy Decisions](#later-policy-decisions) |
+| Explicit stale action (recompute, warn, or fail) | Partly met. `refresh`/`archive`/`remove` describe what the *content* needs; warn-or-fail is left to the consumer. See [Open Question 3](#3-where-warn-or-fail-stale-behavior-lives) |
+| Minimum vocabulary: duration, explicit invalidation, source-content change, software/library version change, model retirement | Duration is in increment 1 and source-content change in increment 2; both are required for this feature. Explicit invalidation and model retirement are added to [Later Policy Decisions](#later-policy-decisions) |
 
 **Why evaluators now live in the shared library.** The earlier ruling kept
 evaluators out because evaluation looked domain-specific. This spec splits
@@ -122,18 +154,28 @@ redesign. Research's draft
 callers. Per the 2026-09-18 ruling, its migration applies only if the Research
 package survives, and this feature does not touch it.
 
-## Proposed Delivery Scope
+## Delivery Scope
+
+*(Decided 2026-09-28.)* The feature is done when **both** increments are
+delivered. They are planned as two phases of one implementation plan.
 
 The first increment delivers a complete lifecycle for `Evergreen`,
 `TimeSensitive`, `ValidFor`, and `ValidUntil`: declaration parsing, validation,
 references, evaluation, renewal planning and application, and CLI reporting.
+It also migrates the existing `Duration(...)` notes (see
+[Backwards compatibility](#backwards-compatibility)).
 The second adds `FileChanged` to prove provider injection and persisted
-fingerprints.
+fingerprints. Two rulings are still needed before the second phase starts:
+line endings in fingerprints
+([Open Question 4](#4-line-endings-in-filechanged-fingerprints)) and the
+structured declaration shape as it applies to `FileChanged`
+([Open Question 5](#5-declaration-shape)).
 
 Package versions, symbols, URL/schema changes, explicit invalidation, model
 retirement, and file/program presence rules follow after their comparison
-contracts are reviewed. They should not delay the first increment. Reaper is not
-a prerequisite for time or file policies. It is currently a placeholder crate.
+contracts are reviewed. None of them is part of this feature, and they should
+not delay either increment. Reaper is not a prerequisite for time or file
+policies. It is currently a placeholder crate.
 
 Outside this initial scope:
 
@@ -145,6 +187,20 @@ Outside this initial scope:
 - configurable action precedence
 - evaluating many documents in one CLI call (callers loop, or a later feature adds it)
 - adoption by Darkmatter, Claudine, or Research
+
+### Backwards compatibility
+
+Six hand-written notes in `biscuit-terminal/docs/research/terminal-multiplexing/`
+(`about.md`, `cmux.md`, `ghostty.md`, `tmux.md`, `wezterm.md`, `zellij.md`)
+already declare `content_policy:` with `Duration(3mo)`; `about.md` uses
+`Duration(12mo)`. All six have `last_updated`, so the shorthand's default date
+property resolves. This feature rewrites each `Duration(...)` entry as the
+equivalent `ValidFor(...)` entry.
+
+There is no `Duration` alias. After the migration, `Duration` is an unknown rule
+name and a validation error like any other. Nothing else needs migrating:
+no Rust code writes the old form, and Research's draft `ContentPolicy` type has
+no callers.
 
 ## Terms
 
@@ -164,7 +220,7 @@ The compact and action-bearing forms express the same model:
 
 ```yaml
 last_updated: 2026-09-28
-content-policy:
+content_policy:
   - ValidFor(3mo, @last_updated)
   - rule: ValidUntil(2027-01-01)
     action: archive
@@ -173,7 +229,7 @@ content-policy:
 Inline baselines are equally valid:
 
 ```yaml
-content-policy:
+content_policy:
   - ValidFor(3mo, 2026-09-28)
 ```
 
@@ -189,9 +245,13 @@ The four first-increment rules:
 ### Defaults and references — proposed
 
 - The policy value must be a YAML list. A single string such as
-  `content-policy: ValidFor(3mo)` is a validation error whose message suggests
+  `content_policy: ValidFor(3mo)` is a validation error whose message suggests
   the list form. One accepted shape keeps renewal edits and error messages
-  simple.
+  simple. Evaluation accepts any valid YAML list, including a flow-style list
+  such as `content_policy: [ValidFor(3mo)]`; renewal is narrower (see
+  [Renewal file editing](#renewal-file-editing)).
+- The default key is `content_policy`. A caller can configure another key, but
+  no kebab-case `content-policy` alias is read.
 - An absent policy key, or a document with no frontmatter, uses the caller's
   default policy. The CLI default is `ValidFor(6mo)`. A library caller can
   instead configure **no default**, and an absent policy then yields the
@@ -235,7 +295,7 @@ A structured form is proposed for richer rules. For example, a file baseline
 needs the digest algorithm as well as the digest:
 
 ```yaml
-content-policy:
+content_policy:
   - rule:
       type: FileChanged
       file: src/config.rs
@@ -247,8 +307,9 @@ content-policy:
 
 The digest above is a placeholder, not valid stored evidence. Structured and
 compact forms must normalize to the same internal representation. The first
-increment need only accept the illustrated time-rule forms. The complete
-structured grammar will be settled before provider-backed rules are built.
+increment need only accept the illustrated time-rule forms. The structured
+grammar for `FileChanged` must be settled before the second phase starts
+([Open Question 5](#5-declaration-shape)).
 
 In the structured form, a reference must be quoted, as in
 `baseline: "@last_updated"`. YAML reserves `@` at the start of a plain value,
@@ -434,9 +495,8 @@ sequenceDiagram
   unavailable, return diagnostics without partially advancing baselines.
 - Preserve the Markdown body, unrelated frontmatter, and declaration form.
   "Preserve" means byte-for-byte outside the edited values, including comments
-  and quoting. How this is achieved is an [open question](#open-questions),
-  because Darkmatter's existing frontmatter writer rewrites the whole YAML
-  block.
+  and quoting. How this is achieved is described in
+  [Renewal file editing](#renewal-file-editing).
 - Detect intervening document edits before applying a prepared renewal. The
   plan records an `xxh64` fingerprint (via `biscuit-hash`) of the exact bytes it
   was planned from. Apply re-reads the file and refuses to write if the bytes
@@ -447,6 +507,53 @@ Changing the fingerprint scheme requires explicit recapture; incompatible
 fingerprints cannot be treated as proof of content changes or freshness.
 Content fingerprints are computed with `biscuit-hash` (BLAKE3). The monorepo
 does not hash directly with the `blake3` crate.
+
+### Renewal file editing
+
+*(Decided 2026-09-28.)* The content-policy library applies renewal as
+span-targeted byte edits, using two Biscuit File YAML helpers:
+
+- [`locate_yaml_value`](../../../biscuit-file/lib/src/yaml/analyze/locate.rs)
+  finds a value's byte span in YAML source. The span **includes** any quotes,
+  and the result carries a `plain` flag that says whether the scalar is
+  unquoted. It locates values only inside block mappings and block sequences.
+  It returns `None` for anything inside a flow collection (such as
+  `content_policy: [ValidFor(3mo)]`) and for multi-line and block scalars.
+- [`apply_edit_set`](../../../biscuit-file/lib/src/yaml/analyze/edit_set.rs)
+  applies non-overlapping byte-range edits, expressed as `YamlRepair` items,
+  and leaves every other byte unchanged. An edit with an empty span is an
+  insertion. It is the same applier Biscuit File's YAML repair uses.
+
+Biscuit File has no dependency path to Darkmatter, even with all features
+enabled (checked with `cargo tree`), so the library may use it under the
+[dependency rule](#library-architecture--proposed). Darkmatter's own
+frontmatter writer (`fm_insert` followed by `as_string`) was rejected: it
+re-serializes the whole YAML block and drops comments and quoting, and the
+dependency rule puts it out of the library's reach.
+
+The helpers work on YAML source, not on a Markdown file, so content-policy
+itself must:
+
+1. Slice out the frontmatter block, locate values within it, and translate each
+   span into an offset in the whole file.
+2. Find the date *inside* a compact rule string, such as the `2026-09-28` in
+   `ValidFor(3mo, 2026-09-28)`, and narrow the edit to it. This is
+   straightforward for plain and single-quoted scalars. A double-quoted scalar
+   that contains escape sequences is refused, because source offsets no longer
+   match the decoded text.
+3. Build the insertion that appends a missing top-level property, such as
+   `last_updated`, as one new line at the end of the frontmatter block.
+
+As a consequence, renewal refuses these shapes with a clear message that
+suggests rewriting the policy as a block list:
+
+- a flow-style policy list, such as `content_policy: [ValidFor(3mo)]`
+- a value it must edit that is a block scalar or multi-line scalar
+- a value it must edit that is a double-quoted string containing escape
+  sequences
+
+A refusal writes nothing. Evaluation is unaffected: it still accepts any valid
+YAML list shape.
 
 ## Library Architecture — Proposed
 
@@ -509,29 +616,36 @@ These candidates retain the original idea without claiming settled semantics:
 | --- | --- |
 | `SemVerMajorChange` | Package identity, registry, baseline version, release channel; propose a strictly newer major release |
 | `SemVerMinorChange` | Propose a newer minor or major release; define prerelease and pre-1.0 behavior |
-| `FileChanged` | Propose byte-content fingerprints; define missing/deleted file behavior and line-ending handling (see [Open Questions](#open-questions)) |
+| `FileChanged` | In scope as the second phase of this feature. Propose byte-content fingerprints; define missing/deleted file behavior. Line-ending handling and the structured declaration shape are rulings required before that phase ([Open Questions 4 and 5](#open-questions)) |
 | `SymbolChanged` | File plus qualified selector, ambiguity/deletion handling, signature/body/docs scope |
 | `UrlChanged` | Request identity, selected response content, normalization, conditional-response handling |
 | `SchemaChanged` | Structural changes versus compatibility-breaking changes; schema dialect and reference scope |
 | `WhenFileCreated` / `WhenFileRemoved` | Current presence/absence versus transition since a baseline |
 | `ProgramInstalled` / `ProgramRemoved` | Presence versus transition; host/environment identity and discovery scope |
-| Explicit invalidation (for example a `stale: true` flag) | Property name and type; whether renewal clears the flag. Required by the earlier contract's minimum vocabulary; needs no provider, so it is a cheap early candidate |
+| Explicit invalidation (for example a `stale: true` flag) | Property name and type; whether renewal clears the flag. Required by the earlier contract's minimum vocabulary; needs no provider, so it is a cheap candidate, but it is not part of this feature |
 | Model retirement | Model identity and which provider reports retirement. Required by the earlier contract's minimum vocabulary |
 
 In particular, a missing program on another host should not accidentally prove
 that the program was uninstalled on the host used to create the document.
 
-## CLI Contract — Proposed
+## CLI Contract
 
 The CLI follows the monorepo's CLI standards
 ([cli skill](../../../.claude/skills/cli/cli-best-practices.md)).
+
+*(Decided 2026-09-28.)* The binary is `policy`, built by the
+`content-policy-cli` crate. Each operation is a subcommand, so a document path
+can never be mistaken for a command name, and later subcommands have room to
+arrive.
 
 *(Changed in review: the draft printed JSON by default. That was an accidental
 departure from the repo standard, which makes terminal-formatted output the
 default and requires both `--json` and `--plain`.)*
 
-- `policy document.md` prints the evaluation report. The default output is
-  terminal-formatted and built from `biscuit-terminal` components: a `Prose`
+### `policy check`
+
+- `policy check document.md` prints the evaluation report. The default output
+  is terminal-formatted and built from `biscuit-terminal` components: a `Prose`
   summary line, then a `Table` of entries. `--plain` removes styling, and
   `--json` prints the serialized report as the only content on stdout.
 - `--at <YYYY-MM-DD>` sets the evaluation time to midnight UTC on that date.
@@ -542,16 +656,46 @@ default and requires both `--json` and `--plain`.)*
   unreadable files, and malformed frontmatter; the diagnostics go to stderr,
   including in `--json` mode. `2` is a usage error, reported by clap.
 
-`policy document.md --is-stale` answers whether any rule has confirmed a need
-for action, including expiration. It prints `true` for stale/expired and `false`
-for fresh. A known trigger still prints `true` when action resolution is
-incomplete. The full report is required to choose an action. What it prints and
-how it exits for `unknown` is an [open question](#open-questions).
+`policy check --needs-action document.md` answers whether any rule has
+confirmed a need for action, including expiration. It prints `true` for
+stale/expired, `false` for fresh, and `unknown` when no trigger is confirmed
+and at least one rule could not be evaluated. A known trigger still prints
+`true` when action resolution is incomplete. The full report is required to
+choose an action.
 
-Renewal command naming and whether applying edits requires a write flag remain
-open (see [Open Questions](#open-questions)). The contract requires explicit
-invocation, previewable edits, and no automatic refresh/archive/remove
-execution.
+It uses the same exit codes as the report: `0` whenever a report was produced,
+whatever the answer; `1` only for errors; `2` for usage errors. The answer is
+carried in the printed word, not the exit code, because a shell `if` treats
+every non-zero exit as false and would silently read `unknown` as fresh. Scripts
+compare the text:
+
+```sh
+case "$(policy check --needs-action notes.md)" in
+  true)    echo "notes.md needs a refresh, archive, or removal" ;;
+  false)   echo "notes.md is fresh" ;;
+  unknown) echo "notes.md could not be fully evaluated; read the report" ;;
+  *)       echo "policy check failed" >&2; exit 1 ;;
+esac
+```
+
+### `policy renew`
+
+- `policy renew document.md [--on <YYYY-MM-DD>]` plans a renewal and prints the
+  proposed edits. It changes nothing. `--on` supplies the update date; it
+  defaults to the current UTC date, and a future date is rejected (see
+  [Renewal rules](#renewal-rules--proposed)).
+- `--write` applies the planned edits to the file.
+- Exit codes: `0` means a preview was produced or the edits were written. `1`
+  covers every error, including a refused YAML shape (see
+  [Renewal file editing](#renewal-file-editing)), a conflict because the file
+  changed after the plan was made, and missing required evidence; nothing is
+  written in any of these cases. `2` is a usage error.
+- **Proposed** beyond the ruling: `renew` accepts `--plain` and `--json` for its
+  preview, like `check`; a policy with no renewable entry is not an error, so
+  it exits `0` with a preview that proposes no edits.
+
+The contract requires explicit invocation, previewable edits, and no automatic
+refresh/archive/remove execution.
 
 ## Acceptance Criteria for Implementation
 
@@ -567,9 +711,11 @@ execution.
    baseline, including on the first evaluation.
 6. Renewal changes only the intended baseline values, preserves policy settings,
    consolidates shared writes, and rejects conflicts or incomplete capture.
-7. The lifecycle example below passes through both library and CLI behavior.
+7. The lifecycle example below passes through both library and CLI behavior
+   (`policy check`, `policy renew`, and `policy renew --write`).
 8. The file increment demonstrates the same lifecycle with a fake provider and
    a bundled file adapter, including read failures and incompatible fingerprints.
+   This criterion is required for the feature to be done.
 9. New crates follow repository package-area conventions and support macOS,
    Linux, native Windows, and WSL2. Implementation follows existing test recipes
    and maintains topic/dependency documentation and applicable skills.
@@ -586,6 +732,17 @@ execution.
 13. The package's `docs/` topic page and README are updated to match the
     decisions in this spec, in particular the CLI output and exit codes, the
     empty-list rule, and the `no_policy` outcome.
+14. Renewal refuses, writes nothing, and names the block-list form in its
+    message for each unsupported shape: a flow-style policy list, a block or
+    multi-line scalar it must edit, and a double-quoted rule string containing
+    escape sequences. Each case has a test, and evaluation of the same
+    documents still succeeds (flow-style lists included).
+15. `policy check --needs-action` prints `true`, `false`, or `unknown` and exits
+    `0` for each, with a test per answer; it exits `1` only for errors.
+16. The six `Duration(...)` notes under
+    `biscuit-terminal/docs/research/terminal-multiplexing/` are rewritten to
+    `ValidFor(...)` and evaluate without diagnostics. A `Duration(...)` entry is
+    a validation error for an unknown rule name.
 
 ### Lifecycle example
 
@@ -600,7 +757,11 @@ changes the winning action, while every triggered entry remains in the report.
 ## Open Questions
 
 The review turned the draft's review questions into this list. Where it
-recommends an answer, it gives the options with their pros and cons.
+recommends an answer, it gives the options with their pros and cons. The
+2026-09-28 clarification settled the former questions on renewal file editing,
+`--is-stale` output, the renewal command shape, and scope (see
+[Decisions](#decisions-2026-09-28-clarification)); the remaining questions are
+renumbered.
 
 ### 1. Defaults and references
 
@@ -608,7 +769,8 @@ Approve `last_updated` as the default date property and top-level-only `@name`?
 Nested references can wait unless existing document metadata needs them. The
 empty-list rule has changed from the draft (it is now an error; see
 [Defaults and references](#defaults-and-references--proposed)). Confirm or
-reverse that change.
+reverse that change. The default policy key, `content_policy`, is already
+decided and is not part of this question.
 
 ### 2. Dates
 
@@ -616,81 +778,7 @@ Approve midnight UTC expiration, calendar month/year clamping, and the initial
 date-only duration grammar? In particular, should a named `ValidUntil` date
 instead remain valid through that entire day?
 
-### 3. How renewal edits the file while preserving formatting
-
-The spec promises that renewal preserves comments, quoting, and the declaration
-form. Darkmatter's frontmatter writer (`fm_insert` followed by `as_string`)
-re-serializes the whole YAML block. It keeps key order and the body, but drops
-comments and quoting. It is also off-limits to the library under the
-dependency rule.
-
-1. **Span-targeted edits with Biscuit File's YAML location utilities
-   (recommended).** Find each target value's source span with
-   [`locate_yaml_key` / `locate_yaml_value`](../../../biscuit-file/lib/src/yaml/mod.rs),
-   then replace only those bytes with `apply_edit_set`, the same edit applier
-   Biscuit File's YAML repair uses. A missing top-level property is added as one
-   new line at the end of the frontmatter block.
-   - Pros: true byte-for-byte preservation; reuses code that is already tested;
-     no new YAML dependency; Biscuit File is already allowed by the dependency
-     rule.
-   - Cons: replacing a date *inside* a compact string (such as
-     `ValidFor(3mo, 2026-09-28)`) needs an offset within the located scalar,
-     and that is only straightforward for plain or simply quoted scalars. Block
-     scalars and other exotic YAML forms must be refused with a clear message.
-2. **Re-serialize the frontmatter through Darkmatter.**
-   - Pros: least new code.
-   - Cons: breaks the preservation promise; would force the renewal helper out
-     of the library (dependency rule); makes the "CLI must not be the only
-     renewer" goal harder.
-3. **Add format-preserving editing to Darkmatter and have the CLI use it.**
-   - Pros: `md set` would benefit too.
-   - Cons: expands this feature into Darkmatter; library consumers still cannot
-     use it without a dependency cycle.
-
-**Recommendation:** option 1. It is the only option that keeps the renewal
-helper in the library and delivers the preservation the spec promises.
-
-### 4. `--is-stale` output and exit code for `unknown`
-
-1. **Print `true`, `false`, or `unknown`; exit `0` for all three and `1` only on
-   errors (recommended).**
-   - Pros: a shell `if` cannot quietly turn `unknown` into "not stale", because
-     scripts must compare the text; consistent with the report command's exit
-     codes.
-   - Cons: scripts need a string comparison instead of a bare `if policy …`.
-2. **Communicate through exit codes, like `grep` (`0` stale, `1` fresh, another
-   code for unknown).**
-   - Pros: idiomatic shell use.
-   - Cons: `if` treats every non-zero code as false, so `unknown` silently reads
-     as "fresh". That is exactly the failure the design forbids. It also
-     collides with the repo standard that `1` means error and `2` means usage
-     error.
-3. **Drop `--is-stale` and have scripts read `status` from `--json`.**
-   - Pros: one output contract.
-   - Cons: requires `jq` or similar for a very common question.
-
-**Recommendation:** option 1. Also decide whether to rename the flag to
-`--needs-action`, since it returns `true` for expired documents as well as
-stale ones.
-
-### 5. CLI command shape for renewal
-
-1. **Subcommands for both operations: `policy check <doc>` and
-   `policy renew <doc> [--on <date>] [--write]` (recommended).** Without
-   `--write`, `renew` prints the proposed edits and changes nothing.
-   - Pros: no ambiguity between a file path and a subcommand name; preview is
-     the safe default; room for later subcommands.
-   - Cons: the evaluation command gains a word (`check`).
-2. **Keep `policy <doc>` for evaluation and add a `--renew` flag.**
-   - Pros: shortest invocation.
-   - Cons: flags that switch the command's whole behavior and output shape are
-     hard to document and validate; `--is-stale --renew` becomes a combination
-     that must be rejected.
-
-**Recommendation:** option 1. If adopted, the README and `docs/` examples change
-from `policy document.md` to `policy check document.md`.
-
-### 6. Where "warn or fail" stale behavior lives
+### 3. Where "warn or fail" stale behavior lives
 
 The earlier contract asks the policy for an explicit stale action: recompute,
 serve with a warning, or fail. This spec's actions describe what the content
@@ -712,12 +800,14 @@ needs (refresh, archive, remove), not how a cache should respond meanwhile.
 **Recommendation:** option 1, because the owner of the response is the consumer,
 not the document author.
 
-### 7. Line endings in `FileChanged` fingerprints
+### 4. Line endings in `FileChanged` fingerprints
 
 On Windows, Git's `core.autocrlf` can check out the same committed file with
 CRLF line endings. A raw-byte fingerprint recorded on macOS would then report a
 change on Windows that never happened. The repo requires every package to work
 on all four environments, so this must be settled before the file increment.
+**This ruling is required before the `FileChanged` phase starts**; it is not
+deferred.
 
 1. **Record a normalization in the fingerprint scheme (recommended).** For
    example, `algorithm: blake3` with `normalize: lf`: CRLF is converted to LF
@@ -736,16 +826,17 @@ on all four environments, so this must be settled before the file increment.
 
 **Recommendation:** option 1, with `lf` as the default for `FileChanged`.
 
-### 8. Declaration shape
+### 5. Declaration shape
 
 Approve `{ rule, action }` with a string or structured rule, including the
 baseline object for fingerprint policies and quoted `"@name"` references in the
 structured form?
 
-### 9. Scope
+The time-rule phase needs only the compact and `{ rule, action }` string
+forms already shown. **The structured grammar as it applies to `FileChanged`
+is a ruling required before the `FileChanged` phase starts**; it is not
+deferred.
 
-Approve time policies first and `FileChanged` second, before package, symbol,
-and remote comparisons? Explicit invalidation is a small, provider-free
-candidate that could join the first increment if wanted.
-
-Review these choices before implementation planning and public Rust API design.
+Questions 1 to 3 should be answered before implementation planning and public
+Rust API design. Questions 4 and 5 must be answered before the `FileChanged`
+phase starts.
