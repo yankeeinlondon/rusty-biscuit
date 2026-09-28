@@ -859,7 +859,7 @@ fn measured_sizes_trim_to_the_width_cap() {
 const ALPHA: &str = "feature/very-long-exact-branch-reference-alpha";
 const BETA: &str = "origin/very-long-exact-branch-reference-beta";
 
-/// R12's long labels on neighboring commits of two lanes, `main` and
+/// Long labels on neighboring commits of two lanes, `main` and
 /// `origin/main` one commit apart, and a PR tag.
 fn long_label_neighbors() -> GitGraph {
     GitGraph::new("main", commits(&["d1d1d1d", "d2d2d2d", "d3d3d3d", "d4d4d4d"]))
@@ -994,7 +994,7 @@ fn measured_plans_place_merges_and_tags_without_overlap() {
             merges: &[("m0m0m0m", ["+1999", "o2o2o2o"])],
         },
     ));
-    // Recorded in the implementation log (R3's wider step shows up here).
+    // Per-viewport size, trimming, and the tag-driven commit step, for review.
     eprintln!("{}", report.join("\n"));
 }
 
