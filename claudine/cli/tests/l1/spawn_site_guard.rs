@@ -1190,7 +1190,9 @@ fn the_resource_a_file_owns_decides_what_the_guard_governs() {
 /// those names for `just test-l2` / `just test-l3` and excludes them from
 /// `just test`. Where the claim and the resource disagree, the file runs in the
 /// wrong tier — as nineteen `expectrl` tests did, measured as L2 evidence while
-/// the fast L1 suite never ran them.
+/// the fast L1 suite never ran them. A `real_` name also keeps a file out of
+/// `just test`, so a real-provider test may drive its provider in an emulator
+/// session without claiming a terminal tier.
 #[test]
 fn a_terminal_tier_name_must_match_the_resource_the_file_owns() {
     let root = tests_root();
@@ -1208,9 +1210,12 @@ fn a_terminal_tier_name_must_match_the_resource_the_file_owns() {
         let source = fs::read_to_string(file).expect("test source is readable");
         let name = relative_path.rsplit('/').next().unwrap_or(&relative_path);
         let claims_emulator = name.starts_with("level2_") || name.starts_with("level3_");
+        let real_provider_tier = name.starts_with("real_");
         match (claims_emulator, emulator_session_api(&source)) {
             (true, None) => mislabeled.push(relative_path),
-            (false, Some(api)) => unlabeled.push(format!("{relative_path} ({api})")),
+            (false, Some(api)) if !real_provider_tier => {
+                unlabeled.push(format!("{relative_path} ({api})"));
+            }
             _ => {}
         }
     }

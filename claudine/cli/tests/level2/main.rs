@@ -26,6 +26,8 @@ mod level2_dry_run_approval_capture;
 #[cfg(unix)]
 mod level2_dry_run_metadata_capture;
 #[cfg(unix)]
+mod level2_edit_interactive_capture;
+#[cfg(unix)]
 mod level2_explicit_operation_file_miss;
 #[cfg(unix)]
 mod level2_file_resolution_capture;
