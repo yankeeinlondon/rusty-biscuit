@@ -3301,7 +3301,7 @@ mod prompt_tasks {
         fixture.execute(&wiring);
 
         let request = prompt.last();
-        let overrides = request.set_overrides;
+        let overrides = request.set_overrides.values();
         assert_eq!(overrides["only_param"], json!("from-params"));
         assert_eq!(
             overrides["shared"],
@@ -3319,6 +3319,15 @@ mod prompt_tasks {
             "the reserved overlay outranks everything",
         );
         assert_eq!(overrides["outputs"], json!([]));
+        use darkmatter::markdown::compose::OverrideOrigin;
+        assert_eq!(
+            request.set_overrides.origin_of("only_param"),
+            OverrideOrigin::Data,
+            "an evaluated param is data",
+        );
+        assert_eq!(request.set_overrides.origin_of("shared"), OverrideOrigin::Authored);
+        assert_eq!(request.set_overrides.origin_of("mutated"), OverrideOrigin::Data);
+        assert_eq!(request.set_overrides.origin_of("state"), OverrideOrigin::Data);
     }
 
     #[test]
@@ -4072,7 +4081,7 @@ mod serial_groups {
         // Whole-value typing survives the scope: `attempt` stays a number.
         assert_eq!(request.params["attempt"], json!(2));
         assert_eq!(recorder.events(), vec!["info:starting release".to_string()]);
-        assert_eq!(request.set_overrides["group"]["label"], json!("release"));
+        assert_eq!(request.set_overrides.values()["group"]["label"], json!("release"));
     }
 
     /// The scope ends with the group: a later sequence step referencing

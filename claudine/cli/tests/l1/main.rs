@@ -102,6 +102,7 @@ mod lifecycle_message_drain_interrupt;
 mod loop_cli;
 mod loop_initialize_state;
 mod mcp_cli;
+mod override_boundary_guard;
 #[cfg(unix)]
 mod prompt_reporting;
 mod propagated_context_fixtures;

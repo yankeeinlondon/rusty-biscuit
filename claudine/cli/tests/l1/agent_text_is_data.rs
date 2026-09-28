@@ -4,7 +4,9 @@
 //! Each assertion states the post-fix contract — agent text arrives as exact
 //! raw text, is never evaluated, never asks for shell approval, and the run
 //! succeeds. A test stays ignored until the plan phase that fixes its row
-//! removes the marker.
+//! removes the marker. The regression tests at the end pin what must not
+//! change: a value a person typed is still a template, and the authoring
+//! guards still refuse before any provider starts.
 
 use std::fs;
 
@@ -96,23 +98,49 @@ fn loop_carries_output_raw(agent_text: &str) {
 
 /// Spec row "captured agent output in a loop": malformed template syntax.
 #[test]
-#[ignore = "red until phase 4"]
 fn loop_last_output_with_template_syntax_stays_raw() {
     loop_carries_output_raw("see {{…}} siblings");
 }
 
 /// Spec row "captured agent output in a loop": a whole-value shell form.
 #[test]
-#[ignore = "red until phase 4"]
 fn loop_last_output_with_whole_value_shell_stays_raw() {
     loop_carries_output_raw("$(echo INJECTED)");
 }
 
 /// Spec row "captured agent output in a loop": the acceptance-test text.
 #[test]
-#[ignore = "red until phase 4"]
 fn loop_last_output_with_template_and_shell_stays_raw() {
     loop_carries_output_raw("see {{…}} and $(rm -rf x)");
+}
+
+/// Spec row "captured agent output in a loop": the loop predicate reads the
+/// same raw text. Iteration 1's output ends the loop only when its length is
+/// exactly that of the raw text; a rewritten value would run a second call.
+#[test]
+fn loop_predicate_reads_the_raw_output() {
+    let agent_text = "see {{…}} and $(rm -rf x)";
+    let fixture = CliProcessFixture::named("agent-text-loop-predicate");
+    counting_goose(&fixture, "", agent_text);
+    let md = fixture.cwd().join("loop.md");
+    fs::write(
+        &md,
+        format!(
+            "---\ntitle: t\nloop:\n  max: 3\n  until: 'length(_loop_last_output) == {}'\n---\nGo.\n",
+            agent_text.chars().count()
+        ),
+    )
+    .unwrap();
+
+    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_no_shell_approval(&stderr);
+    assert_eq!(
+        later_prompts(&fixture),
+        "",
+        "the predicate must have seen the raw text after one call; stderr:\n{stderr}"
+    );
 }
 
 // ============================================================================
@@ -122,7 +150,6 @@ fn loop_last_output_with_template_and_shell_stays_raw() {
 /// Spec row "captured task output in a sequence": an agent task's output reaches
 /// the next step raw through a param and through `last(outputs)`.
 #[test]
-#[ignore = "red until phase 4"]
 fn sequence_outputs_with_template_syntax_stay_raw() {
     let fixture = CliProcessFixture::named("agent-text-sequence");
     counting_goose(&fixture, "", "{{ ctx.repo }}");
@@ -152,7 +179,6 @@ fn sequence_outputs_with_template_syntax_stay_raw() {
 /// Spec row "captured task output in a sequence": a parallel group's nested
 /// `outputs` entry stays raw.
 #[test]
-#[ignore = "red until phase 4"]
 fn sequence_parallel_group_nested_output_stays_raw() {
     let fixture = CliProcessFixture::named("agent-text-sequence");
     counting_goose(&fixture, "", "unused");
@@ -279,7 +305,6 @@ fn lifecycle_field_from_agent_written_file_is_sent_verbatim() {
 /// Spec row "agent-written files read by expression": a stack action operand
 /// sends the agent's exact text instead of re-expanding it.
 #[test]
-#[ignore = "red until phase 4"]
 fn lifecycle_stack_message_from_agent_written_file_is_sent_verbatim() {
     let fixture = CliProcessFixture::named("agent-text-message");
     counting_goose(&fixture, &write_agent_log("'see {{…}} siblings'"), "ok");
@@ -306,7 +331,6 @@ fn lifecycle_stack_message_from_agent_written_file_is_sent_verbatim() {
 /// Spec row "lifecycle values derived from the above": a `set:` value read
 /// from an agent-written file stays inert in the next loop iteration.
 #[test]
-#[ignore = "red until phase 4"]
 fn lifecycle_set_from_agent_data_stays_inert_on_next_preparation() {
     let fixture = CliProcessFixture::named("agent-text-set");
     counting_goose(&fixture, &write_agent_log("'agent said {{ title }}'"), "ok");
@@ -330,7 +354,6 @@ fn lifecycle_set_from_agent_data_stays_inert_on_next_preparation() {
 /// Spec row "lifecycle values derived from the above": a `proxy.with:` value
 /// read from an agent-written file stays inert when the target prepares.
 #[test]
-#[ignore = "red until phase 4"]
 fn lifecycle_proxy_with_from_agent_data_stays_inert_in_target() {
     let fixture = CliProcessFixture::named("agent-text-proxy");
     counting_goose(&fixture, &write_agent_log("'agent said {{ title }}'"), "ok");
@@ -356,6 +379,93 @@ fn lifecycle_proxy_with_from_agent_data_stays_inert_in_target() {
     );
 }
 
+/// Spec row "lifecycle values derived from the above": an `initialize` proxy
+/// is hoisted to the command coordinator, which prepares the target itself —
+/// for a looping target, the loop seed and pre-flight compose from the
+/// coordinator's options. The overlay stays inert on that route too.
+#[test]
+fn initialize_proxy_with_from_file_data_stays_inert_in_a_looping_target() {
+    let fixture = CliProcessFixture::named("agent-text-proxy-initialize");
+    counting_goose(&fixture, "", "ok");
+    fs::write(
+        fixture.cwd().join("data.md"),
+        "---\nv: 'agent said {{…}} and $(echo INJECTED)'\nc: '$(echo INJECTED)'\n---\nData.\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.cwd().join("target.md"),
+        "---\ntitle: target-title\nnote: none\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\n---\nNote: [{{ note }}]\nCmd: {{ cmd }} end\n",
+    )
+    .unwrap();
+    let md = fixture.cwd().join("router.md");
+    fs::write(
+        &md,
+        "---\ntitle: t\ninitialize:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {note: \"{{ frontmatter('data.md', 'v') }}\", cmd: \"{{ frontmatter('data.md', 'c') }}\"}}\n---\nRouter.\n",
+    )
+    .unwrap();
+
+    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_no_shell_approval(&stderr);
+    let log = fs::read_to_string(fixture.home().join("prompts.txt")).unwrap_or_default();
+    assert_eq!(
+        log.matches("Note: [agent said {{…}} and $(echo INJECTED)]").count(),
+        2,
+        "both iterations must receive the overlay raw; prompts:\n{log}\nstderr:\n{stderr}"
+    );
+    assert_eq!(
+        log.matches("Cmd: $(echo INJECTED) end").count(),
+        2,
+        "a whole-value command shape from data is text; prompts:\n{log}\nstderr:\n{stderr}"
+    );
+}
+
+/// Row B16: the overlay stays inert when a retry re-prepares the proxied
+/// target, the harness path that re-applies `proxy.with:` on every attempt.
+#[test]
+fn lifecycle_proxy_with_from_agent_data_stays_inert_on_a_retry() {
+    let fixture = CliProcessFixture::named("agent-text-proxy-retry");
+    // Call 1 is the source (it writes the agent log), call 2 is the target's
+    // first attempt and fails, call 3 is the target's retry.
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        &format!(
+            "#!/bin/sh\n\
+             n=0\n\
+             if [ -f \"$HOME/n.txt\" ]; then IFS= read -r n < \"$HOME/n.txt\"; fi\n\
+             n=$((n + 1))\n\
+             printf '%s' \"$n\" > \"$HOME/n.txt\"\n\
+             {{ printf '=== call %s ===\\n' \"$n\"; printf '%s\\n' \"$*\"; /bin/cat; }} >> \"$HOME/prompts.txt\"\n\
+             if [ \"$n\" = 1 ]; then {}; fi\n\
+             if [ \"$n\" = 2 ]; then exit 1; fi\n\
+             printf '%s\\n' done\n",
+            write_agent_log("'agent said {{ title }}'")
+        ),
+    );
+    fs::write(
+        fixture.cwd().join("target.md"),
+        "---\ntitle: target-title\nnote: none\nfailure:\n  stack:\n    - action: {retry: 1}\n---\nNote: [{{ note }}]\n",
+    )
+    .unwrap();
+    let md = fixture.cwd().join("source.md");
+    fs::write(
+        &md,
+        "---\ntitle: t\nsuccess:\n  stack:\n    - action: {action: proxy, target: './target.md', with: {note: \"{{ frontmatter('log.md', 'message_to_agent') }}\"}}\n---\nSource.\n",
+    )
+    .unwrap();
+
+    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_eq!(code, 0, "the retry must succeed; stderr:\n{stderr}");
+    let log = fs::read_to_string(fixture.home().join("prompts.txt")).unwrap_or_default();
+    let retry = log.split("=== call 3 ===").nth(1).unwrap_or_default();
+    assert!(
+        retry.contains("Note: [agent said {{ title }}]"),
+        "the retried target must receive the overlay raw; prompts:\n{log}\nstderr:\n{stderr}"
+    );
+}
+
 // ============================================================================
 // Inventory I2, Table B: further re-entry points
 // ============================================================================
@@ -363,7 +473,6 @@ fn lifecycle_proxy_with_from_agent_data_stays_inert_in_target() {
 /// Row B3: a lifecycle shell command built from file data runs the approved
 /// bytes, not a late re-resolution of the data.
 #[test]
-#[ignore = "red until phase 4"]
 fn lifecycle_shell_from_file_data_runs_approved_bytes() {
     let fixture = CliProcessFixture::named("agent-text-shell");
     counting_goose(&fixture, "", "ok");
@@ -396,7 +505,6 @@ fn lifecycle_shell_from_file_data_runs_approved_bytes() {
 /// re-evaluated as an authored override. The body leaves it unrendered so the
 /// seed, not the body rescan, is what fails.
 #[test]
-#[ignore = "red until phase 4"]
 fn loop_seed_from_composed_frontmatter_stays_raw() {
     let fixture = CliProcessFixture::named("agent-text-seed");
     counting_goose(&fixture, "", "ok");
@@ -425,7 +533,6 @@ fn loop_seed_from_composed_frontmatter_stays_raw() {
 /// Row B9: a mixed-render loop action result stays a string even when it
 /// parses as JSON.
 #[test]
-#[ignore = "red until phase 4"]
 fn loop_action_result_is_not_reparsed_as_json() {
     let fixture = CliProcessFixture::named("agent-text-action");
     counting_goose(&fixture, "", "true");
@@ -448,7 +555,6 @@ fn loop_action_result_is_not_reparsed_as_json() {
 
 /// Row B10: a JSONL item field reaches the step prompt as raw `state` data.
 #[test]
-#[ignore = "red until phase 4"]
 fn sequence_state_from_jsonl_item_stays_raw() {
     let fixture = CliProcessFixture::named("agent-text-state");
     counting_goose(&fixture, "", "ok");
@@ -477,7 +583,6 @@ fn sequence_state_from_jsonl_item_stays_raw() {
 /// Row B12: group `variables:` and task `params:` evaluated from a prior
 /// task's output reach the member prompt raw.
 #[test]
-#[ignore = "red until phase 4"]
 fn task_params_and_group_variables_from_outputs_stay_raw() {
     let fixture = CliProcessFixture::named("agent-text-params");
     counting_goose(&fixture, "", "ok");
@@ -526,7 +631,6 @@ Body.
 /// Row B15: a positional side-effect argument read from an agent-written file
 /// is written without being resolved a second time.
 #[test]
-#[ignore = "red until phase 4"]
 fn set_frontmatter_argument_from_agent_data_is_not_reresolved() {
     let fixture = CliProcessFixture::named("agent-text-effect");
     counting_goose(&fixture, &write_agent_log("'agent said {{ title }}'"), "ok");
@@ -570,4 +674,77 @@ fn set_frontmatter_persisted_agent_data_survives_next_preparation() {
         prompts.contains("Note: [see {{…}} siblings]"),
         "the persisted value must render verbatim; prompts:\n{prompts}\nstderr:\n{stderr}"
     );
+}
+
+// ============================================================================
+// Regressions: what a person typed is still a template; guards still fire
+// ============================================================================
+
+/// `--set` stays a template (ruling N1): the setter fills in on every loop
+/// iteration, even though the loop carries it through its seed.
+#[test]
+fn set_value_template_still_fills_in_on_every_iteration() {
+    let fixture = CliProcessFixture::named("agent-text-set-template");
+    counting_goose(&fixture, "", "ok");
+    let md = fixture.cwd().join("loop.md");
+    fs::write(
+        &md,
+        "---\ntitle: t\ncounter: 0\nloop:\n  while: 'counter < 1'\n  actions:\n    - 'increment(counter)'\n---\nX: [{{ x }}]\n",
+    )
+    .unwrap();
+
+    let (code, stderr) = run(
+        &fixture,
+        &["compose", "--goose", "--set", r#"{"x":"{{ title }}"}"#, md.to_str().unwrap()],
+    );
+
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let log = fs::read_to_string(fixture.home().join("prompts.txt")).unwrap_or_default();
+    assert_eq!(
+        log.matches("X: [t]").count(),
+        2,
+        "both iterations must fill in the typed template; prompts:\n{log}"
+    );
+}
+
+/// The nested-span-in-literal guard still refuses before the provider starts.
+#[test]
+fn nested_span_in_a_lifecycle_literal_is_still_refused() {
+    let fixture = CliProcessFixture::named("agent-text-nested-guard");
+    counting_goose(&fixture, "", "ok");
+    let md = fixture.cwd().join("doc.md");
+    fs::write(
+        &md,
+        "---\ntitle: t\nsuccess:\n  info: \"{{ 'in {{ title }}' }}\"\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_ne!(code, 0, "stderr:\n{stderr}");
+    assert!(stderr.contains("success.info"), "the guard names the property:\n{stderr}");
+    assert!(
+        !fixture.home().join("prompts.txt").exists(),
+        "no provider may start; stderr:\n{stderr}"
+    );
+}
+
+/// Strict whole-value evaluation still fails closed: an authored lifecycle
+/// span with an unknown root is an error, not an empty message.
+#[test]
+fn an_unknown_root_in_an_authored_lifecycle_span_still_fails() {
+    let fixture = CliProcessFixture::named("agent-text-strict-guard");
+    counting_goose(&fixture, "", "ok");
+    let md = fixture.cwd().join("doc.md");
+    fs::write(
+        &md,
+        "---\ntitle: t\nsuccess:\n  info: \"{{ titel }}\"\n---\nBody.\n",
+    )
+    .unwrap();
+
+    let (code, stderr) = run(&fixture, &["compose", "--goose", md.to_str().unwrap()]);
+
+    assert_ne!(code, 0, "stderr:\n{stderr}");
+    assert!(stderr.contains("lifecycle evaluation error"), "{stderr}");
+    assert!(stderr.contains("success.info"), "{stderr}");
 }

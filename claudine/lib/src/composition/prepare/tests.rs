@@ -1305,14 +1305,11 @@ fn prior_outputs_are_visible_to_the_composed_body() {
     runtime.append_output("step one output\n");
     let prepared = prepare_direct(
         &source,
-        PrepareOptions {
-            set_overrides: Some(crate::composition::layered_set_overrides(
-                None,
-                Some(&runtime.snapshot()),
-                None,
-            )),
-            ..PrepareOptions::default()
-        },
+        PrepareOptions::default().with_layered_overrides(crate::composition::layered_set_overrides(
+            crate::composition::LayeredOverrides::new(),
+            Some(&runtime.snapshot()),
+            None,
+        )),
     )
     .unwrap();
 
@@ -1335,14 +1332,11 @@ fn a_user_setter_cannot_replace_outputs() {
 
     let prepared = prepare_direct(
         &source,
-        PrepareOptions {
-            set_overrides: Some(crate::composition::layered_set_overrides(
-                Some(&json!({"outputs": ["hijacked"]})),
-                Some(&crate::composition::RuntimeState::new().snapshot()),
-                None,
-            )),
-            ..PrepareOptions::default()
-        },
+        PrepareOptions::default().with_layered_overrides(crate::composition::layered_set_overrides(
+            crate::composition::LayeredOverrides::authored(Some(&json!({"outputs": ["hijacked"]}))),
+            Some(&crate::composition::RuntimeState::new().snapshot()),
+            None,
+        )),
     )
     .unwrap();
 

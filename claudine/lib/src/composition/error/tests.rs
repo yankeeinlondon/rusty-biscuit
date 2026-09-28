@@ -987,6 +987,8 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let options = PrepareOptions {
         defer_schema_verdict: false,
         set_overrides: None,
+        data_override_keys: Default::default(),
+        proxy_overlay: Default::default(),
         caller_input_records: Default::default(),
         pre_approved_commands: Some(approved),
         env_overrides: BTreeMap::new(),

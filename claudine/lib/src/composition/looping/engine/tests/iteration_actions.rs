@@ -136,7 +136,10 @@ fn injects_ambient_values_and_current_frontmatter() {
         object(json!({"counter": 0, "iteration": 99})),
         LoopExecutionOptions::default(),
         |ctx| {
-            seen.borrow_mut().push(ctx.as_set_overrides());
+            seen.borrow_mut().push(
+                ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new())
+                    .to_value(),
+            );
             Ok(LoopIterationOutput::success(format!(
                 "run {}",
                 ctx.iteration

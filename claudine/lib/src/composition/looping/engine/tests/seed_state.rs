@@ -159,10 +159,9 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
         |ctx| {
             let prepared = prepare_direct(
                 &source,
-                PrepareOptions {
-                    set_overrides: Some(ctx.as_set_overrides()),
-                    ..PrepareOptions::default()
-                },
+                PrepareOptions::default().with_layered_overrides(
+                    ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new()),
+                ),
             )?;
             let pass_icon = prepared
                 .effective_frontmatter
@@ -284,10 +283,9 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
         |ctx| {
             let prepared = prepare_direct(
                 &source,
-                PrepareOptions {
-                    set_overrides: Some(ctx.as_set_overrides()),
-                    ..PrepareOptions::default()
-                },
+                PrepareOptions::default().with_layered_overrides(
+                    ctx.as_layered_overrides(&crate::composition::LayeredOverrides::new()),
+                ),
             )?;
             let body = prepared.prompt.clone();
             captured.borrow_mut().push((ctx.iteration, body));

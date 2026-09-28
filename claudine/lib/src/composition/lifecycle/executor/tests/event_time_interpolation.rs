@@ -367,19 +367,18 @@ fn top_level_unknown_root_fails_event_closed() {
     assert!(recorder.events().is_empty());
 }
 
-/// Post-DM2 leak guard (5.4): a known reference whose resolved value is
-/// itself raw template text leaves a surviving `{{ … }}` span, which fails
-/// before dispatch.
+/// A known reference whose value is itself template text is data (N10): the
+/// value is dispatched verbatim, never expanded a second time and never
+/// refused.
 #[test]
-fn post_dm2_surviving_span_fails_before_dispatch() {
+fn a_frontmatter_value_holding_template_text_is_sent_verbatim() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"stack": [{"action": {"message": "{{tmpl}}"}}]}}),
+        &json!({"success": {"stack": [{"action": {"action": "info", "message": "{{tmpl}}"}}]}}),
         Path::new("t.md"),
     )
     .unwrap();
-    // The frontmatter value is literal template text — resolving `{{tmpl}}`
-    // yields `{{x}}`, a surviving recognized span.
-    let fm = map(json!({"tmpl": "{{x}}"}));
+    // `x` is defined, so a second expansion would visibly render `second`.
+    let fm = map(json!({"tmpl": "{{x}} and {{…}} and $(echo X)", "x": "second"}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
@@ -395,28 +394,54 @@ fn post_dm2_surviving_span_fails_before_dispatch() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    let info = outcome
-        .evaluation_error
-        .expect("surviving span is an evaluation-layer failure");
-    assert!(outcome.action_error.is_none());
-    assert!(recorder.events().is_empty(), "no side effect dispatched");
-    assert_eq!(info.property.as_deref(), Some("success.stack[0].action[0]"));
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Info("{{x}} and {{…}} and $(echo X)".to_string())]
+    );
 }
 
-/// The backstop names the top-level property and carries a typed reason, and
-/// the rendered error selects the concatenate/`{{{ … }}}` hint from that reason
-/// rather than the missing-path hint (spec D4).
+/// The same holds for a top-level field and for mixed authored text: the
+/// authored span is scanned once, and what it inserts is kept as text.
 #[test]
-fn surviving_span_in_top_level_field_renders_property_reason_and_specific_hint() {
-    use biscuit_terminal::errors::BlockError;
-    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
-
+fn a_top_level_field_inserts_template_text_once() {
     let config = parse_lifecycle_config(
-        &json!({"success": {"message": "{{ tmpl }}"}}),
+        &json!({"success": {"message": "done: {{ tmpl }}"}}),
         Path::new("t.md"),
     )
     .unwrap();
-    let fm = map(json!({"tmpl": "done in {{ctx.repo_name}}"}));
+    let fm = map(json!({"tmpl": "in {{ctx.repo_name}}"}));
+    let (_dir, engine) = temp_engine();
+    let shell = MockShell::new(0);
+    let recorder = Recorder::default();
+    let harness = Harness::default();
+    let context = ctx(
+        LifecycleSignal::Success,
+        &fm,
+        None,
+        &engine,
+        &shell,
+        &recorder,
+        &harness,
+        Path::new("t.md"),
+    );
+    let outcome = context.execute_event(&config);
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
+    assert_eq!(
+        recorder.events(),
+        vec![Emitted::Message("done: in {{ctx.repo_name}}".to_string())]
+    );
+}
+
+/// An authored template is still strict: a typo'd root fails before dispatch.
+#[test]
+fn an_authored_span_with_an_unknown_root_still_fails_before_dispatch() {
+    let config = parse_lifecycle_config(
+        &json!({"success": {"message": "done: {{ tmpl_typo }}"}}),
+        Path::new("t.md"),
+    )
+    .unwrap();
+    let fm = map(json!({"tmpl": "x"}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
     let recorder = Recorder::default();
@@ -434,24 +459,9 @@ fn surviving_span_in_top_level_field_renders_property_reason_and_specific_hint()
     let info = context
         .execute_event(&config)
         .evaluation_error
-        .expect("a surviving span fails the event");
+        .expect("an unknown authored root fails the event");
     assert!(recorder.events().is_empty(), "no side effect dispatched");
     assert_eq!(info.property.as_deref(), Some("success.message"));
-    assert_eq!(
-        info.reason,
-        crate::composition::LifecycleEvaluationReason::SurvivingSpan {
-            span: "{{ctx.repo_name}}".to_string()
-        }
-    );
-
-    let err = CompositionError::lifecycle_evaluation("success", "t.md", &info);
-    let rendered = strip_escape_codes(err.report_block_error_optimistic(Some(200)));
-    assert!(rendered.contains("success.message"), "{rendered}");
-    assert!(rendered.contains("still contains `{{ctx.repo_name}}`"), "{rendered}");
-    assert!(rendered.contains("concatenate with `+`"), "{rendered}");
-    assert!(rendered.contains("{{{ … }}}"), "{rendered}");
-    assert!(!rendered.contains("resolve the missing"), "{rendered}");
-    assert!(!rendered.contains("an interpolated string"), "{rendered}");
 }
 
 /// A genuine expression raise keeps the missing-path hint and gains the
