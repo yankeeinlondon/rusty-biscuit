@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use biscuit_terminal::components::git_graph::{GitGraphPlan, GraphViewport, LaneEntry, NaturalSize};
+use biscuit_terminal::components::git_graph::{GitGraphPlan, GraphViewport, LaneEntry, LaneMerge, NaturalSize};
 use biscuit_terminal::components::mermaid::MermaidTheme;
 use biscuit_terminal::components::terminal_image::ImageWidth;
 use biscuit_terminal::discovery::fonts::CellSize;
@@ -221,7 +221,7 @@ fn the_base_view_gives_every_worktree_branch_a_line() {
     // fork, and its own tip is where `GitGraph` tags it.
     assert!(line("chore/merged").entries.is_empty());
     assert_eq!(line("chore/merged").fork_sha, None);
-    assert_eq!(line("chore/merged").merged_into, None, "a fast-forward has no merge commit");
+    assert_eq!(merge_destinations(line("chore/merged")), Vec::<&String>::new(), "a fast-forward has no merge commit");
     assert_eq!(line("chore/merged").tip_sha.as_ref(), Some(&m1));
     assert_eq!(line("chore/merged").last_active, None);
     assert_eq!(line("feature-a").tip_sha.as_ref(), Some(&repo.a1));
@@ -522,6 +522,11 @@ fn line<'a>(graph: &'a GraphFacts, branch: &str) -> &'a GraphLine {
         .unwrap_or_else(|| panic!("no line {branch}: {:?}", graph.lines))
 }
 
+/// The merge commits `line` merged into, oldest first.
+fn merge_destinations(line: &GraphLine) -> Vec<&String> {
+    line.merges.iter().map(|merge| &merge.destination).collect()
+}
+
 fn mermaid(graph: &GraphFacts) -> String {
     graph.to_git_graph(&PrListing::default(), None).mermaid().expect("mermaid")
 }
@@ -579,7 +584,11 @@ fn a_merged_current_branch_keeps_its_lane_and_merges_at_its_merge_commit() {
     let wt_ux = line(&graph, "fix/wt-ux");
     assert_eq!(wt_ux.entries, commits(&[&repo.w1, &repo.w2]), "the branch's own commits are its lane");
     assert_eq!(wt_ux.fork_sha.as_ref(), Some(&repo.d1));
-    assert_eq!(wt_ux.merged_into.as_ref(), Some(&repo.merge));
+    assert_eq!(
+        wt_ux.merges,
+        [LaneMerge { source: repo.w2.clone(), destination: repo.merge.clone() }],
+        "the merge's source is the branch tip"
+    );
     assert_eq!(wt_ux.tip_sha.as_ref(), Some(&repo.w2));
     // First-parent history only: no branch commit is presented as main's.
     assert_eq!(graph.default_entries, commits(&[&repo.r, &repo.d1, &repo.d2, &repo.merge]));
@@ -605,7 +614,7 @@ fn a_merged_branch_keeps_its_lane_in_the_base_view() {
     let wt_ux = line(&graph, "fix/wt-ux");
     assert_eq!(wt_ux.entries, commits(&[&repo.w1, &repo.w2]));
     assert_eq!(wt_ux.fork_sha.as_ref(), Some(&repo.d1));
-    assert_eq!(wt_ux.merged_into.as_ref(), Some(&repo.merge));
+    assert_eq!(merge_destinations(wt_ux), [&repo.merge]);
     assert_eq!(graph.default_entries, commits(&[&repo.r, &repo.d1, &repo.d2, &repo.merge]));
     assert!(!graph.incomplete);
 
@@ -676,12 +685,12 @@ fn a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view
     let wt_ux = line(&graph, "fix/wt-ux");
     assert_eq!(wt_ux.entries, commits(&[&repo.w1, &repo.w2]));
     assert_eq!(wt_ux.fork_sha.as_ref(), Some(&repo.d1));
-    assert_eq!(wt_ux.merged_into.as_ref(), Some(&repo.m103));
+    assert_eq!(merge_destinations(wt_ux), [&repo.m103]);
 
     let sniff = line(&graph, "fix/sniff");
     assert_eq!(sniff.parent.as_deref(), Some("fix/wt-ux"));
     assert_eq!(sniff.fork_sha.as_ref(), Some(&repo.w2), "forks at its parent's tip");
-    assert_eq!(sniff.merged_into.as_ref(), Some(&repo.m104));
+    assert_eq!(merge_destinations(sniff), [&repo.m104]);
     assert_eq!(sniff.tip_sha.as_ref(), repo.sniff.last());
     let mut expected = vec![LaneEntry::Elided(repo.sniff.len() - LINE_WINDOW)];
     expected.extend(commits(&repo.sniff[repo.sniff.len() - LINE_WINDOW..].iter().collect::<Vec<_>>()));
@@ -898,7 +907,7 @@ fn a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment
 
     let sniff = line(&graph, "fix/sniff");
     assert_eq!(sniff.parent.as_deref(), Some("fix/wt-ux"));
-    assert_eq!(sniff.merged_into.as_ref(), Some(&repo.m104));
+    assert_eq!(merge_destinations(sniff), [&repo.m104]);
     assert_eq!(sniff.fork_sha.as_ref(), Some(repo.w1()), "merge-base(M104^1, tip)");
     let mut own_run = vec![LaneEntry::Elided(SPARSE_SNIFF_COMMITS - LINE_WINDOW)];
     own_run.extend(commits(&repo.sniff[SPARSE_SNIFF_COMMITS - LINE_WINDOW..].iter().collect::<Vec<_>>()));
@@ -968,7 +977,7 @@ fn a_deferred_direct_merge_with_a_drawn_fork_is_complete() {
 
     let child = line(&graph, "child");
     assert_eq!(child.parent.as_deref(), Some("parent"));
-    assert_eq!(child.merged_into.as_ref(), Some(&merge));
+    assert_eq!(merge_destinations(child), [&merge]);
     assert_eq!(child.fork_sha.as_ref(), Some(&p2), "merge-base(M^1, tip)");
     assert_eq!(child.entries, commits(&[&c1, &c2]));
     assert_eq!(line(&graph, "parent").entries, commits(&[&p3, &sync, &p4]));
@@ -1018,13 +1027,13 @@ fn a_tip_on_the_parents_first_parent_chain_is_labeled_there_while_main_contains_
 
     let child = line(&graph, "child");
     assert!(child.entries.is_empty(), "no lane of its own: {child:?}");
-    assert_eq!(child.merged_into, None);
+    assert_eq!(merge_destinations(child), Vec::<&String>::new());
     assert_eq!(child.fork_sha, None);
     assert_eq!(child.tip_sha.as_ref(), Some(&p1));
     let parent = line(&graph, "parent");
     assert_eq!(parent.entries, commits(&[&p1, &p2]));
     assert_eq!(parent.fork_sha.as_ref(), Some(&d1));
-    assert_eq!(parent.merged_into.as_ref(), Some(&merge));
+    assert_eq!(merge_destinations(parent), [&merge]);
     assert!(!graph.incomplete);
 
     let plan = untrimmed_plan(&graph, 120, 40);
@@ -1072,7 +1081,7 @@ fn a_child_merged_into_its_parent_merges_on_the_parent_lane() {
     assert_eq!(child.parent.as_deref(), Some("parent"));
     assert_eq!(child.entries, commits(&[&c1, &c2]));
     assert_eq!(child.fork_sha.as_ref(), Some(&p1), "measured against the commit before the merge, not the parent's tip");
-    assert_eq!(child.merged_into.as_ref(), Some(&merge));
+    assert_eq!(merge_destinations(child), [&merge]);
     let parent = line(&graph, "parent");
     assert_eq!(parent.entries, commits(&[&p1, &p2, &merge, &p3]), "the parent lane holds the merge");
     assert_eq!(parent.fork_sha.as_ref(), Some(&d1));
@@ -1135,7 +1144,7 @@ fn a_fast_forwarded_branch_is_a_label_at_its_commit() {
 
     let ff = line(&graph, "ff");
     assert!(ff.entries.is_empty(), "no empty lane: {ff:?}");
-    assert_eq!(ff.merged_into, None, "no fabricated merge");
+    assert_eq!(merge_destinations(ff), Vec::<&String>::new(), "no fabricated merge");
     assert_eq!(ff.fork_sha, None);
     assert_eq!(ff.tip_sha.as_ref(), Some(&f1));
     assert_eq!(graph.default_entries, commits(&[&d1, &f1, &d2]));
@@ -1172,10 +1181,10 @@ fn equal_tips_keep_the_merged_lane_and_label_the_new_branch() {
     let c = line(&graph, "c");
     assert_eq!(c.entries, commits(&[&c1, &c2]));
     assert_eq!(c.fork_sha.as_ref(), Some(&d1));
-    assert_eq!(c.merged_into.as_ref(), Some(&merge));
+    assert_eq!(merge_destinations(c), [&merge]);
     let d = line(&graph, "d");
     assert!(d.entries.is_empty());
-    assert_eq!(d.merged_into, None);
+    assert_eq!(merge_destinations(d), Vec::<&String>::new());
     assert_eq!(d.tip_sha.as_ref(), Some(&c2));
     assert_eq!(d.parent.as_deref(), Some("c"));
     assert!(!graph.incomplete);
@@ -1211,7 +1220,7 @@ fn a_branch_continued_after_its_merge_is_an_unmerged_lane() {
     let b = line(&graph, "b");
     assert_eq!(b.entries, commits(&[&b2]));
     assert_eq!(b.fork_sha.as_ref(), Some(&b1));
-    assert_eq!(b.merged_into, None, "no earlier merge is reconstructed");
+    assert_eq!(merge_destinations(b), Vec::<&String>::new(), "no earlier merge is reconstructed");
     assert!(graph.default_entries.iter().all(|entry| *entry != LaneEntry::Commit(b1.clone())));
     assert!(graph.default_entries.contains(&LaneEntry::Commit(d1.clone())));
     assert!(graph.default_entries.contains(&LaneEntry::Commit(merge.clone())));
@@ -1254,7 +1263,7 @@ fn an_indirectly_integrated_branch_gets_a_lane_without_a_merge_and_the_notice() 
     let t = line(&graph, "t");
     assert_eq!(t.entries, commits(&[&t1]));
     assert_eq!(t.fork_sha.as_ref(), Some(&d1));
-    assert_eq!(t.merged_into, None);
+    assert_eq!(merge_destinations(t), Vec::<&String>::new());
     assert!(graph.incomplete);
     assert_eq!(graph.default_entries.last(), Some(&LaneEntry::Commit(merge)));
     assert!(!mermaid(&graph).contains("merge "));
@@ -1695,7 +1704,7 @@ fn old_forks_and_merges_stay_drawn_with_exact_elided_runs() {
     assert_eq!(graph.default_entries, expected);
     let side = line(&graph, "side");
     assert_eq!(side.fork_sha.as_ref(), Some(fork));
-    assert_eq!(side.merged_into.as_ref(), Some(&repo.merge));
+    assert_eq!(merge_destinations(side), [&repo.merge]);
     let mut side_expected = vec![LaneEntry::Elided(3)];
     side_expected.extend(commits(&repo.side[3..].iter().collect::<Vec<_>>()));
     assert_eq!(side.entries, side_expected);
@@ -1706,7 +1715,7 @@ fn old_forks_and_merges_stay_drawn_with_exact_elided_runs() {
     let mut expected = vec![LaneEntry::Commit(context.clone()), LaneEntry::Commit(fork.clone()), LaneEntry::Elided(3), LaneEntry::Commit(repo.merge.clone()), LaneEntry::Elided(10)];
     expected.extend(commits(&repo.after[10..].iter().collect::<Vec<_>>()));
     assert_eq!(graph.default_entries, expected);
-    assert_eq!(line(&graph, "side").merged_into.as_ref(), Some(&repo.merge));
+    assert_eq!(merge_destinations(line(&graph, "side")), [&repo.merge]);
     assert!(!graph.incomplete);
     assert!(has_merge(&mermaid(&graph), "side", &repo.merge));
 }
@@ -1745,7 +1754,7 @@ fn a_shallow_clone_draws_what_it_can_verify_and_reports_the_rest() {
     let feature_line = line(&graph, "feature");
     assert_eq!(feature_line.entries, commits(&[&feature[0], &feature[1]]), "the verified commits remain");
     assert_eq!(feature_line.fork_sha.as_ref(), Some(&main[3]), "a positive merge base is trusted");
-    assert_eq!(feature_line.merged_into, None);
+    assert_eq!(merge_destinations(feature_line), Vec::<&String>::new());
     assert_eq!(graph.default_entries, commits(&[&main[2], &main[3]]));
 
     let (graph, _) = gather(&input("main", &["main", "feature"], ForkOriginStore::default()), true, false);
@@ -1830,7 +1839,7 @@ fn a_shallow_unknown_earlier_candidate_is_a_gap_even_beside_a_later_direct_merge
     assert!(graph.incomplete);
     let feature = line(&graph, "feature");
     assert_eq!(feature.parent.as_deref(), Some("parent"));
-    assert_eq!(feature.merged_into, None, "no merge edge is invented");
+    assert_eq!(merge_destinations(feature), Vec::<&String>::new(), "no merge edge is invented");
     assert!(!mermaid(&graph).contains("merge "), "{}", mermaid(&graph));
 }
 
@@ -1891,7 +1900,7 @@ fn a_merged_lane_competes_under_the_height_cap_by_activity() {
 
     let (graph, _) = gather(&input("main", &["main", "old", "merged", "newest", "middle"], ForkOriginStore::default()), true, false);
     let graph = graph.expect("base view");
-    assert_eq!(line(&graph, "merged").merged_into.as_ref(), Some(&merge));
+    assert_eq!(merge_destinations(line(&graph, "merged")), [&merge]);
 
     // 16 units per lane (default included) at the 1.25 scale is
     // `ceil(1.25 × lanes)` rows. An 8-row terminal caps the graph at 4 rows:

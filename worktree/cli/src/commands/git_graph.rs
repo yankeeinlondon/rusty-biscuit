@@ -608,7 +608,7 @@ fn assemble(
                 line = line.forked_at(fork.clone());
             }
             if let Some((merge, _)) = merge {
-                line = line.merged_into(merge.clone());
+                line = line.with_merge(placement.tip.clone(), merge.clone());
             }
             if let Some(built) = lanes.get(&LaneId::Branch(placement.branch.clone())) {
                 line = line.with_entries(built.entries.clone());
