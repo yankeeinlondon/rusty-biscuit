@@ -647,9 +647,13 @@ Antigravity CLI has limited machine-readable discovery in the public surface obs
 - Installer scripts stage downloads under `$HOME/.cache/antigravity/staging` on Unix and `%LOCALAPPDATA%\antigravity\staging` on Windows.
 - Windows CMD installer argument sanitization rejects command lines containing `&`, `|`, `;`, `<`, `>`, or `^`.
 
+- Interactive startup prompt: `agy --prompt-interactive "<prompt>"` runs the prompt as the first turn and continues the session in the TUI (needs a TTY). `--print` is headless one-shot and must not be used for an interactive launch. Use the attached form `--prompt-interactive=<prompt>` for a prompt starting with `-`. Evidence tier: help text and research; not yet verified against a live TUI.
+
 ## Changelog
 
 This is the initial Antigravity CLI research document for this topic. `changes` is `[]`.
+
+- 2026-09-28: Added the interactive startup-prompt form (`--prompt-interactive`).
 
 ## Sources
 

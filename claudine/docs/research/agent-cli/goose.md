@@ -1129,8 +1129,11 @@ Do not rely on docs-only `--with-remote-extension`; the verified `1.41.0` binary
 
 Treat debug output, diagnostics output, verbose config, and session exports as sensitive. They can include prompts, tool results, local paths, config, logs, and secrets.
 
+Interactive startup prompt: `goose run --text "<prompt>" --interactive` processes the prompt as the first turn and then continues in an interactive session ("Continue in interactive mode after processing initial input"). Put `run` first so any other flag parses as a `run` option. `-t/--text` has no `allow_hyphen_values`, so a prompt starting with `-` must use the attached form `--text=<prompt>`; the same applies to one-shot `run -t`. Evidence tier: upstream source (`crates/goose-cli/src/cli.rs`, read 2026-09-28); not yet verified against a live binary.
+
 ## Changelog
 
+- 2026-09-28: Added the interactive startup-prompt form (`run --text <p> --interactive`) and the leading-dash rule for `-t/--text`.
 - Updated on 2026-07-03 against release `v1.41.0` from GitHub and the downloaded macOS release binary.
 - Replaced prior "no local binary" evidence with a stronger finding: no installed `goose` is on `PATH`, but a temporary release binary was inspected and reports `1.41.0`.
 - Added local config discovery results: no real user Goose config found under `/Users/ken`; `goose info` creates `projects.json` and log directories under an isolated root.
