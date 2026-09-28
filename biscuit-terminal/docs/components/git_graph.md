@@ -80,6 +80,56 @@ gitGraph
 
 After `biscuit-visualized`'s repair, `mmmmmmm`'s parents are `2222222` and `bbbbbbb`.
 
+### A lane merged from its middle
+
+A branch that was merged and then got new commits has its merge source in the middle of its lane. Pass all of its commits, and one `with_merge` per merge, oldest first:
+
+```rust
+GraphLine::new("feat/x")
+    .forked_at(d1)
+    .with_entries(vec![LaneEntry::Commit(b1.clone()), LaneEntry::Commit(n1), LaneEntry::Commit(n2)])
+    .with_merge(b1, c1) // c1 is on the default lane: d1 → p1 → c1 → m2
+```
+
+The lane is emitted in **segments**. It pauses right after its source `b1`, the default lane runs until it reaches `c1` and emits it as the `merge`, and then `feat/x` resumes with `n1`:
+
+```text
+gitGraph
+    commit id: "d1d1d1d"
+    branch feat/x
+    checkout feat/x
+    commit id: "b1b1b1b"
+    checkout main
+    commit id: "p1p1p1p"
+    merge feat/x id: "c1c1c1c"
+    checkout feat/x
+    commit id: "n1n1n1n"
+    commit id: "n2n2n2n"
+    checkout main
+    commit id: "m2m2m2m"
+```
+
+`c1c1c1c`'s parents are `p1p1p1p` and `b1b1b1b`, and `n1n1n1n`'s parent is `b1b1b1b`: the renderer leaves a merged lane's head at the commit it merged from, so the resumed commit (or a `+N` square) follows the source.
+
+```mermaid
+flowchart TD
+    A["emit feat/x up to its source b1,<br/>plus lanes forked at b1"] --> P{"is c1 emitted yet?"}
+    P -- no --> PAUSE["pause feat/x;<br/>continue the lane holding c1"]
+    PAUSE --> M["reach c1: emit merge feat/x id c1"]
+    M --> R["resume feat/x after b1"]
+    P -- yes --> DROP["c1 came first: draw it as a plain commit,<br/>mark the graph incomplete"]
+    DROP --> R
+    R --> NEXT{"another source on feat/x?"}
+    NEXT -- yes --> A
+    NEXT -- no --> END([lane ends])
+```
+
+A lane merged twice pauses twice, and both merges are drawn in source order. A lane forked at the source is declared before the pause, so it hangs from the source; a lane forked earlier or later hangs from its own commit.
+
+### Sibling order and cycles
+
+Lanes that fork at the same commit follow creation time, with one exception: a lane whose merge lands on a sibling (or on a lane hanging from that sibling) is emitted before it, because a merge can only be drawn after the merged lane's source. When two lanes' merges depend on each other, the input is inconsistent. The first edge is drawn, the other is drawn as a plain commit, and the graph is marked incomplete.
+
 ### Nothing undrawn is substituted
 
 The component never draws something at a commit other than the one it was given:
@@ -104,8 +154,8 @@ Each of these, and `with_incomplete_history()`, sets `GitGraphPlan::incomplete`,
 
 The image is sized with `ImageWidth::Scale` (see [TerminalImage](./terminal_image.md)): at 125%, gitGraph's 10-unit commit IDs and 14–16-unit branch labels read comfortably. Fitting works in two steps:
 
-1. **Height (base view only).** Past half the terminal's rows, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork and merge commits, and its parent's lane), until the next would not fit. A dim line then says `N more worktrees not shown`.
-2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
+1. **Height (base view only).** Past half the terminal's rows, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork commit and every one of its merge destinations, and its parent's lane), until the next would not fit. So a merge between two branch lanes is drawn with both lanes or with neither. A dim line then says `N more worktrees not shown`.
+2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge sources and destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
 
 `biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../../../biscuit-visualized/docs/mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
 
