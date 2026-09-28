@@ -5,6 +5,7 @@ $schema:
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
     spec_name: string -> the name of the spec (which is really just the spec's folder name)
+    in_loop: boolean -> set by the `review-loop` sequence; when true this review opts out if the previous review already ended the loop
 description: |-
     Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
@@ -14,10 +15,27 @@ design: |-
     {{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
-previous: "{{ iteration > 1 ? decrement_file_index(review) : null }}"
+# A sibling of `spec` in whatever form `spec` arrived, as the implement router
+# does. `decrement_file_index(review)` is not used because it re-anchors a
+# relative `review` on this document's directory, and a sequence step passes a
+# repo-relative `dir`.
+previous_review: "{{ iteration > 1 ? replace(spec, basename(spec), 'review-' + (iteration - 1) + '.md') : null }}"
 spec_name: "{{ parent_dir(spec) }}"
 
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
+initialize:
+    stack:
+        # Inside the review-loop sequence the step list is static, so a review
+        # whose predecessor already closed the loop opts out here and launches
+        # nothing. A direct `claudine compose` never sets `in_loop`.
+        - when: "in_loop && previous_review && frontmatter(previous_review, 'ready') == true"
+          action:
+              - message: "review #{{iteration}} skipped: {{basename(previous_review)}} already marked `{{parent_dir(spec)}}` production ready"
+              - skip
+        - when: "in_loop && previous_review && frontmatter(previous_review, 'recurrence') == true"
+          action:
+              - message: "review #{{iteration}} skipped: {{basename(previous_review)}} reported a recurring finding class; a human should read it before another cycle runs"
+              - skip
 start:
     message: "🏃‍♂️ starting review #{{iteration}} of `{{parent_dir(spec)}}` (_{{feature_or_fix}} in the **{{ctx.area || ctx.repo}}**_)"
 success:
@@ -72,7 +90,7 @@ failure:
 
 You are performing a review of the functionality defined by the `{{spec_name}}` spec:
 
-::block when="previous"
+::block when="previous_review"
 - This is the #{{iteration}} iteration of the review/fix cycle for this specification
 - The first thing you will need to check is whether the _findings_ in the review's `## Unblocked Findings` section were all implemented
     - this is the most obvious thing that the last implementation was supposed to have addressed
@@ -106,6 +124,43 @@ Read both the specification document and then perform a review on the implementa
 - features who's implementation is broken or incomplete
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
+
+## Sweep the class before you write
+
+Your goal is to be the last review. A review that reports one instance of a
+defect the code has in several places is an incomplete review, and it costs a
+full review/fix cycle for every sibling it leaves out. For example: five
+consecutive reviews each report that one more parser coerces a missing, null,
+or wrong-type field to a permissive default. One review that swept every
+parser for that class would have replaced all five.
+
+For every finding:
+
+- classify it in one sentence that names the defect class, not the file
+- enumerate every sibling site: each parser, reader, detector, or projection
+  that handles the same kind of input or makes the same kind of decision
+- check each one, using the same reproduction you used for the first (copy a
+  real fixture, change one field, run the shipped CLI or public API)
+- report the class as **one finding** with an instance table: site, shape
+  tested, observed result, expected result; include the sites that were clean
+
+Do not stop at the first high finding. Finish the sweep, then write.
+
+::block when="previous_review"
+### Recurrence
+
+Compare each finding in this review with the findings of every earlier review
+in this directory. If a finding belongs to the same class as an earlier one:
+
+- say so under a `## Recurrence` heading, naming the earlier review and finding
+- state which sibling sites that fix should have swept and did not
+- sweep them all now, so this review carries the complete list
+- set the frontmatter property `recurrence` to `true`; the review loop stops on
+  it, because a recurring class means the sweep is missing and a human should
+  look before another cycle runs
+::end-block
+
+::file "../_input-robustness.md"
 
 ::file ../_writing-clearly.md 
 
@@ -148,16 +203,17 @@ test is at the wrong level under "Findings" with severity at least "high".
     - set `$schema` to "feature-review.yaml"
     ::file "../_ready.md"
     - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
+    - set `recurrence` to `true` when any finding repeats the class of a finding in an earlier review (see "Recurrence" above), otherwise `false`
     - set `created` property to "{{ctx.now}}"
     - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
     - set `implemented` property to `false`
     - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
     - set the `{{feature_or_fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
     ::block when="iteration > 1"
-    - set the `previous` property to "{{parent_dir(previous)}}/{{basename(previous)}}"
+    - set the `previous` property to "{{parent_dir(previous_review)}}/{{basename(previous_review)}}"
     ::end-block
 ::block when="iteration >  1"
-- Now set the frontmatter properties of the _previous review_ located at @{{previous}}:
+- Now set the frontmatter properties of the _previous review_ located at @{{previous_review}}:
     - set the `next` property on the _previous review_ to "{{parent_dir(review)}}/{{basename(review)}}"
     - set the `implemented` property to `true`
 ::end-block

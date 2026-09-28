@@ -10,7 +10,7 @@ use crate::performance;
 use crate::performance::counters;
 
 use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
-use super::glob::expand_membership_globs;
+use super::glob::{DeclaredPatterns, expand_membership_globs};
 use super::manifest_index::CargoLockVersions;
 use super::standard::{GlobDialect, MonorepoStandard};
 
@@ -31,53 +31,43 @@ pub(super) fn detect_cargo_workspace(
         None => return Ok(None),
     };
 
-    let members = workspace
-        .get("members")
-        .and_then(|m| m.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
+    let members = declared_patterns(workspace, "members");
     if members.is_empty() {
         return Ok(None);
     }
-
-    let excludes = workspace
-        .get("exclude")
-        .and_then(|m| m.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let excludes = declared_patterns(workspace, "exclude");
 
     let dialect = MonorepoStandard::CargoWorkspace
         .glob_dialect()
         .unwrap_or(GlobDialect::Cargo);
 
-    let mut seeds = expand_membership_globs(
+    let expansion = expand_membership_globs(
         root,
-        &members,
+        &members.patterns,
         dialect,
         MonorepoStandard::CargoWorkspace,
         None,
         evidence,
     );
 
+    // Cargo rejects a missing literal member, so it leaves the set incomplete;
+    // excluding a missing path is harmless.
+    let mut incomplete =
+        !expansion.patterns_resolved || expansion.missing_literal || members.has_invalid;
+    let mut seeds = expansion.seeds;
+
     // Expand excluded patterns and mark them. A directory matched by both an
     // include and an exclude pattern merges to one excluded seed.
-    let mut excluded_seeds = expand_membership_globs(
+    let excluded = expand_membership_globs(
         root,
-        &excludes,
+        &excludes.patterns,
         dialect,
         MonorepoStandard::CargoWorkspace,
         None,
         evidence,
     );
+    incomplete |= !excluded.patterns_resolved || excludes.has_invalid;
+    let mut excluded_seeds = excluded.seeds;
     for seed in &mut excluded_seeds {
         seed.is_excluded = true;
     }
@@ -87,7 +77,20 @@ pub(super) fn detect_cargo_workspace(
         standard: MonorepoStandard::CargoWorkspace,
         root: root.to_path_buf(),
         seeds,
+        incomplete,
     }))
+}
+
+/// The `[workspace]` array at `key`; absent reads as empty, and a value that
+/// is not an array is an invalid declaration.
+fn declared_patterns(workspace: &toml_crate::Value, key: &str) -> DeclaredPatterns {
+    match workspace.get(key) {
+        None => DeclaredPatterns::default(),
+        Some(value) => match value.as_array() {
+            Some(arr) => arr.iter().map(|v| v.as_str()).collect(),
+            None => DeclaredPatterns::invalid(),
+        },
+    }
 }
 
 /// Parses Cargo.toml dependencies from an already-parsed TOML value.
@@ -316,4 +319,37 @@ pub(crate) fn cargo_features_from_value(parsed: &toml_crate::Value) -> Vec<Strin
     let mut names: Vec<String> = features.keys().cloned().collect();
     names.sort();
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workspace(source: &str) -> toml_crate::Value {
+        let parsed: toml_crate::Value = toml_crate::from_str(source).unwrap();
+        parsed["workspace"].clone()
+    }
+
+    #[test]
+    fn an_absent_key_declares_nothing() {
+        let workspace = workspace("[workspace]\nresolver = \"2\"\n");
+
+        assert!(declared_patterns(&workspace, "members").is_empty());
+        assert!(declared_patterns(&workspace, "exclude").is_empty());
+    }
+
+    #[test]
+    fn a_non_array_value_is_recorded_as_invalid_rather_than_absent() {
+        for key in ["members", "exclude"] {
+            for value in ["\"crates/*\"", "123", "{ a = 1 }"] {
+                let workspace = workspace(&format!("[workspace]\n{key} = {value}\n"));
+
+                assert_eq!(
+                    declared_patterns(&workspace, key),
+                    DeclaredPatterns::invalid(),
+                    "{key} = {value}"
+                );
+            }
+        }
+    }
 }

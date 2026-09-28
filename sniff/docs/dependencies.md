@@ -92,6 +92,19 @@ Darkmatter's `ctx.tailnet`/`ctx.gateway*` values and `ping()` functions (see
   Pinned to the same major as `claudine` and `claudine-cli` so provider and tool
   discovery behave consistently across the workspace.
 
+## Lockfile and Configuration Parsing (`filesystem::repo::{jsonc, lockfile}`)
+
+- **`jsonc-parser` 0.33.2 (`serde` feature only).** `bun.lock`, `rush.json`,
+  and Rush's `pnpm-config.json` and `subspaces.json` are JSON with comments
+  and trailing commas, which strict `serde_json` rejects. The crate
+  deserializes typed partial structs straight from its scanner (no value
+  tree) and rejects trailing content. Its defaults are lenient (single
+  quotes, unquoted keys, missing commas), so `repo::jsonc` spells out strict
+  options and nothing else may call it with `Default::default()`.
+  `json-five`, already in the graph through `biscuit-file`, was rejected: it
+  builds a full AST (about 9x the input at peak) and cannot turn off JSON5
+  extensions. Chosen in spike S2 of `2026-09-26-lockfile-corroboration`.
+
 ## Portable Path Text
 
 - **`biscuit-file` (default features off).** The CLI uses the workspace path-text

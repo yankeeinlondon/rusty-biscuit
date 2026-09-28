@@ -38,6 +38,11 @@ fn repository_root(process: &CliProcessFixture) -> PathBuf {
         root.join("prompts/plan.md"),
     )
     .unwrap();
+    fs::copy(
+        checkout.join("prompts/_input-robustness.md"),
+        root.join("prompts/_input-robustness.md"),
+    )
+    .unwrap();
     let route = "darkmatter/cli/tests/fixtures/shipped_plan_route";
     fs::create_dir_all(root.join(route)).unwrap();
     fs::copy(

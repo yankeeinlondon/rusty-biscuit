@@ -186,6 +186,13 @@ sniff repo recent-commits --package-area sniff
 sniff repo recent-commits --operation fix --author ada
 ```
 
+`--package` matches files owned by that package; `--package-area` matches any
+file inside the area's directory, including shared files such as fixes,
+specs, and the area README, which report `"packages": []` and the area in
+`package_areas`. Membership is by file location, never by commit scope. The
+count is the number of matching commits, and each one keeps all of its
+changed files.
+
 **Justfile Detection:**
 
 ```bash
@@ -481,7 +488,7 @@ table summarises the contract; see the per-subcommand docs under
 | Subcommand | JSON shape |
 |---|---|
 | `repo` (bare, `--json`) | Consolidated `SniffRepo` aggregate with snake_case keys, grouped `context`, top-level `branches`/`worktrees`, and `dirty`/`staged`/`unstaged`/`untracked` scope buckets; see [`sniff/docs/topics/json-output.md`](../../docs/topics/json-output.md) |
-| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo. |
+| `repo structure` | Full `RepoInfo` blob (`is_monorepo`, `packages`, `dependencies`, ...). A single-package project, a PHP-only `composer.json` root included, reports its one root package with `is_monorepo: false`. Includes `monorepo_standards` and `monorepo_layers` when the repo is a monorepo; each layer carries a `lockfile` object (which replaces the removed `lockfile_match`) and is corroborated against its lockfile, as in bare `repo --json`. `standalone_lockfiles` (Poetry, PDM, Composer) is omitted when empty; the bare `repo --json` aggregate always carries it under `structure`. Commands that run the structure tier read no lockfile for this. |
 | `repo name` | `{ "name": "..." }` |
 | `repo language` | `{ "language": "..." \| null }` (or full language breakdown with `--breakdown`) |
 | `repo is-monorepo` | `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }` |
@@ -519,6 +526,33 @@ table summarises the contract; see the per-subcommand docs under
 object-shaped output (everything above except the array shapes); for
 array outputs (`packages`, `package-areas`, `pr`, file lists, commit families) the
 array is wrapped in `{ data: [...], performance: {...} }`.
+
+### Lockfile Observations
+
+Every command that reports workspace layers (`repo structure`, `filesystem`,
+bare `sniff --json`, and the `repo --json` aggregate) corroborates each layer
+against its lockfile, so none of them reports `not_requested`. The CLI only
+projects the library's observations; it never rediscovers or reinterprets a
+lockfile.
+
+- **JSON.** Each `monorepo_layers` entry carries a required `lockfile` object
+  whose `status`, `paths`, `reason`, `extra`, and `missing` fields are always
+  present. It replaces the removed `lockfile_match` boolean, which is a
+  breaking change for scripts that read that key. `standalone_lockfiles` lists
+  the Poetry, PDM, and Composer lockfiles found at the repository root or a
+  package root, including a single-package project's root. It is omitted when empty, except under the `repo --json`
+  aggregate's `structure`, which always carries it. The
+  [library README](../lib/README.md#lockfile-corroboration) defines the
+  status and reason vocabulary, the Cargo-only `members_present` /
+  `members_missing` statuses, and why only an exact `match` upgrades
+  provenance to `lockfile`.
+- **Human output.** A "Lockfiles" section follows the package listing, with
+  one entry per layer and standalone lockfile giving its status, a
+  plain-language explanation, the selected lockfile paths, and each missing
+  or extra member. See [`repo structure`](../docs/cli/repo_structure.md#lockfiles).
+- **Streams and exit status.** A `mismatch` or `unreadable` lockfile is a fact
+  about the repository, not an error: it is printed on stdout and does not
+  change the exit status. JSON stdout remains exactly one document.
 
 ## Architecture
 

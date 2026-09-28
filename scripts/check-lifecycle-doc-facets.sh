@@ -57,7 +57,7 @@ if [[ $# -eq 0 ]]; then
     # The deprecated aliases are allowed only inside an explicit
     # "Deprecated aliases" section (see the window logic below).
     files=(
-        "${repo_root}/claudine/docs/topics/lifecycle.md"
+        "${repo_root}/claudine/docs/topics/flow-control/lifecycle.md"
         "${repo_root}/claudine/docs/topics/composition.md"
         "${repo_root}/claudine/docs/topics/frontmatter-properties.md"
     )

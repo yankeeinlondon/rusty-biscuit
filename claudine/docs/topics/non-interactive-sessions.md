@@ -379,7 +379,7 @@ Both commands flow through the same unified pipeline: `execute_composition_reque
 
 ## Harness System
 
-The harness wraps non-interactive prompts with timeout enforcement, shell-audit pre-flight, runtime attempt classification, and lifecycle recovery infrastructure. Gating, verification, and recovery are expressed through the prompt's [lifecycle stack](lifecycle.md) — `when:` guards plus the `error` / `skip` / `proxy` / `retry` / `resume` / `defer` lifecycle actions — not a separate validation/handler DSL.
+The harness wraps non-interactive prompts with timeout enforcement, shell-audit pre-flight, runtime attempt classification, and lifecycle recovery infrastructure. Gating, verification, and recovery are expressed through the prompt's [lifecycle stack](flow-control/lifecycle.md) — `when:` guards plus the `error` / `skip` / `proxy` / `retry` / `resume` / `defer` lifecycle actions — not a separate validation/handler DSL.
 
 ### Gating, Verification, and Recovery
 

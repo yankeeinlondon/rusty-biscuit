@@ -1,0 +1,21 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+pnpmfileChecksum: kjiy455cgchvlc7orvc57y6wr4
+
+importers:
+
+  .: {}
+
+  ../../.tools/hidden: {}
+
+  ../../packages/alpha:
+    dependencies:
+      '@fixture/beta':
+        specifier: workspace:*
+        version: link:../beta
+
+  ../../packages/beta: {}

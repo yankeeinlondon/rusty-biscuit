@@ -2,6 +2,12 @@
 
 ## Recent Dependency Notes
 
+- `sniff` adds `jsonc-parser` 0.33.2 (`serde` feature) (2026-09-26,
+  `2026-09-26-lockfile-corroboration`) for `bun.lock`, `rush.json`, and Rush
+  configuration, all JSON with comments. It is the only new crate in the
+  graph. It streams, so peak memory stays flat for large lockfiles.
+  `json-five`, already present through `biscuit-file`, was rejected because it
+  builds a full AST. See `sniff/docs/dependencies.md`.
 - `biscuit-visualized` moves `mermaid-rs-renderer` from 0.2 (locked 0.2.1) to
   0.3.1 (2026-09-24, worktree `2026-09-24-ux-improvements`), for 0.3's
   `measure_svg_dimensions` (the natural SVG size that scale-based image widths
@@ -1195,6 +1201,12 @@ This is a Rust workspace with the following modules:
     _Fast JSON serialization/deserialization using serde._
 
     _Tags: json, serialization_
+
+- [jsonc-parser](https://github.com/dprint/jsonc-parser) _v0.33.2_ [📄](https://docs.rs/jsonc-parser)
+
+    _JSON-with-comments parser with a streaming serde deserializer; Sniff reads `bun.lock` and Rush configuration with it under strict options._
+
+    _Tags: json, parsing, serialization_
 
 - [serde_path_to_error](https://github.com/dtolnay/path-to-error) _v0.1_ [📄](https://docs.rs/serde_path_to_error)
 

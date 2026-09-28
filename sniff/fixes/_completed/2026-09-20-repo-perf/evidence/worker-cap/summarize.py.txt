@@ -1,0 +1,48 @@
+import json, glob, os, statistics, re, collections, sys
+S = os.path.dirname(os.path.abspath(__file__))
+R, P = f"{S}/raw", f"{S}/probes"
+agg = collections.defaultdict(list)
+for f in sorted(glob.glob(f"{R}/*.sample.json")):
+    side, prof, run, case = re.match(r"(w\d+)-(release)-(r\d)-(.*)\.sample\.json", os.path.basename(f)).groups()
+    d = json.load(open(f))
+    per = [t / i / 1e6 for t, i in zip(d["times"], d["iters"])]
+    agg[(case, side)].append((run, statistics.median(per), min(per), max(per)))
+print("## Criterion corpus (release), per-bracket medians r1,r2,r3 (ms)\n")
+print("| case | side | bracket medians | median | sample min-max |\n|---|---|---|---:|---|")
+for k in sorted(agg):
+    v = agg[k]; meds = [x[1] for x in v]
+    print(f"| {k[0]} | {k[1]} | {', '.join(f'{m:.2f}' for m in meds)} | {statistics.median(meds):.2f} | {min(x[2] for x in v):.2f}-{max(x[3] for x in v):.2f} |")
+print("\n## Tiny-tree latency (median us) p1 / p2\n")
+print("| profile | case | w12 | w4 |\n|---|---|---|---|")
+lat = collections.defaultdict(dict)
+for f in glob.glob(f"{P}/*-tiny-latency.txt"):
+    side, prof, run = re.match(r"(w\d+)-(release|debug)-(p\d)-", os.path.basename(f)).groups()
+    for line in open(f):
+        m = re.match(r"(\w+): n=\d+ median_us=([\d.]+)", line)
+        if m: lat[(prof, m.group(1))][(side, run)] = float(m.group(2))
+for k in sorted(lat):
+    d = lat[k]; fmt = lambda s: " / ".join(f"{d.get((s,r),float('nan')):,.1f}" for r in ("p1","p2"))
+    print(f"| {k[0]} | {k[1]} | {fmt('w12')} | {fmt('w4')} |")
+print("\n## Concurrent (release) p1 / p2\n")
+print("| tree | threads x req | side | rps | median ms | p95 ms | user+sys s | max RSS MB | invol ctx |\n|---|---|---|---:|---:|---:|---:|---:|---:|")
+con = collections.defaultdict(lambda: collections.defaultdict(list))
+for f in sorted(glob.glob(f"{P}/*-concurrent-*.txt")):
+    side, run, tree, t = re.match(r"(w\d+)-release-(p\d)-concurrent-(\w+)-t(\d+)", os.path.basename(f)).groups()
+    txt = open(f).read()
+    rps = float(re.search(r"throughput_rps=([\d.]+)", txt).group(1))
+    req = re.search(r"requests_per_thread=(\d+)", txt).group(1)
+    med = float(re.search(r"request_latency: .*median_us=([\d.]+)", txt).group(1))/1e3
+    p95 = float(re.search(r"p95_us=([\d.]+)", txt).group(1))/1e3
+    m = re.search(r"([\d.]+) real\s+([\d.]+) user\s+([\d.]+) sys", txt)
+    cpu = float(m.group(2))+float(m.group(3))
+    rss = int(re.search(r"(\d+)\s+maximum resident", txt).group(1))/1e6
+    ctx = int(re.search(r"(\d+)\s+involuntary", txt).group(1))
+    c = con[(tree, int(t), req, side)]
+    for key, val in (("rps",rps),("med",med),("p95",p95),("cpu",cpu),("rss",rss),("ctx",ctx)): c[key].append(val)
+for k in sorted(con, key=lambda k: (k[0]!="tiny", k[1], k[3]!="w12")):
+    c = con[k]; j = lambda key, f: " / ".join(f.format(x) for x in c[key])
+    print(f"| {k[0]} | {k[1]} x {k[2]} | {k[3]} | {j('rps','{:,.1f}')} | {j('med','{:.2f}')} | {j('p95','{:.2f}')} | {j('cpu','{:.2f}')} | {j('rss','{:.1f}')} | {j('ctx','{:,}')} |")
+print("\n## Load\n")
+for f in sorted(glob.glob(f"{P}/*.txt") + glob.glob(f"{R}/*.log")):
+    ls = [l.strip() for l in open(f) if l.startswith(("start:", "end:"))]
+    if ls: print(f"- {os.path.basename(f)}: {' | '.join(ls)}")

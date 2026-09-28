@@ -205,7 +205,7 @@ behavior.
   `execute_resolved_message`, and `execute_notification` docs currently say
   "fire-and-forget". Rewrite them to say sends are tracked and drained
   before exit (R1–R3).
-- `docs/topics/lifecycle.md`: add a sentence to the communication-properties
+- `docs/topics/flow-control/lifecycle.md`: add a sentence to the communication-properties
   section (near the `message` row) stating that a message sent from a
   terminal event is delivered, or reported as failed, before the process
   exits, with a 10-second limit.

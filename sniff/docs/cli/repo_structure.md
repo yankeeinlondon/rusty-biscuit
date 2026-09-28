@@ -3,6 +3,7 @@ blast_radius:
   - sniff/cli/src/args/repo.rs
   - sniff/cli/src/args/mod.rs
   - sniff/cli/src/output/filesystem/repo.rs
+  - sniff/cli/src/output/filesystem/lockfile.rs
   - sniff/cli/src/output/repo_json.rs
   - sniff/lib/src/filesystem/repo/types.rs
   - sniff/lib/src/filesystem/repo/standard.rs
@@ -24,7 +25,10 @@ Detects and displays the structure of a repository, whether single-package or mo
 
 ### Single-Package Repository
 
-For non-monorepos, a summary is shown:
+For a single-package project (a root `Cargo.toml`, `package.json`,
+`pyproject.toml`, `requirements.txt`, `go.mod`, or `composer.json` with no
+workspace), a summary is shown, followed by any [Lockfiles](#lockfiles)
+section:
 
 ```
 Repository
@@ -72,6 +76,32 @@ Packages excluded from the workspace are shown in orange: `<orange>{name}</orang
 When `--latest-versions` is active, packages with updatable dependencies append a `*` indicator:
 - `<yellow>*</yellow>` — updates available
 - `<red>*</red>` — major version update available
+
+### Lockfiles
+
+After the package listing, a **Lockfiles** section reports what each
+workspace layer's lockfile says about the layer's members, then any
+standalone Poetry, PDM, or Composer lockfile found at the repository root or a
+package root. The section is omitted when there is neither.
+
+```
+Lockfiles
+
+- pnpm workspaces (.): mismatch — the lockfile's members differ from the manifest
+    - lockfile: pnpm-lock.yaml
+    - missing from the lockfile: packages/beta
+- Poetry (packages/alpha): unverifiable — this lockfile does not record which packages are workspace members
+    - lockfile: poetry.lock
+```
+
+Each entry names the layer (its label and root relative to the repository
+root), the status, and a plain-language explanation of the status and its
+reason. Beneath it, each selected lockfile is on its own line (a legacy Gradle
+group can select many), followed by each member only the manifest declares
+(`missing from the lockfile`) and each member only the lockfile records
+(`only in the lockfile`). A `mismatch` or `unreadable` lockfile is a fact
+about the repository: it is printed on stdout and does not change the exit
+status.
 
 ## Verbose Mode (`-v`)
 
@@ -177,6 +207,14 @@ Returns a `RepoInfo` object:
       "authority": "cargo-workspace",
       "orchestrators": [],
       "provenance": "globbed",
+      "lockfile": {
+        "status": "members_present",
+        "paths": ["Cargo.lock"],
+        "reason": "subset_only",
+        "extra": [],
+        "missing": []
+      },
+      "root_is_package": false,
       "packages": ["sniff/lib", "sniff/cli"]
     }
   ],
@@ -209,6 +247,12 @@ Returns a `RepoInfo` object:
   ]
 }
 ```
+
+Every layer carries a `lockfile` object with `status`, `paths`, `reason`,
+`extra`, and `missing`; it replaces the removed `lockfile_match`.
+`standalone_lockfiles` lists standalone Poetry, PDM, and Composer lockfiles,
+each with `root` and `tool` plus the same five fields; like
+`monorepo_layers`, it is omitted when empty.
 
 The legacy keys `monorepo_tool`, `workspace_tools`, and `discovery_sources` are no longer emitted.
 

@@ -48,6 +48,7 @@ pub(super) fn detect_go_workspace(root: &Path) -> Result<Option<DetectorOutcome>
         standard: MonorepoStandard::GoWorkspace,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 

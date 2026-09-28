@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use tracing::debug;
 
 use crate::filesystem::file_types::{
     FileAssociation, FileInventory, FrameworkAccumulator, FrameworkKind, LanguageAccumulator,
@@ -24,15 +25,22 @@ use super::go::{
     detect_go_workspace, go_mod_dependencies_from_content, go_module_name_from_content,
 };
 use super::gradle::detect_gradle_workspace;
+use super::lockfile::cargo::CargoLock;
+use super::lockfile::sources::Format;
+use super::lockfile::{
+    LockfileFailure, LockfilePresence, LockfileStatus, ParsedLockfile, observe_layer_lockfile,
+    observe_standalone_lockfiles,
+};
 use super::manifest_index::{
     CargoLockVersions, ManifestIndex, discover_seeds_from_index,
     discover_seeds_with_optional_index as mi_discover_seeds_with_optional_index,
 };
+use super::jsonc;
 use super::maven::detect_maven_workspace;
 use super::nested::discover_nested_workspace_outcomes;
 use super::npm::{
-    detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace, detect_rush_workspace,
-    detect_yarn_workspace, npm_package_name, npm_package_version,
+    RushJson, detect_bun_workspace, detect_npm_workspace, detect_pnpm_workspace,
+    detect_rush_workspace, detect_yarn_workspace, npm_package_name, npm_package_version,
     package_json_dependencies_from_value, package_json_workspace_patterns_from_value,
     pnpm_workspace_patterns_from_value, resolve_js_package_manager,
 };
@@ -66,6 +74,9 @@ pub(crate) struct RepoEvidence<'a> {
     /// membership globs resolve a boundary by marker presence alone and have
     /// never applied the index's generated/fixture exclusions.
     pub(crate) manifest_dirs: Option<&'a [PathBuf]>,
+    /// Where the observation walk failed to read an entry; see
+    /// `FilesystemSystemView::manifest_walk_errors`.
+    pub(crate) manifest_walk_errors: Option<&'a [PathBuf]>,
     pub(crate) nested_markers: Option<&'a [PathBuf]>,
     pub(crate) inventory: Option<&'a FileInventory>,
 }
@@ -81,6 +92,7 @@ impl<'a> RepoEvidence<'a> {
         Self {
             manifest_index: view.manifest_index.as_ref(),
             manifest_dirs: view.manifest_dirs.as_deref(),
+            manifest_walk_errors: view.manifest_walk_errors.as_deref(),
             nested_markers: view.nested_markers.as_deref(),
             inventory: view.inventory.as_ref(),
         }
@@ -143,11 +155,13 @@ pub(crate) fn detect_repo_inner_with_request(
 /// `root`, or `None` when `root` declares no recognizable package.
 ///
 /// [`detect_repo_inner_with_shared`] returns `None` for an ordinary
-/// single-package project — a `Cargo.toml` with `[package]` but no
-/// `[workspace]`, or a lone `package.json` / `pyproject.toml` / `go.mod` —
-/// because every workspace detector requires a membership marker. The
-/// package-manager, dependency, and aggregate reporting paths still need that
-/// root package's facts, so this builds the one-package catalog they consume.
+/// single-package project — a root `Cargo.toml`, `package.json`,
+/// `pyproject.toml`, `requirements.txt`, `go.mod`, or `composer.json` that
+/// declares no workspace members — because every workspace detector requires
+/// a membership marker. A degenerate workspace manifest therefore also
+/// becomes one root package. The package-manager, dependency,
+/// and aggregate reporting paths still need that root package's facts, so this
+/// builds the one-package catalog they consume.
 pub(crate) fn synthesize_root_package_repo(root: &Path) -> Option<RepoInfo> {
     synthesize_root_package_repo_with_request(root, &RepoRequest::structure())
 }
@@ -168,7 +182,11 @@ fn synthesize_root_package_repo_with_store(
     request: &RepoRequest,
     manifests: &ManifestStore,
 ) -> Option<RepoInfo> {
-    if detect_package_ecosystem(root) == PackageEcosystem::Unknown {
+    let composer_json = root.join("composer.json");
+    let ecosystem = detect_package_ecosystem(root);
+    // A PHP-only root has no `PackageEcosystem` of its own, but it is still
+    // the one package whose `composer.lock` ruling R2 reports.
+    if ecosystem == PackageEcosystem::Unknown && !probe_exists(&composer_json) {
         return None;
     }
     let lock_versions = if request.wants_dependencies() {
@@ -176,21 +194,47 @@ fn synthesize_root_package_repo_with_store(
     } else {
         None
     };
-    let package = create_package_with_request(
+    let mut package = create_package_with_request(
         root,
         root,
         MonorepoStandard::Unknown,
         PackageProvenance::ManifestScan,
-        lock_versions.as_deref(),
+        lock_versions.as_deref().map(|lock| &lock.versions),
         request,
+        manifests,
+    );
+    // `composer.json` is read only when no other root manifest exists to
+    // name the package.
+    if ecosystem == PackageEcosystem::Unknown
+        && let Some(name) = manifests
+            .raw_text(&composer_json)
+            .and_then(|content| composer_package_name(&content))
+    {
+        package.name = name;
+    }
+    let standalone_lockfiles = observe_standalone_lockfiles(
+        root,
+        [],
+        request.wants_lockfile_provenance(),
         manifests,
     );
     Some(RepoInfo {
         is_monorepo: false,
         root: root.to_path_buf(),
         packages: Some(vec![package]),
+        standalone_lockfiles,
         ..RepoInfo::default()
     })
+}
+
+/// The `name` of a `composer.json`, absent when the document is not valid
+/// JSON or declares none (a root project need not).
+fn composer_package_name(content: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()?
+        .get("name")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Request-scoped store for manifest outcomes, lockfiles, and root configuration.
@@ -206,15 +250,19 @@ pub(crate) struct ManifestStore {
     npm: RefCell<HashMap<PathBuf, ManifestOutcome<serde_json::Value>>>,
     pyproject: RefCell<HashMap<PathBuf, ManifestOutcome<toml_crate::Value>>>,
     pnpm_workspace: RefCell<HashMap<PathBuf, ManifestOutcome<serde_yaml_ng::Value>>>,
+    rush_json: RefCell<HashMap<PathBuf, ManifestOutcome<RushJson>>>,
     go_mod: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
     raw_text: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
-    cargo_locks: RefCell<HashMap<PathBuf, Option<Rc<CargoLockVersions>>>>,
-    pnpm_locks: RefCell<HashMap<PathBuf, Option<Rc<serde_yaml_ng::Value>>>>,
-    uv_locks: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
+    /// Keyed by the lexical [`normalize_path`], so a probe pays no hidden
+    /// `canonicalize`.
+    lockfile_presence: RefCell<HashMap<PathBuf, LockfilePresence>>,
+    lockfiles: RefCell<HashMap<PathBuf, LockfileOutcome<ParsedLockfile>>>,
+    cargo_locks: RefCell<HashMap<PathBuf, LockfileOutcome<CargoLock>>>,
     root_configs: RefCell<HashMap<PathBuf, bool>>,
 }
 
 type ManifestOutcome<T> = std::result::Result<Rc<T>, ManifestFailure>;
+type LockfileOutcome<T> = std::result::Result<Rc<T>, LockfileFailure>;
 
 #[derive(Clone, Debug)]
 enum ManifestFailure {
@@ -325,6 +373,41 @@ impl ManifestStore {
         parsed.map_err(|error| error.to_sniff_error())
     }
 
+    /// Parse a Node manifest that is only a candidate workspace root, sharing
+    /// the cache with [`Self::npm`] and [`Self::required_npm`].
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(None)` when the file is not valid JSON: it cannot declare a
+    /// workspace, and if it is a workspace member, lockfile corroboration
+    /// reports that member as incomplete discovery (ruling R10).
+    ///
+    /// ## Errors
+    ///
+    /// The read error, so an unreadable manifest still fails detection.
+    pub(crate) fn npm_unless_malformed(
+        &self,
+        path: &Path,
+    ) -> Result<Option<Rc<serde_json::Value>>> {
+        let key = normalized_key(path);
+        let cached = self.npm.borrow().get(&key).cloned();
+        let outcome = cached.unwrap_or_else(|| {
+            let parsed = read_counted_parsed_manifest(path, |content| {
+                serde_json::from_str::<serde_json::Value>(content)
+            });
+            self.npm.borrow_mut().insert(key, parsed.clone());
+            parsed
+        });
+        match outcome {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(ManifestFailure::Parse(message)) => {
+                debug!(path = %path.display(), %message, "package.json is not valid JSON");
+                Ok(None)
+            }
+            Err(failure) => Err(failure.to_sniff_error()),
+        }
+    }
+
     pub(crate) fn pyproject(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
         let key = normalized_key(path);
         if let Some(cached) = self.pyproject.borrow().get(&key) {
@@ -369,6 +452,35 @@ impl ManifestStore {
         parsed.map_err(|error| error.to_sniff_error())
     }
 
+    /// Parse `rush.json` (JSON with comments) once per request, for both the
+    /// Rush detector and Rush lockfile corroboration.
+    ///
+    /// ## Returns
+    ///
+    /// `Ok(None)` when the file is not valid JSONC or does not have the
+    /// expected shape, which the detector treats as "not a Rush repository".
+    ///
+    /// ## Errors
+    ///
+    /// The read error, so an unreadable `rush.json` still fails detection.
+    pub(crate) fn rush_json(&self, path: &Path) -> Result<Option<Rc<RushJson>>> {
+        let key = normalized_key(path);
+        let cached = self.rush_json.borrow().get(&key).cloned();
+        let outcome = cached.unwrap_or_else(|| {
+            let parsed = read_counted_parsed_manifest(path, jsonc::from_str::<RushJson>);
+            self.rush_json.borrow_mut().insert(key, parsed.clone());
+            parsed
+        });
+        match outcome {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(ManifestFailure::Parse(message)) => {
+                debug!(path = %path.display(), %message, "rush.json is not valid JSONC");
+                Ok(None)
+            }
+            Err(failure) => Err(failure.to_sniff_error()),
+        }
+    }
+
     pub(crate) fn go_mod(&self, path: &Path) -> Option<Rc<String>> {
         let key = normalized_key(path);
         if let Some(cached) = self.go_mod.borrow().get(&key) {
@@ -383,7 +495,8 @@ impl ManifestStore {
     /// in the cache yet (composer.json, Gemfile, pom.xml, build.gradle,
     /// mix.exs, *.csproj, *.gemspec, requirements.txt). Used by test-runner
     /// repo detection to do substring searches over the declared dependency
-    /// keys without re-reading the file per runner.
+    /// keys without re-reading the file per runner, and to name a PHP-only
+    /// root package.
     pub(crate) fn raw_text(&self, path: &Path) -> Option<Rc<String>> {
         let key = normalized_key(path);
         if let Some(cached) = self.raw_text.borrow().get(&key) {
@@ -394,38 +507,75 @@ impl ManifestStore {
         content
     }
 
-    pub(crate) fn cargo_lock(&self, path: &Path) -> Option<Rc<CargoLockVersions>> {
+    /// Whether a lockfile exists, probed once per request.
+    ///
+    /// Every lockfile read in the store is gated on this answer, so an absent
+    /// lockfile costs one metadata probe and no open.
+    pub(crate) fn lockfile_presence(&self, path: &Path) -> LockfilePresence {
+        let key = normalize_path(path);
+        if let Some(cached) = self.lockfile_presence.borrow().get(&key) {
+            return *cached;
+        }
+        performance::increment_counter(counters::REPO_LOCKFILE_PROBES, 1);
+        performance::increment_counter(counters::FS_METADATA_PROBES, 1);
+        let presence = super::lockfile::probe_presence(path);
+        self.lockfile_presence.borrow_mut().insert(key, presence);
+        presence
+    }
+
+    /// A lockfile's parsed corroboration view, read and parsed at most once
+    /// per request. Failures are cached as well as successes.
+    pub(crate) fn lockfile(&self, path: &Path, format: Format) -> LockfileOutcome<ParsedLockfile> {
+        if format == Format::Cargo {
+            let lock = self.cargo_lock_outcome(path)?;
+            return lock.membership.clone().map_err(LockfileFailure::Parse);
+        }
+        self.gate_on_presence(path)?;
+        let key = normalized_key(path);
+        if let Some(cached) = self.lockfiles.borrow().get(&key) {
+            return cached.clone();
+        }
+        let outcome = read_counted_lockfile(path)
+            .map_err(|error| LockfileFailure::Read(error.kind()))
+            .and_then(|content| {
+                format
+                    .parse(&content)
+                    .map(Rc::new)
+                    .map_err(LockfileFailure::Parse)
+            });
+        self.lockfiles.borrow_mut().insert(key, outcome.clone());
+        outcome
+    }
+
+    /// The shared `Cargo.lock` parse for dependency-version enrichment, or
+    /// `None` when the file is absent, unreadable, or not valid TOML.
+    pub(crate) fn cargo_lock(&self, path: &Path) -> Option<Rc<CargoLock>> {
+        self.cargo_lock_outcome(path).ok()
+    }
+
+    fn cargo_lock_outcome(&self, path: &Path) -> LockfileOutcome<CargoLock> {
+        self.gate_on_presence(path)?;
         let key = normalized_key(path);
         if let Some(cached) = self.cargo_locks.borrow().get(&key) {
             return cached.clone();
         }
-        let parsed = CargoLockVersions::parse(path).map(Rc::new);
-        self.cargo_locks.borrow_mut().insert(key, parsed.clone());
-        parsed
+        let outcome = read_counted_lockfile(path)
+            .map_err(|error| LockfileFailure::Read(error.kind()))
+            .and_then(|content| {
+                CargoLock::parse(&content)
+                    .map(Rc::new)
+                    .map_err(LockfileFailure::Parse)
+            });
+        self.cargo_locks.borrow_mut().insert(key, outcome.clone());
+        outcome
     }
 
-    fn pnpm_lock(&self, path: &Path) -> Option<Rc<serde_yaml_ng::Value>> {
-        let key = normalized_key(path);
-        if let Some(cached) = self.pnpm_locks.borrow().get(&key) {
-            return cached.clone();
+    fn gate_on_presence(&self, path: &Path) -> std::result::Result<(), LockfileFailure> {
+        match self.lockfile_presence(path) {
+            LockfilePresence::Present => Ok(()),
+            LockfilePresence::Absent => Err(LockfileFailure::Absent),
+            LockfilePresence::Failed(kind) => Err(LockfileFailure::Metadata(kind)),
         }
-        let parsed = read_counted_lockfile(path)
-            .and_then(|content| serde_yaml_ng::from_str(&content).ok())
-            .map(Rc::new);
-        self.pnpm_locks.borrow_mut().insert(key, parsed.clone());
-        parsed
-    }
-
-    fn uv_lock(&self, path: &Path) -> Option<Rc<toml_crate::Value>> {
-        let key = normalized_key(path);
-        if let Some(cached) = self.uv_locks.borrow().get(&key) {
-            return cached.clone();
-        }
-        let parsed = read_counted_lockfile(path)
-            .and_then(|content| toml_crate::from_str(&content).ok())
-            .map(Rc::new);
-        self.uv_locks.borrow_mut().insert(key, parsed.clone());
-        parsed
     }
 
     /// Observe one workspace-root test-runner configuration path once.
@@ -473,12 +623,26 @@ fn read_counted_manifest(path: &Path) -> Option<String> {
     Some(content)
 }
 
-fn read_counted_lockfile(path: &Path) -> Option<String> {
+/// Read a configuration file that is not cached in the store, counting it as
+/// a manifest read and parse (Rush's `pnpm-config.json` and
+/// `subspaces.json`, ruling R8).
+pub(crate) fn read_counted_config(path: &Path) -> std::io::Result<String> {
     performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = std::fs::read_to_string(path)?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+    Ok(content)
+}
+
+/// Read a lockfile the store has already probed as present, counting the
+/// attempt before the open and the parse after a successful read.
+fn read_counted_lockfile(path: &Path) -> std::io::Result<String> {
+    performance::increment_counter(counters::REPO_LOCKFILE_READS, 1);
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
+    let content = std::fs::read_to_string(path)?;
     performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
     performance::increment_counter(counters::REPO_LOCKFILE_PARSES, 1);
-    Some(content)
+    Ok(content)
 }
 
 /// Probe for a path's existence, recording one metadata probe.
@@ -646,7 +810,11 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     collect_outcome(detect_gradle_workspace(root)?, &mut seeds, &mut outcomes);
     collect_outcome(detect_maven_workspace(root)?, &mut seeds, &mut outcomes);
     collect_outcome(detect_dotnet_solution(root)?, &mut seeds, &mut outcomes);
-    collect_outcome(detect_rush_workspace(root)?, &mut seeds, &mut outcomes);
+    collect_outcome(
+        detect_rush_workspace(root, &manifests)?,
+        &mut seeds,
+        &mut outcomes,
+    );
 
     // Polyglot leaf-marker build systems contribute one outcome per workspace
     // root (Bazel segments nested `WORKSPACE` subtrees into their own layer).
@@ -743,10 +911,23 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
             resolve_acting_binary(standard.standard, &standard.root, &executable_index);
     }
 
-    // Upgrade provenance to `Lockfile` for ecosystems where the committed
-    // lockfile is a high-fidelity membership source.
+    // Every layer reports a lockfile observation. Presence is always probed;
+    // a request that declines corroboration reads no lockfile content here
+    // and keeps manifest-derived provenance.
     for layer in &mut monorepo_layers {
-        upgrade_provenance_with_lockfile(layer, &mut seeds, &manifests);
+        let outcome = outcomes
+            .iter()
+            .find(|outcome| outcome.root == layer.root && outcome.standard == layer.authority);
+        // An incomplete outcome is passed as no outcome: both leave the
+        // manifest-side set unknown, so neither is ever compared.
+        let complete = outcome
+            .filter(|outcome| !outcome.incomplete)
+            .map(|outcome| outcome.seeds.as_slice());
+        layer.lockfile = observe_layer_lockfile(layer, complete, request, &manifests);
+        if layer.lockfile.status == LockfileStatus::Match {
+            layer.provenance = PackageProvenance::Lockfile;
+            upgrade_owned_seed_provenance(layer, complete.unwrap_or_default(), &mut seeds);
+        }
     }
 
     if !request.structure_only {
@@ -780,7 +961,12 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
                 None
             };
             (
-                create_package_from_seed(seed, lock_versions.as_deref(), request, &manifests),
+                create_package_from_seed(
+                    seed,
+                    lock_versions.as_deref().map(|lock| &lock.versions),
+                    request,
+                    &manifests,
+                ),
                 seed.key.clone(),
             )
         })
@@ -816,6 +1002,12 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
     if request.wants_dependencies() {
         resolve_internal_deps(&mut packages);
     }
+    let standalone_lockfiles = observe_standalone_lockfiles(
+        root,
+        packages.iter().map(|package| package.path.as_path()),
+        request.wants_lockfile_provenance(),
+        &manifests,
+    );
 
     Ok((
         Some(RepoInfo {
@@ -828,6 +1020,7 @@ pub(crate) fn detect_repo_inner_with_shared_request_and_ownership(
             monorepo_standards,
             monorepo_layers,
             packages: Some(packages),
+            standalone_lockfiles,
         }),
         repo_inventory,
         Some(ownership_index),
@@ -882,185 +1075,26 @@ fn collect_outcomes(
     }
 }
 
-/// Upgrade a layer's provenance to `Lockfile` when the committed lockfile
-/// corroborates the manifest-derived package set.
+/// Mark the seeds a lockfile-matched layer owns as [`PackageProvenance::Lockfile`].
 ///
-/// The manifest remains the authority when lockfile and manifest disagree; the
-/// mismatch is recorded in `lockfile_match` so consumers can spot stale lockfiles.
-fn upgrade_provenance_with_lockfile(
-    layer: &mut MonorepoLayer,
+/// Ownership is the layer's own detector outcome: the same boundary key,
+/// standard, and owner root. A seed another layer resolved at the same
+/// relative path, including a nested or overlapping layer of the same
+/// standard, keeps its own provenance.
+fn upgrade_owned_seed_provenance(
+    layer: &MonorepoLayer,
+    owned: &[PackageSeed],
     seeds: &mut [PackageSeed],
-    manifests: &ManifestStore,
 ) {
-    let authority = layer.authority;
-    let lockfile_result = match authority {
-        MonorepoStandard::PnpmWorkspaces => pnpm_lockfile_matches(layer, seeds, manifests),
-        MonorepoStandard::UvWorkspace => uv_lockfile_matches(layer, seeds, manifests),
-        MonorepoStandard::CargoWorkspace => cargo_lockfile_matches(layer, seeds, manifests),
-        _ => return,
-    };
-
-    let Some(matches) = lockfile_result else {
-        return;
-    };
-
-    layer.lockfile_match = Some(matches);
-    if matches {
-        layer.provenance = PackageProvenance::Lockfile;
-        for relative in &layer.packages {
-            let key = normalize_layer_package_relative(relative);
-            for seed in seeds.iter_mut().filter(|s| s.relative == key) {
-                seed.provenance = PackageProvenance::Lockfile;
-            }
-        }
-    }
-}
-
-/// Normalize a repo-relative layer package path for comparison with
-/// [`Package::relative`]. Empty paths are preserved so they match root
-/// packages (e.g. uv's always-counted workspace root).
-fn normalize_layer_package_relative(path: &str) -> String {
-    path.replace('\\', "/")
-}
-
-/// Compute a path relative to a layer root, normalizing separators.
-///
-/// Returns `None` when `path` is not under `layer_root`.
-fn layer_relative_path(path: &Path, layer_root: &Path) -> Option<String> {
-    let rel = path.strip_prefix(layer_root).ok()?;
-    rel.to_str().map(normalize_layer_package_relative)
-}
-
-/// Parse `pnpm-lock.yaml` and compare its `importers:` keys to the layer's
-/// package set. Returns `Some(true)` only when the two sets are equal, so a
-/// stale lockfile with extra importers is reported as a mismatch rather than
-/// silently upgrading provenance to `Lockfile`. Returns `None` when the
-/// lockfile is absent or unparseable.
-///
-/// The pnpm root importer key `"."` is normalized away because the manifest
-/// globs never list the root — both sides are compared as member sets without
-/// the workspace root.
-fn pnpm_lockfile_matches(
-    layer: &MonorepoLayer,
-    seeds: &[PackageSeed],
-    manifests: &ManifestStore,
-) -> Option<bool> {
-    let lock_path = layer.root.join("pnpm-lock.yaml");
-    let parsed = manifests.pnpm_lock(&lock_path)?;
-
-    let importers = parsed.get("importers")?.as_mapping()?;
-    let lock_members: std::collections::HashSet<String> = importers
-        .keys()
-        .filter_map(|k| k.as_str())
-        .map(|s| {
-            s.trim_start_matches('.')
-                .trim_start_matches('/')
-                .to_string()
-        })
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    if lock_members.is_empty() {
-        return Some(false);
-    }
-
-    let manifest_members: std::collections::HashSet<String> = layer
-        .packages
-        .iter()
-        .filter_map(|rel| {
-            let key = normalize_layer_package_relative(rel);
-            seeds
+    for seed in seeds.iter_mut() {
+        let is_owned = seed.standard == layer.authority
+            && owned
                 .iter()
-                .find(|s| s.relative == key)
-                .and_then(|s| layer_relative_path(&s.path, &layer.root))
-        })
-        .collect();
-
-    Some(manifest_members == lock_members)
-}
-
-/// Parse `uv.lock` and compare its `workspace.members` entries to the layer's
-/// package set. Returns `Some(true)` only on set equality, so a stale lockfile
-/// with extra or missing members is reported as a mismatch. Returns `None`
-/// when the lockfile is absent or unparseable.
-///
-/// The uv root member (`"."`) is kept on both sides because uv's
-/// `RootMembership::Always` adds the root to `layer.packages`, so both sets
-/// include the root.
-fn uv_lockfile_matches(
-    layer: &MonorepoLayer,
-    seeds: &[PackageSeed],
-    manifests: &ManifestStore,
-) -> Option<bool> {
-    let lock_path = layer.root.join("uv.lock");
-    let parsed = manifests.uv_lock(&lock_path)?;
-
-    let members = parsed.get("workspace")?.get("members")?.as_array()?;
-
-    let lock_members: std::collections::HashSet<String> = members
-        .iter()
-        .filter_map(|v| {
-            if let Some(s) = v.as_str() {
-                return Some(s.trim_end_matches('/').to_string());
-            }
-            v.get("root")
-                .and_then(|r| r.as_str())
-                .map(|s| s.trim_end_matches('/').to_string())
-        })
-        .collect();
-
-    if lock_members.is_empty() {
-        return Some(false);
-    }
-
-    let manifest_members: std::collections::HashSet<String> = layer
-        .packages
-        .iter()
-        .filter_map(|rel| {
-            let key = normalize_layer_package_relative(rel);
-            seeds.iter().find(|s| s.relative == key).and_then(|seed| {
-                let s = layer_relative_path(&seed.path, &layer.root)?;
-                // uv counts the workspace root (`.`) as a member; represent the
-                // empty relative path the same way the lockfile does.
-                Some(if s.is_empty() { ".".to_string() } else { s })
-            })
-        })
-        .collect();
-
-    Some(manifest_members == lock_members)
-}
-
-/// Check that every globbed Cargo member has a `[package].name` present in the
-/// root `Cargo.lock` `[[package]]` table.
-fn cargo_lockfile_matches(
-    layer: &MonorepoLayer,
-    seeds: &[PackageSeed],
-    manifests: &ManifestStore,
-) -> Option<bool> {
-    let lock_path = layer.root.join("Cargo.lock");
-    let lock_versions = manifests.cargo_lock(&lock_path)?;
-
-    for relative in &layer.packages {
-        let key = normalize_layer_package_relative(relative);
-        let seed = seeds.iter().find(|s| s.relative == key)?;
-        let cargo_toml = seed.path.join("Cargo.toml");
-        let name = manifests.cargo(&cargo_toml).and_then(|parsed| {
-            parsed
-                .get("package")?
-                .get("name")?
-                .as_str()
-                .map(String::from)
-        });
-
-        let Some(name) = name else {
-            return Some(false);
-        };
-        if lock_versions.resolve(&name).is_none() {
-            return Some(false);
+                .any(|owned| owned.key == seed.key && owned.owner_root == seed.owner_root);
+        if is_owned {
+            seed.provenance = PackageProvenance::Lockfile;
         }
     }
-
-    Some(true)
 }
 
 pub(crate) fn collect_default_workspace_patterns(
@@ -1073,14 +1107,14 @@ pub(crate) fn collect_default_workspace_patterns(
         .required_npm(&root.join("package.json"))
         .map(|parsed| package_json_workspace_patterns_from_value(&parsed))
     {
-        patterns.extend(package_json_patterns);
+        patterns.extend(package_json_patterns.patterns);
     }
 
     if let Ok(pnpm_patterns) = manifests
         .required_pnpm_workspace(&root.join("pnpm-workspace.yaml"))
         .map(|parsed| pnpm_workspace_patterns_from_value(&parsed))
     {
-        patterns.extend(pnpm_patterns);
+        patterns.extend(pnpm_patterns.patterns);
     }
 
     if let Some(lerna_patterns) = parse_lerna_workspace_patterns(&root.join("lerna.json")) {
@@ -1671,10 +1705,7 @@ pub(crate) fn discover_seeds_with_optional_index(
 }
 
 /// Resolve the lockfile owned by `seed` without reframing it to the outer repo.
-fn lock_versions_for_seed(
-    seed: &PackageSeed,
-    manifests: &ManifestStore,
-) -> Option<Rc<CargoLockVersions>> {
+fn lock_versions_for_seed(seed: &PackageSeed, manifests: &ManifestStore) -> Option<Rc<CargoLock>> {
     matches!(
         seed.standard,
         MonorepoStandard::CargoWorkspace | MonorepoStandard::Unknown
@@ -2329,6 +2360,37 @@ mod tests {
     }
 
     #[test]
+    fn npm_unless_malformed_declines_only_a_parse_failure() {
+        use crate::performance::testing;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let malformed = dir.path().join("malformed/package.json");
+        let valid = dir.path().join("valid/package.json");
+        let missing = dir.path().join("missing/package.json");
+        std::fs::create_dir_all(malformed.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(valid.parent().unwrap()).unwrap();
+        std::fs::write(&malformed, r#"{"name":"#).unwrap();
+        std::fs::write(&valid, r#"{"name":"valid"}"#).unwrap();
+        let manifests = ManifestStore::default();
+
+        let (_, counts) = testing::measure(|| {
+            assert!(manifests.npm_unless_malformed(&malformed).unwrap().is_none());
+            assert!(manifests.required_npm(&malformed).is_err());
+            let parsed = manifests.npm_unless_malformed(&valid).unwrap().unwrap();
+            assert_eq!(npm_package_name(&parsed).as_deref(), Some("valid"));
+            assert!(manifests.required_npm(&valid).is_ok());
+            assert!(matches!(
+                manifests.npm_unless_malformed(&missing),
+                Err(SniffError::Io(_))
+            ));
+        });
+
+        assert_eq!(counts.get(counters::FS_FILE_OPENS), 3);
+        assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
+    }
+
+    #[test]
     fn package_build_context_derives_all_fields_from_manifest_store() {
         use std::io::Write;
         use tempfile::tempdir;
@@ -2875,8 +2937,8 @@ mod observation_index {
         assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 4);
         assert_eq!(
             counts.get(counters::FS_FILE_OPENS),
-            5,
-            "four unique manifests plus one absent pnpm lockfile observation"
+            4,
+            "four unique manifests; the absent pnpm lockfile is probed, never opened"
         );
     }
 
@@ -2924,8 +2986,8 @@ mod observation_index {
         assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 2);
         assert_eq!(
             counts.get(counters::FS_FILE_OPENS),
-            3,
-            "two unique manifests plus one absent uv lockfile observation"
+            2,
+            "two unique manifests; the absent uv lockfile is probed, never opened"
         );
     }
 
@@ -3098,47 +3160,502 @@ mod observation_index {
         );
         assert_eq!(
             counts.get(counters::FS_FILE_OPENS),
-            MEMBERS as u64 + 2,
-            "unique manifests plus the one absent Cargo.lock observation: {:?}",
+            MEMBERS as u64 + 1,
+            "unique manifests only; structure reads no Cargo.lock: {:?}",
             counts.all()
         );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0);
+    }
+
+    fn observation(
+        status: LockfileStatus,
+        paths: &[&str],
+        reason: Option<crate::filesystem::repo::LockfileReason>,
+        missing: &[&str],
+    ) -> crate::filesystem::repo::LockfileObservation {
+        crate::filesystem::repo::LockfileObservation {
+            status,
+            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
+            reason,
+            extra: Vec::new(),
+            missing: missing.iter().map(|path| (*path).to_owned()).collect(),
+        }
     }
 
     #[test]
-    fn cargo_lock_is_shared_by_provenance_and_dependency_enrichment() {
-        use crate::request::RepoDetailRequest;
-
+    fn absent_cargo_lock_is_one_probe_and_no_read() {
         let dir = inherited_cargo_workspace(2, false);
-        fs::write(
-            dir.path().join("Cargo.lock"),
-            "version = 3\n\n\
-             [[package]]\nname = \"member-0\"\nversion = \"9.9.9\"\n\n\
-             [[package]]\nname = \"member-1\"\nversion = \"9.9.9\"\n\n\
-             [[package]]\nname = \"serde\"\nversion = \"1.0.0\"\n",
-        )
-        .expect("write Cargo.lock");
-        let request = RepoRequest::focused(RepoDetailRequest::dependencies());
+        let request = RepoRequest::structure().with_lockfile_provenance(true);
 
         let (result, counts) =
             testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
         let (repo, _) = result.expect("detection should succeed");
         let repo = repo.expect("fixture is a Cargo workspace");
 
-        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1);
-        assert!(
-            repo.packages
-                .as_deref()
-                .expect("packages")
-                .iter()
-                .all(
-                    |package| package.dependencies.as_deref().is_some_and(|dependencies| {
-                        dependencies.iter().any(|dependency| {
-                            dependency.name == "serde"
-                                && dependency.actual_version.as_deref() == Some("1.0.0")
-                        })
-                    })
-                )
+        // `Cargo.lock`, plus the Yarn and Bun detectors' marker probes
+        // (`yarn.lock`, `bun.lock`, `bun.lockb`) sharing the same cache, plus
+        // the three standalone candidates (`composer.lock`, `pdm.lock`,
+        // `poetry.lock`) at the root and both member roots.
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PROBES), 13, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 0, "{:?}", counts.all());
+        assert_eq!(repo.monorepo_layers.len(), 1);
+        assert_eq!(
+            repo.monorepo_layers[0].lockfile,
+            observation(LockfileStatus::Absent, &[], None, &[])
         );
+    }
+
+    const INHERITED_CARGO_LOCK: &str = "version = 3\n\n\
+         [[package]]\nname = \"member-0\"\nversion = \"9.9.9\"\n\n\
+         [[package]]\nname = \"member-1\"\nversion = \"9.9.9\"\n\n\
+         [[package]]\nname = \"serde\"\nversion = \"1.0.0\"\n";
+
+    /// Corroboration and dependency enrichment share one `Cargo.lock` read and
+    /// parse, and Cargo's subset evidence never upgrades provenance (R1).
+    #[test]
+    fn cargo_lock_is_shared_by_corroboration_and_dependency_enrichment() {
+        use crate::filesystem::repo::LockfileReason;
+        use crate::request::RepoDetailRequest;
+
+        let dir = inherited_cargo_workspace(2, false);
+        fs::write(dir.path().join("Cargo.lock"), INHERITED_CARGO_LOCK).expect("write Cargo.lock");
+        let request = RepoRequest::focused(RepoDetailRequest::dependencies())
+            .with_lockfile_provenance(true);
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1);
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1);
+        let layer = &repo.monorepo_layers[0];
+        assert_eq!(
+            layer.lockfile,
+            observation(
+                LockfileStatus::MembersPresent,
+                &["Cargo.lock"],
+                Some(LockfileReason::SubsetOnly),
+                &[]
+            )
+        );
+        assert_eq!(layer.provenance, PackageProvenance::Globbed);
+        for package in repo.packages.as_deref().expect("packages") {
+            assert_eq!(package.provenance, PackageProvenance::Globbed);
+            assert!(
+                package
+                    .dependencies
+                    .as_deref()
+                    .is_some_and(|dependencies| dependencies.iter().any(|dependency| {
+                        dependency.name == "serde"
+                            && dependency.actual_version.as_deref() == Some("1.0.0")
+                    })),
+                "{} must resolve serde from Cargo.lock",
+                package.name
+            );
+        }
+    }
+
+    #[test]
+    fn declined_corroboration_still_resolves_dependency_versions_from_cargo_lock() {
+        use crate::filesystem::repo::LockfileReason;
+        use crate::request::RepoDetailRequest;
+
+        let dir = inherited_cargo_workspace(2, false);
+        fs::write(dir.path().join("Cargo.lock"), INHERITED_CARGO_LOCK).expect("write Cargo.lock");
+        let request = RepoRequest::focused(RepoDetailRequest::dependencies());
+        assert!(!request.wants_lockfile_provenance());
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a Cargo workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1, "{:?}", counts.all());
+        let layer = &repo.monorepo_layers[0];
+        assert_eq!(layer.provenance, PackageProvenance::Globbed);
+        assert_eq!(
+            layer.lockfile,
+            observation(
+                LockfileStatus::NotRequested,
+                &["Cargo.lock"],
+                Some(LockfileReason::RequestDisabled),
+                &[]
+            )
+        );
+        for package in repo.packages.as_deref().expect("packages") {
+            assert_eq!(package.provenance, PackageProvenance::Globbed);
+            assert!(
+                package
+                    .dependencies
+                    .as_deref()
+                    .is_some_and(|dependencies| dependencies.iter().any(|dependency| {
+                        dependency.name == "serde"
+                            && dependency.actual_version.as_deref() == Some("1.0.0")
+                    })),
+                "{} must resolve serde from Cargo.lock",
+                package.name
+            );
+        }
+    }
+
+    /// A root carrying a Cargo, a pnpm, and a uv workspace, each with a
+    /// lockfile in its real tool's layout that records exactly its members.
+    fn three_lockfile_workspace() -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        let write = |relative: &str, content: &str| {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+            fs::write(path, content).expect("write fixture file");
+        };
+
+        write(
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n",
+        );
+        for name in ["alpha", "beta"] {
+            write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            );
+        }
+        write(
+            "Cargo.lock",
+            "version = 3\n\n\
+             [[package]]\nname = \"alpha\"\nversion = \"0.1.0\"\n\n\
+             [[package]]\nname = \"beta\"\nversion = \"0.1.0\"\n",
+        );
+
+        write("package.json", r#"{"name":"root","private":true}"#);
+        write("pnpm-workspace.yaml", "packages:\n  - \"packages/*\"\n");
+        for name in ["web", "ui"] {
+            write(
+                &format!("packages/{name}/package.json"),
+                &format!(r#"{{"name":"{name}","version":"1.0.0"}}"#),
+            );
+        }
+        write(
+            "pnpm-lock.yaml",
+            "lockfileVersion: '9.0'\nimporters:\n  .: {}\n  packages/web: {}\n  packages/ui: {}\n",
+        );
+
+        write(
+            "pyproject.toml",
+            "[project]\nname = \"root-py\"\nversion = \"0.1.0\"\n\n\
+             [tool.uv.workspace]\nmembers = [\"py/*\"]\n",
+        );
+        for name in ["lib-a", "lib-b"] {
+            write(
+                &format!("py/{name}/pyproject.toml"),
+                &format!("[project]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+            );
+        }
+        write(
+            "uv.lock",
+            "version = 1\nrevision = 3\n\n\
+             [manifest]\nmembers = [\"lib-a\", \"lib-b\", \"root-py\"]\n\n\
+             [[package]]\nname = \"lib-a\"\nversion = \"0.1.0\"\nsource = { editable = \"py/lib-a\" }\n\n\
+             [[package]]\nname = \"lib-b\"\nversion = \"0.1.0\"\nsource = { editable = \"py/lib-b\" }\n\n\
+             [[package]]\nname = \"root-py\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n",
+        );
+        dir
+    }
+
+    fn layer_for(repo: &RepoInfo, authority: MonorepoStandard) -> &MonorepoLayer {
+        repo.monorepo_layers
+            .iter()
+            .find(|layer| layer.authority == authority)
+            .unwrap_or_else(|| panic!("no {authority:?} layer: {:?}", repo.monorepo_layers))
+    }
+
+    /// Plan checkpoint 2: a declining structure request probes every layer's
+    /// lockfile but reads and parses none.
+    #[test]
+    fn declining_structure_request_probes_but_reads_and_parses_no_lockfile() {
+        use crate::filesystem::repo::LockfileReason;
+
+        let dir = three_lockfile_workspace();
+        let request = RepoRequest::structure();
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a workspace");
+
+        assert!(
+            !counts.all().contains_key(counters::REPO_LOCKFILE_READS),
+            "an absent counter is the zero-read proof: {:?}",
+            counts.all()
+        );
+        assert!(
+            !counts.all().contains_key(counters::REPO_LOCKFILE_PARSES),
+            "{:?}",
+            counts.all()
+        );
+        // The three layer lockfiles, plus the Yarn and Bun detectors' marker
+        // probes (`yarn.lock`, `bun.lock`, `bun.lockb`) at the root and at
+        // both nested `package.json` directories. Those nine probes predate
+        // corroboration and now share its cache. The new work is the three
+        // layer probes and the three standalone candidates (`composer.lock`,
+        // `pdm.lock`, `poetry.lock`) at the root and each of the six package
+        // roots.
+        assert_eq!(
+            counts.get(counters::REPO_LOCKFILE_PROBES),
+            33,
+            "{:?}",
+            counts.all()
+        );
+        assert_eq!(repo.monorepo_layers.len(), 3, "{:?}", repo.monorepo_layers);
+        for (authority, lockfile) in [
+            (MonorepoStandard::CargoWorkspace, "Cargo.lock"),
+            (MonorepoStandard::PnpmWorkspaces, "pnpm-lock.yaml"),
+            (MonorepoStandard::UvWorkspace, "uv.lock"),
+        ] {
+            let layer = layer_for(&repo, authority);
+            assert_eq!(
+                layer.lockfile,
+                observation(
+                    LockfileStatus::NotRequested,
+                    &[lockfile],
+                    Some(LockfileReason::RequestDisabled),
+                    &[]
+                ),
+                "{authority:?}"
+            );
+            assert_ne!(layer.provenance, PackageProvenance::Lockfile, "{layer:?}");
+        }
+        for package in repo.packages.as_deref().expect("packages") {
+            assert_ne!(package.provenance, PackageProvenance::Lockfile, "{package:?}");
+        }
+    }
+
+    /// Each lockfile is read and parsed once; pnpm and uv match and upgrade
+    /// only the packages their own layer owns, while Cargo's subset evidence
+    /// leaves its packages manifest-derived.
+    #[test]
+    fn opted_in_structure_request_corroborates_every_lockfile_once() {
+        use crate::filesystem::repo::LockfileReason;
+
+        let dir = three_lockfile_workspace();
+        let request = RepoRequest::structure().with_lockfile_provenance(true);
+
+        let (result, counts) =
+            testing::measure(|| detect_repo_inner_with_request(dir.path(), &request));
+        let (repo, _) = result.expect("detection should succeed");
+        let repo = repo.expect("fixture is a workspace");
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 3, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 3, "{:?}", counts.all());
+        assert_eq!(repo.monorepo_layers.len(), 3, "{:?}", repo.monorepo_layers);
+
+        let cargo = layer_for(&repo, MonorepoStandard::CargoWorkspace);
+        assert_eq!(
+            cargo.lockfile,
+            observation(
+                LockfileStatus::MembersPresent,
+                &["Cargo.lock"],
+                Some(LockfileReason::SubsetOnly),
+                &[]
+            )
+        );
+        assert_eq!(cargo.provenance, PackageProvenance::Globbed);
+        for (authority, lockfile) in [
+            (MonorepoStandard::PnpmWorkspaces, "pnpm-lock.yaml"),
+            (MonorepoStandard::UvWorkspace, "uv.lock"),
+        ] {
+            let layer = layer_for(&repo, authority);
+            assert_eq!(
+                layer.lockfile,
+                observation(LockfileStatus::Match, &[lockfile], None, &[]),
+                "{authority:?}"
+            );
+            assert_eq!(layer.provenance, PackageProvenance::Lockfile, "{layer:?}");
+        }
+        for package in repo.packages.as_deref().expect("packages") {
+            let expected = if package.standard == MonorepoStandard::CargoWorkspace {
+                PackageProvenance::Globbed
+            } else {
+                PackageProvenance::Lockfile
+            };
+            assert_eq!(package.provenance, expected, "{package:?}");
+        }
+    }
+
+    /// A pnpm workspace with two members and `lockfile` as its lockfile.
+    fn pnpm_workspace(lockfile: Option<&str>) -> TempDir {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path();
+        fs::write(root.join("package.json"), r#"{"name":"root","private":true}"#)
+            .expect("write package.json");
+        fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - \"packages/*\"\n")
+            .expect("write pnpm workspace");
+        for name in ["web", "ui"] {
+            let member = root.join("packages").join(name);
+            fs::create_dir_all(&member).expect("create member");
+            fs::write(
+                member.join("package.json"),
+                format!(r#"{{"name":"{name}","version":"1.0.0"}}"#),
+            )
+            .expect("write member package.json");
+        }
+        if let Some(lockfile) = lockfile {
+            fs::write(root.join("pnpm-lock.yaml"), lockfile).expect("write pnpm-lock.yaml");
+        }
+        dir
+    }
+
+    fn corroborate(root: &Path) -> (RepoInfo, testing::WorkCounts) {
+        let request = RepoRequest::structure().with_lockfile_provenance(true);
+        let (result, counts) = testing::measure(|| detect_repo_inner_with_request(root, &request));
+        let (repo, _) = result.expect("detection should succeed");
+        (repo.expect("fixture is a workspace"), counts)
+    }
+
+    /// R9: a metadata failure injected through the store's probe seam is
+    /// `unreadable`, never `absent`, and nothing is read.
+    #[test]
+    fn a_metadata_failure_is_unreadable_and_reads_nothing() {
+        use crate::filesystem::repo::LockfileReason;
+
+        let dir = pnpm_workspace(Some("lockfileVersion: '9.0'\nimporters:\n  .: {}\n"));
+        let _failure = super::super::lockfile::test_seam::fail_metadata(
+            &dir.path().join("pnpm-lock.yaml"),
+            std::io::ErrorKind::PermissionDenied,
+        );
+
+        let (repo, counts) = corroborate(dir.path());
+
+        let layer = layer_for(&repo, MonorepoStandard::PnpmWorkspaces);
+        assert_eq!(
+            layer.lockfile,
+            observation(
+                LockfileStatus::Unreadable,
+                &[],
+                Some(LockfileReason::MetadataFailed),
+                &[]
+            )
+        );
+        assert_eq!(layer.provenance, PackageProvenance::Globbed);
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 0, "{:?}", counts.all());
+    }
+
+    /// R9: a directory in place of the lockfile is present by metadata and
+    /// then fails to read, on every OS.
+    #[test]
+    fn a_directory_in_place_of_the_lockfile_is_a_read_failure() {
+        use crate::filesystem::repo::LockfileReason;
+
+        let dir = pnpm_workspace(None);
+        fs::create_dir(dir.path().join("pnpm-lock.yaml")).expect("create directory");
+
+        let (repo, counts) = corroborate(dir.path());
+
+        assert_eq!(
+            layer_for(&repo, MonorepoStandard::PnpmWorkspaces).lockfile,
+            observation(
+                LockfileStatus::Unreadable,
+                &["pnpm-lock.yaml"],
+                Some(LockfileReason::ReadFailed),
+                &[]
+            )
+        );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 0, "{:?}", counts.all());
+    }
+
+    #[test]
+    fn a_malformed_pnpm_lockfile_is_a_parse_failure() {
+        use crate::filesystem::repo::LockfileReason;
+
+        let dir = pnpm_workspace(Some("lockfileVersion: '9.0'\nimporters:\n  .: {\n"));
+
+        let (repo, counts) = corroborate(dir.path());
+
+        assert_eq!(
+            layer_for(&repo, MonorepoStandard::PnpmWorkspaces).lockfile,
+            observation(
+                LockfileStatus::Unreadable,
+                &["pnpm-lock.yaml"],
+                Some(LockfileReason::ParseFailed),
+                &[]
+            )
+        );
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1);
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1);
+    }
+
+    /// Presence, read, and parse failures are all cached for the request.
+    #[test]
+    fn the_store_caches_lockfile_presence_and_failures() {
+        let dir = TempDir::new().expect("tempdir");
+        let malformed = dir.path().join("pnpm-lock.yaml");
+        fs::write(&malformed, "lockfileVersion: '9.0'\nimporters: [\n").expect("write lockfile");
+        let absent = dir.path().join("uv.lock");
+        let manifests = ManifestStore::default();
+
+        let (_, counts) = testing::measure(|| {
+            for _ in 0..3 {
+                assert!(matches!(
+                    manifests.lockfile(&malformed, Format::Pnpm),
+                    Err(LockfileFailure::Parse(_))
+                ));
+                assert_eq!(
+                    manifests.lockfile(&absent, Format::Uv),
+                    Err(LockfileFailure::Absent)
+                );
+                assert!(manifests.cargo_lock(&dir.path().join("Cargo.lock")).is_none());
+            }
+        });
+
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PROBES), 3, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::FS_METADATA_PROBES), 3, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_READS), 1, "{:?}", counts.all());
+        assert_eq!(counts.get(counters::REPO_LOCKFILE_PARSES), 1, "{:?}", counts.all());
+    }
+
+    /// R10: a member manifest that fails to parse leaves the manifest-side
+    /// set incomplete, which is never read as a missing member.
+    #[test]
+    fn an_unparseable_cargo_member_is_incomplete_manifest_discovery() {
+        use crate::filesystem::repo::LockfileReason;
+
+        let dir = inherited_cargo_workspace(2, false);
+        fs::write(dir.path().join("Cargo.lock"), INHERITED_CARGO_LOCK).expect("write Cargo.lock");
+        fs::write(
+            dir.path().join("crates/member-1/Cargo.toml"),
+            "[package\nname = \"member-1\"\n",
+        )
+        .expect("write malformed member");
+
+        let (repo, _) = corroborate(dir.path());
+
+        assert_eq!(
+            repo.monorepo_layers[0].lockfile,
+            observation(
+                LockfileStatus::Unverifiable,
+                &["Cargo.lock"],
+                Some(LockfileReason::IncompleteManifestDiscovery),
+                &[]
+            )
+        );
+    }
+
+    #[test]
+    fn an_orchestrator_only_root_has_no_layer_to_observe() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::write(dir.path().join("nx.json"), "{}").expect("write nx.json");
+        fs::write(dir.path().join("package-lock.json"), "{}").expect("write lockfile");
+
+        let request = RepoRequest::full();
+        let (repo, _) = detect_repo_inner_with_request(dir.path(), &request)
+            .expect("detection should succeed");
+
+        if let Some(repo) = repo {
+            assert!(repo.monorepo_layers.is_empty(), "{:?}", repo.monorepo_layers);
+        }
     }
 
     #[test]

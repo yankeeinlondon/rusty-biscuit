@@ -9,6 +9,7 @@ subprocesses, host capabilities, or request cost.
 - [Filesystem observation](#filesystem-observation)
 - [Change classification and committed diffs](#change-classification-and-committed-diffs)
 - [Package topology](#package-topology)
+- [Lockfile observation pipeline](#lockfile-observation-pipeline)
 - [Programs and subprocesses](#programs-and-subprocesses)
 - [Network defaults](#network-defaults)
 
@@ -104,8 +105,16 @@ Committed-tree diffs have two paths:
   author) run first. Path filters (package, area, file type) use the cheap
   untracked file listing. A count selection stops at N *matches*.
 - Only survivors are enriched: the rename-aware diff with line counts,
-  structure-tier attribution through one `PackageOwnershipIndex`, and one
-  linking pass. The work counters prove this: `git.file_diffs` covers only
+  structure-tier attribution, and one linking pass. Filtering and
+  attribution share one per-path resolver in `PackageCatalog`: the owner
+  comes from `PackageOwnershipIndex`, and the area is the deepest area
+  directory strictly containing the path (`PackageAreaIndex`, also behind
+  `RepoInfo::package_area_for_dir`), whether or not a package owns it; only
+  a path no area directory contains falls back to its owner's area. Package
+  and area boundaries are independent: a shared file under `worktree/fixes/`
+  has area `worktree` and no package, and a file in `darkmatter/dmls/` (both
+  the `dmls` package and a nested area) has package `dmls` and area
+  `darkmatter/dmls`. The root area `""` is never a directory fallback. The work counters prove this: `git.file_diffs` covers only
   survivors, with zero inventory, doc, or enrichment counters.
 - `--branch` resolves in order: local branch, `refs/remotes/<name>`, then
   `<remote>/<name>` over *configured* remotes. Nothing is fetched.
@@ -161,9 +170,99 @@ Each layer has one membership authority and zero or more task orchestrators.
 An orchestrator alone is not a monorepo. Package `standard` and `provenance`
 identify the membership authority and discovery method.
 
-Structure requests collect membership and minimum identity only. Use a focused
-request for selected manifest facts and full mode for inventory-backed
-enrichment.
+Structure requests collect membership and minimum identity only and read no
+lockfile, so provenance stays manifest-derived. Use a focused request for
+selected manifest facts and full mode for inventory-backed enrichment and
+lockfile corroboration; `with_lockfile_provenance` opts any tier in or out.
+
+## Lockfile observation pipeline
+
+Every `MonorepoLayer` carries a required `lockfile: LockfileObservation`
+(`filesystem/repo/lockfile/`), which replaced `lockfile_match` and must not
+return. The manifest stays the membership authority: an observation never adds
+or removes packages or changes ownership. Its only side effect is provenance,
+and only an exact `match` upgrades the layer and the seeds it owns
+(`upgrade_owned_seed_provenance`). Cargo reports `members_present` /
+`members_missing` with `subset_only`, never `match`, so it never upgrades.
+The detector's raw Cargo seeds hold an included *and* an excluded seed for a
+directory matched by both `members` and `[workspace].exclude` (they merge only
+later), so `lockfile::cargo::compare` skips every path with an excluded seed;
+checking `is_excluded` per seed reports a false `members_missing`.
+
+`lockfile::sources::source` is the single authority-to-lockfile table:
+
+| `Source` | Standards | Behavior |
+|---|---|---|
+| `Candidates` | pnpm, npm, Yarn, Bun, uv, Cargo | First present file in precedence order is selected (`npm-shrinkwrap.json` > `package-lock.json`, `bun.lock` > `bun.lockb`); never retry a lower-priority file after the selected one fails |
+| `Configured` | Rush | `lockfile/rush.rs` picks the manager's lockfile from `rush.json`; only the single pnpm workspace layout compares (importer base `common/temp`) |
+| `Fallback` | Go, Gradle, Bazel | Metadata only, never opened: `unverifiable` + `no_membership_data`; Bazel without `MODULE.bazel` is `not_applicable` |
+| `NotApplicable` | Maven, .NET, Pants, Buck2, orchestrators, `Unknown` | `no_lockfile_source`, or `unknown_standard` for `Unknown` |
+
+Adding a standard means adding its row; the `sources` test pins all 18.
+`observe_layer_lockfile` applies the spec's precedence in order: no source,
+metadata failure, absence, declined request (`not_requested`), metadata-only
+fallback, then parse and classify. Only the last step reads content.
+
+`ManifestStore` owns every lockfile touch for the request:
+
+- `lockfile_presence` probes each normalized path once and caches
+  `Present`/`Absent`/`Failed(kind)`. A missing file or parent is absence; any
+  other metadata error is `unreadable` + `metadata_failed`, never absence.
+- `lockfile(path, format)` gates on presence, then reads and parses at most
+  once, caching typed `LockfileFailure`s (absent, metadata, read, parse) as
+  well as successes. A directory in place of the file is a read failure.
+- `Cargo.lock` goes through `cargo_lock`, one shared parse serving both
+  dependency-version enrichment (`CargoLockVersions`, byte-for-byte legacy
+  results) and corroboration.
+- The metadata-failure test seam is `lockfile::test_seam::fail_metadata`;
+  Unix mode bits are not a portable way to inject one.
+
+Membership comparison (`lockfile/membership.rs`) is lexical: both sides become
+`/`-separated paths relative to the layer root, the root is excluded from both
+sets, `..` resolves against the format's base, and no lockfile path is ever
+opened or canonicalized. Do not intersect lockfile paths with manifest members
+first; that erases `extra`. A layer is `incomplete_manifest_discovery` (R10)
+when it has no matching detector outcome, when the outcome's `incomplete` flag
+is set, or when a member's own manifest is missing or fails to parse (Cargo:
+its identity cannot be resolved). The flag comes from `glob.rs`'s
+`MembershipExpansion`: a dropped unsupported or unparseable pattern, a walk
+failure under a glob's walk root (the shared walk records its failures in
+`manifest_walk_errors`), or, for Cargo and Rush only, a declared literal
+member that does not exist. The Node tools and uv expand literals as globs, so
+a missing one matches nothing. Detectors also set it when a declared member
+entry is not a string, or when a present member field is not a list at all
+(`DeclaredPatterns::has_invalid`, `DeclaredPatterns::invalid()`: Cargo
+`members` and `exclude`, uv `members`, pnpm `packages`, `package.json`
+`workspaces` in both forms, Rush `projects` and a project without a string
+`projectFolder`); never filter such an entry out silently, and keep the layer
+even when every entry is invalid or the field has the wrong type. An absent
+field, a null pnpm `packages`/`package.json` `workspaces`, and the object form
+without a `packages` key still declare nothing. The npm lockfile parser is
+stricter: its root-record `workspaces: null`, and `resolved: null` on a
+`link: true` record, are `unreadable` + `parse_failed`, because only an
+omitted field means "no locked declarations" or "no link target". An explicit uv `members = []` still forms a
+root-only layer (empty sets can `match`); only an absent `members` array forms
+none. A uv layer lists its root among `packages`, so
+`membership_resolves_non_degenerately` treats one uv package as degenerate and
+the root-only workspace is not a monorepo. Incompleteness blocks only the comparison
+step; every earlier status wins. Nested dispatch treats a malformed
+`package.json` as no npm/Yarn/Bun root (`ManifestStore::npm_unless_malformed`),
+so a malformed member reaches its layer's corroboration as incomplete; a
+malformed workspace root manifest, or an unreadable one anywhere, still fails
+detection.
+
+Standalone Poetry, PDM, and Composer lockfiles are repository-level
+`RepoInfo.standalone_lockfiles` entries (`lockfile/standalone.rs`), never
+layers: one probe per tool at the repository root and each unique package
+root, no walk, no read, and no entry for an absent file. A single-package root
+reaches the probe only through root-package synthesis
+(`synthesize_root_package_repo_with_store`), which accepts a lone
+`composer.json` as well as the `PackageEcosystem` markers; filesystem
+detection synthesizes only when the repo request carries `details`.
+
+`bun.lock`, `rush.json`, and Rush configuration are JSON with comments. Parse
+them only through `filesystem::repo::jsonc::from_str` (strict `jsonc-parser`
+options: comments and trailing commas, nothing looser), never `serde_json`.
 
 ## Programs and subprocesses
 

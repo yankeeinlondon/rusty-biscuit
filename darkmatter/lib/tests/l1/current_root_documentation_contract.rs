@@ -12,7 +12,9 @@
 //!   topology are fixed by the request's repository observation, and only
 //!   mutable Git and filesystem facts refresh at reference time.
 //!
-//! `PAGES` is the spec's "## Documentation" list. The spec says the pages
+//! `PAGES` is the spec's "## Documentation" list, less the Claudine skill's
+//! `lifecycle.md` and `composition.md`: those were snapshot copies, now
+//! replaced by the skill's `topics/` symlink to the docs listed here. The spec says the pages
 //! describe the model *collectively*, so each entry names only the clauses
 //! that page is responsible for; the phrases are the page's own wording, so a
 //! stray word cannot satisfy an entry and a rewrite that drops the claim
@@ -47,24 +49,6 @@ const PAGES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        ".claude/skills/claudine/lifecycle.md",
-        &[
-            "each `current.<key>` is evaluated when it is referenced",
-            "`current_env.<key>` for every `env.<key>`",
-            "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
-            "refresh at reference time",
-        ],
-    ),
-    (
-        ".claude/skills/claudine/composition.md",
-        &[
-            "| `current.<key>` | Lazy — the same keys as `ctx`",
-            "| `current_env.<key>` | Lazy — the same keys as `env`",
-            "`ctx.recent_commits` and `recent_commits(count)` are the first pair",
-            "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
-        ],
-    ),
-    (
         ".claude/skills/darkmatter/compose.md",
         &[
             "`current.<key>` where `<key>` is cataloged",
@@ -84,7 +68,7 @@ const PAGES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "claudine/docs/topics/lifecycle.md",
+        "claudine/docs/topics/flow-control/lifecycle.md",
         &[
             "`current.<key>` for every `ctx.<key>`",
             "`current_env.<KEY>` for every `env.<KEY>`",

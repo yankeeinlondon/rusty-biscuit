@@ -52,6 +52,7 @@ pub(super) fn detect_gradle_workspace(root: &Path) -> Result<Option<DetectorOutc
         standard: MonorepoStandard::GradleMultiProject,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete: false,
     }))
 }
 

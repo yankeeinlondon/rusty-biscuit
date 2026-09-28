@@ -1,0 +1,36 @@
+== baseline-release-probe
+root=<temp tiny tree> repo_detected=true
+filesystem.io.bytes_read=207
+filesystem.io.canonicalizations=13
+filesystem.io.file_opens=5
+filesystem.io.metadata_probes=35
+filesystem.io.read_dirs=2
+filesystem.repo.manifest_parses=4
+filesystem.repo.nested_marker_walks=1
+root=/Volumes/coding/wt/rusty-biscuit/fix-sniff repo_detected=true
+filesystem.io.bytes_read=828598
+filesystem.io.canonicalizations=393
+filesystem.io.file_opens=85
+filesystem.io.metadata_probes=369
+filesystem.io.read_dirs=2
+filesystem.repo.lockfile_parses=2
+filesystem.repo.manifest_parses=83
+filesystem.repo.nested_marker_walks=1
+== after-release-probe
+root=<temp tiny tree> repo_detected=true
+filesystem.io.bytes_read=207
+filesystem.io.canonicalizations=13
+filesystem.io.file_opens=5
+filesystem.io.metadata_probes=35
+filesystem.io.read_dirs=2
+filesystem.repo.manifest_parses=4
+filesystem.repo.nested_marker_walks=1
+root=/Volumes/coding/wt/rusty-biscuit/fix-sniff repo_detected=true
+filesystem.io.bytes_read=828598
+filesystem.io.canonicalizations=393
+filesystem.io.file_opens=85
+filesystem.io.metadata_probes=369
+filesystem.io.read_dirs=2
+filesystem.repo.lockfile_parses=2
+filesystem.repo.manifest_parses=83
+filesystem.repo.nested_marker_walks=1

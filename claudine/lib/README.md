@@ -386,7 +386,7 @@ Timeouts, shell policy, and runtime attempt classification for composed prompt p
 ### Nested-Span Lifecycle Validation (2026-09)
 
 - `composition::lifecycle::validate_no_interpolation_leaks` and `CompositionError::LifecycleInterpolationLeak` are removed. Neither had a production caller.
-- `composition::lifecycle::validate_no_nested_spans_in_literals` and `CompositionError::LifecycleNestedSpanInLiteral { source_path, property, literal, nested, suggestion }` are new. Shared preparation now refuses a `{{ … }}` nested inside a quoted string literal on a single-pass lifecycle value (see [Lifecycle — `LifecycleNestedSpanInLiteral`](../docs/topics/lifecycle.md#lifecyclenestedspaninliteral)).
+- `composition::lifecycle::validate_no_nested_spans_in_literals` and `CompositionError::LifecycleNestedSpanInLiteral { source_path, property, literal, nested, suggestion }` are new. Shared preparation now refuses a `{{ … }}` nested inside a quoted string literal on a single-pass lifecycle value (see [Lifecycle — `LifecycleNestedSpanInLiteral`](../docs/topics/flow-control/lifecycle.md#lifecyclenestedspaninliteral)).
 - `CompositionError::LifecycleEvaluationError` gained `property: Option<String>` and `reason: Box<LifecycleEvaluationReason>`. Exhaustive struct patterns need `..`.
 
 ### Contextual Errors (2026-04)

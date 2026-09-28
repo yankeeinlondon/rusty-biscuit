@@ -31,6 +31,71 @@ use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 /// Manifest file names that mark a directory as a package boundary.
 const MANIFEST_FILES: [&str; 4] = ["Cargo.toml", "package.json", "pyproject.toml", "go.mod"];
 
+/// The seeds a membership expansion resolved, and whether they are every
+/// member the patterns declare.
+///
+/// ## Notes
+///
+/// Completeness is reported, never inferred (ruling R10 of
+/// `2026-09-26-lockfile-corroboration`). The two signals stay separate because
+/// standards disagree about a glob-free pattern naming a missing path: Cargo
+/// and Rush reject it, while the Node tools and uv treat it as a glob that
+/// matched nothing.
+pub(crate) struct MembershipExpansion {
+    pub(crate) seeds: Vec<PackageSeed>,
+    /// `false` when a pattern was dropped as unsupported or unparseable, or
+    /// when a directory a glob could match was not enumerated because the walk
+    /// failed on it.
+    pub(crate) patterns_resolved: bool,
+    /// A glob-free pattern named a path that does not exist.
+    pub(crate) missing_literal: bool,
+}
+
+/// The member patterns a workspace manifest declares.
+///
+/// ## Notes
+///
+/// An entry that is not a string is dropped from `patterns` but recorded in
+/// `has_invalid`: the declared set is then not fully understood, so the
+/// detector reports its outcome incomplete (ruling R10) and the layer is never
+/// compared with its lockfile. A declaration whose every entry is invalid,
+/// or a present member field that is not a list at all
+/// ([`DeclaredPatterns::invalid`]), still yields a layer rather than
+/// vanishing.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct DeclaredPatterns {
+    pub(crate) patterns: Vec<String>,
+    pub(crate) has_invalid: bool,
+}
+
+impl<'a> FromIterator<Option<&'a str>> for DeclaredPatterns {
+    fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(entries: I) -> Self {
+        let mut declared = Self::default();
+        for entry in entries {
+            match entry {
+                Some(pattern) => declared.patterns.push(pattern.to_owned()),
+                None => declared.has_invalid = true,
+            }
+        }
+        declared
+    }
+}
+
+impl DeclaredPatterns {
+    /// A present member field whose value is not a list.
+    pub(crate) fn invalid() -> Self {
+        Self {
+            patterns: Vec::new(),
+            has_invalid: true,
+        }
+    }
+
+    /// Whether the manifest declares no member entry at all, valid or not.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.patterns.is_empty() && !self.has_invalid
+    }
+}
+
 /// Expand workspace membership `patterns` into [`PackageSeed`] values.
 ///
 /// Explicit (glob-free) patterns are resolved by directory existence alone, so
@@ -53,11 +118,13 @@ pub(crate) fn expand_membership_globs(
     standard: MonorepoStandard,
     provenance: Option<PackageProvenance>,
     evidence: RepoEvidence<'_>,
-) -> Vec<PackageSeed> {
+) -> MembershipExpansion {
     let provenance = provenance.unwrap_or_else(|| standard.membership_provenance());
     // BTreeSet dedupes directories matched by overlapping patterns and yields a
     // deterministic order before the (relatively expensive) package build.
     let mut matched: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut patterns_resolved = true;
+    let mut missing_literal = false;
 
     let mut include_globs: Vec<String> = Vec::new();
     let mut exclude_globs: Vec<String> = Vec::new();
@@ -80,6 +147,8 @@ pub(crate) fn expand_membership_globs(
             let path = root.join(native);
             if probe_exists(&path) {
                 matched.insert(path);
+            } else {
+                missing_literal = true;
             }
             continue;
         }
@@ -89,6 +158,7 @@ pub(crate) fn expand_membership_globs(
                 pattern = %pattern,
                 "rejecting unsupported Cargo workspace member glob"
             );
+            patterns_resolved = false;
             continue;
         }
 
@@ -96,9 +166,11 @@ pub(crate) fn expand_membership_globs(
     }
 
     if !include_globs.is_empty() {
-        let include_set = build_globset(&include_globs);
-        let exclude_set = build_globset(&exclude_globs);
-        for dir in manifest_dirs(root, &include_globs, evidence) {
+        let (include_set, include_valid) = build_globset(&include_globs);
+        let (exclude_set, exclude_valid) = build_globset(&exclude_globs);
+        let (dirs, walk_complete) = manifest_dirs(root, &include_globs, evidence);
+        patterns_resolved &= include_valid && exclude_valid && walk_complete;
+        for dir in dirs {
             let Ok(relative) = dir.strip_prefix(root) else {
                 continue;
             };
@@ -109,10 +181,15 @@ pub(crate) fn expand_membership_globs(
         }
     }
 
-    matched
+    let seeds = matched
         .into_iter()
         .map(|path| PackageSeed::new(&path, root, standard, provenance))
-        .collect()
+        .collect();
+    MembershipExpansion {
+        seeds,
+        patterns_resolved,
+        missing_literal,
+    }
 }
 
 /// Normalize a path or pattern to a slash-separated logical form.
@@ -151,22 +228,30 @@ fn cargo_pattern_valid(pattern: &str) -> bool {
 /// `literal_separator(true)` makes `*` and `?` stop at `/` (single-component
 /// matches) while `**` spans separators — the minimatch semantics Cargo's
 /// subset also obeys. An unparseable pattern is logged and skipped rather than
-/// aborting the whole set.
-fn build_globset(patterns: &[String]) -> GlobSet {
+/// aborting the whole set; the returned flag is `false` when any was skipped.
+fn build_globset(patterns: &[String]) -> (GlobSet, bool) {
     let mut builder = GlobSetBuilder::new();
+    let mut valid = true;
     for pattern in patterns {
         match GlobBuilder::new(pattern).literal_separator(true).build() {
             Ok(glob) => {
                 builder.add(glob);
             }
-            Err(error) => debug!(pattern = %pattern, %error, "skipping invalid membership glob"),
+            Err(error) => {
+                debug!(pattern = %pattern, %error, "skipping invalid membership glob");
+                valid = false;
+            }
         }
     }
-    builder.build().unwrap_or_else(|_| GlobSet::empty())
+    match builder.build() {
+        Ok(set) => (set, valid),
+        Err(_) => (GlobSet::empty(), false),
+    }
 }
 
 /// Every manifest-bearing directory a glob could match, from observed evidence
-/// when available and from a bounded walk otherwise.
+/// when available and from a bounded walk otherwise, and whether every
+/// directory under the globs' walk roots was enumerated.
 ///
 /// ## Notes
 ///
@@ -184,11 +269,47 @@ fn manifest_dirs(
     root: &Path,
     include_globs: &[String],
     evidence: RepoEvidence<'_>,
-) -> Vec<PathBuf> {
+) -> (Vec<PathBuf>, bool) {
     match evidence.manifest_dirs {
-        Some(dirs) => dirs.to_vec(),
+        Some(dirs) => {
+            let walk_roots = resolve_walk_roots(root, include_globs);
+            let complete = !evidence
+                .manifest_walk_errors
+                .unwrap_or_default()
+                .iter()
+                .any(|failed| failure_affects(failed, &walk_roots));
+            (dirs.to_vec(), complete)
+        }
         None => walk_manifest_dirs(root, include_globs),
     }
+}
+
+/// Whether a walk failure at `failed` can hide a directory under one of
+/// `walk_roots`: the failure is inside a walked subtree, or at one of its
+/// ancestors.
+fn failure_affects(failed: &Path, walk_roots: &[PathBuf]) -> bool {
+    walk_roots
+        .iter()
+        .any(|walk_root| failed.starts_with(walk_root) || walk_root.starts_with(failed))
+}
+
+/// The path of a walk error that may have hidden entries, or `None` for an
+/// error that hides nothing (an unparseable ignore rule, for example).
+///
+/// An I/O failure without a recorded path is attributed to `walk_root`, so it
+/// affects every subtree that walk covers.
+pub(crate) fn walk_failure_path(error: &ignore::Error, walk_root: &Path) -> Option<PathBuf> {
+    fn recorded_path(error: &ignore::Error) -> Option<&Path> {
+        match error {
+            ignore::Error::WithPath { path, .. } => Some(path),
+            ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => {
+                recorded_path(err)
+            }
+            _ => None,
+        }
+    }
+    error.io_error()?;
+    Some(recorded_path(error).map_or_else(|| walk_root.to_path_buf(), Path::to_path_buf))
 }
 
 /// Walk the bounded subtrees implied by `include_globs` and yield every
@@ -197,10 +318,12 @@ fn manifest_dirs(
 /// Each pattern's literal prefix (the components before its first glob
 /// metacharacter) bounds the walk, so `packages/*` walks only `packages/`
 /// rather than the entire repository. Roots subsumed by an ancestor root are
-/// dropped so overlapping patterns walk each subtree once.
-fn walk_manifest_dirs(root: &Path, include_globs: &[String]) -> Vec<PathBuf> {
+/// dropped so overlapping patterns walk each subtree once. The flag is `false`
+/// when an entry could not be read.
+fn walk_manifest_dirs(root: &Path, include_globs: &[String]) -> (Vec<PathBuf>, bool) {
     let walk_roots = resolve_walk_roots(root, include_globs);
     let mut dirs = Vec::new();
+    let mut complete = true;
 
     for walk_root in walk_roots {
         if !probe_is_dir(&walk_root) {
@@ -224,7 +347,17 @@ fn walk_manifest_dirs(root: &Path, include_globs: &[String]) -> Vec<PathBuf> {
             })
             .build();
 
-        for entry in walker.filter_map(Result::ok) {
+        for entry in walker {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    if let Some(failed) = walk_failure_path(&error, &walk_root) {
+                        debug!(path = %failed.display(), %error, "membership glob walk failed");
+                        complete = false;
+                    }
+                    continue;
+                }
+            };
             if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 continue;
             }
@@ -234,7 +367,7 @@ fn walk_manifest_dirs(root: &Path, include_globs: &[String]) -> Vec<PathBuf> {
         }
     }
 
-    dirs
+    (dirs, complete)
 }
 
 /// Resolve the minimal set of subtree roots to walk for `include_globs`.
@@ -285,7 +418,7 @@ mod tests {
 
     fn set(patterns: &[&str]) -> GlobSet {
         let owned: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
-        build_globset(&owned)
+        build_globset(&owned).0
     }
 
     #[test]
@@ -357,6 +490,129 @@ mod tests {
             &["packages/*".to_string(), "packages/app/*".to_string()],
         );
         assert_eq!(roots, vec![PathBuf::from("/repo/packages")]);
+    }
+
+    fn expand(root: &Path, patterns: &[&str], dialect: GlobDialect) -> MembershipExpansion {
+        expand_with(root, patterns, dialect, RepoEvidence::default())
+    }
+
+    fn expand_with(
+        root: &Path,
+        patterns: &[&str],
+        dialect: GlobDialect,
+        evidence: RepoEvidence<'_>,
+    ) -> MembershipExpansion {
+        let owned: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
+        expand_membership_globs(
+            root,
+            &owned,
+            dialect,
+            MonorepoStandard::Unknown,
+            Some(PackageProvenance::Globbed),
+            evidence,
+        )
+    }
+
+    fn members_fixture() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        for name in ["a", "b"] {
+            let member = dir.path().join("packages").join(name);
+            std::fs::create_dir_all(&member).expect("create member");
+            std::fs::write(member.join("package.json"), "{}").expect("write manifest");
+        }
+        dir
+    }
+
+    fn relatives(expansion: &MembershipExpansion) -> Vec<&str> {
+        expansion
+            .seeds
+            .iter()
+            .map(|seed| seed.relative.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_fully_understood_expansion_is_complete() {
+        let dir = members_fixture();
+        let expansion = expand(dir.path(), &["packages/*", "tools/*"], GlobDialect::Minimatch);
+        assert_eq!(relatives(&expansion), ["packages/a", "packages/b"]);
+        assert!(expansion.patterns_resolved);
+        assert!(!expansion.missing_literal, "a glob matching nothing is not a miss");
+    }
+
+    #[test]
+    fn a_dropped_pattern_is_reported_unresolved() {
+        let dir = members_fixture();
+        for (patterns, dialect) in [
+            (["packages/*", "tools/{a,b}"], GlobDialect::Cargo),
+            (["packages/*", "tools/["], GlobDialect::Minimatch),
+            (["packages/*", "!packages/["], GlobDialect::Minimatch),
+        ] {
+            let expansion = expand(dir.path(), &patterns, dialect);
+            assert!(!expansion.patterns_resolved, "{patterns:?}");
+            assert!(!expansion.missing_literal, "{patterns:?}");
+        }
+    }
+
+    #[test]
+    fn a_missing_literal_member_is_reported_separately() {
+        let dir = members_fixture();
+        let expansion = expand(
+            dir.path(),
+            &["packages/a", "packages/missing"],
+            GlobDialect::Cargo,
+        );
+        assert_eq!(relatives(&expansion), ["packages/a"]);
+        assert!(expansion.missing_literal);
+        assert!(expansion.patterns_resolved);
+    }
+
+    #[test]
+    fn an_observed_walk_failure_is_unresolved_only_where_a_glob_walks() {
+        let dir = members_fixture();
+        let root = dir.path();
+        let dirs = [root.join("packages/a"), root.join("packages/b")];
+        for (failed, resolved) in [
+            (root.join("packages/b/node"), false),
+            (root.to_path_buf(), false),
+            (root.join("docs"), true),
+        ] {
+            let failures = [failed.clone()];
+            let evidence = RepoEvidence {
+                manifest_dirs: Some(&dirs),
+                manifest_walk_errors: Some(&failures),
+                ..RepoEvidence::default()
+            };
+            let expansion = expand_with(root, &["packages/*"], GlobDialect::Minimatch, evidence);
+            assert_eq!(relatives(&expansion), ["packages/a", "packages/b"]);
+            assert_eq!(expansion.patterns_resolved, resolved, "{}", failed.display());
+        }
+    }
+
+    #[test]
+    fn only_io_walk_errors_have_a_failure_path() {
+        let walk_root = Path::new("/repo/packages");
+        let io = || Box::new(ignore::Error::Io(std::io::Error::other("denied")));
+        let with_path = ignore::Error::WithDepth {
+            depth: 1,
+            err: Box::new(ignore::Error::WithPath {
+                path: PathBuf::from("/repo/packages/a"),
+                err: io(),
+            }),
+        };
+        assert_eq!(
+            walk_failure_path(&with_path, walk_root),
+            Some(PathBuf::from("/repo/packages/a"))
+        );
+        assert_eq!(
+            walk_failure_path(&ignore::Error::Io(std::io::Error::other("denied")), walk_root),
+            Some(walk_root.to_path_buf())
+        );
+        let ignore_rule = ignore::Error::Glob {
+            glob: Some("[".to_owned()),
+            err: "unclosed class".to_owned(),
+        };
+        assert_eq!(walk_failure_path(&ignore_rule, walk_root), None);
     }
 
     #[test]

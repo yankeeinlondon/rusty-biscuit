@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Build the two pnpm-authoritative fixtures for 2026-09-21-lockfile-provenance-cost.
+
+usage: pnpm-fixture.py <checkout-root> <out-dir>
+
+checkout-shape/  this checkout's pnpm-workspace.yaml, pnpm-lock.yaml, and the three
+                 package.json files it names, at the same relative paths (no Cargo files)
+large/           40 members under packages/*, and a synthetic pnpm-lock.yaml: 41
+                 importers (root + 40, each with homelab/server/frontend's dependency
+                 block) and the checkout's packages:/snapshots: sections repeated 10x
+                 with every entry key renamed per copy so keys stay unique
+"""
+import os, re, shutil, sys
+
+src, out = sys.argv[1], sys.argv[2]
+shutil.rmtree(out, ignore_errors=True)
+
+a = os.path.join(out, "checkout-shape")
+for rel in ["pnpm-workspace.yaml", "pnpm-lock.yaml", "package.json",
+            "homelab/server/frontend/package.json", "tools/test-audit/package.json"]:
+    os.makedirs(os.path.dirname(os.path.join(a, rel)) or a, exist_ok=True)
+    shutil.copy(os.path.join(src, rel), os.path.join(a, rel))
+
+lines = open(os.path.join(src, "pnpm-lock.yaml")).read().split("\n")
+top = {l.rstrip(":"): i for i, l in enumerate(lines) if re.match(r"^[a-z]+:", l)}
+header = lines[:top["importers"]]
+importers = lines[top["importers"] + 1:top["packages"]]
+packages = lines[top["packages"] + 1:top["snapshots"]]
+snapshots = lines[top["snapshots"] + 1:]
+
+# the frontend importer's body (lines after "  homelab/server/frontend:" up to the next importer key)
+start = importers.index("  homelab/server/frontend:") + 1
+end = next(i for i in range(start, len(importers)) if re.match(r"^  \S", importers[i]))
+body = [l for l in importers[start:end] if l.strip()]
+
+def renamed(section, k):
+    res = []
+    for l in section:
+        m = re.match(r"^  ('?)(.+)$", l)
+        if m and not l.startswith("   ") and l.endswith(":") or (m and not l.startswith("   ") and ": {}" in l):
+            q, rest = m.group(1), m.group(2)
+            l = f"  {q}lpc{k}-{rest}" if k else l
+        res.append(l)
+    return res
+
+b = os.path.join(out, "large")
+N, COPIES = 40, 10
+members = [f"packages/pkg-{i:02d}" for i in range(N)]
+out_lines = header + ["importers:", "", "  .:", "    dependencies:", "      node-addon-api:",
+                      "        specifier: ^8.9.0", "        version: 8.9.0", ""]
+for m in members:
+    out_lines += [f"  {m}:"] + body + [""]
+out_lines += ["packages:"]
+for k in range(COPIES):
+    out_lines += renamed(packages, k)
+out_lines += ["snapshots:"]
+for k in range(COPIES):
+    out_lines += renamed(snapshots, k)
+os.makedirs(b)
+open(os.path.join(b, "pnpm-lock.yaml"), "w").write("\n".join(out_lines) + "\n")
+open(os.path.join(b, "pnpm-workspace.yaml"), "w").write("packages:\n  - packages/*\n")
+open(os.path.join(b, "package.json"), "w").write('{"name": "lpc-large", "private": true}\n')
+for i, m in enumerate(members):
+    os.makedirs(os.path.join(b, m))
+    open(os.path.join(b, m, "package.json"), "w").write(f'{{"name": "pkg-{i:02d}", "version": "1.0.0"}}\n')

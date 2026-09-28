@@ -61,6 +61,22 @@ pub const FS_CANONICALIZATIONS: &str = "filesystem.io.canonicalizations";
 /// `go.mod`, and peers).
 pub const REPO_MANIFEST_PARSES: &str = "filesystem.repo.manifest_parses";
 
+/// Unique lockfile paths whose presence was probed (one metadata probe each).
+///
+/// Probes run even when the request declines corroboration: each layer's
+/// candidates in precedence order until one is present, plus `composer.lock`,
+/// `pdm.lock`, and `poetry.lock` at the repository root and every unique
+/// package root.
+pub const REPO_LOCKFILE_PROBES: &str = "filesystem.repo.lockfile_probes";
+
+/// Lockfile content-read attempts.
+///
+/// Only a lockfile probed as present is opened, so an absent lockfile counts
+/// no read; a present file that fails to read (a directory, or one removed
+/// after the probe) still counts one attempt. Zero proves that detection read
+/// no lockfile content.
+pub const REPO_LOCKFILE_READS: &str = "filesystem.repo.lockfile_reads";
+
 /// Lockfiles parsed (`Cargo.lock`, `pnpm-lock.yaml`, and peers).
 pub const REPO_LOCKFILE_PARSES: &str = "filesystem.repo.lockfile_parses";
 

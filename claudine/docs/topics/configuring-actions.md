@@ -432,7 +432,7 @@ This is useful for shared repo configs where the webhook secret should not be co
 
 ### Desktop Notifications
 
-Desktop notifications are **zero-config** and are not managed through `claudine config`. They are triggered via the `notify` field in composition lifecycle frontmatter only. See [Lifecycle Notifications](lifecycle.md).
+Desktop notifications are **zero-config** and are not managed through `claudine config`. They are triggered via the `notify` field in composition lifecycle frontmatter only. See [Lifecycle Notifications](flow-control/lifecycle.md).
 
 ### Example Settings Block
 

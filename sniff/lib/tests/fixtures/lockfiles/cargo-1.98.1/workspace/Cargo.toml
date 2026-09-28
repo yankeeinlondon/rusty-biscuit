@@ -1,0 +1,14 @@
+[package]
+name = "fixture-root"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+local-lib = { path = "local-lib" }
+
+[workspace]
+members = ["crates/alpha", "crates/beta", ".tools/hidden"]
+exclude = ["local-lib"]
+
+[workspace.package]
+version = "0.3.0"

@@ -1,0 +1,11 @@
+[project]
+name = "fixture-root"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+local-lib = { path = "local-lib" }

@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use crate::executable_index::ExecutableIndex;
 use crate::filesystem::file_types::ProgrammingLanguage;
 
+use super::lockfile::LockfileObservation;
+
 // TODO(swift): see spec § "How should SwiftPM be represented?". The
 // `SwiftPackage` variant is intentionally absent until option 2
 // (`.package(path:)` local-package detection) lands; a multi-target
@@ -330,8 +332,8 @@ pub enum PackageProvenance {
     LeafMarkers,
     /// Parsed local path dependencies as package links.
     LocalPathDependencies,
-    /// Parsed the committed lockfile's resolved member set. High fidelity,
-    /// still filesystem-only.
+    /// The working-tree lockfile records exactly the manifest-derived member
+    /// set. High fidelity, still filesystem-only.
     Lockfile,
     /// Discovered by walking for per-directory manifests without a confirming
     /// membership authority. This is the fallback provenance for packages found
@@ -377,12 +379,25 @@ pub struct MonorepoLayer {
     pub authority: MonorepoStandard,
     /// Orchestrators riding on top (role [`Role::OrchestratesTasks`] only).
     pub orchestrators: Vec<MonorepoStandard>,
-    /// How this layer's package list was derived. Packages inherit it.
+    /// How this layer's package list was derived. The packages this layer
+    /// owns inherit it.
+    ///
+    /// [`PackageProvenance::Lockfile`] appears only when the request
+    /// [wants lockfile provenance](crate::request::RepoRequest::wants_lockfile_provenance)
+    /// and [`MonorepoLayer::lockfile`] is an exact
+    /// [`LockfileStatus::Match`](super::LockfileStatus::Match); every other
+    /// status keeps this manifest-derived.
     pub provenance: PackageProvenance,
-    /// Whether the committed lockfile agrees with the manifest-derived package
-    /// set, if a lockfile was consulted. `None` when no lockfile was parsed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lockfile_match: Option<bool>,
+    /// What the layer's lockfile, as it exists in the working tree, says
+    /// about [`MonorepoLayer::packages`].
+    ///
+    /// Always present. A request that declines corroboration (the
+    /// [`RepoRequest::structure`](crate::request::RepoRequest::structure) and
+    /// [`RepoRequest::focused`](crate::request::RepoRequest::focused)
+    /// defaults) still probes whether the lockfile exists but reads none, so
+    /// a present lockfile reports
+    /// [`LockfileStatus::NotRequested`](super::LockfileStatus::NotRequested).
+    pub lockfile: LockfileObservation,
     /// Whether the layer's root manifest also declares a package, when the
     /// standard's [`RootMembership`] is [`RootMembership::WhenManifestDeclaresPackage`].
     ///
@@ -456,15 +471,17 @@ impl MonorepoStandard {
     /// single non-root member when its [`RootMembership`] also lets the root
     /// count. `WhenManifestDeclaresPackage` consults
     /// [`MonorepoLayer::root_is_package`] so a virtual Cargo workspace with a
-    /// single member (no `[package]` at the root) is honestly degenerate. A
-    /// `PackageBoundaryOnly` standard never resolves non-degenerately on its
-    /// own — targets and products are not packages.
+    /// single member (no `[package]` at the root) is honestly degenerate. An
+    /// `Always` layer (uv) lists its root among `packages`, so one package is
+    /// the root alone and is degenerate. A `PackageBoundaryOnly` standard
+    /// never resolves non-degenerately on its own — targets and products are
+    /// not packages.
     pub fn membership_resolves_non_degenerately(self, layer: &MonorepoLayer) -> bool {
         match self.spec().multiplicity {
             WorkspaceMultiplicity::MemberCount => match layer.packages.len() {
                 0 => false,
                 1 => match self.spec().root_membership {
-                    RootMembership::Always => true,
+                    RootMembership::Always => false,
                     RootMembership::WhenManifestDeclaresPackage => layer.root_is_package,
                     RootMembership::Never => false,
                 },
@@ -2040,7 +2057,9 @@ mod tests {
             authority,
             orchestrators: Vec::new(),
             provenance: PackageProvenance::Globbed,
-            lockfile_match: None,
+            lockfile: LockfileObservation::not_applicable(
+                super::super::lockfile::LockfileReason::NoLockfileSource,
+            ),
             root_is_package: false,
             packages,
         }
@@ -2110,8 +2129,11 @@ mod tests {
         assert!(
             MonorepoStandard::CargoWorkspace.membership_resolves_non_degenerately(&cargo_root_pkg)
         );
-        // uv counts the root unconditionally.
-        let uv = layer_with(MonorepoStandard::UvWorkspace, 1);
+        // A uv layer lists its root among its packages, so a lone package is
+        // a root-only workspace (`members = []`) and a second is a real member.
+        let uv_root_only = layer_with(MonorepoStandard::UvWorkspace, 1);
+        assert!(!MonorepoStandard::UvWorkspace.membership_resolves_non_degenerately(&uv_root_only));
+        let uv = layer_with(MonorepoStandard::UvWorkspace, 2);
         assert!(MonorepoStandard::UvWorkspace.membership_resolves_non_degenerately(&uv));
     }
 

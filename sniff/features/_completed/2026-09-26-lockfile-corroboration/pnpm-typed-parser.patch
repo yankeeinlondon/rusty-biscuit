@@ -1,0 +1,274 @@
+--- a/sniff/lib/src/filesystem/repo/detection.rs
++++ b/sniff/lib/src/filesystem/repo/detection.rs
+@@ -209,7 +209,7 @@
+     go_mod: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
+     raw_text: RefCell<HashMap<PathBuf, Option<Rc<String>>>>,
+     cargo_locks: RefCell<HashMap<PathBuf, Option<Rc<CargoLockVersions>>>>,
+-    pnpm_locks: RefCell<HashMap<PathBuf, Option<Rc<serde_yaml_ng::Value>>>>,
++    pnpm_locks: RefCell<HashMap<PathBuf, Option<Rc<Vec<String>>>>>,
+     uv_locks: RefCell<HashMap<PathBuf, Option<Rc<toml_crate::Value>>>>,
+     root_configs: RefCell<HashMap<PathBuf, bool>>,
+ }
+@@ -404,13 +404,15 @@
+         parsed
+     }
+ 
+-    fn pnpm_lock(&self, path: &Path) -> Option<Rc<serde_yaml_ng::Value>> {
++    /// The `importers:` keys of a `pnpm-lock.yaml`, or `None` when the file is
++    /// absent, is not valid YAML, or has no `importers` mapping.
++    fn pnpm_lock_importers(&self, path: &Path) -> Option<Rc<Vec<String>>> {
+         let key = normalized_key(path);
+         if let Some(cached) = self.pnpm_locks.borrow().get(&key) {
+             return cached.clone();
+         }
+         let parsed = read_counted_lockfile(path)
+-            .and_then(|content| serde_yaml_ng::from_str(&content).ok())
++            .and_then(|content| pnpm_importer_keys(&content))
+             .map(Rc::new);
+         self.pnpm_locks.borrow_mut().insert(key, parsed.clone());
+         parsed
+@@ -936,7 +938,7 @@
+     rel.to_str().map(normalize_layer_package_relative)
+ }
+ 
+-/// Parse `pnpm-lock.yaml` and compare its `importers:` keys to the layer's
++/// Read `pnpm-lock.yaml`'s `importers:` keys and compare them to the layer's
+ /// package set. Returns `Some(true)` only when the two sets are equal, so a
+ /// stale lockfile with extra importers is reported as a mismatch rather than
+ /// silently upgrading provenance to `Lockfile`. Returns `None` when the
+@@ -951,12 +953,10 @@
+     manifests: &ManifestStore,
+ ) -> Option<bool> {
+     let lock_path = layer.root.join("pnpm-lock.yaml");
+-    let parsed = manifests.pnpm_lock(&lock_path)?;
++    let importers = manifests.pnpm_lock_importers(&lock_path)?;
+ 
+-    let importers = parsed.get("importers")?.as_mapping()?;
+     let lock_members: std::collections::HashSet<String> = importers
+-        .keys()
+-        .filter_map(|k| k.as_str())
++        .iter()
+         .map(|s| {
+             s.trim_start_matches('.')
+                 .trim_start_matches('/')
+@@ -982,6 +982,115 @@
+         .collect();
+ 
+     Some(manifest_members == lock_members)
++}
++
++/// The string keys of a `pnpm-lock.yaml` document's top-level `importers`
++/// mapping, in document order; non-string keys are dropped.
++///
++/// Only the key set is retained: importer bodies and the `packages:` and
++/// `snapshots:` sections are skipped through `IgnoredAny`, so no YAML value
++/// tree is built for them. The whole document is still scanned, so invalid
++/// YAML anywhere yields `None`. One divergence from the generic `Value` parse
++/// it replaced: a duplicate key outside the `importers` keys (for example
++/// inside `packages:`) is not detected, where the generic parse rejected the
++/// document. pnpm does not write such a lockfile.
++///
++/// ## Returns
++///
++/// `None` when the content is not valid YAML, is not a mapping, or has no
++/// `importers` mapping.
++fn pnpm_importer_keys(content: &str) -> Option<Vec<String>> {
++    serde_yaml_ng::from_str::<PnpmLockDocument>(content)
++        .ok()?
++        .importers
++}
++
++/// The part of a `pnpm-lock.yaml` document that [`pnpm_importer_keys`] reads.
++#[derive(serde::Deserialize)]
++struct PnpmLockDocument {
++    #[serde(default, deserialize_with = "importer_keys_or_none")]
++    importers: Option<Vec<String>>,
++}
++
++/// Deserialize a mapping's string keys, or `None` for any non-mapping value.
++fn importer_keys_or_none<'de, D: serde::Deserializer<'de>>(
++    deserializer: D,
++) -> std::result::Result<Option<Vec<String>>, D::Error> {
++    use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
++
++    struct ImporterKeys;
++
++    impl<'de> Visitor<'de> for ImporterKeys {
++        type Value = Option<Vec<String>>;
++
++        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
++            formatter.write_str("any YAML value")
++        }
++
++        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Self::Value, A::Error> {
++            let mut keys = Vec::new();
++            let mut seen = HashSet::new();
++            // Keys go through `Value` so a non-string key is dropped rather than
++            // rejected, as the generic `as_str` filter did, and a duplicate key
++            // fails the document as the generic mapping did.
++            while let Some(key) = map.next_key::<serde_yaml_ng::Value>()? {
++                map.next_value::<IgnoredAny>()?;
++                if !seen.insert(key.clone()) {
++                    return Err(A::Error::custom("duplicate importer key"));
++                }
++                if let serde_yaml_ng::Value::String(key) = key {
++                    keys.push(key);
++                }
++            }
++            Ok(Some(keys))
++        }
++
++        fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> std::result::Result<Self::Value, A::Error> {
++            IgnoredAny.visit_seq(seq)?;
++            Ok(None)
++        }
++
++        fn visit_unit<E: Error>(self) -> std::result::Result<Self::Value, E> {
++            Ok(None)
++        }
++
++        fn visit_bool<E: Error>(self, _: bool) -> std::result::Result<Self::Value, E> {
++            Ok(None)
++        }
++
++        fn visit_i64<E: Error>(self, _: i64) -> std::result::Result<Self::Value, E> {
++            Ok(None)
++        }
++
++        fn visit_u64<E: Error>(self, _: u64) -> std::result::Result<Self::Value, E> {
++            Ok(None)
++        }
++
++        fn visit_f64<E: Error>(self, _: f64) -> std::result::Result<Self::Value, E> {
++            Ok(None)
++        }
++
++        fn visit_str<E: Error>(self, _: &str) -> std::result::Result<Self::Value, E> {
++            Ok(None)
++        }
++    }
++
++    deserializer.deserialize_any(ImporterKeys)
++}
++
++/// The generic `serde_yaml_ng::Value` path that [`pnpm_importer_keys`]
++/// replaced, kept as the parity oracle.
++#[cfg(test)]
++fn pnpm_importer_keys_reference(content: &str) -> Option<Vec<String>> {
++    let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(content).ok()?;
++    let importers = parsed.get("importers")?.as_mapping()?;
++    Some(
++        importers
++            .keys()
++            .filter_map(|k| k.as_str())
++            .map(str::to_string)
++            .collect(),
++    )
+ }
+ 
+ /// Parse `uv.lock` and compare its `workspace.members` entries to the layer's
+@@ -2251,9 +2360,104 @@
+ 
+         assert_eq!(counts.get(counters::FS_FILE_OPENS), 1);
+         assert_eq!(counts.get(counters::REPO_MANIFEST_PARSES), 1);
++    }
++
++    /// A v9-shaped lockfile whose `importers` precede `packages` and
++    /// `snapshots`, so the typed parse must skip real trailing sections.
++    fn pnpm_lock_with_importers(importers: &[&str]) -> String {
++        let mut lock = String::from("lockfileVersion: '9.0'\n\nimporters:\n");
++        for importer in importers {
++            lock.push_str(&format!(
++                "  {importer}:\n    dependencies:\n      left-pad:\n        specifier: ^1.3.0\n        version: 1.3.0\n"
++            ));
++        }
++        lock.push_str(
++            "\npackages:\n  left-pad@1.3.0:\n    resolution: {integrity: sha512-abc}\n\n\
++             snapshots:\n  left-pad@1.3.0: {}\n",
++        );
++        lock
+     }
+ 
++    fn assert_pnpm_parity(content: &str) -> Option<Vec<String>> {
++        let typed = pnpm_importer_keys(content);
++        assert_eq!(
++            typed,
++            pnpm_importer_keys_reference(content),
++            "typed and reference importer keys differ for {content:?}"
++        );
++        typed
++    }
++
+     #[test]
++    fn pnpm_importer_keys_match_reference_for_matching_extra_and_missing_importers() {
++        let cases: [(&str, &[&str]); 3] = [
++            ("matching", &[".", "packages/web", "packages/ui"]),
++            ("extra", &[".", "packages/web", "packages/ui", "packages/stale"]),
++            ("missing", &[".", "packages/web"]),
++        ];
++        for (label, importers) in cases {
++            let keys = assert_pnpm_parity(&pnpm_lock_with_importers(importers));
++            let expected: Vec<String> = importers.iter().map(|k| k.to_string()).collect();
++            assert_eq!(keys, Some(expected), "{label}");
++        }
++    }
++
++    #[test]
++    fn pnpm_importer_keys_match_reference_for_malformed_lockfiles() {
++        let absent = [
++            ("invalid YAML", "importers:\n  .: {\n"),
++            ("invalid YAML after importers", "importers:\n  .: {}\npackages: [\n"),
++            ("empty document", ""),
++            ("scalar document", "just a string\n"),
++            ("sequence document", "- importers\n"),
++            ("no importers key", "lockfileVersion: '9.0'\npackages: {}\n"),
++            ("null importers", "importers:\n"),
++            ("scalar importers", "importers: 3\n"),
++            ("string importers", "importers: packages/web\n"),
++            ("sequence importers", "importers:\n  - packages/web\n"),
++            ("duplicate importer key", "importers:\n  a: {}\n  a: {}\n"),
++            ("duplicate non-string importer key", "importers:\n  1: {}\n  1: {}\n"),
++            ("duplicate importers key", "importers: {}\nimporters: {}\n"),
++        ];
++        for (label, content) in absent {
++            assert_eq!(assert_pnpm_parity(content), None, "{label}");
++        }
++
++        let present = [
++            ("empty importers", "importers: {}\n", vec![]),
++            (
++                "non-string keys are dropped",
++                "importers:\n  1: {}\n  true: {}\n  ~: {}\n  packages/web: {}\n",
++                vec!["packages/web".to_string()],
++            ),
++            (
++                "scalar importer bodies",
++                "importers:\n  .: 7\n  packages/web: ~\n",
++                vec![".".to_string(), "packages/web".to_string()],
++            ),
++        ];
++        for (label, content, expected) in present {
++            assert_eq!(assert_pnpm_parity(content), Some(expected), "{label}");
++        }
++    }
++
++    #[test]
++    fn pnpm_importer_keys_accept_duplicate_keys_outside_importers() {
++        let content = "importers:\n  a: {}\npackages:\n  x: 1\n  x: 2\n";
++
++        assert_eq!(pnpm_importer_keys_reference(content), None);
++        assert_eq!(pnpm_importer_keys(content), Some(vec!["a".to_string()]));
++    }
++
++    #[test]
++    fn pnpm_importer_keys_match_reference_on_workspace_lockfile() {
++        let content = include_str!("../../../../../pnpm-lock.yaml");
++
++        let keys = assert_pnpm_parity(content).expect("workspace pnpm-lock.yaml has importers");
++        assert!(keys.iter().any(|k| k == "."), "{keys:?}");
++    }
++
++    #[test]
+     fn manifest_store_replays_node_pnpm_and_uv_parse_failures() {
+         use crate::performance::testing;
+         use tempfile::tempdir;

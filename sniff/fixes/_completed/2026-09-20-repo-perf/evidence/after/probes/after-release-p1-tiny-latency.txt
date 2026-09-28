@@ -1,0 +1,6 @@
+start: 2026-09-25T23:31:17Z load: { 53.86 42.47 30.19 }
+tiny_tree: root=/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/repo-perf-tiny-50629 walked_entries=8 candidates=3 warmup_iters=200 samples=20 iters_per_sample=200
+serial_reference: n=20 median_us=233.0 min_us=229.5 p95_us=673.2 max_us=1460.8
+production: n=20 median_us=3056.1 min_us=2944.7 p95_us=9072.8 max_us=9268.3
+detect_repo_structure: n=20 median_us=3379.1 min_us=3289.1 p95_us=13580.8 max_us=13655.0
+end: 2026-09-25T23:31:53Z load: { 55.65 43.91 31.19 }

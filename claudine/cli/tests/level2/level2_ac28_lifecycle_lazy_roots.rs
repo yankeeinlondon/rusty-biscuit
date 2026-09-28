@@ -537,6 +537,14 @@ fn level2_ac28_shipped_prompt_that_references_a_lazy_root_composes() {
     let fixture = stage();
     fs::create_dir_all(fixture.repo.join("features/f1")).unwrap();
     fs::write(fixture.repo.join("features/f1/spec.md"), "# fixture spec\n").unwrap();
+    // `plan.md` transcludes `./_input-robustness.md`, so it must sit beside
+    // both documents written below.
+    write_document(
+        &fixture,
+        "_input-robustness.md",
+        &fs::read_to_string(workspace_root().join("prompts/_input-robustness.md"))
+            .expect("the shipped input-robustness prompt must be readable"),
+    );
     let real = write_document(&fixture, "plan.md", &shipped);
     let control = write_document(
         &fixture,

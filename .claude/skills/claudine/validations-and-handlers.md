@@ -7,7 +7,7 @@ last_updated: 2026-06-30
 The harness **validation and handler DSL** (`pre_checks`, `post_checks`, `handle`,
 `handle_<event>`, `deviate`) has been **removed**. Its gating, verification, and
 recovery roles are now expressed through the prompt's **lifecycle stack**. See the
-lifecycle reference: [`lifecycle.md`](lifecycle.md)
+lifecycle reference: [`lifecycle.md`](topics/flow-control/lifecycle.md)
 and the lifecycle spec at `claudine/features/2026-05-12-lifecycle/spec.md`.
 
 ## What the harness module still owns

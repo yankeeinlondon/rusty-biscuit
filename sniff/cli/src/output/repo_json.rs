@@ -583,7 +583,7 @@ fn structure_value(
     };
 
     if filter.is_empty() && package.is_none() && package_area.is_none() {
-        return serde_json::to_value(repo).unwrap_or(Value::Null);
+        return repo_info_value(repo);
     }
 
     let packages = repo.packages.as_deref().unwrap_or(&[]);
@@ -595,7 +595,29 @@ fn structure_value(
 
     let mut repo_clone = repo.clone();
     repo_clone.packages = Some(filtered);
-    serde_json::to_value(&repo_clone).unwrap_or(Value::Null)
+    repo_info_value(&repo_clone)
+}
+
+/// Serialize a `RepoInfo` as the CLI projects it.
+pub(crate) fn repo_info_value(repo: &RepoInfo) -> Value {
+    let mut value = serde_json::to_value(repo).unwrap_or(Value::Null);
+    omit_empty_standalone_lockfiles(&mut value);
+    value
+}
+
+/// Drop an empty `standalone_lockfiles` from a serialized `RepoInfo`.
+///
+/// The library always serializes the list; the CLI omits it when empty, the
+/// rule `RepoInfo` applies to `monorepo_layers` (ruling R2 of
+/// `2026-09-26-lockfile-corroboration`).
+pub(crate) fn omit_empty_standalone_lockfiles(repo: &mut Value) {
+    if let Value::Object(fields) = repo
+        && fields
+            .get("standalone_lockfiles")
+            .is_some_and(|list| list.as_array().is_some_and(Vec::is_empty))
+    {
+        fields.remove("standalone_lockfiles");
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -635,6 +657,7 @@ struct AggregateStructure {
     root: PathBuf,
     monorepo_standards: Value,
     monorepo_layers: Value,
+    standalone_lockfiles: Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -797,12 +820,15 @@ fn aggregate_structure(repo: Option<&RepoInfo>) -> AggregateStructure {
                 .unwrap_or_else(|_| json!([])),
             monorepo_layers: serde_json::to_value(&repo.monorepo_layers)
                 .unwrap_or_else(|_| json!([])),
+            standalone_lockfiles: serde_json::to_value(&repo.standalone_lockfiles)
+                .unwrap_or_else(|_| json!([])),
         },
         None => AggregateStructure {
             is_monorepo: false,
             root: PathBuf::new(),
             monorepo_standards: json!([]),
             monorepo_layers: json!([]),
+            standalone_lockfiles: json!([]),
         },
     }
 }
@@ -983,7 +1009,7 @@ fn changed_path_attribution(result: &SniffResult, paths: &[PathBuf]) -> PathAttr
 /// Build the legacy full-`RepoInfo` JSON value (today's behavior).
 fn fallback_repo_value(result: &SniffResult) -> Value {
     if let Some(ref fs) = result.filesystem {
-        serde_json::to_value(&fs.repo).unwrap_or(Value::Null)
+        fs.repo.as_ref().map_or(Value::Null, repo_info_value)
     } else {
         json!({})
     }
@@ -1033,6 +1059,7 @@ mod tests {
             monorepo_standards: Vec::new(),
             monorepo_layers: Vec::new(),
             packages: None,
+            standalone_lockfiles: Vec::new(),
         };
         let filesystem = FilesystemInfo {
             repo: Some(repo),
@@ -1071,6 +1098,7 @@ mod tests {
             monorepo_standards: Vec::new(),
             monorepo_layers: Vec::new(),
             packages: None,
+            standalone_lockfiles: Vec::new(),
         };
         let filesystem = FilesystemInfo {
             repo: Some(repo),
@@ -1272,6 +1300,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: Some(packages),
+                standalone_lockfiles: Vec::new(),
             };
             let mut git = fixture_git_info();
             git.status.as_mut().unwrap().dirty = dirty_paths
@@ -1503,6 +1532,7 @@ mod tests {
                     make_package("alpha", "area-a"),
                     make_package("beta", "area-b"),
                 ]),
+                standalone_lockfiles: Vec::new(),
             };
             let mut git = fixture_git_info();
             git.status.as_mut().unwrap().dirty = dirty_paths
@@ -1671,7 +1701,9 @@ mod tests {
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
                     root: PathBuf::from("/repo"),
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: true,
                     packages: vec!["pkg-a".to_string()],
                 }],
@@ -1713,7 +1745,9 @@ mod tests {
                     orchestrators: vec![],
                     provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
                     root: PathBuf::from("/repo"),
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: true,
                     packages: vec!["pkg-a".to_string()],
                 }],
@@ -1745,7 +1779,9 @@ mod tests {
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: sniff::filesystem::repo::PackageProvenance::Explicit,
                     root: PathBuf::from("/repo"),
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: true,
                     packages: vec!["pkg-a".to_string()],
                 }],
@@ -1915,6 +1951,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: Some(vec![alpha, beta]),
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2215,6 +2252,7 @@ mod tests {
                     make_package("alpha", "area-a"),
                     make_package("beta", "area-b"),
                 ]),
+                standalone_lockfiles: Vec::new(),
             };
             SniffResult {
                 os: None,
@@ -2379,6 +2417,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: None,
+                standalone_lockfiles: Vec::new(),
             };
             let request = sniff::request::FilesystemRequest::new()
                 .git(
@@ -2434,6 +2473,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: Some(packages),
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2779,11 +2819,14 @@ mod tests {
                     authority: MonorepoStandard::CargoWorkspace,
                     orchestrators: vec![MonorepoStandard::Nx],
                     provenance: PackageProvenance::Globbed,
-                    lockfile_match: None,
+                    lockfile: sniff::filesystem::repo::LockfileObservation::not_applicable(
+                        sniff::filesystem::repo::LockfileReason::NoLockfileSource,
+                    ),
                     root_is_package: false,
                     packages: vec!["pkg-a".to_string(), "pkg-b".to_string()],
                 }],
                 packages: None,
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2852,6 +2895,7 @@ mod tests {
                 monorepo_standards: Vec::new(),
                 monorepo_layers: Vec::new(),
                 packages: None,
+                standalone_lockfiles: Vec::new(),
             };
             let result = result_with_repo(repo);
             let action = RepoAction::Structure {
@@ -2932,6 +2976,122 @@ mod tests {
             let layers = value["monorepo_layers"].as_array().unwrap();
             let layer_packages = layers[0]["packages"].as_array().unwrap();
             assert!(layer_packages.iter().all(|p| p.is_string()));
+        }
+
+        fn poetry_lockfile() -> sniff::filesystem::repo::StandaloneLockfileObservation {
+            use sniff::filesystem::repo::{
+                LockfileObservation, LockfileReason, LockfileStatus,
+                StandaloneLockfileObservation, StandaloneLockfileTool,
+            };
+            StandaloneLockfileObservation {
+                root: "pkg-a".to_string(),
+                tool: StandaloneLockfileTool::Poetry,
+                observation: LockfileObservation {
+                    status: LockfileStatus::Unverifiable,
+                    paths: vec!["poetry.lock".to_string()],
+                    reason: Some(LockfileReason::NoMembershipData),
+                    extra: Vec::new(),
+                    missing: Vec::new(),
+                },
+            }
+        }
+
+        /// Every `RepoInfo` projection `sniff repo --json` subcommands use:
+        /// unfiltered and filtered `structure`, and the unspecialized
+        /// fallback.
+        fn repo_info_projections(repo: RepoInfo) -> Vec<(&'static str, Value)> {
+            let result = result_with_repo(repo);
+            let structure = |filter: Vec<String>| RepoAction::Structure {
+                filter,
+                latest_versions: false,
+                package: None,
+                package_area: None,
+            };
+            vec![
+                ("structure", build(&result, Some(&structure(Vec::new())), None)),
+                (
+                    "filtered structure",
+                    build(&result, Some(&structure(vec!["pkg-a".to_string()])), None),
+                ),
+                ("fallback", build(&result, None, None)),
+            ]
+        }
+
+        /// Ruling R2: the library always serializes `standalone_lockfiles`;
+        /// the CLI omits the empty list, as `RepoInfo` omits empty layers.
+        #[test]
+        fn repo_info_projections_omit_an_empty_standalone_lockfile_list() {
+            for (label, value) in repo_info_projections(repo_with_layers()) {
+                assert!(
+                    value.get("standalone_lockfiles").is_none(),
+                    "{label}: empty list must be omitted: {value}"
+                );
+                assert!(value.get("monorepo_layers").is_some(), "{label}: {value}");
+                // The omitted list reads back as empty.
+                let read: RepoInfo = serde_json::from_value(value).expect("RepoInfo");
+                assert!(read.standalone_lockfiles.is_empty(), "{label}");
+            }
+        }
+
+        #[test]
+        fn repo_info_projections_keep_a_populated_standalone_lockfile_list() {
+            let mut repo = repo_with_layers();
+            repo.standalone_lockfiles = vec![poetry_lockfile()];
+
+            for (label, value) in repo_info_projections(repo.clone()) {
+                assert_eq!(
+                    value["standalone_lockfiles"],
+                    json!([{
+                        "root": "pkg-a",
+                        "tool": "poetry",
+                        "status": "unverifiable",
+                        "paths": ["poetry.lock"],
+                        "reason": "no_membership_data",
+                        "extra": [],
+                        "missing": [],
+                    }]),
+                    "{label}: {value}"
+                );
+                // Write, read, write again: the projection is stable.
+                let read: RepoInfo = serde_json::from_value(value.clone()).expect("RepoInfo");
+                assert_eq!(read.standalone_lockfiles, repo.standalone_lockfiles, "{label}");
+                assert_eq!(repo_info_value(&read), value, "{label}");
+            }
+        }
+
+        /// The aggregate's `structure` always carries `standalone_lockfiles`,
+        /// as it always carries `monorepo_layers`.
+        #[test]
+        fn aggregate_structure_always_carries_standalone_lockfiles() {
+            let (_temp, _path) = super::aggregate::temp_git_repo();
+
+            let repo = repo_with_layers();
+            let result = result_with_repo(repo.clone());
+            let value =
+                build_aggregate_value(&result, &super::aggregate::synthetic_aggregate(repo));
+            assert_eq!(value["structure"]["standalone_lockfiles"], json!([]), "{value}");
+            assert_eq!(
+                value["structure"]["monorepo_layers"][0]["lockfile"],
+                json!({
+                    "status": "not_applicable",
+                    "paths": [],
+                    "reason": "no_lockfile_source",
+                    "extra": [],
+                    "missing": [],
+                }),
+                "{value}"
+            );
+
+            let mut repo = repo_with_layers();
+            repo.standalone_lockfiles = vec![poetry_lockfile()];
+            let result = result_with_repo(repo.clone());
+            let value =
+                build_aggregate_value(&result, &super::aggregate::synthetic_aggregate(repo));
+            assert_eq!(
+                value["structure"]["standalone_lockfiles"][0]["tool"],
+                "poetry",
+                "{value}"
+            );
         }
     }
 

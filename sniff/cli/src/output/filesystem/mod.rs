@@ -76,6 +76,7 @@ mod deps;
 mod docs;
 mod files;
 mod language;
+mod lockfile;
 mod package_areas;
 mod packages;
 mod path_format;
@@ -2536,6 +2537,7 @@ mod tests {
                 } else {
                     Some(packages)
                 },
+                standalone_lockfiles: Vec::new(),
             }
         }
 
@@ -2724,6 +2726,7 @@ mod tests {
                 } else {
                     Some(packages)
                 },
+                standalone_lockfiles: Vec::new(),
             }
         }
 

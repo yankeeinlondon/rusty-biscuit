@@ -1,0 +1,7 @@
+{
+  "name": "alpha",
+  "version": "1.0.0",
+  "dependencies": {
+    "@fixture/beta": "^1.0.0"
+  }
+}

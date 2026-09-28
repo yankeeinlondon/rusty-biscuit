@@ -315,6 +315,7 @@ fn fake_repo_info(root: &Path) -> RepoInfo {
         packages: None,
         monorepo_standards: vec![],
         monorepo_layers: vec![],
+        standalone_lockfiles: Vec::new(),
     }
 }
 
