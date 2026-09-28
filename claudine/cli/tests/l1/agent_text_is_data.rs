@@ -3,8 +3,8 @@
 //!
 //! Each assertion states the post-fix contract — agent text arrives as exact
 //! raw text, is never evaluated, never asks for shell approval, and the run
-//! succeeds — so every test fails on today's code and is ignored until the
-//! plan phase that fixes its row removes the marker.
+//! succeeds. A test stays ignored until the plan phase that fixes its row
+//! removes the marker.
 
 use std::fs;
 
@@ -253,8 +253,10 @@ fn inline_agent_added_frontmatter_survives_a_second_run() {
 
 /// Spec row "agent-written files read by expression": a top-level lifecycle
 /// field sends the agent's exact text instead of refusing it as a surviving span.
+///
+/// Green since Darkmatter stopped converting `{{{ … }}}` literals in inserted
+/// text; a `{{ … }}` payload in the same field still depends on N10.
 #[test]
-#[ignore = "red until phase 4"]
 fn lifecycle_field_from_agent_written_file_is_sent_verbatim() {
     let fixture = CliProcessFixture::named("agent-text-message");
     counting_goose(&fixture, &write_agent_log("'see {{{ title }}} siblings'"), "ok");

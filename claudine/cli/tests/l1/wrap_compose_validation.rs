@@ -862,6 +862,11 @@ fn colliding_proxy_overlay_paths_are_rejected_before_launch() {
 
 /// Acceptance 4: synthesized action bodies, mixed strings, ordinary
 /// whole-value frontmatter, and the valid `+` form still launch the provider.
+///
+/// Darkmatter scans each authored span once, so the ordinary whole-value
+/// `resides_in` renders its nested `{{area}}` as literal text in the prompt,
+/// and the mixed `success.info` composes its branch with `+`
+/// (`2026-09-27-agent-text-is-data`).
 #[test]
 fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     let fixture = CliProcessFixture::named("nested-span-negative-controls");
@@ -870,7 +875,7 @@ fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     let doc = fixture.cwd().join("controls.md");
     fs::write(
         &doc,
-        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    info: \"starting in {{area}}\"\n    stack:\n        - action:\n              - info: \"running {{area}}\"\n              - action: info\n                message: \"Deployed {{area}}\"\nsuccess:\n    info: \"a {{ area ? 'in {{area}}' : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
+        "---\narea: claudine\nresides_in: \"{{ area ? 'in {{area}}' : 'nowhere' }}\"\nstart:\n    info: \"starting in {{area}}\"\n    stack:\n        - action:\n              - info: \"running {{area}}\"\n              - action: info\n                message: \"Deployed {{area}}\"\nsuccess:\n    info: \"a {{ area ? 'in ' + area : 'x' }} b\"\n    stdout: \"{{ 'done in ' + area }}\"\n---\nBody {{resides_in}}\n",
     )
     .unwrap();
 
@@ -879,6 +884,8 @@ fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     assert!(success, "valid forms must run:\n{stderr}");
     assert_eq!(provider_runs(&marker), 1, "the provider launches exactly once");
     assert!(!stderr.contains("nested interpolation"), "{stderr}");
+    assert!(stderr.contains("Body in {{area}}"), "the prompt keeps the data literal:\n{stderr}");
+    assert!(stderr.contains("a in claudine b"), "{stderr}");
 }
 
 /// D4: a frontmatter value that holds template text reaches the event-time
