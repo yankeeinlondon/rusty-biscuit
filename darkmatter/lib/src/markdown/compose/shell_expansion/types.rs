@@ -668,6 +668,27 @@ impl ShellExpansionError {
             | Self::Preflight(_) => None,
         }
     }
+
+    /// Where in the document the failing command or directive was authored.
+    ///
+    /// `PolicyIo` and `Preflight` are not tied to a document location, so they
+    /// return `None`.
+    pub fn origin(&self) -> Option<&ShellCommandOrigin> {
+        match self {
+            Self::ParseDirective { origin, .. }
+            | Self::ExpressionEvaluation { origin, .. }
+            | Self::CommandNotFound { origin, .. }
+            | Self::Blacklisted { origin, .. }
+            | Self::ApprovalRequired { origin, .. }
+            | Self::Denied { origin, .. }
+            | Self::NotPreApproved { origin, .. }
+            | Self::DynamicCommandShape { origin, .. }
+            | Self::UnevaluatedDependencyShape { origin, .. }
+            | Self::Timeout { origin, .. }
+            | Self::ExecutionFailed { origin, .. } => Some(origin),
+            Self::PolicyIo { .. } | Self::Preflight(_) => None,
+        }
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for ShellExpansionError {
@@ -2103,6 +2124,26 @@ mod tests {
         assert_eq!(frontmatter_key_line(&ctx, "quoted"), Some(3));
         assert_eq!(frontmatter_key_line(&ctx, "double"), Some(4));
         assert_eq!(frontmatter_key_line(&ctx, "missing"), None);
+    }
+
+    #[test]
+    fn origin_names_the_authored_location_or_none_for_unscoped_failures() {
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: "cmd".to_string(),
+            line: Some(3),
+        };
+        let located = ShellExpansionError::Denied {
+            ctx: Box::new(full_file_source_context()),
+            command: "echo fail".to_string(),
+            origin: origin.clone(),
+        };
+        assert_eq!(located.origin(), Some(&origin));
+
+        let unscoped = ShellExpansionError::PolicyIo {
+            path: std::path::PathBuf::from("/policy.toml"),
+            source: std::io::Error::other("unreadable"),
+        };
+        assert_eq!(unscoped.origin(), None);
     }
 
     fn test_source_context() -> SourceContext {
