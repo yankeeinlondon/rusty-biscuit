@@ -790,7 +790,21 @@ $schema:
 2. filters candidates whose path contains `everywhere` (case-insensitive), and
 3. drives a **confirmation dialog** on a single match or a **chooser** on multiple, then records the selected path in the effective override and caller provenance before continuing preparation. Each unresolved supplied input is handled, including individual file-array elements.
 
-The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required-eager and optional-eager file properties reach this resolution. Lazy file properties may name future output files and do not enter this early completion pass. Zero glob+substring matches, a declined confirmation, or a cancelled chooser fall back to the original `no existing file matched reference` schema-validation error unchanged. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required-eager and optional-eager file properties reach this resolution. Lazy file properties may name future output files and do not enter this early completion pass. Zero glob+substring matches, a declined confirmation (`n`/`Esc`), or a cancelled dialog or chooser (`Ctrl-C`) fall back to the original `no existing file matched reference` schema-validation error unchanged.
+
+Root-union schemas get the same completion. The caller's inputs first pick the arm they apply to; a sibling whose value is still a template (`doc: "{{spec || design}}"`) cannot rule an arm out, because composition may yet make it valid. When no single arm applies, completion still runs if **every** arm in contention declares the property as an eager `file(match)` of the same shape, because the file must exist whichever arm wins. The chooser then searches all of those arms' globs, de-duplicated in arm order, and the picked path settles the arm:
+
+```yaml
+$schema:
+  - kind: 'literal(feature)'
+    spec: 'file(required;eager;match(**/features/**/spec.md))'
+  - kind: 'literal(fix)'
+    spec: 'file(required;eager;match(**/fixes/**/spec.md))'
+```
+
+`spec=cli` lists matching specs from both trees; picking `fixes/…/spec.md` fails the first arm's `match`, so the `fix` arm applies. If any contending arm types the property differently (a `string`, a lazy `file`, `file[]` against `file`) or does not declare it, the pass stays out and the full verdict decides.
+
+Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
 
 Supplied eager file inputs are resolved **before `initialize` consumes them**,
 including on a proxy target that first declares their file schema. Candidate
