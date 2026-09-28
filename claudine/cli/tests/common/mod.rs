@@ -155,6 +155,7 @@ pub(crate) mod signal;
 pub(crate) mod source_scan;
 #[cfg(unix)]
 pub(crate) mod terminal_interrupt;
+pub(crate) mod webhook_listener;
 pub(crate) mod wrap;
 
 // Re-exported so a call site keeps saying `common::helper_command`.
