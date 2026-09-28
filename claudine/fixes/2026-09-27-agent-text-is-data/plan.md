@@ -7,8 +7,23 @@ yolo: true
 spec: 2026-09-27-agent-text-is-data
 packages:
     - darkmatter
+    - darkmatter-cli
     - claudine
     - claudine-cli
+source_files_during_phase_1:
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_value_provenance.rs
+    - darkmatter/cli/tests/l1/main.rs
+docs_updated_during_phase_1:
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+docs_created_during_phase_1:
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/inventory.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/spike-s1-body-provenance.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/spike-s2-yaml-leaf-spans.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/spike-s3-token-lexer.md
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: agent-produced text is data, never instructions
@@ -109,14 +124,14 @@ These rulings are proposed by the planner. Under `yolo: true`, implementation
 proceeds on the stated default unless the author overrules one. **N9 is the one
 the author should explicitly confirm**, because it narrows a sentence in R3.
 
-- [ ] **N1 — The spec's `--set` reproductions stay failures.** The *Decisions*
+- [x] **N1 — The spec's `--set` reproductions stay failures.** The *Decisions*
       section keeps command-line setters as templates. So
       `--set '{"note":"see {{…}} siblings"}'` still fails after the fix, and
       `--set '{"note":"$(echo INJECTED)"}'` still asks for shell approval
       (both confirmed on today's `md`). Only the attribution changes (R5).
       Darkmatter's R1 acceptance tests inject data through the new library
       data-override API (N3). `md` gains **no** new CLI flag.
-- [ ] **N2 — Origin travels out of band, never as in-band escaping.**
+- [x] **N2 — Origin travels out of band, never as in-band escaping.**
       - Frontmatter: each string leaf is in one of two states. *Authored and
         not yet scanned* means a template. *Data* means inert. Darkmatter
         records the data state as a set of JSON-pointer paths next to the
@@ -124,7 +139,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
       - Body and transcluded text: the representation is chosen by spike S1.
         The default is tracked data ranges extending `BodyOrigin`.
       - A leaf or span is scanned **at most once**. Its result is data.
-- [ ] **N3 — Split the override channel by origin.** `ComposeOptions` gains
+- [x] **N3 — Split the override channel by origin.** `ComposeOptions` gains
       layered overrides with an explicit `OverrideOrigin::{Authored, Data}`.
       `with_set_overrides` keeps its meaning (Authored), so every existing
       caller is unchanged.
@@ -136,14 +151,14 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
       - Precedence between layers stays exactly as today, and a test pins it.
       - After a deep merge, a leaf takes the origin of the layer that supplied
         it.
-- [ ] **N4 — Frontmatter pass 2 only scans deferred authored leaves.** Pass 2
+- [x] **N4 — Frontmatter pass 2 only scans deferred authored leaves.** Pass 2
       re-scans only the leaves deferred behind shell output, and only their
       authored text. Shell output is data. This also removes the mismatch
       between the untrimmed `starts_with("$(")` check
       (`frontmatter_interpolation.rs:714`) and the trimmed `parse_shell_value`:
       both use one shared predicate on the **authored source value**, and
       preflight and runtime call the same function (R1.2).
-- [ ] **N5 — Token spelling and scope.**
+- [x] **N5 — Token spelling and scope.**
       - Spelling: `{{!data:v1:<base64url, unpadded>}}`. The empty string is
         `{{!data:v1:}}`.
       - It is recognized **only as an entire frontmatter string leaf**: exact
@@ -157,13 +172,13 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         plain scalar starting with `{` would be read as a flow mapping.
       - Add `base64` as a direct `darkmatter` dependency. It is already in
         `Cargo.lock`. Update `docs/dependencies.md`.
-- [ ] **N6 — Where tokens are decoded.**
+- [x] **N6 — Where tokens are decoded.**
       - Darkmatter decodes tokens during frontmatter pass 1 into Data leaves.
       - A public `decode_literal_tokens(&Value) -> Result<Value, …>` (plus a
         `Frontmatter` convenience method) serves every Claudine reader,
         including schema checks.
       - Nothing decodes tokens outside frontmatter.
-- [ ] **N7 — Inline closure order.** Read, then the body checks, then
+- [x] **N7 — Inline closure order.** Read, then the body checks, then
       **repair (R4)**, then `restore_properties_text`, then **encode (R3)**,
       then the hash plan and save, then `atomic_write`, then the completion
       instance (decoded values), then `evaluate_completion`.
@@ -171,7 +186,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         and a failed schema verdict keeps the artifact.
       - This satisfies R3 ("encode before hashing, completion schema
         validation, and the write"). The schema sees decoded values through N6.
-- [ ] **N8 — Which values the agent owns.**
+- [x] **N8 — Which values the agent owns.**
       - The agent owns every **string leaf** that is new or changed compared
         with the pre-run parsed value tree. Comparison is by value, so
         whitespace-only rewrites do not count.
@@ -186,7 +201,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         encoded as a fallback.
       - An agent-changed block scalar is replaced by a token. Unchanged block
         scalars keep their bytes. Touched lines keep their line endings.
-- [ ] **N9 — Encode only strings that could act as an instruction (author to
+- [x] **N9 — Encode only strings that could act as an instruction (author to
       confirm).** Encode an agent-owned string leaf only if it contains `{{`
       or `$(`. Every other string is written as a normal YAML string, quoted by
       the R4 repair when needed.
@@ -204,7 +219,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         "encode every string" means changing one line.
       - All spec acceptance cases still hold. The `summary` and `cmd` values
         become tokens. `note` and `title` round-trip as quoted strings.
-- [ ] **N10 — Lifecycle messages and `set:` results are data.**
+- [x] **N10 — Lifecycle messages and `set:` results are data.**
       - Delete the re-resolution of `{{`-containing results in `render_message`
         (`executor.rs:1302`/`:926`) and in `resolve_typed_value` (`:1862-1875`).
       - Run `reject_surviving_spans(_deep)` on the **authored** template before
@@ -212,10 +227,10 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         data.
       - The nested-span-in-literal guard and the strict whole-value checks stay
         as they are.
-- [ ] **N11 — Loop action results are data.** A string produced by
+- [x] **N11 — Loop action results are data.** A string produced by
       `render_string_with_lookup` (`looping/actions.rs:192`) enters the next
       iteration's frontmatter as Data.
-- [ ] **N12 — Repair scope (R4).** Repair only touches a new or changed
+- [x] **N12 — Repair scope (R4).** Repair only touches a new or changed
       **top-level** key whose value is a single-line plain scalar. It wraps the
       complete source value in double quotes, escaping it, and keeps the line
       ending. It quotes only when the value:
@@ -228,14 +243,97 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
       properties are never repaired. A malformed owned property therefore fails
       inside `restore_properties_text` with an agent-attributed diagnostic, and
       rollback runs.
-- [ ] **N13 — Authoring tools showing decoded text is out of scope.** DMLS
+- [x] **N13 — Authoring tools showing decoded text is out of scope.** DMLS
       (the Darkmatter language server) hover or display of decoded values is
       not part of this fix. Phase 6 documents how to hand-edit a token and adds
       one follow-up line to the Darkmatter docs. No new spec is created.
 
+### Phase 1 amendments (from S1, S2, S3, I1, I2)
+
+These amend the rulings above. Evidence is in the spike files and
+`inventory.md`.
+
+- **N2 (amended):** confirmed; no topological key order is needed. Key-to-key
+  chains already resolve in dependency order (S1, I1). A Data leaf is a seed
+  value even when it contains `{{`. Body data ranges are carried by (a),
+  tracked byte ranges beside `BodyOrigin`. They are dropped right after the
+  transclusion directive parse, not at Finalization. Losing ranges is an error,
+  never a silent drop. The ranges also flow:
+  - out of the InlinePre-only compose used by the reference graph
+    (`reference/graph.rs::prepare_content`) and preflight
+    (`preflight/collect.rs:373`);
+  - into the transclusion cache key;
+  - into the child via `build_child_external_state`.
+- **N4 (amended, body clause):** directive markers (`::shell`, `::shell-block`,
+  `::end-block`, `::file`, `::url`, `::code`), shell-block command boundaries,
+  and executable tokens come only from authored text. Code-region detection
+  runs on a masked view: every non-whitespace data byte becomes `x`, so offsets
+  stay put. A data code fence therefore cannot hide an authored directive.
+  (S1; I2 B1.)
+- **N5 (amended):** the `{{!data:` check lives in `ExpressionFinder::scan`
+  (`lexer.rs:133`), where the token becomes its own result kind, never an
+  expression. It also lives in the interpolation entry points (`rewrite.rs`)
+  and the nested-span lint (`lint.rs:227`), where it becomes a located
+  `MalformedLiteralToken`. That error is fatal under lenient policy too. The
+  whole-leaf match does not trim, so it does not reuse `whole_value_span`. (S3)
+- **N6 (amended):** loaders keep tokens encoded. Decoding happens only at the
+  reader boundary; a loader that decoded first would feed decoded text back to
+  compose as a template. The `contains("{{")` "pending" checks do not treat a
+  Data value or a decoded value as pending. They are:
+  - `schemas/format.rs:265`
+  - `schemas/mod.rs:1565`
+  - `schema_validation.rs:1253`
+  - `schemas/rewrite.rs:374`
+  - DMLS `diagnostics/frontmatter.rs:655`
+  - Claudine `schema/mod.rs:923` `value_needs_composition`
+
+  Claudine `sequence/grammar.rs:122` either reads decoded input or rejects
+  `{{!data:` itself. (S3, I2 Table C)
+- **N8 (amended):**
+  - Locate leaves one top-level property at a time, with a new
+    `locate_frontmatter_leaves` in `markdown/hash/write.rs` built on
+    `locate_frontmatter_value` and `decode_scalar_node`. Whole-frontmatter
+    location failed on 68 of 2,785 repository files.
+  - Phase 5 extends the locator to unindented sequences and empty values,
+    because `serde_yaml_ng` emits unindented sequences.
+  - Encode the decoded scalar text.
+  - Quoted items in single-line flow collections are supported.
+  - These shapes fail with an agent-attributed diagnostic:
+    - an anchor, alias, or tag on an owned leaf
+    - `<<` merges
+    - unquoted or multi-line flow collections
+    - a trailing `|+` at the end of frontmatter
+    - nested sequences
+  - A replaced block scalar loses its header comment.
+  - Mapping keys are never encoded. (S2)
+- **N10 (amended):** "delete the re-resolution" means removing the *second*
+  scan of returned data only. The single scan of authored mixed text
+  (`"a {{ x }} b"`) stays. The call sites also include:
+  - lifecycle shell commands (`executor.rs:1360`, I2 B3), whose executed bytes
+    must equal the approved bytes;
+  - positional side-effect arguments (`executor.rs:1411`, I2 B15).
+- **N14 — Links inside data text (S1).** A relative link to a missing file that
+  sits in data text is a warning, not a reference-validation error. Authored
+  links keep today's error.
+- **N15 — Nested-span check reach (I1).** The check keeps today's reach. The
+  tests that exempt bodies and non-lifecycle keys keep their assertions, and
+  only their stated reason is updated, because those surfaces no longer
+  rescan. Widening the reach is out of scope.
+- **N16 — Scope of the I2 re-entry points.** Each in-scope point has a red test
+  in `agent_text_is_data.rs` or `compose_value_provenance.rs`.
+
+  | Points | Ruling |
+  | ------ | ------ |
+  | B1, B4 (transcluded children re-evaluate inherited state, also I1), B5 | in scope, Phase 2 |
+  | B3, B8, B9, B10, B12, B15, B16 | in scope, Phase 4 |
+  | B14 (`set_frontmatter` / `merge_` / `append_` / `prepend_frontmatter` writes of data) | in scope, Phase 5; **author to confirm** |
+  | B2 (data in `sh -c` under argv-based approval), B11 (data items that declare tasks), B13 (MCP `#tags` in agent text) | **out of scope**, pending author confirmation; they are not template rescans |
+  | B6 (a transcluded agent-written file) | authored, as today; documented in Phase 6 |
+  | B7 (`as_markdown(…)`) | an explicit R1 exception, since the author asked for composition; documented in Phase 6 |
+
 ### Wave 1 (parallel; read-only apart from new test files)
 
-- [ ] **Red reproduction tests** (`feature-tester-rust`)
+- [x] **Red reproduction tests** (`feature-tester-rust`)
       - Add failing L1 tests, marked `#[ignore = "red until phase N"]`, that
         reproduce each row of the spec's "Where agent text re-enters" table on
         today's code:
@@ -249,7 +347,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
       - Use `InlineAgentStub` (`claudine/cli/tests/common/mod.rs:1182`) and the
         local `fake_goose` helpers. Spawn through `CliProcessFixture`.
       - Each later phase removes the `#[ignore]` for the rows it fixes.
-- [ ] **Spike S1: body provenance** (`rust-architect`)
+- [x] **Spike S1: body provenance** (`rust-architect`)
       - Compare two representations of data-origin text in the body across the
         whole operation list (`pipeline/operations.rs`):
         (a) byte ranges tracked through each rewrite, extending
@@ -267,7 +365,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         chosen representation, every operation that must honor it, and a
         prototype diff summary. Default: (a), unless an operation cannot remap
         ranges.
-- [ ] **Spike S2: nested YAML leaf spans** (`rust-developer`)
+- [x] **Spike S2: nested YAML leaf spans** (`rust-developer`)
       - Establish which nested string leaves can be replaced exactly through
         source spans. Candidates are `parse_text_frontmatter` in `hash/write.rs`
         and the YAML focused-region locator recently added to `biscuit-terminal`
@@ -276,7 +374,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
       - **Output:** `spike-s2-yaml-leaf-spans.md` naming the supported subset
         for N8 and the API to use. The spike must not add a new YAML parser
         dependency.
-- [ ] **Spike S3: token lexer surface** (`rust-developer`)
+- [x] **Spike S3: token lexer surface** (`rust-developer`)
       - List every scanner that would meet `{{!data:`:
         - `ExpressionFinder::scan`
         - `expression/lint.rs` (`is_whole_value_span` / `whole_value_span`)
@@ -287,7 +385,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
       - Confirm that N5's prefix check is enough for none of them to treat a
         token as an expression or a shell candidate.
       - **Output:** a short table in `spike-s3-token-lexer.md`.
-- [ ] **Inventory I1: fixed-point reliance** (`Explore`)
+- [x] **Inventory I1: fixed-point reliance** (`Explore`)
       - Find every authored template that depends on rescanning: in
         `prompts/**`, `claudine/docs/research/**` prompt documents, the
         `darkmatter/` and `claudine/` test fixtures, and any Markdown in the
@@ -300,7 +398,7 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
         `rewrite.rs` / `frontmatter_interpolation.rs` suites).
       - **Output:** a migration table in `inventory.md` (file, construct, new
         form or new expected output).
-- [ ] **Inventory I2: entry points and readers** (`Explore`)
+- [x] **Inventory I2: entry points and readers** (`Explore`)
       - Confirm each spec table row against the code, then look for other
         places where file or runtime data re-enters (R1 asks for this). Check
         `dispatch/template.rs`, system-prompt preparation
@@ -317,10 +415,10 @@ the author should explicitly confirm**, because it narrows a sentence in R3.
 
 ### Checkpoint 1
 
-- [ ] Every red test fails for the documented reason (not a fixture error).
-- [ ] S1, S2, and S3 outcomes are recorded. N2 and N8 defaults are confirmed or
+- [x] Every red test fails for the documented reason (not a fixture error).
+- [x] S1, S2, and S3 outcomes are recorded. N2 and N8 defaults are confirmed or
       amended in this plan before Phase 2 starts.
-- [ ] The I1 and I2 tables exist. Any new re-entry point from I2 has a red test
+- [x] The I1 and I2 tables exist. Any new re-entry point from I2 has a red test
       and an owning task in Phase 2, 4, or 5.
 
 ---
@@ -374,7 +472,22 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
       - Every body operation that scans for instructions skips Data: inline
         ShellExpansion, ShellBlocks, directives, and transclusion discovery.
         The transclusion splice keeps the child's Data ranges.
-      - Flatten to plain text only at Finalization.
+      - Flatten to plain text only at Finalization. *(Amended: drop ranges
+        right after the transclusion directive parse; see the N2 amendment.)*
+      - Apply the N4 body clause: directive discovery (`::file`, `::url`,
+        `::code`, `::shell`, `::shell-block`/`::end-block`) and code-region
+        detection read a masked view, so data never creates or hides a
+        directive (I2 B1).
+      - Transcluded children receive the parent's composed values as Data
+        through `build_child_external_state` and the `external_state`
+        channel. Data paths go into the transclusion cache key. A
+        `::file … key={{x}}` option result is Data in the child (I2 B4, B5,
+        I1 finding 3).
+      - Return data ranges from the InlinePre-only compose used by
+        `reference/graph.rs::prepare_content` and `preflight/collect.rs:373`.
+      - Apply N14: missing relative links inside data text warn.
+      - Remove `ExpressionOrigin::Generated` along with
+        `MAX_INTERPOLATION_DEPTH` (I1).
 - [ ] **R5 attribution** (`rust-developer`)
       - Add `SourceRef` variants for command-line overrides (Authored override)
         so `with_on_disk_source` (`markdown/types.rs:382`) no longer rewrites
@@ -404,7 +517,13 @@ Depends on Phase 1. All changes are in `darkmatter/lib`.
         - strict whole-value errors and lenient mixed-text warnings are
           unchanged
       - Add the R5 test: the `--set` repro error names the override.
-      - Un-ignore the Darkmatter red test.
+      - Un-ignore the Darkmatter red tests in
+        `darkmatter/cli/tests/l1/compose_value_provenance.rs` (the `esc.md`
+        rows and I2 B1/B4/B5).
+      - Rewrite `darkmatter/benchmarks/fixtures/compose_interpolation_heavy.md:61`
+        to expression concatenation (I1). The frozen
+        `nested_span_regression/commit.md` keeps its bytes; only its expected
+        output changes.
 
 ### Checkpoint 2
 
@@ -485,17 +604,34 @@ Depends on Phases 2 and 3.
         (`cli/wrap/overlay.rs:17`; call sites `compose/prep.rs:352`,
         `harness_orch/prompt.rs:131`, `sequence/iterate.rs:686`) into a Data
         layer with the same precedence. Add a precedence test.
+      - Also remove the retry/resume fold of `proxy.with:` into user setters
+        (`harness_orch/prompt.rs:159-166`, I2 B16).
 - [ ] **Lifecycle messages and `set:`** (`rust-developer`)
       - Apply N10 in `lifecycle/executor.rs`: `render_message` (`:1302`),
         `resolve_string_value` (`:926`), `resolve_typed_value` (`:1862`),
         `dispatch_runtime_set` (`:1476`), and `resolve_proxy_with` /
         `walk_proxy_with` (`:1757/1787`).
       - The surviving-span checks (`:2050/2067`) inspect authored syntax only.
+      - Also the lifecycle shell command (`:1360`, I2 B3), where the executed
+        bytes must equal the approved bytes, and positional side-effect
+        arguments (`:1411`, I2 B15). Keep the one scan of authored mixed text
+        (N10 amendment).
       - Update the tests in `lifecycle/executor/tests/*` and
         `lifecycle/tests/nested_span.rs`.
 - [ ] **Loop actions** (`rust-developer`)
       - Apply N11 in `looping/actions.rs:192`, `looping/expression.rs:267`, and
         `engine.rs:1108`.
+      - A rendered action string keeps its string type. Do not re-parse it
+        as JSON (`actions.rs:241`, I2 B9).
+      - A seed control variable whose value differs from its authored
+        source is Data. CLI setters in the seed stay Authored
+        (`looping/seed.rs:130-148`, I2 B8).
+- [ ] **Sequence state, params, and variables** (`rust-developer`)
+      - Step `state`/`previous`/`next` leaves derived from item data are Data
+        (`sequence/mod.rs:196-240` → `model.rs:309`, I2 B10).
+      - Evaluated task `params:` and group `variables:` enter the member
+        prompt as a Data layer, not the user-setters layer
+        (`task/mod.rs:808-838`, `task/group.rs:445-523`, I2 B12).
 
 ### Wave 3
 
@@ -551,6 +687,16 @@ runtime layers.
         composition-tolerant rule must not treat a token as a pending `{{`
         value.
       - `file_detail.rs` shows decoded text.
+      - Apply the N6 amendment to the `contains("{{")` "pending" checks
+        (Darkmatter schema/DMLS sites and Claudine `value_needs_composition`)
+        and to `sequence/grammar.rs:122`.
+- [ ] **Effect-engine frontmatter writes** (`rust-developer`; I2 B14, author
+      to confirm)
+      - `set_frontmatter`/`merge_`/`append_`/`prepend_frontmatter` writes of
+        Data-origin strings go through the same encoder gate as the closure
+        (N9), at the effect-engine write (`executor.rs:1443-1450`, mirror
+        `:1590-1640`, sequence `side_effect:` at `task/mod.rs:702`).
+      - Un-ignore the B14 red test.
 
 ### Wave 2 (depends on Wave 1)
 

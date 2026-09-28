@@ -36,6 +36,32 @@ related:
     - 2026-09-27-union-partial-file-completion
     - 2026-09-20-lifecycle-handoff-gaps
 human_review: false
+message_to_agent: |-
+    Phase 1 is complete. Before starting Phase 2, read the plan's new section
+    "Phase 1 amendments (from S1, S2, S3, I1, I2)". It amends N2, N4, N5, N6,
+    N8, and N10, and adds N14-N16. Phase 2 must honor:
+    - N4's body clause. Directive markers, shell-block command boundaries, and
+      executable tokens come only from authored text. Code-region detection
+      runs on a masked view where data bytes become `x`.
+    - Data ranges are tracked byte ranges beside `BodyOrigin` (spike S1). Drop
+      them right after the transclusion directive parse. Losing ranges is an
+      error, never a silent drop.
+    - Transcluded children receive the parent's composed values as Data
+      through `build_child_external_state`, and the data paths join the
+      transclusion cache key (I2 B4/B5).
+    - No topological key order is needed. Frontmatter key chains already
+      resolve in dependency order.
+    Red tests to un-ignore in Phase 2: every test in
+    `darkmatter/cli/tests/l1/compose_value_provenance.rs` marked
+    `red until phase 2`. There are 8. The child value override syntax is
+    `set.NAME="…"`; a bare `key=` is ignored. The 17 Claudine red tests are in
+    `claudine/cli/tests/l1/agent_text_is_data.rs` (Phase 4 and Phase 5).
+    Author confirmation is still pending, but none of it blocks Phase 2:
+    - N9, the encode-only-`{{`/`$(` gate
+    - B14, effect-engine frontmatter writes, planned for Phase 5
+    - B2/B11/B13, proposed out of scope
+    `inventory.md` has the migration table, the tests whose expectations
+    change, and the Table C reader list.
 ---
 
 # Agent-Produced Text Is Data, Never Instructions
