@@ -364,3 +364,39 @@ fn a_child_receives_parent_values_as_data() {
     assert!(composed.content().contains("Note=$(echo X) Actor={{ area }}"), "{}", composed.content());
     assert!(approvals.commands().is_empty());
 }
+
+// ── Caller file references: origin decides scanning, not the path base ────
+
+/// A schema-selected file value supplied by the caller resolves from the
+/// caller's base whether it arrived authored or as data.
+#[test]
+fn a_data_override_file_reference_resolves_from_the_caller_base() {
+    let dir = TempDir::new().unwrap();
+    let area = dir.path().join("area");
+    std::fs::create_dir_all(&area).unwrap();
+    write(&area, "spec.md", "---\ntitle: s\n---\nspec\n");
+    write(
+        dir.path(),
+        "doc.md",
+        "---\n$schema:\n  spec: 'file(required;eager)'\n---\nSpec: {{ spec }}\n",
+    );
+
+    for (label, layer, expected) in [
+        ("authored", OverrideLayer::authored(json!({"spec": "spec.md"})), area.join("spec.md")),
+        ("data", OverrideLayer::data(json!({"spec": "spec.md"})), area.join("spec.md")),
+    ] {
+        let composed = compose(
+            dir.path(),
+            "doc.md",
+            options(dir.path(), "doc.md", Recorder::denying())
+                .with_file_ref_fallback_dir(area.clone())
+                .with_override_layers([layer]),
+        )
+        .unwrap_or_else(|error| panic!("{label}: {error}"));
+        assert_eq!(
+            frontmatter_string(&composed, "spec"),
+            json!(expected.display().to_string()),
+            "{label}"
+        );
+    }
+}
