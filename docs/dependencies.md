@@ -2,6 +2,12 @@
 
 ## Recent Dependency Notes
 
+- `biscuit-test-harness` adds a Linux-only `x11rb = "0.13.2"` edge with
+  `default-features = false` and only the `xtest` feature (2026-09-28). The
+  crate is pure Rust and was already in the graph through `clipboard-rs`, so
+  the lockfile gains one edge and no package. `src/xvfb.rs` uses it to focus a
+  window and press keys through XTEST on a private `Xvfb` display, which
+  avoids depending on an installed `xdotool`.
 - `sniff` adds `jsonc-parser` 0.33.2 (`serde` feature) (2026-09-26,
   `2026-09-26-lockfile-corroboration`) for `bun.lock`, `rush.json`, and Rush
   configuration, all JSON with comments. It is the only new crate in the
@@ -214,7 +220,8 @@
   `level2_graph_in_kitty.rs`. No new external crate was added; both were
   already in the workspace graph. `xpty` 0.3.6 is a Windows-only development
   dependency that opens the ConPTY pseudoconsole `level2_powershell_remove.rs`
-  runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`).
+  runs PowerShell in; `unchained-ai/lib` already builds it (as `portable-pty`),
+  and `claudine-cli` uses it the same way for a typed Ctrl+C test.
   `sysinfo` 0.38 (development) finds the detached `wt internal-refresh`
   worker in `list_prs.rs` and reads its working directory on every OS;
   `sniff` already builds the same version.
