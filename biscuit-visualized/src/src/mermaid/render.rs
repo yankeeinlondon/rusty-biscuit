@@ -5,6 +5,15 @@ use crate::raster::{rasterize_svg_to_png, rasterize_svg_to_png_bytes};
 
 use super::config::{MermaidConfig, MermaidTheme};
 use super::error::MermaidError;
+use super::gitgraph::{self, GitGraphGeometry};
+
+/// A parsed diagram and the layout drawn from it.
+struct LaidOut {
+    graph: mermaid_rs_renderer::Graph,
+    layout: mermaid_rs_renderer::Layout,
+    theme: mermaid_rs_renderer::Theme,
+    config: mermaid_rs_renderer::LayoutConfig,
+}
 
 /// A diagram's natural size in SVG user units (1 unit = 1 px at scale 1.0).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -198,6 +207,10 @@ impl MermaidDiagram {
         })
     }
 
+    /// The cache key's options. The gitGraph merge repair and tag spacing add
+    /// no input here: both are derived from the instructions and the theme,
+    /// which the key already covers, so changing either algorithm bumps
+    /// `MERMAID_BACKEND` instead.
     fn render_options_json(&self, request: &RenderRequest) -> String {
         let config_value = self
             .config
@@ -227,27 +240,35 @@ impl MermaidDiagram {
     ///
     /// Returns `MermaidError::RenderFailed` when the instructions do not parse.
     pub fn natural_size(&self) -> Result<NaturalSize, MermaidError> {
-        let (layout, _theme, layout_config) = self.compute_layout(false)?;
-        let dimensions = mermaid_rs_renderer::measure_svg_dimensions(&layout, &layout_config, None);
+        let laid_out = self.compute_layout(false)?;
+        let dimensions = mermaid_rs_renderer::measure_svg_dimensions(&laid_out.layout, &laid_out.config, None);
         Ok(NaturalSize {
             width: dimensions.viewbox_width,
             height: dimensions.viewbox_height,
         })
     }
 
-    fn compute_layout(
-        &self,
-        transparent_background: bool,
-    ) -> Result<
-        (
-            mermaid_rs_renderer::Layout,
-            mermaid_rs_renderer::Theme,
-            mermaid_rs_renderer::LayoutConfig,
-        ),
-        MermaidError,
-    > {
-        let parsed = mermaid_rs_renderer::parse_mermaid(&self.instructions)
+    /// The gitGraph layout that [`render`](Self::render) draws, as commit
+    /// parents, lanes, and tag bounds. Test support for callers that must prove
+    /// label placement without inspecting pixels; not a stable API.
+    ///
+    /// `Ok(None)` for any other diagram type.
+    ///
+    /// ## Errors
+    ///
+    /// The same as [`natural_size`](Self::natural_size).
+    #[doc(hidden)]
+    pub fn gitgraph_geometry(&self) -> Result<Option<GitGraphGeometry>, MermaidError> {
+        let laid_out = self.compute_layout(false)?;
+        Ok(GitGraphGeometry::from_layout(&laid_out.graph, &laid_out.layout, &laid_out.config))
+    }
+
+    /// The one path from instructions to layout that measurement and rendering
+    /// share, gitGraph corrections included (see the `gitgraph` module).
+    fn compute_layout(&self, transparent_background: bool) -> Result<LaidOut, MermaidError> {
+        let mut parsed = mermaid_rs_renderer::parse_mermaid(&self.instructions)
             .map_err(|err| MermaidError::RenderFailed(err.to_string()))?;
+        gitgraph::repair_gitgraph_merges(&mut parsed.graph)?;
 
         let mut theme = self.build_theme(transparent_background);
 
@@ -256,14 +277,20 @@ impl MermaidDiagram {
             apply_init_theme_overrides(&mut theme, init);
         }
 
-        let layout_config = mermaid_rs_renderer::LayoutConfig::default();
-        let layout = mermaid_rs_renderer::compute_layout(&parsed.graph, &theme, &layout_config);
-        Ok((layout, theme, layout_config))
+        let (layout, config) = gitgraph::layout(&parsed.graph, &theme);
+        Ok(LaidOut {
+            graph: parsed.graph,
+            layout,
+            theme,
+            config,
+        })
     }
 
     fn render_svg(&self, request: &RenderRequest) -> Result<String, MermaidError> {
-        let (layout, theme, layout_config) = self.compute_layout(request.transparent_background)?;
-        let svg = mermaid_rs_renderer::render_svg(&layout, &theme, &layout_config);
+        let LaidOut {
+            layout, theme, config, ..
+        } = self.compute_layout(request.transparent_background)?;
+        let svg = mermaid_rs_renderer::render_svg(&layout, &theme, &config);
 
         Ok(self.apply_svg_overrides(svg))
     }

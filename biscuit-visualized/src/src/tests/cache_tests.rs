@@ -310,3 +310,20 @@ fn visualization_kind_as_str() {
     assert_eq!(VisualizationKind::Mermaid.as_str(), "mermaid");
     assert_eq!(VisualizationKind::Graph.as_str(), "graph");
 }
+
+#[test]
+fn cache_key_different_mermaid_backend() {
+    // Artifacts laid out before the gitGraph merge repair and tag spacing
+    // must never be served again.
+    let key = |backend: &str| {
+        FileCache::cache_key(
+            VisualizationKind::Mermaid,
+            "gitGraph\n    commit id: \"a\" tag: \"main\"",
+            "{}",
+            backend,
+            OutputFormat::Png,
+        )
+    };
+    assert_eq!(MERMAID_BACKEND, "mermaid-rs-renderer@0.3.x+bv2");
+    assert_ne!(key(MERMAID_BACKEND), key("mermaid-rs-renderer@0.2.x+bv1"));
+}

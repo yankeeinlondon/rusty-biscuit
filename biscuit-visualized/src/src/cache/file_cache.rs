@@ -14,11 +14,13 @@ pub const CACHE_DIR_ENV: &str = "BISCUIT_VISUALIZED_CACHE_DIR";
 /// Backend identifiers for cache key generation.
 ///
 /// The mermaid identifier carries a `+bv<n>` suffix for biscuit-visualized's
-/// own render layer (theme overrides in `build_theme`, SVG post-processing in
-/// `apply_svg_overrides`). The cache key sees only the theme *name*, not the
-/// resolved colors, so bump `<n>` whenever those overrides change output —
-/// otherwise identical instructions keep serving pre-change artifacts.
-pub const MERMAID_BACKEND: &str = "mermaid-rs-renderer@0.2.x+bv1";
+/// own render layer (theme overrides in `build_theme`, the gitGraph merge
+/// repair and tag spacing in `mermaid::gitgraph`, SVG post-processing in
+/// `apply_svg_overrides`). The cache key sees only the theme *name* and the
+/// instructions, not the resolved colors or layout, so bump `<n>` whenever that
+/// layer changes output — otherwise identical instructions keep serving
+/// pre-change artifacts.
+pub const MERMAID_BACKEND: &str = "mermaid-rs-renderer@0.3.x+bv2";
 pub const GRAPH_BACKEND: &str = "layout-rs@0.1.x";
 pub const RASTERIZER: &str = "resvg@0.45";
 
