@@ -19,7 +19,8 @@ use darkmatter::markdown::compose::directive_targets::{
 };
 use darkmatter::markdown::compose::expression::ExpressionFinder;
 use darkmatter::markdown::compose::{
-    FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
+    FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellValue, describe_suffix,
+    parse_frontmatter_shell_suffixes, parse_frontmatter_shell_value_spanned,
 };
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::language_grammar::LanguageGrammar;
@@ -49,6 +50,9 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
     if let Some(partial) = directives::name_partial(prefix) {
         return directive_name_completions(ctx, offset, partial);
     }
+    if let Some(items) = shell_suffix_completions(ctx, offset) {
+        return items;
+    }
     if let Some((token_start, partial)) = expressions::completion_partial(ctx.text, offset) {
         return interpolation_completions(ctx, token_start, offset, partial);
     }
@@ -56,6 +60,57 @@ pub fn completion(ctx: &DocumentContext, offset: usize) -> Vec<CompletionItem> {
         return items;
     }
     Vec::new()
+}
+
+/// Suffix completions after a frontmatter `$( … )` value's closing
+/// parenthesis: every suffix the value can still take, filtered by the `::…`
+/// partial under the cursor. A suffix already present is not offered again,
+/// and neither is a second result suffix.
+fn shell_suffix_completions(ctx: &DocumentContext, offset: usize) -> Option<Vec<CompletionItem>> {
+    let (value_span, parsed) = frontmatter_shell_at(ctx, offset)?;
+    let tail_start = value_span.start + parsed.close_span.end;
+    if offset < tail_start {
+        return None;
+    }
+    let tail = ctx.text.get(tail_start..offset)?;
+    let partial_start = tail.rfind("::").unwrap_or(tail.len());
+    let partial = &tail[partial_start..];
+    let present: Vec<_> = parsed
+        .suffixes
+        .iter()
+        .filter(|suffix| value_span.start + suffix.span.end <= tail_start + partial_start)
+        .map(|suffix| describe_suffix(&suffix.value).label)
+        .collect();
+    let has_result = present.iter().any(|label| is_result_suffix(label));
+    let start = tail_start + partial_start;
+    Some(
+        FRONTMATTER_SHELL_SUFFIXES
+            .iter()
+            .filter(|suffix| suffix.insert_text.starts_with(partial))
+            .filter(|suffix| !present.contains(&suffix.label))
+            .filter(|suffix| !(has_result && is_result_suffix(suffix.label)))
+            .filter_map(|suffix| {
+                text_edit_item(
+                    ctx,
+                    start,
+                    offset,
+                    CompletionCandidate {
+                        label: suffix.label.to_string(),
+                        new_text: suffix.insert_text.to_string(),
+                        kind: CompletionItemKind::KEYWORD,
+                        detail: Some(suffix.summary.to_string()),
+                        documentation: None,
+                    },
+                )
+            })
+            .collect(),
+    )
+}
+
+fn is_result_suffix(label: &str) -> bool {
+    FRONTMATTER_SHELL_SUFFIXES[..3]
+        .iter()
+        .any(|suffix| suffix.label == label)
 }
 
 /// `::keyword` completions filtered by the partial typed after `::`.
@@ -333,9 +388,22 @@ fn schema_property_hover(ctx: &DocumentContext, name: &str) -> Option<String> {
     frontmatter::schema_hover_details(def)
 }
 
-/// Hover on a frontmatter `$(...)` value: the parsed command and policy verdict.
+/// Hover on a frontmatter `$(...)` value: a suffix under the cursor describes
+/// itself; anywhere else, the parsed command and policy verdict.
 fn frontmatter_shell_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let (value_span, parsed) = frontmatter_shell_at(ctx, offset)?;
+    if let Some(suffix) = parsed.suffixes.iter().find(|suffix| {
+        let span = shift_span(&suffix.span, value_span.start);
+        span.start <= offset && offset < span.end
+    }) {
+        let descriptor = describe_suffix(&suffix.value);
+        let markdown = format!(
+            "**Shell suffix** `{}`\n\n{}",
+            suffix.value.spelling(),
+            descriptor.summary
+        );
+        return Some(markup_hover(ctx, shift_span(&suffix.span, value_span.start), markdown));
+    }
     let command = &ctx.text[shift_span(&parsed.inner_span, value_span.start)];
     let mut markdown = format!("**Shell value**\n\n`{}`", command.trim());
     markdown.push_str(&shell_verdict_markdown(command, ctx));
@@ -848,7 +916,8 @@ pub(crate) fn unknown_identifier_diagnostic(
 }
 
 /// Shell commands the built-in policy blacklist disallows (`::shell`,
-/// `::shell-block` body lines, and frontmatter `$()`).
+/// `::shell-block` body lines, and frontmatter `$()`), and a frontmatter
+/// `$()` suffix the suffix grammar rejects.
 fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     let whitelist = shell::load_whitelist(ctx.config);
     for directive in directives::directives(ctx.text) {
@@ -873,6 +942,18 @@ fn shell_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 
     for (value_span, parsed) in frontmatter_shell_values(ctx) {
+        let tail = shift_span(&(parsed.close_span.end..parsed.span.end), value_span.start);
+        if let Err(error) = parse_frontmatter_shell_suffixes(&ctx.text[tail.clone()], tail.start)
+            && let Some(range) = ctx.source_map.byte_range_to_lsp(error.span)
+        {
+            out.push(diagnostic(
+                range,
+                DiagnosticSeverity::ERROR,
+                code::SHELL_INVALID_SUFFIX,
+                source::COMPOSE,
+                error.message,
+            ));
+        }
         let command = &ctx.text[shift_span(&parsed.inner_span, value_span.start)];
         if let Some(command) = shell::parse_command(command)
             && let PolicyVerdict::Denied(reason) = shell::verdict(&command, whitelist.as_ref())
@@ -1050,12 +1131,21 @@ fn frontmatter_shell_values(ctx: &DocumentContext) -> Vec<(SourceSpan, Frontmatt
     ast.entries()
         .iter()
         .filter_map(|entry| {
-            let value_span = entry.value_span.clone();
+            let value_span = unquoted_span(ctx.text, entry.value_span.clone());
             let raw = ctx.text.get(value_span.clone())?;
             let parsed = parse_frontmatter_shell_value_spanned(raw)?;
             Some((value_span, parsed))
         })
         .collect()
+}
+
+/// A YAML scalar's span without its quotes, when it is quoted. A shell value
+/// is almost always quoted, and the scalar's source span includes the quotes.
+fn unquoted_span(text: &str, span: SourceSpan) -> SourceSpan {
+    match text.get(span.clone()).map(str::as_bytes) {
+        Some([open @ (b'"' | b'\''), .., close]) if open == close => span.start + 1..span.end - 1,
+        _ => span,
+    }
 }
 
 /// Every executable command inside a `::shell-block` body, as

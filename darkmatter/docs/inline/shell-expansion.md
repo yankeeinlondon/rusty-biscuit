@@ -98,6 +98,8 @@ Error: Shell command failed (exit 1) at line 1: 'cargo --version'
 Is the Rust toolchain installed?
 ```
 
+**The same rules hold in a transcluded file.** A failure the directive does not handle stops the composition whether the `::shell` line is in the document being composed or in a file it includes with `::file`, and the error names the included file. Moving a command into a shared partial never turns a required fact into a silent gap. Other failures inside an included file are more forgiving; see [Block Transclusion](../transclusion/block-transclusion.md#when-an-included-file-fails).
+
 **Put the options first.** Darkmatter recognizes them anywhere on the line, including after the command. `::shell false --when-error "x"` behaves the same as `::shell --when-error "x" false`, so an option placed last is taken by Darkmatter and never reaches the command.
 
 ## Combining commands
@@ -139,7 +141,7 @@ Error: Shell command timed out after 10s at line 4: 'just ci-local --plan'
 
 ## Caching
 
-A command that appears more than once runs **once per composition**, and every occurrence gets the same output. That holds across transcluded files. It keeps a document consistent with itself (`git rev-parse HEAD` cannot change halfway down the page) and avoids repeated work.
+A command that appears more than once runs **once per composition**, and every occurrence gets the same outcome, a failing exit status included. That holds across transcluded files, and for a frontmatter `$( … )` of the same command. It keeps a document consistent with itself (`git rev-parse HEAD` cannot change halfway down the page) and avoids repeated work. An occurrence reuses the outcome only when it would run in the same working directory under the same timeout.
 
 It is the wrong behavior for a command whose output is supposed to differ each time. Opt out with `--no-cache`, which neither reads nor writes the cache:
 

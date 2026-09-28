@@ -144,4 +144,7 @@ pub mod code {
     pub const FENCE_UNKNOWN_LANGUAGE: &str = "dm.fence.unknown_language";
     /// A `::shell` / `::shell-block` / `$()` command the shell policy disallows.
     pub const SECURITY_DISALLOWED_COMMAND: &str = "dm.security.disallowed_command";
+    /// A frontmatter `$()` suffix that is unrecognized, empty, repeated, a
+    /// second result suffix, or followed by non-suffix text.
+    pub const SHELL_INVALID_SUFFIX: &str = "dm.shell.invalid_suffix";
 }

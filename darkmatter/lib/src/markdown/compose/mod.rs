@@ -143,8 +143,12 @@ pub use remote::{
 };
 pub use remote_fetch::RemoteFetchStats;
 pub use frontmatter_shell_expansion::{
-    FrontmatterShellAction, FrontmatterShellBody, FrontmatterShellPipeline, FrontmatterShellSuffix,
-    FrontmatterShellTernary, FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
+    FRONTMATTER_SHELL_SUFFIXES, FrontmatterShellAction, FrontmatterShellBody,
+    FrontmatterShellPipeline, FrontmatterShellSuffix, FrontmatterShellTernary,
+    FrontmatterShellValue, ResolvedShellValue, ShellResultKind, ShellSuffixDescriptor,
+    ShellSuffixError, check_frontmatter_shell_value, describe_suffix,
+    execute_resolved_shell_values, expected_suffixes, parse_frontmatter_shell_suffixes,
+    parse_frontmatter_shell_value_spanned,
 };
 pub use icmp::PlannedIcmpProbe;
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_frontmatter_shell_commands, collect_shell_commands};

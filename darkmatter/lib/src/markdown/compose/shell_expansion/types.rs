@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use super::executor::ShellOutcome;
 use thiserror::Error;
 
 use crate::markdown::Markdown;
@@ -596,9 +598,10 @@ pub enum ShellExpansionError {
     },
 
     /// Discovery cannot evaluate `dependency` the way the compose pass will:
-    /// shell probes answer `false` and `as_markdown` composes nothing there.
-    /// A command or nested content that depends on one could be approved in
-    /// one shape and executed in another.
+    /// shell probes answer `false`, `as_markdown` composes nothing, and a lazy
+    /// `current`/`current_env` read observes nothing there. A command or nested
+    /// content that depends on one could be approved in one shape and executed
+    /// in another.
     #[error(
         "dynamic command shape: '{command}' at {origin} depends on {dependency}, which a \
          condition-blind pre-flight does not evaluate, so it cannot approve a command or \
@@ -1079,11 +1082,14 @@ struct SharedShellExpansionRuntime {
     whitelist: Arc<ShellRuleSet>,
     user_blacklist: Arc<ShellRuleSet>,
     policy_paths: Option<ShellPolicyPaths>,
-    /// Per-compose memoization of shell command output, keyed by the normalized
-    /// command string. Shared across recursive transclusion (same `Arc`), so an
-    /// identical command in a child document reuses the root's result — "execute
-    /// once per compose."
-    command_cache: HashMap<String, CachedCommandOutput>,
+    /// Per-compose memoization of whole command outcomes, keyed by the command,
+    /// its execution context, and its deadline (see `cache_key`). Shared across
+    /// recursive transclusion (same `Arc`), so an identical command in a child
+    /// document reuses the root's result — "execute once per compose." Each
+    /// entry is a once-cell, so concurrent identical requests share one
+    /// execution; a cell left empty by a failure that produced no outcome is
+    /// removed so the next reader runs the command itself.
+    command_cache: HashMap<String, Arc<OnceLock<Option<ShellOutcome>>>>,
     /// Normalized commands for which a volatile-command discoverability warning
     /// has already been emitted, so the warning fires at most once per command.
     volatile_warned: HashSet<String>,
@@ -1097,13 +1103,6 @@ struct SharedShellExpansionRuntime {
     /// production builds carry neither the field nor its bookkeeping.
     #[cfg(test)]
     parked_waiters: HashMap<String, usize>,
-}
-
-/// Memoized stdout/stderr for one normalized command in [`SharedShellExpansionRuntime::command_cache`].
-#[derive(Debug, Clone)]
-struct CachedCommandOutput {
-    stdout: String,
-    stderr: String,
 }
 
 /// An immutable read-only view of the runtime's policy collections, shared by
@@ -1336,30 +1335,65 @@ impl ShellExpansionRuntime {
             .push(ShellRuleEntry::Exact(normalized));
     }
 
-    /// Returns the memoized `(stdout, stderr)` for `normalized`, if present.
+    /// Returns the outcome cached under `key`, running `run` to produce it
+    /// when no reader has yet, and whether this call ran it.
+    ///
+    /// A concurrent reader of the same key blocks until the first run finishes
+    /// and then shares its outcome. An error that leaves no outcome (a missing
+    /// executable, a spawn failure) is returned to the reader that ran and is
+    /// not cached: a reader that waited on it runs the command itself.
     ///
     /// Takes `&self`: the cache lives behind the shared `Mutex`, so concurrent
-    /// frontmatter branches (executed via rayon) can consult it without a
-    /// mutable borrow of the runtime.
-    pub(crate) fn cache_lookup(&self, normalized: &str) -> Option<(String, String)> {
-        let shared = self.shared.lock().unwrap();
-        shared
-            .command_cache
-            .get(normalized)
-            .map(|c| (c.stdout.clone(), c.stderr.clone()))
-    }
-
-    /// Memoizes `stdout`/`stderr` for `normalized`, keeping the first result if a
-    /// concurrent peer already stored one.
-    pub(crate) fn cache_store(&self, normalized: &str, stdout: &str, stderr: &str) {
-        let mut shared = self.shared.lock().unwrap();
-        shared
-            .command_cache
-            .entry(normalized.to_string())
-            .or_insert_with(|| CachedCommandOutput {
-                stdout: stdout.to_string(),
-                stderr: stderr.to_string(),
-            });
+    /// frontmatter values (executed via rayon) can consult it without a
+    /// mutable borrow of the runtime. The mutex is never held while a command
+    /// runs.
+    pub(crate) fn cached_outcome<F>(
+        &self,
+        key: &str,
+        run: F,
+    ) -> Result<(ShellOutcome, bool), ShellExpansionError>
+    where
+        F: FnOnce() -> Result<ShellOutcome, ShellExpansionError>,
+    {
+        let cell = {
+            let mut shared = self.shared.lock().unwrap();
+            Arc::clone(
+                shared
+                    .command_cache
+                    .entry(key.to_string())
+                    .or_insert_with(|| Arc::new(OnceLock::new())),
+            )
+        };
+        let mut run = Some(run);
+        let mut failure = None;
+        let stored = cell.get_or_init(|| {
+            let run = run.take().expect("a once-cell initializes at most once");
+            match run() {
+                Ok(outcome) => Some(outcome),
+                Err(error) => {
+                    failure = Some(error);
+                    None
+                }
+            }
+        });
+        if let Some(outcome) = stored {
+            return Ok((outcome.clone(), run.is_none()));
+        }
+        {
+            let mut shared = self.shared.lock().unwrap();
+            if shared
+                .command_cache
+                .get(key)
+                .is_some_and(|current| Arc::ptr_eq(current, &cell))
+            {
+                shared.command_cache.remove(key);
+            }
+        }
+        match (failure, run) {
+            (Some(error), _) => Err(error),
+            (None, Some(run)) => run().map(|outcome| (outcome, true)),
+            (None, None) => unreachable!("the reader that ran either failed or stored an outcome"),
+        }
     }
 
     /// Records that a volatile command was just served from cache.
@@ -1529,6 +1563,63 @@ impl PipelineRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn exited(code: i32) -> ShellOutcome {
+        ShellOutcome {
+            status: super::super::executor::ShellStatus::Exited(code),
+            stdout: format!("run {code}"),
+            stderr: String::new(),
+            timed_out_after: None,
+        }
+    }
+
+    /// Concurrent readers of one key share one execution: every reader waits
+    /// on the same once-cell, and only the first runs the command.
+    #[test]
+    fn concurrent_identical_requests_share_one_execution() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let runtime = ShellExpansionRuntime::new();
+        let runs = AtomicUsize::new(0);
+        let start = std::sync::Barrier::new(8);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        runtime.cached_outcome("key", || {
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            Ok(exited(1))
+                        })
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|handle| handle.join().unwrap()).collect()
+        });
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(results.iter().filter(|result| result.as_ref().unwrap().1).count(), 1);
+        assert!(results.iter().all(|result| result.as_ref().unwrap().0 == exited(1)));
+    }
+
+    /// A failure that leaves no outcome is not cached: the next reader runs.
+    #[test]
+    fn a_failure_without_an_outcome_is_not_cached() {
+        let runtime = ShellExpansionRuntime::new();
+        let failed = runtime.cached_outcome("key", || {
+            Err(ShellExpansionError::PolicyIo {
+                path: PathBuf::from("x"),
+                source: std::io::Error::other("spawn"),
+            })
+        });
+        assert!(failed.is_err());
+        let (outcome, fresh) = runtime.cached_outcome("key", || Ok(exited(0))).unwrap();
+        assert!(fresh);
+        assert_eq!(outcome, exited(0));
+        let (_, fresh) = runtime
+            .cached_outcome("key", || panic!("a cached outcome is reused"))
+            .unwrap();
+        assert!(!fresh);
+    }
 
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::discovery::detection::ColorDepth;

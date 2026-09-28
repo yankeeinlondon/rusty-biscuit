@@ -372,6 +372,55 @@ impl MarkdownError {
         None
     }
 
+    /// The [`NotPreApproved`](crate::markdown::compose::ShellExpansionError::NotPreApproved)
+    /// failure somewhere in this error's cause chain, if any.
+    ///
+    /// It means a command about to run was missing from the approval set its
+    /// caller discovered: the discovery walk and execution disagreed about
+    /// the command's bytes. That is a broken invariant, not a command failure,
+    /// so no tolerance a stage offers for ordinary failures (a transclusion
+    /// replaced by a notice, a nested composition reported as an expression
+    /// failure) may absorb it.
+    pub fn pre_approval_violation(&self) -> Option<&crate::markdown::compose::ShellExpansionError> {
+        use crate::markdown::compose::ShellExpansionError;
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            let shell = error
+                .downcast_ref::<ShellExpansionError>()
+                .or_else(|| error.downcast_ref::<Box<ShellExpansionError>>().map(AsRef::as_ref));
+            if let Some(shell @ ShellExpansionError::NotPreApproved { .. }) = shell {
+                return Some(shell);
+            }
+            current = error.source();
+        }
+        None
+    }
+
+    /// Whether a shell span (`::shell`, `::shell-block`, or a frontmatter
+    /// `$( … )`) failed somewhere in this error's cause chain.
+    ///
+    /// An unhandled command failure stops the composition wherever the span
+    /// is written. A transcluded file is part of the same composition, so the
+    /// lenient transclusion fallback (a notice in place of the file) must not
+    /// absorb it: that would turn a fact the author declared required into a
+    /// silent gap. A failure the author handled (`when_error`, a matching exit
+    /// code, `--allow-shell-timeout`) never reaches this error at all.
+    pub fn shell_span_failure(&self) -> bool {
+        use crate::markdown::compose::{ShellBlockError, ShellExpansionError};
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(self);
+        while let Some(error) = current {
+            if error.is::<ShellExpansionError>()
+                || error.is::<Box<ShellExpansionError>>()
+                || error.is::<ShellBlockError>()
+                || error.is::<Box<ShellBlockError>>()
+            {
+                return true;
+            }
+            current = error.source();
+        }
+        false
+    }
+
     /// Anchors a [`MarkdownError::Interpolation`] to a real on-disk frontmatter
     /// region so the rendered block can show an OSC8-linked prompt file and a
     /// focused YAML excerpt.

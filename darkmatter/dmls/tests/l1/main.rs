@@ -15,6 +15,7 @@ mod lsp_session;
 mod mapping_only_corpus;
 mod no_side_effects;
 mod packaging_contract;
+mod shell_suffixes;
 mod stdio_subprocess;
 mod strict_mode_recovery_spike;
 mod suggest_constraint_phase1;

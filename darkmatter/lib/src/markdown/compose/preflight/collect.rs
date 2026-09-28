@@ -24,7 +24,6 @@ use crate::markdown::compose::ComposeOperation;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::ComposeSource;
 use crate::markdown::compose::DeferredCapabilities;
-use crate::markdown::compose::context::effective_state as state;
 use crate::markdown::compose::frontmatter_interpolation::interpolate_frontmatter_best_effort;
 use crate::markdown::compose::frontmatter_shell_expansion::{
     directive_reachable_pipelines, parse_shell_value, scan_frontmatter,
@@ -94,7 +93,7 @@ fn directive_action_iter(directive: &ShellDirective) -> Vec<(String, String, Vec
 }
 
 /// Resolves an executable through alias expansion, mirroring the runtime path.
-fn resolve_executable(exe_raw: &str, args_raw: &[String]) -> (String, Vec<String>) {
+pub(crate) fn resolve_executable(exe_raw: &str, args_raw: &[String]) -> (String, Vec<String>) {
     if which::which(exe_raw).is_ok() {
         (exe_raw.to_string(), args_raw.to_vec())
     } else if let Some(resolved) = resolve_alias(exe_raw) {
@@ -195,6 +194,7 @@ pub(crate) fn collect_effects(
         &remote_fetch,
         &root,
         None,
+        &InheritedDiscovery::default(),
     )?;
     Ok((entries, icmp, capabilities, graph))
 }
@@ -260,6 +260,15 @@ pub fn collect_frontmatter_shell_commands(
 /// `root` is the request root's source, the resolution base of `as_markdown`
 /// content. `nested_key` is `Some` for such content: it identifies the node in
 /// `visited` instead of the root source its options carry.
+///
+/// A local child is walked with the options composition gives it
+/// ([`transclusion::markdown_child_options`]): its parent's effective state as
+/// inherited data, so a command that interpolates a parent default, a
+/// derived value, a `proxy.with:` overlay, or a caller override has the bytes
+/// it will execute with. `inherited` names the inherited values whose
+/// executed form discovery cannot know (see [`InheritedDiscovery`]); a
+/// command built from one fails exactly as it does in the document that
+/// authored the value.
 #[allow(clippy::too_many_arguments)]
 fn collect_recursive(
     markdown: &Markdown,
@@ -272,6 +281,7 @@ fn collect_recursive(
     remote_fetch: &remote_fetch::RemoteFetchRuntime,
     root: &RootSource,
     nested_key: Option<String>,
+    inherited: &InheritedDiscovery,
 ) -> MarkdownResult<super::PreflightGraphNode> {
     let source_file = match &options.source {
         ComposeSource::File(p) => p.clone(),
@@ -338,9 +348,11 @@ fn collect_recursive(
         &authored_ctx,
         markdown.frontmatter_line_count(),
     )?;
+    let unobserved = unobserved_keys(markdown, options, &inherited.unobserved);
     detect_unevaluated_dependency_shape(
         markdown,
         &authored_pending,
+        &unobserved,
         &authored_ctx,
         markdown.frontmatter_line_count(),
     )?;
@@ -403,8 +415,24 @@ fn collect_recursive(
     // approved shape (with `$(...)`) differs from its executed shape. Reject it
     // here rather than letting it surface as a late `NotPreApproved`.
     let prepared_provenance = prepare_frontmatter_for_compose(&mut markdown.clone(), options);
-    let pending = pending_shell_literals(&prepared, &prepared_provenance, &prepared_ctx);
+    let mut pending = pending_shell_literals(&prepared, &prepared_provenance, &prepared_ctx);
+    pending.extend(still_inherited_pending(&prepared, &inherited.pending));
+    let for_children = InheritedDiscovery {
+        pending: pending.clone(),
+        unobserved,
+    };
     detect_dynamic_command_shape(prepared.content(), &pending, &prepared_ctx, line_offset)?;
+
+    // ── The state this document's local children inherit ──────────
+    // Built exactly as the compose pass builds the state its transclusion
+    // stage hands to children, less the parent's `$schema`: the parent
+    // already coerced these values, and re-judging them here would resolve
+    // the parent's relative file values from the child's directory, which
+    // composition does not do. Schema judgment changes no command bytes.
+    let child_state =
+        crate::markdown::compose::pipeline::document_state_builder(&prepared, options).build()?;
+    let mut child_state_data = child_state.data().clone();
+    child_state_data.remove("$schema");
 
     // ── Body `::shell` directives ──────────────────────────────────
     let directives = crate::markdown::compose::shell_expansion::parser::parse_directives_in(
@@ -525,10 +553,13 @@ fn collect_recursive(
         match resolved {
             transclusion::ResolvedTarget::File { path, .. } => {
                 let mut child = Markdown::try_from(path.as_path())?;
-                apply_child_overrides(&mut child, &directive.options);
-                let mut child_options = options.clone().with_accepted_source_file(path.clone());
-                child_options.inherited_origin =
-                    transclusion::child_inherited_origin(&directive.options);
+                transclusion::apply_directive_set_overlay(&mut child, &directive.options);
+                let child_options = transclusion::markdown_child_options(
+                    options,
+                    &child_state_data,
+                    &directive.options,
+                    &path,
+                );
                 let child = collect_recursive(
                     &child,
                     &child_options,
@@ -540,6 +571,7 @@ fn collect_recursive(
                     remote_fetch,
                     root,
                     None,
+                    &for_children,
                 )?;
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
@@ -551,11 +583,11 @@ fn collect_recursive(
                 let Some(body) = fetch_remote_child_body(&url, remote_fetch)? else {
                     continue;
                 };
-                let mut child = Markdown::from(body);
-                apply_child_overrides(&mut child, &directive.options);
-                let mut child_options = options.clone().with_source_url(url.clone());
-                child_options.inherited_origin =
-                    transclusion::child_inherited_origin(&directive.options);
+                // Composition gives a remote child its parent's options and
+                // nothing of the parent's state or the directive's `set`
+                // overlay; its commands are approved for exactly that.
+                let child = Markdown::from(body);
+                let child_options = options.clone().with_source_url(url.clone());
                 let child = collect_recursive(
                     &child,
                     &child_options,
@@ -567,6 +599,7 @@ fn collect_recursive(
                     remote_fetch,
                     root,
                     None,
+                    &InheritedDiscovery::default(),
                 )?;
                 edges.push(super::PreflightGraphEdge {
                     directive: directive.clone(),
@@ -608,9 +641,15 @@ fn collect_recursive(
         let child = match resolved {
             transclusion::ResolvedTarget::File { path, .. } => {
                 let child = Markdown::try_from(path.as_path())?;
+                let child_options = transclusion::markdown_child_options(
+                    options,
+                    &child_state_data,
+                    &transclusion::BlockOptions::default(),
+                    &path,
+                );
                 collect_recursive(
                     &child,
-                    &options.clone().with_accepted_source_file(path),
+                    &child_options,
                     seen,
                     entries,
                     icmp,
@@ -619,6 +658,7 @@ fn collect_recursive(
                     remote_fetch,
                     root,
                     None,
+                    &for_children,
                 )?
             }
             transclusion::ResolvedTarget::Url { url, .. } => {
@@ -637,6 +677,7 @@ fn collect_recursive(
                     remote_fetch,
                     root,
                     None,
+                    &InheritedDiscovery::default(),
                 )?
             }
         };
@@ -673,6 +714,7 @@ fn collect_recursive(
             remote_fetch,
             root,
             Some(key),
+            &InheritedDiscovery::default(),
         )?;
         node.source = None;
         children.push(std::sync::Arc::new(node));
@@ -690,19 +732,6 @@ fn collect_recursive(
         edges,
         children,
     })
-}
-
-/// Applies `set_object`/`set_properties` overrides from a transclusion
-/// directive's options to a child document's frontmatter.
-fn apply_child_overrides(child: &mut Markdown, opts: &transclusion::BlockOptions) {
-    if opts.set_object.is_some() || !opts.set_properties.is_empty() {
-        let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
-        let base_map: serde_json::Map<String, serde_json::Value> =
-            base_indexmap.into_iter().collect();
-        let overlaid =
-            state::apply_set_overrides(&base_map, opts.set_object.as_ref(), &opts.set_properties);
-        *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
-    }
 }
 
 /// Fetches a remote Markdown child for pre-flight collection.
@@ -937,6 +966,90 @@ fn pending_shell_literals(
     pending
 }
 
+/// What a local child inherits from the discovery of its parent, beyond the
+/// parent's state itself: the inherited values whose executed form discovery
+/// cannot know.
+#[derive(Debug, Default)]
+struct InheritedDiscovery {
+    /// Parent `$(...)` values, still unexpanded here, that the child receives
+    /// as the executed output of that command.
+    pending: Vec<(String, String)>,
+    /// Keys whose value reads something discovery does not evaluate (a shell
+    /// probe, `as_markdown`, a lazy `current`/`current_env` read), directly or
+    /// through another such key.
+    unobserved: Vec<String>,
+}
+
+/// The keys of `markdown` whose value discovery cannot observe as composition
+/// will: every inherited such key the document does not replace, plus every
+/// key whose authored value reads a shell probe, `as_markdown`, a lazy root,
+/// or another such key. A caller override replaces the authored value, so an
+/// overridden key is observable.
+fn unobserved_keys(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    inherited: &[String],
+) -> Vec<String> {
+    let frontmatter = markdown.frontmatter().as_map();
+    let overridden = |key: &str| {
+        [options.set_overrides.as_ref(), options.data_overrides.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_object)
+            .any(|overrides| overrides.contains_key(key))
+    };
+    let mut unobserved: Vec<String> = inherited
+        .iter()
+        .filter(|key| !frontmatter.contains_key(*key) && !overridden(key))
+        .cloned()
+        .collect();
+    loop {
+        let before = unobserved.len();
+        for (key, value) in frontmatter {
+            if unobserved.contains(key) || overridden(key) {
+                continue;
+            }
+            let Some(text) = value.as_str() else { continue };
+            let reads_unobserved = ExpressionFinder::find_all_plain(text).iter().any(|location| {
+                parse(&location.expression).is_ok_and(|expression| {
+                    let mut roots = Vec::new();
+                    collect_expression_roots(&expression, &mut roots);
+                    unevaluated_call(&expression).is_some()
+                        || lazy_root_read(&expression).is_some()
+                        || roots.iter().any(|root| unobserved.contains(root))
+                })
+            });
+            if reads_unobserved {
+                unobserved.push(key.clone());
+            }
+        }
+        if unobserved.len() == before {
+            return unobserved;
+        }
+    }
+}
+
+/// The parent's still-unexpanded `$(...)` values that reach this document
+/// unchanged through its inherited state.
+///
+/// A document that sets the key itself (or receives it from a directive
+/// `set`) no longer carries the parent's value, so it drops out.
+fn still_inherited_pending(
+    prepared: &Markdown,
+    inherited_pending: &[(String, String)],
+) -> Vec<(String, String)> {
+    let frontmatter = prepared.frontmatter().as_map();
+    inherited_pending
+        .iter()
+        .filter(|(key, literal)| {
+            frontmatter
+                .get(key)
+                .is_some_and(|value| value.as_str() == Some(literal.as_str()))
+        })
+        .cloned()
+        .collect()
+}
+
 /// Rejects an authored transclusion target that reads a frontmatter value whose
 /// shell expansion has not run yet.
 fn detect_authored_dynamic_target(
@@ -1110,6 +1223,30 @@ fn visit_calls(expression: &Expr, visit: &mut impl FnMut(&str, &[Expr])) {
 }
 
 /// The first function in [`UNEVALUATED_IN_DISCOVERY`] that `expression` calls.
+/// The lazy root (`current`, `current_env`) `expression` reads, if any.
+///
+/// Discovery observes no lazy value, and composition reads one when the
+/// command is reached, so a command built from one has no bytes discovery can
+/// approve.
+fn lazy_root_read(expression: &Expr) -> Option<String> {
+    let mut roots = Vec::new();
+    collect_expression_roots(expression, &mut roots);
+    roots
+        .into_iter()
+        .find(|root| root == "current" || root == "current_env")
+        .map(|root| format!("`{root}.*`, which is read when the command runs"))
+}
+
+/// The unobserved frontmatter key `expression` reads, if any.
+fn unobserved_read(expression: &Expr, unobserved: &[String]) -> Option<String> {
+    let mut roots = Vec::new();
+    collect_expression_roots(expression, &mut roots);
+    roots
+        .into_iter()
+        .find(|root| unobserved.contains(root))
+        .map(|key| format!("frontmatter.{key}, whose value discovery does not observe"))
+}
+
 fn unevaluated_call(expression: &Expr) -> Option<String> {
     let mut found = None;
     visit_calls(expression, &mut |name, _| {
@@ -1135,6 +1272,7 @@ fn unevaluated_call(expression: &Expr) -> Option<String> {
 fn detect_unevaluated_dependency_shape(
     markdown: &Markdown,
     pending: &[(String, String)],
+    unobserved: &[String],
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
 ) -> MarkdownResult<()> {
@@ -1158,10 +1296,12 @@ fn detect_unevaluated_dependency_shape(
             let Ok(expression) = parse(&location.expression) else { continue };
             if text.trim_start().starts_with("$(")
                 && let Some(dependency) = unevaluated_call(&expression)
+                    .or_else(|| lazy_root_read(&expression))
+                    .or_else(|| unobserved_read(&expression, unobserved))
             {
                 return error(text.to_string(), dependency, origin());
             }
-            if let Some(dependency) = dynamic_nested_dependency(&expression, pending) {
+            if let Some(dependency) = dynamic_nested_dependency(&expression, pending, unobserved) {
                 return error(text.to_string(), dependency, origin());
             }
         }
@@ -1203,10 +1343,14 @@ fn detect_unevaluated_dependency_shape(
             || effect_spans
                 .iter()
                 .any(|span| location.start >= span.start && location.start < span.end);
-        if in_effect && let Some(dependency) = unevaluated_call(&expression) {
+        if in_effect
+            && let Some(dependency) = unevaluated_call(&expression)
+                .or_else(|| lazy_root_read(&expression))
+                .or_else(|| unobserved_read(&expression, unobserved))
+        {
             return error(line.to_string(), dependency, origin);
         }
-        if let Some(dependency) = dynamic_nested_dependency(&expression, pending) {
+        if let Some(dependency) = dynamic_nested_dependency(&expression, pending, unobserved) {
             return error(line.to_string(), dependency, origin);
         }
     }
@@ -1214,7 +1358,11 @@ fn detect_unevaluated_dependency_shape(
 }
 
 /// The unevaluated dependency of a non-literal `as_markdown` argument, if any.
-fn dynamic_nested_dependency(expression: &Expr, pending: &[(String, String)]) -> Option<String> {
+fn dynamic_nested_dependency(
+    expression: &Expr,
+    pending: &[(String, String)],
+    unobserved: &[String],
+) -> Option<String> {
     let mut found = None;
     visit_calls(expression, &mut |name, args| {
         if found.is_some() || name != "as_markdown" {
@@ -1226,12 +1374,15 @@ fn dynamic_nested_dependency(expression: &Expr, pending: &[(String, String)]) ->
         }
         let mut roots = Vec::new();
         collect_expression_roots(argument, &mut roots);
-        found = unevaluated_call(argument).or_else(|| {
-            pending
-                .iter()
-                .find(|(key, _)| roots.contains(key))
-                .map(|(key, _)| format!("frontmatter.{key}, which frontmatter shell expansion resolves"))
-        });
+        found = unevaluated_call(argument)
+            .or_else(|| lazy_root_read(argument))
+            .or_else(|| unobserved_read(argument, unobserved))
+            .or_else(|| {
+                pending
+                    .iter()
+                    .find(|(key, _)| roots.contains(key))
+                    .map(|(key, _)| format!("frontmatter.{key}, which frontmatter shell expansion resolves"))
+            });
     });
     found
 }

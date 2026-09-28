@@ -15,9 +15,9 @@ use shared_child::SharedChild;
 use tracing::{debug, instrument, warn};
 
 use super::types::{
-    ChainOperator, CommandAction, RedirectionConfig, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellExpansionOptions, ShellPipeline, ShellTimeoutBehavior, StderrTarget,
-    StdoutTarget,
+    ChainOperator, CommandAction, PipelineAction, RedirectionConfig, ShellCommandOrigin,
+    ShellDirective, ShellExpansionError, ShellExpansionOptions, ShellTimeoutBehavior,
+    StderrTarget, StdoutTarget,
 };
 use crate::markdown::compose::ComposeSource;
 
@@ -39,14 +39,6 @@ impl CommandExecution {
             stdout,
             stderr,
             timeout_fallback: None,
-        }
-    }
-
-    fn timeout_fallback(timeout: std::time::Duration) -> Self {
-        Self {
-            stdout: String::new(),
-            stderr: String::new(),
-            timeout_fallback: Some(timeout),
         }
     }
 
@@ -157,198 +149,143 @@ pub fn execute_command(
     Ok(execute_command_detailed(directive, shell_opts, source)?.combined_output())
 }
 
+/// How a command ended, or, for a chain, how the last command that ran ended.
+///
+/// Only [`ShellStatus::Exited`] carries a status an author can read. A timed-out
+/// or signal-terminated command has none, so no number is invented for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellStatus {
+    /// The command exited with this status code.
+    Exited(i32),
+    /// The command was killed at its deadline.
+    TimedOut,
+    /// The command was ended by a signal (on Windows, by a console
+    /// interrupt), which includes a user interruption.
+    Signaled,
+}
+
+/// Everything one execution of a shell directive produced.
+///
+/// This is what the per-compose command cache stores, so every reader of the
+/// same command (an unsuffixed `$(cmd)`, a `$(cmd)::result`, a body
+/// `::shell cmd`) derives its own view from one run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellOutcome {
+    /// The status of the last command that ran.
+    pub status: ShellStatus,
+    /// The stdout of every command that ran, in execution order, joined with a
+    /// newline between non-empty streams.
+    pub stdout: String,
+    /// The stderr of every command that ran, joined the same way.
+    pub stderr: String,
+    /// The deadline, when any command that ran was killed at it. A chain run
+    /// under [`ShellTimeoutBehavior::EmptyString`] continues past a timed-out
+    /// command as if it succeeded, so this can be set while `status` is
+    /// [`ShellStatus::Exited`].
+    pub timed_out_after: Option<Duration>,
+}
+
+/// Windows reports a console Ctrl+C as this exit code rather than a signal.
+#[cfg(windows)]
+const STATUS_CONTROL_C_EXIT: u32 = 0xC000_013A;
+
+fn shell_status(status: ExitStatus) -> ShellStatus {
+    match status.code() {
+        #[cfg(windows)]
+        Some(code) if code as u32 == STATUS_CONTROL_C_EXIT => ShellStatus::Signaled,
+        Some(code) => ShellStatus::Exited(code),
+        None => ShellStatus::Signaled,
+    }
+}
+
 /// Executes a shell directive command with timeout and output capture.
 ///
 /// Returns stdout/stderr separately so callers can implement different output
-/// contracts for body and frontmatter shell expansion.
+/// contracts for body and frontmatter shell expansion. Only the directive's
+/// first command runs; [`execute_directive_outcome`] runs a whole chain.
 pub(crate) fn execute_command_detailed(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    // If there's a pipeline with redirections, use the action-based path
-    if let Some(ref pipeline) = directive.pipeline
-        && let Some(action) = pipeline.actions.first()
-        && action.command.redirection != RedirectionConfig::default()
-    {
-        let working_dir = resolve_working_directory(shell_opts, source);
-        let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
-        return execute_single_action(
-            &action.command,
-            &working_dir,
-            timeout,
-            shell_opts,
-            &directive.raw_command,
-            &directive.origin,
-            &directive.ctx,
-        );
-    }
-
-    // Standard single-command path (no redirections)
-    let resolved_path =
-        which::which(&directive.executable).map_err(|_| ShellExpansionError::CommandNotFound {
-            ctx: Box::new(directive.ctx.clone()),
-            command: directive.executable.clone(),
-            origin: directive.origin.clone(),
-        })?;
-
-    let working_dir = resolve_working_directory(shell_opts, source);
-    debug!(working_dir = %working_dir.display(), "shell: executing command");
-
-    // 3. Build command
-    let mut cmd = Command::new(&resolved_path);
-    cmd.args(&directive.args)
-        .current_dir(&working_dir)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    if shell_opts.strip_ansi {
-        cmd.env("NO_COLOR", "1");
-    }
-
-    // 4. Spawn
-    let child = SharedChild::spawn(&mut cmd)
-        .map(Arc::new)
-        .map_err(|e| ShellExpansionError::ExecutionFailed {
-            ctx: Box::new(directive.ctx.clone()),
-            command: directive.raw_command.clone(),
-            code: -1,
-            stdout: String::new(),
-            stderr: e.to_string(),
-            origin: directive.origin.clone(),
-        })?;
-
-    // 5. Drain stdout and stderr concurrently via threads
-    let stdout_handle = child.take_stdout();
-    let stderr_handle = child.take_stderr();
-
-    let stdout_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut stdout) = stdout_handle {
-            let _ = stdout.read_to_end(&mut buf);
-        }
-        buf
-    });
-
-    let stderr_thread = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut stderr) = stderr_handle {
-            let _ = stderr.read_to_end(&mut buf);
-        }
-        buf
-    });
-
-    // 6. Wait with timeout
-    let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
-
-    let status = match wait_with_timeout(&child, timeout) {
-        Ok(WaitOutcome::Exited(status)) => status,
-        Ok(WaitOutcome::TimedOut) => {
-            warn!(?timeout, "shell: command timed out");
-            match shell_opts.timeout_behavior {
-                ShellTimeoutBehavior::Error => {
-                    return Err(ShellExpansionError::Timeout {
-                        ctx: Box::new(directive.ctx.clone()),
-                        command: directive.raw_command.clone(),
-                        timeout,
-                        origin: directive.origin.clone(),
-                    });
-                }
-                ShellTimeoutBehavior::EmptyString => {
-                    return Ok(CommandExecution::timeout_fallback(timeout));
-                }
-            }
-        }
-        Err(e) => {
-            return Err(ShellExpansionError::ExecutionFailed {
-                ctx: Box::new(directive.ctx.clone()),
-                command: directive.raw_command.clone(),
-                code: -1,
-                stdout: String::new(),
-                stderr: e.to_string(),
-                origin: directive.origin.clone(),
-            });
-        }
-    };
-
-    let stdout_bytes = join_output_thread_raw(stdout_thread, "stdout", &directive.ctx)?;
-    let stderr_bytes = join_output_thread_raw(stderr_thread, "stderr", &directive.ctx)?;
-    let mut stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
-    let mut stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
-
-    if shell_opts.strip_ansi {
-        stdout = biscuit_terminal::prelude::strip_escape_codes(stdout);
-        stderr = biscuit_terminal::prelude::strip_escape_codes(stderr);
-    }
-
-    if status.success() {
-        let output = CommandExecution::from_streams(stdout, stderr);
-        debug!(
-            exit_code = 0,
-            output_len = output.combined_output().len(),
-            "shell: command succeeded"
-        );
-        Ok(output)
-    } else {
-        Err(ShellExpansionError::ExecutionFailed {
-            ctx: Box::new(directive.ctx.clone()),
-            command: directive.raw_command.clone(),
-            code: status.code().unwrap_or(-1),
-            stdout,
-            stderr,
-            origin: directive.origin.clone(),
-        })
-    }
+    let first = directive_actions(directive).into_iter().take(1).collect();
+    let outcome = run_actions(directive, first, shell_opts, source)?;
+    outcome_to_execution(directive, outcome, shell_opts.timeout_behavior)
 }
 
-/// Executes a shell directive, dispatching to pipeline execution if the
-/// directive contains a chain, otherwise to single-command execution.
+/// Executes a shell directive, running every command of a chain, and maps a
+/// non-zero status to [`ShellExpansionError::ExecutionFailed`].
+#[cfg(test)]
 pub(crate) fn execute_directive_impl(
     directive: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
 ) -> Result<CommandExecution, ShellExpansionError> {
-    if let Some(ref pipeline) = directive.pipeline
-        && pipeline.actions.len() > 1
-    {
-        return execute_pipeline_detailed(directive, pipeline, shell_opts, source);
-    }
-    execute_command_detailed(directive, shell_opts, source)
+    let outcome = execute_directive_outcome(directive, shell_opts, source)?;
+    outcome_to_execution(directive, outcome, shell_opts.timeout_behavior)
 }
 
-/// Executes a pipeline of chained commands with per-command redirections.
-fn execute_pipeline_detailed(
+/// Executes a shell directive and returns its whole outcome, whatever its
+/// status.
+///
+/// A chain follows `&&`/`||` on each command's status. Under
+/// [`ShellTimeoutBehavior::Error`] a timed-out command ends the chain; under
+/// [`ShellTimeoutBehavior::EmptyString`] it counts as a success for chaining
+/// and contributes no output.
+///
+/// ## Errors
+///
+/// Only failures that leave no outcome: a missing executable, a spawn or wait
+/// failure, or a capture thread that panicked.
+pub(crate) fn execute_directive_outcome(
     directive: &ShellDirective,
-    pipeline: &ShellPipeline,
     shell_opts: &ShellExpansionOptions,
     source: &ComposeSource,
-) -> Result<CommandExecution, ShellExpansionError> {
+) -> Result<ShellOutcome, ShellExpansionError> {
+    run_actions(directive, directive_actions(directive), shell_opts, source)
+}
+
+/// The directive's commands with their chain operators. A directive without a
+/// pipeline is its own single command.
+fn directive_actions(directive: &ShellDirective) -> Vec<PipelineAction> {
+    match &directive.pipeline {
+        Some(pipeline) if !pipeline.actions.is_empty() => pipeline.actions.clone(),
+        _ => vec![PipelineAction {
+            operator: ChainOperator::None,
+            command: CommandAction {
+                executable: directive.executable.clone(),
+                args: directive.args.clone(),
+                redirection: RedirectionConfig::default(),
+            },
+        }],
+    }
+}
+
+fn run_actions(
+    directive: &ShellDirective,
+    actions: Vec<PipelineAction>,
+    shell_opts: &ShellExpansionOptions,
+    source: &ComposeSource,
+) -> Result<ShellOutcome, ShellExpansionError> {
     let working_dir = resolve_working_directory(shell_opts, source);
     let timeout = directive.timeout_override.unwrap_or(shell_opts.timeout);
+    debug!(working_dir = %working_dir.display(), "shell: executing command");
 
-    let mut combined_stdout = String::new();
-    let mut combined_stderr = String::new();
+    let mut stdout = String::new();
+    let mut stderr = String::new();
     let mut last_success = true;
-    let mut timeout_fallback = None;
+    let mut status = ShellStatus::Exited(0);
+    let mut timed_out_after = None;
 
-    for action in &pipeline.actions {
-        // Check chain condition
+    for action in &actions {
         match action.operator {
             ChainOperator::None => {}
-            ChainOperator::And => {
-                if !last_success {
-                    continue;
-                }
-            }
-            ChainOperator::Or => {
-                if last_success {
-                    continue;
-                }
-            }
+            ChainOperator::And if !last_success => continue,
+            ChainOperator::Or if last_success => continue,
+            ChainOperator::And | ChainOperator::Or => {}
         }
 
-        let result = execute_single_action(
+        let run = run_action(
             &action.command,
             &working_dir,
             timeout,
@@ -356,103 +293,102 @@ fn execute_pipeline_detailed(
             &directive.raw_command,
             &directive.origin,
             &directive.ctx,
-        );
-
-        match result {
-            Ok(exec) => {
-                last_success = true;
-                timeout_fallback = timeout_fallback.or(exec.timeout_fallback);
-                if !exec.stdout.is_empty() {
-                    if !combined_stdout.is_empty() {
-                        combined_stdout.push('\n');
-                    }
-                    combined_stdout.push_str(&exec.stdout);
-                }
-                if !exec.stderr.is_empty() {
-                    if !combined_stderr.is_empty() {
-                        combined_stderr.push('\n');
-                    }
-                    combined_stderr.push_str(&exec.stderr);
+        )?;
+        join_stream(&mut stdout, run.stdout);
+        join_stream(&mut stderr, run.stderr);
+        status = run.status;
+        match run.status {
+            ShellStatus::Exited(code) => last_success = code == 0,
+            ShellStatus::Signaled => last_success = false,
+            ShellStatus::TimedOut => {
+                warn!(?timeout, "shell: command timed out");
+                timed_out_after = Some(timeout);
+                match shell_opts.timeout_behavior {
+                    ShellTimeoutBehavior::Error => break,
+                    ShellTimeoutBehavior::EmptyString => last_success = true,
                 }
             }
-            Err(ShellExpansionError::ExecutionFailed {
-                code,
-                stdout,
-                stderr,
-                ..
-            }) => {
-                last_success = false;
-                if !stdout.is_empty() {
-                    if !combined_stdout.is_empty() {
-                        combined_stdout.push('\n');
-                    }
-                    combined_stdout.push_str(&stdout);
-                }
-                if !stderr.is_empty() {
-                    if !combined_stderr.is_empty() {
-                        combined_stderr.push('\n');
-                    }
-                    combined_stderr.push_str(&stderr);
-                }
-                // If this is the last action (or no subsequent Or handler), propagate failure
-                let is_last = std::ptr::eq(action, &pipeline.actions[pipeline.actions.len() - 1]);
-                // Check if next action handles failure with ||
-                let next_handles_failure = pipeline
-                    .actions
-                    .iter()
-                    .position(|a| std::ptr::eq(a, action))
-                    .map(|idx| {
-                        idx + 1 < pipeline.actions.len()
-                            && pipeline.actions[idx + 1].operator == ChainOperator::Or
-                    })
-                    .unwrap_or(false);
+        }
+    }
 
-                if is_last || !next_handles_failure {
-                    // Check if any remaining actions could handle the failure
-                    let pos = pipeline
-                        .actions
-                        .iter()
-                        .position(|a| std::ptr::eq(a, action))
-                        .unwrap();
-                    let any_or_handler = pipeline.actions[pos + 1..]
-                        .iter()
-                        .any(|a| a.operator == ChainOperator::Or);
+    debug!(?status, "shell: command finished");
+    Ok(ShellOutcome {
+        status,
+        stdout,
+        stderr,
+        timed_out_after,
+    })
+}
 
-                    if !any_or_handler {
-                        return Err(ShellExpansionError::ExecutionFailed {
-                            ctx: Box::new(directive.ctx.clone()),
-                            command: directive.raw_command.clone(),
-                            code,
-                            stdout: combined_stdout,
-                            stderr: combined_stderr,
-                            origin: directive.origin.clone(),
-                        });
-                    }
-                }
-            }
-            Err(ShellExpansionError::Timeout { .. }) => {
-                return Err(ShellExpansionError::Timeout {
+/// Appends `next` to `joined`, with a newline between non-empty streams.
+fn join_stream(joined: &mut String, next: String) {
+    if next.is_empty() {
+        return;
+    }
+    if !joined.is_empty() {
+        joined.push('\n');
+    }
+    joined.push_str(&next);
+}
+
+/// Maps an outcome to the text contract of an unsuffixed reader: exit `0`
+/// succeeds, any other status is an error, and a timeout follows `behavior`.
+pub(crate) fn outcome_to_execution(
+    directive: &ShellDirective,
+    outcome: ShellOutcome,
+    behavior: ShellTimeoutBehavior,
+) -> Result<CommandExecution, ShellExpansionError> {
+    let failed = |code: i32, outcome: ShellOutcome| ShellExpansionError::ExecutionFailed {
+        ctx: Box::new(directive.ctx.clone()),
+        command: directive.raw_command.clone(),
+        code,
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
+        origin: directive.origin.clone(),
+    };
+    match outcome.status {
+        ShellStatus::Exited(0) => Ok(CommandExecution {
+            stdout: outcome.stdout,
+            stderr: outcome.stderr,
+            timeout_fallback: outcome.timed_out_after,
+        }),
+        ShellStatus::Exited(code) => Err(failed(code, outcome)),
+        ShellStatus::Signaled => Err(failed(-1, outcome)),
+        ShellStatus::TimedOut => {
+            let timeout = outcome
+                .timed_out_after
+                .expect("a timed-out status records its deadline");
+            match behavior {
+                ShellTimeoutBehavior::Error => Err(ShellExpansionError::Timeout {
                     ctx: Box::new(directive.ctx.clone()),
                     command: directive.raw_command.clone(),
                     timeout,
                     origin: directive.origin.clone(),
-                });
+                }),
+                ShellTimeoutBehavior::EmptyString => Ok(CommandExecution {
+                    stdout: outcome.stdout,
+                    stderr: outcome.stderr,
+                    timeout_fallback: Some(timeout),
+                }),
             }
-            Err(e) => return Err(e),
         }
     }
-
-    let mut execution = CommandExecution::from_streams(combined_stdout, combined_stderr);
-    execution.timeout_fallback = timeout_fallback;
-    Ok(execution)
 }
 
-/// Executes a single command action with its redirection config.
+/// One command's status and captured streams.
+struct ActionRun {
+    status: ShellStatus,
+    stdout: String,
+    stderr: String,
+}
+
+/// Runs a single command action with its redirection config.
 ///
 /// For `2>&1` and `>&2` redirections, both child streams are wired to a single
 /// OS pipe (via `std::io::pipe`) before spawning so that emission order is
-/// preserved by the kernel rather than reconstructed after exit.
-fn execute_single_action(
+/// preserved by the kernel rather than reconstructed after exit. A timed-out
+/// command reports no output.
+fn run_action(
     action: &CommandAction,
     working_dir: &std::path::Path,
     timeout: std::time::Duration,
@@ -460,7 +396,7 @@ fn execute_single_action(
     raw_command: &str,
     origin: &super::types::ShellCommandOrigin,
     ctx: &biscuit_terminal::errors::SourceContext,
-) -> Result<CommandExecution, ShellExpansionError> {
+) -> Result<ActionRun, ShellExpansionError> {
     let resolved_path =
         which::which(&action.executable).map_err(|_| ShellExpansionError::CommandNotFound {
             ctx: Box::new(ctx.clone()),
@@ -551,22 +487,13 @@ fn execute_single_action(
     };
 
     let status = match wait_with_timeout(&child, timeout) {
-        Ok(WaitOutcome::Exited(status)) => status,
+        Ok(WaitOutcome::Exited(status)) => shell_status(status),
         Ok(WaitOutcome::TimedOut) => {
-            warn!(?timeout, "shell: command timed out");
-            match shell_opts.timeout_behavior {
-                ShellTimeoutBehavior::Error => {
-                    return Err(ShellExpansionError::Timeout {
-                        ctx: Box::new(ctx.clone()),
-                        command: raw_command.to_string(),
-                        timeout,
-                        origin: origin.clone(),
-                    });
-                }
-                ShellTimeoutBehavior::EmptyString => {
-                    return Ok(CommandExecution::timeout_fallback(timeout));
-                }
-            }
+            return Ok(ActionRun {
+                status: ShellStatus::TimedOut,
+                stdout: String::new(),
+                stderr: String::new(),
+            });
         }
         Err(e) => {
             return Err(ShellExpansionError::ExecutionFailed {
@@ -604,18 +531,11 @@ fn execute_single_action(
         final_stderr = biscuit_terminal::prelude::strip_escape_codes(final_stderr);
     }
 
-    if status.success() {
-        Ok(CommandExecution::from_streams(final_stdout, final_stderr))
-    } else {
-        Err(ShellExpansionError::ExecutionFailed {
-            ctx: Box::new(ctx.clone()),
-            command: raw_command.to_string(),
-            code: status.code().unwrap_or(-1),
-            stdout: final_stdout,
-            stderr: final_stderr,
-            origin: origin.clone(),
-        })
-    }
+    Ok(ActionRun {
+        status,
+        stdout: final_stdout,
+        stderr: final_stderr,
+    })
 }
 
 /// Identifies which output field (stdout or stderr) the merged stream's bytes
@@ -815,7 +735,7 @@ fn join_output_thread_raw(
 mod tests {
     use super::*;
     use crate::markdown::compose::shell_expansion::types::{
-        ErrorHandling, PipelineAction, ShellCommandOrigin,
+        ErrorHandling, ShellCommandOrigin, ShellPipeline,
     };
     use tempfile::TempDir;
 
@@ -1449,14 +1369,13 @@ mod tests {
         assert!(stderr.bytes().all(|b| b == SATURATE_STDERR_BYTE));
     }
 
-    /// F17 — the same saturation guarantee for the redirection/`execute_single_action`
-    /// executor, whose `ReadStrategy::Separate` branch owns its own drain threads.
+    /// F17 — the same saturation guarantee for a chained directive, whose
+    /// commands each drain through `run_action`'s `ReadStrategy::Separate` threads.
     #[test]
     fn saturated_dual_stream_capture_does_not_deadlock_in_pipeline_executor() {
         let mut d = child_directive(ChildMode::Saturate);
         let noop = child_directive(ChildMode::Noop);
-        // Two actions force `execute_pipeline_detailed` -> `execute_single_action`
-        // rather than the standard single-command path.
+        // Two actions make this a chain rather than a single command.
         d.pipeline = Some(ShellPipeline {
             actions: vec![
                 PipelineAction {
@@ -1567,7 +1486,7 @@ mod tests {
     fn pipeline_wait_hands_the_full_budget_to_one_blocking_span() {
         let mut d = child_directive(ChildMode::Noop);
         d.timeout_override = Some(NO_POLL_BUDGET);
-        // A non-default redirection routes through `execute_single_action`.
+        // A non-default redirection on the directive's only command.
         d.pipeline = Some(ShellPipeline {
             actions: vec![PipelineAction {
                 operator: ChainOperator::None,

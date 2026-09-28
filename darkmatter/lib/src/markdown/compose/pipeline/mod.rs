@@ -398,6 +398,8 @@ impl Markdown {
                 // full post-shell validation pass; otherwise this stage only
                 // checks caller-file classification, leaving final coercion and
                 // optional-value scrubbing with the downstream schema owner.
+                // Either way, a value a result suffix typed (`::ok`,
+                // `::exit-code`, `::result`) is judged below.
                 if options.trigger_schemas {
                     let schema_consumer = runtime
                         .transclusion
@@ -422,29 +424,17 @@ impl Markdown {
                         provenance.data(),
                     )?;
                 }
+                schema_validation::validate_typed_shell_values(
+                    self,
+                    &options,
+                    &prepared_schemas,
+                    &fse_report.typed_keys,
+                )?;
             }
 
             // Build effective state for replacement/interpolation and condition checks.
             let esb_start = perf.is_enabled().then(std::time::Instant::now);
-            let effective_state = EffectiveStateBuilder::new()
-                .with_frontmatter(
-                    self.frontmatter()
-                        .as_map()
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                )
-                .with_external_state(
-                    options
-                        .external_state
-                        .clone()
-                        .unwrap_or(Value::Object(Map::new())),
-                )
-                .with_merge_strategy(crate::markdown::MergeStrategy::PreferDocument)
-                .with_replace_parent_wins(options.replace_parent_wins)
-                .with_context(options.context().clone())
-                .with_allow_ctx_override(options.allow_ctx_override)
-                .with_name_coercion_keys(options.name_coercion_keys.clone())
+            let effective_state = document_state_builder(self, &options)
                 .with_presentation_values(caller_projection.presentation_values())
                 .with_current_authority(options.current_authority())
                 .build()?;
@@ -654,4 +644,38 @@ pub(crate) fn preflight_gate_applies(
         && (options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
             || options.is_enabled(ComposeOperation::ShellExpansion)
             || options.is_enabled(ComposeOperation::ShellBlocks))
+}
+
+/// The effective-state inputs of one document: its prepared frontmatter over
+/// the state it inherited, under the request's merge and `ctx` rules.
+///
+/// Composition builds the state its stages (and its transcluded children)
+/// read from this, and pre-flight discovery builds the state it hands a child
+/// from it, so both derive a child's inherited values the same way. Callers
+/// add stage-specific inputs (presentation values, the lazy `current` scope)
+/// before building.
+pub(crate) fn document_state_builder(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> EffectiveStateBuilder {
+    EffectiveStateBuilder::new()
+        .with_frontmatter(
+            markdown
+                .frontmatter()
+                .as_map()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        )
+        .with_external_state(
+            options
+                .external_state
+                .clone()
+                .unwrap_or(Value::Object(Map::new())),
+        )
+        .with_merge_strategy(crate::markdown::MergeStrategy::PreferDocument)
+        .with_replace_parent_wins(options.replace_parent_wins)
+        .with_context(options.context().clone())
+        .with_allow_ctx_override(options.allow_ctx_override)
+        .with_name_coercion_keys(options.name_coercion_keys.clone())
 }

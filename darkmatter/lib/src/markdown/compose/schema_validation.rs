@@ -427,6 +427,67 @@ pub(crate) fn run_with_registry(
     Ok(())
 }
 
+/// Judges the values a frontmatter shell result suffix (`::ok`,
+/// `::exit-code`, `::result`) produced, after shell expansion.
+///
+/// The first pass deferred these keys while they still held `$( … )`, and a
+/// typed value is a new kind of value no downstream owner expects to coerce,
+/// so this pass reports a problem on any of `keys` as final. Unsuffixed shell
+/// values keep their existing contract: their stdout text is left to the
+/// downstream schema owner. Nothing is written back.
+///
+/// ## Errors
+///
+/// [`MarkdownError::SchemaValidationFailed`] naming the typed values that do
+/// not satisfy the schema.
+pub(crate) fn validate_typed_shell_values(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    prepared: &PreparedSchemas,
+    keys: &HashSet<String>,
+) -> MarkdownResult<()> {
+    let Some(schemas) = prepared.schemas.as_ref() else {
+        return Ok(());
+    };
+    if keys.is_empty() || options.defer_schema_verdict {
+        return Ok(());
+    }
+    let path = source_path(markdown, options);
+    let description = markdown
+        .frontmatter()
+        .as_map()
+        .get("description")
+        .and_then(|v| v.as_str().map(String::from));
+    let report = match options.schema_phase {
+        Some(phase) => schemas.validate_for_phase(markdown, phase),
+        None => schemas.validate(markdown),
+    }
+    .map_err(|err| MarkdownError::SchemaValidationFailed {
+        path: path.clone(),
+        problems: Vec::new(),
+        summary: format!("schema could not be prepared: {err}"),
+        description: description.clone(),
+        source: Some(Box::new(err)),
+    })?;
+    let problems: Vec<_> = report
+        .problems
+        .into_iter()
+        .filter(|problem| {
+            top_level_pointer_segment(&problem.path).is_some_and(|name| keys.contains(&name))
+        })
+        .collect();
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(MarkdownError::SchemaValidationFailed {
+        path,
+        problems,
+        summary: "a shell result value did not satisfy the schema".to_string(),
+        description,
+        source: None,
+    })
+}
+
 /// Rechecks only caller-file classification against the current effective
 /// schema, without taking ownership of validation or frontmatter mutation.
 pub(crate) fn verify_projection_stability(

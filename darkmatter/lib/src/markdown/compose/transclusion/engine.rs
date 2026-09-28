@@ -1402,16 +1402,7 @@ impl<'a> TransclusionEngine<'a> {
         // does NOT propagate through `child_options`, so grandchildren do not
         // inherit it.
         let mut child = runtime.load_markdown(path)?;
-        if directive_options.set_object.is_some() || !directive_options.set_properties.is_empty() {
-            let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
-            let base_map: serde_json::Map<String, Value> = base_indexmap.into_iter().collect();
-            let overlaid = state::apply_set_overrides(
-                &base_map,
-                directive_options.set_object.as_ref(),
-                &directive_options.set_properties,
-            );
-            *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
-        }
+        apply_directive_set_overlay(&mut child, directive_options);
         let child_context = runtime.context_epoch.context_for_source(
             state.context(),
             &crate::markdown::compose::ContextRequirements::for_document(&child),
@@ -1452,29 +1443,14 @@ impl<'a> TransclusionEngine<'a> {
         );
         let cache_handle = runtime.cache.clone();
 
-        let inherited = self.build_child_external_state(state);
-        let replace_parent_wins = matches!(
-            directive_options.replace,
-            transclusion::ReplaceOption::ParentWins
-        );
-        let one_off = match &directive_options.replace {
-            transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
-            _ => None,
-        };
         let path_buf = path.to_path_buf();
-        let inherited_origin = child_inherited_origin(directive_options);
 
         let cached = cache_handle.get_or_compute_compose(
             &cache_key,
             || {
-                let mut child_options = options
-                    .clone()
-                    .with_replace_parent_wins(replace_parent_wins)
-                    .with_one_off_replace(one_off.clone())
-                    .with_request_context(child_context.clone());
-                child_options.external_state = Some(inherited.clone());
-                child_options.inherited_origin = inherited_origin.clone();
-                child_options = child_options.with_accepted_source_file(path_buf.clone());
+                let mut child_options =
+                    markdown_child_options(options, state.data(), directive_options, &path_buf)
+                        .with_request_context(child_context.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
                 // transclusion stage reuses grandchild target resolution too.
@@ -1643,23 +1619,6 @@ impl<'a> TransclusionEngine<'a> {
         content
     }
 
-    /// The parent's composed values, handed to a child as defaults. They are
-    /// data in the child ([`child_inherited_origin`]): the parent already
-    /// scanned every authored value once.
-    fn build_child_external_state(&self, state: &EffectiveState) -> Value {
-        let mut inherited: Map<String, Value> = state.data().clone().into_iter().collect();
-
-        // Prologue/epilogue are scoped to the defining document — never propagate.
-        // ctx is captured fresh per-document by EffectiveStateBuilder, so the
-        // parent's merged runtime context must not leak into children (it would
-        // appear as a document-defined ctx and trigger false collision warnings).
-        inherited.remove("prologue");
-        inherited.remove("epilogue");
-        inherited.remove("ctx");
-
-        Value::Object(inherited)
-    }
-
     fn resolve_ignore_invalid(&self, options: &ComposeOptions) -> bool {
         if let Some(value) = options.ignore_invalid_references {
             return value;
@@ -1676,6 +1635,68 @@ impl<'a> TransclusionEngine<'a> {
             .and_then(|raw| parse_bool(raw))
             .unwrap_or(false)
     }
+}
+
+/// Applies a `::file` directive's `set` overlay to the child's authored
+/// frontmatter.
+///
+/// Composition and pre-flight discovery both call this, so the child a
+/// directive composes is the child its commands were approved for. The overlay
+/// never reaches grandchildren through the child's options.
+pub(crate) fn apply_directive_set_overlay(
+    child: &mut Markdown,
+    directive_options: &transclusion::BlockOptions,
+) {
+    if directive_options.set_object.is_some() || !directive_options.set_properties.is_empty() {
+        let base_indexmap = std::mem::take(child.frontmatter_mut().as_map_mut());
+        let base_map: Map<String, Value> = base_indexmap.into_iter().collect();
+        let overlaid = state::apply_set_overrides(
+            &base_map,
+            directive_options.set_object.as_ref(),
+            &directive_options.set_properties,
+        );
+        *child.frontmatter_mut().as_map_mut() = overlaid.into_iter().collect();
+    }
+}
+
+/// The options a local Markdown child composes with, given its parent's
+/// options and the parent's effective state (`parent_data`).
+///
+/// This is the single derivation of a child's inputs. Pre-flight discovery
+/// walks the transclusion graph with it, and composition executes with it, so
+/// a command a child interpolates from inherited state has the same bytes in
+/// the approval set as when it runs. The parent's values reach the child as
+/// data defaults ([`child_inherited_origin`]): the parent already scanned
+/// every authored value once.
+pub(crate) fn markdown_child_options(
+    parent: &ComposeOptions,
+    parent_data: &HashMap<String, Value>,
+    directive_options: &transclusion::BlockOptions,
+    path: &Path,
+) -> ComposeOptions {
+    let mut inherited: Map<String, Value> = parent_data.clone().into_iter().collect();
+    // Prologue/epilogue are scoped to the defining document — never propagate.
+    // ctx is captured fresh per-document by EffectiveStateBuilder, so the
+    // parent's merged runtime context must not leak into children (it would
+    // appear as a document-defined ctx and trigger false collision warnings).
+    inherited.remove("prologue");
+    inherited.remove("epilogue");
+    inherited.remove("ctx");
+
+    let one_off = match &directive_options.replace {
+        transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
+        _ => None,
+    };
+    let mut child_options = parent
+        .clone()
+        .with_replace_parent_wins(matches!(
+            directive_options.replace,
+            transclusion::ReplaceOption::ParentWins
+        ))
+        .with_one_off_replace(one_off);
+    child_options.external_state = Some(Value::Object(inherited));
+    child_options.inherited_origin = child_inherited_origin(directive_options);
+    child_options.with_accepted_source_file(path.to_path_buf())
 }
 
 /// Origin of what a transcluded child receives from the directive that
