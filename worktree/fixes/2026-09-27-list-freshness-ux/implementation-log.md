@@ -282,6 +282,8 @@ packages:
     - biscuit-terminal
     - worktree
     - worktree-cli
+implementation_1: "2026-09-27T12:36:00-07:00"
+implementation_2: "2026-09-27T16:23:23-07:00"
 ---
 
 # Implementation Log for 2026-09-27-list-freshness-ux (5 phases)
@@ -1118,3 +1120,104 @@ No pre-existing failure was skipped, and nothing failed.
 Every Definition of Done item is checked. The spec's lifecycle directory is untouched: the spec stays in `fixes/`, not `_completed/`. Its frontmatter is updated only as this phase's instructions require (`implemented`, `human_review`, `message_to_agent`).
 
 **Final state: implementation complete, ready for review.**
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-27T12:36:00-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-27-list-freshness-ux/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- starting the work on 'Forced refresh can finish without a pull request result after lock contention' at 12:36:09
+        - confirmed: `Follow::run` accepted a `Contended` receipt once `pr_lock_held()` was false; `pull_requests::refresh` stores nothing on failure or `AlreadyFresh`, so a failed/skipped holder left `wt -r` showing the old answer
+        - design: a contended PR half counts only if the PR store (current origin) then holds an answer with `fetched_at` newer than at launch (new `WaitEnv::pr_fetched_at`, `StoreEnv` now takes the origin); otherwise relaunch the forced worker once within the same budget; a second contended-without-answer ends as `PrStatus::Failed { Other }` in the returned receipt. "Newer than at launch" rather than ">= launch time" so a holder that began its request just before `wt -r` still counts
+        - unit tests (`list/wait/tests.rs`): replaced the elapsed-only contention test with holder-published, holder-published-nothing (one relaunch), and relaunch-contended-too (PR failure) cases
+        - binary tests (`cli/tests/list_flags.rs`): `refresh_shows_the_answer_a_contending_holder_published`, `refresh_asks_again_when_a_contending_holder_failed` (a real `internal-refresh` holder held at `FakeGitea`; the second fails without the fix: 1 request instead of 2)
+        - updated `wait.rs` module/`WaitEnd` docs and the worktree skill's `wt list` paragraph
+        - `just test` (684 passed), `just lint` clean
+- work completed for 'Forced refresh can finish without a pull request result after lock contention' at 12:41:13
+- starting the work on 'Spinner phase changes lack real-terminal verification' at 12:41:13
+        - discovery: holding a fallback `ls-remote` and then a fetch in one pane needs an origin sniff recognizes as Gitea (`http://gitea.test/o/r.git`) *and* a real git transport; `url.*.insteadOf` cannot bridge them (`git remote get-url` expands it, so provider detection would see the local path), and `remote.origin.uploadpack` does not apply to HTTP
+        - `cli/tests/perf_support`: `FakeGitea` now serves git smart HTTP through `git http-backend` (`serve_repositories(root)`), holds git requests with `hold_git(GitHold::All | Fetch)` (`Fetch` holds only the pack request, so an `ls-remote` passes), counts them apart (`git_requests`, `wait_for_git_waiting`), and can answer branch heads with another status (`answer_branch_heads_with(429)`); `release` also clears the git hold
+        - `cli/tests/level2_list_verbose.rs`: `DesignFixture::with_gitea_repository` (bare `o/r.git` one commit past `origin/main`, the commit made only in the bare repo so the fetch sends a pack; the pane's git gets `http.proxy` at the stand-in instead of refused HTTP); new scenes under `wt list -r`: `level2_list_spinner_moves_from_the_fallback_to_the_fetch_on_one_line_in_tmux` (the `no API key, using fallback method` line with `ls-remote` held, then `pulling remote updates` with the fetch held, each exactly one `<frame> <text>` line with no other spinner text, then cleared before the caption, which shows the fetched state `main is 2 commits behind`) and `level2_list_spinner_shows_the_rate_limited_fallback_in_tmux` (429 on branch heads)
+        - mutation check: dropping the erase-to-end-of-line `\x1b[K` from biscuit-terminal's spinner `frame` makes the transition scene fail (the fetch line keeps the fallback text's tail); reverted
+        - updated the module doc and the worktree skill's `wt list` L2 paragraph
+        - `just test-l2` 24 passed (both new scenes ran, about 2 s each, not skipped), `just test` 684 passed, `just lint` clean, `just check-tier-coverage` nothing stranded
+- work completed for 'Spinner phase changes lack real-terminal verification' at 12:51:00
+- starting the work on 'Ignored API preferences merge distinct SSH ports' at 12:51:00
+        - policy: SSH to a known provider maps to 443 only on the standard SSH port (none spelled, or explicit 22); an explicit nonstandard SSH port is kept, so it differs from HTTPS and from other ports. sniff's `remote_identity` already reports an explicit `ssh://` port (the `url` crate knows no default for `ssh`), so sniff is unchanged
+        - no scheme field added (format stays 1): an SSH and an HTTPS remote spelling the same explicit host and port name one server
+        - added `a_known_provider_on_a_nonstandard_ssh_port_keeps_that_port` and `an_ignored_nonstandard_ssh_port_survives_a_round_trip_without_ignoring_other_ports`; the existing sharing test already covers `git@`, `ssh://` without a port, and `:22`
+        - updated `RepoIdentity` / `from_origin` docs and the worktree skill's `api_preference` bullet
+        - `just test` 686 passed, `just lint` clean
+- work completed for 'Ignored API preferences merge distinct SSH ports' at 12:52:43
+- starting the work on 'A failed remote check hides an available fast-forward suggestion' at 12:52:43
+        - gate in `list.rs`: suggestion follows the post-wait comparison under every `RemoteStatus` except `StillChecking`/`StillPulling` (a timed-out check may still lead to a fetch, so both count as "rendered before the fetch finished"); check-failed, fetch-failed, unavailable, and absent-with-tracking-ref now suggest when strictly behind
+        - `UploadPackGate::failing(fixture, n)` in `remote_fixture`; added `a_failed_check_still_suggests_…` and `a_failed_fetch_still_suggests_…` to `list_remote_head.rs` (the still-pulling no-suggestion test is unchanged)
+        - updated `docs/cli/list.md` closing-notes wording and the worktree skill's `render_notes` note
+        - `just test` 688 passed (26 skipped), `just lint` clean
+        - gate: the suggestion follows the post-wait comparison (strictly behind, never under `--ff`) unless the listing rendered while the check was still running or the fetch was still pulling; checked-now, fetched, check-failed, fetch-failed, unavailable, and absent-with-tracking-ref all suggest when strictly behind
+        - no L1 test exercises the still-checking exclusion with a behind branch: the existing still-checking test uses an in-sync branch
+- work completed for 'A failed remote check hides an available fast-forward suggestion' at 12:57:58
+- final verification (orchestrator)
+        - `worktree/` `just test`: 688 passed, 26 skipped; `just lint`: clean; `just check-tier-coverage worktree`: 0 stranded
+        - `just cross-check worktree-cli --os windows`: 375 passed, 46 skipped (native Windows)
+        - `just test-l2` (24 passed) was run by the spinner-scene subagent after its change; the later changes touched no L2 test or tmux fixture
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 22 minutes. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 4 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+
+The files changed in this cycle are:
+
+- `worktree/cli/src/commands/list.rs`
+- `worktree/cli/src/commands/list/wait.rs`
+- `worktree/cli/src/commands/list/wait/tests.rs`
+- `worktree/cli/tests/level2_list_verbose.rs`
+- `worktree/cli/tests/list_flags.rs`
+- `worktree/cli/tests/list_remote_head.rs`
+- `worktree/cli/tests/perf_support/mod.rs`
+- `worktree/cli/tests/remote_fixture/mod.rs`
+- `worktree/lib/src/api_preference.rs`
+- `worktree/docs/cli/list.md`
+- `.claude/skills/worktree/SKILL.md`
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-27T16:23:23-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/fixes/2026-09-27-list-freshness-ux/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'Forced refresh mistakes a same-second pull request update for no update' at 16:23:40
+        - decision: every successful PR-store write now stamps a random `publication` id (`remote_head::new_attempt_id`, 32 hex) beside `fetched_at`, whose meaning (request start, whole seconds, shown as the age) is unchanged
+        - decision: bumped `PR_STORE_FORMAT_VERSION` 2 -> 3 rather than an optional field, so every served answer has an id; an old store is a `Miss` and is refilled once (no users, so no migration)
+        - both writers stamp a fresh id through one private `publish` (foreground `fetch_and_publish`, worker `refresh`); no OS randomness means nothing is stored (`refresh` returns `PublishFailed`, the foreground still shows its answer)
+        - added `pull_requests::stored_publication(store, origin, now)`, which reads the id under exactly `select_cached`'s validity rules (shared private `usable`)
+        - `WaitEnv::pr_fetched_at` replaced by `WaitEnv::pr_publication`; a contended holder counts as published when the id after its lock opens is present and differs from the id at launch
+        - Level 1 tests added: `pull_requests::every_publication_stores_a_new_id_even_within_one_second`, `a_publication_id_is_read_only_where_the_answer_would_be_served`, a format-2 store as a `Miss`; `wait::a_forced_wait_accepts_a_holders_answer_published_within_the_same_second`, `a_forced_wait_accepts_a_holders_first_answer`; existing relaunch tests now script ids; `list_flags::refresh_shows_a_holders_answer_that_replaced_a_young_one_within_its_second`
+        - the binary test seeds its young answer after the holder's request is held, so the seeded `fetched_at` is at or after the holder's stamp every time; with the old `fetched_at` comparison patched back in temporarily, it failed (two requests), and it passes with the fix
+        - discovery: `cargo test` (shared process) intermittently reports `Contended` in the `pull_requests` refresh tests while nextest passes; it looks like lock fds inherited by other threads' git children. This predates the change and nextest is the repo's runner
+        - PR store JSON fixtures (`perf_support::seed_pr_store`, `seed_empty_pr_store`, `level2_list_verbose` design fixture) now write `PR_STORE_FORMAT_VERSION` and a publication id
+        - docs: the `pull_requests` and `wt list` wait sentences in `.claude/skills/worktree/SKILL.md` now describe format 3, `stored_publication`, and `WaitEnv::pr_publication`; `worktree/docs/cli/list.md` does not describe the contended-holder check, so it is unchanged
+        - verification: `just test` 695 passed, 26 skipped; `just lint` clean; `just check-tier-coverage worktree` 0 stranded
+        - blocker (outside this finding): `just test-l2` fails `level2_list_styles_follow_the_design_in_tmux` at line 637. `row_with` searches from the bottom and now matches the §9 note `main is 1 commit behind origin/main; run wt --ff ...`, which the uncommitted §9 change in `list.rs` prints after a failed check, rather than the caption. The PR store fixture is not involved: the caption and `PR #99` render correctly. The other 23 L2 tests pass when run serially (`-j 1`, tmux required)
+        - orchestrator: resolved the L2 blocker. The failure was a test-matching regression from review cycle 1's §9 change, not a product defect: the caption lookup in `level2_list_styles_follow_the_design_in_tmux` now also requires `(`, which the caption carries and the `--ff` suggestion does not. `just test-l2` 24 passed; `just lint` clean
+        - orchestrator: `just cross-check worktree-cli --os windows` passed (native Windows)
+- work completed for 'Forced refresh mistakes a same-second pull request update for no update' at 16:37:02
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 14 minutes. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+
+The files changed in this cycle are:
+
+- `worktree/lib/src/pull_requests.rs`
+- `worktree/cli/src/commands/list/wait.rs`
+- `worktree/cli/src/commands/list/wait/tests.rs`
+- `worktree/cli/tests/list_flags.rs`
+- `worktree/cli/tests/perf_support/mod.rs`
+- `worktree/cli/tests/level2_list_verbose.rs`
+- `.claude/skills/worktree/SKILL.md`
