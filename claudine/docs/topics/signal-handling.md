@@ -491,9 +491,13 @@ provider hooks call into — enforces a per-invocation execution deadline
 When the deadline is exceeded the handler aborts with exit code `124`
 to prevent a slow handler from blocking the parent agent session.
 
-This deadline is enforced by checking elapsed time against the budget at
-each phase boundary, not by `SIGALRM`. There is no signal involvement
-beyond the standard `_exit(124)`.
+The handler's work runs under a Tokio timer (`timeout_at`) armed before any
+work starts, not under `SIGALRM`, and no signal is involved. On the deadline
+the handler prints a one-line diagnostic and returns `124` to the CLI's
+shared shutdown path, which exits with it. That path's delivery drain is
+capped by the same deadline, so a hook `message` still sending cannot keep the
+handler alive past it: a handler that already hit the deadline reports its
+pending deliveries and exits without waiting.
 
 ## Signal-safety rules for new code
 

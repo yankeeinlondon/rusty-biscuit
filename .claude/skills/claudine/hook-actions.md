@@ -106,7 +106,7 @@ Send a message to the configured messaging destination (Discord, Slack, Signal, 
 | `message` | `string` | (required) | Markdown message with template interpolation |
 | `image` | `string?` | None | Path to an image to attach (Discord only) |
 
-**Behavior:** Async and non-blocking for the event pipeline. The send runs as a task registered with the process-wide delivery tracker (`messaging::delivery::track`), so `drain_deliveries` can wait for it before exit; a bare spawn in `messaging/` fails `lib/tests/l1/messaging_spawn_guard.rs`. The CLI's drain on exit is planned (see [Messaging](topics/messaging.md#delivery-tracking)).
+**Behavior:** Async and non-blocking for the event pipeline. The send runs as a task registered with the process-wide delivery tracker (`messaging::delivery::track`), so `drain_deliveries` can wait for it before exit; a bare spawn in `messaging/` fails `lib/tests/l1/messaging_spawn_guard.rs`. Every ordinary CLI exit goes through `cli/src/shutdown.rs::finish`, which drains within 10 s (capped by `claudine handle`'s deadline) and keeps the exit code; `cli/tests/l1/exit_site_guard.rs` fails on any other direct exit (see [Messaging](topics/messaging.md#delivery-tracking)).
 
 **Hook Handler Timeout:** When running inside `claudine handle`, messenger actions have a hard **3-second timeout** by default (overridable via `CLAUDINE_MESSENGER_TIMEOUT_SECONDS`).
 

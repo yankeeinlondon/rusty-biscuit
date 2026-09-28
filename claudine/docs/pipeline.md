@@ -404,9 +404,9 @@ Spans `composition_postprocess`.
 | # | Step | Notes |
 |---|------|-------|
 | G1 | **`--perf` report** [O-flag] | Always emitted to stderr when set; overrides `--silent`/`--quiet`. |
-| G2 | **Drop SIGINT guard** [M] | RAII restores prior handler. |
+| G2 | **Hand the SIGINT guard to shutdown** [M] | Kept installed through the delivery drain (G4), so a repeat Ctrl+C there still force-exits `130`. |
 | G3 | **Switch back to launch CWD** [O] | Wrapper does *not* restore — see project memory note about intentional CWD switch. |
-| G4 | **`std::process::exit(code)`** [M] | Top-level walker translates errors into `BlockError` reports first. |
+| G4 | **Drain deliveries, then exit** [M] | The command returns its exit code; `shutdown::finish` waits up to 10 s for pending messages and notifications, warns about any unfinished, flushes, and exits with that code. An error is rendered by the top-level walker (`BlockError` reports) first and exits `1` the same way. |
 
 ---
 

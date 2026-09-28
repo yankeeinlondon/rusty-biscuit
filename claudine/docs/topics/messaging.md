@@ -82,10 +82,28 @@ outcome.report(); // one Warning naming each delivery still sending
   way. Neither is returned as an error.
 - Without an active Tokio runtime a send logs a warning and does nothing.
 
-**Planned:** the `claudine` CLI drains on every ordinary exit, within a
-10-second budget (`DELIVERY_DRAIN_BUDGET`) capped by `claudine handle`'s own
-deadline, and keeps the command's exit code. Until that lands, a message sent
-just before the CLI exits can still be lost.
+### The CLI drains before every ordinary exit
+
+Every `claudine` command, including one that ends in an error, exits through
+one shutdown path. That path drains pending deliveries while the runtime is
+still running, prints the warning for any that did not finish, flushes stdout
+and stderr, and exits with the command's own code. A `success` or `finalize`
+message sent in the last moments of a run therefore arrives, or is reported,
+before the process ends.
+
+- The drain waits at most 10 seconds in total (`DELIVERY_DRAIN_BUDGET`).
+- Under `claudine handle` the drain also stops at the handler's overall
+  deadline (`CLAUDINE_HANDLE_DEADLINE_SECONDS`), so a stalled route cannot
+  hold a hook past it. A handler that already hit its deadline still exits
+  `124` and reports its pending deliveries without waiting.
+- The exit code never changes: an undelivered message does not turn a
+  successful run into a failure.
+- A run that sent nothing exits exactly as fast as before.
+- Ctrl+C during the drain prints a notice. A second press, or the first press
+  after one made during the run, force-exits with `130`.
+
+A delivery that did not finish in time is named in one warning on stderr, for
+example `Route alerts was still sending at exit; delivery is unknown`.
 
 ## Desktop notifications
 
