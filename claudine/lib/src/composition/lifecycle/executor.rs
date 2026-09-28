@@ -1444,14 +1444,18 @@ impl StackExecutionContext<'_> {
                 .ok_or_else(|| dispatch_err(format!("`{verb}` is missing a required argument")))
         };
 
+        // Every written value is the product of one evaluation, so it is data:
+        // it is stored so the next preparation reads it back instead of
+        // scanning it (the inline closure's gate). `working` keeps it raw.
+        let stored = |idx: usize| v(idx).map(|value| crate::composition::closure::persisted_data(&value));
         let result = match verb {
-            "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, v(2)?),
-            "merge_frontmatter" => engine.merge_frontmatter(&s(0)?, v(1)?),
+            "set_frontmatter" => engine.set_frontmatter(&s(0)?, &s(1)?, stored(2)?),
+            "merge_frontmatter" => engine.merge_frontmatter(&s(0)?, stored(1)?),
             "delete_frontmatter" => engine.delete_frontmatter(&s(0)?, &s(1)?),
             "increment_frontmatter" => engine.increment_frontmatter(&s(0)?, &s(1)?),
             "decrement_frontmatter" => engine.decrement_frontmatter(&s(0)?, &s(1)?),
-            "append_frontmatter" => engine.append_frontmatter(&s(0)?, &s(1)?, v(2)?),
-            "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, v(2)?),
+            "append_frontmatter" => engine.append_frontmatter(&s(0)?, &s(1)?, stored(2)?),
+            "prepend_frontmatter" => engine.prepend_frontmatter(&s(0)?, &s(1)?, stored(2)?),
             "ensure_file" => {
                 if values.len() >= 2 {
                     engine.ensure_file_with_content(&path(0)?, &s(1)?).map(Value::String)
