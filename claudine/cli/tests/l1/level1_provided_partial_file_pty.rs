@@ -17,6 +17,11 @@
 //!   provider.
 //! - Scalar string values for `file[]` properties are normalized to a
 //!   single-element array before resolution.
+//! - Root-union schemas (`2026-09-27-union-partial-file-completion`) reach the
+//!   same dialog or chooser, including the D1 shape whose arms each declare
+//!   the property over a different tree. Every failed completion (zero
+//!   candidates, declined, `Ctrl-C`) is reported before the provider picker
+//!   and before `initialize`, and the file dialog always precedes the picker.
 //!
 //! ## Tier
 //!
@@ -353,4 +358,274 @@ fn union_partial_with_templated_file_sibling_reaches_chooser() {
         "the composed prompt should carry the chosen spec path; stub \
          saw:\n{launched_with}\ntranscript:\n{plain}"
     );
+}
+
+/// `claudine compose <plan> <args…>` with no provider flag, so a run that gets
+/// past its inputs opens the provider picker.
+fn compose_without_provider(fixture: &CliProcessFixture, md_file: &Path, args: &[&str]) -> Command {
+    stage_default_config(fixture.home());
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = fixture.command_std();
+    cmd.arg("compose").arg(md_file).args(args);
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CLAUDINE_PLAIN");
+    cmd.env_remove("CI");
+    cmd
+}
+
+/// The R7.1 union fixture with `goose` (recording) and `claude` stubs on
+/// `PATH`, so the provider picker has two options. Returns the goose and
+/// claude markers.
+fn union_fixture_with_two_providers(label: &str) -> (CliProcessFixture, PathBuf, PathBuf) {
+    let fixture = CliProcessFixture::named(label);
+    let goose = fixture.cwd().join("goose.flag");
+    let claude = fixture.cwd().join("claude.flag");
+    stage_recording_goose_stub(fixture.bin_dir(), &goose);
+    write_executable(
+        &fixture.bin_dir().join("claude"),
+        &format!("#!/bin/sh\necho 'launched' > {}\nexit 0\n", claude.display()),
+    );
+    seed_specs(fixture.cwd());
+    (fixture, goose, claude)
+}
+
+/// Drain the session until `done` holds or `deadline` passes.
+fn drain_until(session: &mut OsSession, mut transcript: String, deadline: Duration, done: impl Fn() -> bool) -> String {
+    let stop = Instant::now() + deadline;
+    while Instant::now() < stop && !done() {
+        transcript.push_str(&read_for(session, Duration::from_millis(200)));
+    }
+    transcript
+}
+
+/// The provider picker's observable traces: its raw-mode entry, and the
+/// option label no other prompt in these runs prints.
+fn assert_picker_never_rendered(transcript: &str, label: &str) {
+    let plain = common::strip_ansi(transcript);
+    assert!(
+        !transcript.contains(KBD_ENHANCEMENT_PUSH),
+        "{label}: the provider picker must not open; transcript:\n{plain}"
+    );
+    assert!(
+        !plain.contains("Goose"),
+        "{label}: the provider picker's options must not render; transcript:\n{plain}"
+    );
+}
+
+/// R7.2: two `**/*spec*.md` paths contain the partial, so the chooser opens;
+/// the path the user picks is the one the provider receives.
+#[test]
+fn union_partial_with_two_matches_opens_the_chooser_and_launches_the_pick() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let fixture = CliProcessFixture::named("level1-provided-partial-union-chooser");
+    // A repository makes the chooser's labels repository-relative, short
+    // enough to read in the PTY's default width.
+    fixture.initialize_repository();
+    let marker = fixture.cwd().join("launched.flag");
+    stage_recording_goose_stub(fixture.bin_dir(), &marker);
+    seed_specs(fixture.cwd());
+    let second = fixture.cwd().join("features/everywhere-else/spec.md");
+    fs::create_dir_all(second.parent().unwrap()).unwrap();
+    fs::write(&second, "---\ntitle: Everywhere else\n---\nSpec body.\n").unwrap();
+    let md_file = plan_with_union_templated_sibling(fixture.cwd());
+
+    let cmd = compose_command(&fixture, &md_file, "spec", "everywhere");
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    let pre = wait_for_marker(&mut session, "Enter=Submit", Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    let plain = common::strip_ansi(&pre);
+    // The list pane truncates the longer seeded label, so match its prefix.
+    assert!(
+        plain.contains("features/2026-06-30-style-every")
+            && plain.contains("features/everywhere-else/spec.md"),
+        "the chooser should list both matches; transcript:\n{plain}"
+    );
+    assert!(!plain.contains("Use this file"), "two matches need the chooser; transcript:\n{plain}");
+    assert!(!marker.exists(), "provider launched before the chooser was answered:\n{plain}");
+
+    // The chooser lists the matches in path order; `j` moves to the second.
+    session.write_all(b"j\r").expect("pick the second match");
+    session.flush().ok();
+    let transcript = drain_until(&mut session, pre, Duration::from_secs(15), || marker.exists());
+    let plain = common::strip_ansi(&transcript);
+
+    let launched_with = fs::read_to_string(&marker)
+        .unwrap_or_else(|_| panic!("the stub should launch; transcript:\n{plain}"));
+    assert!(
+        launched_with.contains("features/everywhere-else/spec.md")
+            && !launched_with.contains("2026-06-30-style-everywhere"),
+        "the provider should receive the picked path; stub saw:\n{launched_with}\ntranscript:\n{plain}"
+    );
+    assert!(fixture.cwd().join("events.log").exists(), "initialize should run after the pick");
+}
+
+/// R2/R3 (R7.3): with zero candidates, the failure prints before the provider
+/// picker, which never opens; `initialize` never runs.
+#[test]
+fn union_partial_with_zero_matches_fails_before_the_provider_picker() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let (fixture, goose, claude) = union_fixture_with_two_providers("level1-union-zero-before-picker");
+    let md_file = plan_with_union_templated_sibling(fixture.cwd());
+
+    let cmd = compose_without_provider(&fixture, &md_file, &["spec=no-such-partial"]);
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+    // `read_for` returns at end of output, when the failed run exits.
+    let transcript = read_for(&mut session, Duration::from_secs(10));
+    let plain = common::strip_ansi(&transcript);
+
+    assert!(
+        plain.contains("no existing file matched reference `no-such-partial`"),
+        "the unresolved reference should be reported; transcript:\n{plain}"
+    );
+    assert_picker_never_rendered(&transcript, "zero candidates");
+    assert!(!goose.exists() && !claude.exists(), "no provider may launch:\n{plain}");
+    assert!(!fixture.cwd().join("events.log").exists(), "initialize must not run:\n{plain}");
+}
+
+/// R3 (R7.3): with one candidate, the file dialog comes before the provider
+/// picker, and the confirmed path reaches the provider the user then picks.
+#[test]
+fn union_partial_file_dialog_renders_before_the_provider_picker() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let (fixture, goose, claude) = union_fixture_with_two_providers("level1-union-dialog-before-picker");
+    let md_file = plan_with_union_templated_sibling(fixture.cwd());
+
+    let cmd = compose_without_provider(&fixture, &md_file, &["spec=everywhere"]);
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    let pre = wait_for_marker(&mut session, "Use this file", Duration::from_secs(10));
+    assert_picker_never_rendered(&pre, "before the file dialog is answered");
+    wait_for_raw_mode_termios(&mut session, Duration::from_secs(10));
+    session.write_all(b"y").expect("confirm the file");
+    session.flush().ok();
+
+    // Only now does the picker open.
+    let mut transcript = pre.clone();
+    transcript.push_str(&wait_for_marker(&mut session, "Goose", Duration::from_secs(10)));
+    let transcript = wait_for_raw_mode(&mut session, transcript, Duration::from_secs(10));
+    let dialog_at = transcript.find("Use this file").expect("dialog rendered");
+    let picker_at = transcript.find(KBD_ENHANCEMENT_PUSH).expect("picker entered raw mode");
+    assert!(dialog_at < picker_at, "the file dialog must precede the picker");
+
+    // Claude is the picker's default; `j` moves to Goose.
+    session.write_all(b"j\r").expect("select Goose");
+    session.flush().ok();
+    let transcript = drain_until(&mut session, transcript, Duration::from_secs(15), || goose.exists());
+    let plain = common::strip_ansi(&transcript);
+
+    let launched_with = fs::read_to_string(&goose)
+        .unwrap_or_else(|_| panic!("goose should launch; transcript:\n{plain}"));
+    assert!(
+        launched_with.contains("features/2026-06-30-style-everywhere/spec.md"),
+        "the confirmed path should reach the provider; stub saw:\n{launched_with}"
+    );
+    assert!(!claude.exists(), "the unselected provider must not launch:\n{plain}");
+}
+
+/// R2 (R7.3): declining the single-file dialog, or cancelling it with
+/// `Ctrl-C`, fails before the provider picker opens and before `initialize`.
+#[test]
+fn union_partial_declined_or_cancelled_fails_before_the_provider_picker() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    // `n` declines. `Ctrl-C` arrives as a key in raw mode, not as a signal,
+    // so the dialog must treat it as a cancellation rather than wait on.
+    for (label, key) in [("declined", b"n".as_slice()), ("cancelled", b"\x03".as_slice())] {
+        let (fixture, goose, claude) =
+            union_fixture_with_two_providers(&format!("level1-union-{label}-before-picker"));
+        let md_file = plan_with_union_templated_sibling(fixture.cwd());
+
+        let cmd = compose_without_provider(&fixture, &md_file, &["spec=everywhere"]);
+        let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+        let pre = wait_for_marker(&mut session, "Use this file", Duration::from_secs(10));
+        wait_for_raw_mode_termios(&mut session, Duration::from_secs(10));
+        session.write_all(key).expect("answer the file dialog");
+        session.flush().ok();
+
+        // `read_for` returns at end of output, when the failed run exits.
+        let transcript = pre + &read_for(&mut session, Duration::from_secs(10));
+        let plain = common::strip_ansi(&transcript);
+        assert!(
+            plain.contains("no existing file matched reference `everywhere`"),
+            "{label}: the unresolved reference should be reported; transcript:\n{plain}"
+        );
+        assert_picker_never_rendered(&transcript, label);
+        assert!(!goose.exists() && !claude.exists(), "{label}: no provider may launch:\n{plain}");
+        assert!(
+            !fixture.cwd().join("events.log").exists(),
+            "{label}: initialize must not run:\n{plain}"
+        );
+    }
+}
+
+/// R7.4 (ruling D1): arms discriminated by an optional `kind`, each declaring
+/// `spec` as an eager `file(match)` over its own tree. The chooser searches
+/// both trees, and picking the `fixes` spec composes under the `fixes` arm.
+///
+/// With `initialize` the early supplied-file pass offers the chooser (the D1
+/// fallback); without it the pre-validator's union classification does. Both
+/// surfaces must agree.
+#[test]
+fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let fixture = CliProcessFixture::named("level1-provided-partial-d1");
+    // A repository makes the chooser's labels repository-relative, short
+    // enough to read in the PTY's default width.
+    fixture.initialize_repository();
+    let marker = fixture.cwd().join("launched.flag");
+    stage_recording_goose_stub(fixture.bin_dir(), &marker);
+    for spec in ["features/cli-colors/spec.md", "fixes/cli-switches/spec.md"] {
+        let path = fixture.cwd().join(spec);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "---\ntitle: Spec\n---\nSpec body.\n").unwrap();
+    }
+    let schema = concat!(
+        "$schema:\n",
+        "  - kind: 'literal(feature)'\n",
+        "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
+        "  - kind: 'literal(fix)'\n",
+        "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
+    );
+    let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
+
+    for (label, extra) in [("with initialize", initialize), ("without initialize", "")] {
+        let md_file = fixture.cwd().join("plan.md");
+        fs::write(&md_file, format!("---\n{schema}{extra}---\nSpec document: {{{{spec}}}}\n")).unwrap();
+        let _ = fs::remove_file(&marker);
+
+        let cmd = compose_command(&fixture, &md_file, "spec", "cli");
+        let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+        let pre = wait_for_marker(&mut session, "Enter=Submit", Duration::from_secs(10));
+        let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+        let plain = common::strip_ansi(&pre);
+        assert!(
+            plain.contains("features/cli-colors/spec.md") && plain.contains("fixes/cli-switches/spec.md"),
+            "{label}: the chooser should list a match from each tree; transcript:\n{plain}"
+        );
+        assert!(!marker.exists(), "{label}: provider launched before the pick:\n{plain}");
+
+        // Path order puts `features/…` first; `j` moves to `fixes/…`.
+        session.write_all(b"j\r").expect("pick the fixes spec");
+        session.flush().ok();
+        let transcript = drain_until(&mut session, pre, Duration::from_secs(15), || marker.exists());
+        let plain = common::strip_ansi(&transcript);
+
+        let launched_with = fs::read_to_string(&marker).unwrap_or_else(|_| {
+            panic!("{label}: the fixes arm should validate and launch; transcript:\n{plain}")
+        });
+        assert!(
+            launched_with.contains("fixes/cli-switches/spec.md"),
+            "{label}: the provider should receive the fixes spec; stub saw:\n{launched_with}"
+        );
+        assert!(!plain.contains("schema validation"), "{label}: composition should validate:\n{plain}");
+    }
 }

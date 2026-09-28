@@ -1725,3 +1725,160 @@ fn completion_file_match_honors_negated_path_qualified_glob() {
         "negated recursive pattern must reject `src/inner/test_util.rs`: {got:?}"
     );
 }
+
+// ============================================================================
+// Caller-supplied file references (2026-09-27-union-partial-file-completion)
+// ============================================================================
+
+/// A `goose` stub that counts its launches, plus the `events.log` path the
+/// fixtures' `initialize` stacks append to.
+#[cfg(unix)]
+fn caller_file_fixture(label: &str) -> (CliProcessFixture, std::path::PathBuf, std::path::PathBuf) {
+    let fixture = CliProcessFixture::named(label);
+    let count_path = fixture.cwd().join("call-count.txt");
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        &format!("#!/bin/sh\necho touched >> {}\nexit 0\n", count_path.display()),
+    );
+    let spec = fixture.cwd().join("features/2026-06-30-style/spec.md");
+    fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    fs::write(&spec, "---\ntitle: Style\n---\nSpec body.\n").unwrap();
+    let events = fixture.cwd().join("events.log");
+    (fixture, count_path, events)
+}
+
+/// R4 / R7.6: a caller value typed at the launch root and judged by the
+/// post-`initialize` verdict names the launch directory, never the document's
+/// `prompts/` directory.
+///
+/// The arms disagree on `spec`'s array shape and the discriminant is only
+/// known after composition, so the early supplied-file pass has no single glob
+/// and the value reaches the late verdict. Darkmatter resolved it in document
+/// context there and reported `…/prompts`.
+#[cfg(unix)]
+#[test]
+fn compose_late_caller_file_verdict_names_the_launch_directory() {
+    let (fixture, count_path, events) = caller_file_fixture("compose-late-caller-file");
+    let prompts = fixture.cwd().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    let md_file = prompts.join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  - kind: 'literal(feature)'\n",
+            "    spec: 'file(required;match(**/*spec*.md);eager)'\n",
+            "  - kind: 'literal(note)'\n",
+            "    spec: 'file(required;match(**/*note*.md);eager)[]'\n",
+            "kind: \"{{ 'feature' }}\"\n",
+            "initialize:\n",
+            "  stack:\n",
+            "    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            "---\n",
+            "Spec: {{spec}}\n",
+        ),
+    )
+    .unwrap();
+
+    let run = |spec: &str| {
+        let output = fixture
+            .command()
+            .args(["compose", "--goose", "prompts/plan.md", &format!("spec={spec}")])
+            // Keep the long temporary paths on one line.
+            .env("COLUMNS", "1000")
+            .output()
+            .unwrap();
+        (output.status.success(), strip_ansi(&String::from_utf8_lossy(&output.stderr)))
+    };
+
+    // Control: a spec the launch directory resolves composes and launches.
+    let (ok, plain) = run("features/2026-06-30-style/spec.md");
+    assert!(ok, "a resolvable spec should compose; stderr:\n{plain}");
+    assert!(count_path.exists(), "the provider should launch; stderr:\n{plain}");
+    fs::remove_file(&count_path).unwrap();
+    fs::remove_file(&events).unwrap();
+
+    let (ok, plain) = run("fix");
+    assert!(!ok, "`fix` names no file; stderr:\n{plain}");
+    let launch_dir = fixture.cwd().canonicalize().unwrap();
+    assert!(
+        plain.contains(&format!(
+            "/spec: no existing file matched reference `fix` while resolving from `{}`",
+            launch_dir.display()
+        )),
+        "the verdict should name the launch directory; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.contains(&format!("`{}`", launch_dir.join("prompts").display())),
+        "the verdict must not name the document directory; stderr:\n{plain}"
+    );
+    assert!(
+        fs::read_to_string(&events).is_ok_and(|log| log.contains("initialize")),
+        "the failure must come from the post-initialize verdict; stderr:\n{plain}"
+    );
+    assert!(!count_path.exists(), "no provider should launch; stderr:\n{plain}");
+}
+
+/// R2: a caller's eager `file(match)` value that names no file fails before
+/// the document's `initialize` runs, for a union whose applicable arm is only
+/// clear once a templated sibling is ignored (C1), and for the D1 shape, where
+/// both arms declare the property.
+#[cfg(unix)]
+#[test]
+fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive() {
+    let (fixture, count_path, events) = caller_file_fixture("compose-early-caller-file");
+    let prompts = fixture.cwd().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
+    for (label, schema) in [
+        (
+            "templated sibling",
+            "$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n    doc: file\n  \
+             - design: 'file(required;match(**/*design*.md))'\n    doc: file\n\
+             doc: \"{{spec || design}}\"\n",
+        ),
+        (
+            "D1 two-tree union",
+            "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager;match(**/features/**/spec.md))'\n  \
+             - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
+        ),
+    ] {
+        let md_file = prompts.join("plan.md");
+        fs::write(&md_file, format!("---\n{schema}{initialize}---\nSpec: {{{{spec}}}}\n")).unwrap();
+
+        // Control: a resolvable literal passes the early check and runs
+        // `initialize`, so the check below is the only thing that stops it.
+        // The path is absolute because a root union still judges a relative
+        // caller path from the document's directory once it picks an arm.
+        let spec = fixture.cwd().canonicalize().unwrap().join("features/2026-06-30-style/spec.md");
+        let output = fixture
+            .command()
+            .args(["compose", "--goose", "prompts/plan.md", &format!("spec={}", spec.display())])
+            .output()
+            .unwrap();
+        let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{label}: control should compose; stderr:\n{plain}");
+        assert!(events.exists(), "{label}: control should run initialize; stderr:\n{plain}");
+        fs::remove_file(&events).unwrap();
+        fs::remove_file(&count_path).unwrap();
+
+        let output = fixture
+            .command()
+            .args(["compose", "--goose", "prompts/plan.md", "spec=no-such-spec"])
+            .env("COLUMNS", "1000")
+            .output()
+            .unwrap();
+        let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        assert!(!output.status.success(), "{label}: stderr:\n{plain}");
+        assert!(
+            plain.contains(&format!(
+                "/spec: no existing file matched reference `no-such-spec` while resolving from `{}`",
+                fixture.cwd().canonicalize().unwrap().display()
+            )),
+            "{label}: expected the caller-origin failure; stderr:\n{plain}"
+        );
+        assert!(!events.exists(), "{label}: initialize must not run; stderr:\n{plain}");
+        assert!(!count_path.exists(), "{label}: no provider should launch; stderr:\n{plain}");
+    }
+}
