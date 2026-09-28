@@ -151,7 +151,7 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
     .unwrap();
 
     let captured = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         &source.resolved_path,
         &config,
         seed,
@@ -181,17 +181,20 @@ fn seeded_loop_repro_runs_to_completion_with_live_derived_variable() {
     .unwrap();
 
     assert!(result.error.is_none(), "expected clean run, got {result:?}");
-    assert_eq!(result.iteration_count, 6);
+    // `until: phase > total_phases` is read after each iteration against the
+    // phase it ran with, so the phase-6 gate (`6 > 6`) continues and a
+    // phase-7 iteration runs before the gate stops the loop.
+    assert_eq!(result.iteration_count, 7);
     assert_eq!(result.final_frontmatter.get("phase"), Some(&json!(7)));
 
     let seen = captured.into_inner();
-    assert_eq!(seen.len(), 6);
+    assert_eq!(seen.len(), 7);
     for (index, (iteration, phase, body, pass_icon)) in seen.iter().enumerate() {
         let n = index + 1;
         assert_eq!(*iteration, n);
         assert_eq!(*phase, Some(json!(n)));
         assert_eq!(body.trim(), format!("Implement Phase {n} of 6"));
-        let expected_icon = if n == 6 { "✅" } else { "🧑‍💻" };
+        let expected_icon = if n == 7 { "✅" } else { "🧑‍💻" };
         assert_eq!(
             pass_icon.as_ref().and_then(|v| v.as_str()),
             Some(expected_icon),
@@ -221,7 +224,7 @@ fn seeded_loop_reports_honest_error_for_non_numeric_control_variable() {
     )
     .unwrap();
 
-    let result = execute_loop_with_config(
+    let result = run_loop(
         &source.resolved_path,
         &config,
         seed,
@@ -275,7 +278,7 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
     assert_eq!(seed.get("total"), Some(&json!(2)));
 
     let captured = RefCell::new(Vec::new());
-    let result = execute_loop_with_config(
+    let result = run_loop(
         &source.resolved_path,
         &config,
         seed,
@@ -295,17 +298,17 @@ fn seeded_loop_doc_namespace_condition_retains_readonly_control_value() {
     .unwrap();
 
     assert!(result.error.is_none(), "expected clean run, got {result:?}");
-    assert_eq!(result.iteration_count, 2);
+    // `doc.counter < doc.total` from 0 runs with counter 0, 1, 2.
+    assert_eq!(result.iteration_count, 3);
     assert_eq!(result.final_frontmatter.get("counter"), Some(&json!(2)));
 
     let seen = captured.into_inner();
-    assert_eq!(seen.len(), 2);
+    assert_eq!(seen.len(), 3);
     for (index, (iteration, body)) in seen.iter().enumerate() {
         let n = index + 1;
         assert_eq!(*iteration, n);
-        // Iteration N uses the counter value BEFORE the increment fires
-        // at the end of the iteration (counter 0→1→2), so the rendered
-        // body shows the starting counter for that pass.
+        // Iteration N runs with the counter the previous gate committed
+        // (0, 1, 2), so the rendered body shows N - 1.
         assert_eq!(body.trim(), format!("Step {} of 2", n - 1));
     }
 }

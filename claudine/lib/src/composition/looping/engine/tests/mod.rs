@@ -8,7 +8,12 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::composition::types::{LoopAction, LoopCondition};
+use crate::composition::prepare::PrepareOptions;
+use crate::composition::types::{
+    CompositionMode, LoopAction, LoopCondition, ResolvedCompositionSource,
+};
+use super::super::config::resolve_loop_config;
+use super::super::seed::build_loop_seed;
 
 /// The loop-engine wiring captures a populated `timing` global so loop
 /// lifecycle events (`initialize`, `loop`) expose `timing.document_ms` and
@@ -83,8 +88,62 @@ fn make_source_with_body(
     }
 }
 
+/// Drive the loop engine with no lifecycle blocks, handing each iteration to
+/// `executor`.
+///
+/// Tests whose subject is iteration timing, actions, rate limits, or seeding
+/// use this so the lifecycle wiring stays out of their fixtures.
+fn run_loop(
+    prompt_path: &Path,
+    config: &LoopConfig,
+    initial_frontmatter: Map<String, Value>,
+    options: LoopExecutionOptions,
+    mut executor: impl FnMut(LoopIterationContext) -> Result<LoopIterationOutput, CompositionError>,
+) -> Result<LoopExecutionResult, CompositionError> {
+    let settings = crate::events::GlobalSettings::default();
+    let messaging = crate::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = biscuit_terminal::terminal::Terminal::default();
+    let lifecycle_ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: prompt_path,
+        repo_root: prompt_path.parent(),
+        launch_area: None,
+        context: None,
+    };
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(prompt_path.parent().unwrap_or(Path::new(".")))
+        .auto_rehash(false)
+        .build();
+    let initialize_frontmatter = initial_frontmatter.clone();
+    execute_loop_with_lifecycle(
+        prompt_path,
+        config,
+        initial_frontmatter,
+        &initialize_frontmatter,
+        None,
+        options,
+        &LifecycleConfig::default(),
+        &lifecycle_ctx,
+        &effect_engine,
+        &crate::composition::lifecycle_executor::SystemShellRunner,
+        &crate::composition::DefaultLifecycleEmitter,
+        None,
+        None,
+        |ctx, guard| {
+            guard.emit_start_once();
+            executor(ctx)
+        },
+    )
+}
 
+mod gate_ambient;
 mod iteration_actions;
 mod lifecycle_control;
+mod post_checked_timing;
 mod rate_limits;
 mod seed_state;

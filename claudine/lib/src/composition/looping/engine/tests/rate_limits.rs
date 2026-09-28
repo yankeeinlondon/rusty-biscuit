@@ -13,8 +13,8 @@ fn throttled(message: Option<&str>, reset_in_secs: Option<i64>) -> RateLimitInfo
 
 #[test]
 fn rate_limit_continue_policy_proceeds_without_pausing() {
-    // While-condition exits after 2 successful iterations. Even though
-    // iteration 1 carries a rate-limit trailer, the `Continue` policy
+    // `counter < 2` from 0 runs with counter 0, 1, 2. Every
+    // iteration carries a 60s rate-limit trailer, yet the `Continue` policy
     // means we don't pause and we don't abort.
     let config = LoopConfig {
         condition: LoopCondition::While("counter < 2".into()),
@@ -26,7 +26,7 @@ fn rate_limit_continue_policy_proceeds_without_pausing() {
 
     let observed = RefCell::new(Vec::new());
     let start = std::time::Instant::now();
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -41,7 +41,8 @@ fn rate_limit_continue_policy_proceeds_without_pausing() {
     let elapsed = start.elapsed();
 
     assert!(result.error.is_none(), "got: {result:?}");
-    assert_eq!(result.iteration_count, 2);
+    assert_eq!(result.iteration_count, 3);
+    assert_eq!(&*observed.borrow(), &[1, 2, 3]);
     assert!(
         elapsed < std::time::Duration::from_millis(500),
         "Continue policy should not sleep; elapsed = {elapsed:?}"
@@ -58,7 +59,7 @@ fn rate_limit_abort_policy_halts_with_structured_error() {
         on_rate_limit: Some(OnRateLimit::Abort),
     };
 
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -103,7 +104,7 @@ fn rate_limit_pause_with_no_reset_falls_back_to_abort() {
         on_rate_limit: Some(OnRateLimit::Pause),
     };
 
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -139,21 +140,25 @@ fn rate_limit_pause_skipped_on_final_iteration() {
     };
 
     let start = std::time::Instant::now();
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
         LoopExecutionOptions::default(),
-        |_ctx| {
-            // Iteration 1 IS the last (counter goes 0 → 1, condition fails next round).
-            Ok(LoopIterationOutput::success("ok")
-                .with_rate_limit(Some(throttled(Some("trailer on last"), Some(300)))))
+        |ctx| {
+            // `counter < 1` from 0 runs with counter 0 then 1, so iteration 2
+            // is the last. Only it carries the trailer: a trailer on
+            // iteration 1 would rightly pause for 300s.
+            let rl = (ctx.iteration == 2)
+                .then(|| throttled(Some("trailer on last"), Some(300)));
+            Ok(LoopIterationOutput::success("ok").with_rate_limit(rl))
         },
     )
     .unwrap();
     let elapsed = start.elapsed();
 
     assert!(result.error.is_none(), "got: {result:?}");
+    assert_eq!(result.iteration_count, 2);
     assert!(
         elapsed < std::time::Duration::from_millis(500),
         "should skip pause on last iteration; elapsed = {elapsed:?}"
@@ -172,7 +177,7 @@ fn rate_limit_default_policy_is_pause() {
         on_rate_limit: None,
     };
 
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -205,7 +210,7 @@ fn rate_limit_pause_sleeps_until_reset_then_continues() {
     };
 
     let start = std::time::Instant::now();
-    let result = execute_loop_with_config(
+    let result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),
@@ -228,7 +233,8 @@ fn rate_limit_pause_sleeps_until_reset_then_continues() {
     let elapsed = start.elapsed();
 
     assert!(result.error.is_none(), "got: {result:?}");
-    assert_eq!(result.iteration_count, 2);
+    // `counter < 2` from 0 runs with counter 0, 1, 2.
+    assert_eq!(result.iteration_count, 3);
     // 1s reset + 0 margin → it must have waited, but not unbounded.
     assert!(
         elapsed >= std::time::Duration::from_millis(500),
@@ -264,7 +270,7 @@ fn rate_limit_pause_is_interrupt_aware() {
     };
 
     let start = std::time::Instant::now();
-    let _result = execute_loop_with_config(
+    let _result = run_loop(
         Path::new("loop.md"),
         &config,
         object(json!({"counter": 0})),

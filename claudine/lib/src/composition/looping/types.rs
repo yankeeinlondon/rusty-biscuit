@@ -216,10 +216,10 @@ pub struct LoopExecutionResult {
     /// consume, when any loop lifecycle event handed the run off.
     ///
     /// `None` for an ordinary loop end. `Some` when the document's
-    /// `initialize`, an iteration's terminal/`finalize`/`start` stack, or the
-    /// post-`finalize` loop gate selected `proxy`: the loop ends at once (the
+    /// `initialize` or an iteration's `start`/terminal/`finalize` stack
+    /// selected `proxy` (the loop gate refuses one): the loop ends at once (the
     /// target is not an extra iteration of the source loop, R7) and the
-    /// handoff travels here. An initialize/gate handoff is an uncommitted
+    /// handoff travels here. An `initialize` handoff is an uncommitted
     /// [`SurfacedHandoff::Request`] — the engine has no run ledger, so it
     /// cannot answer the hop/cycle question, and a resolved-but-unapproved
     /// target is exactly the half-committed state the two-stage handoff
@@ -228,10 +228,8 @@ pub struct LoopExecutionResult {
     /// it against the shared invocation ledger while the source's stacks
     /// could still catch a refusal.
     ///
-    /// This is a typed channel, not an `Option<PathBuf>`: an unhandled
-    /// handoff is a compile-time-visible omission, whereas an ignored
-    /// optional target is the silently-dropped proxy that motivated this
-    /// feature.
+    /// A committed handoff is already in the run ledger's chain, so a caller
+    /// that ignores this field leaves a hop recorded that no document adopted.
     pub handoff: Option<SurfacedHandoff>,
 }
 
@@ -279,7 +277,7 @@ impl LoopExecutionResult {
 
 /// Insert the read-only ambient loop variables (`_loop_*`) into a frontmatter
 /// override map for prompt preparation.
-fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
+pub(super) fn insert_ambient_overrides(frontmatter: &mut Map<String, Value>, ambient: &LoopAmbient) {
     frontmatter.insert(
         "_loop_count".to_string(),
         Value::Number(ambient.iteration.into()),

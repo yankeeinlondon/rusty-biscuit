@@ -109,8 +109,7 @@ pub use lifecycle_executor::{
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_from_bootstrap,
-    build_loop_seed_with_lifecycle, execute_loop,
-    execute_loop_with_config, execute_loop_with_lifecycle,
+    build_loop_seed_with_lifecycle, execute_loop_with_lifecycle,
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use looping::{

@@ -466,7 +466,16 @@ Loop execution runs `initialize` once at the start, then re-enters each iteratio
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](looping.md#iteration-semantics) for the full counting table.
 
-The `loop:` block's own fields can read ordinary frontmatter, which is how the example above would report progress. They cannot currently read the ambient loop values (`state.loop.*`, spelled `_loop_*` by the current engine): referencing one there fails the run with an "unknown root" error, which is a known defect. `start`, `success`, `failure`, and `finalize` can read them.
+The `loop:` block's own fields and stack read ordinary frontmatter and the ambient loop values (`_loop_count`, `_loop_is_first`, `_loop_is_last`, `_loop_last_output`, `_loop_last_exit_code`). Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `_loop_count` is the number of iterations that ran:
+
+```yaml
+loop:
+  until: "_loop_count >= 2"
+  action: increment(counter)
+  info: "gate after iteration {{_loop_count}}"
+```
+
+This prints `gate after iteration 1` and then `gate after iteration 2`, and the loop stops after the second iteration.
 
 ## Examples
 
@@ -563,11 +572,11 @@ loop:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - action: { info: "finished iteration {{iteration}} of {{max_iterations}}" }
+    - action: { info: "finished iteration {{_loop_count}} of {{max_iterations}}" }
 ---
 ```
 
-This runs three times. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads the document's own `iteration` counter because the `loop:` block cannot currently read `_loop_count` (see [Loop Gate Concerns](#loop-gate-concerns)).
+This runs three times and reports `finished iteration 1 of 3`, then `2 of 3`, then `3 of 3`. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads `_loop_count`, which inside the `loop:` block is the count of the iteration that just finished (see [Loop Gate Concerns](#loop-gate-concerns)).
 
 ### Recover from a usage cap by switching providers
 

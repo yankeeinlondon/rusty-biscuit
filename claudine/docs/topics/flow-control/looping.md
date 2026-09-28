@@ -231,7 +231,7 @@ If iteration 1 ends with `see {{…}} and $(rm -rf x)`, iteration 2's prompt con
 >
 > **Planned.** The current engine instead *predicts* `is_last` by evaluating the condition before the iteration, which is exact for counter loops and silently wrong for every loop that ends on what the agent did, and which can raise when the condition reads a file the agent has not written yet. The cap-only definition above replaces it.
 
-> **Known defect.** The `loop:` block's own notification fields and stack (`loop: { info: "…" }`) cannot read the ambient loop values; referencing one there fails the run with an "unknown root" error. They can read ordinary frontmatter. The intended behavior is that they read `state.loop.*` like every other lifecycle event.
+> The `loop:` block's own notification fields and stack (`loop: { info: "…" }`) read the ambient loop values too. There they describe the iteration that just finished, the same values the condition reads.
 
 For example:
 
@@ -343,7 +343,7 @@ Read a condition as "*did the iteration that just finished satisfy this?*" rathe
 
 - **`break` (planned)** ends the innermost enclosing loop, whichever primitive owns it. The current iteration completes, `finalize` included, and the loop then stops without evaluating its condition or applying its actions. A loop ended by `break` is reported as its own outcome, distinct from "condition met" and "`max` reached". See [Flow Control — `break`](flow-control.md#break).
 - An explicit `error` in the `loop:` block's stack fails the run before the condition is evaluated.
-- A `proxy` raised by an iteration's `success`, `failure`, or `finalize` is meant to end the loop and hand off to its target, which is not an extra iteration of this loop. **Known defect:** the handoff is currently not performed and the loop continues. Until it is fixed, use a lifecycle `retry` for bounded repetition in a document that also has to hand off.
+- A `proxy` raised by an iteration's `start`, `success`, `failure`, or `finalize` ends the loop and hands off to its target, which enters at its own `initialize` and is not an extra iteration of this loop. No further iteration runs and the `loop:` block does not fire for the abandoned iteration. A proxy from `success` or `failure` skips that iteration's `finalize`, and one from `finalize` does not run it again.
 - `retry`, `resume`, and `proxy` authored inside the `loop:` block itself are not supported and fail the run with `LifecycleSetupPhaseRecoveryUnsupported`.
 
 ## Iteration cap
@@ -367,6 +367,8 @@ A loop therefore ends in one of three ways, and sequence summaries and exit code
 | Source of failure                                    | `fail_fast: true` (default)                                                 | `fail_fast: false`                                                              |
 |------------------------------------------------------|-----------------------------------------------------------------------------|---------------------------------------------------------------------------------|
 | Prompt run exits non-zero                            | Loop halts; `final_exit_code` is the failing run's code.                    | Loop continues; the next iteration sees the failure via `state.loop.last_exit_code`. |
+| An `error` in `success` that nothing recovers        | Loop halts; the error names the iteration and the `error` reason.           | Loop continues through the gate; the iteration's reason is reported as it ends. |
+| The iteration cannot complete (e.g. a refused `proxy`: missing target, cycle, hop limit) | Loop halts with that error.                                  | The error is reported and the next iteration starts; the `loop:` gate does not run for the failed iteration. |
 | Action raises an error (e.g. `InvalidIncrementType`) | Loop halts; the action stage for that iteration is discarded.               | Loop continues; the iteration's frontmatter remains in its pre-action state.    |
 | Loop condition cannot be parsed/evaluated            | Loop halts unconditionally — this is a structural error, not a runtime one. | Same.                                                                           |
 
@@ -413,10 +415,6 @@ A setter is authored text, so a template in it fills in on every iteration: `--s
 | `InvalidAction at iteration N, action M of K: '<prop>' is reserved` | An action tried to write to `loop`, `state`, `replace`, or anything under `state.loop` / `state.seq`.                         |
 | `LoopLimitExceeded`                                                 | The cap was reached and the condition would still continue.                                                           |
 | `LoopInterrupted`                                                   | The user pressed Ctrl+C; the loop halted between iterations and exited with code `130`.                               |
-
-## Implementation note
-
-`claudine compose` and `claudine inline-compose` drive loops through `execute_loop_with_lifecycle` in [`looping/engine.rs`](../../../lib/src/composition/looping/engine.rs), and that is the engine this page describes. Group and sequence loops are specified to run the same engine, and a root `loop:` on a sequence document is defined as one serial group holding every step, so there is one set of rules to keep. The same file still holds `execute_loop` and `execute_loop_with_config`, an older engine that checks the condition **before** each iteration and so can run zero times. No command uses it, only library tests call it, and it is scheduled for deletion. Do not call it; this note goes away with it.
 
 ## See also
 
