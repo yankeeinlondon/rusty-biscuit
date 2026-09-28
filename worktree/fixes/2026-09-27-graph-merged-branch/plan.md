@@ -1,7 +1,7 @@
 ---
 total_phases: 5
 created: 2026-09-27
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 source_files_during_phase_1:
@@ -16,8 +16,28 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_2:
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/src/main.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/run.sh
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
+    - biscuit-visualized
+    - biscuit-terminal
 ---
 
 # Plan: `wt list` graph hides a merged branch and overlaps neighboring tags
@@ -215,7 +235,7 @@ Goal: the shared layers can represent merged branches, compressed anchors, and n
 
 **Wave 2** (concurrent: 2a in `biscuit-visualized`, 2b in `biscuit-terminal`)
 
-- [ ] **2a. Merge-parent repair** (`biscuit-visualized/src/src/mermaid/render.rs`, new private `gitgraph` module)
+- [x] **2a. Merge-parent repair** (`biscuit-visualized/src/src/mermaid/render.rs`, new private `gitgraph` module)
   - Implement R2 as `repair_gitgraph_merges(&mut ParsedGraph) -> Result<(), MermaidError>`, called in `compute_layout` right after `parse_mermaid`.
   - Tests:
     - a labeled merge gets parents `[dest-head, source-tip]`;
@@ -226,7 +246,7 @@ Goal: the shared layers can represent merged branches, compressed anchors, and n
     - an unknown lane is rejected;
     - an empty source lane is rejected;
     - the message-format pin test.
-- [ ] **2a. Tag spacing** (same module)
+- [x] **2a. Tag spacing** (same module)
   - Implement R3 (plus any S2 amendment) inside `compute_layout`, so `natural_size` and `render_svg` share it.
   - Add a test helper, `tag_boxes(&Layout)`, that returns `(commit id, tag text, bounds)` from the layout.
   - Tests, all asserting zero pairwise overlaps and tag membership on the original commit IDs:
@@ -235,15 +255,15 @@ Goal: the shared layers can represent merged branches, compressed anchors, and n
     - a stack of three tags;
     - cross-lane tags;
     - a no-tag diagram whose layout equals the single-pass layout.
-- [ ] **2a. Cache identity**
+- [x] **2a. Cache identity**
   - Bump `MERMAID_BACKEND` per R3.
   - Add a test that the cache key changes with the backend string (if not already covered).
   - Update the `render_options_json` docs to state that the repair and spacing are derived from the instructions and theme, and add no key input.
-- [ ] **2b. `GraphLine` explicit tip and merge destination** (`biscuit-terminal/lib/src/components/git_graph.rs`)
+- [x] **2b. `GraphLine` explicit tip and merge destination** (`biscuit-terminal/lib/src/components/git_graph.rs`)
   - Add `tip_sha` / `with_tip` and `merged_into` / `merged_into()` per R7.
   - `tip()` never returns `fork_sha`.
   - Update the struct and field docs, including the `fork_sha` doc, which currently says "A line with no commits of its own has its tip here" (drifted once this lands).
-- [ ] **2b. Merge emission**
+- [x] **2b. Merge emission**
   - In `emit_lane`, a destination entry whose SHA is some eligible lane's `merged_into` is emitted as `merge <lane name> id: "<id>"` plus its tags, instead of `commit`. This happens only when the merged lane was emitted earlier in the output.
   - Otherwise emit `commit`, record an undrawn merge, and set `incomplete` (R8).
   - Tests (Mermaid-text level):
@@ -252,7 +272,7 @@ Goal: the shared layers can represent merged branches, compressed anchors, and n
     - the `fix/sniff` shape (fork from a parent lane, merge into default);
     - a merge commit that is also a fork point;
     - a merge destination tagged `origin/main`.
-- [ ] **2b. No substitution, full accounting**
+- [x] **2b. No substitution, full accounting**
   - Replace `attach_point`'s fallbacks with R8.
   - `tags()` records every unplaced tag instead of dropping it.
   - `trim_one_commit` pins merge destinations alongside tips, forks, and tagged commits.
@@ -265,28 +285,28 @@ Goal: the shared layers can represent merged branches, compressed anchors, and n
     - trimming never elides a merge destination;
     - the base-view lane cap keeps a merged lane's destination;
     - the notice text renders in a `Terminal` test after the hidden-lanes note.
-- [ ] **2b. Existing coverage stays green**
+- [x] **2b. Existing coverage stays green**
   - Run `just test` in `biscuit-terminal`. Update `git_graph/tests.rs` expectations only where R7/R8 intentionally change output (the fork-fallback tag, the substitute attachment), and name each change in the log.
 
 **Wave 3** (after Wave 2)
 
-- [ ] **Real-backend component proof** (`biscuit-terminal/lib/src/components/git_graph/tests.rs` or `lib/tests/l1/`)
+- [x] **Real-backend component proof** (`biscuit-terminal/lib/src/components/git_graph/tests.rs` or `lib/tests/l1/`)
   - Build `GitGraph` inputs for the two observations, R12's long-label neighbors, and a compressed old fork/merge, then call `plan()` with the real `biscuit-visualized` measurement.
   - Assert through `biscuit-visualized`'s public layout helper (exposed as a `#[doc(hidden)]` test-support function or behind a `test-support` feature; decide by matching existing crate practice):
     - merge parents are exact;
     - tags sit on the right emitted IDs;
     - there are zero tag overlaps;
     - `plan.columns > viewport.columns` only when fully trimmed.
-- [ ] **Consumer regressions**
+- [x] **Consumer regressions**
   - Run `just test` in `biscuit-visualized`, `biscuit-terminal` (including `lib/tests/l1/mermaid_parity.rs` and the `bt git-graph` CLI tests), and `darkmatter`.
   - Accept snapshot changes that come only from wider `commit_step` or repaired merges. Review each and list them in the log.
-- [ ] **Lint**
+- [x] **Lint**
   - `just lint` in `biscuit-visualized` and `biscuit-terminal`.
 
 **Checkpoint 2**
 
-- [ ] Wave 2 and Wave 3 tests pass.
-- [ ] Rendered PNGs of the two observation fixtures and the long-label pair are generated from the new backend path and visually inspected. Paths and findings are in the log.
+- [x] Wave 2 and Wave 3 tests pass.
+- [x] Rendered PNGs of the two observation fixtures and the long-label pair are generated from the new backend path and visually inspected. Paths and findings are in the log.
 
 ## Phase 3 — Git Discovery in `worktree-cli`
 

@@ -15,8 +15,28 @@ docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1:
     - .claude/skills/worktree/SKILL.md
+source_files_during_phase_2:
+    - biscuit-visualized/src/src/mermaid/gitgraph.rs
+    - biscuit-visualized/src/src/mermaid/mod.rs
+    - biscuit-visualized/src/src/mermaid/render.rs
+    - biscuit-visualized/src/src/cache/file_cache.rs
+    - biscuit-visualized/src/src/tests/gitgraph_tests.rs
+    - biscuit-visualized/src/src/tests/mod.rs
+    - biscuit-visualized/src/src/tests/cache_tests.rs
+    - biscuit-terminal/lib/src/components/git_graph.rs
+    - biscuit-terminal/lib/src/components/git_graph/tests.rs
+    - worktree/cli/src/commands/git_graph.rs
+    - worktree/cli/src/commands/git_graph/tests.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/src/main.rs
+    - worktree/fixes/2026-09-27-graph-merged-branch/spikes/phase2-renders/run.sh
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/worktree/SKILL.md
 packages:
     - worktree-cli
+    - biscuit-visualized
+    - biscuit-terminal
 ---
 
 # Implementation Log for 2026-09-27-graph-merged-branch (5 phases)
@@ -416,3 +436,234 @@ Skipped or not applicable:
   planned `tag_boxes(&Layout)` helper.
 - R3's global step widens diagrams up to 3.8×. Watch `trimmed_commits` and image
   scale in the Wave 3 real-backend proof.
+
+## Phase 2
+
+Shared rendering layers, 2026-09-27. No Git discovery changed beyond one
+bridging line in `worktree-cli` (see "Deliberate early touch").
+
+### 2a — `biscuit-visualized` (merge repair, tag spacing, cache identity)
+
+- New private module `biscuit-visualized/src/src/mermaid/gitgraph.rs`:
+  - `repair_gitgraph_merges(&mut Graph)` implements R2 + R2-A1 exactly: the
+    source lane is the IR message minus `merged branch ` and the
+    `into {commit.branch}` tail (`rsplit_once`), matched against declared lanes
+    (equal, or name + whitespace + `id:`/`tag:`/`type:`); exactly one match;
+    the second parent is the lane's last commit with a smaller `seq`. Two or
+    more parents, or a single parent that already is the source tip, are left
+    alone. No match, several matches, or an empty source lane is
+    `MermaidError::RenderFailed`. The plan named the argument `ParsedGraph`;
+    the renderer's type is `mermaid_rs_renderer::Graph` (`ParseOutput.graph`).
+  - `layout(&Graph, &Theme)` implements R3: a second pass with
+    `commit_step = max(default, widest tag + TAG_GAP_EM × theme.font_size)`.
+    `TAG_GAP_EM = 1.0` is the named policy constant (one em), since the gap
+    must follow each theme's resolved font size, including `%%{init}%%` and
+    `point_label_font_size` overrides.
+  - `MermaidDiagram::compute_layout` (shared by `natural_size` and
+    `render_svg`) now parses → repairs → applies theme overrides → `layout`.
+  - `#[doc(hidden)] MermaidDiagram::gitgraph_geometry()` returns the laid-out
+    commits (repaired parents, lane, tag bounds) with `tag_boxes()` and
+    `tag_overlaps()`. Chosen over a `test-support` feature to match existing
+    practice (`#[doc(hidden)]` surfaces in `biscuit-terminal`); it lets
+    `biscuit-terminal` prove placement against the layout that renders.
+- `MERMAID_BACKEND` is now `mermaid-rs-renderer@0.3.x+bv2`; its doc and
+  `render_options_json`'s doc state the repair and spacing add no key input.
+
+**R3-A1 (amendment, binding).** R3 read "`transform == None` (horizontal
+orientation)". That equivalence is false: 0.3.1 draws unrotated tags in
+vertical (`TB`/`BT`) graphs too, and the first run spaced a `TB` graph by tag
+width along its vertical axis. Spacing now also requires the layout direction
+to be `LR` or `RL`; vertical graphs and any rotated tag keep the single pass.
+Also learned: 0.3.1 ignores a direction written in the header
+(`gitGraph TB:`); only a separate `TB` or `direction TB` line counts.
+
+**R2-A2 (renderer fact, binding on `GitGraph`).** The parser *drops* a labeled
+`merge` into a lane that has no head yet (it finds neither the suffix lane nor
+a current head), so the repair never sees it. `GitGraph` therefore emits a
+merge only where its lane already has a commit (never as the root lane's first
+statement or an unconnected lane's first statement).
+
+Tests (`biscuit-visualized/src/src/tests/gitgraph_tests.rs`, L1, all-features):
+
+| Behavior | Test |
+|---|---|
+| Message format pinned (and 0.3.1 loses the second parent) | `the_parser_message_still_carries_the_whole_merge_suffix` |
+| Labeled merge gets `[dest head, source tip]`; tags and lane kept; next commit's parent unchanged | `a_labeled_merge_gets_its_source_tip_as_second_parent` |
+| Unlabeled merge and a two-parent merge untouched | `a_merge_the_parser_already_resolved_is_untouched` |
+| Single parent already the source tip untouched; labeled merge into a headless lane is dropped by the parser | `a_merge_into_a_lane_without_a_head_keeps_its_single_source_parent` |
+| Nested-lane source (`fix/sniff` shape), both merges | `a_nested_lane_merges_into_the_root_lane` |
+| Merge into a non-root lane | `a_merge_into_a_non_root_lane_is_repaired` |
+| `feat` vs `feat x` resolves to `feat x` (R2-A1c) | `a_lane_name_that_prefixes_another_resolves_to_the_exact_name` |
+| Genuine ambiguity (`x` / `x tag: "t"`) rejected | `a_suffix_that_names_two_lanes_is_rejected` |
+| Unknown lane rejected | `a_merge_from_an_unknown_lane_is_rejected` |
+| Empty source lane rejected | `a_merge_from_an_empty_lane_is_rejected` |
+| Rejection surfaces through public `natural_size` and `gitgraph_geometry` | `measurement_and_geometry_report_a_rejected_merge` |
+| Geometry carries repaired parents and lanes; `None` for other diagrams | `geometry_carries_the_repaired_parents`, `geometry_is_none_for_other_diagrams` |
+| R12 long labels on neighbors: 0 overlaps, tags on original IDs (both themes; control: default layout overlaps) | `long_labels_on_neighboring_commits_do_not_overlap` |
+| `main`/`origin/main` one apart (control overlaps) | `main_and_origin_main_one_commit_apart_do_not_overlap` |
+| Three-tag stack beside neighbors (control overlaps) | `a_stack_of_three_tags_clears_its_neighbors` |
+| Cross-lane tags (control overlaps) | `tags_on_different_lanes_do_not_overlap` |
+| No-tag layout equals the single pass | `a_diagram_without_tags_keeps_the_single_pass_layout` |
+| Vertical graphs not spaced; `LR` is (R3-A1) | `a_vertical_graph_with_tags_keeps_the_single_pass_layout` |
+| Measured size is the spaced layout | `the_spaced_layout_is_the_measured_one` |
+| Cache key changes with the backend; value pinned | `cache_tests::cache_key_different_mermaid_backend` |
+
+### 2b — `biscuit-terminal` `GitGraph`
+
+- `GraphLine` gains `tip_sha`/`with_tip` and `merged_into`/`merged_into()`.
+  `tip()` is `tip_sha`, else the newest commit, never `fork_sha`. The
+  `fork_sha` doc ("a line with no commits of its own has its tip here") was
+  drifted by this change and now says `None` is an unknown connection.
+- `attach_point` returns `None` instead of the parent-lane or default-lane
+  start. Such lanes (and lanes closing an attach cycle) are **unconnected**
+  (R8-A1): declared as `branch <lane>` before the root lane's first commit,
+  followed by `checkout main`, and their commits are emitted after the root
+  lane's first entry, so their first commit has no parent.
+- `emit_lane` emits `merge <lane> id: "<id>"` plus tags for a commit that is
+  some drawn lane's `merged_into`, only when that lane was already emitted in
+  full and the destination lane has a head (R2-A2). Otherwise it emits
+  `commit` and marks the graph incomplete. A second lane merged at the same
+  commit is never drawn and marks it incomplete.
+- New, not in the plan: siblings hanging from one commit are reordered so a
+  lane merged into a sibling (or into a lane below that sibling) is emitted
+  first (`emit_merged_lanes_first`). Without it, creation order emitted the
+  destination lane's merge commit before the merged lane had commits, which
+  showed up in the height-cap test. The shape is reachable once Phase 3 sets a
+  child's fork against its recorded parent's tip and that fork lies on the
+  default lane.
+- `tags()` returns `(tags, unplaced)`. A ref, an in-view label-only line, or a
+  PR with a known tip whose commit is not drawn sets `unplaced`. Tags of lanes
+  the base-view height cap left out are not counted (that note already accounts
+  for them), and a PR for a branch the graph does not know has no commit to
+  account for.
+- `trim_one_commit` pins merge destinations (and no longer pins the root
+  entry that only unconnected lanes hang from). `fit_lanes` keeps a lane's
+  ancestors by fork commit, merge destination, and parent name
+  (`lane_ancestors`).
+- `with_incomplete_history()`, `GitGraphPlan::incomplete`, and
+  `pub const INCOMPLETE_HISTORY_NOTE = "Some history is not shown"`. The
+  notice is a dim `Prose` line after "N more worktrees not shown"
+  (`with_notes`, which replaced `with_hidden_lanes_note`).
+- Module docs updated in the same change: they now describe merges, the
+  no-substitution rule, and the notice, and they no longer name the
+  `2026-09-24-ux-improvements` fix.
+
+Existing tests whose expectations changed on purpose (named per plan):
+
+| Test | Change | Why |
+|---|---|---|
+| `a_branch_already_in_the_default_branch_is_a_tag` | line gains `with_tip` | R7: the fork no longer labels |
+| `the_base_view_gives_every_branch_with_commits_a_lane` | `merged` gains `with_tip(2222222)`, fork moved to `1111111` | R7 |
+| `a_fork_point_outside_the_drawn_commits_hangs_from_the_lane_start` → `…_is_drawn_unconnected` | asserts unconnected text, no parent, `incomplete` | R8 (was a substitute attachment) |
+
+New tests (`git_graph/tests.rs`, L1, `--features image`):
+
+| Behavior | Test |
+|---|---|
+| Merge into default (exact text, repaired parents, lane, not incomplete) | `a_lane_merged_into_the_default_lane_is_drawn_merging_at_its_commit` |
+| Merge into the recorded parent's lane | `a_lane_merged_into_its_recorded_parent_merges_on_the_parent_lane` |
+| `fix/sniff` shape (fork from parent, both merges into default, `+96`) | `a_nested_lane_merged_into_the_default_lane_forks_from_its_parent` |
+| Merge commit that is also a fork point | `a_merge_commit_can_also_be_a_fork_point` |
+| Merge destination tagged `origin/main` | covered by the default and nested tests (`tag: "origin/main"` on the merge line, placed by geometry in Wave 3) |
+| Sibling order puts the merged lane first | `a_lane_merged_into_a_sibling_is_emitted_before_it` |
+| Undrawn destination / destination before the lane / at the root start / two lanes at one commit → no merge, `incomplete` | `a_merge_whose_destination_is_not_drawn_…`, `a_merge_that_would_precede_its_lane_…`, `a_merge_at_the_start_of_the_default_lane_…`, `only_one_lane_merges_at_a_commit` |
+| Fork omitted from the parent lane: no attachment at the parent start or default start, `incomplete` | `a_fork_commit_missing_from_the_parent_lane_is_not_replaced_by_its_start` |
+| Fork omitted from the default lane | `a_fork_point_outside_the_drawn_commits_is_drawn_unconnected` |
+| Unknown fork (`None`) | `an_unknown_fork_is_drawn_unconnected_and_reported` |
+| Tagged commit omitted → `incomplete` (control: complete) | `a_tag_on_an_undrawn_commit_is_reported` |
+| Label-only line at `tip_sha` even with its fork drawn; no tip / undrawn tip → not labeled, `incomplete` | `a_label_only_line_sits_at_its_tip_never_its_fork` |
+| PR for an unknown branch is not reported | `a_pull_request_for_a_branch_the_graph_does_not_know_is_not_reported` |
+| Caller-reported gap | `the_caller_can_report_incomplete_history` |
+| Trimming never elides a merge destination | `trimming_never_elides_a_merge_destination` |
+| Base-view cap keeps a merged lane's destination lane | `the_height_cap_keeps_a_merged_lanes_destination_lane` |
+| Hidden lanes' tags are not double-reported | `tags_of_lanes_the_height_cap_leaves_out_are_not_reported_twice` |
+| Notice renders in a `Terminal` after the hidden-lanes note | `the_incomplete_history_notice_follows_the_lane_note` |
+
+### Deliberate early touch of `worktree-cli`
+
+R7 removes the fork fallback that was the *only* way `wt list` labeled a
+merged branch (its lines had no tip). Leaving `worktree-cli` untouched would
+have made every merged worktree branch vanish between Phase 2 and Phase 3.
+So each `GraphLine` built in `commands/git_graph.rs` (focused current and
+parent lines, base-view lines, the diverged `origin/<default>` line) now also
+calls `.with_tip(<its tip>)`. Nothing else in gathering changed. Pinned by
+`commands::git_graph::tests::the_base_view_gives_every_worktree_branch_a_line`
+(`tip_sha` of three lines, and the merged branch's tag in the emitted text).
+
+### Wave 3 — real-backend proof
+
+`git_graph::tests::measured_plans_place_merges_and_tags_without_overlap` plans
+four fixtures with the real measurement (`MermaidTheme::Default`) at 120×40 and
+56×60 (fallback 8×16 cells) and checks the layout that renders: zero tag
+overlaps, every expected tag on its display ID, merge second parent exact
+(first parent exact unless trimmed into a `+N` square), not incomplete, and
+`columns > viewport` only when planning for one column gives the same text
+(fully trimmed). It is named without `real_`, which is a tier marker.
+
+| Fixture | Viewport | Columns | Rows | Trimmed | Commit step | Natural width |
+|---|---|---|---|---|---|---|
+| observation 1 | 120×40 | 100 | 13 | 0 | 79.0 | 616 |
+| observation 1 | 56×60 | 100 | 13 | 2 | 79.0 | 616 |
+| observation 2 | 120×40 | 117 | 18 | 0 | 79.0 | 724 |
+| observation 2 | 56×60 | 117 | 18 | 1 | 79.0 | 724 |
+| long labels (R12) | 120×40 | 291 | 13 | 1 | 246.5 | 1,907 |
+| long labels (R12) | 56×60 | 291 | 13 | 1 | 246.5 | 1,907 |
+| compressed (fork 5,000 / merge 3,000 back) | 120×40 | 116 | 14 | 1 | 79.0 | 716 |
+| compressed | 56×60 | 116 | 14 | 1 | 79.0 | 716 |
+
+(Default theme's default step is 34.) Finding for Phase 4: with R3's global
+step, trimming a lone commit into `+1` no longer narrows the image, because the
+tag-driven step, not commit labels, sets the width. Trimming then stops with
+the graph still wider than the viewport, and the image shrinks (the existing,
+accepted behavior). The long-label pair shrinks about 2.4× at 120 columns and
+about 5.2× at 56. Phase 4's 56-column evidence should expect
+`trimmed_commits > 0` with an unchanged width.
+
+### Consumer regressions and gates
+
+- `just test` in `biscuit-visualized`: 98 passed.
+- `just test` in `biscuit-terminal` (lib `--features image`, `l1` including
+  `mermaid_parity.rs`, and the `bt` CLI): 3,344 passed, 55 skipped. No snapshot
+  changed; no `.snap.new` files.
+- `just test` in `darkmatter`: 8,498 passed, 12 skipped. No snapshot changed.
+- `just test` in `worktree`: 712 passed, 29 skipped (tier-filtered `perf_` and
+  L2), including the added tip assertions.
+- `just lint` in `biscuit-visualized`, `biscuit-terminal`, `worktree`: pass.
+  `biscuit-terminal`'s lint recipe builds without `image`, which is the feature
+  that compiles `git_graph`, so the changed code was also checked with
+  `cargo clippy -p biscuit-terminal --features image --all-targets -- -D warnings`
+  and `cargo clippy -p biscuit-visualized --all-features --all-targets -- -D warnings`:
+  clean.
+- Cross-OS: not run in this phase. The changes are pure computation over
+  strings and floats (no paths, processes, or filesystem). Phase 4 runs the
+  three packages' L1 on Linux and Windows.
+
+### Checkpoint 2 — rendered PNGs
+
+`spikes/phase2-renders/run.sh <out>` (standalone crate, never in the
+workspace) plans observation 1, observation 2 (with the real short SHAs), and
+the R12 pair through `GitGraph::plan` and renders each plan with
+`MermaidDiagram::render` (PNG, scale 2, default theme). Output:
+`spikes/phase2-renders-output/{observation-1,observation-2,long-labels}-{120x40,56x60}.{png,mmd}`.
+Every plan reported zero overlaps and exact merge parents
+(`08cf96a ← [2222222, 2a7298a]`; `08cf96a ← [1314bd6, 2a7298a]` and
+`b47a046 ← [08cf96a, b3b17f3]`). Inspected:
+
+- `observation-1-120x40.png`: `fix/wt-ux` has its own lane from `1111111`,
+  and the merge edge enters `main` at `08cf96a` (drawn as a merge node, tagged
+  `origin/main`). `main` sits on `3333333`. No overlap.
+- `observation-1-56x60.png`: the same with `2222222` and `7ba6ea8` trimmed into
+  `+1` squares. The merge edge is unchanged.
+- `observation-2-120x40.png`: `fix/wt-ux` merges at `08cf96a` (tag `main`), and
+  `fix/sniff` forks at `2a7298a` through `+95` and merges at `b47a046` (tag
+  `origin/main`). No side commits are on the default lane.
+- `long-labels-120x40.png`: all four labels are separate and on their commits;
+  `origin/main` and `main` sit one commit apart. Wide image, small scale, as
+  predicted by S2.
+
+### Requirement-to-test mapping (Phase 2)
+
+Covered by the three tables above. Skipped or pre-existing failures: none. Not
+done here by plan: `docs/` pages (Phase 5). `biscuit-terminal/docs/components/git_graph.md`
+still documents merged branches as tags and "no merge statements"; that drift
+is Phase 5's to fix, in the same pass that writes the new contract.

@@ -33,34 +33,39 @@ related:
     - 2026-09-27-list-freshness-ux
 human_review: false
 message_to_agent: |-
-    Phase 1 (rulings, spikes, baseline) is done; read implementation-log.md's
-    "Amendments" section before writing code, because four planning rules
-    changed and the amendments win over the plan text:
+    Phase 2 (shared rendering layers) is done; read implementation-log.md's
+    "## Phase 2" before writing Phase 3 code. What Phase 3 must rely on:
 
-    - R4-A1: the plan's `git rev-list --first-parent --ancestry-path --parents T..X`
-      returns nothing for indirect integration (it walks first-parent edges only).
-      Find C as the oldest commit of X's first-parent chain (`rev-list
-      --first-parent --parents T..X`) that is in `rev-list --ancestry-path T..X`,
-      stopping at the first chain commit that is not.
-    - R9-A1: in a shallow repository, `merge-base --is-ancestor` and `merge-base`
-      exit 1 silently when history is missing, exactly like a real "no". Check
-      `rev-parse --is-shallow-repository` once; there, every negative or empty
-      answer is a gap and every `+N` count sets `incomplete`.
-    - R2-A1: leave a merge alone when its single parent already is the source
-      tip; `feat` vs `feat x` is NOT ambiguous under R2 (it resolves to `feat x`),
-      so the Phase 2 rejection test must use lanes `x` and `x tag: "t"` with
-      `merge x tag: "t" id: "M"`.
-    - R8-A1: disconnected lanes render correctly (declare `branch <lane>` before
-      the root lane's first commit).
-
-    R3 (tag spacing, TAG_GAP = theme font size) and R6 (anchor distance plus
-    batched `rev-parse` verification) are confirmed unchanged. A working
-    prototype of R2, R3, and `tag_boxes` is in
-    spikes/render-topologies/src/main.rs. Global spacing widens diagrams up to
-    3.8x, so watch trimming and image scale in the real-backend proof. Each git
-    call costs about 60 ms on native Windows, so keep per-lane git calls few.
-    Phase 4 reruns the baseline unchanged with
-    `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release`.
+    - GitGraph contract (biscuit-terminal): pass every line's tip with
+      `GraphLine::with_tip(sha)`; a line without commits is labeled ONLY at
+      its tip (the fork fallback is gone). `GraphLine::merged_into(sha)` draws
+      a `merge` at that commit, found by position, but only if the merged lane
+      is emitted before it AND the destination lane already has a commit
+      before it (0.3.1 drops a labeled merge into a lane with no head). So in
+      the focused and base views, keep at least one entry (context commit or
+      `+N` square) before any merge destination on the default lane.
+    - `fork_sha == None`, or a fork commit not drawn anywhere, makes the lane
+      unconnected (never a substitute attachment) and sets
+      `GitGraphPlan::incomplete`. A ref/PR/label whose commit is not drawn also
+      sets it. So every ref you pass (local `main`, `origin/main`, parent tips)
+      must be drawn, or it will trigger "Some history is not shown": anchor it
+      (R6) rather than leave it outside the window.
+    - `GitGraph::with_incomplete_history()` is the hook for `GraphFacts::incomplete`.
+    - worktree-cli was touched once, deliberately: every GraphLine built in
+      commands/git_graph.rs now calls `.with_tip(...)` so merged branches keep
+      their labels until you rewrite gathering. Keep that when rewriting.
+    - R3-A1: tag spacing applies only to LR/RL gitGraphs. With the global
+      step, trimming a lone commit to `+1` no longer narrows the image; Phase 4's
+      56-column evidence should expect trimmed_commits > 0 with the image
+      shrinking, not getting narrower.
+    - biscuit-terminal's `just lint` does not enable `image` (the feature that
+      compiles git_graph); also run
+      `cargo clippy -p biscuit-terminal --features image --all-targets -- -D warnings`.
+    - Test helper: `biscuit_visualized::mermaid::MermaidDiagram::gitgraph_geometry()`
+      (#[doc(hidden)]) gives repaired parents, lanes, and tag bounds with
+      `tag_overlaps()`; Phase 4's end-to-end layout test should use it.
+    - Docs are Phase 5: biscuit-terminal/docs/components/git_graph.md still
+      says merged branches become tags and no merge statements are emitted.
 references:
     renderer-spike.md: >-
         Isolated renderer feasibility experiment covering measured label spacing,
