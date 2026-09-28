@@ -531,6 +531,32 @@ belong here.
   for the period before the supersede lands. See `2d783c6ad` for the
   2026-09-17-remove-strict-mode D19→D20 example (D19 retained for
   traceability, D20 is the effective tier policy in `spec.md`).
+- A follow-up review finding whose fix REPLACES the prior cycle's
+  mechanism (rather than layering on top) ships as one combined
+  `feat(<area>):` rather than two per-finding commits, when
+  reconstructing the prior cycle's intermediate state would write the
+  very bug back in. The earlier journal rule
+  ("earlier finding's commit carries the file minus the later
+  finding's contiguous block; the later commit carries the full staged
+  file") assumes the two iterations ADD to the same file; when cycle
+  N+1 is a substantive revision of cycle N's design (e.g. cycle N
+  compared PR store `fetched_at` timestamps, cycle N+1 replaces that
+  with a per-write `publication` id because the timestamps can repeat
+  within a second), the reconstructed cycle-N state carries the same
+  defect the cycle-N+1 finding was written to fix. Standalone
+  findings (cycle-N SSH port, FF suggestion gate) still split into
+  separate commits; only the cycle-N finding whose mechanism the
+  cycle-N+1 finding replaces ships combined. The body of the combined
+  commit documents the cycle-N partial fix and the cycle-N+1 revision
+  in sequence, and `implementation-log.md` carries the per-cycle
+  attribution so reviewers can trace each cycle. See `8fa2e2cee`
+  (feat(worktree): verify PR lock contention outcomes and real
+  terminal spinner changes) for the cycle-1 PR lock contention +
+  cycle-2 publication id + cycle-1 L2 spinner scenes combined commit
+  (per-cycle detail in `implementation-log.md` "## Implementation of
+  Review Findings #1" and "#2"); the sibling `49a7e14a5` (FF
+  suggestion) and `f79e83412` (SSH port) commits show the
+  non-replacement findings still split cleanly.
 
 - A brief that says "write the message body to a temp file" yields a file
   with no subject line, and `git commit -F` then collapses every bullet into
