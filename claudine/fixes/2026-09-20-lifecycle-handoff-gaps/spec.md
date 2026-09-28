@@ -99,7 +99,7 @@ The main contracts checked during this review are:
 
 - Claudine's [composition contract](../../docs/topics/composition.md), including
   launch-anchored context, target identity, sequence ownership, and dry runs.
-- Claudine's [lifecycle contract](../../docs/topics/lifecycle.md), including
+- Claudine's [lifecycle contract](../../docs/topics/flow-control/lifecycle.md), including
   shell-free initialization, early approval, and atomic mapping assignments.
 - Darkmatter's [frontmatter shell expansion contract](../../../darkmatter/docs/inline/fm-shell-expansion.md),
   including whole-value parsing, conditional expressions, and cache behavior.
@@ -222,7 +222,7 @@ never happened. `target.md` is never adopted.
 `2026-07-13-proxy-with` R7 already rules the intended behavior: "A proxy emitted
 by the loop lifecycle ends the source document and returns a handoff to the
 active-document coordinator. It does not make the target an extra iteration of
-the source loop." `docs/topics/lifecycle.md` says the same ("a `proxy` from
+the source loop." `docs/topics/flow-control/lifecycle.md` says the same ("a `proxy` from
 `success`/`failure` skips that attempt's ordinary `finalize`"). Existing loop
 coverage exercises a proxy from `initialize`
 (`loop_initialize_proxy_hands_off_without_iterating`) and a proxy *into* a
@@ -304,7 +304,7 @@ correctly (`Error: gave up in finalize`, exit `1`), so the loss is specific to a
 downgrade that starts in `success`.
 
 So the downgrade is performed inside the lifecycle and is then lost before it
-reaches the rendered outcome and the exit code. `docs/topics/lifecycle.md`
+reaches the rendered outcome and the exit code. `docs/topics/flow-control/lifecycle.md`
 says `error` "at `success`/`finalize` … converts success to failure", and its
 completion-verdict section says the process exits non-zero when no recovery
 takes the failure.
@@ -355,7 +355,7 @@ same properties.
 iteration, so a loop always runs at least once. The behavior matches that, with
 one detail worth stating because it sets the count: the gate reads the state the
 *finished* iteration ran with, and the actions are applied only after the gate
-decides to continue. `docs/topics/composition.md` and `docs/topics/lifecycle.md`
+decides to continue. `docs/topics/composition.md` and `docs/topics/flow-control/lifecycle.md`
 describe exactly this ("the loop condition is evaluated after lifecycle concerns
 and before per-iteration mutations are applied").
 
@@ -427,7 +427,7 @@ The run fails at the first gate with a lifecycle evaluation error, "unknown
 root". `{{counter}}` in the same field works, and `{{_loop_count}}` and
 `{{_loop_is_last}}` work in `start`, `success`, `failure`, and `finalize`. So the
 `_loop_*` values are supplied to the iteration's events and to the condition,
-but not to the lifecycle concerns the gate runs. `docs/topics/lifecycle.md`
+but not to the lifecycle concerns the gate runs. `docs/topics/flow-control/lifecycle.md`
 ("Loop lifecycle concerns") gives `info: "iteration {{_loop_count}}"` inside a
 `loop:` stack as its example.
 

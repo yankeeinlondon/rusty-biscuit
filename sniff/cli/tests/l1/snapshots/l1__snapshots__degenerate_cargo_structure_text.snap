@@ -1,5 +1,0 @@
----
-source: sniff/cli/tests/snapshots.rs
-expression: "normalize_snapshot_paths(&stdout, &path)"
----
-

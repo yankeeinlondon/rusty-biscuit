@@ -75,7 +75,7 @@ concurrent access, descendants, publication, approvals, or production recovery.
 Claudine's documentation describes the observed distinction: its timeout starts
 at child spawn, and document-level retry/resume budgets have a different lifetime
 from proxy and subsequent-loop budgets. See
-[timeout semantics](../../../../../.claude/skills/claudine/timeouts.md) and
+[timeout semantics](../../../../../claudine/docs/topics/timeouts.md) and
 [composition state ownership](../../../../../claudine/docs/topics/composition.md#retry-and-resume-re-entry).
 The checked-out graph resolves the sequence entry to `run_sequence_inner` in
 `claudine-cli`; this was read-only context, not a source modification.

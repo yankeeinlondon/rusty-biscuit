@@ -1,0 +1,13 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "packages": {
+    "@fixture/beta": ["@fixture/beta@workspace:packages/beta"],
+
+    "alpha": ["alpha@workspace:packages/alpha"],
+
+    "hidden-tool": ["hidden-tool@workspace:.tools/hidden"],
+
+    "local-lib": ["local-lib@file:local-lib", {}],
+  }
+}

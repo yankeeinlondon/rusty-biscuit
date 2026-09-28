@@ -12,3 +12,8 @@ Repository (2 layers)
     - js-b v0.1.0 (js-b)
     - rust-a v0.1.0 (rust-a) [Rust]
     - rust-b v0.1.0 (rust-b) [Rust]
+
+Lockfiles
+
+- cargo (.): absent — no lockfile was found
+- pnpm workspaces (.): absent — no lockfile was found

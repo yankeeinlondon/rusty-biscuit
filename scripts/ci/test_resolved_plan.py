@@ -341,8 +341,9 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
 
     def test_each_tooling_trigger_selects_exactly_its_owner(self) -> None:
         # Ownership is the whole-tier selection. Several of these files are
-        # also read by `test-toolkit`'s contract tests, which a changed test
-        # input schedules separately as one narrowed Linux L1 cell; that is
+        # also read by `test-toolkit`'s contract tests or `sniff`'s lockfile
+        # parser tests, which a changed test input schedules separately as one
+        # narrowed Linux L1 cell; that is
         # the second column, and it never widens into ownership.
         for path, owners, readers in (
             (".github/ci/ci-baseline.toml", ["repo-deps"], ["test-toolkit"]),
@@ -351,7 +352,7 @@ class SuiteOwnershipCorpusTests(PlannerFixture):
             (".github/workflows/ci.yml", ["test-toolkit"], []),
             (".github/workflows/_area-ci.yml", ["test-toolkit"], []),
             ("tools/test-audit/package.json", ["test-toolkit"], []),
-            ("pnpm-lock.yaml", ["test-toolkit"], []),
+            ("pnpm-lock.yaml", ["test-toolkit"], ["sniff"]),
             ("pnpm-workspace.yaml", ["test-toolkit"], []),
             ("tools/test-toolkit/Cargo.toml", ["test-toolkit"], []),
             ("docs/topics/ci-cd.md", [], ["test-toolkit"]),
@@ -1630,13 +1631,13 @@ class ChangeInventoryEndToEndTests(PlannerFixture):
     def test_the_inventory_disagrees_with_change_class_where_the_truth_does(
         self,
     ) -> None:
-        # R8: the two answer different questions. `Cargo.lock` selects no
+        # R8: the two answer different questions. `rustfmt.toml` selects no
         # gating package, so the class is `documentation`; the path is plainly
         # `configuration`, and a reader seeing both is seeing the truth.
-        plan = self.plan("Cargo.lock")
+        plan = self.plan("rustfmt.toml")
         self.assertEqual("documentation", plan["change_class"])
         self.assertEqual(
-            ["Cargo.lock"], plan["change_inventory"]["paths"]["configuration"]
+            ["rustfmt.toml"], plan["change_inventory"]["paths"]["configuration"]
         )
         self.assertEqual([], plan["change_inventory"]["paths"]["documentation"])
 

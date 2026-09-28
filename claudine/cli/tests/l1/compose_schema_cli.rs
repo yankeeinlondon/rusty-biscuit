@@ -1123,6 +1123,7 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
     let root = fixture.cwd().to_path_buf();
     for relative in [
         "prompts/plan.md",
+        "prompts/_input-robustness.md",
         "claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
     ] {
         let source = checkout.join(relative);

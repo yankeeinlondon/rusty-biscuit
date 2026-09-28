@@ -1,5 +1,7 @@
 ---
 reviewed: false
+prepares:
+    - 2026-09-27-sequence-improvements
 ---
 # Lifecycle Ergonomics
 
@@ -116,7 +118,7 @@ In this example all three actions will be executed by Claudine concurrently and 
 
 This is not a real change in behavior, the current implementation already supports the idea of a long form action too. The basic idea is that our shorthand syntax of: `{command}: {param}` works very well for most cases because almost all of the actions really only _require_ a single parameter. However, many actions offer optional parameters that give the caller greater control over what the action does.
 
-A good example of this is that all flow control directives provide an optional `use` parameter that allows for the Frontmatter state to be better prepared for the next flow state.
+A good example of this is that all flow control directives that move to another flow state provide an optional `with` parameter that allows the Frontmatter state of the next flow state to be prepared. This is the same `with` that `proxy` already accepts: an overlay applied to the target of the transition, for that transition only, never written to disk and never merged back into the caller. `prep` takes it too. `break` and `stop` do not, because neither has a next flow state to prepare.
 
 - the default behavior for flow-state transitions is to move the current state exactly to the new flow-state (which might be the same prompt, a different one, or a sequence)
 - the default behavior is good for a lot of flow-state transitions but it is very common that a caller will want to mutate state slightly for the next flow state.
@@ -125,8 +127,8 @@ A good example of this is that all flow control directives provide an optional `
 ```yaml
 failure:
     - retry:
-        use:
-            reason: err.msg
+        with:
+            reason: "{{ err.msg }}"
         max: 3
 ```
 
@@ -265,3 +267,57 @@ To move away from this awkwardness, this feature will provide the following thin
 ## Loop Lifecycle
 
 Of all the lifetime events that Claudine exposes, the `loop` event is _slightly_ different because it MUST lead by
+
+## Hand-off: prepare `2026-09-27-sequence-improvements`
+
+The sequence-improvements feature is sequenced **after** this one because every
+lifecycle example it contains is written in the grammar this feature removes,
+and two of the directives it adds (`break`, `prep`) belong in the action
+enumeration this feature defines. Its implementation must not start until the
+following has been done, and doing it is the last task of this feature:
+
+1. **Rewrite every lifecycle example in that spec** into the grammar defined
+   here: no `stack:`, no `action:`, `then`/`else` for conditionals, and the
+   dictionary grammar where it reads better. The semantics the examples show
+   must not change; only their spelling.
+2. **Add `break` and `prep` to `action.yaml`** with both a short and a long
+   form, using the parameter tables in that spec (`break`: `reason`, `code`;
+   `prep`: `target`, `with`). Add `defer` if it is not already enumerated, so
+   the schema names every directive the flow-control page documents, planned
+   ones included.
+3. **Confirm the placement rules here cover the new directives.** An
+   unconditional `break` or `prep` followed by further actions is the same
+   immediate error as for any other directive; `break` inside a nested
+   conditional is legal and ends the innermost enclosing loop. The sequence
+   spec's `break` and `prep` sections still say a directive "ends the current
+   stack", which describes the old silent truncation; restate them against
+   this error so a reader does not infer truncation.
+4. **Keep `with` as the one overlay parameter.** Every directive that moves
+   to another flow state (`retry`, `resume`, `proxy`, `prep`) takes `with`,
+   with `proxy`'s existing semantics: an overlay on the target, for that
+   transition only, never persisted, never merged back. There is no separate
+   `use`. `break` and `stop` take no overlay.
+5. **Write `sequence.yaml` to the shape the sequence spec defines**, not to
+   today's shape: `when:` on a step or task, `loop:` on a group object and at
+   a sequence document's root, and `loop` and `seq` as reserved authored-state
+   keys. Otherwise DMLS rejects every example in that spec the day the schema
+   lands.
+6. **Write the "Loop Lifecycle" section above with one job:** the `loop:`
+   block's lifecycle concerns use the same flat stack grammar as every other
+   event. Everything about when the loop condition is checked, what its
+   `action` mutates on each primitive, the three loop outcomes, and `break`
+   is owned by the sequence-improvements spec and is not restated here.
+7. **Migrate the `_loop_*` reads** in shipped prompts to `state.loop.*` in the
+   same pass that rewrites their `stack:`/`action:` blocks, so those files are
+   swept once. The `in_loop` gates in `feature-review.md`,
+   `implement-suggestions.md`, and `implement-plan.md` stay until `when:` on
+   steps exists; only their spelling changes here.
+8. **Record the rewrite** in that spec's frontmatter (`grammar: lifecycle-ergonomics`
+   or similar) and in this feature's implementation log, and set its
+   `depends-on` as satisfied.
+
+The flow-control and looping topic pages already describe `break`, `prep`, and
+uniform loops as planned. Their examples are also in the old grammar and are
+rewritten under this feature's normal documentation duty, not deferred to the
+sequence work.
+

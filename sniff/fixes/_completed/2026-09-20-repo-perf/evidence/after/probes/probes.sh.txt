@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+B=/tmp/repo-perf-phase4/bin
+P=/tmp/repo-perf-phase4/probes
+mkdir -p "$P"
+C=/Volumes/coding/wt/rusty-biscuit/fix-sniff
+run=$1; shift
+for side in "$@"; do
+  for prof in release debug; do
+    out="$P/$side-$prof-$run-tiny-latency.txt"
+    { echo "start: $(date -u +%FT%TZ) load: $(sysctl -n vm.loadavg)"; "$B/$side-$prof-probe" tiny-latency; echo "end: $(date -u +%FT%TZ) load: $(sysctl -n vm.loadavg)"; } > "$out"
+    sed "s/^/[$side-$prof-$run tiny] /" "$out" | grep -v "^.*start\|end:"
+  done
+  for spec in "tiny 1 400" "tiny 14 400" "$C 1 20" "$C 14 10"; do
+    set -- $spec
+    name=$( [ "$1" = tiny ] && echo tiny || echo corpus )
+    out="$P/$side-release-$run-concurrent-$name-t$2.txt"
+    { echo "start: $(date -u +%FT%TZ) load: $(sysctl -n vm.loadavg)"; /usr/bin/time -l "$B/$side-release-probe" concurrent "$1" "$2" "$3" 2>&1; echo "end: $(date -u +%FT%TZ) load: $(sysctl -n vm.loadavg)"; } > "$out"
+    grep -E "^concurrent|request_latency|real|maximum resident|involuntary" "$out" | sed "s/^/[$side-$run $name t$2] /"
+  done
+done

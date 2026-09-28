@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Summarize measure.py JSON: median and range per set and case, in ms."""
+import glob, json, os, statistics, sys
+
+rows = []
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*", "*.json"))):
+    d = json.load(open(path))
+    s = [v / 1e6 for v in d["samples_ns"]]
+    rows.append((d["set"], d["side"], d["case"], d["status"], len(s),
+                 statistics.median(s) if s else None, min(s) if s else None,
+                 max(s) if s else None, d["load_before"], d.get("load_after")))
+order = {"release": 0, "debug": 1}
+rows.sort(key=lambda r: (order[r[0].split("-")[0]], r[0], r[1] != "baseline", r[2]))
+print("| Set | Side | Case | n | Median (ms) | Range (ms) | 1-min load before → after |")
+print("|---|---|---|---|---|---|---|")
+for set_, side, case, status, n, med, lo, hi, lb, la in rows:
+    if status != "measured":
+        print(f"| {set_} | {side} | `{case}` | 0 | deferred | — | {lb} → — |")
+    else:
+        print(f"| {set_} | {side} | `{case}` | {n} | {med:.3f} | {lo:.3f}–{hi:.3f} | {lb} → {la} |")

@@ -9,7 +9,7 @@ The **taxonomy** (the facet enums and the locked code catalog) is ratified in
 its data model is [`error-structure.md`](../../features/_completed/2026-06-28-real-errors/error-structure.md).
 This document is the **transport**: the seams, the selection rule, and what an
 author of a new error must do. For the `err.*` surface those facets reach, see
-[lifecycle.md](lifecycle.md#err-fields).
+[lifecycle.md](flow-control/lifecycle.md#err-fields).
 
 ## The one-sentence version
 

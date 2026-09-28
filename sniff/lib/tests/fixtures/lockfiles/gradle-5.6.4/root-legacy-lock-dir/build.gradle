@@ -1,0 +1,16 @@
+plugins {
+    id 'java'
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+    }
+    dependencyLocking {
+        lockAllConfigurations()
+    }
+}
+
+dependencies {
+    implementation 'org.slf4j:slf4j-api:2.0.13'
+}

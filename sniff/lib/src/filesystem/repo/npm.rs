@@ -3,14 +3,14 @@
 use std::path::Path;
 
 use biscuit_file::serde_yaml_ng;
+use serde::Deserialize;
+use serde::de::IgnoredAny;
 
 use crate::Result;
 use crate::package::{DependencyEntry, DependencyKind};
-use crate::performance;
-use crate::performance::counters;
 
 use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
-use super::glob::expand_membership_globs;
+use super::glob::{DeclaredPatterns, expand_membership_globs};
 use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{GlobDialect, MonorepoStandard, PackageProvenance};
 
@@ -127,7 +127,6 @@ pub(super) fn detect_pnpm_workspace(
 
     let parsed = manifests.required_pnpm_workspace(&pnpm_workspace)?;
     let packages = pnpm_workspace_patterns_from_value(&parsed);
-
     if packages.is_empty() {
         return Ok(None);
     }
@@ -135,9 +134,9 @@ pub(super) fn detect_pnpm_workspace(
     let dialect = MonorepoStandard::PnpmWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let package_locations = expand_membership_globs(
+    let expansion = expand_membership_globs(
         root,
-        &packages,
+        &packages.patterns,
         dialect,
         MonorepoStandard::PnpmWorkspaces,
         None,
@@ -147,7 +146,8 @@ pub(super) fn detect_pnpm_workspace(
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::PnpmWorkspaces,
         root: root.to_path_buf(),
-        seeds: merge_seeds(package_locations),
+        seeds: merge_seeds(expansion.seeds),
+        incomplete: !expansion.patterns_resolved || packages.has_invalid,
     }))
 }
 
@@ -155,8 +155,16 @@ pub(super) fn detect_pnpm_workspace(
 ///
 /// Bun and npm/yarn all declare members via `package.json#workspaces`; the
 /// lockfile is what disambiguates Bun so it wins the membership authority.
-fn has_bun_lockfile(root: &Path) -> bool {
-    probe_exists(&root.join("bun.lock")) || probe_exists(&root.join("bun.lockb"))
+///
+/// Probed through the store, so the Bun layer's lockfile observation reuses
+/// these answers. A failed probe reads as absent here, as `Path::exists` did.
+fn has_bun_lockfile(root: &Path, manifests: &ManifestStore) -> bool {
+    manifests
+        .lockfile_presence(&root.join("bun.lock"))
+        .is_present()
+        || manifests
+            .lockfile_presence(&root.join("bun.lockb"))
+            .is_present()
 }
 
 pub(super) fn detect_bun_workspace(
@@ -164,7 +172,7 @@ pub(super) fn detect_bun_workspace(
     evidence: RepoEvidence<'_>,
     manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
-    if !has_bun_lockfile(root) {
+    if !has_bun_lockfile(root, manifests) {
         return Ok(None);
     }
 
@@ -183,9 +191,9 @@ pub(super) fn detect_bun_workspace(
     let dialect = MonorepoStandard::BunWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let packages = expand_membership_globs(
+    let expansion = expand_membership_globs(
         root,
-        &workspaces,
+        &workspaces.patterns,
         dialect,
         MonorepoStandard::BunWorkspaces,
         None,
@@ -195,7 +203,8 @@ pub(super) fn detect_bun_workspace(
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::BunWorkspaces,
         root: root.to_path_buf(),
-        seeds: merge_seeds(packages),
+        seeds: merge_seeds(expansion.seeds),
+        incomplete: !expansion.patterns_resolved || workspaces.has_invalid,
     }))
 }
 
@@ -211,7 +220,7 @@ pub(super) fn detect_npm_workspace(
 
     // Bun reuses `package.json#workspaces`; when a Bun lockfile is present, the
     // Bun detector owns membership and npm must not also claim this root.
-    if has_bun_lockfile(root) {
+    if has_bun_lockfile(root, manifests) {
         return Ok(None);
     }
 
@@ -225,9 +234,9 @@ pub(super) fn detect_npm_workspace(
     let dialect = MonorepoStandard::NpmWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let packages = expand_membership_globs(
+    let expansion = expand_membership_globs(
         root,
-        &workspaces,
+        &workspaces.patterns,
         dialect,
         MonorepoStandard::NpmWorkspaces,
         None,
@@ -237,7 +246,8 @@ pub(super) fn detect_npm_workspace(
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::NpmWorkspaces,
         root: root.to_path_buf(),
-        seeds: merge_seeds(packages),
+        seeds: merge_seeds(expansion.seeds),
+        incomplete: !expansion.patterns_resolved || workspaces.has_invalid,
     }))
 }
 
@@ -246,7 +256,10 @@ pub(super) fn detect_yarn_workspace(
     evidence: RepoEvidence<'_>,
     manifests: &ManifestStore,
 ) -> Result<Option<DetectorOutcome>> {
-    if !probe_exists(&root.join("yarn.lock")) {
+    if !manifests
+        .lockfile_presence(&root.join("yarn.lock"))
+        .is_present()
+    {
         return Ok(None);
     }
 
@@ -265,9 +278,9 @@ pub(super) fn detect_yarn_workspace(
     let dialect = MonorepoStandard::YarnWorkspaces
         .glob_dialect()
         .unwrap_or(GlobDialect::Minimatch);
-    let packages = expand_membership_globs(
+    let expansion = expand_membership_globs(
         root,
-        &workspaces,
+        &workspaces.patterns,
         dialect,
         MonorepoStandard::YarnWorkspaces,
         None,
@@ -277,29 +290,35 @@ pub(super) fn detect_yarn_workspace(
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::YarnWorkspaces,
         root: root.to_path_buf(),
-        seeds: merge_seeds(packages),
+        seeds: merge_seeds(expansion.seeds),
+        incomplete: !expansion.patterns_resolved || workspaces.has_invalid,
     }))
 }
 
-pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcome>> {
+pub(super) fn detect_rush_workspace(
+    root: &Path,
+    manifests: &ManifestStore,
+) -> Result<Option<DetectorOutcome>> {
     let rush_json = root.join("rush.json");
     if !probe_exists(&rush_json) {
         return Ok(None);
     }
-
-    performance::increment_counter(counters::FS_FILE_OPENS, 1);
-    let content = std::fs::read_to_string(&rush_json)?;
-    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
-    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
-    let folders = parse_rush_project_folders(&content);
+    let Some(config) = manifests.rush_json(&rush_json)? else {
+        return Ok(None);
+    };
+    let folders = config.project_folders();
     if folders.is_empty() {
         return Ok(None);
     }
 
     let mut seeds = Vec::new();
-    for folder in folders {
-        let member_path = root.join(&folder);
+    // Rush requires every declared project folder to exist, so a missing one
+    // leaves the member set incomplete.
+    let mut incomplete = folders.has_invalid;
+    for folder in &folders.patterns {
+        let member_path = root.join(folder);
         if !probe_exists(&member_path) {
+            incomplete = true;
             continue;
         }
         seeds.push(PackageSeed::new(
@@ -310,7 +329,7 @@ pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcom
         ));
     }
 
-    if seeds.is_empty() {
+    if seeds.is_empty() && !folders.has_invalid {
         return Ok(None);
     }
 
@@ -318,82 +337,158 @@ pub(super) fn detect_rush_workspace(root: &Path) -> Result<Option<DetectorOutcom
         standard: MonorepoStandard::RushStack,
         root: root.to_path_buf(),
         seeds: merge_seeds(seeds),
+        incomplete,
     }))
 }
 
-/// Parse the `projectFolder` of each entry in `rush.json#projects`.
+/// The parts of `rush.json` Sniff reads: the projects for membership, and
+/// the package manager and install settings that classify the lockfile
+/// layout (ruling R3 of `2026-09-26-lockfile-corroboration`).
 ///
-/// Rush's `projects` array lists `{ projectFolder, packageName }` objects whose
-/// `projectFolder` is a repo-relative directory. Entries without a string
-/// `projectFolder` are skipped.
-fn parse_rush_project_folders(content: &str) -> Vec<String> {
-    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) else {
-        return Vec::new();
-    };
-    parsed
-        .get("projects")
-        .and_then(|v| v.as_array())
-        .map(|projects| {
-            projects
+/// Real `rush.json` files are JSON with comments. A field of an unexpected
+/// type is kept as [`Lenient::Other`] rather than failing the document, so an
+/// odd setting never hides the projects.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RushJson {
+    projects: Option<Lenient<Vec<Lenient<RushProject>>>>,
+    pnpm_version: Option<IgnoredAny>,
+    npm_version: Option<IgnoredAny>,
+    yarn_version: Option<IgnoredAny>,
+    pnpm_options: Option<Lenient<RushPnpmOptions>>,
+    variants: Option<Lenient<Vec<IgnoredAny>>>,
+}
+
+/// The package manager `rush.json` selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RushManager {
+    Pnpm,
+    Npm,
+    Yarn,
+}
+
+impl RushJson {
+    /// The `projectFolder` of each project; an entry without a string
+    /// `projectFolder`, or a `projects` value that is not an array, is
+    /// recorded as invalid.
+    fn project_folders(&self) -> DeclaredPatterns {
+        match &self.projects {
+            None => DeclaredPatterns::default(),
+            Some(Lenient::Other(_)) => DeclaredPatterns::invalid(),
+            Some(Lenient::Value(projects)) => projects
                 .iter()
-                .filter_map(|project| {
-                    project
-                        .get("projectFolder")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
+                .map(|project| match project {
+                    Lenient::Value(RushProject {
+                        project_folder: Some(Lenient::Value(folder)),
+                    }) => Some(folder.as_str()),
+                    _ => None,
                 })
-                .collect()
-        })
-        .unwrap_or_default()
+                .collect(),
+        }
+    }
+
+    /// The manager, when exactly one of `pnpmVersion`, `npmVersion`, and
+    /// `yarnVersion` is set.
+    pub(crate) fn manager(&self) -> Option<RushManager> {
+        match (
+            self.pnpm_version.is_some(),
+            self.npm_version.is_some(),
+            self.yarn_version.is_some(),
+        ) {
+            (true, false, false) => Some(RushManager::Pnpm),
+            (false, true, false) => Some(RushManager::Npm),
+            (false, false, true) => Some(RushManager::Yarn),
+            _ => None,
+        }
+    }
+
+    /// The legacy `pnpmOptions.useWorkspaces`, for repositories without a
+    /// `pnpm-config.json`.
+    pub(crate) fn legacy_use_workspaces(&self) -> Option<bool> {
+        match &self.pnpm_options {
+            Some(Lenient::Value(options)) => options.use_workspaces.as_ref()?.value().copied(),
+            _ => None,
+        }
+    }
+
+    /// Whether `rush.json` declares installation variants, or declares them
+    /// in a shape Sniff cannot read.
+    pub(crate) fn declares_variants(&self) -> bool {
+        match &self.variants {
+            None => false,
+            Some(Lenient::Value(variants)) => !variants.is_empty(),
+            Some(Lenient::Other(_)) => true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RushProject {
+    project_folder: Option<Lenient<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RushPnpmOptions {
+    use_workspaces: Option<Lenient<bool>>,
+}
+
+/// A value of the expected type, or anything else.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum Lenient<T> {
+    Value(T),
+    Other(IgnoredAny),
+}
+
+impl<T> Lenient<T> {
+    pub(crate) fn value(&self) -> Option<&T> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Other(_) => None,
+        }
+    }
 }
 
 /// Extract the `packages:` sequence from a parsed `pnpm-workspace.yaml`.
 ///
-/// Returns an empty vector when the field is absent, so callers treat a
-/// missing or empty `packages` list as "not a pnpm workspace".
-pub(super) fn pnpm_workspace_patterns_from_value(parsed: &serde_yaml_ng::Value) -> Vec<String> {
-    parsed
-        .get("packages")
-        .and_then(|p| p.as_sequence())
-        .map(|seq| {
-            seq.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
+/// Returns an empty declaration when the field is absent or null (pnpm
+/// accepts both), so callers treat a missing or empty `packages` list as "not
+/// a pnpm workspace". A present value that is not a sequence is an invalid
+/// declaration.
+pub(super) fn pnpm_workspace_patterns_from_value(
+    parsed: &serde_yaml_ng::Value,
+) -> DeclaredPatterns {
+    match parsed.get("packages") {
+        None | Some(serde_yaml_ng::Value::Null) => DeclaredPatterns::default(),
+        Some(packages) => match packages.as_sequence() {
+            Some(seq) => seq.iter().map(|v| v.as_str()).collect(),
+            None => DeclaredPatterns::invalid(),
+        },
+    }
 }
 
 /// Extract the workspace patterns from a parsed `package.json`.
 ///
 /// Returns `None` when the manifest declares no `workspaces` field, so callers
-/// can distinguish "not a workspace root" from an empty pattern list.
+/// can distinguish "not a workspace root" from an empty pattern list. A null
+/// `workspaces`, or the object form without a `packages` key (for example
+/// only `nohoist`), is an empty declaration; a present list of the wrong type
+/// is an invalid one.
 pub(super) fn package_json_workspace_patterns_from_value(
     parsed: &serde_json::Value,
-) -> Option<Vec<String>> {
+) -> Option<DeclaredPatterns> {
     let workspaces = parsed.get("workspaces")?;
-
-    if let Some(arr) = workspaces.as_array() {
-        return Some(
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect(),
-        );
-    }
-
-    if let Some(obj) = workspaces.as_object() {
-        return Some(
-            obj.get("packages")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default(),
-        );
-    }
-
-    Some(Vec::new())
+    let entries = match workspaces {
+        serde_json::Value::Object(object) => object.get("packages"),
+        other => Some(other),
+    };
+    Some(match entries {
+        None | Some(serde_json::Value::Null) => DeclaredPatterns::default(),
+        Some(serde_json::Value::Array(arr)) => arr.iter().map(|v| v.as_str()).collect(),
+        Some(_) => DeclaredPatterns::invalid(),
+    })
 }
 
 pub(super) fn resolve_js_package_manager(
@@ -428,8 +523,12 @@ pub(super) fn resolve_js_package_manager(
 mod tests {
     use super::*;
 
+    fn rush_json(content: &str) -> RushJson {
+        crate::filesystem::repo::jsonc::from_str(content).expect("valid rush.json")
+    }
+
     #[test]
-    fn parse_rush_projects_reads_project_folders() {
+    fn rush_json_reads_project_folders() {
         let content = r#"{
             "projects": [
                 { "packageName": "@scope/app", "projectFolder": "apps/app" },
@@ -437,13 +536,175 @@ mod tests {
             ]
         }"#;
         assert_eq!(
-            parse_rush_project_folders(content),
-            vec!["apps/app".to_string(), "libraries/lib".to_string()]
+            rush_json(content).project_folders().patterns,
+            vec!["apps/app", "libraries/lib"]
         );
     }
 
     #[test]
-    fn parse_rush_projects_empty_when_absent() {
-        assert!(parse_rush_project_folders(r#"{"rushVersion": "5.0.0"}"#).is_empty());
+    fn rush_json_without_projects_has_no_folders() {
+        assert!(rush_json(r#"{"rushVersion": "5.0.0"}"#).project_folders().is_empty());
+    }
+
+    #[test]
+    fn rush_json_records_projects_without_a_string_folder_as_invalid() {
+        let content = r#"{"projects": [
+            {"packageName": "a"},
+            {"projectFolder": 3},
+            "not a project",
+            {"projectFolder": "apps/b"}
+        ], "pnpmOptions": 7, "variants": {}}"#;
+        let config = rush_json(content);
+        assert_eq!(
+            config.project_folders(),
+            DeclaredPatterns {
+                patterns: vec!["apps/b".to_owned()],
+                has_invalid: true,
+            }
+        );
+        assert_eq!(config.legacy_use_workspaces(), None);
+        assert!(config.declares_variants(), "an unreadable variants value");
+    }
+
+    /// Regression: `rush init` writes comments throughout `rush.json`, and the
+    /// former strict JSON parse found no projects in any real Rush repository.
+    #[test]
+    fn the_real_rush_json_is_read_through_its_comments() {
+        let content = include_str!(
+            "../../../tests/fixtures/lockfiles/rush-5.179.0/pnpm-workspace/rush.json"
+        );
+        assert!(serde_json::from_str::<serde_json::Value>(content).is_err());
+        let config = rush_json(content);
+        assert_eq!(
+            config.project_folders().patterns,
+            vec!["packages/alpha", "packages/beta", ".tools/hidden"]
+        );
+        assert_eq!(config.manager(), Some(RushManager::Pnpm));
+        assert!(!config.declares_variants());
+    }
+
+    #[test]
+    fn exactly_one_version_field_selects_the_manager() {
+        for (content, expected) in [
+            (r#"{"pnpmVersion": "9.0.0"}"#, Some(RushManager::Pnpm)),
+            (r#"{"npmVersion": "6.0.0"}"#, Some(RushManager::Npm)),
+            (r#"{"yarnVersion": "1.22.0"}"#, Some(RushManager::Yarn)),
+            (r#"{}"#, None),
+            (r#"{"pnpmVersion": "9.0.0", "npmVersion": "6.0.0"}"#, None),
+        ] {
+            assert_eq!(rush_json(content).manager(), expected, "{content}");
+        }
+        assert_eq!(
+            rush_json(r#"{"pnpmOptions": {"useWorkspaces": true}}"#).legacy_use_workspaces(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn package_json_non_string_workspaces_are_recorded_as_invalid() {
+        for (workspaces, patterns) in [
+            (r#"["packages/a", 123]"#, vec!["packages/a".to_owned()]),
+            (r#"{"packages": ["packages/a", null]}"#, vec!["packages/a".to_owned()]),
+            (r#"[123]"#, Vec::new()),
+        ] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&format!(r#"{{"workspaces": {workspaces}}}"#)).unwrap();
+
+            assert_eq!(
+                package_json_workspace_patterns_from_value(&parsed),
+                Some(DeclaredPatterns {
+                    patterns,
+                    has_invalid: true,
+                }),
+                "{workspaces}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_json_non_array_workspaces_are_recorded_as_invalid() {
+        for workspaces in [
+            "123",
+            r#""packages/*""#,
+            r#"{"packages": "x"}"#,
+            r#"{"packages": {"a": 1}}"#,
+        ] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&format!(r#"{{"workspaces": {workspaces}}}"#)).unwrap();
+
+            assert_eq!(
+                package_json_workspace_patterns_from_value(&parsed),
+                Some(DeclaredPatterns::invalid()),
+                "{workspaces}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_json_null_or_packageless_workspaces_declare_nothing() {
+        for workspaces in ["null", r#"{"nohoist": ["**/x"]}"#, r#"{"packages": null}"#] {
+            let parsed: serde_json::Value =
+                serde_json::from_str(&format!(r#"{{"workspaces": {workspaces}}}"#)).unwrap();
+
+            assert_eq!(
+                package_json_workspace_patterns_from_value(&parsed),
+                Some(DeclaredPatterns::default()),
+                "{workspaces}"
+            );
+        }
+    }
+
+    #[test]
+    fn pnpm_non_sequence_packages_are_recorded_as_invalid() {
+        for source in ["packages: 123\n", "packages: packages/*\n", "packages:\n  a: 1\n"] {
+            let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).unwrap();
+
+            assert_eq!(
+                pnpm_workspace_patterns_from_value(&parsed),
+                DeclaredPatterns::invalid(),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn pnpm_absent_or_null_packages_declare_nothing() {
+        for source in ["catalog:\n  a: 1.0.0\n", "packages:\n", "packages: null\n"] {
+            let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).unwrap();
+
+            assert!(pnpm_workspace_patterns_from_value(&parsed).is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn rush_json_non_array_projects_are_recorded_as_invalid() {
+        for projects in ["123", r#""apps/*""#, r#"{"projectFolder": "apps/a"}"#] {
+            let config = rush_json(&format!(r#"{{"projects": {projects}, "pnpmVersion": "9.0.0"}}"#));
+
+            assert_eq!(config.project_folders(), DeclaredPatterns::invalid(), "{projects}");
+            assert_eq!(config.manager(), Some(RushManager::Pnpm), "{projects}");
+        }
+        assert!(rush_json(r#"{"projects": null}"#).project_folders().is_empty());
+    }
+
+    #[test]
+    fn pnpm_non_string_packages_are_recorded_as_invalid() {
+        for (source, patterns) in [
+            ("packages:\n  - packages/*\n  - 123\n", vec!["packages/*".to_owned()]),
+            ("packages:\n  - 123\n", Vec::new()),
+        ] {
+            let parsed: serde_yaml_ng::Value = serde_yaml_ng::from_str(source).unwrap();
+            let declared = pnpm_workspace_patterns_from_value(&parsed);
+
+            assert_eq!(
+                declared,
+                DeclaredPatterns {
+                    patterns,
+                    has_invalid: true,
+                },
+                "{source}"
+            );
+            assert!(!declared.is_empty(), "{source}");
+        }
     }
 }

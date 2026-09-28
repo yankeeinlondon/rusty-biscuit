@@ -1,0 +1,1828 @@
+//! Real-tool lockfile fixtures through the public detection API
+//! (`2026-09-26-lockfile-corroboration`, AC2).
+//!
+//! Each fixture under `tests/fixtures/lockfiles/<tool>-<version>/<case>/` was
+//! written by the recorded tool (see its `PROVENANCE.md`). It is copied into a
+//! temporary directory before detection, because in place this monorepo's
+//! `.git` and workspaces would take over. Expected results are the
+//! "Expected results" table of the feature's `accepted-versions.md`.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use sniff::filesystem::repo::{
+    LockfileObservation, LockfileReason, LockfileStatus, StandaloneLockfileObservation,
+    StandaloneLockfileTool, detect_repo_with_request, detect_repo_with_request_or_root_package,
+};
+use sniff::filesystem::{MonorepoStandard, PackageEcosystem, PackageProvenance, RepoInfo};
+use sniff::performance::{PerformanceCollector, counters, with_current_collector};
+use sniff::request::RepoRequest;
+use tempfile::TempDir;
+
+fn fixture_root() -> PathBuf {
+    biscuit_test_harness::manifest_dir!().join("tests/fixtures/lockfiles")
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).expect("create fixture copy directory");
+    for entry in fs::read_dir(from).expect("read fixture directory") {
+        let entry = entry.expect("fixture entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("fixture entry type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            fs::copy(entry.path(), &target).expect("copy fixture file");
+        }
+    }
+}
+
+/// A disposable copy of one fixture directory.
+fn copied(fixture: &str) -> (TempDir, PathBuf) {
+    let source = fixture_root().join(fixture);
+    assert!(source.is_dir(), "missing fixture {}", source.display());
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path().join("repo");
+    copy_tree(&source, &root);
+    (dir, root)
+}
+
+fn measured(
+    root: &Path,
+    request: &RepoRequest,
+) -> (RepoInfo, BTreeMap<String, u64>) {
+    let collector = PerformanceCollector::new_shared();
+    let repo = with_current_collector(Some(Arc::clone(&collector)), || {
+        detect_repo_with_request(root, request)
+    });
+    let repo = repo
+        .expect("detection succeeds")
+        .expect("the fixture is a workspace");
+    (repo, collector.snapshot(Duration::ZERO).counters)
+}
+
+fn counter(counts: &BTreeMap<String, u64>, name: &str) -> u64 {
+    counts.get(name).copied().unwrap_or(0)
+}
+
+/// One expected fixture result: `(fixture, authority, lockfile, status,
+/// reason, extra, missing)`.
+type Row = (
+    &'static str,
+    MonorepoStandard,
+    &'static str,
+    LockfileStatus,
+    Option<LockfileReason>,
+    &'static [&'static str],
+    &'static [&'static str],
+);
+
+fn observation(
+    lockfile: &str,
+    status: LockfileStatus,
+    reason: Option<LockfileReason>,
+    extra: &[&str],
+    missing: &[&str],
+) -> LockfileObservation {
+    let owned = |items: &[&str]| items.iter().map(|item| (*item).to_owned()).collect();
+    LockfileObservation {
+        status,
+        paths: vec![lockfile.to_owned()],
+        reason,
+        extra: owned(extra),
+        missing: owned(missing),
+    }
+}
+
+/// Assert each row's layer under a corroborating request, then that a
+/// declining request reports it as `not_requested` without reading it.
+fn assert_rows(rows: &[Row]) {
+    for &(fixture, authority, lockfile, status, reason, extra, missing) in rows {
+        let (_dir, root) = copied(fixture);
+
+        let (repo, counts) = measured(&root, &RepoRequest::full());
+        let layers: Vec<_> = repo
+            .monorepo_layers
+            .iter()
+            .filter(|layer| layer.authority == authority)
+            .collect();
+        assert_eq!(layers.len(), 1, "{fixture}: {:?}", repo.monorepo_layers);
+        let layer = layers[0];
+        assert_eq!(
+            layer.lockfile,
+            observation(lockfile, status, reason, extra, missing),
+            "{fixture}"
+        );
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 1, "{fixture}");
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1, "{fixture}");
+
+        // Only an exact match upgrades the layer and the packages it owns.
+        let upgraded = status == LockfileStatus::Match;
+        assert_eq!(
+            layer.provenance == PackageProvenance::Lockfile,
+            upgraded,
+            "{fixture}: {layer:?}"
+        );
+        for package in repo.packages.as_deref().expect("packages") {
+            if package.provenance == PackageProvenance::Lockfile {
+                assert!(upgraded, "{fixture}: {package:?}");
+                assert_eq!(package.standard, authority, "{fixture}: {package:?}");
+            }
+        }
+
+        let (repo, counts) = measured(&root, &RepoRequest::structure());
+        let layer = repo
+            .monorepo_layers
+            .iter()
+            .find(|layer| layer.authority == authority)
+            .unwrap_or_else(|| panic!("{fixture}: no declined layer"));
+        assert_eq!(
+            layer.lockfile,
+            observation(
+                lockfile,
+                LockfileStatus::NotRequested,
+                Some(LockfileReason::RequestDisabled),
+                &[],
+                &[]
+            ),
+            "{fixture} declined"
+        );
+        assert_ne!(layer.provenance, PackageProvenance::Lockfile, "{fixture}");
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 0, "{fixture}");
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 0, "{fixture}");
+    }
+}
+
+#[test]
+fn pnpm_tool_fixtures_report_the_accepted_version_matrix() {
+    use LockfileStatus::{Match, Mismatch, Unreadable, Unverifiable};
+    const PNPM: MonorepoStandard = MonorepoStandard::PnpmWorkspaces;
+    const LOCK: &str = "pnpm-lock.yaml";
+    let parse_failed = Some(LockfileReason::ParseFailed);
+    assert_rows(&[
+        ("pnpm-8.15.9/workspace", PNPM, LOCK, Match, None, &[], &[]),
+        ("pnpm-9.15.9/workspace", PNPM, LOCK, Match, None, &[], &[]),
+        ("pnpm-10.32.1/workspace", PNPM, LOCK, Match, None, &[], &[]),
+        (
+            "pnpm-10.32.1/workspace-edited-stale-extra",
+            PNPM,
+            LOCK,
+            Mismatch,
+            None,
+            &["packages/gamma"],
+            &[],
+        ),
+        (
+            "pnpm-10.32.1/workspace-edited-missing",
+            PNPM,
+            LOCK,
+            Mismatch,
+            None,
+            &[],
+            &["packages/beta"],
+        ),
+        (
+            "pnpm-10.32.1/workspace-edited-malformed-trailing",
+            PNPM,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "pnpm-10.32.1/workspace-edited-duplicate-key",
+            PNPM,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "pnpm-10.32.1/workspace-edited-unknown-version",
+            PNPM,
+            LOCK,
+            Unverifiable,
+            Some(LockfileReason::UnsupportedVersion),
+            &[],
+            &[],
+        ),
+        (
+            "pnpm-10.32.1/workspace-edited-missing-required-field",
+            PNPM,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+    ]);
+}
+
+#[test]
+fn uv_tool_fixtures_report_the_accepted_version_matrix() {
+    use LockfileStatus::{Match, Mismatch, Unreadable, Unverifiable};
+    const UV: MonorepoStandard = MonorepoStandard::UvWorkspace;
+    const LOCK: &str = "uv.lock";
+    assert_rows(&[
+        ("uv-0.9.5/workspace", UV, LOCK, Match, None, &[], &[]),
+        ("uv-0.9.5/virtual-root", UV, LOCK, Match, None, &[], &[]),
+        (
+            "uv-0.9.5/workspace-edited-stale-extra",
+            UV,
+            LOCK,
+            Mismatch,
+            None,
+            &["packages/gamma"],
+            &[],
+        ),
+        (
+            "uv-0.9.5/workspace-edited-missing",
+            UV,
+            LOCK,
+            Mismatch,
+            None,
+            &[],
+            &["packages/beta"],
+        ),
+        (
+            "uv-0.9.5/workspace-edited-malformed-trailing",
+            UV,
+            LOCK,
+            Unreadable,
+            Some(LockfileReason::ParseFailed),
+            &[],
+            &[],
+        ),
+        (
+            "uv-0.9.5/workspace-edited-unknown-version",
+            UV,
+            LOCK,
+            Unverifiable,
+            Some(LockfileReason::UnsupportedVersion),
+            &[],
+            &[],
+        ),
+        // Without `[manifest]`, the other local packages mean the document no
+        // longer records membership; it is never read as the empty set.
+        (
+            "uv-0.9.5/workspace-edited-missing-required-field",
+            UV,
+            LOCK,
+            Unverifiable,
+            Some(LockfileReason::NoMembershipData),
+            &[],
+            &[],
+        ),
+    ]);
+}
+
+#[test]
+fn cargo_tool_fixtures_report_subset_evidence() {
+    use LockfileStatus::{MembersMissing, MembersPresent, Unreadable, Unverifiable};
+    const CARGO: MonorepoStandard = MonorepoStandard::CargoWorkspace;
+    const LOCK: &str = "Cargo.lock";
+    let subset = Some(LockfileReason::SubsetOnly);
+    let parse_failed = Some(LockfileReason::ParseFailed);
+    assert_rows(&[
+        ("cargo-1.98.1/workspace", CARGO, LOCK, MembersPresent, subset, &[], &[]),
+        ("cargo-1.77.2/workspace-v3", CARGO, LOCK, MembersPresent, subset, &[], &[]),
+        ("cargo-1.52.0/workspace-v2", CARGO, LOCK, MembersPresent, subset, &[], &[]),
+        // Cargo cannot recover a stale extra member.
+        (
+            "cargo-1.98.1/workspace-edited-stale-extra",
+            CARGO,
+            LOCK,
+            MembersPresent,
+            subset,
+            &[],
+            &[],
+        ),
+        // The registry `itoa` 1.0.18 does not satisfy the member `itoa` 0.1.0.
+        (
+            "cargo-1.98.1/workspace-edited-missing",
+            CARGO,
+            LOCK,
+            MembersMissing,
+            subset,
+            &[],
+            &["crates/beta"],
+        ),
+        (
+            "cargo-1.98.1/workspace-edited-malformed-trailing",
+            CARGO,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "cargo-1.98.1/workspace-edited-unknown-version",
+            CARGO,
+            LOCK,
+            Unverifiable,
+            Some(LockfileReason::UnsupportedVersion),
+            &[],
+            &[],
+        ),
+        (
+            "cargo-1.98.1/workspace-edited-missing-required-field",
+            CARGO,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+    ]);
+}
+
+/// A declared root-only uv workspace (`members = []`) gets a layer whose empty
+/// member set matches the lockfile's root-only record, without the one-package
+/// repository being called a monorepo. The declining request reads nothing.
+#[test]
+fn a_root_only_uv_workspace_matches_its_root_only_lockfile() {
+    let (_dir, root) = copied("uv-0.9.5/root-only-workspace");
+
+    let (repo, counts) = measured(&root, &RepoRequest::full());
+
+    assert!(!repo.is_monorepo, "{repo:?}");
+    assert_eq!(repo.monorepo_layers.len(), 1, "{repo:?}");
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::UvWorkspace);
+    assert_eq!(layer.packages, vec![String::new()]);
+    assert_eq!(layer.provenance, PackageProvenance::Lockfile);
+    let json = serde_json::to_value(layer).expect("layer serializes");
+    assert_eq!(
+        json["lockfile"],
+        serde_json::json!({
+            "status": "match",
+            "paths": ["uv.lock"],
+            "reason": null,
+            "extra": [],
+            "missing": [],
+        })
+    );
+    let packages = repo.packages.as_deref().expect("packages");
+    assert_eq!(packages.len(), 1, "{packages:?}");
+    assert_eq!(packages[0].relative, "");
+    assert_eq!(packages[0].standard, MonorepoStandard::UvWorkspace);
+    assert_eq!(packages[0].provenance, PackageProvenance::Lockfile);
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 1);
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1);
+
+    let (repo, counts) = measured(&root, &RepoRequest::structure());
+
+    assert!(!repo.is_monorepo, "{repo:?}");
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::UvWorkspace);
+    assert_eq!(layer.provenance, PackageProvenance::Globbed);
+    let json = serde_json::to_value(layer).expect("layer serializes");
+    assert_eq!(
+        json["lockfile"],
+        serde_json::json!({
+            "status": "not_requested",
+            "paths": ["uv.lock"],
+            "reason": "request_disabled",
+            "extra": [],
+            "missing": [],
+        })
+    );
+    let packages = repo.packages.as_deref().expect("packages");
+    assert_eq!(packages[0].provenance, PackageProvenance::Globbed);
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 0);
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 0);
+}
+
+/// The serialized layer always carries all five fields, with empty lists and
+/// a `null` reason spelled out.
+#[test]
+fn the_serialized_layer_carries_the_complete_lockfile_object() {
+    let (_dir, root) = copied("pnpm-10.32.1/workspace-edited-missing");
+
+    let (repo, _) = measured(&root, &RepoRequest::full());
+
+    let json = serde_json::to_value(&repo).expect("RepoInfo serializes");
+    let layer = &json["monorepo_layers"][0];
+    assert!(layer.get("lockfile_match").is_none(), "{layer}");
+    assert_eq!(
+        layer["lockfile"],
+        serde_json::json!({
+            "status": "mismatch",
+            "paths": ["pnpm-lock.yaml"],
+            "reason": null,
+            "extra": [],
+            "missing": ["packages/beta"],
+        })
+    );
+}
+
+#[test]
+fn npm_tool_fixtures_report_the_accepted_version_matrix() {
+    use LockfileStatus::{Match, Mismatch, Unreadable, Unverifiable};
+    const NPM: MonorepoStandard = MonorepoStandard::NpmWorkspaces;
+    const LOCK: &str = "package-lock.json";
+    let parse_failed = Some(LockfileReason::ParseFailed);
+    assert_rows(&[
+        ("npm-11.6.4/workspace", NPM, LOCK, Match, None, &[], &[]),
+        ("npm-11.6.4/workspace-lockfile-v2", NPM, LOCK, Match, None, &[], &[]),
+        ("npm-11.6.4/shrinkwrap", NPM, "npm-shrinkwrap.json", Match, None, &[], &[]),
+        (
+            "npm-11.6.4/workspace-edited-stale-extra",
+            NPM,
+            LOCK,
+            Mismatch,
+            None,
+            &["packages/gamma"],
+            &[],
+        ),
+        (
+            "npm-11.6.4/workspace-edited-missing",
+            NPM,
+            LOCK,
+            Mismatch,
+            None,
+            &[],
+            &["packages/beta"],
+        ),
+        (
+            "npm-11.6.4/workspace-edited-malformed-trailing",
+            NPM,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "npm-11.6.4/workspace-edited-duplicate-key",
+            NPM,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "npm-11.6.4/workspace-edited-unknown-version",
+            NPM,
+            LOCK,
+            Unverifiable,
+            Some(LockfileReason::UnsupportedVersion),
+            &[],
+            &[],
+        ),
+        (
+            "npm-11.6.4/workspace-edited-missing-required-field",
+            NPM,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+    ]);
+}
+
+/// npm 6 wrote no workspaces, so its real v1 lockfile is placed beside the
+/// npm 11 workspace manifests: the version alone makes it unverifiable.
+#[test]
+fn an_npm_v1_lockfile_is_an_unsupported_version_through_detection() {
+    let (_dir, root) = copied("npm-11.6.4/workspace");
+    fs::copy(
+        fixture_root().join("npm-6.14.18/single-project/package-lock.json"),
+        root.join("package-lock.json"),
+    )
+    .expect("replace the lockfile");
+
+    let (repo, counts) = measured(&root, &RepoRequest::full());
+
+    let layer = &repo.monorepo_layers[0];
+    assert_eq!(layer.authority, MonorepoStandard::NpmWorkspaces);
+    assert_eq!(
+        layer.lockfile,
+        observation(
+            "package-lock.json",
+            LockfileStatus::Unverifiable,
+            Some(LockfileReason::UnsupportedVersion),
+            &[],
+            &[]
+        )
+    );
+    assert_ne!(layer.provenance, PackageProvenance::Lockfile);
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1);
+}
+
+/// A valid v3 lockfile whose root record lacks `workspaces` and that has no
+/// other record has not recorded an empty workspace, so it cannot report
+/// every current member as `missing`.
+#[test]
+fn an_npm_lockfile_without_workspace_declarations_has_no_membership_data() {
+    let (_dir, root) = copied("npm-11.6.4/workspace");
+    fs::write(
+        root.join("package-lock.json"),
+        r#"{
+  "name": "fixture-root",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "fixture-root",
+      "version": "0.0.0",
+      "dependencies": {
+        "local-lib": "file:./local-lib"
+      }
+    }
+  }
+}
+"#,
+    )
+    .expect("replace the lockfile");
+
+    let (repo, counts) = measured(&root, &RepoRequest::full());
+
+    assert_eq!(
+        layer_lockfile(&repo, MonorepoStandard::NpmWorkspaces, "npm without declarations"),
+        observation(
+            "package-lock.json",
+            LockfileStatus::Unverifiable,
+            Some(LockfileReason::NoMembershipData),
+            &[],
+            &[]
+        )
+    );
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1);
+    assert_ne!(repo.monorepo_layers[0].provenance, PackageProvenance::Lockfile);
+    let packages = repo.packages.as_deref().expect("packages");
+    assert!(!packages.is_empty());
+    for package in packages {
+        assert_ne!(package.provenance, PackageProvenance::Lockfile, "{package:?}");
+    }
+}
+
+/// An explicit `null` root `workspaces` is a mistyped membership field, not an
+/// omitted one: it must not read as `ambiguous_membership` (records local
+/// packages) or `no_membership_data` (records none).
+#[test]
+fn an_npm_lockfile_with_null_workspace_declarations_is_unreadable() {
+    const ROOT_ONLY: &str = r#"{
+  "name": "fixture-root",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "fixture-root",
+      "version": "0.0.0",
+      "workspaces": null
+    }
+  }
+}
+"#;
+    for root_only in [false, true] {
+        let (_dir, root) = copied("npm-11.6.4/workspace");
+        if root_only {
+            fs::write(root.join("package-lock.json"), ROOT_ONLY).expect("replace the lockfile");
+        } else {
+            // The declarations move to an ignored key, so the edit is one
+            // line whatever the checkout's line endings.
+            edit(
+                &root,
+                "package-lock.json",
+                r#""workspaces": ["#,
+                r#""workspaces": null, "formerWorkspaces": ["#,
+            );
+        }
+
+        let (repo, counts) = measured(&root, &RepoRequest::full());
+
+        assert_eq!(
+            layer_lockfile(&repo, MonorepoStandard::NpmWorkspaces, "npm null declarations"),
+            observation(
+                "package-lock.json",
+                LockfileStatus::Unreadable,
+                Some(LockfileReason::ParseFailed),
+                &[],
+                &[]
+            ),
+            "root_only = {root_only}"
+        );
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1);
+        assert_ne!(repo.monorepo_layers[0].provenance, PackageProvenance::Lockfile);
+        let packages = repo.packages.as_deref().expect("packages");
+        assert!(!packages.is_empty());
+        for package in packages {
+            assert_ne!(package.provenance, PackageProvenance::Lockfile, "{package:?}");
+        }
+    }
+}
+
+/// An explicit `null` link target is a mistyped membership field. The
+/// `packages/beta` record still names the same member, so dropping the link
+/// would report a false `match` and upgrade provenance.
+#[test]
+fn an_npm_lockfile_with_a_null_link_target_is_unreadable() {
+    let (_dir, root) = copied("npm-11.6.4/workspace");
+    edit(
+        &root,
+        "package-lock.json",
+        r#""resolved": "packages/beta","#,
+        r#""resolved": null,"#,
+    );
+
+    let (repo, counts) = measured(&root, &RepoRequest::full());
+
+    assert_eq!(
+        layer_lockfile(&repo, MonorepoStandard::NpmWorkspaces, "npm null link target"),
+        observation(
+            "package-lock.json",
+            LockfileStatus::Unreadable,
+            Some(LockfileReason::ParseFailed),
+            &[],
+            &[]
+        )
+    );
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 1);
+    assert_ne!(repo.monorepo_layers[0].provenance, PackageProvenance::Lockfile);
+    let packages = repo.packages.as_deref().expect("packages");
+    assert!(!packages.is_empty());
+    for package in packages {
+        assert_ne!(package.provenance, PackageProvenance::Lockfile, "{package:?}");
+    }
+}
+
+/// `npm-shrinkwrap.json` wins over `package-lock.json` (ruling R6): only the
+/// winner is listed, read, and parsed, even when the loser would disagree.
+#[test]
+fn npm_shrinkwrap_takes_precedence_over_package_lock() {
+    let (_dir, root) = copied("npm-11.6.4/shrinkwrap");
+    fs::copy(
+        fixture_root().join("npm-11.6.4/workspace-edited-missing/package-lock.json"),
+        root.join("package-lock.json"),
+    )
+    .expect("add a disagreeing package-lock.json");
+
+    let (repo, counts) = measured(&root, &RepoRequest::full());
+
+    assert_eq!(
+        repo.monorepo_layers[0].lockfile,
+        observation("npm-shrinkwrap.json", LockfileStatus::Match, None, &[], &[])
+    );
+    assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 1);
+}
+
+#[test]
+fn yarn_tool_fixtures_report_the_accepted_version_matrix() {
+    use LockfileStatus::{Match, Mismatch, Unreadable, Unverifiable};
+    const YARN: MonorepoStandard = MonorepoStandard::YarnWorkspaces;
+    const LOCK: &str = "yarn.lock";
+    let parse_failed = Some(LockfileReason::ParseFailed);
+    let unsupported = Some(LockfileReason::UnsupportedVersion);
+    assert_rows(&[
+        ("yarn-3.8.7/workspace", YARN, LOCK, Match, None, &[], &[]),
+        ("yarn-4.0.2/workspace", YARN, LOCK, Match, None, &[], &[]),
+        ("yarn-4.18.1/workspace", YARN, LOCK, Match, None, &[], &[]),
+        ("yarn-1.22.22/workspace", YARN, LOCK, Unverifiable, unsupported, &[], &[]),
+        (
+            "yarn-4.18.1/workspace-edited-stale-extra",
+            YARN,
+            LOCK,
+            Mismatch,
+            None,
+            &["packages/gamma"],
+            &[],
+        ),
+        (
+            "yarn-4.18.1/workspace-edited-missing",
+            YARN,
+            LOCK,
+            Mismatch,
+            None,
+            &[],
+            &["packages/beta"],
+        ),
+        (
+            "yarn-4.18.1/workspace-edited-malformed-trailing",
+            YARN,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "yarn-4.18.1/workspace-edited-duplicate-key",
+            YARN,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "yarn-4.18.1/workspace-edited-unknown-version",
+            YARN,
+            LOCK,
+            Unverifiable,
+            unsupported,
+            &[],
+            &[],
+        ),
+        (
+            "yarn-4.18.1/workspace-edited-missing-required-field",
+            YARN,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+    ]);
+}
+
+#[test]
+fn bun_tool_fixtures_report_the_accepted_version_matrix() {
+    use LockfileStatus::{Match, Mismatch, Unreadable, Unverifiable};
+    const BUN: MonorepoStandard = MonorepoStandard::BunWorkspaces;
+    const LOCK: &str = "bun.lock";
+    let parse_failed = Some(LockfileReason::ParseFailed);
+    assert_rows(&[
+        ("bun-1.2.0/workspace", BUN, LOCK, Match, None, &[], &[]),
+        ("bun-1.3.3/workspace", BUN, LOCK, Match, None, &[], &[]),
+        (
+            "bun-1.3.3/workspace-edited-comments-trailing-commas",
+            BUN,
+            LOCK,
+            Match,
+            None,
+            &[],
+            &[],
+        ),
+        // Ruling R6: `bun.lock` wins, and `bun.lockb` is not listed.
+        ("bun-1.3.3/precedence-both", BUN, LOCK, Match, None, &[], &[]),
+        (
+            "bun-1.3.3/workspace-edited-stale-extra",
+            BUN,
+            LOCK,
+            Mismatch,
+            None,
+            &["packages/gamma"],
+            &[],
+        ),
+        (
+            "bun-1.3.3/workspace-edited-missing",
+            BUN,
+            LOCK,
+            Mismatch,
+            None,
+            &[],
+            &["packages/beta"],
+        ),
+        (
+            "bun-1.3.3/workspace-edited-malformed-trailing",
+            BUN,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "bun-1.3.3/workspace-edited-duplicate-key",
+            BUN,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+        (
+            "bun-1.3.3/workspace-edited-unknown-version",
+            BUN,
+            LOCK,
+            Unverifiable,
+            Some(LockfileReason::UnsupportedVersion),
+            &[],
+            &[],
+        ),
+        (
+            "bun-1.3.3/workspace-edited-missing-required-field",
+            BUN,
+            LOCK,
+            Unreadable,
+            parse_failed,
+            &[],
+            &[],
+        ),
+    ]);
+}
+
+/// Binary `bun.lockb` is reported from metadata alone: never read or parsed,
+/// and Bun is never invoked.
+#[test]
+fn a_binary_bun_lockfile_is_unverifiable_without_a_read() {
+    let (_dir, root) = copied("bun-1.3.3/workspace-binary");
+
+    for (request, status, reason) in [
+        (
+            RepoRequest::full(),
+            LockfileStatus::Unverifiable,
+            LockfileReason::NoMembershipData,
+        ),
+        (
+            RepoRequest::structure(),
+            LockfileStatus::NotRequested,
+            LockfileReason::RequestDisabled,
+        ),
+    ] {
+        let (repo, counts) = measured(&root, &request);
+        let layer = repo
+            .monorepo_layers
+            .iter()
+            .find(|layer| layer.authority == MonorepoStandard::BunWorkspaces)
+            .expect("a Bun layer");
+        assert_eq!(
+            layer.lockfile,
+            observation("bun.lockb", status, Some(reason), &[], &[])
+        );
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 0);
+        assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 0);
+    }
+}
+
+/// Regression: real `rush.json` files carry comments, and the former strict
+/// JSON parse found no Rush layer at all. The ordinary pnpm workspace layout
+/// compares importer keys resolved against `common/temp`.
+#[test]
+fn rush_tool_fixture_reports_the_accepted_version_matrix() {
+    assert_rows(&[(
+        "rush-5.179.0/pnpm-workspace",
+        MonorepoStandard::RushStack,
+        "common/config/rush/pnpm-lock.yaml",
+        LockfileStatus::Match,
+        None,
+        &[],
+        &[],
+    )]);
+}
+
+fn edit(root: &Path, relative: &str, from: &str, to: &str) {
+    let path = root.join(relative);
+    let content = fs::read_to_string(&path).expect("read fixture file");
+    assert!(content.contains(from), "{relative} lacks {from:?}");
+    fs::write(&path, content.replacen(from, to, 1)).expect("write fixture file");
+}
+
+fn rush_layer_lockfile(root: &Path) -> LockfileObservation {
+    let (repo, _) = measured(root, &RepoRequest::full());
+    repo.monorepo_layers
+        .into_iter()
+        .find(|layer| layer.authority == MonorepoStandard::RushStack)
+        .expect("a Rush layer")
+        .lockfile
+}
+
+/// Edits of the real Rush fixture, one setting at a time: a dropped importer
+/// is a missing member, and each layout ruling R3 excludes is unverifiable.
+#[test]
+fn rush_tool_fixture_variants_follow_ruling_r3() {
+    const LOCK: &str = "common/config/rush/pnpm-lock.yaml";
+
+    let (_dir, root) = copied("rush-5.179.0/pnpm-workspace");
+    edit(&root, LOCK, "  ../../packages/beta:", "  ../../packages/renamed:");
+    assert_eq!(
+        rush_layer_lockfile(&root),
+        observation(
+            LOCK,
+            LockfileStatus::Mismatch,
+            None,
+            &["packages/renamed"],
+            &["packages/beta"]
+        )
+    );
+
+    let unsupported = observation(
+        LOCK,
+        LockfileStatus::Unverifiable,
+        Some(LockfileReason::UnsupportedLayout),
+        &[],
+        &[],
+    );
+    for (file, from, to) in [
+        (
+            "common/config/rush/subspaces.json",
+            "\"subspacesEnabled\": false",
+            "\"subspacesEnabled\": true",
+        ),
+        (
+            "common/config/rush/pnpm-config.json",
+            "\"useWorkspaces\": true",
+            "\"useWorkspaces\": false",
+        ),
+    ] {
+        let (_dir, root) = copied("rush-5.179.0/pnpm-workspace");
+        edit(&root, file, from, to);
+        assert_eq!(rush_layer_lockfile(&root), unsupported, "{file}: {to}");
+    }
+
+    let (_dir, root) = copied("rush-5.179.0/pnpm-workspace");
+    fs::create_dir_all(root.join("common/config/rush/variants/v1")).expect("variant");
+    assert_eq!(rush_layer_lockfile(&root), unsupported, "variants");
+}
+
+/// A workspace declaration with a non-string member entry, or a present
+/// member field that is not a list at all, is not fully understood (ruling
+/// R10): each fixture's otherwise matching or present lockfile is
+/// `unverifiable` + `incomplete_manifest_discovery`, and neither the layer nor
+/// any package is upgraded. An all-invalid list or a wrong-type field still
+/// yields the layer rather than silently dropping it.
+#[test]
+fn invalid_workspace_member_entries_are_incomplete_manifest_discovery() {
+    // (fixture, authority, lockfile, [(manifest, from, to)])
+    type Case = (
+        &'static str,
+        MonorepoStandard,
+        &'static str,
+        &'static [(&'static str, &'static str, &'static str)],
+    );
+    const UV_MEMBERS: &str = r#"members = ["packages/alpha", "packages/beta", ".tools/hidden"]"#;
+    const PNPM_PACKAGES: &str = "  - \"packages/*\"\n  - \".tools/hidden\"";
+    const NPM_WORKSPACES: &str = "\"packages/*\",\n    \".tools/hidden\"\n  ]";
+    const CARGO_MEMBERS: &str = r#"members = ["crates/alpha", "crates/beta", ".tools/hidden"]"#;
+    const RUSH_HIDDEN: &str = r#""projectFolder": ".tools/hidden""#;
+    let cases: &[Case] = &[
+        (
+            "uv-0.9.5/workspace",
+            MonorepoStandard::UvWorkspace,
+            "uv.lock",
+            &[(
+                "pyproject.toml",
+                UV_MEMBERS,
+                r#"members = ["packages/alpha", "packages/beta", ".tools/hidden", 123]"#,
+            )],
+        ),
+        (
+            "uv-0.9.5/workspace",
+            MonorepoStandard::UvWorkspace,
+            "uv.lock",
+            &[("pyproject.toml", UV_MEMBERS, "members = [123]")],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            MonorepoStandard::PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            &[(
+                "pnpm-workspace.yaml",
+                PNPM_PACKAGES,
+                "  - \"packages/*\"\n  - \".tools/hidden\"\n  - 123",
+            )],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            MonorepoStandard::PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            &[("pnpm-workspace.yaml", PNPM_PACKAGES, "  - 123")],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            MonorepoStandard::NpmWorkspaces,
+            "package-lock.json",
+            &[(
+                "package.json",
+                NPM_WORKSPACES,
+                "\"packages/*\",\n    \".tools/hidden\",\n    123\n  ]",
+            )],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            MonorepoStandard::NpmWorkspaces,
+            "package-lock.json",
+            &[(
+                "package.json",
+                "\"workspaces\": [\n    \"packages/*\",\n    \".tools/hidden\"\n  ]",
+                "\"workspaces\": {\"packages\": [\"packages/*\", \".tools/hidden\", null]}",
+            )],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            MonorepoStandard::NpmWorkspaces,
+            "package-lock.json",
+            &[("package.json", NPM_WORKSPACES, "123 ]")],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            MonorepoStandard::CargoWorkspace,
+            "Cargo.lock",
+            &[(
+                "Cargo.toml",
+                CARGO_MEMBERS,
+                r#"members = ["crates/alpha", "crates/beta", ".tools/hidden", 123]"#,
+            )],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            MonorepoStandard::CargoWorkspace,
+            "Cargo.lock",
+            &[("Cargo.toml", CARGO_MEMBERS, "members = [123]")],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            MonorepoStandard::CargoWorkspace,
+            "Cargo.lock",
+            &[(
+                "Cargo.toml",
+                r#"exclude = ["local-lib"]"#,
+                r#"exclude = ["local-lib", 7]"#,
+            )],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            MonorepoStandard::RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            &[("rush.json", RUSH_HIDDEN, r#""projectFolder": 3"#)],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            MonorepoStandard::RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            &[
+                ("rush.json", RUSH_HIDDEN, r#""projectFolder": 3"#),
+                ("rush.json", r#""projectFolder": "packages/alpha""#, r#""projectFolder": 1"#),
+                ("rush.json", r#""projectFolder": "packages/beta""#, r#""projectFolder": 2"#),
+            ],
+        ),
+        // A present member field of the wrong type. Each edit that replaces an
+        // array keeps the original under an unread key so the document stays
+        // valid.
+        (
+            "uv-0.9.5/workspace",
+            MonorepoStandard::UvWorkspace,
+            "uv.lock",
+            &[("pyproject.toml", UV_MEMBERS, r#"members = "packages/*""#)],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            MonorepoStandard::PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            &[("pnpm-workspace.yaml", PNPM_PACKAGES, "  123\nunread:\n  - x")],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            MonorepoStandard::NpmWorkspaces,
+            "package-lock.json",
+            &[("package.json", "\"workspaces\": [", "\"workspaces\": 123, \"unread\": [")],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            MonorepoStandard::NpmWorkspaces,
+            "package-lock.json",
+            &[(
+                "package.json",
+                "\"workspaces\": [",
+                "\"workspaces\": {\"packages\": \"packages/*\"}, \"unread\": [",
+            )],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            MonorepoStandard::CargoWorkspace,
+            "Cargo.lock",
+            &[("Cargo.toml", CARGO_MEMBERS, r#"members = "crates/*""#)],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            MonorepoStandard::CargoWorkspace,
+            "Cargo.lock",
+            &[("Cargo.toml", r#"exclude = ["local-lib"]"#, r#"exclude = "local-lib""#)],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            MonorepoStandard::RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            &[("rush.json", "\"projects\": [", "\"projects\": 123, \"unread\": [")],
+        ),
+    ];
+    let incomplete = |lockfile| {
+        observation(
+            lockfile,
+            LockfileStatus::Unverifiable,
+            Some(LockfileReason::IncompleteManifestDiscovery),
+            &[],
+            &[],
+        )
+    };
+
+    for &(fixture, authority, lockfile, edits) in cases {
+        let (_dir, root) = copied(fixture);
+        for &(manifest, from, to) in edits {
+            edit(&root, manifest, from, to);
+        }
+        let label = format!("{fixture}: {edits:?}");
+
+        let (repo, _) = measured(&root, &RepoRequest::full());
+
+        assert_eq!(
+            layer_lockfile(&repo, authority, &label),
+            incomplete(lockfile),
+            "{label}"
+        );
+        let layer = repo
+            .monorepo_layers
+            .iter()
+            .find(|layer| layer.authority == authority)
+            .expect("the layer is kept");
+        assert_ne!(layer.provenance, PackageProvenance::Lockfile, "{label}");
+        for package in repo.packages.as_deref().expect("packages") {
+            assert_ne!(package.provenance, PackageProvenance::Lockfile, "{label}: {package:?}");
+        }
+    }
+}
+
+fn layer_lockfile(repo: &RepoInfo, authority: MonorepoStandard, fixture: &str) -> LockfileObservation {
+    let layers: Vec<_> = repo
+        .monorepo_layers
+        .iter()
+        .filter(|layer| layer.authority == authority)
+        .collect();
+    assert_eq!(layers.len(), 1, "{fixture}: {:?}", repo.monorepo_layers);
+    layers[0].lockfile.clone()
+}
+
+/// Metadata-only sources on real-tool fixtures: a present file is
+/// `unverifiable` + `no_membership_data` (or `not_requested` when declined),
+/// and nothing is ever read or parsed. Subproject-only Gradle locks are
+/// never searched, so those fixtures are `absent`.
+#[test]
+fn fallback_tool_fixtures_are_reported_from_metadata_alone() {
+    let legacy: Vec<String> = [
+        "annotationProcessor",
+        "archives",
+        "compile",
+        "compileClasspath",
+        "compileOnly",
+        "default",
+        "runtime",
+        "runtimeClasspath",
+        "testAnnotationProcessor",
+        "testCompile",
+        "testCompileClasspath",
+        "testCompileOnly",
+        "testRuntime",
+        "testRuntimeClasspath",
+    ]
+    .iter()
+    .map(|name| format!("gradle/dependency-locks/{name}.lockfile"))
+    .collect();
+    let legacy: Vec<&str> = legacy.iter().map(String::as_str).collect();
+    let cases: [(&str, MonorepoStandard, &[&str]); 6] = [
+        ("go-1.27.1/workspace", MonorepoStandard::GoWorkspace, &["go.work.sum"]),
+        (
+            "gradle-8.14.5/root-lockfile",
+            MonorepoStandard::GradleMultiProject,
+            &["gradle.lockfile"],
+        ),
+        (
+            "gradle-5.6.4/root-legacy-lock-dir",
+            MonorepoStandard::GradleMultiProject,
+            &legacy,
+        ),
+        ("gradle-8.14.5/multi-project", MonorepoStandard::GradleMultiProject, &[]),
+        ("gradle-5.6.4/legacy-lock-dir", MonorepoStandard::GradleMultiProject, &[]),
+        ("bazel-8.4.2/bzlmod", MonorepoStandard::Bazel, &["MODULE.bazel.lock"]),
+    ];
+    assert_eq!(legacy.len(), 14);
+    for (fixture, authority, paths) in cases {
+        let (_dir, root) = copied(fixture);
+        if authority == MonorepoStandard::Bazel {
+            // The Bazel detector needs leaf packages; the fixture ships only
+            // the module files Bazel itself wrote.
+            for package in ["app", "lib"] {
+                fs::create_dir_all(root.join(package)).expect("create package");
+                fs::write(root.join(package).join("BUILD.bazel"), "").expect("write BUILD");
+            }
+        }
+        let owned = |items: &[&str]| items.iter().map(|item| (*item).to_owned()).collect();
+        for (request, status, reason) in [
+            (
+                RepoRequest::full(),
+                LockfileStatus::Unverifiable,
+                LockfileReason::NoMembershipData,
+            ),
+            (
+                RepoRequest::structure(),
+                LockfileStatus::NotRequested,
+                LockfileReason::RequestDisabled,
+            ),
+        ] {
+            let (repo, counts) = measured(&root, &request);
+            let expected = if paths.is_empty() {
+                LockfileObservation {
+                    status: LockfileStatus::Absent,
+                    paths: Vec::new(),
+                    reason: None,
+                    extra: Vec::new(),
+                    missing: Vec::new(),
+                }
+            } else {
+                LockfileObservation {
+                    status,
+                    paths: owned(paths),
+                    reason: Some(reason),
+                    extra: Vec::new(),
+                    missing: Vec::new(),
+                }
+            };
+            assert_eq!(layer_lockfile(&repo, authority, fixture), expected, "{fixture}");
+            assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 0, "{fixture}");
+            assert_eq!(counter(&counts, counters::REPO_LOCKFILE_PARSES), 0, "{fixture}");
+        }
+    }
+}
+
+fn standalone(
+    root: &str,
+    tool: StandaloneLockfileTool,
+    lockfile: &str,
+    status: LockfileStatus,
+    reason: LockfileReason,
+) -> StandaloneLockfileObservation {
+    StandaloneLockfileObservation {
+        root: root.to_owned(),
+        tool,
+        observation: LockfileObservation {
+            status,
+            paths: vec![lockfile.to_owned()],
+            reason: Some(reason),
+            extra: Vec::new(),
+            missing: Vec::new(),
+        },
+    }
+}
+
+/// Ruling R2 on unmodified real-tool fixtures: a standalone Poetry, PDM, or
+/// Composer project is a root package with no layer, and its lockfile is
+/// reported at the repository level from metadata alone.
+#[test]
+fn standalone_tool_fixtures_are_repository_level_observations() {
+    for (fixture, tool, lockfile) in [
+        ("poetry-2.5.1/single-project", StandaloneLockfileTool::Poetry, "poetry.lock"),
+        ("pdm-2.29.2/single-project", StandaloneLockfileTool::Pdm, "pdm.lock"),
+        ("composer-2.10.3/single-project", StandaloneLockfileTool::Composer, "composer.lock"),
+    ] {
+        let (_dir, root) = copied(fixture);
+        for (request, status, reason) in [
+            (
+                RepoRequest::full(),
+                LockfileStatus::Unverifiable,
+                LockfileReason::NoMembershipData,
+            ),
+            (
+                RepoRequest::structure(),
+                LockfileStatus::NotRequested,
+                LockfileReason::RequestDisabled,
+            ),
+        ] {
+            let collector = PerformanceCollector::new_shared();
+            let repo = with_current_collector(Some(Arc::clone(&collector)), || {
+                detect_repo_with_request_or_root_package(&root, &request)
+            })
+            .expect("detection succeeds")
+            .expect("a root package");
+            let counts = collector.snapshot(Duration::ZERO).counters;
+
+            assert!(!repo.is_monorepo, "{fixture}");
+            assert!(repo.monorepo_layers.is_empty(), "{fixture}");
+            assert!(repo.monorepo_standards.is_empty(), "{fixture}");
+            let packages = repo.packages.as_deref().expect("a package catalog");
+            assert_eq!(packages.len(), 1, "{fixture}");
+            assert_eq!(packages[0].relative, "", "{fixture}");
+            assert_eq!(
+                repo.standalone_lockfiles,
+                [standalone("", tool, lockfile, status, reason)],
+                "{fixture}"
+            );
+            assert_eq!(counter(&counts, counters::REPO_LOCKFILE_READS), 0, "{fixture}");
+
+            let json = serde_json::to_value(&repo).expect("RepoInfo serializes");
+            assert_eq!(
+                json["standalone_lockfiles"][0]["tool"],
+                serde_json::to_value(tool).expect("tool serializes"),
+                "{fixture}"
+            );
+        }
+    }
+}
+
+/// A PHP-only root has no ecosystem of its own: its one package is named by
+/// `composer.json` and reports no package manager, and a PHP root beside a
+/// Node manifest is still observed once.
+#[test]
+fn a_php_only_root_package_is_named_by_its_composer_manifest() {
+    let (_dir, root) = copied("composer-2.10.3/single-project");
+
+    let repo = detect_repo_with_request_or_root_package(&root, &RepoRequest::full())
+        .expect("detection succeeds")
+        .expect("a root package");
+
+    let package = &repo.packages.as_deref().expect("a package catalog")[0];
+    assert_eq!(package.name, "fixture/fixture-root");
+    assert_eq!(package.ecosystem, PackageEcosystem::Unknown);
+    assert!(package.package_managers.is_empty(), "{:?}", package.package_managers);
+
+    fs::write(root.join("package.json"), r#"{"name": "front-end"}"#).expect("write package.json");
+    let repo = detect_repo_with_request_or_root_package(&root, &RepoRequest::full())
+        .expect("detection succeeds")
+        .expect("a root package");
+    let packages = repo.packages.as_deref().expect("a package catalog");
+    assert_eq!(packages.len(), 1);
+    assert_eq!(packages[0].name, "front-end");
+    assert_eq!(
+        repo.standalone_lockfiles,
+        [standalone(
+            "",
+            StandaloneLockfileTool::Composer,
+            "composer.lock",
+            LockfileStatus::Unverifiable,
+            LockfileReason::NoMembershipData,
+        )]
+    );
+}
+
+/// A dependency lock is not a package manifest: `composer.lock` without
+/// `composer.json` makes no repository result.
+#[test]
+fn a_composer_lockfile_without_its_manifest_is_no_repository() {
+    let (_dir, root) = copied("composer-2.10.3/single-project");
+    fs::remove_file(root.join("composer.json")).expect("remove composer.json");
+
+    for request in [RepoRequest::full(), RepoRequest::structure()] {
+        let repo = detect_repo_with_request_or_root_package(&root, &request)
+            .expect("detection succeeds");
+        assert!(repo.is_none(), "{repo:?}");
+    }
+}
+
+/// A package root inside a workspace is probed too, and a lockfile that is
+/// neither at the root nor at a package root is never looked for.
+#[test]
+fn standalone_lockfiles_at_workspace_package_roots_are_reported() {
+    let (_dir, root) = copied("pnpm-10.32.1/workspace");
+    fs::copy(
+        fixture_root().join("poetry-2.5.1/single-project/poetry.lock"),
+        root.join("packages/alpha/poetry.lock"),
+    )
+    .expect("add a package-level poetry.lock");
+    fs::create_dir_all(root.join("vendor/lib")).expect("vendor directory");
+    fs::write(root.join("vendor/lib/composer.lock"), "{}").expect("unprobed lockfile");
+
+    let (repo, _) = measured(&root, &RepoRequest::full());
+
+    assert_eq!(
+        repo.standalone_lockfiles,
+        [standalone(
+            "packages/alpha",
+            StandaloneLockfileTool::Poetry,
+            "poetry.lock",
+            LockfileStatus::Unverifiable,
+            LockfileReason::NoMembershipData,
+        )]
+    );
+    // The pnpm layer is unaffected.
+    assert_eq!(repo.monorepo_layers[0].lockfile.status, LockfileStatus::Match);
+}
+
+/// The library always serializes the list, `[]` when empty.
+#[test]
+fn an_empty_standalone_list_is_still_serialized() {
+    let (_dir, root) = copied("pnpm-10.32.1/workspace");
+
+    let (repo, _) = measured(&root, &RepoRequest::structure());
+
+    let json = serde_json::to_value(&repo).expect("RepoInfo serializes");
+    assert_eq!(json["standalone_lockfiles"], serde_json::json!([]));
+}
+
+/// The input-robustness matrix, walked through the public result: every
+/// load-bearing membership field, on the manifest side and the lockfile side,
+/// under each shape a permissive reader would coerce (explicit null, wrong
+/// type for the whole field, wrong type for one element, wrong type for every
+/// element). No cell may corroborate: the layer survives, its status is
+/// `unverifiable` or `unreadable`, and nothing gains lockfile provenance.
+///
+/// One row per format keeps the sweep in one place; the hand-written cases
+/// above are the review-by-review history of the same property.
+#[test]
+fn no_membership_field_shape_corroborates_when_it_cannot_be_understood() {
+    // (fixture, authority, lockfile, file, anchor, [replacement, ...])
+    type Cell = (
+        &'static str,
+        MonorepoStandard,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static [&'static str],
+    );
+    use MonorepoStandard::*;
+    const UV_MEMBERS: &str = r#"members = ["packages/alpha", "packages/beta", ".tools/hidden"]"#;
+    const PNPM_PACKAGES: &str = "  - \"packages/*\"\n  - \".tools/hidden\"";
+    const CARGO_MEMBERS: &str = r#"members = ["crates/alpha", "crates/beta", ".tools/hidden"]"#;
+    const JSON_WORKSPACES_OPEN: &str = "\"workspaces\": [";
+    // Each JSON replacement parks the original array under an unread key so
+    // the document stays valid.
+    const JSON_WORKSPACES_SHAPES: &[&str] = &[
+        "\"workspaces\": null, \"unread\": [",
+        "\"workspaces\": 123, \"unread\": [",
+        "\"workspaces\": \"packages/*\", \"unread\": [",
+        "\"workspaces\": {\"packages\": 123}, \"unread\": [",
+        "\"workspaces\": {\"packages\": null}, \"unread\": [",
+        "\"workspaces\": [123], \"unread\": [",
+        "\"workspaces\": [null], \"unread\": [",
+    ];
+    const JSON_FIRST_PATTERN: &str = "\"packages/*\",";
+    const BUN_ALPHA_RECORD: &str = "\"packages/alpha\": {\n      \"name\": \"alpha\",\n      \"version\": \"1.0.0\",\n      \"dependencies\": {\n        \"@fixture/beta\": \"workspace:*\",\n      },\n    },";
+    const JSON_ELEMENT_SHAPES: &[&str] = &["123,", "null,", "{},"];
+
+    let cells: &[Cell] = &[
+        // ---- manifest side ------------------------------------------------
+        (
+            "uv-0.9.5/workspace",
+            UvWorkspace,
+            "uv.lock",
+            "pyproject.toml",
+            UV_MEMBERS,
+            &[
+                r#"members = "packages/*""#,
+                "members = 123",
+                r#"members = ["packages/alpha", "packages/beta", ".tools/hidden", 123]"#,
+                r#"members = ["packages/alpha", {}]"#,
+                "members = [123]",
+            ],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            "pnpm-workspace.yaml",
+            PNPM_PACKAGES,
+            &[
+                "  null",
+                "  123",
+                "  \"packages/*\"",
+                "  - \"packages/*\"\n  - \".tools/hidden\"\n  - 123",
+                "  - \"packages/*\"\n  - null",
+                "  - 123",
+            ],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "yarn-4.18.1/workspace",
+            YarnWorkspaces,
+            "yarn.lock",
+            "package.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "yarn-4.18.1/workspace",
+            YarnWorkspaces,
+            "yarn.lock",
+            "package.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "package.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "package.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.toml",
+            CARGO_MEMBERS,
+            &[
+                r#"members = "crates/*""#,
+                "members = 123",
+                r#"members = ["crates/alpha", "crates/beta", ".tools/hidden", 123]"#,
+                "members = [123]",
+            ],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.toml",
+            r#"exclude = ["local-lib"]"#,
+            &[
+                r#"exclude = "local-lib""#,
+                r#"exclude = ["local-lib", 7]"#,
+                "exclude = [7]",
+            ],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            "rush.json",
+            "\"projects\": [",
+            &[
+                "\"projects\": null, \"unread\": [",
+                "\"projects\": 123, \"unread\": [",
+                "\"projects\": [123], \"unread\": [",
+                "\"projects\": [null], \"unread\": [",
+            ],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            "rush.json",
+            r#""projectFolder": "packages/alpha""#,
+            &[
+                r#""projectFolder": null"#,
+                r#""projectFolder": 1"#,
+                r#""projectFolder": ["packages/alpha"]"#,
+            ],
+        ),
+        // ---- lockfile side ------------------------------------------------
+        (
+            "uv-0.9.5/workspace",
+            UvWorkspace,
+            "uv.lock",
+            "uv.lock",
+            "[manifest]\nmembers = [",
+            &[
+                "[manifest]\nmembers = 1\nunread = [",
+                "[manifest]\nmembers = \"alpha\"\nunread = [",
+                "[manifest]\nmembers = [\n    1,",
+                "[manifest]\nmembers = [\n    {},",
+            ],
+        ),
+        (
+            "pnpm-10.32.1/workspace",
+            PnpmWorkspaces,
+            "pnpm-lock.yaml",
+            "pnpm-lock.yaml",
+            "importers:\n",
+            &[
+                "importers: null\nunread:\n",
+                "importers: 123\nunread:\n",
+                "importers:\n  123: {}\n",
+                "importers:\n  null: {}\n",
+                "importers:\n  packages/alpha: 123\n",
+            ],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            JSON_WORKSPACES_OPEN,
+            JSON_WORKSPACES_SHAPES,
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            JSON_FIRST_PATTERN,
+            JSON_ELEMENT_SHAPES,
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            r#""resolved": "packages/beta","#,
+            &[
+                r#""resolved": null,"#,
+                r#""resolved": 7,"#,
+                r#""resolved": ["packages/beta"],"#,
+            ],
+        ),
+        (
+            "npm-11.6.4/workspace",
+            NpmWorkspaces,
+            "package-lock.json",
+            "package-lock.json",
+            r#""resolved": "packages/beta",
+      "link": true"#,
+            &[
+                r#""resolved": "packages/beta",
+      "link": null"#,
+                r#""resolved": "packages/beta",
+      "link": 1"#,
+                r#""resolved": "packages/beta",
+      "link": "true""#,
+            ],
+        ),
+        (
+            "yarn-4.18.1/workspace",
+            YarnWorkspaces,
+            "yarn.lock",
+            "yarn.lock",
+            r#"resolution: "alpha@workspace:packages/alpha""#,
+            &["resolution: null", "resolution: 123", "resolution: [alpha]"],
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "bun.lock",
+            "\"workspaces\": {",
+            &[
+                "\"workspaces\": null, \"unread\": {",
+                "\"workspaces\": 123, \"unread\": {",
+                "\"workspaces\": [], \"unread\": {",
+            ],
+        ),
+        (
+            "bun-1.3.3/workspace",
+            BunWorkspaces,
+            "bun.lock",
+            "bun.lock",
+            BUN_ALPHA_RECORD,
+            &[
+                "\"packages/alpha\": null,",
+                "\"packages/alpha\": 123,",
+                "\"packages/alpha\": [],",
+            ],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.lock",
+            "name = \"alpha\"",
+            &["name = 1", "name = [\"alpha\"]"],
+        ),
+        (
+            "cargo-1.98.1/workspace",
+            CargoWorkspace,
+            "Cargo.lock",
+            "Cargo.lock",
+            "name = \"alpha\"\nversion = \"0.3.0\"",
+            &[
+                "name = \"alpha\"\nversion = 1",
+                "name = \"alpha\"\nversion = [\"0.3.0\"]",
+            ],
+        ),
+        (
+            "rush-5.179.0/pnpm-workspace",
+            RushStack,
+            "common/config/rush/pnpm-lock.yaml",
+            "common/config/rush/pnpm-lock.yaml",
+            "importers:\n",
+            &[
+                "importers: null\nunread:\n",
+                "importers: 123\nunread:\n",
+                "importers:\n  123: {}\n",
+            ],
+        ),
+    ];
+
+    // Control: every unedited fixture corroborates, so each edit below is
+    // known to remove a positive result rather than a neutral one.
+    let mut controlled = std::collections::BTreeSet::new();
+    for &(fixture, authority, _, _, _, _) in cells {
+        if !controlled.insert(fixture) {
+            continue;
+        }
+        let (_dir, root) = copied(fixture);
+        let (repo, _) = measured(&root, &RepoRequest::full());
+        let status = layer_lockfile(&repo, authority, fixture).status;
+        let positive = matches!(
+            status,
+            LockfileStatus::Match | LockfileStatus::MembersPresent
+        );
+        assert!(positive, "{fixture} control: {status:?}");
+    }
+
+    // Cells this matrix found open when it was written (2026-09-27). Each is a
+    // recorded gap, not an accepted behavior: the cell must keep failing until
+    // its fix removes it from this list, so the list can only shrink.
+    // `(file, replacement)` identifies the cell across fixtures.
+    const KNOWN_GAPS: &[(&str, &str)] = &[
+        // Manifest side: an explicit null member field reads as "no declaration",
+        // so the workspace is not detected at all (no repository result).
+        ("pnpm-workspace.yaml", "  null"),
+        ("package.json", "\"workspaces\": null, \"unread\": ["),
+        (
+            "package.json",
+            "\"workspaces\": {\"packages\": null}, \"unread\": [",
+        ),
+        ("rush.json", "\"projects\": null, \"unread\": ["),
+        // Yarn: an integer `resolution` is dropped, so the member goes missing
+        // and the lockfile reports `mismatch`.
+        ("yarn.lock", "resolution: 123"),
+        // Bun: a workspace record of the wrong type is accepted by key alone
+        // and reports an exact `match` that upgrades provenance.
+        ("bun.lock", "\"packages/alpha\": null,"),
+        ("bun.lock", "\"packages/alpha\": 123,"),
+        ("bun.lock", "\"packages/alpha\": [],"),
+    ];
+
+    /// Why one edited cell is not an honest non-corroboration, or empty.
+    fn cell_failures(
+        root: &Path,
+        authority: MonorepoStandard,
+        lockfile: &str,
+        label: &str,
+    ) -> Vec<String> {
+        let repo = match detect_repo_with_request(root, &RepoRequest::full()) {
+            Ok(Some(repo)) => repo,
+            Ok(None) => return vec![format!("{label}: no repository result")],
+            Err(error) => return vec![format!("{label}: detection failed: {error}")],
+        };
+        let Some(layer) = repo
+            .monorepo_layers
+            .iter()
+            .find(|layer| layer.authority == authority)
+        else {
+            return vec![format!("{label}: the layer disappeared")];
+        };
+        let observation = &layer.lockfile;
+        let understood = matches!(
+            observation.status,
+            LockfileStatus::Unverifiable | LockfileStatus::Unreadable
+        );
+        if !understood {
+            return vec![format!("{label}: corroborated as {observation:?}")];
+        }
+        let mut failures = Vec::new();
+        if observation.paths != vec![lockfile.to_owned()] {
+            failures.push(format!("{label}: paths {:?}", observation.paths));
+        }
+        if layer.provenance == PackageProvenance::Lockfile {
+            failures.push(format!("{label}: layer provenance upgraded"));
+        }
+        for package in repo.packages.as_deref().unwrap_or(&[]) {
+            if package.provenance == PackageProvenance::Lockfile {
+                failures.push(format!(
+                    "{label}: {} provenance upgraded",
+                    package.path.display()
+                ));
+            }
+        }
+        failures
+    }
+
+    let mut failures = Vec::new();
+    let mut closed_gaps = Vec::new();
+    for &(fixture, authority, lockfile, file, anchor, shapes) in cells {
+        for &shape in shapes {
+            let label = format!("{fixture} {file}: {anchor:?} -> {shape:?}");
+            let (_dir, root) = copied(fixture);
+            edit(&root, file, anchor, shape);
+            let cell = cell_failures(&root, authority, lockfile, &label);
+            match (KNOWN_GAPS.contains(&(file, shape)), cell.is_empty()) {
+                (false, false) => failures.extend(cell),
+                (true, true) => closed_gaps.push(label),
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} cell(s) corroborated or lost the observation:\n  {}",
+        failures.len(),
+        failures.join("\n  ")
+    );
+    assert!(
+        closed_gaps.is_empty(),
+        "{} KNOWN_GAPS cell(s) now pass; remove them from the list:\n  {}",
+        closed_gaps.len(),
+        closed_gaps.join("\n  ")
+    );
+}

@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Alternating warmed-cache driver for the isolated corroboration step and the
+pnpm-authoritative cost check (2026-09-21-lockfile-provenance-cost, review 2).
+
+usage: measure-corrob.py <out-evidence-dir> [set-name-substring]
+
+Same protocol as measure.py: each set runs 3 discarded warmup rounds, then 20
+measured rounds; every round runs each side once and the side order rotates by
+one each round, so sides alternate and none always goes first. Each process
+makes 3 in-process warmup calls before its one timed call. The 1-minute load
+average is recorded before and after every set; a set whose start load
+exceeds 12 waits (polling every 60 s, up to 15 minutes) and is recorded as
+deferred if it never drops.
+"""
+import hashlib, json, os, subprocess, sys, time
+from datetime import datetime, timezone
+
+BIN = "/tmp/lpc/corrob/bin"
+ROOT = "/Volumes/coding/wt/rusty-biscuit/fix-sniff"
+FIXTURES = "/tmp/lpc/corrob/fixtures"
+WARMUP_ROUNDS, SAMPLES, IN_PROCESS_WARMUPS = 3, 20, 3
+LOAD_LIMIT, POLL_S, MAX_WAIT_S = 12.0, 60, 15 * 60
+
+def load1():
+    return float(subprocess.check_output(["sysctl", "-n", "vm.loadavg"], text=True).split()[1])
+
+def now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def sha(path):
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+def side(tree, profile, exe_name, case, target):
+    exe = f"{BIN}/{tree}-{profile}-{exe_name}"
+    def run():
+        out = subprocess.run([exe, case, target, str(IN_PROCESS_WARMUPS)], cwd=ROOT,
+                             stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True)
+        return int(out.stdout.strip()), out.stderr.strip()
+    return exe, run, target
+
+STEP = "in-process ns, one isolated corroboration step (fresh store copy, cold lockfile caches) after 3 in-process warmups"
+
+def sets():
+    for profile in ("release", "debug"):
+        for case, set_name in [("corroborate", "corroborate-all"),
+                               ("corroborate-manifests-cached", "corroborate-all-manifests-cached"),
+                               ("corroborate-cargo", "corroborate-cargo"),
+                               ("corroborate-cargo-manifests-cached", "corroborate-cargo-manifests-cached"),
+                               ("corroborate-pnpm", "corroborate-pnpm")]:
+            yield f"{profile}-{set_name}", STEP + f"; lpc_corrob case `{case}` on the checkout root", [
+                ("baseline", "generic-cargo-parser", *side("baseline", profile, "lpc_corrob", case, ROOT)),
+                ("after", "typed-cargo-parser", *side("changed", profile, "lpc_corrob", case, ROOT)),
+            ]
+        for fixture in ("checkout-shape", "large"):
+            root = f"{FIXTURES}/{fixture}"
+            lock = f"{root}/pnpm-lock.yaml"
+            yield f"{profile}-pnpm-{fixture}", f"in-process ns after 3 in-process warmups, pnpm-authoritative fixture `{fixture}`; see label", [
+                ("after", "corroborate-pnpm", *side("changed", profile, "lpc_corrob", "corroborate-pnpm", root)),
+                ("after", "pnpm-lock-parse", *side("changed", profile, "lpc_corrob", "pnpm-parse", root)),
+                ("after", "probe-value-parse", *side("changed", profile, "lpc_pnpm_probe", "value-parse", lock)),
+                ("after", "probe-typed-importers", *side("changed", profile, "lpc_pnpm_probe", "typed-importers", lock)),
+                ("after", "detect-declined", *side("changed", profile, "lpc_bench", "detect-structure", root)),
+                ("after", "detect-requested", *side("changed", profile, "lpc_bench", "detect-provenance", root)),
+            ]
+
+def main():
+    out_dir = sys.argv[1]
+    only = sys.argv[2] if len(sys.argv) > 2 else ""
+    for name, unit, sides in sets():
+        if only not in name:
+            continue
+        waited, start_load = 0, load1()
+        while start_load > LOAD_LIMIT and waited < MAX_WAIT_S:
+            print(f"[{name}] load {start_load} > {LOAD_LIMIT}; waiting", flush=True)
+            time.sleep(POLL_S); waited += POLL_S; start_load = load1()
+        record = {"set": name, "unit": unit, "start": now(), "load_before": start_load,
+                  "waited_s": waited}
+        samples, notes = {}, {}
+        if start_load > LOAD_LIMIT:
+            record.update(status="deferred", end=now())
+            print(f"[{name}] DEFERRED at load {start_load}", flush=True)
+        else:
+            samples = {label: [] for _, label, _, _, _ in sides}
+            for round_index in range(WARMUP_ROUNDS + SAMPLES):
+                k = round_index % len(sides)
+                for _, label, _, run, _ in sides[k:] + sides[:k]:
+                    value, note = run()
+                    notes[label] = note
+                    if round_index >= WARMUP_ROUNDS:
+                        samples[label].append(value)
+            record.update(status="measured", end=now(), load_after=load1())
+        for tree_dir, label, exe, _, target in sides:
+            doc = dict(record, side=tree_dir, case=label, target=target,
+                       binary=os.path.basename(exe), binary_sha256=sha(exe),
+                       stderr=notes.get(label), samples_ns=samples.get(label, []))
+            path = os.path.join(out_dir, tree_dir, f"{name}-{label}.json")
+            with open(path, "w") as fh:
+                json.dump(doc, fh, indent=1)
+        print(f"[{name}] {record['status']} load {record['load_before']} -> {record.get('load_after')}", flush=True)
+
+if __name__ == "__main__":
+    main()

@@ -518,18 +518,23 @@ fn pnpm_nx_monorepo_structure_json_snapshot() {
     );
 }
 
+/// A degenerate workspace is no monorepo. `repo structure` reports its root
+/// as a single package, as the aggregate and `repo packages` do; the root
+/// path is not snapshotted because its length decides where the line wraps.
 #[test]
-fn degenerate_cargo_structure_text_is_empty() {
+fn degenerate_cargo_structure_text_is_single_package() {
     let (_dir, path) = create_degenerate_cargo_fixture();
     let stdout = run_repo_structure(&path);
-    insta::assert_snapshot!("degenerate_cargo_structure_text", stdout);
+    let stdout = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(stdout.starts_with("Repository - Type: Single-package - Root:"), "{stdout}");
+    assert!(!stdout.contains("Lockfiles"), "{stdout}");
 }
 
 #[test]
 fn degenerate_cargo_structure_json_has_no_topology_keys() {
     let (_dir, path) = create_degenerate_cargo_fixture();
     let json = run_repo_structure_json(&path);
-    assert!(json.as_object().is_none_or(|o| o.is_empty()));
+    assert_eq!(json["is_monorepo"], false, "{json}");
     assert!(json.get("monorepo_standards").is_none());
     assert!(json.get("monorepo_layers").is_none());
     assert!(json.get("monorepo_tool").is_none());
@@ -695,6 +700,7 @@ fn stable_aggregate_json(json: &Value) -> Value {
             "is_monorepo": json["structure"]["is_monorepo"],
             "monorepo_standards": monorepo_standards,
             "monorepo_layers": json["structure"]["monorepo_layers"],
+            "standalone_lockfiles": json["structure"]["standalone_lockfiles"],
         },
         "git_status": {
             "current_branch": json["git_status"]["current_branch"],

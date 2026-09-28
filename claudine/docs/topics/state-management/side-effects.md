@@ -30,7 +30,7 @@ success:
 
 Here, `stack` is a list of actions to run. `set_frontmatter` changes a property in the YAML metadata block at the top of the named Markdown file. If its frontmatter contains `status: in-progress`, the action replaces that value with `status: done`.
 
-See [Lifecycle: Side-Effect Actions](../lifecycle.md#side-effect-actions) for how to configure these actions.
+See [Lifecycle: Side-Effect Actions](../flow-control/lifecycle.md#side-effect-actions) for how to configure these actions.
 
 The responsibilities are separate:
 
@@ -46,7 +46,7 @@ Darkmatter's document composition pipeline does not invoke this effects engine. 
 
 `set(key, value)` changes a top-level value in the caller's runtime state and returns the previous value, or `null` if the key was absent. It does not write the value to disk.
 
-This differs from `set_frontmatter`, which saves a change to a Markdown file. The catalog uses function-style names; Claudine lifecycle YAML expresses an in-memory update as `set: {ready: true}`. See [Lifecycle](../lifecycle.md) for the action syntax.
+This differs from `set_frontmatter`, which saves a change to a Markdown file. The catalog uses function-style names; Claudine lifecycle YAML expresses an in-memory update as `set: {ready: true}`. See [Lifecycle](../flow-control/lifecycle.md) for the action syntax.
 
 ### Markdown frontmatter
 

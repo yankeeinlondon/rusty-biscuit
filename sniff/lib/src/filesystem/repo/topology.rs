@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::detection::{ManifestStore, probe_exists};
+use super::lockfile::{LockfileObservation, LockfileReason};
 use super::seed::PackageSeed;
 use super::standard::{
     DetectedStandard, DetectionConfidence, MonorepoLayer, MonorepoStandard, RootMembership,
@@ -28,6 +29,12 @@ pub(crate) struct DetectorOutcome {
     pub(crate) standard: MonorepoStandard,
     pub(crate) root: PathBuf,
     pub(crate) seeds: Vec<PackageSeed>,
+    /// Discovery knows `seeds` omit a declared member (ruling R10): a pattern
+    /// was dropped, a walk failed, or a declared member the standard requires
+    /// to exist is missing. A layer built from an incomplete outcome is never
+    /// compared with its lockfile. Detectors whose authority has no comparable
+    /// lockfile leave it `false`.
+    pub(crate) incomplete: bool,
 }
 
 /// Build the membership layers from detector outcomes.
@@ -74,7 +81,8 @@ pub(crate) fn build_monorepo_layers(
                 authority: outcome.standard,
                 orchestrators: orchestrators.clone(),
                 provenance,
-                lockfile_match: None,
+                // Replaced by the detection's lockfile observation.
+                lockfile: LockfileObservation::not_applicable(LockfileReason::NoLockfileSource),
                 root_is_package,
                 packages,
             });
@@ -215,6 +223,7 @@ mod tests {
             standard,
             root: PathBuf::from("/repo"),
             seeds,
+            incomplete: false,
         }
     }
 
@@ -227,6 +236,7 @@ mod tests {
             standard,
             root: PathBuf::from(root),
             seeds,
+            incomplete: false,
         }
     }
 

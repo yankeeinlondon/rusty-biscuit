@@ -1264,6 +1264,24 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .without_docs()
                         .without_formatting(),
                 ),
+            // A detail request is what makes filesystem detection synthesize
+            // the root package of a single-package project; without it such a
+            // project has no repository result from which to report a
+            // standalone lockfile (ruling R2). On a full request the details
+            // widen nothing else.
+            Some(crate::args::RepoAction::Structure { .. }) => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(git_request.clone())
+                        .repo(RepoRequest {
+                            details: Some(RepoDetailRequest::all()),
+                            ..RepoRequest::full()
+                        })
+                        .without_file_inventory(),
+                ),
             Some(crate::args::RepoAction::GitStatus {
                 package,
                 package_area,

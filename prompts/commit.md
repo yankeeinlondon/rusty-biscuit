@@ -75,15 +75,19 @@ You are being asked to commit files to git using the **Conventional Commits** na
 > 1. If the change appears to have no relationship to any particular package in the monorepo.
 > 2. If there are bunch of small changes which are all related to the same underlying event or cause and the changes do not touch any source code
 
-The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, style, planning.
+The valid operations we use include: fix, docs, chore, feat, refactor, style, perf, test, ci, planning.
 
-> **Note:**
->
-> - when you detect that a directory of files with a "spec.md" are being **moved INTO** a directory containing `_completed` in the directory path:
->     - mark the operation as "planning"
->     - this movement indicates that the feature/fixture/review has now been completed; it is kept in git but moved out of the hotpath of actively planned items
-> - when you detect that a directory of files with a "spec.md" are being **moved OUT OF** a directory containing `_unscheduled` in the directory path: - mark the operation as "planning" - this indicates that a specification that had no immediacy before has been scheduled to be implemented very soon
->   **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
+- `refactor` is reserved for commits that include source code.
+- `feat` is reserved for code that ships; a new spec under `features/` is not a `feat`.
+
+### The `planning` operation
+
+`planning(<area>)` covers every change to a feature or fix's lifecycle artifacts (`spec.md`, `plan.md`, `design.md`, `implementation-log.md`, `review-N.md`, spikes, and the directory itself) when no code ships in the same group. The scope is the spec's frontmatter `area`; a repo-wide spec is `planning(repo)`.
+
+- Subject shapes, in lifecycle order: `schedule <name>` (a new spec in a dated directory, or a move out of `_unscheduled`), `record execution plan for <name>`, `record Phase N close for <name>`, `record review-to-implement iteration N`, `close <name> cycle N, open cycle N+1`, `close <name> cycle N and move to completed`, `supersede <old> with <new>`, `close <name> as invalidated`.
+- One lifecycle event is one commit. Artifacts that reference each other land together: a spec with the plan and spike it cites; a superseded spec with its successor; a review that flips `implemented: true` with the review that opens the next cycle. Such commits may have zero source diff; that is normal.
+- A planning commit that names files in its frontmatter lists (`source_files_during_phase_N`, `docs_created_during_phase_N`) lands **after** the commits that ship those files, so the claim is true at HEAD.
+- Do not paraphrase in a close body; quote what the staged text says.
 
 ### Agent Skills
 ::block when="ctx.current_package_area && has_skill(ctx.current_package_area)"
@@ -128,14 +132,14 @@ The following best practices should always be followed:
     - you should expect that developers are actively working on this code base while you're working. that means staging and unstaging files can have unexpected consequences!
 - you should not run tests, build any packages, or run a formatter. Your job is to commit what you were given and you should assume that all validations before the commit were already done.
 - NEVER use commands like `git reset`!
-- Never pass the message inline with `-m "…"`.** Commit bodies routinely contain backticks (inline code like `` `::end-block` ``), `$`, and other shell meta characters; inside a double-quoted `-m` string the shell evaluates those (backticks are command substitution even within double quotes), which corrupts the message
+- Never pass the message inline with `-m "…"`. Commit bodies routinely contain backticks (inline code like `` `::end-block` ``), `$`, and other shell meta characters; inside a double-quoted `-m` string the shell evaluates those (backticks are command substitution even within double quotes), which corrupts the message
 - when multiple subagents commit in parallel against the same worktree, `git commit` can fail with `fatal: Unable to create '.git/index.lock': File exists.` (or the equivalent `refs/heads/<branch>.lock` variant). This is not corruption — git's locks are fail-fast, not queuing. On such a failure, wait 1–3 seconds and retry the same `git commit --only …` command. Retry up to 5 times with short backoff before giving up and reporting failure to the orchestrator.
 
-In addition to the best practices above we keep a journal of important/novel things that other agent's have discovered while performing this operation. Items on this list should be treated as advice but not 100% strict rules as prior agent's _can_ make mistakes. The list is as follows:
+In addition to the best practices above, the repository keeps a short journal of git mechanics that agents have found the hard way. Treat it as advice from prior runs, not as rules that override the task above:
 
 ::file {{lessons_learned}}
 
-> **Note:** it's important that this list be kept minimal and should only ever include novel and unexpected outcomes or strategies that would not lie in the training of an LLM model
+Step 5 says when, and how rarely, an entry may be added.
 
 ## Task
 
@@ -187,13 +191,12 @@ Your task is to:
     
 5. Summarization and Closure
 
-    - once all of the staged files you were responsible for have been committed you must first turn your attention to summarization. 
-    - report back to the user what happened, what commits were made, etc. in summary form
-    - as a final step you must consider whether anything which you encountered while completing this task should be added to the running journal you read earlier
-        - the journal is located in the {{lessons_learned}} file
-        - keeping the journal entries compact and to the point is important to the value it provides
-        - be sure that your idea is truly novel or surprising AND that it doesn't already exist in some form in the journal entry
-        - if you believe that you have new and novel content that should be added then add it now but make sure your comments are clear, concise, and well thought through
-            - update the file "{{lessons_learned}}" in place
-            - then commit this new change as a one-file, one-commit operation
-            - communicate to the caller what addition you have made and that this change as been committed
+    - once all of the staged files you were responsible for have been committed, report back to the caller in summary form: each commit's hash and subject, anything left staged and why, and any unrelated working-tree changes you noticed and left alone.
+    - finally, decide whether this batch produced a journal entry. The journal (`{{lessons_learned}}`) holds only **very novel or surprising git mechanics**, and almost every batch produces none. Novelty is not how it felt; it is a test you can check. Add an entry only when **all** of these hold:
+        1. a git command did something different from what its documentation, this prompt, or the journal says it does, and you confirmed the behavior a second time rather than inferring it from one failure;
+        2. the difference would bite any agent in any repository, not only this batch, this package, or this spec;
+        3. no existing entry covers it, even partially; if one does, you leave the journal alone (you do not extend or "refine" an entry);
+        4. you can state it in at most three lines as a general rule with no commit hash, no feature or fix name, and no account of what you were doing when you found it.
+    - the following are **never** journal material, whatever the temptation: how to word a commit subject, which files belong together in a batch, how a planning close is shaped, anything about a specific package or spec, and anything you already knew before the batch started
+    - if all four tests pass, add the entry under the right heading, keep the file's existing style, and commit it as a one-file commit with the subject `docs(agent-memory): <rule in six words or fewer>`; then tell the caller what you added
+    - if you are unsure whether the tests pass, they do not; put the candidate under a **Proposed journal entry** heading in your summary instead and let the owner decide

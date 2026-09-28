@@ -976,6 +976,260 @@ fn repo_structure_json_output_is_valid_json_on_stdout_with_clean_stderr() {
     );
 }
 
+/// [`create_cli_monorepo`] plus a committed `Cargo.lock` that names both
+/// members, so a corroborating request reports `members_present` subset
+/// evidence (Cargo never upgrades provenance).
+fn create_cli_monorepo_with_matching_cargo_lock() -> (tempfile::TempDir, PathBuf) {
+    let (dir, path) = create_cli_monorepo();
+    test_commit_file(
+        &path,
+        "Cargo.lock",
+        "version = 4\n\n\
+         [[package]]\nname = \"pkg-a\"\nversion = \"0.1.0\"\n\n\
+         [[package]]\nname = \"pkg-b\"\nversion = \"0.1.0\"\n",
+    );
+    (dir, path)
+}
+
+/// Run `sniff --base <path> <args>` and parse its stdout, which must be one
+/// JSON document and nothing else.
+fn sniff_json_at(path: &Path, args: &[&str]) -> Value {
+    let output = common::owned_sniff_command()
+        .args(["--base", path.to_str().unwrap()])
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("run sniff {args:?}: {e}"));
+    assert!(
+        output.status.success(),
+        "sniff {args:?} must succeed: stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = std::str::from_utf8(&output.stdout).expect("stdout should be UTF-8");
+    serde_json::from_str(stdout).unwrap_or_else(|e| {
+        panic!("sniff {args:?} stdout must be JSON only: {e}\n---\n{stdout}\n---")
+    })
+}
+
+#[test]
+fn repo_structure_tier_json_is_json_only_with_a_lockfile_present() {
+    let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
+
+    assert_eq!(
+        sniff_json_at(&path, &["repo", "is-monorepo", "--json"]),
+        serde_json::json!({ "authority": "cargo-workspace", "is_monorepo": true })
+    );
+    assert_eq!(
+        sniff_json_at(&path, &["repo", "packages", "--json"]),
+        serde_json::json!(["pkg-a", "pkg-b"])
+    );
+}
+
+/// `repo structure` runs the full request, which keeps lockfile corroboration.
+/// A `Cargo.lock` holding every member yields subset evidence only, which
+/// never upgrades provenance (ruling R1 of `2026-09-26-lockfile-corroboration`).
+#[test]
+fn repo_structure_json_reports_cargo_subset_evidence_for_matching_lockfile() {
+    let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
+    let json = sniff_json_at(&path, &["repo", "structure", "--json"]);
+
+    let layers = json["monorepo_layers"]
+        .as_array()
+        .expect("monorepo_layers array");
+    assert_eq!(layers.len(), 1, "{json}");
+    assert_eq!(layers[0]["authority"], "cargo-workspace", "{json}");
+    assert_eq!(layers[0]["provenance"], "globbed", "{json}");
+    assert_eq!(
+        layers[0]["lockfile"],
+        serde_json::json!({
+            "status": "members_present",
+            "paths": ["Cargo.lock"],
+            "reason": "subset_only",
+            "extra": [],
+            "missing": [],
+        }),
+        "{json}"
+    );
+    assert_eq!(
+        layers[0]["packages"],
+        serde_json::json!(["pkg-a/lib", "pkg-b/lib"]),
+        "{json}"
+    );
+
+    let packages: Vec<(&str, &str)> = json["packages"]
+        .as_array()
+        .expect("packages array")
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap(),
+                p["provenance"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        packages,
+        [("pkg-a", "globbed"), ("pkg-b", "globbed")],
+        "{json}"
+    );
+
+    assert_eq!(
+        normalized_structure_json(&json, &path),
+        expected_lockfile_structure_json(),
+        "{json}"
+    );
+}
+
+/// `sniff repo structure --json` output with its reported root replaced by
+/// `<root>` and `\` separators turned into `/`. The acting-binary lookup reads
+/// the fixture's minimal system `PATH`, which no fixture file controls, so it
+/// becomes `<host PATH lookup>` once any binary it found is checked to be
+/// `cargo`.
+fn normalized_structure_json(json: &Value, fixture_root: &Path) -> Value {
+    fn normalize(value: &mut Value, root: &str) {
+        match value {
+            Value::String(text) => *text = text.replace(root, "<root>").replace('\\', "/"),
+            Value::Array(items) => items.iter_mut().for_each(|item| normalize(item, root)),
+            Value::Object(fields) => fields.values_mut().for_each(|item| normalize(item, root)),
+            _ => {}
+        }
+    }
+
+    // The CLI reports the canonical root (`/private/var/...` for a macOS
+    // temporary directory), so the placeholder follows the reported spelling
+    // after checking it names the fixture.
+    let root = json["root"].as_str().expect("root string").to_owned();
+    assert_eq!(
+        std::fs::canonicalize(&root).expect("canonical reported root"),
+        std::fs::canonicalize(fixture_root).expect("canonical fixture root"),
+    );
+    let mut value = json.clone();
+    for standard in value["monorepo_standards"]
+        .as_array_mut()
+        .expect("monorepo_standards array")
+    {
+        let binary = standard["binary"].take();
+        if !binary.is_null() {
+            assert_eq!(binary["name"], "cargo", "{binary}");
+        }
+        standard["binary"] = Value::from("<host PATH lookup>");
+    }
+    normalize(&mut value, &root);
+    value
+}
+
+/// The complete `repo structure --json` document for
+/// [`create_cli_monorepo_with_matching_cargo_lock`], written out field by
+/// field.
+fn expected_lockfile_structure_json() -> Value {
+    let package = |name: &str| {
+        let relative = format!("{name}/lib");
+        let manifest = format!("{relative}/Cargo.toml");
+        let source = format!("{relative}/src/lib.rs");
+        serde_json::json!({
+            "path": format!("<root>/{relative}"),
+            "relative": relative,
+            "package_area": name,
+            "name": name,
+            "ecosystem": "cargo",
+            "standard": "cargo-workspace",
+            "provenance": "globbed",
+            "primary_language": "rust",
+            "languages": [{
+                "language": "rust",
+                "language_type": "compiled_binary",
+                "percentage": 100.0,
+                "signal": 1.0,
+                "direct_file_count": 1,
+                "direct_files": [source],
+                "framework_file_count": 0,
+                "framework_files": [],
+                "total_file_count": 1,
+            }],
+            "file_associations": [
+                {
+                    "association": "configuration",
+                    "file_count": 1,
+                    "percentage": 50.0,
+                    "files": [manifest],
+                },
+                {
+                    "association": "programming_language",
+                    "file_count": 1,
+                    "percentage": 50.0,
+                    "files": [source],
+                },
+            ],
+            // Pre-existing behavior pinned as the pre-change contract, not
+            // endorsed: `configuration` prefixes the package's relative path
+            // onto an already repository-relative file path.
+            "configuration": [format!("{relative}/{manifest}")],
+            "package_managers": ["cargo"],
+            "test_runners": [{
+                "runner": "CargoTest",
+                "source": { "kind": "ecosystem_default" },
+            }],
+            "version": "0.1.0",
+        })
+    };
+    serde_json::json!({
+        "is_monorepo": true,
+        "root": "<root>",
+        "packages": [package("pkg-a"), package("pkg-b")],
+        "monorepo_standards": [{
+            "standard": "cargo-workspace",
+            "root": "<root>",
+            "matched_markers": ["<root>/Cargo.toml"],
+            "binary": "<host PATH lookup>",
+            "confidence": "marker-confirmed",
+        }],
+        "monorepo_layers": [{
+            "root": "<root>",
+            "authority": "cargo-workspace",
+            "orchestrators": [],
+            "provenance": "globbed",
+            "lockfile": {
+                "status": "members_present",
+                "paths": ["Cargo.lock"],
+                "reason": "subset_only",
+                "extra": [],
+                "missing": [],
+            },
+            "root_is_package": false,
+            "packages": ["pkg-a/lib", "pkg-b/lib"],
+        }],
+    })
+}
+
+/// Bare `sniff repo` opts its aggregate request in to lockfile provenance.
+#[test]
+fn repo_aggregate_json_reports_cargo_subset_evidence_for_matching_lockfile() {
+    let (_dir, path) = create_cli_monorepo_with_matching_cargo_lock();
+    let json = sniff_json_at(&path, &["repo", "--json"]);
+
+    let layers = json["structure"]["monorepo_layers"]
+        .as_array()
+        .expect("structure.monorepo_layers array");
+    assert_eq!(layers.len(), 1, "{json}");
+    assert_eq!(layers[0]["authority"], "cargo-workspace", "{json}");
+    assert_eq!(layers[0]["provenance"], "globbed", "{json}");
+    assert_eq!(
+        layers[0]["lockfile"],
+        serde_json::json!({
+            "status": "members_present",
+            "paths": ["Cargo.lock"],
+            "reason": "subset_only",
+            "extra": [],
+            "missing": [],
+        }),
+        "{json}"
+    );
+    assert_eq!(
+        json["structure"]["standalone_lockfiles"],
+        serde_json::json!([]),
+        "{json}"
+    );
+}
+
 #[test]
 fn repo_aggregate_json_scope_buckets_have_stable_shape() {
     let output = repo_aggregate_json_output();
@@ -5875,6 +6129,223 @@ fn test_recent_commits_package_filters_and_attribution_in_a_monorepo() {
 
     let area = run_commit_json(&path, &["recent-commits", "--package-area", "pkg-b", "--json"]);
     assert_eq!(headings(&area), ["b2", "initial monorepo"]);
+}
+
+/// A workspace with `worktree/lib` (`worktree`), `worktree/cli`
+/// (`worktree-cli`), and `other/lib` (`other`), and commits touching shared
+/// area files, look-alike paths, and a misleading scope. Returns the commit
+/// ids oldest first, labeled `C0`..=`C9` in the assertions.
+fn create_area_membership_repo() -> (tempfile::TempDir, PathBuf, Vec<String>) {
+    const BASE: i64 = 1_763_158_400;
+    const PACKAGE: &str = "[package]\nversion = \"0.1.0\"\nedition = \"2024\"\nname = ";
+    let dir = tempfile::tempdir().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    let path = dir.path().to_path_buf();
+    let worktree_manifest = format!("{PACKAGE}\"worktree\"\n");
+    let cli_manifest = format!("{PACKAGE}\"worktree-cli\"\n");
+    let other_manifest = format!("{PACKAGE}\"other\"\n");
+    let history: [(&[(&str, &str)], &str); 10] = [
+        (
+            &[
+                ("Cargo.toml", "[workspace]\nmembers = [\"worktree/lib\", \"worktree/cli\", \"other/lib\"]\n"),
+                ("worktree/lib/Cargo.toml", &worktree_manifest),
+                ("worktree/lib/src/lib.rs", "pub fn worktree() {}\n"),
+                ("worktree/cli/Cargo.toml", &cli_manifest),
+                ("worktree/cli/src/main.rs", "fn main() {}\n"),
+                ("other/lib/Cargo.toml", &other_manifest),
+                ("other/lib/src/lib.rs", "pub fn other() {}\n"),
+                ("worktree/README.md", "# worktree\n"),
+            ],
+            "chore: initial workspace",
+        ),
+        (&[("worktree/lib/src/lib.rs", "pub fn worktree() { /* 1 */ }\n")], "feat(worktree): lib change"),
+        (&[("other/lib/src/lib.rs", "pub fn other() { /* 2 */ }\n")], "chore: other change"),
+        (
+            &[
+                ("worktree/fixes/2026-09-25-worktree-file/plan.md", "# plan\n"),
+                ("worktree/fixes/2026-09-25-worktree-file/spec.md", "# spec\n"),
+            ],
+            "planning(worktree): record execution plan for 2026-09-25-worktree-file",
+        ),
+        (&[(".claude/skills/worktree/SKILL.md", "# skill\n")], "planning(worktree): skill note"),
+        (&[("worktree-other/README.md", "# sibling\n")], "docs: sibling readme"),
+        (&[("worktree/README.md", "# worktree v2\n")], "docs: refresh readme"),
+        (&[("worktree/fixes/2026-09-25-worktree-file/review-1.md", "# review\n")], "review: first review"),
+        (&[("worktree/cli/src/main.rs", "fn main() { /* 8 */ }\n")], "fix(cli): cli change"),
+        (
+            &[
+                ("worktree/features/x/spec.md", "# x\n"),
+                ("other/lib/src/lib.rs", "pub fn other() { /* 9 */ }\n"),
+            ],
+            "chore: mixed",
+        ),
+    ];
+    let ids = history
+        .iter()
+        .zip(0..)
+        .map(|((files, message), minute)| {
+            commit_files_at(&path, files, message, BASE + 60 * minute).to_string()
+        })
+        .collect();
+    (dir, path, ids)
+}
+
+/// The 2026-09-25-recent-commits regression through the shipped binary: a
+/// planning-only commit under `worktree/fixes/` belongs to the `worktree`
+/// area but to no package.
+#[test]
+fn test_recent_commits_package_area_selects_shared_area_files_by_location() {
+    let (_dir, path, ids) = create_area_membership_repo();
+    let hashes = |commits: &[Value]| -> Vec<String> {
+        commits
+            .iter()
+            .map(|commit| commit["hash"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let pick = |indices: &[usize]| -> Vec<String> { indices.iter().map(|i| ids[*i].clone()).collect() };
+
+    let area = run_commit_json(&path, &["recent-commits", "5", "--package-area", "worktree", "--json"]);
+    assert_eq!(hashes(&area), pick(&[9, 8, 7, 6, 3]), "count 5 fills with area matches");
+    let all_area = run_commit_json(&path, &["recent-commits", "50", "--package-area", "worktree", "--json"]);
+    assert_eq!(hashes(&all_area), pick(&[9, 8, 7, 6, 3, 1, 0]), "C4 and C5 are outside the area");
+
+    let package = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree", "--json"]);
+    assert_eq!(hashes(&package), pick(&[1, 0]), "the planning commit touches no package");
+    let cli = run_commit_json(&path, &["recent-commits", "50", "--package", "worktree-cli", "--json"]);
+    assert_eq!(hashes(&cli), pick(&[8, 0]));
+
+    // Attribution comes from the files, not from the filter being present.
+    let unfiltered = run_commit_json(&path, &["recent-commits", "50", "--json"]);
+    let record = |hash: &str| unfiltered.iter().find(|c| c["hash"] == hash).unwrap().clone();
+    let planning = record(&ids[3]);
+    assert_eq!(planning["packages"], serde_json::json!([]));
+    assert_eq!(planning["package_areas"], serde_json::json!(["worktree"]));
+    assert_eq!(
+        file_paths(&planning),
+        [
+            "worktree/fixes/2026-09-25-worktree-file/plan.md",
+            "worktree/fixes/2026-09-25-worktree-file/spec.md"
+        ]
+    );
+    let mixed = record(&ids[9]);
+    assert_eq!(mixed["packages"], serde_json::json!(["other"]));
+    assert_eq!(mixed["package_areas"], serde_json::json!(["other", "worktree"]));
+    assert_eq!(file_paths(&mixed), ["other/lib/src/lib.rs", "worktree/features/x/spec.md"]);
+    for commit in &area {
+        assert_eq!(commit, &record(commit["hash"].as_str().unwrap()), "filtered record differs");
+    }
+
+    let plain = run_repo(&path, &["recent-commits", "--package-area", "worktree", "--plain"]);
+    assert!(plain.status.success());
+    let stdout = String::from_utf8(plain.stdout).unwrap();
+    let stderr = String::from_utf8(plain.stderr).unwrap();
+    assert!(
+        stdout.contains("record execution plan for 2026-09-25-worktree-file"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("skill note"), "{stdout}");
+    assert!(!stderr.contains("record execution plan"), "result data on stderr: {stderr}");
+}
+
+/// The aggregate collects recent commits through the caller-observed catalog
+/// (`collect_observed`), so a shared area file must be attributed there
+/// exactly as the focused command attributes it.
+#[test]
+fn test_repo_aggregate_attributes_shared_area_files_like_the_focused_command() {
+    let (_dir, path, ids) = create_area_membership_repo();
+
+    let aggregate = run_aggregate_json(&path);
+    let focused = run_commit_json(&path, &["recent-commits", "--json"]);
+    assert_eq!(aggregate["recent_commits"], Value::Array(focused));
+
+    let planning = aggregate["recent_commits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|commit| commit["hash"] == ids[3].as_str())
+        .expect("the planning commit is inside the last 10");
+    assert_eq!(planning["packages"], serde_json::json!([]));
+    assert_eq!(planning["package_areas"], serde_json::json!(["worktree"]));
+    // The documentation projection prunes files but keeps whole-commit
+    // attribution.
+    let documentation = aggregate["documentation_changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|commit| commit["hash"] == ids[3].as_str())
+        .expect("the planning commit changes documentation");
+    assert_eq!(documentation["package_areas"], serde_json::json!(["worktree"]));
+}
+
+/// Review 1 of 2026-09-25-recent-commits through the shipped binary:
+/// `dm/dmls` is both the `dmls` package directory and the area of the nested
+/// `zed` package, as `darkmatter/dmls` is in this repository. Area membership
+/// follows location, so a `dmls`-owned file belongs to the `dm/dmls` area
+/// rather than `dmls`'s declared `dm`, while package ownership is unchanged.
+#[test]
+fn test_recent_commits_package_area_selects_files_in_a_package_directory_that_is_also_an_area() {
+    const BASE: i64 = 1_763_158_400;
+    const PACKAGE: &str = "[package]\nversion = \"0.1.0\"\nedition = \"2024\"\nname = ";
+    let dir = tempfile::tempdir().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    let path = dir.path();
+    let lib_manifest = format!("{PACKAGE}\"dm\"\n");
+    let dmls_manifest = format!("{PACKAGE}\"dmls\"\n");
+    let zed_manifest = format!("{PACKAGE}\"zed\"\n");
+    let history: [(&[(&str, &str)], &str); 4] = [
+        (
+            &[
+                ("Cargo.toml", "[workspace]\nmembers = [\"dm/lib\", \"dm/dmls\", \"dm/dmls/zed\"]\n"),
+                ("dm/lib/Cargo.toml", &lib_manifest),
+                ("dm/lib/src/lib.rs", "pub fn dm() {}\n"),
+                ("dm/dmls/Cargo.toml", &dmls_manifest),
+                ("dm/dmls/src/main.rs", "fn main() {}\n"),
+                ("dm/dmls/zed/Cargo.toml", &zed_manifest),
+                ("dm/dmls/zed/src/lib.rs", "pub fn zed() {}\n"),
+            ],
+            "chore: initial workspace",
+        ),
+        (&[("dm/dmls/README.md", "# dmls\n")], "docs: dmls readme"),
+        (&[("dm/lib/src/lib.rs", "pub fn dm() { /* 2 */ }\n")], "feat: lib change"),
+        (&[("dm/dmls-extra/README.md", "# sibling\n")], "docs: sibling readme"),
+    ];
+    let ids: Vec<String> = history
+        .iter()
+        .zip(0..)
+        .map(|((files, message), minute)| {
+            commit_files_at(path, files, message, BASE + 60 * minute).to_string()
+        })
+        .collect();
+    let hashes = |commits: &[Value]| -> Vec<String> {
+        commits
+            .iter()
+            .map(|commit| commit["hash"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let pick = |indices: &[usize]| -> Vec<String> { indices.iter().map(|i| ids[*i].clone()).collect() };
+
+    let nested = run_commit_json(path, &["recent-commits", "--package-area", "dm/dmls", "--json"]);
+    assert_eq!(hashes(&nested), pick(&[1, 0]), "the sibling `dm/dmls-extra` is outside the area");
+    let parent = run_commit_json(path, &["recent-commits", "--package-area", "dm", "--json"]);
+    assert_eq!(hashes(&parent), pick(&[3, 2, 1, 0]), "a parent area selects its nested areas");
+    let package = run_commit_json(path, &["recent-commits", "--package", "dmls", "--json"]);
+    assert_eq!(hashes(&package), pick(&[1, 0]));
+    let zed = run_commit_json(path, &["recent-commits", "--package", "zed", "--json"]);
+    assert_eq!(hashes(&zed), pick(&[0]), "the nested area confers no ownership of `dmls` files");
+
+    let unfiltered = run_commit_json(path, &["recent-commits", "--json"]);
+    let record = |index: usize| unfiltered.iter().find(|c| c["hash"] == ids[index].as_str()).unwrap().clone();
+    let readme = record(1);
+    assert_eq!(readme["packages"], serde_json::json!(["dmls"]));
+    assert_eq!(readme["package_areas"], serde_json::json!(["dm/dmls"]));
+    assert_eq!(file_paths(&readme), ["dm/dmls/README.md"]);
+    assert_eq!(nested[0], readme, "filtered record differs");
+    let initial = record(0);
+    assert_eq!(initial["packages"], serde_json::json!(["dm", "dmls", "zed"]));
+    assert_eq!(initial["package_areas"], serde_json::json!(["dm", "dm/dmls"]));
+    let sibling = record(3);
+    assert_eq!(sibling["packages"], serde_json::json!([]));
+    assert_eq!(sibling["package_areas"], serde_json::json!(["dm"]));
 }
 
 #[test]

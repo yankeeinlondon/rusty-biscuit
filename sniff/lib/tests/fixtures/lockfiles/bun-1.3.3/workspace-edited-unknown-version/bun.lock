@@ -1,0 +1,36 @@
+{
+  "lockfileVersion": 99,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "fixture-root",
+      "dependencies": {
+        "local-lib": "file:./local-lib",
+      },
+    },
+    ".tools/hidden": {
+      "name": "hidden-tool",
+      "version": "1.0.0",
+    },
+    "packages/alpha": {
+      "name": "alpha",
+      "version": "1.0.0",
+      "dependencies": {
+        "@fixture/beta": "workspace:*",
+      },
+    },
+    "packages/beta": {
+      "name": "@fixture/beta",
+      "version": "1.0.0",
+    },
+  },
+  "packages": {
+    "@fixture/beta": ["@fixture/beta@workspace:packages/beta"],
+
+    "alpha": ["alpha@workspace:packages/alpha"],
+
+    "hidden-tool": ["hidden-tool@workspace:.tools/hidden"],
+
+    "local-lib": ["local-lib@file:local-lib", {}],
+  }
+}

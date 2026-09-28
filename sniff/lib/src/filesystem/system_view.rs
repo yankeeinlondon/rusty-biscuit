@@ -62,6 +62,10 @@ pub(crate) struct FilesystemSystemView {
     /// resolve a boundary by marker presence alone and have never applied that
     /// exclusion, so they need the unfiltered set.
     pub(crate) manifest_dirs: Option<Vec<PathBuf>>,
+    /// Where the walk failed to read an entry, so `manifest_dirs` may be
+    /// missing directories under these paths. Present exactly when
+    /// `manifest_dirs` is.
+    pub(crate) manifest_walk_errors: Option<Vec<PathBuf>>,
     /// Observed nested-workspace marker files, including `*.sln` solutions.
     pub(crate) nested_markers: Option<Vec<PathBuf>>,
     pub(crate) inventory: Option<FileInventory>,
@@ -72,6 +76,7 @@ pub(crate) struct FilesystemSystemView {
 struct SharedWalkAccumulator {
     manifest_paths: Vec<PathBuf>,
     manifest_dirs: Vec<PathBuf>,
+    walk_errors: Vec<PathBuf>,
     nested_markers: Vec<PathBuf>,
     classifications: Vec<FileClassification>,
     docs: Vec<MarkdownMeta>,
@@ -91,6 +96,7 @@ struct WorkerBuffers {
     collector: performance::WorkerCollector,
     manifests: Vec<PathBuf>,
     manifest_dirs: Vec<PathBuf>,
+    walk_errors: Vec<PathBuf>,
     nested_markers: Vec<PathBuf>,
     classifications: Vec<FileClassification>,
     docs: Vec<MarkdownMeta>,
@@ -103,6 +109,7 @@ impl WorkerBuffers {
             collector: performance::WorkerCollector::inherit(),
             manifests: Vec::new(),
             manifest_dirs: Vec::new(),
+            walk_errors: Vec::new(),
             nested_markers: Vec::new(),
             classifications: Vec::new(),
             docs: Vec::new(),
@@ -118,6 +125,7 @@ impl Drop for WorkerBuffers {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         shared.manifest_paths.append(&mut self.manifests);
         shared.manifest_dirs.append(&mut self.manifest_dirs);
+        shared.walk_errors.append(&mut self.walk_errors);
         shared.nested_markers.append(&mut self.nested_markers);
         shared.classifications.append(&mut self.classifications);
         shared.docs.append(&mut self.docs);
@@ -151,8 +159,14 @@ pub(crate) fn build_filesystem_system_view(
                 worker.collector.activate();
                 performance::increment_counter(counters::FS_WALK_ENTRIES, 1);
 
-                let Ok(entry) = result else {
-                    return WalkState::Continue;
+                let entry = match result {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        if let Some(failed) = repo::glob::walk_failure_path(&error, &scan_root) {
+                            worker.walk_errors.push(failed);
+                        }
+                        return WalkState::Continue;
+                    }
                 };
 
                 if !entry
@@ -215,6 +229,9 @@ pub(crate) fn build_filesystem_system_view(
     let manifest_dirs = options
         .collect_manifests
         .then(|| std::mem::take(&mut accumulated.manifest_dirs));
+    let manifest_walk_errors = options
+        .collect_manifests
+        .then(|| std::mem::take(&mut accumulated.walk_errors));
     let nested_markers = options
         .collect_nested_markers
         .then(|| std::mem::take(&mut accumulated.nested_markers));
@@ -223,6 +240,7 @@ pub(crate) fn build_filesystem_system_view(
         root: root.to_path_buf(),
         manifest_index,
         manifest_dirs,
+        manifest_walk_errors,
         nested_markers,
         inventory,
         docs: docs.flatten(),
