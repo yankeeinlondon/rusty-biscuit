@@ -244,6 +244,47 @@ A text replacement (`replace:`) writes its value as authored text when the value
 
 A caller can inject data directly: `ComposeOptions::with_data_overrides` and `ComposeOptions::with_override_layers` insert values that are never scanned. `--set` / `with_set_overrides` values are authored templates: a person typed them.
 
+### Literal Tokens
+
+A file can also store a frontmatter string as data, so the next compose of that file does not read it as a template. A tool writes the value as a **literal token**: `{{!data:v1:` plus the string's UTF-8 bytes in unpadded URL-safe base64, then `}}`. It is always written as a double-quoted YAML scalar.
+
+```yaml
+---
+area: claudine
+# The string `fixed {{ area }} parsing`, stored as data
+summary: "{{!data:v1:Zml4ZWQge3sgYXJlYSB9fSBwYXJzaW5n}}"
+---
+{{ summary }}
+```
+
+This composes to `fixed {{ area }} parsing`. Frontmatter pass 1 decodes the token once, and the decoded string is data: it is never evaluated, never converted, and never a shell command, even when it reads `$(echo X)`. The file keeps the token until a person edits it.
+
+```mermaid
+flowchart LR
+    A["summary: &quot;{{!data:v1:…}}&quot;"] -->|load| B["token text (loaders keep it)"]
+    B -->|compose pass 1| C["decoded string, marked data"]
+    C --> D["expressions read it as text"]
+    B -->|decode_literal_tokens| E["decoded string for a reader"]
+```
+
+| Written | Result |
+| ------- | ------ |
+| `k: "{{!data:v1:JChlY2hvIFgp}}"` | the string `$(echo X)`, never run |
+| `k: "{{!data:v1:}}"` | the empty string |
+| `k: "see {{!data:v1:YQ}}"` | error: a token must be the entire value |
+| `k: " {{!data:v1:YQ}}"` | error: nothing may surround the token, whitespace included |
+| `k: "{{!data:v2:YQ}}"` | error: unsupported version |
+| `{{!data:v1:YQ}}` in the body | error: tokens exist only as frontmatter values |
+| `{{ 'a {{!data:v1:YQ}}' }}` | error: a token inside an expression |
+| `k: "{{{!data:v1:YQ}}}"`, `\{{!data:v1:YQ}}` | the spelling as text, via the usual escapes |
+
+A malformed or misplaced token fails composition under every policy, preflight included, with the token's line and column; it is never read as an expression. A token inside a fenced or indented code block is not scanned, like any other `{{`.
+
+- **Reading a file's values.** Loaders keep tokens encoded. A reader that needs the strings calls `darkmatter::markdown::literal_token::decode_literal_tokens` on a loaded value, or `Frontmatter::decoded_literal_tokens`. Do not hand the decoded values back to composition as authored text, because it would scan them.
+- **Writing a token.** `literal_token::encode_yaml_scalar(value)` returns the quoted scalar and `encode(value)` the bare token. Decide from where the value came from, never from what it looks like: a string that already resembles a token is encoded again.
+- **Editing a token by hand.** Replace the whole quoted token with ordinary text, or decode the payload with any base64url decoder, edit it, and encode it again. Language-server display of decoded values is a possible follow-up; today an editor shows the token.
+- **Lifecycle keys.** A key the caller defers to event time (Claudine's lifecycle stacks) keeps its raw text, token included, for the caller that evaluates it.
+
 
 ## Escaping an Opener with a Backslash
 
@@ -303,3 +344,4 @@ See the source modules:
 - `darkmatter/lib/src/markdown/compose/interpolation/` — lexer, evaluator, rewriter
 - `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs` — frontmatter-specific interpolation engine
 - `darkmatter/lib/src/markdown/compose/value_origin.rs` and `body_origin.rs` — which frontmatter values and body bytes are data
+- `darkmatter/lib/src/markdown/literal_token.rs` — the `{{!data:v1:…}}` codec and `decode_literal_tokens`

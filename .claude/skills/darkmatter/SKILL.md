@@ -262,7 +262,16 @@ composition regardless of `fail_fast`. Every scan is single-pass: text an
 expression, file read, shell command, or literal produced is data and is
 never scanned again (`compose/value_origin.rs` for frontmatter,
 `DataRanges` in `compose/body_origin.rs` for the body); a directive
-scanner must read the masked view (`parse_utils::structural_view`). `interpolate_text`/`interpolate_value` take an explicit
+scanner must read the masked view (`parse_utils::structural_view`).
+A frontmatter string stored as `{{!data:v1:<base64url>}}` (the
+`markdown::literal_token` codec) decodes once in pass 1 into a data leaf.
+`ExpressionFinder::scan` reports tokens in `tokens`, never as expressions, and
+any token outside a whole authored leaf is an authoring-fatal
+`ExpressionError::MalformedLiteralToken`. Loaders keep tokens encoded, and
+readers call `decode_literal_tokens`. The pre-approval gate collects from the
+document before pass 1, so a produced `$( … )` is never collected as authored.
+See [interpolation docs](../../../darkmatter/docs/inline/interpolation.md#literal-tokens).
+`interpolate_text`/`interpolate_value` take an explicit
 `ExpressionFailurePolicy`. Pass `Strict` from document stages. Use `Lenient`
 only for `compose_subtree(..., Lenient)` and preflight discovery (see
 [compose.md](compose.md#error-handling)). The error carries the authored
