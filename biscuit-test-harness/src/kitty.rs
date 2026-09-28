@@ -494,8 +494,10 @@ impl KittyInstance {
     /// ## Errors
     ///
     /// Returns an error when `screencapture` fails. Without the Screen
-    /// Recording permission for the calling terminal, macOS returns an image
-    /// without the window's contents rather than an error.
+    /// Recording permission for the calling terminal
+    /// ([`screen_capture_permitted`](crate::screen_capture_permitted)), and
+    /// sometimes even with it while the window is in the background, macOS
+    /// returns an image without the window's contents rather than an error.
     pub fn screenshot(&self, path: &std::path::Path) -> io::Result<()> {
         let mut cmd = Command::new("screencapture");
         cmd.args(["-x", "-o", "-l", &self.platform_window_id.to_string()]).arg(path);
