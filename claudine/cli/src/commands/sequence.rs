@@ -48,7 +48,7 @@ fn parse_boolish(s: &str) -> Result<bool, String> {
     }
 }
 
-/// Entry point for `claudine sequence`.
+/// Entry point for `claudine sequence`; returns the process exit code.
 ///
 /// Errors returned here bubble up to the top-level walker in `main.rs`,
 /// which renders darkmatter `BlockError` reports for typed Markdown
@@ -57,17 +57,16 @@ pub fn run_sequence(
     args: SequenceArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
-) -> Result<()> {
-    let code = match args.budget_ledger.clone() {
+) -> Result<i32> {
+    match args.budget_ledger.clone() {
         Some(ledger) => {
             let shared = args.shared.clone();
             crate::budget::run_with_ledger(&ledger, &shared, || {
                 run_sequence_inner(args, verbose, startup_timings)
-            })?
+            })
         }
-        None => run_sequence_inner(args, verbose, startup_timings)?,
-    };
-    std::process::exit(code);
+        None => run_sequence_inner(args, verbose, startup_timings),
+    }
 }
 
 #[allow(clippy::result_large_err)]

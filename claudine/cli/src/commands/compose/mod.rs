@@ -634,35 +634,12 @@ pub struct InlineComposeArgs {
     pub args: Vec<String>,
 }
 
-/// Entry point for `claudine compose`.
+/// Entry point for `claudine compose`; returns the process exit code.
 ///
 /// Errors returned here bubble up to the top-level walker in `main.rs`,
 /// which renders darkmatter `BlockError` reports for typed Markdown
 /// failures and falls back to `color_eyre` otherwise.
 pub fn run_compose(
-    args: ComposeArgs,
-    verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
-) -> Result<()> {
-    let code = run_compose_inner(args, verbose, startup_timings)?;
-    std::process::exit(code);
-}
-
-/// Entry point for `claudine inline-compose`.
-///
-/// Errors returned here bubble up to the top-level walker in `main.rs`,
-/// which renders darkmatter `BlockError` reports for typed Markdown
-/// failures and falls back to `color_eyre` otherwise.
-pub fn run_inline_compose(
-    args: InlineComposeArgs,
-    verbose: u8,
-    startup_timings: Option<crate::perf::StartupTimings>,
-) -> Result<()> {
-    let code = run_inline_compose_inner(args, verbose, startup_timings)?;
-    std::process::exit(code);
-}
-
-fn run_compose_inner(
     args: ComposeArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
@@ -677,7 +654,12 @@ fn run_compose_inner(
     )
 }
 
-fn run_inline_compose_inner(
+/// Entry point for `claudine inline-compose`; returns the process exit code.
+///
+/// Errors returned here bubble up to the top-level walker in `main.rs`,
+/// which renders darkmatter `BlockError` reports for typed Markdown
+/// failures and falls back to `color_eyre` otherwise.
+pub fn run_inline_compose(
     args: InlineComposeArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,

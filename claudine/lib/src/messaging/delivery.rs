@@ -151,6 +151,14 @@ where
     }
 }
 
+/// Whether any tracked delivery is still running.
+///
+/// A program about to exit can use this to prepare only for a drain that will
+/// actually wait (the CLI installs its Ctrl+C ladder only then).
+pub fn has_pending_deliveries() -> bool {
+    registry().iter().any(|entry| !entry.handle.is_finished())
+}
+
 /// Wait for every tracked delivery to finish, until `deadline`.
 ///
 /// The deadline is shared by all deliveries, including any registered while

@@ -138,6 +138,28 @@ async fn nothing_tracked_returns_immediately() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn pending_deliveries_are_seen_until_they_finish() {
+    assert!(!has_pending_deliveries());
+
+    let stalled_dropped = track_stalled(route("stalled"));
+    track(route("quick"), async {});
+    assert!(has_pending_deliveries());
+
+    let outcome = drain_deliveries(Instant::now() + DELIVERY_DRAIN_BUDGET).await;
+    assert_eq!(outcome.pending, vec![route("stalled")]);
+    assert!(!has_pending_deliveries());
+    settle_runtime().await;
+    assert!(stalled_dropped.load(Ordering::SeqCst));
+
+    // A delivery that has already finished but was never drained does not
+    // count as pending.
+    track(route("done"), async {});
+    settle_runtime().await;
+    assert_eq!(tracked_count(), 1);
+    assert!(!has_pending_deliveries());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_panicking_delivery_is_reported_and_not_re_raised() {
     track(route("boom"), async { panic!("delivery exploded") });
     track(DeliveryLabel::DesktopNotification, async {

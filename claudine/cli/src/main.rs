@@ -17,6 +17,7 @@ mod log;
 mod output;
 mod perf;
 mod provider_values;
+mod shutdown;
 mod table_utils;
 mod telemetry;
 
@@ -191,13 +192,11 @@ fn main() -> Result<()> {
         .ok();
     color_eyre::install()?;
 
-    match run() {
-        Ok(()) => Ok(()),
-        Err(report) => {
-            render_top_level_error(&report);
-            std::process::exit(1);
-        }
-    }
+    // `run` returns only for an error raised before the runtime exists; every
+    // other exit goes through `shutdown::finish` inside the runtime.
+    let Err(report) = run();
+    render_top_level_error(&report);
+    shutdown::exit_before_runtime(1)
 }
 
 fn run_audio_worker_if_requested() -> Result<Option<i32>> {
@@ -244,7 +243,7 @@ fn render_top_level_error(report: &Report) {
     log::error(&report.to_string());
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<std::convert::Infallible> {
     let process_start = std::time::Instant::now();
 
     // When invoked as a completion subprocess (COMPLETE=<shell> claudine …),
@@ -283,22 +282,52 @@ fn run() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(
+    Ok(runtime.block_on(async_main(
         argv,
         provider_tail,
         perf_bootstrap,
         arg_parse_start,
         process_start,
-    ))
+    )))
 }
 
+/// Run the command, render any error, and exit through the shutdown path.
+///
+/// The error block renders before the drain so it precedes any
+/// pending-delivery warning.
 async fn async_main(
     argv: Vec<OsString>,
     provider_tail: argv::ProviderArgs,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
-) -> Result<()> {
+) -> std::convert::Infallible {
+    let code = match dispatch(
+        argv,
+        provider_tail,
+        perf_bootstrap,
+        arg_parse_start,
+        process_start,
+    )
+    .await
+    {
+        Ok(code) => code,
+        Err(report) => {
+            render_top_level_error(&report);
+            1
+        }
+    };
+    shutdown::finish(code).await
+}
+
+/// Parse the CLI and run the selected command, returning its exit code.
+async fn dispatch(
+    argv: Vec<OsString>,
+    provider_tail: argv::ProviderArgs,
+    perf_bootstrap: perf::PerfBootstrap,
+    arg_parse_start: std::time::Instant,
+    process_start: std::time::Instant,
+) -> Result<i32> {
     let mut cli = parse_cli_from(&argv);
     let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
         claudine::child_environment::LaunchDirectoryMode::ProviderHook
@@ -319,7 +348,7 @@ async fn async_main(
     let perf_tracing_init = tracing_start.elapsed();
 
     if cli.help || cli.command.is_none() {
-        return commands::help::run();
+        return commands::help::run().map(|()| 0);
     }
 
     let perf_enabled = perf_bootstrap.enabled;
@@ -387,8 +416,8 @@ async fn async_main(
         None
     };
 
-    match command {
-        Commands::Handle(args) => commands::handle::run(args).await,
+    let result = match command {
+        Commands::Handle(args) => return commands::handle::run(args).await,
         Commands::Completions(args) => commands::completions::run(args),
         Commands::Complete(args) => commands::completions::run_complete(args),
         Commands::Config(args) => commands::config_tui::run(args).await,
@@ -414,17 +443,18 @@ async fn async_main(
         | Commands::Pi(_)
         | Commands::Antigravity(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => {
-            commands::compose::run_compose(args, cli.verbose, startup_timings)
+            return commands::compose::run_compose(args, cli.verbose, startup_timings);
         }
         Commands::InlineCompose(args) => {
-            commands::compose::run_inline_compose(args, cli.verbose, startup_timings)
+            return commands::compose::run_inline_compose(args, cli.verbose, startup_timings);
         }
         Commands::Sequence(args) => {
-            commands::sequence::run_sequence(args, cli.verbose, startup_timings)
+            return commands::sequence::run_sequence(args, cli.verbose, startup_timings);
         }
         Commands::Budget(args) => commands::budget::run(args),
         Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
         Commands::Errors(args) => commands::errors::run(args),
-    }
+    };
+    result.map(|()| 0)
 }

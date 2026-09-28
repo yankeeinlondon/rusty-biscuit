@@ -117,8 +117,10 @@ pub(crate) fn run_composition_inner(
 
     // Install the process-scoped SIGINT handler now so Ctrl+C during the
     // (potentially slow) compose prep phase produces the same INFO notice
-    // and exit-130 outcome the loop emits during its iterations.
-    let _user_interrupt_guard = install_user_interrupt_guard(&file);
+    // and exit-130 outcome the loop emits during its iterations. Shutdown
+    // keeps it installed through the exit-time delivery drain, so a repeat
+    // press there still force-exits.
+    crate::shutdown::hold_interrupt_guard(install_user_interrupt_guard(&file));
 
     validate_timeout_flags(&shared)?;
     shared.step_timeout_secs()?;
