@@ -192,7 +192,10 @@ impl DefaultTips {
         let (name, sha) = self.origin.as_ref()?;
         let local = self.local.as_deref()?;
         let (entries, last_active) = line_entries(sha, &[local], LINE_WINDOW);
-        let mut line = GraphLine::new(name.clone()).forked_at(fork.clone()).with_entries(entries);
+        let mut line = GraphLine::new(name.clone())
+            .forked_at(fork.clone())
+            .with_tip(sha.clone())
+            .with_entries(entries);
         if let Some(time) = last_active {
             line = line.with_last_active(time);
         }
@@ -277,6 +280,7 @@ fn focused_view(
             let (entries, _) = line_entries(parent_tip, &excludes, LINE_WINDOW);
             let mut parent_line = GraphLine::new(parent)
                 .forked_at(parent_fork.clone())
+                .with_tip(parent_tip)
                 .with_entries(entries);
             if let Some(time) = created_at(input, parent) {
                 parent_line = parent_line.with_created_at(time);
@@ -293,6 +297,7 @@ fn focused_view(
                 GraphLine::new(current)
                     .with_parent(parent)
                     .forked_at(current_fork)
+                    .with_tip(current_tip)
                     .with_entries(entries),
             );
             parent_fork
@@ -303,6 +308,7 @@ fn focused_view(
             lines.push(
                 GraphLine::new(current)
                     .forked_at(current_fork.to_string())
+                    .with_tip(current_tip)
                     .with_entries(entries),
             );
             current_fork.to_string()
@@ -369,7 +375,7 @@ fn base_view(input: &GatherInput, tips: &DefaultTips) -> Option<GraphFacts> {
                         None => merge_base(&tips.lane_tip, tip)?,
                     };
                     let (entries, last_active) = line_entries(tip, &excludes, LINE_WINDOW);
-                    let mut line = GraphLine::new(*branch).forked_at(fork).with_entries(entries);
+                    let mut line = GraphLine::new(*branch).forked_at(fork).with_tip(tip).with_entries(entries);
                     if let Some((parent, _)) = parent {
                         line = line.with_parent(parent);
                     }

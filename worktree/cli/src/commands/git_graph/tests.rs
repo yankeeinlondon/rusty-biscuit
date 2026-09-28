@@ -210,10 +210,21 @@ fn the_base_view_gives_every_worktree_branch_a_line() {
     assert_eq!(line("feature-a").fork_sha.as_ref(), Some(&repo.c2));
     assert!(line("feature-a").last_active.is_some());
     assert_eq!(line("feature-b").entries, commits(&[&repo.b1]));
-    // Already in main: no entries, forked at its own tip, so it becomes a tag.
+    // Already in main: no entries, and its own tip is where `GitGraph` tags it.
     assert!(line("chore/merged").entries.is_empty());
     assert_eq!(line("chore/merged").fork_sha.as_ref(), Some(&m1));
+    assert_eq!(line("chore/merged").tip_sha.as_ref(), Some(&m1));
     assert_eq!(line("chore/merged").last_active, None);
+    assert_eq!(line("feature-a").tip_sha.as_ref(), Some(&repo.a1));
+    assert_eq!(line("feature-c").tip_sha.as_ref(), Some(&c_1));
+    assert!(
+        graph
+            .to_git_graph(&PrListing::default(), None)
+            .mermaid()
+            .expect("a graph")
+            .contains("tag: \"chore/merged\""),
+        "the merged branch is labeled at its tip"
+    );
     // A recorded parent that is also drawn nests the line under it.
     assert_eq!(line("feature-c").parent.as_deref(), Some("feature-b"));
     assert_eq!(line("feature-c").fork_sha.as_ref(), Some(&repo.b1));
