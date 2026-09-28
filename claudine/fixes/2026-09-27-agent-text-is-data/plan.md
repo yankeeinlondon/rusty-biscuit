@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
 total_phases: 6
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 spec: 2026-09-27-agent-text-is-data
@@ -95,6 +95,31 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/errors.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/literal_token.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_value_provenance.rs
+docs_updated_during_phase_3:
+    - docs/dependencies.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/inline/interpolation.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Plan: agent-produced text is data, never instructions
@@ -168,7 +193,7 @@ data-origin values. Phase 2 verifies this with a workspace-wide caller check.
 - [x] An authored whole-value shell candidate is found by preflight and handled
       by the normal approval policy. A command shape produced by interpolation
       is not. Shell output that looks like a command stays data.
-- [ ] Property test: `decode(encode(s)) == s` for arbitrary Unicode, including
+- [x] Property test: `decode(encode(s)) == s` for arbitrary Unicode, including
       strings that look like tokens. A malformed token fails with a source
       location.
 - [ ] Claudine loop, sequence, inline, inline-unrepairable, and lifecycle
@@ -615,13 +640,13 @@ dependency and may start alongside Phase 2.**
 
 ### Wave 1 (parallel)
 
-- [ ] **Codec** (`rust-developer`)
+- [x] **Codec** (`rust-developer`)
       - Add a `literal_token` module with `encode(&str) -> String` (the
         double-quoted YAML scalar form and the bare token), `decode`, and
         `TokenError`. Follow N5.
       - Add `base64` as a direct dependency (unpadded URL-safe alphabet) and
         update `docs/dependencies.md`.
-- [ ] **Property tests** (`feature-tester-rust`)
+- [x] **Property tests** (`feature-tester-rust`)
       - Using `proptest` (already a dev-dependency), test that
         `decode(encode(s)) == s` for arbitrary Unicode. Cover the empty string,
         braces, `$(`, backslashes, newlines, quote characters, and strings that
@@ -630,7 +655,7 @@ dependency and may start alongside Phase 2.**
 
 ### Wave 2
 
-- [ ] **Scanner integration** (`rust-developer`)
+- [x] **Scanner integration** (`rust-developer`)
       - Following S3, a whole-leaf token decodes to a Data leaf during
         frontmatter pass 1 (never re-scanned, never a shell candidate). A
         malformed or misplaced token fails with a located `MalformedLiteralToken`.
@@ -642,7 +667,7 @@ dependency and may start alongside Phase 2.**
 
 ### Checkpoint 3
 
-- [ ] `cd darkmatter && just test && just lint` is green, including the
+- [x] `cd darkmatter && just test && just lint` is green, including the
       proptest.
 
 ---

@@ -37,43 +37,37 @@ related:
     - 2026-09-20-lifecycle-handoff-gaps
 human_review: false
 message_to_agent: |-
-    Phase 2 is complete (see implementation-log.md "## Phase 2"). What Phase 3
+    Phase 3 is complete (see implementation-log.md "## Phase 3"). What Phase 4
     builds on:
-    - Frontmatter origin lives in `compose/value_origin.rs`: `DataPaths`
-      (leaf paths), `FrontmatterProvenance` (the authored top-level snapshot
-      plus data paths), and `authored_shell_candidate`, the single shell
-      predicate. `prepare_frontmatter_for_compose` returns the provenance, and
-      `interpolate_frontmatter_located` takes `&mut FrontmatterProvenance` and a
-      `FrontmatterPass` (`First { defer_shell_pending }` / `Deferred(&keys)`).
-      A token decoded in pass 1 should become a data leaf: mark its path with
-      `provenance.data_mut().mark(path)` and never hand it to `rewrite_value`.
-      Data leaves are already skipped by classification, rewrite, literal
-      conversion, the shell scan, and the leak guard.
-    - The body is single-pass (`interpolate_text_in` in
-      `interpolation/rewrite.rs`). Directive scanners read
-      `parse_utils::structural_view`, and `authored_directive` decides whether
-      a directive is authored. `MAX_INTERPOLATION_DEPTH` and
-      `ExpressionOrigin::Generated` are gone.
-    - N5's `{{!data:` check belongs in `ExpressionFinder::scan` and the
-      entry points of `interpolate_text_in`; both now run exactly once per
-      authored span.
-    - Public API added: `OverrideOrigin`, `OverrideLayer`,
-      `ComposeOptions::{with_data_overrides, with_override_layers}`, and
-      `SourceRef::Supplied { supplier }` (R5; Phase 5 can use it for "the
-      agent"). Phase 4 should pass Claudine's runtime layers through
-      `with_override_layers`.
-    - Claudine: `lifecycle_field_from_agent_written_file_is_sent_verbatim` is
-      green and un-ignored. It passes because Darkmatter no longer converts
-      `{{{ … }}}` in inserted text; a `{{ … }}` payload in that field still
-      needs N10 (Phase 4). 16 Claudine red tests remain ignored.
-    - `just cross-check` re-parses parenthesized nextest filtersets; pass
-      plain test-name filters instead.
-    Open decisions, none blocking Phase 3 (details in the log's "Departures"):
-    - `::file … when="…"` conditions built from inserted data are still
-      evaluated.
-    - Directive `set`/`replace` option values are data only when data falls
-      in the options region after the target.
-    - N9, B14, and B2/B11/B13 are still awaiting author confirmation.
+    - The codec is public at `darkmatter::markdown::literal_token`: `encode`,
+      `encode_yaml_scalar` (always double-quoted), `decode`, `decode_leaf`,
+      `decode_literal_tokens(&Value)`, and `Frontmatter::decoded_literal_tokens()`.
+      Loaders keep tokens encoded; readers decode. Never hand decoded values
+      back to compose as authored text; pass them as a Data layer
+      (`with_override_layers`).
+    - Compose decodes an authored whole-leaf token in frontmatter pass 1 into a
+      data leaf. Keys in `exclude_keys` (Claudine lifecycle stacks) are NOT
+      decoded: a token there reaches event-time interpolation raw and fails
+      as `ExpressionError::MalformedLiteralToken`. That is fail-closed, but
+      Phases 4/5 must decide whether an agent can own a lifecycle key.
+    - Any token outside a whole authored frontmatter leaf, including a token
+      inside an expression's string literal, is the authoring-fatal
+      `ExpressionError::MalformedLiteralToken`, under Lenient too. Claudine
+      code that calls Darkmatter interpolation on text holding
+      `{{!data:` now gets that error. `ExpressionFinder::scan` reports tokens
+      in the new `tokens` list, so `find_all` no longer returns them: S3 row
+      16's hazard (a raw token passing Claudine's `reject_surviving_spans`
+      silently) is live until readers decode.
+    - Fixed a latent Phase 2 defect: the pre-approval gate
+      (`validate_pre_approved`) now collects from a snapshot taken before
+      frontmatter pass 1, so a produced `$( … )` (an expression result or a
+      decoded token) no longer fails `md compose` with "not pre-approved ...
+      bug in the pre-flight scanner".
+    - The N6 "pending" classifiers and Claudine `sequence/grammar.rs:122` are
+      still not decoding (Phase 5 owns them, per the plan).
+    Open decisions carried from Phase 2 are unchanged: N9, B14, and
+    B2/B11/B13 still await author confirmation, and a `::file … when="…"`
+    condition built from data is still evaluated.
 ---
 
 # Agent-Produced Text Is Data, Never Instructions

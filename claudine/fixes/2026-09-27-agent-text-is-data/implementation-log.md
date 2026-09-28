@@ -92,6 +92,31 @@ skills_files_updated_during_phase_2:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/darkmatter/compose.md
     - .claude/skills/darkmatter/errors.md
+source_files_during_phase_3:
+    - Cargo.lock
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/literal_token.rs
+    - darkmatter/lib/src/markdown/mod.rs
+    - darkmatter/lib/src/markdown/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/expression/lexer.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/cli/tests/l1/compose_value_provenance.rs
+docs_updated_during_phase_3:
+    - docs/dependencies.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/docs/inline/interpolation.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/plan.md
+    - claudine/fixes/2026-09-27-agent-text-is-data/implementation-log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/SKILL.md
 ---
 
 # Implementation Log for 2026-09-27-agent-text-is-data (6 phases)
@@ -526,3 +551,129 @@ All 8 Darkmatter `red until phase 2` tests are un-ignored and pass.
   statements were corrected.
 - The Claudine skill is unchanged. Claudine's behavior changes arrive in
   Phases 4–5.
+
+## Phase 3
+
+- Started and finished 2026-09-28. All changes are in `darkmatter` (the lib,
+  plus two new CLI tests). Claudine is unchanged; its L1 suite gives the same
+  result as at the end of Phase 2.
+
+### What was built
+
+- **Codec** (`darkmatter/lib/src/markdown/literal_token.rs`, new, public).
+  - `encode` (the bare token), `encode_yaml_scalar` (always double-quoted),
+    `decode`, and `decode_leaf`, which classifies one string leaf as no token,
+    a whole token, or a malformed or embedded token.
+  - `TokenError` has these variants: `NotAToken`, `Unterminated`,
+    `MissingVersion`, `UnsupportedVersion`, `InvalidPayload`, `InvalidUtf8`,
+    and `Embedded`.
+  - `decode_literal_tokens(&Value)` returns a `LiteralTokenError` that carries
+    the dotted path. `Frontmatter::decoded_literal_tokens()` is the per-key
+    convenience (N6).
+  - `base64 0.22` is a new direct dependency, using unpadded URL-safe base64
+    with canonical decoding. It was already in the lockfile, and both
+    dependency docs are updated.
+- **Scanner.** `ExpressionFinder::scan` classifies a two-brace opener
+  followed by `!data:` as a `LiteralTokenLocation` in a new
+  `ExpressionScanResult::tokens` list, and never as an expression. A token
+  ends at the first `}}`, or at the end of the text when unclosed. Triple
+  braces, backslash escapes, and code regions are checked first, so they
+  still win.
+- **Error.** The new `ExpressionError::MalformedLiteralToken(TokenError)` is
+  authoring-fatal, so a lenient caller cannot keep a token. `interpolation_block`
+  gives it a dedicated "malformed literal token" block, with the file,
+  line, column, and excerpt.
+- **Frontmatter pass 1.** `decode_authored_tokens` runs before literal
+  conversion and before classification. Each authored whole-leaf token, at
+  any depth, is replaced by its text and marked as a data path. A malformed
+  or embedded token fails at its located span. The check runs in a pre-pass
+  so that it is fatal in best-effort (preflight) runs too; those runs swallow
+  per-key rewrite errors. Excluded (event-time) keys keep their raw text.
+- **Body and mixed text.** `interpolate_text_in` rejects any token its
+  masked view still shows. Tokens inside data are masked, so they are not
+  errors. It and the whole-value path in `interpolate_value_located` also
+  reject an expression whose source holds `{{!data:`, such as a token inside
+  a string literal (N5, "inside an expression").
+- **Pre-approval gate fix** (`pipeline/mod.rs`). `validate_pre_approved` now
+  collects from a snapshot of the document taken before frontmatter pass 1.
+  Before this fix it re-collected from the document *after* pass 1. It then
+  re-prepared the provenance, so a produced whole-value `$( … )` read as
+  authored text, and the run failed with "Command 'echo X' … was not
+  pre-approved … bug in the pre-flight scanner".
+  - This was a latent Phase 2 defect. `cmd: "{{ '$(echo X)' }}"` failed
+    under `md compose` the same way before Phase 3. A decoded token exposed
+    it.
+  - The shell stage never ran the command; only the gate misfired.
+  - The snapshot is taken only when the gate applies (the root, with
+    `pre_approved_commands`).
+
+### Departures and decisions
+
+- **Unterminated and trailing text.** `{{!data:v1:YQ}} ` (trailing space)
+  and two adjacent tokens are `Embedded`, not `Unterminated`: the scanner
+  finds a complete token that is not the whole leaf. `{{!data:v1:YQ` with no
+  closer is `Unterminated`.
+- **The nested-span lint no longer flags a token.** Before this phase,
+  `lint_expression` reported `{{!data:…}}` inside a string literal as a
+  nested span, because it was an expression. Now it is a scanner token and
+  not an expression. The runtime check above reports it as
+  `MalformedLiteralToken` instead. No `ExpressionLintKind` variant was
+  added, because Claudine and DMLS match on that enum. S3 row 5 suggested
+  reporting from the lint; the runtime check covers the same input on every
+  compose surface.
+- **Excluded keys are not decoded.** Claudine's lifecycle keys stay raw for
+  the caller that evaluates them at event time. A token in one therefore
+  reaches Darkmatter interpolation later, and there it fails as
+  `MalformedLiteralToken`, which is fail-closed. Phase 4/5 must decide
+  whether an agent can own a lifecycle key at all.
+- **Error rendering.** A token failure in the body says "A document
+  expression holds …". That is the existing scope phrase, which was kept.
+- **Out of this phase, owned by Phase 5:**
+  - the N6 "pending" classifiers (`schemas/format.rs:265`,
+    `schemas/mod.rs:1565`, `schema_validation.rs:1253`,
+    `schemas/rewrite.rs:374`, DMLS, and Claudine `value_needs_composition`)
+  - Claudine `sequence/grammar.rs:122`
+
+  None of them decode yet.
+
+### Requirement → test mapping
+
+| Requirement | Tests |
+| ----------- | ----- |
+| `decode(encode(s)) == s` for arbitrary Unicode and tricky strings (braces, `$(`, backslashes, CR/LF, quotes, token look-alikes, empty) | `literal_token::tests::decode_inverts_encode`, `decode_inverts_encode_on_tricky_strings` (proptest) |
+| Encoded scalar is YAML-safe and loads back to the same string | `literal_token::tests::the_yaml_scalar_round_trips` (proptest), `the_yaml_scalar_loads_back_as_the_bare_token` |
+| A token is exactly one scanner token, never an expression | `literal_token::tests::a_token_is_one_scanner_token_and_never_an_expression` (proptest) |
+| Canonical payload, empty string, each `TokenError` | `the_empty_string_has_an_empty_payload`, `the_payload_is_unpadded_url_safe_base64`, `malformed_tokens_name_what_is_wrong` |
+| Whole-leaf only; escapes are text | `a_leaf_is_a_token_only_when_it_is_the_whole_value`; L1 `literal_token::escaped_spellings_are_text` |
+| Public decode API (N6), paths, shape | `decoding_a_tree_replaces_whole_leaves_and_keeps_shape`, `a_malformed_leaf_in_a_tree_reports_its_path`; L1 `loaders_keep_tokens_and_readers_decode_them` |
+| Decoded `{{ area }}` / `{{…}}` / `{{{ area }}}` / `$(echo X)` / mixed / token look-alike / empty: not evaluated, exact at top level, nested leaf, dependent key, body, and transcluded child; no approval; file unchanged | L1 `literal_token::a_decoded_token_is_data_everywhere_it_flows` |
+| Unchanged token read again on a later run (repeated read) | L1 `loaders_keep_tokens_and_readers_decode_them` (composes twice) |
+| Decoded `$(echo X)` is not a shell candidate for collection, approval, or the pre-approval gate; authored `$(echo Y)` control still is; produced `$( … )` passes the gate | L1 `literal_token::a_decoded_command_is_not_a_shell_candidate` (fails if the gate fix is reverted; checked by mutation) |
+| Malformed tokens fail with typed cause, key, and 1-based line/column under both `fail_fast` values: bad version, unterminated, embedded, leading whitespace, nested bad payload, body, inside an expression | L1 `literal_token::malformed_tokens_report_their_location` |
+| Lenient preflight cannot keep a token | L1 `literal_token::preflight_fails_on_a_body_token` |
+| End to end through `md compose` | CLI `compose_value_provenance::literal_tokens_compose_to_their_exact_text`, `malformed_literal_token_fails_with_its_location` |
+
+The input-robustness matrix does not apply to this phase as a config
+reader, but the token grammar's shapes are all covered:
+
+- absent: an ordinary string
+- empty payload
+- a wrong version
+- an invalid alphabet or length
+- non-canonical trailing bits
+- non-UTF-8 bytes
+- trailing and leading content
+- two tokens
+- unterminated
+
+### Gates
+
+- macOS, `cd darkmatter`: `just test` passed 8565 tests with 12 skipped.
+  `just lint` passes. `just test-l2` passed 18 + 69 + 3.
+- macOS, `cd claudine`: `just test` passed 7481 tests with 25 skipped,
+  unchanged from Phase 2. `just lint` passes. The only warning is the
+  existing macOS linker note `__eh_frame section too large`.
+- `just cross-check` with `literal_token` and `pre_approved` name filters:
+  - `darkmatter`: Linux 22/22, native Windows 22/22.
+  - `darkmatter-cli`: Linux 2/2, native Windows 2/2.
+- No new `#[cfg]`. No pre-existing failures were seen.
