@@ -81,6 +81,10 @@ Look for how this spec file could be improved:
             - be sure to still includes addressing these side-effects as part of the spec
             - and explain the change as a readers note to indicates the design solution to a reader so they understand why the changes was made
 - update with better wording if you think ideas are expressed unclearly
+- keep performance measurement proportional to the risk
+    - a performance spike is one host and a quick sample, unless the spec names a known cost that is specific to one OS
+    - if the spec's own figures already answer a spike's question, remove the spike rather than tightening it
+    - never add hosts, workloads, repetitions, or statistical thresholds to a spike on your own initiative; if you think more is needed, put it in "Open Questions" for the author to decide
 
 ### Update Spec Frontmatter
 

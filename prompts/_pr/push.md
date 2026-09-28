@@ -115,63 +115,11 @@ failure:
     > {{about}}
 ::end-block
 
-<!-- The shell blocks are inline on purpose. A command that fails inside a transcluded partial
-     drops the whole partial with only a warning, while an inline block either renders its
-     `when_error` text or stops the stage, so one missing tool cannot silently erase every fact. -->
 ## What Is Already Known
 
 These facts were gathered immediately before this session started. Use them as given rather than re-running the commands; re-check a fact only when something you did could have changed it.
 
-- The checkout is on the `{{ctx.branch}}` branch of **{{ctx.repo}}**, on a **{{ctx.os}}** host.
-
-### Uncommitted changes
-
-::block when="length(ctx.dirty_files) == 0"
-The working tree is clean.
-::end-block
-::block when="length(ctx.dirty_files) > 0"
-These paths have uncommitted changes (staged, unstaged, or untracked): {{ as_csv(ctx.dirty_files) }}. They make the pre-push hook replan from the working tree and withhold the evidence CI would otherwise reuse.
-::end-block
-
-### Is local `{{base}}` current with `origin/{{base}}`?
-
-`origin/{{base}}` was fetched first. The two numbers are commits only on local `{{base}}`, then commits only on `origin/{{base}}`; `0 0` means they match.
-
-::shell-block timeout=30 when_error="(could not be determined on this host)"
-git fetch --quiet origin {{base}}
-git rev-list --left-right --count {{base}}...origin/{{base}}
-::end-block
-
-### How `HEAD` relates to `origin/{{base}}`
-
-Commits only on `HEAD` (the work to propose), then commits only on `origin/{{base}}` (what this branch is behind by):
-
-::shell-block timeout=30 when_error="(could not be determined on this host)"
-git rev-list --left-right --count HEAD...origin/{{base}}
-::end-block
-
-### Does `{{ctx.branch}}` have a remote?
-
-The last commit on `origin/{{ctx.branch}}`, then the number of local commits not yet pushed to it:
-
-::shell-block timeout=30 when_error="(there is no remote branch yet: this branch has never been pushed)"
-git log -1 --format=reference origin/{{ctx.branch}}
-git rev-list --count origin/{{ctx.branch}}..HEAD
-::end-block
-
-### The commits to propose (`origin/{{base}}..HEAD`)
-
-::shell-block timeout=30 when_error="(could not be listed on this host)"
-git log --oneline origin/{{base}}..HEAD
-::end-block
-
-### Packages with source changes, and what the hook will run
-
-This is the output of `just ci-local --plan`: the packages whose source changed relative to `origin/{{base}}`, the cells the pre-push hook will run for them on this host, and the cells it will reuse from earlier passing evidence.
-
-::shell-block timeout=120 when_error="(the plan preview failed; the hook prints its own plan when it runs)"
-just ci-local --plan
-::end-block
+::file ./_facts.md
 
 ::file ./_report.md
 

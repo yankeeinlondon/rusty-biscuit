@@ -204,6 +204,26 @@ in this example:
 
 For the full grammar, truthiness rules, supported operators, functions, and edge cases, see [Darkmatter Expressions](../topics/darkmatter-expressions.md).
 
+### When an Included File Fails
+
+An included file is composed as part of the same composition, so what happens when it fails depends on why it failed.
+
+- **A shell span fails the composition, exactly as it would inline.** A `::shell`, `::shell-block`, or frontmatter `$( … )` that fails without a handler (a non-zero exit with no `when_error`, a missing program, a timeout without `--allow-shell-timeout`) stops the composition, and the error names the included file. A command the author gave a fallback renders that fallback, as it does inline.
+- **Structural and context failures also stop it:** a cycle, the depth limit, a remote fetch that failed, a `ctx` value the composition never captured, and a command missing from the approved set.
+- **Any other failure is tolerated in lenient mode (`fail_fast` off, the default).** The included file is replaced by a visible `_Could not transclude `name`_` notice, a warning is reported, and the parent composes on. With `fail_fast` on, it stops the composition.
+
+```md
+<!-- facts.md -->
+::shell-block when_error="(unknown)"
+git rev-list --count origin/main..HEAD
+::end-block
+::shell-block
+just ci-local --plan
+::end-block
+```
+
+Transcluding `facts.md` with `git` working but `just` missing stops the composition with an error that names `facts.md`. With `just` present and the `git` command exiting non-zero, the first block renders `(unknown)` and the composition continues.
+
 ## Non Markdown Local Files
 
 Up to known we've focused on Markdown documents _transcluding_ other Markdown documents and that is overwhelming the most common use case, however, we do support a few other file types.

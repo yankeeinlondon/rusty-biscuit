@@ -171,7 +171,7 @@ tests in the domain module and one composition through `md compose` on a fixture
 
 ## Rules Learned the Hard Way
 
-These came out of `has_command`, the path helpers, and the `darkmatter/features/2026-09-09-more-context`
+These came out of `has_command`, the path helpers, and the `2026-09-09-more-context`
 feature (`as_markdown`, `package`, `recent_commits`, the network and shell probes).
 
 - **The catalog is metadata; the binding is behavior.** Neither repeats the other. Add one

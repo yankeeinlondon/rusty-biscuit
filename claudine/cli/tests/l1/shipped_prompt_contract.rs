@@ -736,3 +736,164 @@ fn shipped_implement_plan_logging_instructions_follow_log_content() {
         );
     }
 }
+
+fn frontmatter_value(markdown: &Markdown) -> Value {
+    Value::Object(
+        markdown
+            .frontmatter()
+            .as_map()
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+/// The verbs a stack item's `action` runs, in order, in either action form.
+fn stack_item_verbs(item: &Value) -> Vec<String> {
+    let actions = match item.get("action") {
+        Some(Value::Array(actions)) => actions.clone(),
+        Some(action) => vec![action.clone()],
+        None => Vec::new(),
+    };
+    actions
+        .iter()
+        .flat_map(|action| match action {
+            Value::String(verb) => vec![verb.clone()],
+            Value::Object(fields) => match fields.get("action") {
+                Some(Value::String(verb)) => vec![verb.clone()],
+                _ => fields.keys().cloned().collect(),
+            },
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// Stack items that can fall through into a later unconditional `error`: a
+/// conditional item with no flow-control action runs, and the stack goes on to
+/// the item that fails the event even though its own branch succeeded.
+fn stack_fall_throughs(prompt: &str, frontmatter: &Value) -> Vec<String> {
+    const FLOW_CONTROL: &[&str] = &["stop", "skip", "error", "proxy", "retry", "resume", "defer"];
+    let Some(events) = frontmatter.as_object() else {
+        return Vec::new();
+    };
+    let mut defects = Vec::new();
+    for (event, block) in events {
+        let Some(stack) = block.get("stack").and_then(Value::as_array) else {
+            continue;
+        };
+        for (index, item) in stack.iter().enumerate() {
+            if item.get("when").is_none() {
+                continue;
+            }
+            let ends_flow = stack_item_verbs(item)
+                .iter()
+                .any(|verb| FLOW_CONTROL.contains(&verb.as_str()));
+            let later_error = stack[index + 1..].iter().position(|later| {
+                later.get("when").is_none() && stack_item_verbs(later).iter().any(|verb| verb == "error")
+            });
+            if let (false, Some(offset)) = (ends_flow, later_error) {
+                defects.push(format!(
+                    "{prompt}: `{event}.stack[{index}]` has no flow-control action and falls through to the unconditional `error` at `{event}.stack[{}]`",
+                    index + 1 + offset
+                ));
+            }
+        }
+    }
+    defects
+}
+
+/// An `error` in `success` fails the process, so a stack whose success branch
+/// falls through into its unconditional `error` fails a run that worked. The
+/// pre-fix `_pr/open.md` stack is the negative control.
+#[test]
+fn shipped_prompt_stacks_do_not_fall_through_into_an_unconditional_error() {
+    let control = Markdown::from(
+        "---\nsuccess:\n    stack:\n        - when: \"frontmatter(report, 'status') == 'pr_opened'\"\n          action:\n              - success: opened\n        - action:\n              - error: no pull request URL was recorded\n---\nbody\n",
+    );
+    let control = stack_fall_throughs("open.md", &frontmatter_value(&control));
+    assert_eq!(control.len(), 1, "{control:?}");
+
+    let paths = shipped_prompt_paths();
+    assert!(!paths.is_empty(), "the shipped prompt corpus must not be empty");
+    let defects: Vec<String> = paths
+        .iter()
+        .filter_map(|prompt| {
+            let markdown = Markdown::try_from(prompt.as_path()).ok()?;
+            Some(stack_fall_throughs(&prompt.display().to_string(), &frontmatter_value(&markdown)))
+        })
+        .flatten()
+        .collect();
+    assert!(defects.is_empty(), "{}", defects.join("\n"));
+}
+
+/// A shipped prompt never names a real feature or fix by a path that holds
+/// its dated directory: that path goes stale when the author moves it between
+/// lifecycle directories. Prose names it by `{date}-{name}` alone, and a
+/// lookup searches for that directory (the prompt guide's `find_files`). A
+/// made-up example path that names no spec in the repository is not a
+/// reference.
+#[test]
+fn shipped_prompts_name_specs_by_directory_identity() {
+    /// `(line, date-name)` for every `features/` or `fixes/` path segment
+    /// followed, after an optional lifecycle directory, by a dated name.
+    fn dated_spec_paths(text: &str) -> Vec<(String, String)> {
+        text.match_indices("features/")
+            .chain(text.match_indices("fixes/"))
+            .filter_map(|(start, kind)| {
+                let rest = &text[start + kind.len()..];
+                let rest = rest
+                    .strip_prefix("_completed/")
+                    .or_else(|| rest.strip_prefix("_unscheduled/"))
+                    .unwrap_or(rest);
+                let date = rest.get(..11)?;
+                let is_date = date.bytes().enumerate().all(|(index, byte)| match index {
+                    4 | 7 | 10 => byte == b'-',
+                    _ => byte.is_ascii_digit(),
+                });
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+                    .collect();
+                let line = text[start..].lines().next().unwrap_or_default().to_string();
+                is_date.then_some((line, name))
+            })
+            .collect()
+    }
+    let found = dated_spec_paths("see darkmatter/features/_completed/2026-09-09-more-context here");
+    assert_eq!(found.len(), 1, "negative control: {found:?}");
+    assert_eq!(found[0].1, "2026-09-09-more-context");
+    assert!(dated_spec_paths("&claudine/fixes/**/2026-09-20-lifecycle-handoff-gaps/spec.md").is_empty());
+
+    // Every dated feature and fix directory in the repository, by name.
+    let root = repository_root();
+    let mut real = std::collections::HashSet::new();
+    for area in WalkBuilder::new(&root)
+        .max_depth(Some(2))
+        .build()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_dir()))
+    {
+        for kind in ["features", "fixes"] {
+            for lifecycle in ["", "_completed", "_unscheduled"] {
+                let Ok(entries) = std::fs::read_dir(area.path().join(kind).join(lifecycle)) else {
+                    continue;
+                };
+                real.extend(entries.filter_map(Result::ok).map(|entry| entry.file_name().to_string_lossy().into_owned()));
+            }
+        }
+    }
+    assert!(real.contains("2026-09-09-more-context"), "the repository scan found the known specs");
+
+    let defects: Vec<String> = shipped_prompt_paths()
+        .iter()
+        .flat_map(|prompt| {
+            let text = std::fs::read_to_string(prompt).unwrap();
+            dated_spec_paths(&text)
+                .into_iter()
+                .filter(|(_, name)| real.contains(name))
+                .map(|(line, _)| format!("{}: {line}", prompt.display()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(defects.is_empty(), "{}", defects.join("\n"));
+}

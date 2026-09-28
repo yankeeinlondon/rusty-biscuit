@@ -48,20 +48,20 @@ Three commands run a prompt:
 | `claudine inline-compose <file>` | the agent writes the document's own body, driven by a frontmatter `prompt:` |
 | `claudine sequence <file>` | runs an ordered list of steps, each its own composition |
 
-This describes Claudine as of **2026-09-20**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
+This describes Claudine as of **2026-09-28**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
 
 ### Composition: what runs before the agent sees anything
 
 - **Interpolation.** {{{ expr }}} is evaluated in the body and in frontmatter values. A frontmatter value that is *exactly one* span keeps the expression's type, so a span holding `true` yields a boolean and not the string. To show brace syntax without evaluating it, wrap it in a third pair of braces.
 - **Inline code is scanned; fenced code is not.** Backticks do not protect a brace span. A fenced code block protects everything inside it, including directives.
-- **`::file <ref>`** transcludes another file, recursively, as part of the same composition. `set.<key>=<value>` overrides the child's frontmatter and `when="<expr>"` makes the inclusion conditional. Prefixes choose where a reference is searched: `./` and `../` are relative to the authoring file, `^` walks package, package area, then repository root, `&` is the repository root, `@` is Claudine's registered roots, and `~/` is home.
+- **`::file <ref>`** transcludes another file, recursively, as part of the same composition. `set.<key>=<value>` overrides the child's frontmatter and `when="<expr>"` makes the inclusion conditional. A shell command that fails inside the included file fails the composition exactly as it would written inline; any other failure there replaces the file with a "could not transclude" notice and a warning. Prefixes choose where a reference is searched: `./` and `../` are relative to the authoring file, `^` walks package, package area, then repository root, `&` is the repository root, `@` is Claudine's registered roots, and `~/` is home.
 - **`::block when="<expr>"` … `::end-block`** keeps or drops a region of the body. Blocks nest.
 - **`::shell <command>`** and **`::shell-block`** splice a command's output into the body. The default timeout is 10 seconds and a non-zero exit fails the composition, so give a command that may fail a fallback (`when_error=` on a block, `--when-error` on a single directive). Output is spliced raw; it cannot be wrapped in a fence.
-- **Frontmatter `$(command)`** stores trimmed stdout in a property, and the whole value must be the expression. `::timeout:<seconds>` extends the limit. An exit status can be captured with a shell idiom.
+- **Frontmatter `$(command)`** stores trimmed stdout in a property, and the whole value must be the expression. `::timeout:<seconds>` extends the limit. A result suffix reads the outcome instead of the text, and a non-zero exit then stores a value rather than failing: `::ok` is a boolean, `::exit-code` a number, and `::result` an object `{ ok, code, stdout, stderr }`.
 
 ```yaml
 commits_ahead: "$(git rev-list --count origin/main..HEAD)::timeout:30"
-tree_is_clean: "$(git diff --quiet && echo yes || echo no)"
+tree_is_clean: "$(git diff --quiet)::ok"
 ```
 
 **Shell approval happens once, up front.** Before anything runs, Claudine collects every command the document could execute, including those in branches that will never be taken, and asks the caller to approve any that are not whitelisted. Approved bytes are executed bytes. A built-in blacklist cannot be overridden: it covers `git push`, `git branch`, `git checkout`, `git reset`, `git rebase`, `rm`, `mv`, `cp`, `curl`, `ssh`, package installs, and `>` redirection, among others. Work the blacklist forbids has to be done by the agent.
@@ -69,7 +69,7 @@ tree_is_clean: "$(git diff --quiet && echo yes || echo no)"
 ### `ctx`, `current`, and when each is read
 
 - **`ctx`** is evaluated **once, eagerly, for each composition run**, and only for the properties that appear on the page. It is available in the body, in frontmatter, and in lifecycle hooks. It describes the world as the run began.
-- **`current`** is the lazy counterpart: `current.<key>` has exactly the shape of `ctx`, and each key is read when the expression that names it evaluates. There is no nesting under it, and a path that is not a `ctx` key fails the run. Its use is in lifecycle hooks, which evaluate when their event fires; a body is composed up front, so `current` there is read at composition time.
+- **`current`** is the lazy counterpart: `current.<key>` has exactly the shape of `ctx`, and is observed once per lifecycle event, so every read in one event sees the same value and the next event observes afresh. There is no nesting under it, and a path that is not a `ctx` key fails the run. Its use is in lifecycle hooks, which evaluate when their event fires; a body is composed up front, so `current` there is read at composition time.
 - Ask which moment your question is about. "Were there staged files when this began?" is `ctx`. "Is anything staged right now?", asked from a hook after the run may have changed things, is `current`. A body that must show the agent the present state uses `::shell`.
 - `ctx` is rich, and lists work directly as gates: `ctx.dirty_files` is falsy when empty. Useful groups are git state (`branch`, `dirty_files`, `staged_files`, `untracked_files`, `dirty_source_code_files`, `merge_conflicts`), blast radius (`dirty_packages`, `dirty_package_areas`, and the booleans `current_package_has_dirty_files` and `current_package_area_has_dirty_files`), location (`repo`, `repo_root`, `area`, `area_description`, `current_package`), target (`agent`, `model`), and host and clock (`os`, `now`, `today`, `timestamp`).
 - Functions that reach the network, such as `branch_exists_on_remote()` and `pr_list()`, fail the run when the host is not on the network allowlist, which denies everything by default. Do not put one in a gate that must not raise.
@@ -132,7 +132,7 @@ Flow control:
 Rules that shape a design:
 
 - **`initialize` is shell-free**, and a document that declares `initialize` may not use a frontmatter `$(…)` at all. Approval cannot lift either rule. Put shell work in `start` or later, or drop `initialize` and gate from `start`.
-- **A lifecycle `shell` action cannot hand back its output or exit status.** A non-zero exit fails the item unless `no_error: true`. To branch on a command's result, use the frontmatter form shown above.
+- **A lifecycle `shell` action cannot hand back its output or exit status.** A non-zero exit fails the item unless `no_error: true`. To branch on a command's result from `start` or later, assign it with `set` and a whole-value `$(…)`, which takes the same suffixes as the frontmatter form (`set: { clean: "$(git diff --quiet)::ok" }`), then gate the next item on it. The command is approved up front like every other.
 - **Verify in `success`; do not trust the agent's exit.** Have the agent record its outcome in a file, read it with `frontmatter(file, 'key')`, and end the stack with an unconditional `error` so that a missing outcome is a failure.
 - **Nudge before giving up.** When the outcome is missing, `resume` the session once and ask for it. Runtime state does not survive re-entry, so record that the nudge happened with `set_frontmatter` on a file.
 - **A bounded retry counts on disk.** `retry: N` has no exhaustion event. Use `increment_frontmatter` in `start`, which fires on every attempt, and gate a "gave up" branch on the count.
@@ -150,8 +150,9 @@ Rules that shape a design:
     - A step becomes conditional when its prompt calls `skip` from `initialize` after reading the shared report.
     - The same document may appear in more than one step.
     - A step's document may declare `interactive: true` and runs interactively. Only the sequence document itself may not.
+    - A step's document may `proxy`; the target runs within the same step, and the step completes once.
     - `sequence_id` names the run and is the right seed for a per-run file name.
-- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `_loop_count`, `_loop_is_first`, and `_loop_is_last`.
+- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `_loop_count`, `_loop_is_first`, `_loop_is_last`, `_loop_last_output`, and `_loop_last_exit_code`. A `proxy` from any event of an iteration ends the loop and hands off.
 - **In this repository every git commit goes through `prompts/commit.md`.** A stage that produces changes stages them and hands off; it never runs `git commit`.
 ::end-block
 
