@@ -162,7 +162,7 @@ Action values can contain `{{ ... }}` templates. These are rendered at **action-
 - `state.loop.last_output` and `state.loop.last_exit_code` reflect what the executor produced for that same iteration.
 - Frontmatter values reflect the pre-action state of that iteration (earlier actions in the same list have not been applied yet).
 
-After rendering, the result is **re-parsed as JSON** so that numeric, boolean, and `null` template results land as their proper JSON types. Non-JSON results fall back to a string. Specifically:
+A value that is exactly one template span keeps its evaluated JSON type. Anything that mixes template and literal text renders to a string and stays one — it is **never re-parsed as JSON**, because the inserted values are data (`" {{ _loop_last_output }}"` with output `true` stays the string `" true"`). The rendered value is also data for the next iteration's preparation: a `{{ … }}` or `$( … )` it carries is never evaluated again. Specifically:
 
 | Action value                          | After rendering against `{ count: 3, name: "alice" }` |
 |---------------------------------------|--------------------------------------------------------|
@@ -170,13 +170,14 @@ After rendering, the result is **re-parsed as JSON** so that numeric, boolean, a
 | `"{{name}}"`                          | `"alice"` (string)                                     |
 | `"iter-{{count}}"`                    | `"iter-3"` (string — text + template = string)         |
 | `"{{count}} + {{count}}"`             | `"3 + 3"` (string)                                     |
+| `"{{count}}{{count}}"`                | `"33"` (string — never re-parsed as a number)          |
 | `{ phase: "{{name}}", n: "{{count}}" }` | `{ phase: "alice", n: 3 }` (object walked recursively)  |
 
 Templates are also rendered inside arrays and objects — every string leaf is processed, non-string scalars pass through.
 
 The rule of thumb: **a value that is purely a single template span preserves its evaluated type; anything mixing template with literal text becomes a string.** This means `set(retries, {{state.loop.count}})` lands as a JSON number you can safely compare arithmetically, while `set(label, "iter-{{state.loop.count}}")` lands as the obvious string.
 
-> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core but differ in three deliberate ways — the JSON re-parse above (loop only), loop-contextual error typing, and unknown-root leniency (loop) vs strict fail-closed (lifecycle). See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
+> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core but differ in two deliberate ways — loop-contextual error typing, and unknown-root leniency (loop) vs strict fail-closed (lifecycle). See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
 
 
 ## Mutation Operations

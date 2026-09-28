@@ -743,9 +743,18 @@ success:
 
 A positional action body such as `message: "review {{iteration}} passed"` is not affected. That string is not an expression literal; Claudine interpolates it as template text.
 
-### `LifecycleEvaluationError`: surviving span
+### Template text in a value is data, not an error
 
-Some template text only appears at event time, typically a frontmatter value that itself holds `{{ … }}` (for example, one a `set_frontmatter` stored). Static validation cannot see it. As a backstop, `reject_surviving_spans` runs after event-time resolution and before dispatch: a top-level communication field whose resolved text still contains a span fails the event, and the side effect is not sent. The error carries the lifecycle property (`in success.say`) and the typed `SurvivingSpan` reason, which selects a hint to concatenate with `+` (or use `{{{ … }}}` for intentional braces) instead of the missing-path hint that ordinary evaluation errors get. A stack action operand that resolves to template text is re-expanded when its message renders. An unknown root in that text then fails as an ordinary expression error.
+Some values only hold template syntax at event time: a frontmatter value a `set_frontmatter` stored, a file an agent wrote, or the output of a `{{{ … }}}` escape. The authored text of a lifecycle field or action operand is scanned **once**; whatever its spans insert is data and is delivered exactly as written. It is never refused and never expanded a second time.
+
+```yaml
+# log.md, written by the agent:  message_to_agent: "see {{ title }}"
+success:
+  info: "agent says: {{ frontmatter('log.md', 'message_to_agent') }}"
+# prints: agent says: see {{ title }}
+```
+
+The same holds for a `set:` value, a `proxy` `with:` value, a side-effect argument, and a shell command: a pre-flight-resolved command runs its approved bytes as they stand. The one exception is a `with:` value for a lifecycle key (see [Passing values with `with:`](flow-control-reference.md#passing-values-with-with)).
 
 ### `LifecycleUndefinedVariable`
 
