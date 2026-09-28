@@ -1,6 +1,6 @@
 ---
 area: claudine
-status: draft-spec
+status: finalized-spec
 created: 2026-09-21
 owner: Ken Snyder <ken@ken.net>
 $schema:
@@ -20,15 +20,40 @@ $schema:
     reviewed_by: string -> the agent and model used in the spec review
     reviewed_on: date -> the date the spec was reviewed
     review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    review_note: string -> a note qualifying the review, such as what process stood in for a separate review
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    clarified_by: string -> the agent and model that ran the clarification
+    needs_rulings: boolean -> whether rulings remain before planning and implementation
+    required_rulings: string[] -> the rulings still required when needs_rulings is true
+    references: object -> map of document path to a 1–2 sentence description of what it is
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-reviewed: false
-clarified: false
+reviewed: true
+reviewed_by: claude/fable (clarification review)
+reviewed_on: 2026-09-28
+review_note: "the clarification process served as a review"
+clarified: true
+clarified_by: claude/fable
+needs_rulings: false
 prepares:
     - 2026-09-27-sequence-improvements
+    - 2026-09-28-recursive-schema-types
 related:
     - 2026-09-22-lifecycle-events
+    - 2026-09-28-recursive-schema-types
+references:
+    spike-results.md: >-
+        Measurements, findings, and verdicts of the 2026-09-28 schema scale spike.
+    spike/README.md: >-
+        How to reproduce the spike.
+    spike/gen-action-schema.py: >-
+        Generator for the action schema's side-effect and expression-function entries,
+        retained as the mechanism for switching full typing on later.
+    spike/schemas/lifecycle.yaml: >-
+        The depth-5 unrolled reference schema the interim shape is derived from.
+    matrix.md: >-
+        Functionality and ownership matrix across Claudine, Darkmatter, and the
+        supporting packages as of 2026-09-21.
 ---
 # Lifecycle Ergonomics
 
@@ -58,6 +83,8 @@ Two housekeeping facts established while clarifying ownership:
 
 - **Single schema home.** Claudine's schemas live in `claudine/schemas/` and nowhere else. Filled-in old-grammar copies exist at `darkmatter/docs/schemas/claudine.yaml` and `darkmatter/docs/schemas/claudine-types.yaml`; both are **deleted** by this feature, and the `.dmls.toml` example in `darkmatter/docs/topics/schemas/dmls-schema-support.md` that points at them is repointed to `claudine/schemas/`. `claudine/schemas/claudine.yaml` is currently an empty file.
 - **No Darkmatter `completed` event.** Darkmatter has no document-lifecycle notion today (its only "lifecycle" is the unrelated preflight stage), so the placeholder `claudine/schemas/partials/lifecycle.yaml` is wrong where it claims Claudine's `success` renames a Darkmatter `completed` event. The claim disappears when that placeholder is replaced under this feature ([Action Inventory](#action-inventory), rule 9).
+
+**Darkmatter follow-on: recursive named types (sequenced after this feature).** The schema scale spike ([Schema spike (run 2026-09-28)](#schema-spike-run-2026-09-28)) found that `SimplifiedSchema` substitutes every named type structurally — there is no `$defs`/`$ref` — so an unrolled lifecycle schema clones the whole action table once per reference, and that an array cannot carry a union-typed named item. The remedy is recursive named types in Darkmatter's schema resolver, filed as the Darkmatter feature `2026-09-28-recursive-schema-types`, which declares this feature as its `depends-on`, and estimated from source, with nothing built, at 13–20 engineer-days (likeliest 16), plus 1–1.5 days to lift the array-of-union restriction in the same change, which is cheap together and expensive alone. The resolver change itself is small; the bulk is the twenty-two consumer sites that walk the resolved schema. Its design keeps every existing schema lowering byte-identically by inlining acyclic types exactly as today and emitting `$defs`/`$ref` only for cyclic types and unions under `[]`. That feature is the **target state** for Claudine's schemas and runs **after** this one: this feature ships the interim shape described under [Schemas](#schemas) and leaves the generator and spike fixtures in place; switching Claudine's schemas to `item[]@this` recursion, restoring full typing of the generated verbs, and making the nesting limit parser-only are tasks of `2026-09-28-recursive-schema-types`, not of this feature. Four Darkmatter defects the spike exposed are filed as non-blocking, in that feature or as fixes: an array over a union-typed named type is rejected; a diagnostic's line and column point at the top-level key rather than the offending node; `required` is stripped from a reused named type (a separate half-day decision, not bundled with the recursion work); and two valid-YAML spellings — a block sequence whose `-` sits at the parent key's indentation, and a plain scalar folded across lines — crash the schema loader. Two cheap pieces of Darkmatter pre-work are recommended and are **not** part of this feature; they belong to `2026-09-28-recursive-schema-types` or to fixes raised ahead of it: share type tables behind an `Arc` in the resolver instead of cloning them per expansion (about half a day; it cuts resolve time directly) and fix the two loader crashes. A DMLS resolved-schema cache keyed on `$schema`, registry, and dependency hashes (2–3 days) would fix per-keystroke re-resolution only, not size.
 
 ## Ergonomic Shift
 
@@ -242,7 +269,7 @@ By contrast, the long form allows us far greater expression and control:
 
 ### Action Inventory
 
-`action.yaml` enumerates every verb and directive with its short and long form. The inventory below **freezes the source inventory as v1**: it was taken from the parser (`actions.rs`, `action_shape.rs`, `parse.rs`, `signatures.rs` under `claudine/lib/src/composition/lifecycle/`) and from the flow-control topic pages, and it is the one list the schema, the parser, and the docs must agree on. `no_error` applies to every row except `set`.
+`action.yaml` enumerates every verb and directive with its short and long form (in the interim schema shape the generated entries are admitted by a catch-all rather than typed one by one; see [Claudine Schema Structure](#claudine-schema-structure)). The inventory below **freezes the source inventory as v1**: it was taken from the parser (`actions.rs`, `action_shape.rs`, `parse.rs`, `signatures.rs` under `claudine/lib/src/composition/lifecycle/`) and from the flow-control topic pages, and it is the one list the schema, the parser, and the docs must agree on. `no_error` applies to every row except `set`.
 
 | Verb | Category | Short-form value | Long-form parameters | Notes |
 |---|---|---|---|---|
@@ -270,12 +297,12 @@ By contrast, the long form allows us far greater expression and control:
 | `append_line` | side-effect | `[file, text]` | `file`, `text` | generated |
 | `append_jsonl` | side-effect | `[file, obj]` | `file`, `obj` | generated |
 | `http_post` | side-effect | `[url, body]` | `url`, `body` | generated |
-| 257 expression functions (`file_exists`, `frontmatter`, `length`, `has_command`, ...) | expression-function | scalar, or array zipped to the signature | the catalog's parameter names | generated; variadic `and`/`or` are positional-only |
+| 110 expression functions (`file_exists`, `frontmatter`, `length`, `has_command`, ...) | expression-function | scalar, or array zipped to the signature | the catalog's parameter names | generated; the count is whatever the catalog holds at generation time; variadic `and`/`or` are positional-only |
 
 Rules:
 
-1. **Every verb and directive has a long form** `verb: { <params>, no_error?: bool }`, with two exceptions: `set` (rule 4) and the variadic expression functions (rule 2). The short form is the verb's single positional payload: a scalar for a one-parameter verb; an array zipped to the signature for a multi-argument side-effect or expression function; and a bare name, `null`, or `[]` for a zero-argument verb (`- stop`, `- stop: null`).
-2. **Side-effect and expression-function entries are generated**, not hand-maintained. The sources are `darkmatter/lib/src/effects/catalog.rs` (13 side-effect signatures) and `darkmatter/docs/schemas/expression-functions.yaml` (257 functions); long-form parameter names are the catalog's parameter names. Variadic functions (`and`, `or`) are positional-only and have no long form.
+1. **Every verb and directive has a long form** `verb: { <params>, no_error?: bool }`, with two exceptions: `set` (rule 4) and the variadic expression functions (rule 2). The short form is the verb's single positional payload: a scalar for a one-parameter verb; an array zipped to the signature for a multi-argument side-effect or expression function; and a bare name, `null`, or `[]` for a zero-argument verb (`- stop`, `- stop: null`). The bare-name spelling is **parser-only**: a schema array item is one type expression, and Darkmatter rejects an array over a union-typed named type ([Expressiveness limits](#expressiveness-limits)), so a bare string cannot sit beside object items in `lifecycle.yaml` until that lands. `- stop: null` is the schema-typable spelling; the parser accepts both.
+2. **Side-effect and expression-function entries are generated**, not hand-maintained. The sources are `darkmatter/lib/src/effects/catalog.rs` (12 side-effect verbs, 13 signatures) and `darkmatter/docs/schemas/expression-functions.yaml` (110 functions at the time of writing; the count is whatever the catalog holds at generation time); long-form parameter names are the catalog's parameter names. Variadic functions (`and`, `or`) are positional-only and have no long form. The generator is `spike/gen-action-schema.py`; in the interim schema shape it emits these entries as a single catch-all key rather than typed one by one, and it is retained so full typing can be switched on later ([Claudine Schema Structure](#claudine-schema-structure)).
 3. **`break` and `prep` enter as planned entries**, carrying the parameter tables from `2026-09-27-sequence-improvements`. `defer` stays enumerated and planned; the runtime returns `LifecycleDeferNotImplemented` when it is used.
 4. **`set` has no long form and no `no_error`.** It stays mapping-only, `set: { key: value }`. A failed `set` is an expression-evaluation error, which `no_error` never suppresses, so the parameter would be meaningless there and is rejected.
 5. **`with` is accepted on `retry`, `proxy`, and `prep`** and rejected everywhere else, `resume` included. Its semantics are `proxy`'s overlay in every case: applied to the target of the transition — for `retry` that target is the fresh re-read of the same document — for that transition only, never persisted, never merged back. This is new behavior for `retry` and `prep`; today `LifecycleProxyOnlyParameter` rejects `with` anywhere but `proxy`. That name, and the `LifecycleProxyWith*` error family, become misnomers once `with` is shared by three directives, so they are **renamed at implementation**. `resume` takes no overlay because it sends a follow-up message into the live provider session rather than re-reading a document, so there is nothing to overlay ([Long Form](#long-form)). `break`, `stop`, `skip`, `error`, and `defer` take no overlay.
@@ -352,7 +379,7 @@ In this example either the `then` or `else` block will be executed but in BOTH c
 
 ### Conditional Nesting
 
-Currently conditional blocks can not nest but with this feature we will start to allow nesting. The limit is **five** conditional levels; a sixth is a parse error (`LifecycleStackInvalidShape`). Five is generous — the most common requirement is a second level — and it is also what the schema can carry: `SimplifiedSchema`, Darkmatter's schema language, has no recursion, so `lifecycle.yaml` unrolls the `when`/`then`/`else` item shape five levels deep by hand (see [Schemas](#schemas)).
+Currently conditional blocks can not nest but with this feature we will start to allow nesting. The limit is **five** conditional levels; a sixth is a parse error (`LifecycleStackInvalidShape`). Five is generous — the most common requirement is a second level. The limit is the **parser's**, and only the parser rejects a sixth level. `SimplifiedSchema`, Darkmatter's schema language, has no recursion, so `lifecycle.yaml` unrolls the `when`/`then`/`else` item shape by hand, and because every unrolled level clones the whole action table, it unrolls only **three** fully typed levels: the `then`/`else` bodies that would hold a fourth and fifth level are typed as a loose list-or-map and accepted without deep checking. The editor therefore never falsely rejects a legal document, and never catches a sixth level either; the spike measured why (see [Schema spike (run 2026-09-28)](#schema-spike-run-2026-09-28)). The divergence closes when Darkmatter gains recursive named types ([Package Ownership and Sequencing](#package-ownership-and-sequencing)).
 
 The syntax for nesting is keeping in line with the normal grammar: a `then` or `else` body is a list, and a list may contain further `when` items.
 
@@ -395,10 +422,10 @@ The schema support that Darkmatter provides now is fairly comprehensive and the 
 What Darkmatter implements today, and what this feature builds on:
 
 - A document can name its schema explicitly with the `$schema` frontmatter property: inline (the schema written in the frontmatter), as a path to a YAML file, or as a **bare name** (`$schema: claudine.yaml`) resolved against the schema roots below.
-- Darkmatter discovers schema roots by an **ancestor walk**: starting from the document's folder it looks for a `schemas/` directory in each parent up to the repository root (when composing) or the editor workspace root (in DMLS).
+- Darkmatter discovers schema roots by an **ancestor walk**: starting from the document's folder it looks for a `schemas/` directory in each parent up to the repository root (the editor workspace root in DMLS). Roots are ordered nearest-first; when two roots hold a file of the same name the nearest one wins and the farther one is reported as shadowed. `md schema triggers` lists every discovered root and trigger and which match arm fired, which is how to check what a document will pick up. The spike confirmed this from `spike/fixtures/` with no `$schema:` pointer: it found `spike/schemas/`, then `claudine/schemas/`, then the repository root, and reported `claudine/schemas/claudine.yaml` as shadowed by the spike's copy.
 - Only files of `kind: trigger-schema` **auto-apply**. A trigger-schema is an envelope with a `match:` block and a `$schema` payload; when the match conditions hold for a document, the payload is applied to it. Match conditions are frontmatter-only: `property: <type-expr>` tests, the combinators `all`/`any`/`none`/`min-match`, and `$path` globs. Body-content matching is rejected. DMLS applies matched triggers and reports diagnostics against them.
 - Plain `kind: schema` files are **import libraries**. The discovery scan silently ignores them; they reach a document only when named by `$schema` or imported by a trigger's payload.
-- The code spells the kind `trigger-schema`; Darkmatter's docs spell it `schema-trigger`, which the parser does not accept. Claudine follows the **code spelling** until Darkmatter renames one or the other.
+- The code spells the kind `trigger-schema`; Darkmatter's docs spell it `schema-trigger`, which the parser does not accept. Claudine follows the **code spelling**, confirmed by the spike, until Darkmatter renames one or the other.
 
 ### Claudine Schema Structure
 
@@ -406,10 +433,10 @@ Six files, three of them type libraries and three of them triggers whose payload
 
 | file path             | kind             | description                                                                                                                                                                                                                                                                             |
 |-----------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `action.yaml`         | `schema`         | types-only library: the action enumeration (every verb and directive, planned ones included), each with its short and long form shapes, per the [Action Inventory](#action-inventory); its side-effect and expression-function entries are **generated** from the two Darkmatter catalogs (`darkmatter/lib/src/effects/catalog.rs`, `darkmatter/docs/schemas/expression-functions.yaml`), not hand-maintained |
-| `lifecycle.yaml`      | `schema`         | types-only library built on `action.yaml`: the full shape of a stack — a list of items or a dictionary bundle; the `when`/`then`/`else` item; the bundle as a pattern-keyed object; nesting unrolled to depth 5; the same stack type is what a `loop:` block's `gate:` and a task's `setup:`/`teardown:` carry |
+| `action.yaml`         | `schema`         | types-only library: the action enumeration (every verb and directive, planned ones included), each with its short and long form shapes, per the [Action Inventory](#action-inventory). The 21 hand-authored verbs (nine control directives, ten communication verbs, `shell`, `set`) are typed fully, with literal keys so a typo is diagnosed by name. In the **interim shape** the 12 side-effect verbs and 110 expression functions are admitted by a single-key catch-all (`<string>: any` under `max-keys(1)`) — no editor completion or typo check for them; Claudine's parser validates them at run time. Their entries are **generated** from the two Darkmatter catalogs (`darkmatter/lib/src/effects/catalog.rs`, `darkmatter/docs/schemas/expression-functions.yaml`) by `spike/gen-action-schema.py`, retained so full typing can be switched on once Darkmatter has recursive named types |
+| `lifecycle.yaml`      | `schema`         | types-only library built on `action.yaml`: the full shape of a stack — a list of items or a dictionary bundle. Each list item is **one merged mapping** (the verb keys plus `when`, `then`, `else`, and `no_error`, at least one key present) rather than a union of named item types, because Darkmatter cannot type an array over a union-typed name; `then`/`else` are each typed as the property-level union of the next level's item list and the bundle; the parser keeps the exclusivity rules the mapping cannot. Nesting is unrolled to **three** fully typed levels, and the bodies below that are a loose list-or-map accepted without deep checking. The same stack type is what a `loop:` block's `gate:` and a task's `setup:`/`teardown:` carry |
 | `linking.yaml`        | `schema`         | types-only library: the eleven optional keys that describe how a prompt is linked into a provider as a skill, command, or agent (`name`, `allowed-tools`, `tools`, `skills`, `license`, `compatibility`, `metadata`, `user-invocable`, `disable-model-invocation`, `argument-hint`, `max_turns`); imported by the `claudine.yaml` payload so a linked prompt raises no DMLS unknown-key warning |
-| `claudine.yaml`       | `trigger-schema` | matches on `any:` of the six event keys (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`) or `agent`/`model`; payload is the catalog of Claudine frontmatter properties below, with the linking keys imported from `linking.yaml`                                        |
+| `claudine.yaml`       | `trigger-schema` | matches on `any:` of the six event keys (`initialize`, `start`, `blocked`, `success`, `failure`, `finalize`) or `agent`/`model`, each arm spelled `<key>: any(required)`; payload is the catalog of Claudine frontmatter properties below, with the linking keys imported from `linking.yaml`                                        |
 | `inline-compose.yaml` | `trigger-schema` | matches `prompt: string(required)` with `none: { sequence: any }`; payload is the shape of an inline-compose document                                                                                                                                                                    |
 | `sequence.yaml`       | `trigger-schema` | matches `sequence: any`; payload is the shape of a sequence document, written to the shape `2026-09-27-sequence-improvements` defines (`when:` on a step or task, `loop:` on a group and at the root, `loop` and `seq` reserved) so that spec's examples validate the day the schema lands; every `loop:` block types `gate:`, and every task types `setup:`/`teardown:`, from `lifecycle.yaml` |
 
@@ -428,14 +455,29 @@ The linking-only keys (`name`, `allowed-tools`, `tools`, `skills`, `license`, `c
 
 `SimplifiedSchema` can express what the grammar looks like but not everything the grammar requires:
 
-- **Can:** unions (`anyOf`) of inline objects as array items; named types via `Name@this` and imports; pattern keys (`<string>`) with `min-keys`/`max-keys` for the bundle shape.
+- **Can:** unions (`anyOf`) of inline objects as array items; named types via `Name@this` and imports; pattern keys (`<string>`) with `min-keys`/`max-keys`, which is how the generated-verb catch-all is spelled; `min-keys`/`max-keys` on a literal object of 143 keys, both as `$constraints` and as a postfix on an import (`bundle(max-keys(1))@./action.yaml`).
 - **Cannot:** recursion (schemas are a DAG, so nesting is unrolled per level); an ordering constraint such as "the flow-control item must be last" (arrays support only `min`/`max`/`unique`, and the planned tuple form puts the spread last); mutual exclusion or at-most-one-of over keys.
+- **Cannot** (established by the spike): an array whose item is a union-typed named type — `item[]@this` where `item` is `bundle | conditional | string` is rejected, which is why a list item is one merged mapping and why the bare `- stop` item is parser-only; a `kind: schema` library carrying a `description` or exporting a `$schema` of its own — a library holds only `kind` and `types`, so it is never validated as a whole file and the event keys are wired by the trigger payload; `required` on a reused named type — the resolver strips it, so `required` is written directly on the property inside the mapping type; a trigger match arm without a presence-requiring condition — `start: any` is rejected as a vacuous arm and `start: any(required)` is the spelling; a shared definition — there is no `$defs`/`$ref`, so every named type is substituted structurally at each reference, and an unrolled schema clones the whole action table once per reference, which is the cost driver the spike measured.
 
-Hence the division of labor: the schemas describe shapes, and Claudine's parser remains the **sole enforcer** of placement (directive last, list-local), cardinality (one flow-control key per bundle, each verb at most once), and exclusion (`then`/`else` not beside sibling verbs; no `when` on a root-level dictionary; in a `loop:` block, `gate:` never beside loose verb keys). Darkmatter gains no lifecycle machinery for this (see [Package Ownership and Sequencing](#package-ownership-and-sequencing)).
+Hence the division of labor: the schemas describe shapes, and Claudine's parser remains the **sole enforcer** of placement (directive last, list-local), cardinality (one flow-control key per bundle, each verb at most once), exclusion (`then`/`else` not beside sibling verbs; no `when` on a root-level dictionary; in a `loop:` block, `gate:` never beside loose verb keys), and the nesting limit beyond the schema's three typed levels. Darkmatter gains no lifecycle machinery for this (see [Package Ownership and Sequencing](#package-ownership-and-sequencing)).
 
-### Schema spike
+### Schema spike (run 2026-09-28)
 
-The first task of the schema work — not a precondition for anything else — is a spike of about half a day: write the `action.yaml` and `lifecycle.yaml` type libraries and one trigger, then validate three fixtures (a flat stack, a root-level dictionary, and a nested `when` inside `then` with an `else`) through `md schema validate`, `md schema triggers`, and DMLS. Three known traps it must prove out: local type references need the `@this` suffix; the resolver strips `required` from reused named types; and the `trigger-schema`/`schema-trigger` envelope spelling drift.
+The spike ran on 2026-09-28, ahead of planning. Its full record is [`spike-results.md`](spike-results.md); the schemas, fixtures, generator, and harness it used are under `spike/`, and [`spike/README.md`](spike/README.md) says how to reproduce it. It generated `action.yaml` and `lifecycle.yaml` at depth 5 with every verb typed, wrote one trigger, and validated nine fixtures (stacks at depth 1, 3, and 5; a depth-6 rejection; a root-level dictionary; a bundle as a `then` body; a `loop:` `gate:`; a typo'd verb inside `then`; and the long forms) through `md schema triggers`, `md schema validate`, and an in-process harness standing in for DMLS. The three traps it was asked to prove out all held: local references need `@this`; the resolver strips `required` from a reused named type; `trigger-schema` is the accepted envelope spelling.
+
+The grammar fits: every fixture validated, depth 6 was rejected with the exact path, and discovery worked with no `$schema:` pointer. The cost did not fit:
+
+| Configuration | Resolved JSON | Resolve | `md schema validate` | Inlined verb tables |
+|---|---|---|---|---|
+| depth 1, full table | 1.9 MB | 109 ms | 234 ms | 42 |
+| depth 3, full table | 9.5 MB | 657 ms | 1.1 s | 210 |
+| depth 5, full table | 39.9 MB | 2.7 s | 5.9 s (3.8–4.1 s via trigger) | 882 |
+| depth 5, generated verbs collapsed | 5.7 MB | 403 ms | 1.0 s | 882 |
+| depth 3, generated verbs collapsed | 1.4 MB | 82 ms | 266 ms | 210 |
+
+Wall-clock figures were taken on a host under a load average of 22–35 and are upper bounds. The cost is entirely duplication: named types are substituted structurally — there is no `$defs`/`$ref` — so each reference clones the whole 143-key action table, and an unrolled stack inlines it 2^(N+2) − 2 times per consumer across seven consumers (the six events and `gate:`). DMLS caches its assembled schema keyed on the full document text, so every keystroke re-resolves, and no cache helps the first load.
+
+**The resulting shape.** The parser and runtime keep the nesting limit of five. `lifecycle.yaml` unrolls three fully typed levels and types the bodies below them as a loose list-or-map, so the schema never falsely rejects a document and does not reject depth 6; only the parser does. `action.yaml` types the 21 hand-authored verbs fully, with short and long forms, and admits the generated side-effect verbs and expression functions through a single-key catch-all, with the generator retained so `2026-09-28-recursive-schema-types` can switch full typing on. This is the cheapest band measured — about 1.4 MB resolved, 82 ms to resolve, 266 ms per CLI validate — and it was chosen over the alternatives because DMLS re-resolves on every validation, so 0.08 s against 0.4 s is felt, and because it loosens editor validation only at the rare fourth and fifth levels while keeping the typo diagnostic for every hand verb. Editor experience was weighted over one shared number. The target state that removes the unroll and the catch-all, and the Darkmatter defects the spike filed, are recorded under [Package Ownership and Sequencing](#package-ownership-and-sequencing).
 
 ### Location
 
@@ -548,7 +590,7 @@ All criteria are L1 unless marked.
 **Parser**
 
 - **AC1** Every stack — each of the six events, a `loop:` block's `gate:`, and a task's `setup:`/`teardown:` — accepts a flat action array; a root-level dictionary form is accepted, never carries `when`, and desugars in the canonical order given in [Execution model](#execution-model).
-- **AC2** `when`/`then`/`else` nest to depth 5; depth 6 is a typed parse error naming the path.
+- **AC2** `when`/`then`/`else` nest to depth 5; depth 6 is a typed parse error naming the path. The rejection is the parser's alone: `lifecycle.yaml` types three levels and accepts the bodies below them loosely, so `md schema validate` and DMLS accept a depth-6 document that the parser rejects.
 - **AC3** In any stack, an action after an unconditional flow-control item within the same list is the typed list-local unreachable-action error (`LifecycleActionOrder`); the same verb in a sibling `else` list is legal; a `when` item never counts as unconditional.
 - **AC4** `no_error` is accepted in both homes (long-form parameter; dictionary-item sibling applying to every action in the item, a dictionary-bundle body included) and rejected beside `then`/`else` and on `set`.
 - **AC5** `with` is accepted on `retry` and `proxy` (and `prep` when built) and rejected elsewhere, `resume` included; a `retry` overlay is visible to the fresh re-read and never persisted.
@@ -564,7 +606,7 @@ All criteria are L1 unless marked.
 
 - **AC10** `claudine/cli/tests/l1/shipped_prompts.rs` gains a walker that runs the lifecycle parser over every `.md` under `prompts/` and every `claudine/docs/research/**/_fleet.md` plus `_TEMPLATE.md`; zero removed-grammar errors.
 - **AC11** `shipped_prompt_route_drift.rs` hashes are refreshed after its fixture is re-derived.
-- **AC12** Six files exist: `claudine/schemas/{action,lifecycle,linking}.yaml` (`kind: schema`) and `claudine/schemas/{claudine,inline-compose,sequence}.yaml` (`kind: trigger-schema`); `lifecycle.yaml` types `gate:` and `setup:`/`teardown:`, and `claudine.yaml` imports `linking.yaml`; they validate the three schema-spike fixtures via `md schema validate` and `md schema triggers`, and are picked up by DMLS; `darkmatter/docs/schemas/claudine*.yaml` are deleted; the DMLS `nested_span.rs` mirror and its parity test, the `overlay/frontmatter.rs` pointer tests, and `mapping_only_corpus.rs` pass against the new schema.
+- **AC12** Six files exist: `claudine/schemas/{action,lifecycle,linking}.yaml` (`kind: schema`) and `claudine/schemas/{claudine,inline-compose,sequence}.yaml` (`kind: trigger-schema`). `action.yaml` types the 21 hand-authored verbs fully and admits the generated side-effect verbs and expression functions through a single-key catch-all, with the generator retained; `lifecycle.yaml` uses one merged item mapping per level, types three levels and leaves deeper bodies loose, and types `gate:` and `setup:`/`teardown:`; `claudine.yaml` imports `linking.yaml`. The fixture set is the one under `spike/fixtures/` — depth 1, 3, and 5 valid; depth 6 accepted by the schema and rejected by the parser; root dictionary; bundle in `then`; loop gate; wrong verb diagnosed by name; the long forms — with a zero-argument directive spelled `- stop: null` wherever a fixture is schema-checked (Action Inventory rule 1). They pass `md schema validate` and `md schema triggers` with those verdicts and are picked up by DMLS; `darkmatter/docs/schemas/claudine*.yaml` are deleted; the DMLS `nested_span.rs` mirror and its parity test, the `overlay/frontmatter.rs` pointer tests, and `mapping_only_corpus.rs` pass against the new schema.
 
 **Docs and gates**
 
@@ -677,6 +719,10 @@ The flow-control and looping topic pages already describe `break`, `prep`, and
 uniform loops as planned. Their examples are also in the old grammar and are
 rewritten under this feature's normal documentation duty, not deferred to the
 sequence work.
+
+## Clarification record
+
+This spec was clarified interactively on 2026-09-27 and 2026-09-28. Twelve rulings (R1–R12) were made by the owner and seven reviewer findings (C1–C7) were closed; each is recorded in the section it governs, not here. The schema scale spike ran on 2026-09-28 and its record is [`spike-results.md`](spike-results.md). No rulings remain.
 
 ## Open Questions
 
