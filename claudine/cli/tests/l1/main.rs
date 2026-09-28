@@ -58,6 +58,7 @@ mod dispatch_inventory;
 mod effective_diagnostic_render;
 mod error_guards;
 mod errors_command;
+mod exit_site_guard;
 #[cfg(unix)]
 mod handle_blocking_output;
 mod handle_deadline;

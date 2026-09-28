@@ -117,7 +117,6 @@ fn kill_and_collect(child: &mut Child, stdout: JoinHandle<String>, stderr: JoinH
 /// here. The test does not assert that the old code sent nothing, because a
 /// killed task may already have written its request.
 #[test]
-#[ignore = "red until the CLI drains deliveries before exit; the change that lands the drain removes this attribute"]
 fn compose_success_message_is_delivered_before_exit() {
     let fixture = CliProcessFixture::named("lifecycle-message-drain");
     write_webhook_route(fixture.home());
