@@ -850,3 +850,110 @@ fn a_composed_prompt_resolves_current_through_the_invocation() {
         "both roots answer from the invocation's launch repository"
     );
 }
+
+/// R4: the late verdict on a caller-supplied file reference names the
+/// directory the caller's value was resolved from, never the document's.
+///
+/// The document sits in `<launch>/prompts`, and `spec=fix` was typed at
+/// `<launch>`. Darkmatter's own verdict resolves the value in document context
+/// and would name `<launch>/prompts`.
+#[test]
+fn late_caller_file_verdict_names_the_callers_base_directory() {
+    let launch = TempDir::new().unwrap();
+    // The verdict names the origin exactly as the caller's record holds it.
+    let launch_dir = launch.path().to_path_buf();
+    fs::create_dir_all(launch_dir.join("prompts")).unwrap();
+    fs::create_dir_all(launch_dir.join("features/a")).unwrap();
+    fs::write(launch_dir.join("features/a/spec.md"), "---\ntitle: a\n---\n").unwrap();
+    let origin = biscuit_file::FileResolutionContext::new(&launch_dir);
+    let caller_base = format!("while resolving from `{}`", launch_dir.display());
+    let document_base = format!("`{}`", launch_dir.join("prompts").display());
+
+    for (label, schema) in [
+        (
+            // The arm is only decidable after composition, and the arms
+            // disagree on `spec`'s array shape, so the early supplied-file
+            // pass has no single glob and leaves `spec` to this verdict.
+            "union arms disagreeing on array shape",
+            "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;match(**/*spec*.md);eager)'\n  \
+             - kind: 'literal(note)'\n    spec: 'file(required;match(**/*note*.md);eager)[]'\n\
+             kind: \"{{ 'feature' }}\"\n",
+        ),
+        (
+            // A bare `file` has no glob, so there is nothing to complete early.
+            "union with a bare eager file",
+            "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager)'\n  \
+             - kind: 'literal(note)'\n    plan: 'file(required;eager)'\n\
+             kind: \"{{ 'feature' }}\"\n",
+        ),
+        (
+            "single schema",
+            "$schema:\n  spec: 'file(required;match(**/*spec*.md);eager)'\n",
+        ),
+    ] {
+        let source = source_at(
+            &launch_dir.join("prompts"),
+            "p.md",
+            &format!("---\n{schema}---\nSpec: {{{{spec}}}}\n"),
+        );
+        let options = |spec: &str| {
+            CallerInputLayers {
+                file_ref_fallback_dir: Some(launch_dir.clone()),
+                ..CallerInputLayers::from_caller_overrides(
+                    Some(serde_json::json!({ "spec": spec })),
+                    origin.clone(),
+                )
+            }
+            .apply_to(PrepareOptions {
+                // As the CLI does: the document-scoped request context.
+                file_resolution_context: Some(origin.for_source(&source.resolved_path)),
+                ..PrepareOptions::default()
+            })
+        };
+        let prepare_with = |spec: &str| {
+            prepare_document(DocumentPreparation {
+                entry: DocumentEntryReason::Direct,
+                mode: CompositionMode::ChainedDocument,
+                source: &source,
+                prompt_source: PromptSource::ComposedBody,
+                schema: SchemaStage::Validate,
+                options: options(spec),
+            })
+        };
+
+        // Control: a literal the caller's origin resolves composes.
+        let prepared = prepare_with("features/a/spec.md")
+            .unwrap_or_else(|err| panic!("{label}: resolvable spec failed: {err}"));
+        assert!(prepared.prompt.contains("features/a/spec.md"), "{label}: {}", prepared.prompt);
+
+        let err = prepare_with("fix").expect_err("`fix` names no file");
+        // A union reaches Claudine's translated verdict; a single schema keeps
+        // Darkmatter's typed caller-file problem, which already carries the
+        // caller's origin. Both must name the caller's base directory.
+        let message = match &err {
+            CompositionError::SchemaValidation { message, problems, .. } => {
+                assert_eq!(problems, &vec!["/spec".to_string()], "{label}");
+                assert!(
+                    message.starts_with("/spec: no existing file matched reference `fix`"),
+                    "{label}: {message}"
+                );
+                message.clone()
+            }
+            CompositionError::ComposeFailed(darkmatter::markdown::MarkdownError::SchemaValidationFailed {
+                problems,
+                ..
+            }) if label == "single schema" => {
+                assert!(problems.iter().all(|problem| problem.caller_file.is_some()), "{label}");
+                problems.iter().map(|problem| problem.message.clone()).collect::<Vec<_>>().join("; ")
+            }
+            other => panic!("{label}: unexpected error: {other}"),
+        };
+        let caller_base = if label == "single schema" {
+            format!("`{}`", launch_dir.display())
+        } else {
+            caller_base.clone()
+        };
+        assert!(message.contains(&caller_base), "{label}: {message}");
+        assert!(!message.contains(&document_base), "{label}: {message}");
+    }
+}

@@ -205,6 +205,10 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// candidates. The CLI catches this variant and drives a confirmation dialog
 /// (single match) or chooser (multiple), mirroring the missing-property loop.
 ///
+/// A root union qualifies too: the glob comes from the arm that declares the
+/// property as `file(match)`, or from the D1 merge when several do (see
+/// [`supplied::file_reference_target`]).
+///
 /// Returns `None` when no problem qualifies, so the caller falls back to the
 /// generic [`CompositionError::SchemaValidation`]. Only the first qualifying
 /// property is surfaced; the interactive retry re-runs validation and picks up
@@ -215,39 +219,19 @@ pub(super) fn classify_unresolved_file_reference(
     effective: Option<&EffectiveSchema>,
     instance: &serde_json::Value,
 ) -> Option<CompositionError> {
-    let shape = match effective?.simplified.as_ref()? {
-        SimplifiedSchema::Single(s) => s,
-        SimplifiedSchema::Union(_) => return None,
-    };
+    let effective = effective?;
     for problem in problems {
-        // Only Darkmatter's `NoMatch` ("no existing file matched reference")
-        // is a resolvable partial — a parse/resolution error is a genuinely
-        // bad value that a glob walk cannot rescue.
-        if !problem.message.contains("no existing file matched reference") {
+        if !problem.message.contains(supplied::NO_MATCH) {
             continue;
         }
         let Some(name) = top_level_pointer_segment(&problem.path) else {
             continue;
         };
-        let Some(atom) = atom_for_property(shape, &name) else {
-            continue;
-        };
-        if !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File)) {
-            continue;
-        }
-        let patterns: Vec<String> = atom
-            .constraints
-            .iter()
-            .find_map(|c| match c {
-                Constraint::Match(p) => Some(p.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
         // A bare `file` (no glob) has nothing to walk — leave it to the generic
         // validation path.
-        if patterns.is_empty() {
+        let Some(target) = supplied::file_reference_target(effective, &name) else {
             continue;
-        }
+        };
         let Some(provided) = provided_partial_value(instance.get(&name)) else {
             continue;
         };
@@ -255,8 +239,8 @@ pub(super) fn classify_unresolved_file_reference(
             source_path: source_path.to_path_buf(),
             property: name,
             provided,
-            patterns,
-            is_array: atom.is_array,
+            patterns: target.patterns,
+            is_array: target.is_array,
             reason: problem.message.clone(),
         });
     }

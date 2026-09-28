@@ -2196,3 +2196,52 @@ fn a_data_override_is_judged_and_an_authored_one_is_deferred() {
             .expect_err("a data string cannot satisfy `number`");
     assert!(matches!(error, CompositionError::SchemaValidation { .. }), "{error:?}");
 }
+
+#[test]
+fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
+    // A root union used to fall back to the generic SchemaValidation. The glob
+    // now comes from the arm that declares `spec` as `file(match)`, or from the
+    // D1 merge of every such arm.
+    let dir = TempDir::new().unwrap();
+    let overrides = serde_json::json!({ "spec": "everywhere" });
+    for (schema, expected) in [
+        (
+            "  - spec: 'file(required;match(**/*spec*.md);eager)'\n  - design: 'file(required)'\n",
+            vec!["**/*spec*.md"],
+        ),
+        (
+            "  - spec: 'file(required;match(**/features/**/spec.md);eager)'\n  \
+             - spec: 'file(required;match(**/fixes/**/spec.md, **/features/**/spec.md);eager)'\n",
+            vec!["**/features/**/spec.md", "**/fixes/**/spec.md"],
+        ),
+    ] {
+        let source = make_source(&dir, &format!("---\n$schema:\n{schema}---\nbody\n"));
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a union file(match) partial with no literal match must fail");
+        let CompositionError::UnresolvedFileReference {
+            property,
+            provided,
+            patterns,
+            is_array,
+            reason,
+            ..
+        } = err
+        else {
+            panic!("{schema}: expected UnresolvedFileReference, got {err}");
+        };
+        assert_eq!(property, "spec");
+        assert_eq!(provided, "everywhere");
+        assert_eq!(patterns, expected, "{schema}");
+        assert!(!is_array);
+        assert!(reason.contains("no existing file matched reference"), "{reason}");
+    }
+
+    // Arms that disagree on the array shape offer no single glob.
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n  \
+         - spec: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+    );
+    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err("still invalid");
+    assert!(matches!(err, CompositionError::SchemaValidation { .. }), "{err}");
+}
