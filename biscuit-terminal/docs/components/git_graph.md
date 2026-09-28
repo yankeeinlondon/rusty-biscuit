@@ -107,7 +107,7 @@ The image is sized with `ImageWidth::Scale` (see [TerminalImage](./terminal_imag
 1. **Height (base view only).** Past half the terminal's rows, the graph keeps the default lane and adds the other lanes most recently active first, each with its drawn ancestors (the lanes holding its fork and merge commits, and its parent's lane), until the next would not fit. A dim line then says `N more worktrees not shown`.
 2. **Width.** While the graph is wider than the available columns, commits move into `+N` squares one at a time. A commit beside an existing square goes first, then the oldest commit on the lane showing the most. Lane tips, fork points, merge destinations, and tagged commits are never trimmed. Only when nothing more can be trimmed does the image shrink to fit.
 
-`biscuit-visualized` spaces commits by the widest tag so neighboring tags never overlap (see [its gitGraph corrections](../../../biscuit-visualized/docs/mermaid-gitgraph.md)). With long labels, that step, not the commit count, sets the width, so trimming may not narrow the image and it shrinks instead. Labels are never shortened.
+`biscuit-visualized` keeps neighboring tags from overlapping (see [its gitGraph corrections](../../../biscuit-visualized/docs/mermaid-gitgraph.md)). It widens the commit spacing only when two tags on different commits would collide, and only as far as a one-em gap needs. A single long label, such as `main` and `origin/main` stacked on one commit, keeps the default spacing, so trimming narrows the image as usual. When tags do collide, the wider spacing applies to every column, so trimming may not narrow the image enough and it shrinks instead. Labels are never shortened.
 
 Text measurement uses the host's fonts, so exact sizes differ slightly by OS.
 
