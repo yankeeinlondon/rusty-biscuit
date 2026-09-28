@@ -34,6 +34,17 @@ packages:
     - biscuit-terminal
 related:
     - 2026-09-27-graph-merged-branch
+human_review: false
+message_to_agent: |-
+    Phase 1 is complete; read implementation-log.md "## Phase 1" first. Facts that change how Phase 2 is written:
+
+    1. Right-to-left gitGraphs cannot be written as Mermaid text in mermaid-rs-renderer 0.3.1. The gitGraph parser recognizes only LR/TB/BT, so `direction RL` parses as LR. A Graph given `Direction::RightLeft` programmatically lays out and renders exactly like LR, with nothing mirrored. R2 and the Wave 2 geometry bullet are amended in plan.md: prove RL ordering with `required_step`'s synthetic RL-ordered input, plus a geometry test that `direction RL` text gives the same geometry as its LR twin. Do not try to build a "real" mirrored RL collision.
+    2. Layout is exactly linear in `commit_step` (0.0000 deviation in every case), so one widening from the first pass always verifies. The R4 fallback is reachable only through the injected placement function.
+    3. Tag label widths are measured at the renderer's `gitgraph.tag_label_font_size` (10) with the theme's font family, not at `theme.font_size`. A font-size override (`MermaidConfig::with_point_label_font_size`) changes only the one-em gap. Write the font-override test to assert that the gap scales and that measured equals rendered geometry, not that labels grow.
+    4. R8 is needed: add `#[doc(hidden)] index: usize` and `x: f32` to `CommitGeometry`, so minimality can be asserted as a counting pair's clearance within SPACING_EPSILON of the gap.
+    5. The observed-shape fixtures are `observed_sparse_lanes()` (L1, git_graph/tests.rs, with `ObservedSparseLanes::w1()` and `branches()`), `Fixture::sparse_lanes()` (Kitty L2), and `GraphFixture::observed_sparse_lanes()` (perf). Commit SHAs in the L1 and Kitty builders change on every run (`commit-tree` stamps the current time), so assert by the fixture's fields, never by literal IDs. `fix/wt-ux`'s recorded parent is the default branch, so its `GraphLine::parent` is `None`.
+    6. Today's L1 plan of the observed shape at 200x60 (Default theme) is step 81.05, trimmed 20, and every branch lane is `+N` plus 1-2 commits (spikes/s1-geometry/observed-planned-before.mmd). Under R3 the same gathered text lays out at the default step 34.
+    7. The perf baseline (before) is in the log: observed sparse lanes, 200x60, release, 10 samples, render median 351.4 ms (350.0-357.8). Phase 3 must rerun `WT_GRAPH_PERF_SAMPLES=10 just test-perf perf_graph --cargo-profile release` on the same Mac with nothing else running.
 ---
 
 # Restore commit density and direct merges in the `wt list` graph

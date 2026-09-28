@@ -1,0 +1,44 @@
+
+Perf tests for [1mworktree-cli[0m (serial)
+
+warning: ignoring --test-threads because --no-capture is specified
+   Compiling worktree-cli v0.1.0 (/Volumes/coding/wt/rusty-biscuit/fix-wt-ux/worktree/cli)
+    Finished `release` profile [optimized] target(s) in 8.66s
+────────────
+ Nextest run ID c92a76bf-3477-46a8-95e1-df941fddd420 with nextest profile: default
+    Starting 2 tests across 20 binaries (471 tests skipped)
+       START [         ] (1/2) worktree-cli::perf_graph_stages perf_graph_stages_are_reported_for_every_graph_fixture
+
+running 1 test
+        SLOW [> 60.000s] (───) worktree-cli::perf_graph_stages perf_graph_stages_are_reported_for_every_graph_fixture
+test perf_graph_stages_are_reported_for_every_graph_fixture has been running for over 60 seconds
+| Fixture | Samples | graph gather (median) | graph image render (biscuit-terminal) (median) |
+|---|---|---|---|
+| floor (one commit) | 10 | 10.9ms | 341.8ms |
+| ordinary | 10 | 38.9ms | 345.8ms |
+| older essential connections | 10 | 130.9ms | 347.6ms |
+| multiple selected branches | 10 | 64.1ms | 348.6ms |
+test perf_graph_stages_are_reported_for_every_graph_fixture ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 113.38s
+
+        PASS [ 113.392s] (1/2) worktree-cli::perf_graph_stages perf_graph_stages_are_reported_for_every_graph_fixture
+       START [         ] (2/2) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+
+running 1 test
+        SLOW [>  5.000s] (───) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+        SLOW [> 10.000s] (───) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+        SLOW [> 15.000s] (───) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+        SLOW [> 20.000s] (───) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+        SLOW [> 25.000s] (───) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+| Fixture | Size | Samples | graph gather (median, min–max) | graph image render (biscuit-terminal) (median, min–max) |
+|---|---|---|---|---|
+| observed sparse lanes | 200×60 | 10 | 61.0ms (58.8ms–70.3ms) | 351.4ms (350.0ms–357.8ms) |
+test perf_graph_stages_for_the_observed_sparse_lanes_at_200x60 ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 28.31s
+
+        PASS [  28.324s] (2/2) worktree-cli::perf_graph_stages perf_graph_stages_for_the_observed_sparse_lanes_at_200x60
+────────────
+     Summary [ 141.716s] 2 tests run: 2 passed (2 slow), 471 skipped
+exit=0
