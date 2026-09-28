@@ -1466,6 +1466,7 @@ dependencies = [
  "serial_test",
  "tempfile",
  "unicode-width 0.2.2",
+ "x11rb",
 ]
 
 [[package]]
@@ -2295,6 +2296,7 @@ dependencies = [
  "uuid",
  "which 8.0.2",
  "windows 0.62.2",
+ "xpty",
 ]
 
 [[package]]
