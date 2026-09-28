@@ -128,6 +128,53 @@ fn loaders_keep_tokens_and_readers_decode_them() {
     }
 }
 
+/// `frontmatter()` and `markdown_title()` read another document's stored
+/// tokens as their text, for a property, a nested leaf, and the whole-map form.
+/// What they return is data: nothing evaluates, nothing asks for approval, and
+/// a malformed token comes back raw rather than failing the expression.
+#[test]
+fn reading_another_documents_frontmatter_decodes_its_tokens() {
+    for payload in payloads() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("log.md"),
+            format!(
+                "---\ntitle: {token}\nmessage_to_agent: {token}\nitems: [plain, {token}]\n\
+                 broken: \"{{{{!data:v1:%%}}}}\"\n---\nx\n",
+                token = encode_yaml_scalar(&payload),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("doc.md"),
+            "---\narea: claudine\n\
+             message: \"{{ frontmatter('./log.md', 'message_to_agent') }}\"\n\
+             items: \"{{ frontmatter('./log.md', 'items') }}\"\n\
+             whole: \"{{ frontmatter('./log.md') }}\"\n\
+             title: \"{{ markdown_title('./log.md') }}\"\n\
+             broken: \"{{ frontmatter('./log.md', 'broken') }}\"\n---\n\
+             Msg: {{ message }} in {{ area }}\n",
+        )
+        .unwrap();
+        let approvals = Arc::new(Recorder::default());
+
+        let (composed, _) = load(dir.path())
+            .compose_with(options(dir.path(), approvals.clone()))
+            .unwrap_or_else(|error| panic!("{payload:?}: {error}"));
+
+        assert_eq!(field(&composed, "message"), json!(payload), "{payload:?}");
+        assert_eq!(field(&composed, "items"), json!(["plain", payload]), "{payload:?}");
+        assert_eq!(field(&composed, "whole")["message_to_agent"], json!(payload), "{payload:?}");
+        assert_eq!(field(&composed, "whole")["items"], json!(["plain", payload]), "{payload:?}");
+        assert_eq!(field(&composed, "title"), json!(payload), "{payload:?}");
+        assert_eq!(field(&composed, "broken"), json!("{{!data:v1:%%}}"), "{payload:?}");
+        let body = composed.content();
+        let expected = format!("Msg: {payload} in claudine");
+        assert!(body.lines().any(|line| line == expected.trim_end()), "{payload:?}: {body}");
+        assert!(approvals.commands().is_empty(), "{payload:?}: {:?}", approvals.commands());
+    }
+}
+
 /// A decoded `$( … )` is not a shell candidate for preflight, for approval, or
 /// for the pre-approval gate; an authored one beside it still is. The gate also
 /// accepts a whole-value `$( … )` an expression produced (Phase 2 R1.2).

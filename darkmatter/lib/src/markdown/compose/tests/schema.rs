@@ -772,6 +772,7 @@ mod schema_validation_integration {
             &markdown,
             &options,
             &prepared,
+            &crate::markdown::compose::value_origin::DataPaths::default(),
         )
         .unwrap();
 

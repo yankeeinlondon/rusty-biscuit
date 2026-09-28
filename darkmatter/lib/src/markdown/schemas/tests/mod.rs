@@ -1069,6 +1069,39 @@ fn validate_with_options_classifies_template_pending_value() {
     assert_eq!(report.pending[0].reason, PendingValueReason::UnresolvedTemplate);
 }
 
+/// A stored literal token is data: it is judged by the text it holds and is
+/// never pending, even when that text looks like a template or a command.
+#[test]
+fn validate_with_options_judges_a_literal_token_by_its_text() {
+    use crate::markdown::literal_token::encode;
+    let effective = effective_number_field();
+    for (text, valid) in [("$(echo 1)", false), ("{{ x }}", false)] {
+        let instance = serde_json::json!({ "n": encode(text) });
+        let report = effective.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert_eq!(report.valid, valid, "{text:?}: {:?}", report.problems);
+        assert!(report.pending.is_empty(), "{text:?}: {:?}", report.pending);
+    }
+
+    let text_schema = DarkmatterSchemas::new()
+        .effective_for(&md_with_schema("$schema:\n  s: enum(abc, xyz)\n"))
+        .expect("effective_for")
+        .expect("schema present");
+    // The token spelling is in no enum; only the decoded text can match.
+    for (text, valid) in [("abc", true), ("ab", false)] {
+        let instance = serde_json::json!({ "s": encode(text) });
+        let report = text_schema.validate_with_options(
+            &instance,
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        assert_eq!(report.valid, valid, "{text:?}: {:?}", report.problems);
+    }
+}
+
 #[test]
 fn validate_with_options_report_policy_keeps_pending_problem() {
     let effective = effective_number_field();
