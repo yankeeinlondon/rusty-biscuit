@@ -204,9 +204,16 @@ Steps:
      quotes, keeping its whole text: `title: Fix: colons` becomes
      `title: "Fix: colons"`, and `note: see issue #42` becomes
      `note: "see issue #42"` (the `#` is text, not a comment). A value that
-     contains `: ` or ` #`, ends with `:`, or starts with a YAML indicator is
-     quoted; numbers, booleans, nulls, quoted and block scalars, valid flow
-     collections, unchanged keys, and the owned properties are never touched.
+     contains `: ` or ` #`, ends with `:`, or starts with a reserved indicator
+     (`%`, `@`, or a backtick, which begin no YAML form) is quoted. Numbers,
+     booleans, nulls, unchanged keys, and the owned properties are never
+     touched, and neither is a value whose first character starts another YAML
+     form — a quoted or block scalar (`"`, `'`, `|`, `>`), a flow collection
+     (`[`, `{`), an anchor, alias, or tag (`&`, `*`, `!`), a comment (`#`), or
+     `- `, `? `, `: ` — whether or not it is valid. A malformed one is refused,
+     not saved as text: `added: "half" quoted`, `added: [a, b`, and
+     `added: {k: v` each fail on their own line, naming the key and the form
+     they started, and the agent can close the form or quote the whole value.
      The whole frontmatter is then parsed again. A duplicate key, bad nesting,
      a missing closing `---`, or anything else outside that repair fails with
      `CompositionError::InlineAgentFrontmatterRejected` (code
