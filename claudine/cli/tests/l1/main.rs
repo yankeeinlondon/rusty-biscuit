@@ -10,6 +10,8 @@
 mod common;
 
 mod agent_cwd;
+#[cfg(unix)]
+mod agent_text_is_data;
 mod argv_normalization;
 mod cfg_gate;
 mod characterization_error_routes;

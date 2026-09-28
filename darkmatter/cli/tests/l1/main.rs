@@ -39,6 +39,7 @@ mod compose_state_set;
 mod compose_terminal_detection;
 mod compose_transclusion;
 mod compose_unknown_identifiers;
+mod compose_value_provenance;
 mod delta;
 mod get_set_rm;
 mod graph;
