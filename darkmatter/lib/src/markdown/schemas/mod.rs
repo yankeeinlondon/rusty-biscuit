@@ -1069,7 +1069,11 @@ impl EffectiveSchema {
         positions: &PositionMap,
         options: &ValidationOptions,
     ) -> ValidationReport {
-        let mut report = self.validate_with_positions(frontmatter, positions);
+        // Stored literal tokens are judged by the text they hold. A malformed
+        // one stays raw; composition reports it.
+        let decoded = crate::markdown::literal_token::decode_literal_tokens(frontmatter).ok();
+        let mut report =
+            self.validate_with_positions(decoded.as_ref().unwrap_or(frontmatter), positions);
         let pending = scan_pending_values(frontmatter);
         let pending_keys: HashSet<&str> = pending.iter().map(|p| p.key.as_str()).collect();
         let defer = matches!(options.pending_policy, PendingPolicy::Defer);
@@ -1571,7 +1575,9 @@ fn pending_reason(value: &Value) -> Option<PendingValueReason> {
 
 fn value_contains_marker(value: &Value, marker: &str) -> bool {
     match value {
-        Value::String(s) => s.contains(marker),
+        Value::String(s) => {
+            s.contains(marker) && crate::markdown::literal_token::holds_pending_syntax(s)
+        }
         Value::Array(items) => items.iter().any(|v| value_contains_marker(v, marker)),
         Value::Object(map) => map.values().any(|v| value_contains_marker(v, marker)),
         _ => false,

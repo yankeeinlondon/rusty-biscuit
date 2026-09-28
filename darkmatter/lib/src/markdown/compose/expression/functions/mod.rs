@@ -2408,11 +2408,20 @@ pub fn frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
     let map = md.frontmatter().as_map();
     if args.len() == 1 {
         let obj: serde_json::Map<String, Value> =
-            map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            map.iter().map(|(k, v)| (k.clone(), stored_value(v))).collect();
         return Ok(Value::Object(obj));
     }
     let prop = require_string_expr("frontmatter", &args[1])?;
-    Ok(map.get(prop).cloned().unwrap_or(Value::Null))
+    Ok(map.get(prop).map(stored_value).unwrap_or(Value::Null))
+}
+
+/// A value read from another document's frontmatter, with stored literal
+/// tokens decoded to the text they hold. The result is expression output, so
+/// it is data either way; a malformed token stays raw, as every other reader
+/// keeps it, rather than failing the reading expression.
+fn stored_value(value: &Value) -> Value {
+    crate::markdown::literal_token::decode_literal_tokens(value)
+        .unwrap_or_else(|_| value.clone())
 }
 
 /// `markdown_body_empty(file) -> bool | Error` — body has only whitespace.
@@ -2435,8 +2444,8 @@ pub fn markdown_title_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Valu
     }
     let raw = require_string_expr("markdown_title", &args[0])?;
     let md = load_markdown(raw, ctx, "markdown_title")?;
-    if let Some(t) = md.frontmatter().as_map().get("title").and_then(Value::as_str) {
-        return Ok(Value::String(t.to_string()));
+    if let Some(Value::String(t)) = md.frontmatter().as_map().get("title").map(stored_value) {
+        return Ok(Value::String(t));
     }
     let h1s: Vec<String> = md
         .content()

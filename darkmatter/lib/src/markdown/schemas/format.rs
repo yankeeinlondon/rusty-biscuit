@@ -241,6 +241,10 @@ pub(crate) fn register_darkmatter_formats_in_context(
         // I/O, or context. Condition mode is the either-dialect superset (§Q2),
         // so a value valid in either expression dialect validates here.
         .with_format(DARKMATTER_EXPRESSION_FORMAT, |value: &str| {
+            // A stored literal token is data: its text is the final value.
+            if let Some(Ok(decoded)) = crate::markdown::literal_token::decode_leaf(value) {
+                return crate::markdown::compose::expression::parse_condition(&decoded).is_ok();
+            }
             if is_pending_expression_value(value) {
                 return true;
             }
@@ -257,13 +261,14 @@ pub(crate) fn register_darkmatter_formats_in_context(
 /// True when an `expression`-typed value still holds an unresolved `$(...)`
 /// shell expression or `{{ ... }}` template. Such a value is pending, not a
 /// final expression, so validation defers rather than eager-failing the parse.
+/// A whole-value literal token is stored data and never pending.
 ///
 /// Lexical only: nothing is evaluated, executed, or read. Neither marker is
 /// expression syntax, so deferral never masks a malformed final expression.
 /// Editor analysis must call this before parsing so it defers exactly where
 /// schema validation does.
 pub fn is_pending_expression_value(value: &str) -> bool {
-    value.contains("$(") || value.contains("{{")
+    crate::markdown::literal_token::holds_pending_syntax(value)
 }
 
 /// Validates a string by parsing it as a `FileReference` and confirming the
@@ -1087,6 +1092,19 @@ mod schema_plus_content_formats {
         for final_value in ["a == b", "a ((", "", "$ (x)", "{ {x} }", "{x: 1}"] {
             assert!(!is_pending_expression_value(final_value), "{final_value:?}");
         }
+        // A stored literal token is data, whatever it holds; a malformed one
+        // stays pending so composition reports it.
+        let token = crate::markdown::literal_token::encode("{{ x }} && $(cmd)");
+        assert!(!is_pending_expression_value(&token));
+        assert!(is_pending_expression_value("{{!data:v9:YQ}}"));
+    }
+
+    #[test]
+    fn expression_validation_parses_the_text_a_literal_token_holds() {
+        use crate::markdown::literal_token::encode;
+        assert!(accepts("when: expression", &json!({ "when": encode("a == b") })));
+        assert!(!accepts("when: expression", &json!({ "when": encode("a ((") })));
+        assert!(!accepts("when: expression", &json!({ "when": encode("{{ x }}") })));
     }
 
     #[test]

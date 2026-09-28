@@ -186,6 +186,7 @@ impl Markdown {
                 self,
                 &options,
                 &prepared_schemas,
+                provenance.data(),
             )?;
             caller_projection.install(self);
             caller_projection.install_provenance(&mut options);
@@ -296,6 +297,7 @@ impl Markdown {
                     &options,
                     &prepared_schemas,
                     &caller_projection,
+                    provenance.data(),
                     &schema_consumer,
                     &mut report,
                 )?;
@@ -407,6 +409,7 @@ impl Markdown {
                         &options,
                         &prepared_schemas,
                         &caller_projection,
+                        provenance.data(),
                         &schema_consumer,
                         &mut report,
                     )?;
@@ -416,6 +419,7 @@ impl Markdown {
                         &options,
                         &prepared_schemas,
                         &caller_projection,
+                        provenance.data(),
                     )?;
                 }
             }

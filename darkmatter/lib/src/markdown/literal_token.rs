@@ -156,6 +156,17 @@ pub(crate) fn first_token(value: &str) -> Option<(std::ops::Range<usize>, bool)>
     Some((first.start..first.end, whole))
 }
 
+/// Whether `value` holds template (`{{`) or shell (`$(`) syntax a later
+/// composition pass could still resolve.
+///
+/// A whole-leaf literal token is stored data, so it is never pending; a
+/// malformed or embedded token still is, and composition reports it. This is
+/// lexical only: a caller that knows a value is data must not ask.
+#[must_use]
+pub fn holds_pending_syntax(value: &str) -> bool {
+    (value.contains("{{") || value.contains("$(")) && !matches!(decode_leaf(value), Some(Ok(_)))
+}
+
 /// `value` with every whole-leaf token replaced by the string it holds.
 ///
 /// For readers of **loaded** frontmatter (schema checks, reports, handoffs to

@@ -47,13 +47,15 @@ use crate::markdown::schemas::{
 };
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
+use super::value_origin::{DataPaths, ValuePathSegment};
 
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
     let mut trigger_registry = None;
     let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
-    let projection = prepare_caller_projection(markdown, options, &prepared)?;
+    let data = DataPaths::default();
+    let projection = prepare_caller_projection(markdown, options, &prepared, &data)?;
     projection.install(markdown);
     let consumer = source_path(markdown, options);
     let mut report = ComposeReport::new();
@@ -62,6 +64,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         options,
         &prepared,
         &projection,
+        &data,
         &consumer,
         &mut report,
     )
@@ -228,6 +231,7 @@ pub(crate) fn run_with_registry(
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
+    data: &DataPaths,
     consumer: &Path,
     compose_report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
@@ -263,7 +267,7 @@ pub(crate) fn run_with_registry(
         }
     };
 
-    ensure_projection_stable(effective.as_ref(), markdown, options, projection)?;
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)?;
 
     if let Some(effective) = effective.as_ref() {
         materialize_optional_document_bindings(markdown, effective);
@@ -273,7 +277,7 @@ pub(crate) fn run_with_registry(
         // Coerce schema-recognized scalars to their declared types and write the
         // coerced top-level properties back, so real types flow to every later
         // stage and into the composed output.
-        let (instance, composition_pending) = build_validation_instance(markdown, options);
+        let (instance, composition_pending) = build_validation_instance(markdown, options, data);
         let outcome =
             coerce_frontmatter_with_pending(&effective.json_schema, &instance, &composition_pending);
         if outcome.changed
@@ -373,7 +377,7 @@ pub(crate) fn run_with_registry(
             let Some(name) = top_level_pointer_segment(&p.path) else {
                 return true;
             };
-            !value_pending_composition(fm_map.get(&name))
+            !value_pending_composition(&name, fm_map.get(&name), data)
         })
         .cloned()
         .collect();
@@ -400,7 +404,7 @@ pub(crate) fn run_with_registry(
     // `options.exclude_keys` stay outside the write-back; pending keys are
     // skipped the same way.
     if let Some(effective) = effective.as_ref() {
-        let (instance, composition_pending) = build_validation_instance(markdown, options);
+        let (instance, composition_pending) = build_validation_instance(markdown, options, data);
         let outcome = effective.normalize_frontmatter(&instance, &composition_pending);
         if outcome.changed
             && let serde_json::Value::Object(rewritten) = outcome.value
@@ -430,6 +434,7 @@ pub(crate) fn verify_projection_stability(
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
+    data: &DataPaths,
 ) -> MarkdownResult<()> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
@@ -451,7 +456,7 @@ pub(crate) fn verify_projection_stability(
             });
         }
     };
-    ensure_projection_stable(effective.as_ref(), markdown, options, projection)
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)
 }
 
 /// Adds composition bindings for eligible document-owned schema properties.
@@ -486,6 +491,7 @@ pub(crate) fn prepare_caller_projection(
     markdown: &Markdown,
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
+    data: &DataPaths,
 ) -> MarkdownResult<CallerProjection> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(CallerProjection::default());
@@ -507,7 +513,7 @@ pub(crate) fn prepare_caller_projection(
             });
         }
     };
-    let (instance, composition_pending) = caller_classification_instance(markdown, options);
+    let (instance, composition_pending) = caller_classification_instance(markdown, options, data);
     resolve_caller_file_overrides(
         effective.as_ref(),
         options,
@@ -534,8 +540,9 @@ fn ensure_projection_stable(
     markdown: &Markdown,
     options: &ComposeOptions,
     projection: &CallerProjection,
+    data: &DataPaths,
 ) -> MarkdownResult<()> {
-    let (instance, composition_pending) = caller_classification_instance(markdown, options);
+    let (instance, composition_pending) = caller_classification_instance(markdown, options, data);
     let current = classify_caller_overrides(effective, options, &instance, &composition_pending);
     for key in &projection.classified {
         if projection.modes.get(key) != current.get(key) {
@@ -550,14 +557,15 @@ fn ensure_projection_stable(
 fn caller_classification_instance(
     markdown: &Markdown,
     options: &ComposeOptions,
+    data: &DataPaths,
 ) -> (serde_json::Value, HashSet<String>) {
-    let (mut instance, mut composition_pending) = build_validation_instance(markdown, options);
+    let (mut instance, mut composition_pending) = build_validation_instance(markdown, options, data);
     let Some(object) = instance.as_object_mut() else {
         return (instance, composition_pending);
     };
     for (key, record) in caller_input_records(options) {
         if !options.exclude_keys.contains(&key) {
-            if value_pending_composition(Some(record.raw())) {
+            if value_pending_composition(&key, Some(record.raw()), data) {
                 composition_pending.insert(key.clone());
             } else {
                 composition_pending.remove(&key);
@@ -1244,9 +1252,9 @@ fn caller_projection_failure(
     }
 }
 
-/// Returns `true` when `value` is still composition-pending — it holds a
-/// frontmatter shell expression (`$(...)`) or an unresolved Darkmatter
-/// template (`{{ ... }}`) somewhere in any string descendant.
+/// Returns `true` when top-level `key`'s `value` is still composition-pending:
+/// an authored string descendant holds a frontmatter shell expression
+/// (`$(...)`) or an unresolved Darkmatter template (`{{ ... }}`).
 ///
 /// This stage runs after template interpolation but before shell expansion.
 /// A value that survives interpolation still holding `{{ ... }}` could not be
@@ -1256,12 +1264,25 @@ fn caller_projection_failure(
 /// their `$(...)` counterparts, must not be failed here: the consumer
 /// re-validates the post-shell effective frontmatter once every expression
 /// has resolved.
-fn value_pending_composition(value: Option<&serde_json::Value>) -> bool {
+///
+/// Data is final: a data leaf (a runtime override, an expression result, a
+/// decoded literal token) and a stored literal token are never pending,
+/// whatever text they hold.
+fn value_pending_composition(
+    key: &str,
+    value: Option<&serde_json::Value>,
+    data: &DataPaths,
+) -> bool {
     let Some(value) = value else { return false };
+    let authored = data.authored_view(&mut vec![ValuePathSegment::Key(key.to_string())], value);
+    holds_pending_syntax(&authored)
+}
+
+fn holds_pending_syntax(value: &serde_json::Value) -> bool {
     match value {
-        serde_json::Value::String(s) => s.contains("$(") || s.contains("{{"),
-        serde_json::Value::Array(items) => items.iter().any(|v| value_pending_composition(Some(v))),
-        serde_json::Value::Object(map) => map.values().any(|v| value_pending_composition(Some(v))),
+        serde_json::Value::String(s) => crate::markdown::literal_token::holds_pending_syntax(s),
+        serde_json::Value::Array(items) => items.iter().any(holds_pending_syntax),
+        serde_json::Value::Object(map) => map.values().any(holds_pending_syntax),
         _ => false,
     }
 }
@@ -1278,6 +1299,7 @@ fn value_pending_composition(value: Option<&serde_json::Value>) -> bool {
 fn build_validation_instance(
     markdown: &Markdown,
     options: &ComposeOptions,
+    data: &DataPaths,
 ) -> (serde_json::Value, std::collections::HashSet<String>) {
     let fm_map = markdown.frontmatter().as_map();
     let mut object = serde_json::Map::with_capacity(fm_map.len());
@@ -1289,7 +1311,7 @@ fn build_validation_instance(
         if options.exclude_keys.contains(key) {
             continue;
         }
-        if value_pending_composition(Some(value)) {
+        if value_pending_composition(key, Some(value), data) {
             composition_pending.insert(key.clone());
         }
         object.insert(key.clone(), value.clone());
