@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use biscuit_terminal::components::git_graph::{GraphViewport, LaneEntry, NaturalSize};
+use biscuit_terminal::components::git_graph::{GitGraphPlan, GraphViewport, LaneEntry, NaturalSize};
 use biscuit_terminal::components::mermaid::MermaidTheme;
 use biscuit_terminal::components::terminal_image::ImageWidth;
 use biscuit_terminal::discovery::fonts::CellSize;
@@ -848,6 +848,177 @@ fn observed_sparse_lanes_fixture_has_the_observed_topology() {
     }
 }
 
+/// A plan at `columns`×`rows` whose measurement always fits, so nothing is
+/// trimmed and every gathered commit is in the Mermaid text.
+fn untrimmed_plan(graph: &GraphFacts, columns: u32, rows: u32) -> GitGraphPlan {
+    graph
+        .to_git_graph(&PrListing::default(), None)
+        .plan_with(viewport(columns, rows), &|_: &str| Some(NaturalSize { width: 400.0, height: 120.0 }))
+        .expect("plan")
+}
+
+/// The oldest laid-out commit on `lane`.
+fn first_on_lane<'g>(geometry: &'g GitGraphGeometry, lane: &str) -> &'g CommitGeometry {
+    geometry
+        .commits
+        .iter()
+        .find(|commit| commit.lane == lane)
+        .unwrap_or_else(|| panic!("no commit on {lane}: {:?}", geometry.commits))
+}
+
+/// `fix/sniff` is merged into `main` directly by `M104`, and its recorded
+/// parent `fix/wt-ux` contains its tip only through `B1`'s merge of `main`.
+/// Its fork `W1` is `M103`'s second parent and older than `fix/wt-ux`'s drawn
+/// run, so no lane draws it.
+#[test]
+#[serial_test::serial]
+fn a_direct_merge_into_the_default_branch_beats_the_parents_indirect_containment() {
+    let repo = observed_sparse_lanes();
+    let _guard = DirGuard::enter(&repo.path);
+    let sniff_tip = repo.sniff.last().expect("sniff commits");
+
+    let (graph, _) = gather(&input("main", &repo.branches(), repo.forks.clone()), true, false);
+    let graph = graph.expect("base view");
+
+    let sniff = line(&graph, "fix/sniff");
+    assert_eq!(sniff.parent.as_deref(), Some("fix/wt-ux"));
+    assert_eq!(sniff.merged_into.as_ref(), Some(&repo.m104));
+    assert_eq!(sniff.fork_sha.as_ref(), Some(repo.w1()), "merge-base(M104^1, tip)");
+    let mut own_run = vec![LaneEntry::Elided(SPARSE_SNIFF_COMMITS - LINE_WINDOW)];
+    own_run.extend(commits(&repo.sniff[SPARSE_SNIFF_COMMITS - LINE_WINDOW..].iter().collect::<Vec<_>>()));
+    assert_eq!(sniff.entries, own_run, "fix/sniff's own first-parent run, nothing of fix/wt-ux or main");
+    assert!(graph.default_entries.contains(&LaneEntry::Commit(repo.m104.clone())));
+    let w1 = LaneEntry::Commit(repo.w1().clone());
+    assert!(!graph.default_entries.contains(&w1), "W1 is not on main's lane");
+    assert!(graph.lines.iter().all(|line| !line.entries.contains(&w1)), "W1 is on no branch lane");
+
+    // Gathering verified every connection it reports; the notice comes from
+    // `GitGraph`, which cannot attach the lane at its fork.
+    let plan = untrimmed_plan(&graph, 200, 60);
+    assert!(plan.incomplete, "the undrawn fork is accounted for by the notice");
+    assert_eq!(plan.hidden_lanes, 0, "{}", plan.mermaid);
+    assert!(has_merge(&plan.mermaid, "fix/sniff", &repo.m104), "{}", plan.mermaid);
+    assert!(!plan.mermaid.contains(&repo.w1()[..7]), "W1 is not drawn: {}", plan.mermaid);
+    let geometry = geometry_of(&plan.mermaid);
+    let merge = laid_out(&geometry, &repo.m104).expect("M104 drawn");
+    assert_eq!(merge.lane, "main", "the merge edge ends on the default lane");
+    assert_eq!(merge.parents.len(), 2, "{merge:?}");
+    assert!(repo.d[13].starts_with(merge.parents[0].as_str()), "{merge:?}");
+    assert!(sniff_tip.starts_with(merge.parents[1].as_str()), "{merge:?}");
+    let start = first_on_lane(&geometry, "fix/sniff");
+    assert!(start.parents.is_empty(), "the lane starts unconnected, never at a substitute fork: {start:?}");
+}
+
+/// The parent was fast-forwarded into `main` at `p2`, where `child` forked,
+/// so the deferred direct merge's fork is on the default lane.
+///
+/// ```text
+/// r - d1 - p1 - p2 - d2 - M (main)
+///                \  \    /  \
+///                 \  c1 - c2  \        (child, merged at M)
+///                  p3 -------- B - p4  (parent, merged main back at B)
+/// ```
+#[test]
+#[serial_test::serial]
+fn a_deferred_direct_merge_with_a_drawn_fork_is_complete() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let _r = commit(&path, "r");
+    let _d1 = commit(&path, "d1");
+    run_git(&path, &["checkout", "-q", "-b", "parent"]);
+    let _p1 = commit(&path, "p1");
+    let p2 = commit(&path, "p2");
+    run_git(&path, &["checkout", "-q", "main"]);
+    run_git(&path, &["merge", "-q", "--ff-only", "parent"]);
+    run_git(&path, &["checkout", "-q", "-b", "child"]);
+    let c1 = commit(&path, "c1");
+    let c2 = commit(&path, "c2");
+    run_git(&path, &["checkout", "-q", "main"]);
+    let d2 = commit(&path, "d2");
+    let merge = merge_no_ff(&path, "child");
+    run_git(&path, &["checkout", "-q", "parent"]);
+    let p3 = commit(&path, "p3");
+    let sync = merge_no_ff(&path, "main");
+    let p4 = commit(&path, "p4");
+    run_git(&path, &["checkout", "-q", "main"]);
+    let _guard = DirGuard::enter(&path);
+    let mut forks = ForkOriginStore::default();
+    forked(&mut forks, "parent", "main", 10);
+    forked(&mut forks, "child", "parent", 20);
+
+    let (graph, _) = gather(&input("main", &["main", "parent", "child"], forks), true, false);
+    let graph = graph.expect("base view");
+
+    let child = line(&graph, "child");
+    assert_eq!(child.parent.as_deref(), Some("parent"));
+    assert_eq!(child.merged_into.as_ref(), Some(&merge));
+    assert_eq!(child.fork_sha.as_ref(), Some(&p2), "merge-base(M^1, tip)");
+    assert_eq!(child.entries, commits(&[&c1, &c2]));
+    assert_eq!(line(&graph, "parent").entries, commits(&[&p3, &sync, &p4]));
+    assert!(graph.default_entries.contains(&LaneEntry::Commit(p2.clone())), "{:?}", graph.default_entries);
+    assert!(graph.default_entries.contains(&LaneEntry::Commit(d2.clone())));
+    assert!(!graph.incomplete);
+
+    let plan = untrimmed_plan(&graph, 120, 40);
+    assert!(!plan.incomplete, "every connection is drawn: {}", plan.mermaid);
+    assert!(has_merge(&plan.mermaid, "child", &merge), "{}", plan.mermaid);
+    let geometry = geometry_of(&plan.mermaid);
+    let start = first_on_lane(&geometry, "child");
+    assert_eq!(start.parents.len(), 1, "{start:?}");
+    assert!(p2.starts_with(start.parents[0].as_str()), "the lane forks at p2: {start:?}");
+}
+
+/// `child`'s tip `p1` is on its parent's first-parent chain, and `main` also
+/// contains it through its merge of the parent.
+///
+/// ```text
+/// r - d1 - d2 - M (main)
+///       \      /
+///        p1 - p2   (parent; child = p1)
+/// ```
+#[test]
+#[serial_test::serial]
+fn a_tip_on_the_parents_first_parent_chain_is_labeled_there_while_main_contains_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let _r = commit(&path, "r");
+    let d1 = commit(&path, "d1");
+    run_git(&path, &["checkout", "-q", "-b", "parent"]);
+    let p1 = commit(&path, "p1");
+    let p2 = commit(&path, "p2");
+    run_git(&path, &["branch", "child", &p1]);
+    run_git(&path, &["checkout", "-q", "main"]);
+    commit(&path, "d2");
+    let merge = merge_no_ff(&path, "parent");
+    let _guard = DirGuard::enter(&path);
+    let mut forks = ForkOriginStore::default();
+    forked(&mut forks, "parent", "main", 10);
+    forked(&mut forks, "child", "parent", 20);
+
+    let (graph, _) = gather(&input("main", &["main", "parent", "child"], forks), true, false);
+    let graph = graph.expect("base view");
+
+    let child = line(&graph, "child");
+    assert!(child.entries.is_empty(), "no lane of its own: {child:?}");
+    assert_eq!(child.merged_into, None);
+    assert_eq!(child.fork_sha, None);
+    assert_eq!(child.tip_sha.as_ref(), Some(&p1));
+    let parent = line(&graph, "parent");
+    assert_eq!(parent.entries, commits(&[&p1, &p2]));
+    assert_eq!(parent.fork_sha.as_ref(), Some(&d1));
+    assert_eq!(parent.merged_into.as_ref(), Some(&merge));
+    assert!(!graph.incomplete);
+
+    let plan = untrimmed_plan(&graph, 120, 40);
+    assert!(!plan.incomplete, "{}", plan.mermaid);
+    let geometry = geometry_of(&plan.mermaid);
+    let labeled = laid_out(&geometry, &p1).expect("p1 drawn");
+    assert_eq!(labeled.lane, "parent", "{labeled:?}");
+    assert!(labeled.tags.iter().any(|tag| tag.text == "child"), "{labeled:?}");
+}
+
 /// ```text
 /// r - d1 (main)
 ///       \
@@ -1179,6 +1350,85 @@ fn a_shallow_clone_draws_what_it_can_verify_and_reports_the_rest() {
     assert_eq!(line(&graph, "feature").entries, commits(&[&feature[0], &feature[1]]));
 }
 
+/// A `--depth 3` clone where `feature` is merged into `main` directly, and
+/// its recorded parent `parent` does not contain it, which only a complete
+/// clone could prove. `outer` contains `feature` indirectly, through
+/// `carrier`'s merge.
+///
+/// ```text
+/// d1 - d2 - d3 - d4 ------------- d5 - M (main)
+///            \    \              /
+///             p1   f1 - f2 ------   (feature)
+///                   \    \
+///                    \    k1 - K    (carrier)
+///                     o1 ------ O   (outer)
+/// ```
+#[test]
+#[serial_test::serial]
+fn a_shallow_unknown_earlier_candidate_is_a_gap_even_beside_a_later_direct_merge() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    fs::create_dir(&source).unwrap();
+    init_repo(&source);
+    let d: Vec<String> = (1..=4).map(|n| commit(&source, &format!("d{n}"))).collect();
+    run_git(&source, &["checkout", "-q", "-b", "feature"]);
+    commit(&source, "f1");
+    let f2 = commit(&source, "f2");
+    run_git(&source, &["checkout", "-q", "-b", "carrier", &d[3]]);
+    commit(&source, "k1");
+    merge_no_ff(&source, "feature");
+    run_git(&source, &["checkout", "-q", "-b", "outer", &d[3]]);
+    let o1 = commit(&source, "o1");
+    let outer = merge_no_ff(&source, "carrier");
+    run_git(&source, &["checkout", "-q", "-b", "parent", &d[2]]);
+    let p1 = commit(&source, "p1");
+    run_git(&source, &["checkout", "-q", "main"]);
+    let d5 = commit(&source, "d5");
+    let merge = merge_no_ff(&source, "feature");
+    let clone = dir.path().join("clone");
+    // `file:///C:/…` on Windows, `file:///tmp/…` elsewhere.
+    let source_path = source.to_string_lossy().replace('\\', "/");
+    let url = format!("file://{}{source_path}", if source_path.starts_with('/') { "" } else { "/" });
+    run_git(dir.path(), &["clone", "-q", "--depth", "3", "--no-single-branch", &url, clone.to_str().unwrap()]);
+    for branch in ["feature", "parent", "outer"] {
+        run_git(&clone, &["branch", branch, &format!("origin/{branch}")]);
+    }
+    assert_eq!(git_output(&clone, &["rev-parse", "--is-shallow-repository"]), "true");
+    let _guard = DirGuard::enter(&clone);
+    let (history, read) = topology::History::read();
+    assert_eq!(read, Ok(()));
+
+    assert_eq!(
+        history.classify(&f2, &[&merge]),
+        Ok(topology::Integration::MergedDirectly {
+            candidate: 0,
+            merge: merge.clone(),
+            first_parent: d5.clone(),
+            after_indirect: false,
+        }),
+        "the later candidate alone has a direct merge"
+    );
+    assert_eq!(history.classify(&f2, &[&p1, &merge]), Err(topology::GatherGap), "a shallow \"no\" is unknown");
+    assert_eq!(
+        history.classify(&f2, &[&outer, &p1]),
+        Ok(topology::Integration::IntegratedOtherwise {
+            candidate: 0,
+            first_parent: o1.clone(),
+        }),
+        "a gap after an indirect match keeps that match"
+    );
+
+    let mut forks = ForkOriginStore::default();
+    forked(&mut forks, "feature", "parent", 20);
+    let (graph, _) = gather(&input("main", &["main", "parent", "feature"], forks), true, false);
+    let graph = graph.expect("a shallow clone still has a graph");
+    assert!(graph.incomplete);
+    let feature = line(&graph, "feature");
+    assert_eq!(feature.parent.as_deref(), Some("parent"));
+    assert_eq!(feature.merged_into, None, "no merge edge is invented");
+    assert!(!mermaid(&graph).contains("merge "), "{}", mermaid(&graph));
+}
+
 #[test]
 #[serial_test::serial]
 fn a_deleted_recorded_parent_falls_back_to_the_default_branch() {
@@ -1271,8 +1521,8 @@ fn classify_names_every_integration_and_tries_candidates_in_order() {
     run_git(&path, &["checkout", "-q", "-b", "indirect", &d1]);
     let i1 = commit(&path, "i1");
     run_git(&path, &["checkout", "-q", "-b", "carrier", &d1]);
-    commit(&path, "k1");
-    merge_no_ff(&path, "indirect");
+    let k1 = commit(&path, "k1");
+    let carried = merge_no_ff(&path, "indirect");
     run_git(&path, &["checkout", "-q", "-b", "unmerged", &d1]);
     let u1 = commit(&path, "u1");
     run_git(&path, &["checkout", "-q", "main"]);
@@ -1280,6 +1530,14 @@ fn classify_names_every_integration_and_tries_candidates_in_order() {
     let merge = merge_no_ff(&path, "merged");
     merge_no_ff(&path, "carrier");
     let tip = git_output(&path, &["rev-parse", "HEAD"]);
+    // `synced` contains everything main has, only through its merge of main;
+    // `extended` has `m1` on its first-parent chain.
+    run_git(&path, &["checkout", "-q", "-b", "synced", &d1]);
+    let y1 = commit(&path, "y1");
+    let synced = merge_no_ff(&path, "main");
+    run_git(&path, &["checkout", "-q", "-b", "extended", &m1]);
+    let extended = commit(&path, "e1");
+    run_git(&path, &["checkout", "-q", "main"]);
     let _guard = DirGuard::enter(&path);
     let (history, read) = topology::History::read();
     assert_eq!(read, Ok(()));
@@ -1291,8 +1549,42 @@ fn classify_names_every_integration_and_tries_candidates_in_order() {
             candidate: 1,
             merge: merge.clone(),
             first_parent: d2.clone(),
+            after_indirect: false,
         }),
         "the first candidate that contains the tip decides"
+    );
+    assert_eq!(
+        history.classify(&m1, &[&synced, &tip]),
+        Ok(topology::Integration::MergedDirectly {
+            candidate: 1,
+            merge: merge.clone(),
+            first_parent: d2.clone(),
+            after_indirect: true,
+        }),
+        "an indirect match defers to a later direct merge"
+    );
+    assert_eq!(
+        history.classify(&i1, &[&synced, &tip]),
+        Ok(topology::Integration::IntegratedOtherwise {
+            candidate: 0,
+            first_parent: y1.clone(),
+        }),
+        "with no stronger result, the first indirect match stands"
+    );
+    assert_eq!(
+        history.classify(&m1, &[&extended, &tip]),
+        Ok(topology::Integration::NoSeparateHistory { candidate: 0 }),
+        "a first-parent match wins over a later direct merge"
+    );
+    assert_eq!(
+        history.classify(&i1, &[&carried, &tip]),
+        Ok(topology::Integration::MergedDirectly {
+            candidate: 0,
+            merge: carried.clone(),
+            first_parent: k1.clone(),
+            after_indirect: false,
+        }),
+        "a direct merge wins over a later indirect match"
     );
     assert_eq!(
         history.classify(&i1, &[&tip]),

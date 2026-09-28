@@ -15,15 +15,22 @@ use worktree::git::{git_command, git_command_allow_no_match};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct GatherGap;
 
-/// How a branch tip `T` relates to the first candidate lane containing it.
-/// `candidate` indexes the candidates passed to [`History::classify`].
+/// How a branch tip `T` relates to the candidate lane [`History::classify`]
+/// chose. `candidate` indexes the candidates passed to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Integration {
     /// No candidate contains `T`.
     Unmerged,
     /// `merge` brought `T` in as a non-first parent; `first_parent` is the
-    /// candidate lane's commit before it.
-    MergedDirectly { candidate: usize, merge: String, first_parent: String },
+    /// candidate lane's commit before it. `after_indirect`: an earlier
+    /// candidate contains `T` only indirectly, so its tip is no fork
+    /// reference for the branch.
+    MergedDirectly {
+        candidate: usize,
+        merge: String,
+        first_parent: String,
+        after_indirect: bool,
+    },
     /// `T` is on the candidate's first-parent chain: the branch has no
     /// history of its own to draw.
     NoSeparateHistory { candidate: usize },
@@ -98,8 +105,14 @@ impl History {
         }
     }
 
-    /// How `tip` was integrated into the first of `candidates` (lane tips, in
-    /// priority order) that contains it.
+    /// How `tip` was integrated into `candidates` (lane tips, in priority
+    /// order).
+    ///
+    /// The first candidate with a direct merge or a first-parent match wins.
+    /// An indirect match is weaker: the first one is kept only if no later
+    /// candidate has either. A gap before any indirect match is the result,
+    /// even if a later candidate would merge `tip` directly, since that does
+    /// not prove which connection should win; a gap after one returns it.
     ///
     /// `C` is the oldest commit on the candidate's first-parent chain that
     /// descends from `tip`: the leading run of `rev-list --first-parent
@@ -107,45 +120,19 @@ impl History {
     /// Containment is monotone along a first-parent chain, so the run is
     /// exactly the chain's commits containing `tip`.
     pub fn classify(&self, tip: &str, candidates: &[&str]) -> Result<Integration, GatherGap> {
+        let mut indirect = None;
         for (candidate, lane_tip) in candidates.iter().enumerate() {
-            if !self.is_ancestor(tip, lane_tip)? {
-                continue;
+            match self.integration_into(tip, candidate, lane_tip, indirect.is_some()) {
+                Ok(None) => {}
+                Ok(Some(found @ Integration::IntegratedOtherwise { .. })) => {
+                    indirect.get_or_insert(found);
+                }
+                Ok(Some(found)) => return Ok(found),
+                Err(gap) => return indirect.ok_or(gap),
             }
-            let range = format!("{tip}..{lane_tip}");
-            let chain = parse_parent_lines(&git_command(&["rev-list", "--first-parent", "--parents", &range, "--"]).map_err(|_| GatherGap)?)?;
-            if chain.is_empty() {
-                // `T..X` is empty only when `T` is `X`; a shallow walk can
-                // also come back empty, so there it proves nothing.
-                if self.shallow {
-                    return Err(GatherGap);
-                }
-                return Ok(Integration::NoSeparateHistory { candidate });
-            }
-            let descendants: HashSet<String> = parse_object_ids(
-                &git_command(&["rev-list", "--ancestry-path", &range, "--"]).map_err(|_| GatherGap)?,
-            )?
-            .into_iter()
-            .collect();
-            let (merge, parents) = chain
-                .iter()
-                .take_while(|(sha, _)| descendants.contains(sha))
-                .last()
-                .ok_or(GatherGap)?;
-            let first_parent = parents.first().ok_or(GatherGap)?;
-            return Ok(if first_parent == tip {
-                Integration::NoSeparateHistory { candidate }
-            } else if parents[1..].iter().any(|parent| parent == tip) {
-                Integration::MergedDirectly {
-                    candidate,
-                    merge: merge.clone(),
-                    first_parent: first_parent.clone(),
-                }
-            } else {
-                Integration::IntegratedOtherwise {
-                    candidate,
-                    first_parent: first_parent.clone(),
-                }
-            });
+        }
+        if let Some(found) = indirect {
+            return Ok(found);
         }
         if self.shallow {
             // Unreachable in practice (`is_ancestor` already refused), kept
@@ -153,6 +140,50 @@ impl History {
             return Err(GatherGap);
         }
         Ok(Integration::Unmerged)
+    }
+
+    /// How `tip` relates to one candidate lane; `None` when the lane does not
+    /// contain it.
+    fn integration_into(&self, tip: &str, candidate: usize, lane_tip: &str, after_indirect: bool) -> Result<Option<Integration>, GatherGap> {
+        if !self.is_ancestor(tip, lane_tip)? {
+            return Ok(None);
+        }
+        let range = format!("{tip}..{lane_tip}");
+        let chain = parse_parent_lines(&git_command(&["rev-list", "--first-parent", "--parents", &range, "--"]).map_err(|_| GatherGap)?)?;
+        if chain.is_empty() {
+            // `T..X` is empty only when `T` is `X`; a shallow walk can
+            // also come back empty, so there it proves nothing.
+            if self.shallow {
+                return Err(GatherGap);
+            }
+            return Ok(Some(Integration::NoSeparateHistory { candidate }));
+        }
+        let descendants: HashSet<String> = parse_object_ids(
+            &git_command(&["rev-list", "--ancestry-path", &range, "--"]).map_err(|_| GatherGap)?,
+        )?
+        .into_iter()
+        .collect();
+        let (merge, parents) = chain
+            .iter()
+            .take_while(|(sha, _)| descendants.contains(sha))
+            .last()
+            .ok_or(GatherGap)?;
+        let first_parent = parents.first().ok_or(GatherGap)?;
+        Ok(Some(if first_parent == tip {
+            Integration::NoSeparateHistory { candidate }
+        } else if parents[1..].iter().any(|parent| parent == tip) {
+            Integration::MergedDirectly {
+                candidate,
+                merge: merge.clone(),
+                first_parent: first_parent.clone(),
+                after_indirect,
+            }
+        } else {
+            Integration::IntegratedOtherwise {
+                candidate,
+                first_parent: first_parent.clone(),
+            }
+        }))
     }
 
     /// The first-parent chain of `tip` within `extent`: the newest `window`

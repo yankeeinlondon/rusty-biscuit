@@ -464,8 +464,10 @@ fn place(history: &History, tips: &DefaultTips, selected: &Selected) -> Placemen
             let into = &candidates[candidate].0;
             // A tip that contains the branch is its own merge base with it,
             // so the fork is taken against the parent's tip only when the
-            // merge went elsewhere, and otherwise against `C^1`.
-            let parent_elsewhere = parent_tip.filter(|_| !matches!(into, LaneId::Branch(_)));
+            // merge went elsewhere and the parent does not contain the branch
+            // (after an indirect match it does), and otherwise against `C^1`.
+            let after_indirect = matches!(integration, Integration::MergedDirectly { after_indirect: true, .. });
+            let parent_elsewhere = parent_tip.filter(|_| !after_indirect && !matches!(into, LaneId::Branch(_)));
             let (fork, fork_gap) = fork(parent_elsewhere.unwrap_or(first_parent), into);
             let mut stop = vec![first_parent.clone()];
             stop.extend(parent_elsewhere.map(str::to_string));
