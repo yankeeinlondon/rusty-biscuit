@@ -552,7 +552,10 @@ Claudine enforces this at two boundaries:
   `FrontmatterDelta` → hash → one `atomic_write`.
   - `repair_agent_frontmatter` quotes an agent-added/changed single-line plain
     top-level scalar YAML would misread (`: `, ` #`, trailing `:`, leading
-    indicator); unparseable YAML and duplicate keys (owned keys included) fail
+    reserved `%`/`@`/backtick); a value opening a structured form (quoted,
+    block, flow, anchor/alias/tag, comment, `- `/`? `/`: `) is never quoted, and
+    a malformed one is rejected on its own line (`malformed_structure`);
+    unparseable YAML and duplicate keys (owned keys included) fail
     as `CompositionError::InlineAgentFrontmatterRejected`
     (`document.invalid_frontmatter`, line, `agent_edit`) and roll back.
   - `encode_agent_values` replaces each agent-owned string leaf holding `{{`
