@@ -7,7 +7,7 @@ previous: 2026-09-25-lifecycle-message-exit-race/review-3.md
 reviewed_by: codex/gpt-6-sol
 created: 2026-09-28T01:27:30-07:00
 implemented: false
-ready: false
+ready: true
 human_review: true
 has_blocked_findings: true
 blocked: true
@@ -21,7 +21,7 @@ human_review_items:
         Please choose how to resolve the remaining test gap:
 
         - Provide an isolated macOS login session or virtual machine and an isolated Windows session or virtual machine where these keyboard tests can run without taking focus from the host user's desktop. The implementation can then add the four drain cases on each system.
-        - Accept Linux operating-system keyboard coverage plus the existing macOS and Windows process and terminal tests as sufficient for this specific drain promise. Record that narrower verification requirement in the fix's current documentation.
+        - APPROVED: Accept Linux operating-system keyboard coverage plus the existing macOS and Windows process and terminal tests as sufficient for this specific drain promise. Record that narrower verification requirement in the fix's current documentation.
 
         The first option continues the isolated-desktop approach already approved in Review 3. The second changes the required verification level on macOS and Windows; it does not change Claudine's promised behavior.
 ---

@@ -966,3 +966,18 @@ The implementation of review cycle 3 has completed successfully in 36 minutes (0
         - `claudine/cli/tests/level2/{main.rs, level2_drain_ctrl_c_kitty.rs (new), level2_drain_ctrl_c_tmux.rs}`, `claudine/cli/tests/level3/{main.rs, level3_drain_ctrl_c.rs}`
         - `biscuit-test-harness/{Cargo.toml, README.md, src/lib.rs, src/kitty.rs, src/xvfb.rs (new)}`, `Cargo.lock`
         - docs and skills: `claudine/docs/topics/{testing.md, signal-handling.md}`, `docs/dependencies.md`, `.claude/skills/biscuit-test-harness/SKILL.md`, `.claude/skills/os/{build-hosts.md, macos.md}`
+
+## Author Decision on Review 4
+
+> **recorded at:** 2026-09-28
+
+- Review 4 has one blocked `[high]` finding, "OS keyboard coverage during the delivery drain remains Linux-only", with two options in its human review item
+- the author approved the **second option** (marked **APPROVED** in `review-4.md`): Linux OS-keyboard coverage plus the existing macOS and Windows process and terminal tests is enough for this drain promise. No isolated macOS or Windows session will be set up
+- rationale:
+        - R4 promises that Claudine's interrupt ladder stays installed through the drain. The OS and terminal turn a keypress into `SIGINT` / `CTRL_C_EVENT`, and this fix does not change that path, so an OS key event on macOS or Windows would test platform and terminal code, not the fix
+        - on each OS, the existing tiers deliver a real interrupt from the terminal layer to the unchanged handler: L1 `SIGINT` / `CTRL_BREAK_EVENT` on all three, L1 ConPTY ETX (conhost raises `CTRL_C_EVENT`) on Windows, and L2 tmux line-discipline and kitty key-encoder presses on macOS and Linux
+        - R6 asks for the second-press check "on macOS, Linux, and Windows" through child-process tests that take no focus. It does not name a tier, so the existing tests meet it. The L3 requirement came from the review's reading of the tier decision tree, which classifies tests that need key injection. It does not require injection for every keypress promise
+- the Linux L3 cases (`level3_drain_ctrl_c.rs`) stay as extra end-to-end evidence
+- docs: `claudine/docs/topics/signal-handling.md` ("Ctrl+C during the exit drain") now states this verification level
+- skills: `.claude/skills/rust-testing/SKILL.md` now says when "needs OS keyboard/mouse injection" applies, so later reviews do not raise this finding again
+- no code changes
