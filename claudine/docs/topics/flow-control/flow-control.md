@@ -123,6 +123,16 @@ success:
 
 Raising `error` in `success` or `finalize` turns a successful run into a failed one. In `success` the run then goes through `failure` and `finalize` as if the agent itself had failed. Use `error` when an agent says it is done but the result does not meet your requirements.
 
+If neither `failure` nor `finalize` recovers the run with `retry`, `resume`, or `proxy`, the failure is the run's outcome, the same as an `error` raised in `start`:
+
+| Where the document runs | Outcome |
+|-------------------------|---------|
+| `compose` / `inline-compose` | Exits `1` and prints `Error: <reason>` once. |
+| A `sequence` step | The step fails; `fail_fast` decides whether later steps run. |
+| A `loop:` iteration | The iteration fails; `fail_fast` decides whether the loop continues. |
+
+A recovery that works reports the recovered attempt's outcome, so a `retry` that succeeds exits `0` with no error left over from the earlier attempt. Messages that already fired, such as a `success` `info:` line, are kept. Without a reason, the error reads `lifecycle success error`.
+
 | Parameter | Required | Meaning |
 |-----------|----------|---------|
 | `reason` | no | Human-readable explanation. This is the positional argument. |

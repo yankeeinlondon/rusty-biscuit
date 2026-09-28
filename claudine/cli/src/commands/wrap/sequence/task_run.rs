@@ -31,12 +31,13 @@
 //! either way: the bar is added on the rendering path only.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use claudine::composition::lifecycle_executor::{StackExecutionContext, SystemShellRunner};
 use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    PreparedComposition, ResolvedExecutionTarget, RuntimeState, SequenceTaskResult,
+    PreparedComposition, ResolvedExecutionTarget, RunLedger, RuntimeState, SequenceTaskResult,
+    SharedRunLedger,
 };
 use claudine::composition::sequence::preflight::{PreflightAction, PreflightGroup, PreflightTask};
 use claudine::composition::sequence::task::{
@@ -51,6 +52,8 @@ use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::EffectiveStateBuilder;
 use serde_json::Value;
 
+use crate::commands::compose::CompositionKind;
+use crate::commands::compose::prep::StepScope;
 use crate::commands::wrap::composition::execute_composition_request_inner;
 
 use super::iterate::{SequenceRunContext, StepOutcome};
@@ -440,9 +443,26 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let resolved =
             shared.resolve_session_interactivity(composed.prepared.selection_hints.interactive);
         let mut env_overrides = self.env_overrides.clone();
+        let mut task_owned_env = super::jit::step_owned_env(self.run.effective_fail_fast);
         if let Some(operation) = &request.operation {
             env_overrides.insert("OPERATION".to_string(), operation.clone());
+            task_owned_env.insert("OPERATION".to_string(), operation.clone());
         }
+
+        // This task's own handoff chain. Each run of a task starts one, so
+        // parallel siblings never share a chain and two of them may adopt the
+        // same target; a cycle is still a cycle within one task (R8).
+        let task_ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
+            source.resolved_path.clone(),
+            Arc::clone(&self.run.compose.approval_cache),
+        )));
+        let runtime_state = request
+            .runtime
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::clone(self.runtime_state));
+        let task_file_resolution_context =
+            prompt_source_context.file_resolution_context().clone();
+        let task_caller_input_records = caller_input_records.clone();
 
         let execution = CompositionExecutionRequest {
             mode: if request.inline_compose {
@@ -493,25 +513,53 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             // The task executor's cell, not the sequence's: a parallel group
             // member hands over its private buffer, so the launched document's
             // own lifecycle `set` stays invisible to its siblings.
-            runtime_state: request
-                .runtime
-                .clone()
-                .or_else(|| Some(std::sync::Arc::clone(self.runtime_state))),
+            runtime_state: Some(std::sync::Arc::clone(&runtime_state)),
             // The task executor publishes the entry after `teardown`, not here.
             suppress_output_commit: true,
             // Carries this task's bar to the thread draining the child's stdout.
             task_frame_writer: request.frame_writer.clone(),
             proxy_overlay: indexmap::IndexMap::new(),
-            handoff_ledger: None,
+            handoff_ledger: Some(Arc::clone(&task_ledger)),
             adopted_handoff: None,
         };
 
+        let kind = if request.inline_compose {
+            CompositionKind::Inline
+        } else {
+            CompositionKind::Direct
+        };
+        // A handoff the document raised stays inside this task: the target
+        // keeps the task's inputs, cell, output policy, and bar, and its result
+        // is the task's. Setup, teardown, and output publication belong to the
+        // task executor around this call, so each still happens once.
+        let task_scope = StepScope {
+            caller_overrides: request.set_overrides.clone(),
+            runtime_state,
+            suppress_output_commit: true,
+            task_frame_writer: request.frame_writer.clone(),
+            env_overrides: task_owned_env,
+            operation: request.operation.clone(),
+        };
         let outcome = execute_composition_request_inner(
             execution,
             self.run.verbose,
             None,
             self.run.perf_enabled,
         )
+        .and_then(|mut outcome| {
+            if let Some(surfaced) = outcome.handoff.take() {
+                (outcome.exit_code, outcome.final_output) = super::iterate::run_step_proxy_loop(
+                    surfaced,
+                    &task_ledger,
+                    self.run,
+                    kind,
+                    &task_scope,
+                    task_caller_input_records,
+                    &task_file_resolution_context,
+                )?;
+            }
+            Ok(outcome)
+        })
         .map_err(|error| CompositionError::SequenceTaskPromptLaunch {
             task: request.reference.clone(),
             path: request.path.clone(),

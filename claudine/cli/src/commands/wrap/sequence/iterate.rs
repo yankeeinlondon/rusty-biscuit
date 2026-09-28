@@ -38,7 +38,8 @@ use tracing::{debug, info_span};
 
 use crate::commands::compose::{CompositionKind, SharedComposeArgs};
 use crate::commands::compose::prep::{
-    ActiveDocumentOutcome, prepare_and_run_active_document, resolve_composition_source,
+    ActiveDocumentOutcome, StepScope, prepare_and_run_active_document,
+    resolve_composition_source,
 };
 use crate::commands::wrap::composition::{CompositionPrepContext, execute_composition_request_inner};
 use crate::commands::wrap::overlay::merge_frontmatter_overlay;
@@ -355,34 +356,31 @@ fn run_one_step(
         runtime_state,
         Arc::clone(&step_ledger),
     );
+    // The step's own scope, kept by any document a handoff adopts within it.
+    let step_scope = StepScope {
+        caller_overrides: set_overrides,
+        runtime_state: Arc::clone(runtime_state),
+        suppress_output_commit: false,
+        task_frame_writer: None,
+        env_overrides: jit::step_owned_env(run.effective_fail_fast),
+        operation: None,
+    };
     let execution = execute_composition_request_inner(request, run.verbose, None, run.perf_enabled)
         .and_then(|mut outcome| {
-            if let Some(surfaced) = outcome.initialize_handoff.take() {
+            if let Some(surfaced) = outcome.handoff.take() {
                 let kind = if run.compose.inline_mode {
                     CompositionKind::Inline
                 } else {
                     CompositionKind::Direct
                 };
-                let system_prompt_args = SystemPromptArgs {
-                    append_file: run.shared.append_system_prompt.clone(),
-                    replace_file: run.shared.replace_system_prompt.clone(),
-                };
-                let launch_area_fallback =
-                    Some(run.prep_context.launch_workspace.launch_cwd.clone());
-                outcome.exit_code = run_step_proxy_loop(
+                (outcome.exit_code, outcome.final_output) = run_step_proxy_loop(
                     surfaced,
                     &step_ledger,
-                    run.prep_context.source_repo_root.as_deref(),
-                    run.shared,
+                    run,
                     kind,
-                    &system_prompt_args,
-                    run.user_set_overrides.clone(),
+                    &step_scope,
                     run.compose.caller_input_records.clone(),
-                    &launch_area_fallback,
-                    &run.compose.approval_cache,
-                    &run.prep_context.invocation,
                     run.compose.file_resolution_context,
-                    run.verbose,
                 )?;
             }
             Ok(outcome)
@@ -642,28 +640,34 @@ fn emit_step_status(
     log::message(&Status::from_prose(prose).state(state).render(&log::terminal()));
 }
 
-/// Drive a sequence step's contained handoff chain to completion.
+/// Drive the handoff chain contained in one sequence step (or one `prompt:`
+/// task) to completion, returning the final target's exit code and captured
+/// output.
 ///
-/// The target is prepared through the canonical compose pipeline while the
-/// ledger remains scoped to the current sequence step.
-#[allow(clippy::too_many_arguments)]
-fn run_step_proxy_loop(
+/// Each target is prepared through the canonical compose pipeline, so it
+/// behaves as the same document invoked directly, while everything the step
+/// owns stays with the step: `ledger` is this step's (or task's) chain, and
+/// `scope` carries its caller layers, runtime cell, and output policy (R8).
+/// `file_resolution_context` is the source document's, against which an
+/// uncommitted request resolves.
+pub(super) fn run_step_proxy_loop(
     initial: SurfacedHandoff,
     ledger: &SharedRunLedger,
-    step_repo_root: Option<&Path>,
-    shared: &SharedComposeArgs,
+    run: &SequenceRunContext<'_>,
     kind: CompositionKind,
-    system_prompt_args: &SystemPromptArgs,
-    mut user_set_overrides: Option<serde_json::Value>,
+    scope: &StepScope,
     mut caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
-    launch_area_fallback: &Option<PathBuf>,
-    shared_approval_cache: &composition::SharedApprovalCache,
-    invocation: &claudine::invocation_context::InvocationContext,
     file_resolution_context: &biscuit_file::FileResolutionContext,
-    verbose: u8,
-) -> Result<i32> {
+) -> Result<(i32, Option<String>)> {
+    let shared = run.shared;
+    let invocation = &run.prep_context.invocation;
+    let system_prompt_args = SystemPromptArgs {
+        append_file: shared.append_system_prompt.clone(),
+        replace_file: shared.replace_system_prompt.clone(),
+    };
+    let launch_area_fallback = Some(run.prep_context.launch_workspace.launch_cwd.clone());
+    let mut caller_overrides = Some(scope.caller_overrides.to_value());
     let mut surfaced = initial;
-    let _ = step_repo_root;
     let mut active_file_resolution_context = file_resolution_context.clone();
     loop {
         let handoff: ProxyHandoff = match surfaced {
@@ -695,7 +699,7 @@ fn run_step_proxy_loop(
         let source_context = invocation.derive_source(&target_source.resolved_path)?;
         active_file_resolution_context = source_context.file_resolution_context().clone();
 
-        let (outcome, next_repo_root) = prepare_and_run_active_document(
+        let (outcome, _) = prepare_and_run_active_document(
             shared,
             kind,
             target_source,
@@ -704,27 +708,28 @@ fn run_step_proxy_loop(
             adopted_handoff,
             false,
             &mut inline_state,
-            system_prompt_args,
-            &mut user_set_overrides,
+            &system_prompt_args,
+            &mut caller_overrides,
             &mut caller_input_records,
             composition::InteractiveSchemaOptions::default(),
-            launch_area_fallback,
-            shared_approval_cache,
+            &launch_area_fallback,
+            &run.compose.approval_cache,
             ledger,
-            verbose,
+            run.verbose,
             None,
             Vec::new(),
             std::time::Instant::now(),
             invocation.clone(),
             source_context,
+            Some(scope),
         )?;
 
         match outcome {
-            ActiveDocumentOutcome::Done(code) => return Ok(code),
-            ActiveDocumentOutcome::Handoff(next) => {
-                surfaced = next;
-                let _ = next_repo_root;
-            }
+            ActiveDocumentOutcome::Done {
+                exit_code,
+                final_output,
+            } => return Ok((exit_code, final_output)),
+            ActiveDocumentOutcome::Handoff(next) => surfaced = next,
         }
     }
 }

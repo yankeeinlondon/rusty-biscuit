@@ -34,8 +34,8 @@ use tracing::info_span;
 
 use super::interrupt::{USER_INTERRUPT_EXIT_CODE, install_user_interrupt_guard};
 use super::loop_run::{
-    build_loop_iteration_output, emit_compose_warnings, emit_rate_limit_halt, record_prep_substage,
-    run_loop_with_overrides,
+    build_loop_iteration_output, downgraded_loop_iteration_output, emit_compose_warnings,
+    emit_rate_limit_halt, record_prep_substage, run_loop_with_overrides,
 };
 use super::setters::{merge_set_overrides, parse_composition_positionals};
 use super::{CompositionKind, SharedComposeArgs};
@@ -49,6 +49,7 @@ use crate::commands::wrap::composition::{
     execute_composition_request_inner, execute_staged_composition,
     install_agent_env_for_composition, staged_boot,
 };
+use crate::commands::wrap::harness_orch::UnrecoveredLifecycleDowngrade;
 use crate::commands::wrap::overlay::merge_frontmatter_overlay;
 use crate::commands::wrap::wrap_terminal;
 use crate::output::emit_execution_header;
@@ -80,7 +81,12 @@ fn enrich_report(
 /// directly (R7).
 pub(crate) enum ActiveDocumentOutcome {
     /// The active document (and any loop it owned) ran to completion.
-    Done(i32),
+    Done {
+        exit_code: i32,
+        /// The final provider run's captured text, when one completed. A
+        /// `prompt:` task publishes it itself, after `teardown`.
+        final_output: Option<String>,
+    },
     /// A proxy handed the run off to a target. The coordinator re-prepares the
     /// target through the canonical launch pipeline and reruns loop-vs-single on
     /// it.
@@ -90,6 +96,67 @@ pub(crate) enum ActiveDocumentOutcome {
     /// from a terminal-recovery / target-initialize-chain route the provider
     /// harness already committed against the shared invocation ledger.
     Handoff(SurfacedHandoff),
+}
+
+impl ActiveDocumentOutcome {
+    fn done(exit_code: i32) -> Self {
+        Self::Done {
+            exit_code,
+            final_output: None,
+        }
+    }
+}
+
+/// What a `sequence` step owns that a handoff inside it must keep.
+///
+/// A handoff changes the step's document, never the step (R8). The target reads
+/// the step's caller layers (the user's setters, a task's evaluated `params`,
+/// the reserved `state`/`previous`/`next` overlay, earlier steps' runtime
+/// values) at the precedence the source read them, sees the step's environment
+/// and `operation`, writes `set` and `outputs` into the step's runtime cell, and
+/// a `prompt:` task's target still withholds its output for the task executor
+/// to publish after `teardown`, under the task's bar. `compose`/`inline-compose`
+/// pass no scope: each active document there gets a fresh cell and the
+/// command's own setters.
+#[derive(Clone)]
+pub(crate) struct StepScope {
+    /// The step's caller layers, origin kept: only the user's setters are
+    /// authored, every run-produced value is data.
+    pub(crate) caller_overrides: claudine::composition::LayeredOverrides,
+    pub(crate) runtime_state: Arc<claudine::composition::RuntimeState>,
+    pub(crate) suppress_output_commit: bool,
+    pub(crate) task_frame_writer: Option<claudine::render::TaskFrameWriter>,
+    /// Environment the step sets for whatever document it runs
+    /// (`CLAUDINE_FAIL_FAST`, a task's `OPERATION`). Never the source's
+    /// `AGENT`/`MODEL`/`YOLO`: the target installs its own over this.
+    pub(crate) env_overrides: BTreeMap<String, String>,
+    /// A task's own `operation`, which outranks the command's `--operation`.
+    pub(crate) operation: Option<String>,
+}
+
+/// The operation a document's run reports: the step's, inside a sequence task
+/// that sets one, else the command's.
+fn effective_operation(shared: &SharedComposeArgs, step_scope: Option<&StepScope>) -> Option<String> {
+    step_scope
+        .and_then(|scope| scope.operation.clone())
+        .or_else(|| shared.operation.clone())
+}
+
+/// The runtime cell a document's run writes to: the step's, inside a sequence,
+/// else a fresh one per active document.
+fn runtime_cell(step_scope: Option<&StepScope>) -> Arc<claudine::composition::RuntimeState> {
+    step_scope.map_or_else(
+        || Arc::new(claudine::composition::RuntimeState::new()),
+        |scope| Arc::clone(&scope.runtime_state),
+    )
+}
+
+/// The data-origin keys among the caller layers, which a step scope carries and
+/// a command's own setters never have.
+fn caller_data_keys(step_scope: Option<&StepScope>) -> std::collections::BTreeSet<String> {
+    step_scope
+        .map(|scope| scope.caller_overrides.data_keys().clone())
+        .unwrap_or_default()
 }
 
 /// Shared implementation for `compose` and `inline-compose`.
@@ -317,10 +384,11 @@ pub(crate) fn run_composition_inner(
             compose_entry,
             invocation.clone(),
             source_context,
+            None,
         )?;
 
         match outcome {
-            ActiveDocumentOutcome::Done(code) => return Ok(code),
+            ActiveDocumentOutcome::Done { exit_code, .. } => return Ok(exit_code),
             ActiveDocumentOutcome::Handoff(surfaced) => {
                 // Resolve the surfaced handoff to a committed one against the one
                 // invocation ledger. An `initialize`-route request is committed
@@ -413,6 +481,7 @@ pub(crate) fn prepare_and_run_active_document(
     compose_entry: std::time::Instant,
     invocation: InvocationContext,
     source_context: SourceContext,
+    step_scope: Option<&StepScope>,
 ) -> Result<(ActiveDocumentOutcome, Option<std::path::PathBuf>)> {
     let perf_enabled = shared.perf;
     // Captured for frontmatter-excerpt enrichment of any error rendered below;
@@ -525,7 +594,9 @@ pub(crate) fn prepare_and_run_active_document(
         .map_err(|e| enrich_report(e, &source, stderr_is_tty))?
     };
 
-    let mut env_overrides: BTreeMap<String, String> = BTreeMap::new();
+    let mut env_overrides: BTreeMap<String, String> = step_scope
+        .map(|scope| scope.env_overrides.clone())
+        .unwrap_or_default();
     if let Some(ref target) = resolved_target {
         install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
     }
@@ -554,8 +625,8 @@ pub(crate) fn prepare_and_run_active_document(
             verbose > 0,
             shared.repo,
             kind.is_inline(),
-            false, // sequence
-            shared.operation.as_deref(),
+            step_scope.is_some(),
+            effective_operation(shared, step_scope).as_deref(),
             current_file,
             prep_context.launch_workspace.package_context.clone(),
             &crate::log::terminal(),
@@ -631,6 +702,7 @@ pub(crate) fn prepare_and_run_active_document(
             &crate::commands::wrap::overlay::proxy_caller_overrides(
                 current_overlay,
                 set_overrides.as_ref(),
+                &caller_data_keys(step_scope),
             ),
             &caller_input_records,
             &approval_options,
@@ -645,7 +717,7 @@ pub(crate) fn prepare_and_run_active_document(
     // or entering the loop.
     if crate::output::user_interrupt_observed() {
         return Ok((
-            ActiveDocumentOutcome::Done(USER_INTERRUPT_EXIT_CODE),
+            ActiveDocumentOutcome::done(USER_INTERRUPT_EXIT_CODE),
             commit_repo_root,
         ));
     }
@@ -675,6 +747,7 @@ pub(crate) fn prepare_and_run_active_document(
         file_resolution_context,
         prepared_context,
         document_epoch,
+        step_scope,
     )?;
 
     Ok((outcome, commit_repo_root))
@@ -898,6 +971,7 @@ fn build_and_run_loop(
     shared: &SharedComposeArgs,
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
     handoff_ledger: &SharedRunLedger,
+    step_scope: Option<&StepScope>,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
     let config = resolve_loop_config(source)?;
     let Some(config) = config else {
@@ -953,13 +1027,17 @@ fn build_and_run_loop(
     let shell_runner = SystemShellRunner;
     let emitter = DefaultLifecycleEmitter;
     // One cell for the whole `--loop` run: a `set` written in iteration 1 and
-    // every committed `outputs` entry stay visible to later iterations.
-    let runtime_state = std::sync::Arc::new(claudine::composition::RuntimeState::new());
+    // every committed `outputs` entry stay visible to later iterations. Inside a
+    // sequence step that cell is the step's.
+    let runtime_state = runtime_cell(step_scope);
     // A staged document's stabilized reread and the approvals it earned. Later
     // iterations compose from it, never from the pre-`initialize` snapshot.
     let mut stabilized: Option<(ResolvedCompositionSource, std::collections::HashSet<String>)> =
         None;
     let staged_start = std::time::Instant::now();
+    // A halting loop renders the failed iteration's error in its final block;
+    // a continuing one never does, so the iteration reports its own.
+    let loop_fail_fast = loop_options.fail_fast.or(config.fail_fast).unwrap_or(true);
 
     run_loop_with_overrides(
         source,
@@ -1104,16 +1182,31 @@ fn build_and_run_loop(
                 // A looping proxy target runs its `initialize` through the loop
                 // engine, not the staged bootstrap, so it is never adopted here.
                 None,
+                step_scope,
             );
 
-            let outcome = execute_composition_attempt(
+            let attempt = execute_composition_attempt(
                 request,
                 verbose,
                 shared.perf,
                 guard,
                 ctx.iteration > 1,
-            )
-            .map_err(|e| {
+            );
+            if let Err(error) = &attempt
+                && let Some(downgrade) = error
+                    .chain()
+                    .find_map(|cause| cause.downcast_ref::<UnrecoveredLifecycleDowngrade>())
+            {
+                if !loop_fail_fast && !shared.silent {
+                    claudine::harness::report::report_unhandled_failure(&downgrade.message, &term);
+                }
+                return Ok(downgraded_loop_iteration_output(
+                    ctx.iteration,
+                    &source.resolved_path,
+                    downgrade,
+                ));
+            }
+            let outcome = attempt.map_err(|e| {
                 // A concrete `CompositionError` keeps its own identity. Since
                 // iteration 1 may defer its verdict, the attempt itself now
                 // carries preparation failures the closure used to raise
@@ -1139,6 +1232,16 @@ fn build_and_run_loop(
                         snapshot: DiagnosticSnapshot::select(other.as_ref()).map(Box::new),
                     },
                 }
+            })
+            .map_err(|error| {
+                // Under `fail_fast: false` the engine continues past an
+                // iteration that could not complete and drops its error, so a
+                // refused hand-off or a preparation failure would otherwise
+                // never be shown.
+                if !loop_fail_fast && !shared.silent && !error.is_already_emitted() {
+                    crate::log::message(&biscuit_terminal::errors::BlockError::report_block_error(&error, &term));
+                }
+                error
             })?;
 
             Ok(build_loop_iteration_output(
@@ -1171,6 +1274,7 @@ fn build_execution_request(
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
     handoff_ledger: SharedRunLedger,
     adopted_handoff: Option<Box<ProxyHandoff>>,
+    step_scope: Option<&StepScope>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -1188,7 +1292,7 @@ fn build_execution_request(
         timeout: shared.timeout.clone(),
         step_timeout: shared.step_timeout.clone(),
         stall_timeout: shared.stall_timeout.clone(),
-        operation: shared.operation.clone(),
+        operation: effective_operation(shared, step_scope),
         sandbox: shared.sandbox,
         repo: shared.repo,
         dry_run: shared.dry_run,
@@ -1201,7 +1305,8 @@ fn build_execution_request(
         silent: shared.silent,
         env_overrides: env_overrides.clone(),
         shared_approval_cache,
-        sequence: false,
+        // Inside a step the sequence owns preflight messaging and the header.
+        sequence: step_scope.is_some(),
         installed_snapshot: Some(prep_context.installed_snapshot.clone()),
         invocation_context: Some(prep_context.invocation.clone()),
         source_context: Some(prep_context.source_context.clone()),
@@ -1213,9 +1318,8 @@ fn build_execution_request(
         provider_args: shared.provider_args.clone(),
         provider_args_explicit: shared.provider_args_explicit,
         runtime_state: Some(runtime_state),
-        suppress_output_commit: false,
-        // Not a sequence task: nothing owns a bar for this run.
-        task_frame_writer: None,
+        suppress_output_commit: step_scope.is_some_and(|scope| scope.suppress_output_commit),
+        task_frame_writer: step_scope.and_then(|scope| scope.task_frame_writer.clone()),
         // The immediate proxy overlay for a proxied target (empty for a
         // directly-invoked document), re-applied on every re-materialization so a
         // retry/resume keeps the pre-schema handoff input (AC26).
@@ -1233,12 +1337,12 @@ fn build_execution_request(
 /// Run the loop engine when the document declares `loop:` frontmatter,
 /// otherwise fall through to the single execution path.
 ///
-/// Returns [`ActiveDocumentOutcome::Handoff`] when the document's `initialize`
-/// proxies before its first provider attempt (whether the document owned a
-/// `loop:` or not), so the caller's active-document coordinator can commit the
-/// target and rerun loop-vs-single on it. Both the loop route (the engine's
-/// initialize transition) and the single route (the pipeline's surfaced
-/// `initialize_handoff`) converge on that one outcome.
+/// Returns [`ActiveDocumentOutcome::Handoff`] when any of the document's
+/// lifecycle events proxies (whether the document owned a `loop:` or not), so
+/// the caller's active-document coordinator can adopt the target and rerun
+/// loop-vs-single on it. Both the loop route (the engine's surfaced handoff)
+/// and the single route (the outcome's `handoff`) converge on that one
+/// outcome.
 ///
 /// `--dry-run` bypasses the iteration engine entirely: a single
 /// composition + single render (Decision 4). Loop detection is skipped so
@@ -1284,6 +1388,7 @@ fn execute_loop_or_single(
     // this exact snapshot.
     prepared_context: darkmatter::markdown::compose::ComposeContext,
     document_epoch: claudine::invocation_context::DocumentEpoch,
+    step_scope: Option<&StepScope>,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared);
 
@@ -1334,7 +1439,7 @@ fn execute_loop_or_single(
         // identical document invoked without `loop:` succeeded.
         defer_schema_verdict: schema_stage
             == claudine::composition::SchemaStage::DeferToStabilizedReread,
-        data_override_keys: Default::default(),
+        data_override_keys: caller_data_keys(step_scope),
         proxy_overlay: proxy_overlay.clone(),
     };
 
@@ -1389,6 +1494,7 @@ fn execute_loop_or_single(
             shared,
             &proxy_overlay,
             &handoff_ledger,
+            step_scope,
         )?;
         if let Some(loop_result) = loop_result {
             if let Some(error) = loop_result.error {
@@ -1396,7 +1502,7 @@ fn execute_loop_or_single(
                 // status line; suppress the red `Error:` echo and exit with
                 // the conventional 130 code so the shell sees a clean Ctrl+C.
                 if matches!(error, CompositionError::LoopInterrupted { .. }) {
-                    return Ok(ActiveDocumentOutcome::Done(loop_result.final_exit_code));
+                    return Ok(ActiveDocumentOutcome::done(loop_result.final_exit_code));
                 }
                 // Rate-limit halt has its own conventional exit code
                 // (`EX_TEMPFAIL` = 75) so shell wrappers can recognize a
@@ -1405,7 +1511,7 @@ fn execute_loop_or_single(
                 // process exits with the right code.
                 if matches!(error, CompositionError::LoopRateLimited { .. }) {
                     emit_rate_limit_halt(&error);
-                    return Ok(ActiveDocumentOutcome::Done(
+                    return Ok(ActiveDocumentOutcome::done(
                         claudine::composition::LOOP_RATE_LIMITED_EXIT_CODE,
                     ));
                 }
@@ -1428,7 +1534,10 @@ fn execute_loop_or_single(
             if let Some(handoff) = loop_result.handoff {
                 return Ok(ActiveDocumentOutcome::Handoff(handoff));
             }
-            return Ok(ActiveDocumentOutcome::Done(loop_result.final_exit_code));
+            return Ok(ActiveDocumentOutcome::Done {
+                exit_code: loop_result.final_exit_code,
+                final_output: Some(loop_result.last_output),
+            });
         }
     }
 
@@ -1454,6 +1563,7 @@ fn execute_loop_or_single(
             system_prompt_args,
             verbose,
             startup_timings,
+            step_scope,
         );
     }
 
@@ -1494,10 +1604,11 @@ fn execute_loop_or_single(
         header_emitted,
         kind.mode(),
         &prep_context,
-        std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        runtime_cell(step_scope),
         &proxy_overlay,
         handoff_ledger,
         adopted_handoff,
+        step_scope,
     );
 
     if let Some(ref mut timings) = startup_timings {
@@ -1512,9 +1623,12 @@ fn execute_loop_or_single(
     // (for a terminal-recovery / target-initialize-chain route) hoists it here
     // rather than adopting it in place, so the coordinator re-prepares the target
     // through the canonical launch pipeline and reruns loop-vs-single (R6/R7).
-    match outcome.initialize_handoff {
+    match outcome.handoff {
         Some(handoff) => Ok(ActiveDocumentOutcome::Handoff(handoff)),
-        None => Ok(ActiveDocumentOutcome::Done(outcome.exit_code)),
+        None => Ok(ActiveDocumentOutcome::Done {
+            exit_code: outcome.exit_code,
+            final_output: outcome.final_output,
+        }),
     }
 }
 
@@ -1606,6 +1720,7 @@ fn run_staged_single(
     system_prompt_args: &SystemPromptArgs,
     verbose: u8,
     startup_timings: Option<crate::perf::StartupTimings>,
+    step_scope: Option<&StepScope>,
 ) -> Result<ActiveDocumentOutcome> {
     let StagedBoot {
         bootstrap,
@@ -1672,7 +1787,7 @@ fn run_staged_single(
         &handoff_ledger,
         Some(&prep_context.invocation),
     )? {
-        staged_boot::StagedInitialize::Skipped => return Ok(ActiveDocumentOutcome::Done(0)),
+        staged_boot::StagedInitialize::Skipped => return Ok(ActiveDocumentOutcome::done(0)),
         staged_boot::StagedInitialize::Handoff(handoff) => {
             return Ok(ActiveDocumentOutcome::Handoff(handoff));
         }
@@ -1720,10 +1835,11 @@ fn run_staged_single(
         header_emitted,
         kind.mode(),
         prep_context,
-        std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+        runtime_cell(step_scope),
         proxy_overlay,
         handoff_ledger,
         None,
+        step_scope,
     );
     let outcome = execute_staged_composition(
         request,
@@ -1732,9 +1848,12 @@ fn run_staged_single(
         shared.perf,
         &mut guard,
     )?;
-    match outcome.initialize_handoff {
+    match outcome.handoff {
         Some(handoff) => Ok(ActiveDocumentOutcome::Handoff(handoff)),
-        None => Ok(ActiveDocumentOutcome::Done(outcome.exit_code)),
+        None => Ok(ActiveDocumentOutcome::Done {
+            exit_code: outcome.exit_code,
+            final_output: outcome.final_output,
+        }),
     }
 }
 

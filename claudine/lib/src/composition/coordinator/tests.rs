@@ -782,3 +782,145 @@ fn redaction_does_not_hide_overlay_values_from_the_code_that_needs_them() {
          authored order"
     );
 }
+
+/// The ledger records committed handoffs, never requests: every refusal on the
+/// way to a commit leaves the chain and the transition log exactly as they
+/// were, and one accepted request adds exactly one entry of each.
+mod commit_records_only_handoffs {
+    use super::*;
+
+    /// A source and a target that resolve for real, since resolution is the
+    /// first refusal the commit can hit.
+    struct Workspace {
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+    }
+
+    impl Workspace {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            for name in ["source.md", "target.md", "other.md"] {
+                std::fs::write(root.join(name), "body\n").unwrap();
+            }
+            Self { _dir: dir, root }
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.root.join(name)
+        }
+
+        fn request(&self, target: &str) -> EvaluatedProxyRequest {
+            EvaluatedProxyRequest::new(
+                target.to_string(),
+                IndexMap::new(),
+                ProxyProvenance::new(
+                    self.path("source.md"),
+                    ActionLocation::new(LifecycleSignal::Success, 0, 0),
+                    vec![self.path("source.md")],
+                ),
+            )
+        }
+
+        fn commit(
+            &self,
+            ledger: &mut RunLedger,
+            target: &str,
+        ) -> Result<ProxyHandoff, ProxyCommitError> {
+            commit_proxy(ledger, self.request(target), Some(self.root.as_path()))
+        }
+    }
+
+    fn snapshot(ledger: &RunLedger) -> (Vec<PathBuf>, usize) {
+        (ledger.chain().to_vec(), ledger.transitions().len())
+    }
+
+    #[test]
+    fn a_refused_resolution_leaves_the_ledger_untouched() {
+        let workspace = Workspace::new();
+        let mut ledger = RunLedger::new(workspace.path("source.md"), cache());
+        let before = snapshot(&ledger);
+
+        let error = workspace
+            .commit(&mut ledger, "./missing.md")
+            .expect_err("a missing target does not resolve");
+
+        assert!(matches!(error, ProxyCommitError::Resolution { .. }), "{error:?}");
+        assert_eq!(snapshot(&ledger), before);
+    }
+
+    #[test]
+    fn a_refused_cycle_leaves_the_ledger_untouched_and_a_legitimate_hop_follows() {
+        let workspace = Workspace::new();
+        let mut ledger = RunLedger::new(workspace.path("source.md"), cache());
+        let before = snapshot(&ledger);
+
+        let error = workspace
+            .commit(&mut ledger, "./source.md")
+            .expect_err("a self-proxy is a cycle");
+        assert!(matches!(error, ProxyCommitError::Rejected(_)), "{error:?}");
+        assert_eq!(snapshot(&ledger), before);
+
+        // The refused request left nothing behind to collide with.
+        let handoff = workspace
+            .commit(&mut ledger, "./target.md")
+            .expect("the legitimate hop commits");
+        assert_eq!(handoff.resolved_target(), workspace.path("target.md"));
+        assert_eq!(
+            ledger.chain(),
+            [workspace.path("source.md"), workspace.path("target.md")]
+        );
+        assert_eq!(ledger.transitions().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_hop_limit_leaves_the_ledger_untouched() {
+        let workspace = Workspace::new();
+        let mut ledger = RunLedger::new(workspace.path("source.md"), cache());
+        for i in 0..(MAX_PROXY_HOPS - 1) {
+            commit(&mut ledger, &format!("hop{i}"), &[]);
+        }
+        let before = snapshot(&ledger);
+
+        let error = workspace
+            .commit(&mut ledger, "./target.md")
+            .expect_err("the hop budget is exhausted");
+
+        assert!(matches!(error, ProxyCommitError::Rejected(_)), "{error:?}");
+        assert_eq!(snapshot(&ledger), before);
+    }
+
+    #[test]
+    fn one_accepted_handoff_adds_exactly_one_entry() {
+        let workspace = Workspace::new();
+        let mut ledger = RunLedger::new(workspace.path("source.md"), cache());
+
+        workspace
+            .commit(&mut ledger, "./target.md")
+            .expect("the hop commits");
+
+        assert_eq!(ledger.hops(), 1);
+        assert_eq!(ledger.transitions().len(), 1);
+    }
+
+    /// Committing is adopting: what the target does next is not the ledger's
+    /// concern, so a target that fails its `initialize` or validation stays in
+    /// the chain, and a later request for it is a cycle.
+    #[test]
+    fn an_adopted_target_that_later_fails_stays_recorded() {
+        let workspace = Workspace::new();
+        let mut ledger = RunLedger::new(workspace.path("source.md"), cache());
+        let handoff = workspace
+            .commit(&mut ledger, "./target.md")
+            .expect("the hop commits");
+        drop(handoff);
+
+        assert!(ledger.contains_document(&workspace.path("target.md")));
+        assert!(matches!(
+            workspace.commit(&mut ledger, "./target.md"),
+            Err(ProxyCommitError::Rejected(_))
+        ));
+        assert!(workspace.commit(&mut ledger, "./other.md").is_ok());
+        assert_eq!(ledger.hops(), 2);
+    }
+}

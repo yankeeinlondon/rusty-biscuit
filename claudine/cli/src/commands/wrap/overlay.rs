@@ -32,7 +32,10 @@ pub(crate) fn merge_frontmatter_overlay(
 /// Precedence, low→high: the target's authored frontmatter < the proxy's
 /// `with:` overlay < the caller's setters. The overlay values were evaluated in
 /// the source document, so they are **data** — the target never scans their
-/// `{{ … }}` or `$( … )` again — while the caller's setters stay authored. A
+/// `{{ … }}` or `$( … )` again — while the caller's setters stay authored,
+/// except the `data_keys` among them: inside a sequence step the caller layer
+/// also carries run-produced values (a task's `params`, the step overlay),
+/// which stay data across the handoff exactly as they were for the source. A
 /// `null` overlay value removes the key from the target's frontmatter
 /// ([`merge_frontmatter_overlay`]) and contributes no override.
 ///
@@ -48,12 +51,13 @@ pub(crate) fn merge_frontmatter_overlay(
 pub(crate) fn proxy_caller_overrides(
     overlay: &IndexMap<String, Value>,
     set_overrides: Option<&Value>,
+    data_keys: &std::collections::BTreeSet<String>,
 ) -> claudine::composition::LayeredOverrides {
     let mut overrides = claudine::composition::LayeredOverrides::proxy_overlay(overlay);
-    overrides.push(
-        darkmatter::markdown::compose::OverrideOrigin::Authored,
+    overrides.extend(&claudine::composition::LayeredOverrides::from_parts(
         set_overrides,
-    );
+        data_keys,
+    ));
     overrides
 }
 

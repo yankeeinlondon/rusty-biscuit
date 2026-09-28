@@ -314,7 +314,7 @@ fn emit_dry_run_outcome(
         // Dry-run never produces a per-iteration summary.
         iteration_signals: None,
         terminal_signal: None,
-        initialize_handoff: None,
+        handoff: None,
         final_output: None,
     }
 }
@@ -1506,7 +1506,7 @@ pub(super) fn route_initialize(
                             iteration_signals: None,
                             terminal_signal: None,
                             final_output: None,
-                            initialize_handoff: None,
+                            handoff: None,
                         },
                     )));
                 }
@@ -1848,7 +1848,7 @@ fn provider_run_handoff(
                 iteration_signals: None,
                 terminal_signal: None,
                 final_output: None,
-                initialize_handoff: Some(committed),
+                handoff: Some(committed),
             })
         }
         // Dry-run proxies (and every other transition) stay on the in-harness

@@ -538,7 +538,7 @@ pub(super) fn run_composition_body(
         // against the shared invocation ledger and surfaces it here for the
         // coordinator to re-prepare. `initialize`-route proxies are surfaced
         // earlier (see `provider_run_handoff`) and never reach this path.
-        initialize_handoff: surfaced_handoff,
+        handoff: surfaced_handoff,
     };
     // `--perf` is an explicit opt-in and overrides `--silent`/`--quiet`.
     // The perf report is always emitted to stderr when requested.

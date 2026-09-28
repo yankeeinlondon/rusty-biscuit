@@ -93,7 +93,7 @@ struct HarnessLoopCtx<'a, 'guard> {
     initial_transition: DocumentTransition,
     // The ledger of the coordinator that owns this run, when one exists: the
     // invocation-wide ledger for `compose`/`inline-compose`, or a `sequence`
-    // step's own per-step ledger. A terminal-event proxy commits against it and
+    // step's or `prompt:` task's own ledger. A terminal-event proxy commits against it and
     // surfaces the committed handoff up rather than adopting in place. `None`
     // only for the direct wrapper passthrough, which prepares no active document
     // and therefore refuses a hand-off instead of consuming one — see
@@ -167,8 +167,8 @@ pub(crate) fn run_harness_loop(
     // commits a proxy raised by a terminal event — one commit point, one set
     // of resolution and cycle semantics, no second channel.
     initial_transition: DocumentTransition,
-    // The shared invocation ledger (compose/inline-compose), or `None` for a
-    // sequence step / direct passthrough. See [`HarnessLoopCtx::handoff_ledger`].
+    // The owning coordinator's ledger, or `None` for the direct wrapper
+    // passthrough. See [`HarnessLoopCtx::handoff_ledger`].
     handoff_ledger: Option<SharedRunLedger>,
     // An already-committed proxy handoff whose target this run adopts for its
     // staged bootstrap, or `None` for a directly-invoked document. See
@@ -1120,10 +1120,11 @@ fn bootstrap_adopted_document_phase(
 ///   up as a [`LoopStep::Return`] carrying it. The harness never repoints its own
 ///   active document; the command coordinator re-prepares the resolved target
 ///   through the full canonical launch pipeline — the same rebuild a direct
-///   invocation performs (R6). Both the top-level `compose`/`inline-compose`
-///   coordinator and each `sequence` step's contained coordinator take this arm:
-///   a sequence step surfaces to the step's own per-step ledger, staying inside
-///   the step while still rebuilding launch state above the harness (R1).
+///   invocation performs (R6). The top-level `compose`/`inline-compose`
+///   coordinator, each `--loop` iteration, and each `sequence` step's or
+///   `prompt:` task's contained coordinator take this arm: a step or task
+///   surfaces to its own ledger, staying inside the step while still rebuilding
+///   launch state above the harness (R1, R8).
 /// - **Unowned** (`handoff_ledger` is `None`): the direct provider wrappers
 ///   (`claudine claude`, `claudine goose`, …) prepare no active document, so
 ///   there is no coordinator to surface to. The request is refused with a typed
@@ -2379,8 +2380,9 @@ fn classify_attempt_phase(
     // `resume`/`retry`/`proxy`/`requeue` (e.g. the agent finished but an
     // expected artifact is missing, so `resume` it), or an `error()` that
     // downgrades the run to failure (handled inside `execute_terminal_event`,
-    // which then carries an `err` into `finalize`). Both surface as
-    // `success.outcome.control`, so dispatch it uniformly.
+    // which then carries an `err` into `finalize`; left unrecovered, it comes
+    // back as this call's `Err`). Both surface as `success.outcome.control`, so
+    // dispatch it uniformly.
     let recovery = {
         let shared_guard = handoff_ledger.as_ref().map(|l| l.lock().unwrap());
         let ledger_ref: &RunLedger =

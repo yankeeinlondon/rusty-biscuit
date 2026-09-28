@@ -195,7 +195,7 @@ const PROXY_TRANSITION_SITE_BASELINE: &[AllowedSite] = &[
         calls: 1,
         reason: "PRODUCER — surfaces the single route's `initialize` proxy up to \
                  the composition command's active-document coordinator \
-                 (`compose::prep`) as `SingleCompositionOutcome::initialize_handoff` \
+                 (`compose::prep`) as `SingleCompositionOutcome::handoff` \
                  instead of committing it inside the provider harness, so loop \
                  recognition reruns for the target (R7)",
     },

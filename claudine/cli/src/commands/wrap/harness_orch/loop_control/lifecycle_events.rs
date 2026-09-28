@@ -112,9 +112,13 @@ pub(super) fn execute_terminal_event(
             // The already-fired success/blocked top-level communication is
             // intentionally preserved.
             guard.redesignate_terminal_to_failure();
+            // A reasonless `error` gets the same default message as one raised
+            // from `start`, so `err.msg` and the rendered error never go blank.
             let action_error = LifecycleErrorInfo::from_action_failure(
                 "error",
-                reason.clone().unwrap_or_default(),
+                reason
+                    .clone()
+                    .unwrap_or_else(|| format!("lifecycle {event_name} error")),
             );
             let failure_outcome = run_failure_event_for_downgrade(
                 guard,
