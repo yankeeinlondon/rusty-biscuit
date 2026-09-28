@@ -26,6 +26,9 @@ test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 worktree = { path = "../lib", features = ["count-git"] }
 assert_cmd = "2"
 base64 = "0.22"
+# `MermaidDiagram::gitgraph_geometry`: the laid-out graph the image is drawn
+# from, for the gathered-graph layout tests. Already built via biscuit-terminal.
+biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["image"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 insta = "1"
