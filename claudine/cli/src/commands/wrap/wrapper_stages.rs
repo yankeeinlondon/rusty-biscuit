@@ -15,23 +15,34 @@ use super::{
 };
 use crate::log;
 
-pub(crate) fn validate_timeout_constraints(
+/// Reject an explicit `--interactive` request combined with a provider timeout.
+///
+/// Runs before `--edit` opens the editor, so the user is never asked to draft
+/// a prompt for a launch that cannot happen. The mode-dependent timeout rules,
+/// which need to know whether the (possibly edited) prompt is empty, stay in
+/// [`validate_timeout_constraints`].
+pub(crate) fn reject_interactive_timeouts(
     args: &WrapperArgs,
     interactive_requested: bool,
-    non_interactive_requested: bool,
-    edit_requested: bool,
 ) -> Result<()> {
-    if args.timeout.is_some() && interactive_requested {
+    if !interactive_requested {
+        return Ok(());
+    }
+    if args.timeout.is_some() {
         return Err(eyre!("--timeout cannot be used with --interactive mode"));
     }
-    if args.step_timeout.is_some() && interactive_requested {
+    if args.step_timeout.is_some() {
         return Err(eyre!(
             "--step-timeout cannot be used with --interactive mode"
         ));
     }
-    if edit_requested && interactive_requested {
-        return Err(eyre!("--edit cannot be used with --interactive"));
-    }
+    Ok(())
+}
+
+pub(crate) fn validate_timeout_constraints(
+    args: &WrapperArgs,
+    non_interactive_requested: bool,
+) -> Result<()> {
     if args.timeout.is_some() && !non_interactive_requested {
         return Err(eyre!(
             "--timeout can only be used in non-interactive mode \

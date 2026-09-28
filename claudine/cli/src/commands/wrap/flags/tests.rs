@@ -150,6 +150,56 @@ fn extract_wrapper_flags_lifts_edit_long_form() {
     assert_eq!(args, vec!["do something"]);
 }
 
+/// Parse `WrapperArgs` through a clap probe, exactly as the wrapper
+/// subcommands flatten it.
+fn try_parse_wrapper_args(extra: &[&str]) -> Result<WrapperArgs, clap::Error> {
+    use clap::Parser;
+
+    // `WrapperArgs` declares its own `help` field.
+    #[derive(Debug, clap::Parser)]
+    #[command(disable_help_flag = true)]
+    struct Probe {
+        #[command(flatten)]
+        args: WrapperArgs,
+    }
+
+    let mut argv = vec!["probe"];
+    argv.extend_from_slice(extra);
+    Probe::try_parse_from(argv).map(|probe| probe.args)
+}
+
+#[test]
+fn wrapper_args_accept_edit_with_interactive_in_every_spelling() {
+    for argv in [
+        &["--edit", "--interactive"][..],
+        &["--edit", "-i"][..],
+        &["-i", "--edit"][..],
+        &["--interactive", "--edit", "review this repository"][..],
+    ] {
+        let args = try_parse_wrapper_args(argv)
+            .unwrap_or_else(|err| panic!("{argv:?} must parse, got: {err}"));
+        assert!(args.edit, "{argv:?} must set edit");
+        assert!(args.interactive, "{argv:?} must set interactive");
+    }
+}
+
+#[test]
+fn edit_and_interactive_after_a_seed_prompt_are_both_lifted() {
+    // clap stops at the positional seed, so both flags land in passthrough and
+    // only the extractor can recover them.
+    let args = try_parse_wrapper_args(&["review this repository", "--edit", "-i"]).unwrap();
+    assert!(!args.edit && !args.interactive);
+    let mut passthrough = args.passthrough;
+    let boundary = passthrough.len();
+
+    let extracted =
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut passthrough, boundary).unwrap();
+
+    assert!(extracted.edit);
+    assert!(extracted.interactive);
+    assert_eq!(passthrough, vec!["review this repository"]);
+}
+
 #[test]
 fn old_non_interactive_flags_pass_through_to_provider() {
     let mut args = vec![
@@ -433,8 +483,15 @@ mod proptests {
             if flags.iter().any(|f| f == "-i" || f == "--interactive") {
                 assert!(extracted.interactive);
             }
-            if flags.iter().any(|f| f == "--edit") {
+            let has_edit = flags.iter().any(|f| f == "--edit");
+            let has_interactive = flags.iter().any(|f| f == "-i" || f == "--interactive");
+            if has_edit {
                 assert!(extracted.edit);
+            }
+            // `--edit` and `-i` after the positional coexist: neither
+            // suppresses the other.
+            if has_edit && has_interactive {
+                assert!(extracted.edit && extracted.interactive);
             }
         }
     }

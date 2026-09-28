@@ -64,18 +64,165 @@ fn wrapper_help_includes_expected_flags() {
     );
 }
 
+/// Install an executable named `name` in `bin_dir` that only creates `marker`.
+///
+/// Serves as both a provider stub and an `EDITOR`: the marker's absence proves
+/// the program never ran.
+fn write_marker_executable(bin_dir: &std::path::Path, name: &str, marker: &std::path::Path) {
+    #[cfg(unix)]
+    common::write_executable(
+        &bin_dir.join(name),
+        &format!(
+            "#!/bin/sh\n: > {}\nexit 0\n",
+            common::sh_quote(&marker.display().to_string())
+        ),
+    );
+    #[cfg(windows)]
+    common::write(
+        &bin_dir.join(format!("{name}.cmd")),
+        &format!(
+            "@echo off\r\ntype nul > \"{}\"\r\nexit /b 0\r\n",
+            marker.display()
+        ),
+    );
+}
+
+fn marker_editor_path(bin_dir: &std::path::Path) -> std::path::PathBuf {
+    if cfg!(windows) {
+        bin_dir.join("fake-editor.cmd")
+    } else {
+        bin_dir.join("fake-editor")
+    }
+}
+
+/// `--edit` with `-i` is no longer a flag conflict. Without a terminal the
+/// only refusal left is the editor's own terminal requirement, raised before
+/// the editor or the provider runs.
 #[test]
-fn wrapper_rejects_edit_and_interactive_conflict() {
-    let fixture = CliProcessFixture::named("wrap-basics-edit-interactive");
+fn wrapper_accepts_edit_with_interactive_and_requires_a_terminal() {
+    for (label, argv) in [
+        ("long", &["codex", "--edit", "--interactive"][..]),
+        ("short", &["codex", "--edit", "-i"][..]),
+        (
+            "after-seed",
+            &["codex", "review this repository", "--edit", "--interactive"][..],
+        ),
+    ] {
+        let fixture = CliProcessFixture::named(&format!("wrap-basics-edit-interactive-{label}"));
+        fixture.seed_user_config();
+        let provider_marker = fixture.cwd().join("provider-ran");
+        let editor_marker = fixture.cwd().join("editor-ran");
+        write_marker_executable(fixture.bin_dir(), "codex", &provider_marker);
+        write_marker_executable(fixture.bin_dir(), "fake-editor", &editor_marker);
+
+        let assert = fixture
+            .command()
+            .env("EDITOR", marker_editor_path(fixture.bin_dir()))
+            .args(argv)
+            .assert()
+            .failure()
+            .stderr(contains("--edit requires an interactive terminal"));
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+        assert!(
+            !stderr.contains("cannot be used with"),
+            "{argv:?} must not report a flag conflict; stderr was: {stderr}"
+        );
+        assert!(
+            !editor_marker.exists(),
+            "{argv:?} must not open the editor without a terminal"
+        );
+        assert!(
+            !provider_marker.exists(),
+            "{argv:?} must not launch the provider without a terminal"
+        );
+    }
+}
+
+/// `-i` recovered from passthrough after a seed prompt, combined with a
+/// timeout, fails on the timeout before the editor would open. Under a non-TTY
+/// the timeout diagnostic can only win if it is checked first.
+#[test]
+fn wrapper_rejects_interactive_timeouts_before_the_editor_opens() {
+    for (label, argv, message) in [
+        (
+            "timeout",
+            &["codex", "--timeout", "5m", "seed", "--edit", "-i"][..],
+            "--timeout cannot be used with --interactive mode",
+        ),
+        (
+            "step-timeout",
+            &["codex", "--step-timeout", "5m", "seed", "--edit", "--interactive"][..],
+            "--step-timeout cannot be used with --interactive mode",
+        ),
+    ] {
+        let fixture = CliProcessFixture::named(&format!("wrap-basics-edit-{label}"));
+        fixture.seed_user_config();
+        let provider_marker = fixture.cwd().join("provider-ran");
+        let editor_marker = fixture.cwd().join("editor-ran");
+        write_marker_executable(fixture.bin_dir(), "codex", &provider_marker);
+        write_marker_executable(fixture.bin_dir(), "fake-editor", &editor_marker);
+
+        let assert = fixture
+            .command()
+            .env("EDITOR", marker_editor_path(fixture.bin_dir()))
+            .args(argv)
+            .assert()
+            .failure()
+            .stderr(contains(message));
+
+        let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+        assert!(
+            !stderr.contains("--edit requires an interactive terminal"),
+            "{argv:?} must fail on the timeout before the editor precondition; \
+             stderr was: {stderr}"
+        );
+        assert!(!editor_marker.exists(), "{argv:?} must not open the editor");
+        assert!(
+            !provider_marker.exists(),
+            "{argv:?} must not launch the provider"
+        );
+    }
+}
+
+/// A direct prompt with `-i` still selects an interactive launch: Codex
+/// receives the prompt without the non-interactive `exec` entrypoint.
+#[cfg(unix)]
+#[test]
+fn wrapper_direct_prompt_with_interactive_launches_interactively() {
+    let fixture = CliProcessFixture::named("wrap-basics-direct-prompt-interactive");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+
+    write_executable(
+        &fixture.bin_dir().join("codex"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
+exit 0
+"#,
+    );
 
     fixture
         .command()
-        .args(["codex", "--edit", "--interactive"])
+        .env("CLAUDINE_ARGS_FILE", &args_path)
+        .args(["codex", "summarize repo", "-i"])
         .assert()
-        .failure()
-        .stderr(contains("--edit"))
-        .stderr(contains("--interactive"))
-        .stderr(contains("cannot be used"));
+        .success();
+
+    let args = fs::read_to_string(&args_path).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    assert!(
+        !args.contains(&"exec"),
+        "interactive Codex must not use the exec entrypoint; args were: {args:?}"
+    );
+    assert!(
+        args.contains(&"summarize repo"),
+        "the direct prompt must reach Codex as its startup prompt; args were: {args:?}"
+    );
+    assert!(
+        !args.contains(&"-i"),
+        "the wrapper-owned -i must not leak to Codex; args were: {args:?}"
+    );
 }
 
 #[cfg(unix)]

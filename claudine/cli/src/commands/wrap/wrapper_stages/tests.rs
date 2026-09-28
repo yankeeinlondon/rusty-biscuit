@@ -410,3 +410,62 @@ fn opencode_yolo_overlay_is_visible_in_added_env() {
     assert_eq!(shown["permission"]["external_directory"], "allow");
     assert_eq!(shown["permission"]["doom_loop"], "allow");
 }
+
+#[test]
+fn reject_interactive_timeouts_refuses_each_timeout_with_interactive() {
+    for (argv, message) in [
+        (
+            &["--timeout", "5m"][..],
+            "--timeout cannot be used with --interactive mode",
+        ),
+        (
+            &["--step-timeout", "5m"][..],
+            "--step-timeout cannot be used with --interactive mode",
+        ),
+    ] {
+        let args = wrapper_args_from(argv);
+        let err = reject_interactive_timeouts(&args, true).unwrap_err();
+        assert_eq!(err.to_string(), message, "argv: {argv:?}");
+    }
+}
+
+#[test]
+fn reject_interactive_timeouts_accepts_edit_with_interactive_alone() {
+    let args = wrapper_args_from(&["--edit", "-i"]);
+    assert!(reject_interactive_timeouts(&args, true).is_ok());
+}
+
+#[test]
+fn reject_interactive_timeouts_leaves_non_interactive_timeouts_alone() {
+    let args = wrapper_args_from(&["--timeout", "5m", "--step-timeout", "5m"]);
+    assert!(reject_interactive_timeouts(&args, false).is_ok());
+}
+
+#[test]
+fn validate_timeout_constraints_no_longer_rejects_edit_with_interactive() {
+    let args = wrapper_args_from(&["--edit", "--interactive"]);
+    // `-i` makes the session interactive, so `non_interactive_requested` is false.
+    assert!(validate_timeout_constraints(&args, false).is_ok());
+}
+
+#[test]
+fn validate_timeout_constraints_still_requires_non_interactive_for_timeouts() {
+    for (argv, message) in [
+        (
+            &["--timeout", "5m"][..],
+            "--timeout can only be used in non-interactive mode",
+        ),
+        (
+            &["--step-timeout", "5m"][..],
+            "--step-timeout can only be used in non-interactive mode",
+        ),
+    ] {
+        let args = wrapper_args_from(argv);
+        let err = validate_timeout_constraints(&args, false).unwrap_err();
+        assert!(
+            err.to_string().starts_with(message),
+            "argv {argv:?} got: {err}"
+        );
+        assert!(validate_timeout_constraints(&args, true).is_ok());
+    }
+}

@@ -44,8 +44,13 @@ pub struct WrapperArgs {
     #[arg(short = 'i', long = "interactive")]
     pub interactive: bool,
 
-    /// Open the prompt in an external editor before launching the provider.
-    #[arg(long, conflicts_with = "interactive")]
+    /// Draft the initial prompt in an external editor before launching the provider.
+    ///
+    /// Authoring only: the edited prompt then selects the session mode like a
+    /// prompt given on the command line (non-interactive by default,
+    /// interactive with `-i`). The editor needs a terminal on stdin and stdout
+    /// whatever the session mode.
+    #[arg(long)]
     pub edit: bool,
 
     /// Override the model used by the provider.
@@ -252,7 +257,7 @@ pub(crate) fn print_wrapper_help(provider: Provider) {
          \x20 -y, --yolo               Enable provider-specific YOLO/auto-approval mode\n\
          \x20     --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters\n\
          \x20 -i, --interactive         Force interactive mode even when a prompt string is provided\n\
-         \x20     --edit                Open the prompt in an external editor before launching the provider\n\
+         \x20     --edit                Draft the initial prompt in an external editor; combine with -i for an interactive session\n\
          \x20 -m, --model <MODEL>       Override the model used by the provider\n\
          \x20 -o, --output <FORMAT>     Set the output format (json, text, stream)\n\
           \x20     --asp <FILE>             Append a system prompt from a file\n\
