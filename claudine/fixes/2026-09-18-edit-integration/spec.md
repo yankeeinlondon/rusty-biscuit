@@ -19,6 +19,17 @@ human_review_items:
         Cons: it adds a second, Kimi-only launch path, which the spec explicitly forbids. It is also fragile (`--continue` picks "the most recent session", which is unsafe if two runs overlap) and splits one conversation across two processes.
 
       **Recommendation: A.** It is the only option that is both truthful and inside the spec's rule against new delivery paths. When Kimi ships an initial-prompt option, the refusal is replaced by that option.
+
+      *Still open after Phase 5 (2026-09-28).* The docs now describe today's behavior honestly (Kimi runs one turn and exits), so choosing B needs no further doc change; A or C needs a code change plus a docs update.
+    - |-
+      **The Claudine agent skill was not updated, because the agent was not allowed to write to it. Please apply the prepared text, or let an agent do it.**
+
+      The skill is the reference other agents read. Until it is updated, it does not mention `--edit` in the wrapper flag table, has no timeline entry for this fix, and misses one testing-rule note. This should be done before the fix is closed, so the next agent working on the wrapper sees the new behavior.
+
+      - **A. Apply the three prepared edits by hand.** The exact text is in `implementation-log.md` under "Phase 5 → Skill edits not made" (and the `SKILL.md` sentence under "Phase 4 → Skill update not made"). Pros: a few minutes of copy-and-paste. Cons: manual.
+      - **B. Run a short agent session that is allowed to write under `.claude/skills/claudine/`.** Pros: no manual work. Cons: one more session.
+
+      **Recommendation: A.** The text is final and short; a new session adds nothing.
 message_to_agent: |-
   Phase 1 (rulings and spikes) is done. Read `spike-interactive-startup.md` in this directory before Phase 3. Phase 2 (wrapper validation) does not depend on any of the open items below and can proceed as planned.
 
@@ -50,11 +61,17 @@ message_to_agent: |-
   17. Docs: `prompt empty; aborted` and `opening <editor> for prompt...` are `log::info`, printed only with `RUST_LOG` or `--debug info` (not `-v`). By default an empty buffer exits 0 silently. Do not document the message as always shown.
   18. The skill write to `.claude/skills/claudine/SKILL.md` was refused by Phase 4's permissions. The log's "Skill update not made" section holds the sentence to add (the spawn-site guard now exempts `real_` files that build an emulator session). Apply it with Phase 5's skill edits.
   19. Pre-existing, not from this fix: `cargo clippy -p claudine-cli --tests --features terminal-tests -- -D warnings` fails on `needless_lifetimes` in `level2_dry_run_metadata_capture.rs:283`. `just lint` does not enable that feature, so it stays hidden. Mention it rather than fix it.
+
+  Phase 5 (docs, drift, closure) is done; see the implementation log's `## Phase 5`. This was the last phase.
+
+  20. `implemented` is `true` because the Phase 5 instructions require it, but `status` stays `human-in-the-loop`: Kimi (N2) is still unruled, and the skill edits under `.claude/skills/claudine/` were refused by the session's permissions (exact text in the log). Plan tasks left unticked for those reasons: Kimi resolution, Reference docs (the `cli-reference.md` part), Skill snapshots, and the fleet and docs/skills Definition-of-Done items.
+  21. Three `_unscheduled` fixes were filed as `<name>/spec.md`: `wrapper-trailing-flags-leak` (N6), `wrapper-user-separator-forwarded` (user `--` forwarded), and `goose-dash-prefixed-one-shot-prompt` (one-shot `run -t -…`).
+  22. If Kimi is ruled A or C, update `claudine/docs/getting-started/index.md` (its Kimi bullet), the Kimi row of the fleet test, and the prepared `cli-reference.md` text together.
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28
 review_iterations: 0
-implemented: false
+implemented: true
 area: claudine
 packages:
     - claudine-cli

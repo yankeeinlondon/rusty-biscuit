@@ -3,6 +3,8 @@ spec: "/Volumes/coding/wt/rusty-biscuit/feat-schema-enhancement/claudine/fixes/2
 plan: "claudine/fixes/2026-09-18-edit-integration/plan.md"
 implemented_by: "claude/opus"
 started_phase: "1"
+completed_phase: 5
+implemented: true
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1:
@@ -46,6 +48,53 @@ docs_updated_during_phase_4:
     - claudine/fixes/2026-09-18-edit-integration/spec.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - claudine/cli/tests/l1/wrap_basics.rs
+docs_updated_during_phase_5:
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/research/agent-cli/antigravity.md
+    - claudine/docs/research/agent-cli/goose.md
+    - claudine/docs/research/agent-cli/kilo.md
+    - claudine/docs/research/agent-cli/pi.md
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+    - claudine/fixes/2026-09-18-edit-integration/spec.md
+docs_created_during_phase_5:
+    - claudine/fixes/_unscheduled/goose-dash-prefixed-one-shot-prompt/spec.md
+    - claudine/fixes/_unscheduled/wrapper-trailing-flags-leak/spec.md
+    - claudine/fixes/_unscheduled/wrapper-user-separator-forwarded/spec.md
+skills_files_updated_during_phase_5: []
+source_code:
+    - claudine/cli/src/commands/wrap/flags.rs
+    - claudine/cli/src/commands/wrap/flags/tests.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/profile/antigravity.rs
+    - claudine/cli/src/commands/wrap/profile/goose.rs
+    - claudine/cli/src/commands/wrap/profile/kilo.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages/tests.rs
+    - claudine/cli/tests/l1/spawn_site_guard.rs
+    - claudine/cli/tests/l1/wrap_basics.rs
+    - claudine/cli/tests/level2/level2_edit_interactive_capture.rs
+    - claudine/cli/tests/level2/main.rs
+    - claudine/cli/tests/real/main.rs
+    - claudine/cli/tests/real/real_pi_interactive_startup.rs
+documentation:
+    - claudine/docs/getting-started/index.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/research/agent-cli/antigravity.md
+    - claudine/docs/research/agent-cli/goose.md
+    - claudine/docs/research/agent-cli/kilo.md
+    - claudine/docs/research/agent-cli/pi.md
+    - claudine/fixes/2026-09-18-edit-integration/implementation-log.md
+    - claudine/fixes/2026-09-18-edit-integration/plan.md
+    - claudine/fixes/2026-09-18-edit-integration/spec.md
+    - claudine/fixes/2026-09-18-edit-integration/spike-interactive-startup.md
+    - claudine/fixes/_unscheduled/goose-dash-prefixed-one-shot-prompt/spec.md
+    - claudine/fixes/_unscheduled/wrapper-trailing-flags-leak/spec.md
+    - claudine/fixes/_unscheduled/wrapper-user-separator-forwarded/spec.md
 packages:
     - claudine-cli
 ---
@@ -514,3 +563,126 @@ contract paragraph:
 > (`real/real_pi_interactive_startup.rs`).
 
 Phase 5 should apply it along with its planned skill edits.
+
+## Phase 5
+
+Started and finished 2026-09-28 on macOS (dev Mac). Phase 5 is docs, drift,
+and closure. No production source changed; the one source change is a new L1
+drift test. Kimi's N2 ruling is **still open**, and this session's permission
+policy refused every write under `.claude/skills/claudine/`, so three plan
+tasks stay unticked (Kimi, reference docs, skill snapshots; see "Skill edits
+not made").
+
+### What changed
+
+- **Getting-started** (`claudine/docs/getting-started/index.md`). Plain
+  `claudine codex --edit` now says it runs a **non-interactive** session after
+  the edit, exactly like a typed prompt; `--edit -i` is the interactive
+  variant; a seeded `'…' --edit -i` example was added. New notes: the editor
+  needs a real terminal whatever the session mode (with the diagnostic it
+  prints), an empty buffer quits without starting the agent (the
+  `prompt empty; aborted` text is **not** promised, per Phase 4's finding that
+  it is `log::info`), `-i` with either timeout is rejected before the editor
+  opens, each agent gets the startup prompt through its own native option
+  (Pi ≥ 0.84.3), and Kimi is the current exception. The quoted help line was
+  updated to the Phase 2 wording ("Draft the initial prompt in an external
+  editor; combine with -i for an interactive session").
+- **`claudine/docs/topics/system-prompt.md:42`** checked: it only says direct
+  wrappers accept `--edit` for the user prompt, which still holds. Unchanged.
+- **No other current doc** implied a non-interactive-only restriction
+  (`rg -- "--edit"` over `claudine/docs` and `.claude/skills/claudine`,
+  excluding research and specs).
+- **Research notes** (body only, so no frontmatter-driven generated data
+  moves): `agent-cli/pi.md` gains an "Interactive startup prompt" subsection
+  (`-- <message>`, 0.84.3 floor, stdin forces print mode, the `@` caveat,
+  live-verified on 0.87.1, #9200 not reproduced at 2 KB). `goose.md`,
+  `kilo.md`, and `antigravity.md` gain a Wrapper Notes entry with the
+  interactive form, the leading-dash spelling, and an explicit evidence tier
+  (Goose: upstream source; Kilo and Antigravity: help and research; none
+  live-verified). Each got a 2026-09-28 changelog line. `just test`, which
+  includes the `claudine-gen` drift tests, is green, so no regeneration was
+  needed.
+- **Unscheduled fixes filed**, each as `<name>/spec.md` to match the two
+  existing `_unscheduled` entries, rather than the plan's single file
+  `wrapper-trailing-flags-leak.md` (departure, layout only):
+  - `wrapper-trailing-flags-leak`: N6 (`--dry-run`, `--timeout`, and
+    `--step-timeout` after the positional reach the provider).
+  - `wrapper-user-separator-forwarded`: Phase 4 finding (a user `--` is
+    forwarded, producing double separators).
+  - `goose-dash-prefixed-one-shot-prompt`: Phase 1 finding (non-interactive
+    `run -t -…` is parsed as a flag).
+- **Drift test (AC10)**: `wrap_basics::getting_started_edit_interactive_form_is_accepted`
+  reads the page with `include_str!("../../../docs/getting-started/index.md")`
+  (a form CI's test-input scheduling sees), asserts the literal
+  `` `claudine codex --edit -i` ``, then runs `codex --edit -i` through
+  `CliProcessFixture::command()` with the Phase 2 `write_marker_executable`
+  stubs, and asserts the terminal diagnostic, no `cannot be used with`, and
+  neither marker. Not Unix-gated.
+
+### Skill edits not made
+
+Every edit under `.claude/skills/claudine/` was refused (`cli-reference.md`
+and `timeline.md` were both attempted). The intended edits, for the author or
+a permitted session to apply:
+
+1. `cli-reference.md`, Shared Wrapper Flags table, after the `-i` row:
+
+   > | `--edit` | Draft the initial prompt in an external editor (`$EDITOR`, then `$VISUAL`, then an installed editor), optionally seeded by a positional prompt; combine with `-i` for an interactive session. Needs a terminal for the editor whatever the session mode; an empty buffer exits 0 without launching. `-i` with `--timeout`/`--step-timeout` is rejected before the editor opens |
+
+2. `cli-reference.md`, "Interactivity default" bullet, append:
+
+   > A non-empty `--edit` result is treated exactly like a prompt string: plain `--edit` runs non-interactively, `--edit -i` opens an interactive session whose first user turn is the edited text. Each profile delivers an interactive startup prompt through the provider's native surface (for example Goose `run --text <p> --interactive`, Kilo `--prompt`, Antigravity `--prompt-interactive`, Pi `-- <p>`, Pi 0.84.3 or later). Kimi Code has no native interactive startup-prompt option; its `--prompt` runs one turn and exits.
+
+3. `timeline.md`, top of `## 2026-09`:
+
+   > - **2026-09-28 — `edit-integration`**: `claudine <provider> --edit -i` works. (1) The clap `conflicts_with = "interactive"` on `WrapperArgs::edit` and the runtime edit/interactive branch in `validate_timeout_constraints` are gone: an edited prompt is `PromptSource::Inline`, exactly like a typed one, so plain `--edit` runs non-interactively and `--edit -i` makes the edited text the first turn of an interactive session. (2) `wrapper_stages::reject_interactive_timeouts` rejects `-i` with `--timeout`/`--step-timeout` at the end of Stage 2, before the editor opens; `validate_timeout_constraints(args, non_interactive_requested)` keeps only the post-edit rules. (3) Interactive startup delivery repaired: Goose `run --text <p> --interactive` (`run` first; `--text=` for a `-` prefix), Kilo `--prompt` (the TUI positional is a project path), Antigravity `--prompt-interactive` (was headless `--print`), Pi `-- <p>` (stdin forces print mode; needs Pi ≥ 0.84.3; a leading `@` gets a leading space). `profile/tests/positional.rs::every_provider_delivers_an_interactive_startup_prompt` pins every provider's interactive shape and forbids stdin/wire-RPC. Kimi has no native interactive startup prompt and still runs `--prompt` one-shot pending an author ruling. The spawn-site guard now exempts `real_` files that build an emulator session.
+
+4. `SKILL.md`: the Phase 4 sentence in "Skill update not made" above. The
+   wrapper row ("optional `--edit` prompt drafting") does not imply the old
+   restriction, so no other `SKILL.md` change is needed.
+
+### Requirement → test mapping
+
+| Requirement | Test (tier) |
+|---|---|
+| AC10: the getting-started page advertises `claudine codex --edit -i`, and the wrapper accepts that exact form (terminal diagnostic, no conflict, no editor, no provider) | `wrap_basics::getting_started_edit_interactive_form_is_accepted` (L1 integration, all OSes) |
+
+- **Regression proof (by construction).** The first assertion fails if the
+  page drops the literal. Against the pre-Phase-2 code, clap refuses
+  `--edit -i` with a conflict before the terminal check, so the stderr
+  assertion fails. Phases 2 and 4 showed the same flip for the sibling tests
+  with the conflict restored.
+- **Placement.** `wrap_basics` is declared in the `l1` binary, and the test
+  name has no tier marker, so `just test` runs it.
+
+### Gates (Checkpoint 5)
+
+- `cd claudine && just test` (macOS): **7740 passed, 9 skipped, 0 failed**
+  (Phase 4's 7739 plus the new drift test).
+- `cd claudine && just lint`: clean.
+- `cd claudine && just test-l2` (macOS): `claudine-cli` **259 passed**,
+  `claudine-gen` **3 passed**.
+- `just cross-check claudine-cli --os windows getting_started_edit_interactive`
+  (native Windows rig): **1 passed**.
+- `just ci-local --plan` (repo root) reviewed. It covers the whole branch
+  against `main`. For this area it schedules `claudine-cli` L1 on all four
+  environments, L2 on ubuntu and macOS (Windows and WSL2 L2 are accepted
+  gaps), and the lint cell. Nothing was pushed.
+- Leftover greps: `rg "cannot be used with --interactive" claudine` returns
+  only the two timeout messages (wrapper, compose, sequence, and their tests)
+  plus the unrelated `--budget-ledger` message. `rg 'conflicts_with =
+  "interactive"' claudine/cli/src/commands/wrap` returns nothing.
+- Pre-existing, unchanged: the macOS linker `__eh_frame` warning, and the
+  `terminal-tests` clippy `needless_lifetimes` in
+  `level2_dry_run_metadata_capture.rs:283` (Phase 4).
+
+### Closure status
+
+- **N2 (Kimi) is still unruled.** The plan's Kimi task and the fleet
+  Definition-of-Done item stay unticked. The docs describe today's Kimi
+  behavior (one turn, then exit) as the exception.
+- **Departure: the spec's `implemented` is set to `true`** because the Phase 5
+  instructions require it, while the plan's final-validation task said to set
+  it only if N2 did not block. `status` stays `human-in-the-loop` and
+  `human_review` stays `true`, so the open ruling is not hidden.
+- The fix directory was not moved to `_completed`.
