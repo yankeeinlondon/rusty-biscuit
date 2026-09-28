@@ -233,7 +233,7 @@ which do the same thing regardless of the agent you are using:
 -y, --yolo               Enable provider-specific YOLO/auto-approval mode
     --include <ENV_NAME>  Preserve this env var even when it matches sensitive-name filters
 -i, --interactive         Force interactive mode even when a prompt string is provided
-    --edit                Open the prompt in an external editor before launching the provider
+    --edit                Draft the initial prompt in an external editor; combine with -i for an interactive session
 -m, --model <MODEL>       Override the model used by the provider
 -o, --output <FORMAT>     Set the output format (json, text, stream)
     --asp <FILE>             Append a system prompt from a file
@@ -315,8 +315,17 @@ That is because Claudine _defaults_ to non-interactive prompts whenever you prov
 
 As a small creature comfort if you'd rather write your prompt in the editor of your choice instead of the terminal's command line you can start your session with:
 
-- `claudine codex --edit` - brings up your favorite editor with a temporary file acting as your prompt's canvas; you can write the prompt there and when you exit that document it will start an interactive session with **codex** (or any other agent)
-- `claudine codex --edit -i` - is the "interactive" variant
+- `claudine codex --edit` - brings up your favorite editor with a temporary file acting as your prompt's canvas; you write the prompt there and when you close the editor Claudine runs it as a **_non-interactive_** session with **codex** (or any other agent), exactly as if you had typed it on the command line
+- `claudine codex --edit -i` - is the "interactive" variant: the edited prompt becomes the first turn of an _interactive_ session
+- `claudine codex 'review this repo' --edit -i` - starts the editor with your text already in it
+
+A few things worth knowing:
+
+- `--edit` needs a real terminal for the _editor_, whether or not the agent session is interactive; with piped input or output it stops with `--edit requires an interactive terminal`
+- if you save an empty prompt, Claudine quits without starting the agent
+- `--timeout` and `--step-timeout` only apply to non-interactive sessions, so combining either with `-i` is rejected before the editor opens
+- a startup prompt with `-i` (typed or edited) reaches each agent through that agent's own "start interactively with this message" option; Pi needs version 0.84.3 or later for this
+- Kimi Code is the exception today: it has no option to start an interactive session with a first message, so `claudine kimi 'hello' -i` (and `claudine kimi --edit -i`) runs that one prompt and exits
 
 #### Better Output Formatting
 
