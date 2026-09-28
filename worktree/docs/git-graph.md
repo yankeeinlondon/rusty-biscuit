@@ -140,13 +140,13 @@ gitGraph
     merge main id: "B1"
 ```
 
-`fix/wt-ux`'s tip contains `S2`, but only through `B1`, so the parent lane's answer is integrated otherwise. That answer is kept, and `main` is tried next: `S2` is `M104`'s second parent, so `fix/sniff` is merged directly into `main` at `M104`, with a merge edge. Because the parent's tip contains `S2`, the fork is measured against `M104`'s first parent, not against the parent's tip, and it comes out as `W1`. `W1` is on neither `fix/wt-ux`'s drawn first-parent run (it is `M103`'s second parent) nor `main`'s. So `fix/sniff`'s lane holds `S1` and `S2`, merges into `M104`, and hangs from nothing. The notice is shown for the undrawn fork; nothing else stands in for `W1`. When the fork is on a drawn lane, the same branch is connected at both ends and no notice appears.
+`fix/wt-ux`'s tip contains `S2`, but only through `B1`, so the parent lane's answer is integrated otherwise. That answer is kept, and `main` is tried next: `S2` is `M104`'s second parent, so `fix/sniff` is merged directly into `main` at `M104`, with a merge edge. Because the parent's tip contains `S2`, the fork is measured against `M104`'s first parent, not against the parent's tip, and it comes out as `W1`. `W1` is `M103`'s second parent, and `fix/wt-ux` continued after that merge, so `fix/wt-ux`'s lane is extended back through `W1` with its merge into `M103` drawn (see "Continued after a merge" below). So `fix/sniff`'s lane holds `S1` and `S2`, hangs from `W1` on `fix/wt-ux`'s lane, and merges into `M104`: connected at both ends, with no notice. If `W1` could not be drawn, the lane would hang from nothing and the notice would account for it; nothing else stands in for a fork.
 
 **No separate history.** A branch fast-forwarded into `main`, or created at a commit already on `main` and never committed to, has its tip on `main`'s first-parent chain. It is a tag on that commit.
 
 **Integrated otherwise.** `feat/a` was merged into `feat/b`, and `feat/b` into `main`. On `main`'s chain, `C` is `feat/b`'s merge, and `feat/a`'s tip is not one of its parents. `feat/a` keeps its lane and fork, but no merge edge is drawn, because the merge that brought it in is on no drawn lane.
 
-**Continued after a merge.** A branch that got new commits after its merge is not contained in any lane, so it is unmerged. Its fork is its old merged tip, which is the merge's second parent and on no first-parent lane. The lane is drawn unconnected, with the notice. The earlier merge is not reconstructed.
+**Continued after a merge.** A branch that got new commits after its merge is not contained in any lane, so it is unmerged, and its lane first ends just above its old merged tip `B`. That boundary is classified against the same lanes: when a lane merged `B` directly at `C`, the branch's lane is extended through `B`, draws `B` merged into `C`, and continues after it. The walk repeats from the next older boundary, so a branch merged several times draws every such merge, oldest first. The fork is measured against `B`: `merge-base(C^1, B)`. The walk stops at an ordinary fork, at a boundary that reached the other lane only through another branch's merge, and at the commit the branch's fork-origin record says it was created at: a branch created at an already merged tip does not claim the older branch's merge, so its lane stays unconnected, with the notice.
 
 ## Forks, merges, and labels at verified commits
 
@@ -203,7 +203,7 @@ Neighboring tags never overlap. `biscuit-visualized` widens the commit spacing o
 ## Limits
 
 - **No squash-merge inference.** A squash-merged branch shares no commits with the default branch. It stays an unmerged lane.
-- **No reconstruction of earlier merges.** Only a branch's current relationship is drawn. A branch continued after a merge, or merged several times, shows its latest state (see [Examples](#examples)).
+- **Earlier merges are drawn only when direct and provable.** A branch's earlier merge is drawn when another drawn lane merged the branch's old tip directly, back to the commit its fork-origin record names. An earlier merge reached only through another branch, or past a shallow clone's cut, is not drawn (see [Examples](#examples)).
 - **No edge for indirect integration.** A branch that reached its lane through another branch's merge has no merge edge of its own. It is drawn with its fork and the notice.
 - One lane merged per commit: when two drawn lanes were merged by the same commit, only the first is drawn merging, and the notice appears.
 
