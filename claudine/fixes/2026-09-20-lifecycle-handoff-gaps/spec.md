@@ -32,8 +32,11 @@ $schema:
 # reads this list and stops warning agents about a defect once its id is here (R10).
 # Keep the key present even when empty: the guide's gates do not tolerate a missing list.
 fixed:
+    - F1
     - F2
+    - F3
     - F4
+    - F5
     - F6
     - F7
     - F8
