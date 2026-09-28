@@ -698,6 +698,156 @@ fn a_child_merged_into_the_default_branch_forks_from_its_parent_in_the_base_view
     assert!(text.contains("tag: \"main\""), "the local main keeps its label: {text}");
 }
 
+/// A commit on `tree` with `parents` (first parent first), made without
+/// touching the checkout; returns its full SHA.
+fn commit_on(path: &Path, tree: &str, parents: &[&str], message: &str) -> String {
+    let mut args = vec!["commit-tree", "-m", message];
+    for parent in parents {
+        args.extend(["-p", *parent]);
+    }
+    args.push(tree);
+    git_output(path, &args)
+}
+
+/// `count` commits after `from`, oldest first.
+fn chain_on(path: &Path, tree: &str, from: &str, prefix: &str, count: usize) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::with_capacity(count);
+    for n in 1..=count {
+        let parent = chain.last().map_or(from, String::as_str).to_string();
+        chain.push(commit_on(path, tree, &[&parent], &format!("{prefix}{n}")));
+    }
+    chain
+}
+
+/// `feat/schema-enhancement`'s own commits in [`observed_sparse_lanes`].
+const SPARSE_SCHEMA_COMMITS: usize = 55;
+/// `fix/wt-ux`'s commits up to `W1`, the tip `M103` merged.
+const SPARSE_WT_UX_BEFORE_MERGE: usize = 8;
+/// `fix/wt-ux`'s commits after `W1` and before it merges `main` back (`B1`).
+const SPARSE_WT_UX_AFTER_MERGE: usize = 64;
+/// `fix/wt-ux`'s commits after `B1`.
+const SPARSE_WT_UX_AFTER_SYNC: usize = 3;
+/// `fix/sniff`'s own commits, forked at `W1`.
+const SPARSE_SNIFF_COMMITS: usize = 94;
+
+/// The history `wt list` drew sparsely on 2026-09-27, shape for shape:
+///
+/// - `main`: `r`, `d1..d12`, `M103` (merges `W1`), `d13`, `M104` (merges
+///   `fix/sniff`'s tip); `origin/main` = `main` = `M104`.
+/// - `feat/schema-enhancement` forks at `d2` with 55 commits, unmerged.
+/// - `fix/wt-ux` (recorded parent `main`) forks at `d5`: `w1..w8` (`W1` =
+///   `w8`), then continues after `M103` with `w9..w72`, merges `main` back at
+///   `B1` (first parent `w72`, second `M104`), then `w73..w75`.
+/// - `fix/sniff` (recorded parent `fix/wt-ux`) forks at `W1` with 94
+///   commits, merged into `main` directly by `M104`.
+///
+/// Every commit shares `r`'s tree and is made with `commit-tree`, so the
+/// ~250-commit history costs one Git call per commit.
+struct ObservedSparseLanes {
+    _dir: tempfile::TempDir,
+    path: PathBuf,
+    d: Vec<String>,
+    schema: Vec<String>,
+    /// `w1..w75`, first-parent order; `B1` is not in it.
+    wt_ux: Vec<String>,
+    sniff: Vec<String>,
+    m103: String,
+    m104: String,
+    b1: String,
+    forks: ForkOriginStore,
+}
+
+impl ObservedSparseLanes {
+    /// `W1`: `fix/wt-ux`'s tip when `M103` merged it, and `fix/sniff`'s fork.
+    fn w1(&self) -> &String {
+        &self.wt_ux[SPARSE_WT_UX_BEFORE_MERGE - 1]
+    }
+
+    fn branches(&self) -> [&'static str; 4] {
+        ["main", "feat/schema-enhancement", "fix/wt-ux", "fix/sniff"]
+    }
+}
+
+fn observed_sparse_lanes() -> ObservedSparseLanes {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+    init_repo(&path);
+    let r = commit(&path, "r");
+    let tree = git_output(&path, &["rev-parse", "HEAD^{tree}"]);
+
+    let mut d = vec![r.clone()];
+    d.extend(chain_on(&path, &tree, &r, "d", 12));
+    let schema = chain_on(&path, &tree, &d[2], "s", SPARSE_SCHEMA_COMMITS);
+    let mut wt_ux = chain_on(&path, &tree, &d[5], "w", SPARSE_WT_UX_BEFORE_MERGE);
+    let w1 = wt_ux.last().unwrap().clone();
+    let m103 = commit_on(&path, &tree, &[&d[12], &w1], "Merge pull request #103 from fix/wt-ux");
+    let sniff = chain_on(&path, &tree, &w1, "n", SPARSE_SNIFF_COMMITS);
+    let continued = chain_on(&path, &tree, &w1, "w", SPARSE_WT_UX_AFTER_MERGE);
+    wt_ux.extend(continued);
+    d.push(commit_on(&path, &tree, &[&m103], "d13"));
+    let m104 = commit_on(&path, &tree, &[&d[13], sniff.last().unwrap()], "Merge pull request #104 from fix/sniff");
+    let b1 = commit_on(&path, &tree, &[wt_ux.last().unwrap(), &m104], "Merge branch 'main' into fix/wt-ux");
+    let synced = chain_on(&path, &tree, &b1, "x", SPARSE_WT_UX_AFTER_SYNC);
+    wt_ux.extend(synced);
+
+    for (branch, tip) in [
+        ("main", &m104),
+        ("feat/schema-enhancement", schema.last().unwrap()),
+        ("fix/wt-ux", wt_ux.last().unwrap()),
+        ("fix/sniff", sniff.last().unwrap()),
+    ] {
+        run_git(&path, &["update-ref", &format!("refs/heads/{branch}"), tip]);
+    }
+    set_origin_main(&path, &m104);
+    run_git(&path, &["reset", "-q", "--hard", "main"]);
+    let mut forks = ForkOriginStore::default();
+    forked(&mut forks, "feat/schema-enhancement", "main", 10);
+    forked(&mut forks, "fix/wt-ux", "main", 20);
+    forked(&mut forks, "fix/sniff", "fix/wt-ux", 30);
+    ObservedSparseLanes { _dir: dir, path, d, schema, wt_ux, sniff, m103, m104, b1, forks }
+}
+
+#[test]
+#[serial_test::serial]
+fn observed_sparse_lanes_fixture_has_the_observed_topology() {
+    let repo = observed_sparse_lanes();
+    let at = |rev: &str| git_output(&repo.path, &["rev-parse", rev]);
+    let count = |range: &str| git_output(&repo.path, &["rev-list", "--count", range]);
+
+    assert_eq!(at("main"), repo.m104);
+    assert_eq!(at("refs/remotes/origin/main"), repo.m104, "origin/main is main");
+    assert_eq!(at("HEAD"), repo.m104, "the main checkout is on main");
+    let parents = |merge: &str| git_output(&repo.path, &["rev-list", "--parents", "-n", "1", merge]);
+    assert_eq!(parents(&repo.m103), format!("{} {} {}", repo.m103, repo.d[12], repo.w1()));
+    assert_eq!(parents(&repo.m104), format!("{} {} {}", repo.m104, repo.d[13], repo.sniff.last().unwrap()));
+    let wt_ux_before_sync = &repo.wt_ux[SPARSE_WT_UX_BEFORE_MERGE + SPARSE_WT_UX_AFTER_MERGE - 1];
+    assert_eq!(parents(&repo.b1), format!("{} {} {}", repo.b1, wt_ux_before_sync, repo.m104));
+
+    assert_eq!(at("fix/wt-ux"), *repo.wt_ux.last().unwrap());
+    assert_eq!(at("fix/sniff"), *repo.sniff.last().unwrap());
+    assert_eq!(at("feat/schema-enhancement"), *repo.schema.last().unwrap());
+    assert_eq!(git_output(&repo.path, &["merge-base", "main", "feat/schema-enhancement"]), repo.d[2]);
+    assert_eq!(git_output(&repo.path, &["merge-base", "fix/sniff", "fix/wt-ux"]), *repo.sniff.last().unwrap(), "fix/wt-ux contains fix/sniff through main");
+    assert_eq!(count("main..feat/schema-enhancement"), SPARSE_SCHEMA_COMMITS.to_string());
+    assert_eq!(count(&format!("{}..fix/sniff", repo.w1())), SPARSE_SNIFF_COMMITS.to_string());
+    assert_eq!(
+        count("main..fix/wt-ux"),
+        (SPARSE_WT_UX_AFTER_MERGE + 1 + SPARSE_WT_UX_AFTER_SYNC).to_string(),
+        "fix/wt-ux's own commits after W1, and B1"
+    );
+    // W1 is on neither main's first-parent chain nor fix/wt-ux's own run.
+    let first_parents = |tip: &str| git_output(&repo.path, &["rev-list", "--first-parent", tip]);
+    assert!(!first_parents("main").contains(repo.w1().as_str()));
+    assert!(first_parents("fix/wt-ux").contains(repo.w1().as_str()));
+    assert!(!git_output(&repo.path, &["rev-list", "--first-parent", "main..fix/wt-ux"]).contains(repo.w1().as_str()));
+
+    assert_eq!(repo.forks.get("fix/sniff").map(|fork| fork.base_branch.as_str()), Some("fix/wt-ux"));
+    assert_eq!(repo.forks.get("fix/wt-ux").map(|fork| fork.base_branch.as_str()), Some("main"));
+    for branch in repo.branches() {
+        assert_eq!(at(branch).len(), 40, "{branch} exists");
+    }
+}
+
 /// ```text
 /// r - d1 (main)
 ///       \

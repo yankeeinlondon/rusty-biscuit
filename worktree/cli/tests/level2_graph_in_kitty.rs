@@ -44,12 +44,63 @@ fn run_git(repo: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed in {repo:?}");
 }
 
+fn git_output(repo: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .expect("git should be installed");
+    assert!(output.status.success(), "git {args:?} failed in {repo:?}");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// A commit on `tree` with `parents` (first parent first), made without
+/// touching a checkout; returns its full SHA.
+fn commit_on(repo: &Path, tree: &str, parents: &[&str], message: &str) -> String {
+    let mut args = vec!["commit-tree", "-m", message];
+    for parent in parents {
+        args.extend(["-p", *parent]);
+    }
+    args.push(tree);
+    git_output(repo, &args)
+}
+
+/// `count` commits after `from`, oldest first.
+fn chain_on(repo: &Path, tree: &str, from: &str, prefix: &str, count: usize) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::with_capacity(count);
+    for n in 1..=count {
+        let parent = chain.last().map_or(from, String::as_str).to_string();
+        chain.push(commit_on(repo, tree, &[&parent], &format!("{prefix}{n}")));
+    }
+    chain
+}
+
+/// The observed-shape history's commit counts, the same in the L1
+/// (`observed_sparse_lanes`) and perf (`GraphFixture::observed_sparse_lanes`)
+/// builders.
+const SPARSE_SCHEMA_COMMITS: usize = 55;
+const SPARSE_WT_UX_BEFORE_MERGE: usize = 8;
+const SPARSE_WT_UX_AFTER_MERGE: usize = 64;
+const SPARSE_WT_UX_AFTER_SYNC: usize = 3;
+const SPARSE_SNIFF_COMMITS: usize = 94;
+
+/// The observed-shape history's named commits, by full SHA.
+struct SparseLanes {
+    d2: String,
+    w1: String,
+    m103: String,
+    m104: String,
+    b1: String,
+}
+
 /// A main checkout on `main` with linked worktrees.
 struct Fixture {
     parent: tempfile::TempDir,
     main: PathBuf,
     /// Worktree directory names; the table lists them after `base repo`, sorted.
     worktrees: Vec<String>,
+    /// Set by [`Fixture::sparse_lanes`].
+    sparse: Option<SparseLanes>,
 }
 
 impl Fixture {
@@ -74,6 +125,7 @@ impl Fixture {
             parent,
             main,
             worktrees: Vec::new(),
+            sparse: None,
         };
         fixture.commit(&fixture.main, "main.txt", "main 1");
         fixture.commit(&fixture.main, "main.txt", "main 2");
@@ -108,6 +160,79 @@ impl Fixture {
         fixture.commit(&fixture.main, "main.txt", "main 3");
         run_git(&fixture.main, &["merge", "--no-ff", "--no-edit", MERGED]);
         fixture
+    }
+
+    /// The history `wt list` drew sparsely on 2026-09-27, with a worktree per
+    /// branch and each branch's recorded parent:
+    ///
+    /// - `main`: `main 1` (`r`), `main 2` (`d1`), `d2..d12`, `M103` (merges
+    ///   `W1`), `d13`, `M104` (merges `fix/sniff`); `origin/main` = `main`.
+    /// - `feat/schema-enhancement` (parent `main`) forks at `d2`: 55 commits.
+    /// - `fix/wt-ux` (parent `main`) forks at `d5`: `w1..w8` (`W1` = `w8`),
+    ///   64 more after `M103`, merges `main` back at `B1`, then 3 more.
+    /// - `fix/sniff` (parent `fix/wt-ux`) forks at `W1`: 94 commits.
+    fn sparse_lanes() -> Self {
+        let mut fixture = Self::init();
+        let repo = fixture.main.clone();
+        let tree = git_output(&repo, &["rev-parse", "HEAD^{tree}"]);
+        let mut d = vec![git_output(&repo, &["rev-parse", "HEAD~1"]), git_output(&repo, &["rev-parse", "HEAD"])];
+        let more = chain_on(&repo, &tree, &d[1], "d", 11);
+        d.extend(more);
+        let schema = chain_on(&repo, &tree, &d[2], "s", SPARSE_SCHEMA_COMMITS);
+        let before = chain_on(&repo, &tree, &d[5], "w", SPARSE_WT_UX_BEFORE_MERGE);
+        let w1 = before.last().unwrap().clone();
+        let m103 = commit_on(&repo, &tree, &[&d[12], &w1], "Merge pull request #103 from fix/wt-ux");
+        let sniff = chain_on(&repo, &tree, &w1, "n", SPARSE_SNIFF_COMMITS);
+        let after = chain_on(&repo, &tree, &w1, "w", SPARSE_WT_UX_AFTER_MERGE);
+        let d13 = commit_on(&repo, &tree, &[&m103], "d13");
+        let m104 = commit_on(&repo, &tree, &[&d13, sniff.last().unwrap()], "Merge pull request #104 from fix/sniff");
+        let b1 = commit_on(&repo, &tree, &[after.last().unwrap(), &m104], "Merge branch 'main' into fix/wt-ux");
+        let synced = chain_on(&repo, &tree, &b1, "x", SPARSE_WT_UX_AFTER_SYNC);
+
+        run_git(&repo, &["update-ref", "refs/heads/main", &m104]);
+        run_git(&repo, &["update-ref", "refs/remotes/origin/main", &m104]);
+        run_git(&repo, &["reset", "-q", "--hard", "main"]);
+        for (directory, branch, tip, parent) in [
+            ("wt-schema", "feat/schema-enhancement", schema.last().unwrap(), "main"),
+            ("wt-ux", "fix/wt-ux", synced.last().unwrap(), "main"),
+            ("wt-sniff", "fix/sniff", sniff.last().unwrap(), "fix/wt-ux"),
+        ] {
+            run_git(&repo, &["branch", branch, tip]);
+            let worktree = fixture.path(directory);
+            run_git(&repo, &["worktree", "add", "-q", worktree.to_str().unwrap(), branch]);
+            fixture.worktrees.push(directory.to_string());
+            fixture.record_parent(branch, parent);
+        }
+        fixture.sparse = Some(SparseLanes {
+            d2: d[2].clone(),
+            w1,
+            m103,
+            m104,
+            b1,
+        });
+        fixture
+    }
+
+    /// The fork-origin store `wt list` reads under the fixture's `HOME` and
+    /// `XDG_CACHE_HOME` (see [`GraphRun::new`]).
+    fn fork_store(&self) -> PathBuf {
+        let real = worktree::fork_origin::fork_origin_path(&self.main).expect("fork store path");
+        let home = self.path("home");
+        let root = if cfg!(target_os = "macos") {
+            home.join("Library").join("Caches")
+        } else {
+            home.join("cache")
+        };
+        root.join("worktree").join(real.file_name().expect("store file name"))
+    }
+
+    fn record_parent(&self, branch: &str, parent: &str) {
+        let origin = worktree::fork_origin::ForkOrigin {
+            base_branch: parent.to_string(),
+            base_sha: git_output(&self.main, &["rev-parse", parent]),
+            created_at: 1,
+        };
+        worktree::fork_origin::record(&self.fork_store(), branch, origin).expect("record the fork origin");
     }
 
     fn add_worktree(&mut self, directory: &str, branch: &str) -> PathBuf {
@@ -522,4 +647,37 @@ fn level2_graph_draws_a_merged_branch_in_kitty() {
     for run in &runs {
         assert_eq!(run.assert_graph_drawn(), None, "no lane is left out:\n{}", run.screen.join("\n"));
     }
+}
+
+/// The observed-shape fixture is the history the plan describes (E1): merge
+/// parents, `origin/main`, own-commit counts, and the recorded parents `wt`
+/// will read.
+#[test]
+#[serial(level2_terminal)]
+fn level2_sparse_lanes_fixture_has_the_observed_topology() {
+    require_level!(Level::L2, KittyInstance::can_launch(), Backend::Kitty);
+
+    let fixture = Fixture::sparse_lanes();
+    let sparse = fixture.sparse.as_ref().expect("sparse-lanes shas");
+    let repo = &fixture.main;
+    let at = |rev: &str| git_output(repo, &["rev-parse", rev]);
+    let parents = |merge: &str| git_output(repo, &["rev-list", "--parents", "-n", "1", merge]);
+    let count = |range: &str| git_output(repo, &["rev-list", "--count", range]);
+
+    assert_eq!(at("main"), sparse.m104);
+    assert_eq!(at("refs/remotes/origin/main"), sparse.m104);
+    assert_eq!(parents(&sparse.m103).split(' ').nth(2), Some(sparse.w1.as_str()));
+    assert_eq!(parents(&sparse.m104).split(' ').nth(2), Some(at("fix/sniff").as_str()));
+    assert_eq!(parents(&sparse.b1).split(' ').nth(2), Some(sparse.m104.as_str()));
+    assert_eq!(git_output(repo, &["merge-base", "main", "feat/schema-enhancement"]), sparse.d2);
+    assert_eq!(count("main..feat/schema-enhancement"), SPARSE_SCHEMA_COMMITS.to_string());
+    assert_eq!(count(&format!("{}..fix/sniff", sparse.w1)), SPARSE_SNIFF_COMMITS.to_string());
+    assert_eq!(count("main..fix/wt-ux"), (SPARSE_WT_UX_AFTER_MERGE + 1 + SPARSE_WT_UX_AFTER_SYNC).to_string());
+    assert_eq!(count(&format!("{}..{}", sparse.d2, sparse.w1)), (3 + SPARSE_WT_UX_BEFORE_MERGE).to_string(), "d3..d5 and w1..w8");
+    assert_eq!(git_output(repo, &["worktree", "list", "--porcelain"]).matches("worktree ").count(), 4);
+
+    let store = worktree::fork_origin::ForkOriginStore::load_from(&fixture.fork_store());
+    assert_eq!(store.get("fix/sniff").map(|fork| fork.base_branch.as_str()), Some("fix/wt-ux"));
+    assert_eq!(store.get("fix/wt-ux").map(|fork| fork.base_branch.as_str()), Some("main"));
+    assert_eq!(store.get("feat/schema-enhancement").map(|fork| fork.base_branch.as_str()), Some("main"));
 }

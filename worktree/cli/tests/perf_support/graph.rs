@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use assert_cmd::cargo::cargo_bin;
+use worktree::fork_origin::{self, ForkOrigin};
+
+use super::isolated_cache_file;
 
 /// A repository with linked worktrees and the checkout `wt list` runs from.
 pub struct GraphFixture {
@@ -112,6 +115,52 @@ impl GraphFixture {
         fixture
     }
 
+    /// The history `wt list` drew sparsely on 2026-09-27, listed from `main`
+    /// (the base view), with each branch's recorded parent in the fork store:
+    ///
+    /// - `main`: `r`, `d1..d12`, `M103` (merges `W1`), `d13`, `M104` (merges
+    ///   `fix/sniff`); `origin/main` = `main` = `M104`.
+    /// - `feat/schema-enhancement` (parent `main`) forks at `d2`: 55 commits.
+    /// - `fix/wt-ux` (parent `main`) forks at `d5`: `w1..w8` (`W1` = `w8`),
+    ///   64 more after `M103`, merges `main` back at `B1`, then 3 more.
+    /// - `fix/sniff` (parent `fix/wt-ux`) forks at `W1`: 94 commits.
+    ///
+    /// The commit counts match the L1 (`observed_sparse_lanes`) and Kitty L2
+    /// (`Fixture::sparse_lanes`) builders.
+    pub fn observed_sparse_lanes() -> Self {
+        let mut history = History::default();
+        let mut d = vec![history.commit("main", None, None)];
+        for _ in 0..12 {
+            let parent = *d.last().unwrap();
+            d.push(history.commit("main", Some(parent), None));
+        }
+        let schema = history.chain("feat/schema-enhancement", d[2], 55);
+        let w1 = history.chain("fix/wt-ux", d[5], 8);
+        let m103 = history.commit("main", Some(d[12]), Some(w1));
+        let sniff = history.chain("fix/sniff", w1, 94);
+        let continued = history.chain("fix/wt-ux", w1, 64);
+        let d13 = history.commit("main", Some(m103), None);
+        let m104 = history.commit("main", Some(d13), Some(sniff));
+        let b1 = history.commit("fix/wt-ux", Some(continued), Some(m104));
+        let wt_ux = history.chain("fix/wt-ux", b1, 3);
+        let fixture = Self::build(
+            "observed sparse lanes",
+            &history,
+            &[("feat/schema-enhancement", schema), ("fix/wt-ux", wt_ux), ("fix/sniff", sniff)],
+            None,
+        );
+        git(&fixture.main, &["update-ref", "refs/remotes/origin/main", "main"]);
+        for (branch, parent) in [("feat/schema-enhancement", "main"), ("fix/wt-ux", "main"), ("fix/sniff", "fix/wt-ux")] {
+            let origin = ForkOrigin {
+                base_branch: parent.to_string(),
+                base_sha: git_output(&fixture.main, &["rev-parse", parent]),
+                created_at: 1,
+            };
+            fork_origin::record(&fixture.fork_store(), branch, origin).expect("record the fork origin");
+        }
+        fixture
+    }
+
     /// The fixtures the graph before/after table reports, floor first.
     pub fn all() -> Vec<Self> {
         vec![Self::floor(), Self::ordinary(), Self::older_connections(), Self::multiple_selected()]
@@ -129,7 +178,7 @@ impl GraphFixture {
 
         let mut run_path = main.clone();
         for (branch, _) in branches {
-            let path = root.path().join(format!("repo-{branch}"));
+            let path = root.path().join(format!("repo-{}", branch.replace('/', "-")));
             git(&main, &["worktree", "add", "--quiet", path.to_str().unwrap(), branch]);
             if run_from == Some(*branch) {
                 run_path = path;
@@ -160,6 +209,12 @@ impl GraphFixture {
 
     pub fn xdg_cache(&self) -> &Path {
         self.xdg_cache.path()
+    }
+
+    /// The fork-origin store `wt` reads under this fixture's cache roots.
+    pub fn fork_store(&self) -> PathBuf {
+        let real = fork_origin::fork_origin_path(&self.main).expect("fork store path");
+        isolated_cache_file(self.home.path(), self.xdg_cache.path(), &real)
     }
 
     /// `wt` in [`run_from`](Self::run_from) with isolated cache roots and none
