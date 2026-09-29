@@ -24,12 +24,96 @@ Configuration is handled via `InputTableState`.
 | **Submit Key** | `with_submit_key(Code, Mod)`| `Ctrl+S` | Convenience method to override only the submission key. |
 
 ### Column Types
-- **StaticText**: Non-editable display text.
+- **StaticText**: Non-editable, single-line display text. The column's `text` seeds every cell; a row value replaces it, so each row can show different text. See [Column Sizing](#column-sizing).
 - **TextInput**: Single-line text entry.
 - **BooleanSwitch**: Toggleable ON/OFF switch.
 - **TextAreaInput**: Multi-line text entry.
 - **ChooseOne**: Single-selection from a list of options.
 - **ChooseMany**: Multi-selection from a list of options.
+
+## Column Sizing
+
+You don't set column widths. On every render the table works them out from
+the column types and the current rows, so a terminal resize or a row you
+change through the state takes effect on the next frame.
+
+### Preferred widths
+
+Each column starts from a preferred width, measured in terminal cells (the
+`unicode-width` rules, so `日本` is 4 cells wide, not 2):
+
+| Column | Preferred width |
+| :--- | :--- |
+| `StaticText` | The widest of the column's `text` and every row's value, at least 3 cells |
+| `BooleanSwitch` | 8 cells |
+| `TextInput`, `ChooseOne`, `ChooseMany` | 20 cells |
+| `TextAreaInput` | Its configured `preferred_width` |
+
+A static column counts **every** row, including rows scrolled off screen, so
+scrolling never changes its width. A static column with the text `Step` and
+the rows `1 implement` and `12 review-5` prefers 11 cells.
+
+The focusable widths are budgets the table protects before it shrinks
+anything else, not hard minimums: a terminal narrower than their sum still
+renders.
+
+### Allocation
+
+The table uses the first rule that fits the available width. The examples
+use one static column (rows `1 implement` and `12 review-5`, preferred 11)
+followed by two `TextInput` columns (20 each).
+
+```mermaid
+flowchart TD
+    A["sum of preferred widths"] --> B{"fits the width?"}
+    B -- yes --> T1["1. Static columns get their preferred width;<br/>focusable columns share the leftover"]
+    B -- no --> C{"focusable budgets + 3 cells<br/>per static column fit?"}
+    C -- yes --> T2["2. Focusable columns keep their budgets;<br/>static columns shrink toward 3 cells"]
+    C -- no --> T3["3. Width divided evenly;<br/>static columns capped at preferred"]
+```
+
+1. **Everything fits.** Static columns get their preferred width. Focusable
+   columns get their budgets and share what is left, with odd cells going to
+   the leftmost. At 80 cells: `11 + 20 + 20 = 51`, and the 29 spare cells
+   make the text columns 35 and 34. A table with only static columns keeps
+   their preferred widths and leaves the rest of the row empty.
+2. **Static columns shrink.** Focusable columns keep their budgets. The
+   static columns give up equal shares of the shortfall until they fit, and
+   none goes below 3 cells. When the share doesn't divide evenly, the
+   leftmost column keeps the odd cell. A column that reaches 3 cells stops,
+   and the others give up the rest. Two static columns preferring 10 cells
+   each, beside one text column, get 7 and 7 at 34 cells and 7 and 6 at 33.
+3. **Emergency.** When even 3 cells per static column plus the focusable
+   budgets don't fit, every column gets an equal share, odd cells going to
+   the leftmost. A static column never gets more than its preferred width,
+   and the cells it can't use stay empty. At 30 cells the example gets 10,
+   10, and 10. A static column preferring 4 cells would get 4, 10, and 10,
+   leaving 6 cells unused.
+
+The widths never add up to more than the available width. At very small
+widths a column can get zero cells and is not drawn.
+
+### Clipping static text
+
+A static value wider than its column is cut to fit and ends with `…`, which
+takes one of the column's cells:
+
+| Value | Column width | Shown |
+| :--- | :--- | :--- |
+| `12 review-5` | 11 or more | `12 review-5` |
+| `12 review-5` | 10 | `12 review…` |
+| `12 日本語テキスト` | 7 | `12 日…` followed by one blank cell |
+| any | 1 | `…` |
+| any | 0 | nothing |
+
+Text is cut between whole characters as a reader sees them (grapheme
+clusters), so an `é` written as `e` plus a combining accent, or a joined
+emoji family, is kept whole or left out whole. A wide character that doesn't
+fit is left out rather than half-drawn, and nothing is drawn past the column
+edge.
+
+Clipping only changes what is drawn. The state and the rows returned on
+submit keep the full text.
 
 ## Usage Examples
 
@@ -126,6 +210,8 @@ let result = run_standalone(InputTable::new(), state, None);
     - `Tab` / `Shift+Tab`: Cycle through all focusable cells in a wrapping row-major order.
     - `Alt+Up` / `Alt+Down`: Force row navigation regardless of cell type.
 - **Validation Aggregation:** When submission is attempted (`Ctrl+S`), the table validates every cell. If any cell has an error (e.g., a required choice is unset), the focus is automatically moved to the first offending cell, and a global error message is displayed.
+- **Focus styling:** The focused cell is drawn with the theme's `label_style` (bold by default) and is not underlined, so its blank space never shows as a line across the column. A choice cell's own highlighting of its active option still shows on top, and underlines that come from your theme are kept.
+- **Cell drawing:** Each cell's rectangle is cleared before it is drawn, so styling from an earlier render into the same buffer (such as the previous focus) does not linger. Anything drawn under the table inside a cell's rectangle is overwritten.
 - **Scrolling:** The table automatically handles vertical scrolling and renders overflow indicators (▲/▼) when the number of rows exceeds the available height.
 - **Type Safety:** The `value()` method returns typed `CellValue` variants (e.g., `Boolean`, `Text`, `ChosenMany`), preserving semantic data types rather than flattening everything to strings.
 

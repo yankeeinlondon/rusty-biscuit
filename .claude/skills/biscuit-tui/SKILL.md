@@ -155,6 +155,8 @@ This wraps the *whole* layout in one border. A border around **each** pane is a 
 2D grid of heterogeneous cells. Supports: `StaticText`, `BooleanSwitch`, `TextInput`, `TextAreaInput`, `ChooseOne`, `ChooseMany`.
 
 - Focus: arrows navigate; Tab/Shift+Tab wrap; `Ctrl+S` validates and submits
+- Widths are recomputed every render: a `StaticText` column prefers its widest value across **all** rows (schema `text` included, floor 3); focusable budgets (switch 8, text/choice 20, text area `preferred_width`) are protected before static columns shrink; an emergency tier splits evenly. Clipping (`…`, grapheme-safe) is display-only. There is no public width option — see `biscuit-tui/docs/components/input_table.md#column-sizing`
+- Focus is `theme.label_style` only (no underline; underline on blank cells reads as a horizontal rule), and every cell rect is `Clear`ed before drawing
 - Value: `Vec<Row>` where each `Row` has `Vec<RowCell>` with typed `CellValue`
 - Construction: `new` panics on invalid input (row-shape/column-id/cell-type mismatch); use the fallible `try_new` for caller-provided data, which returns a typed `InputTableError` (re-exported from the crate root and prelude). `with_blank_rows` is infallible (seeds from column schema).
 
@@ -494,6 +496,7 @@ Windows console recipe, and CI enable them explicitly.
 - `serde_yaml_ng` 0.10 — dictionary parsing
 - `thiserror` 2 — error types
 - `unicode-width` 0.2 — width calculations
+- `unicode-segmentation` 1 — grapheme clusters, so `InputTable` clipping never splits a character
 - `rand` 0.9 — option shuffling
 
 Optional (`renderables` feature only):
