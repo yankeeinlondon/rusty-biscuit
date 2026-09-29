@@ -278,6 +278,26 @@ fn test_clean_save_repairs_lone_cr_frontmatter() {
     assert_repaired_reserved_indicator_document(&fs::read_to_string(path).unwrap(), "\r");
 }
 
+/// Tab-indented frontmatter does not parse; the tab-indentation repair turns
+/// each indentation tab into two spaces, as Darkmatter's own reader does.
+#[test]
+fn test_clean_repairs_tab_indented_frontmatter() {
+    let fixture =
+        CliProcessFixture::named("clean-frontmatter-test-clean-repairs-tab-indented-frontmatter");
+    let (_dir, path) = doc(
+        "---\nprompt: |-\n\tLine one\n\t\tLine two\nupdate_policy:\n\t- Duration(6mo)\n---\n\n# Title\n",
+    );
+
+    let output = clean_to_string(&fixture, &path);
+
+    assert!(
+        output.starts_with(
+            "---\nprompt: |-\n  Line one\n    Line two\nupdate_policy:\n  - Duration(6mo)\n---\n"
+        ),
+        "{output:?}"
+    );
+}
+
 /// D-9: `md clean`'s output is a fixed point — re-cleaning reproduces it byte
 /// for byte, including the repaired frontmatter.
 #[test]

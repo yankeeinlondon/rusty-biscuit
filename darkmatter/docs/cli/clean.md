@@ -111,7 +111,9 @@ Shell completion notes:
 
 `md clean` auto-applies only deterministic repairs whose safety proof passes.
 These include source normalization, parse-equivalent whitespace cleanup,
-reserved-indicator quoting, and schema-proven string quoting. Bytes outside
+tab-indentation repair (each indentation tab becomes two spaces, matching how
+Darkmatter reads tab-indented frontmatter), reserved-indicator quoting, and
+schema-proven string quoting. Bytes outside
 accepted edits are preserved. Non-deterministic findings, including duplicate
 keys and suspicious values, are report-only and never mutate the document.
 
