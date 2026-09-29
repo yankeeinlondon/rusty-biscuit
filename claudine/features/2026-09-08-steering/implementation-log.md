@@ -271,6 +271,66 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6:
   - claudine/docs/topics/automatic-steering.md
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - claudine/lib/src/stream/protocol/codex.rs
+  - claudine/lib/src/stream/protocol/codex/app_server.rs
+  - claudine/lib/src/stream/protocol/codex/app_server/tests.rs
+  - claudine/lib/src/stream/protocol/fixtures/codex-app-server-steer-0.157.1.jsonl
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/adapters.rs
+  - claudine/lib/src/steering/controller.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/native/mod.rs
+  - claudine/lib/src/steering/native/claude_registry.rs
+  - claudine/lib/src/steering/native/claude_registry/tests.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/mod.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/commands.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/launch.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/executor.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/tests.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/codex.rs
+  - claudine/cli/src/commands/wrap/profile/pi.rs
+  - claudine/cli/src/commands/wrap/profile/tests/pi_managed.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/steer/service.rs
+  - claudine/cli/tests/bin/fake_codex/main.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/common/codex_model.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/codex_app_server.rs
+  - claudine/cli/tests/l1/steer_cli.rs
+  - claudine/cli/tests/l1/compose_system_prompt_lifetime.rs
+  - claudine/cli/tests/l1/shipped_prompt_contract.rs
+  - claudine/cli/tests/real/main.rs
+  - claudine/cli/tests/real/real_codex_app_server.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/docs/providers/steering-activation.yaml
+  - claudine/docs/providers/catalog.json
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+docs_updated_during_phase_7:
+  - claudine/README.md
+  - claudine/docs/cli/steer.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/automatic-steering.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/docs/research/steering/codex.md
+  - claudine/docs/research/steering/kimi.md
+  - claudine/docs/research/non-interactive-sessions/codex.md
+  - claudine/features/2026-09-08-steering/verification/README.md
+docs_created_during_phase_7:
+  - claudine/docs/topics/codex-app-server.md
+skills_files_updated_during_phase_7: []
 ---
 # Implementation Log for 2026-09-08-steering (8 phases)
 
@@ -1484,3 +1544,379 @@ process group on Unix, Job Object on Windows) and the reader-thread change;
 both passed natively on Windows and on Linux. The non-Unicode env test is
 Unix-only because building an invalid `OsStr` is platform-specific; the
 parser's non-Unicode branch is the same code on Windows.
+
+## Phase 7
+
+Remaining provider adapters and native coverage, started 2026-09-28 on macOS.
+(The work items were plain numbered text and were converted to GFM todos, as
+in Phases 1–6, plus one validation todo.)
+
+### Scoping (read before the per-provider sections)
+
+Four read-only research briefs (OpenCode+Kilo, Claude Code, Kimi+Goose,
+Qwen+Gemini+Antigravity) were produced first, then the plan's order was
+followed: Codex, OpenCode, Claude Code, then the roster. Every remaining
+provider is a Phase-4-sized protocol integration (a managed launch, a
+parser path, an adapter, fakes, real tests). Direct provider CLI invocations
+need approval in this session, so real providers were reached only through
+opt-in `real_` nextest targets (the Phase 4 technique), and a throwaway
+exploration test (`tests/real/real_zz_explore.rs`, removed before the phase
+ended) captured the installed Codex's protocol schema and live traffic.
+
+### Codex (checkpoint 1: implemented, verified, and granted on macOS)
+
+**Protocol facts established against the installed Codex 0.157.1** (the
+research had examined 0.153.4): `codex exec` is itself an in-process
+app-server client (`rust-v0.157.1` `exec/src/lib.rs`: `thread/start` with
+`approvalPolicy: never`, one `turn/start`, elicitation → cancel, every other
+server request → JSON-RPC `-32000`, exit 1 for a failed/interrupted task turn
+or an unretried error, Git trust check). Live, with a disposable
+`CODEX_HOME` and a scripted Responses-API model:
+
+- `turn/steer {threadId, expectedTurnId}` is Codex's **atomic target guard**:
+  a wrong/stale turn is refused with `-32600` and never reaches the model; an
+  idle thread is refused ("no active turn to steer").
+- A steer is answered at once (while a tool runs **and** while the model is
+  generating), then reaches the model at the turn's next request — after the
+  whole tool batch or the current response — and the turn continues with it
+  (a final-message response does not end the turn). Boundary:
+  `end_of_tool_batch`; the answer establishes scheduling (`queued`).
+- A repeated `clientUserMessageId` is delivered twice (no deduplication).
+- `turn/interrupt` → `{}`, then `turn/completed` `interrupted` in ~200 ms; the
+  running tool stops; a replacement `turn/start` works.
+- Closing stdin during a turn makes the server exit 0 in ~15 ms and abandon
+  the turn (tool killed): the owner must close only after settlement.
+- `initialize`'s `userAgent` names the exact version (`claudine/0.157.1 …`),
+  so the managed launch establishes `provider_version` — the first launch in
+  the project that does, which a grant requires.
+
+**Correction during the phase:** my first reading of the exploration
+transcript said a steer during generation is answered only when the response
+ends. The transcript recorded lines in read order, not arrival order; the
+real test showed the answer is immediate. Research, code comments, and tests
+were corrected before any record was written.
+
+**Design decisions**
+
+- **The Codex parser learns the app-server protocol** (as Pi's parser learned
+  RPC records): `claudine::stream::protocol::codex::app_server` has strict
+  readers for the load-bearing fields (response shape, `initialize`, thread
+  and turn ids, turn status, `thread/read` activity) and a `Projector` that
+  mirrors exec's JSONL projection (thread announced once, per-turn usage from
+  total deltas, failed/interrupted turns, retried vs unretried errors,
+  warnings). Responses and server requests render nothing, except a refusal
+  of the task's own request (`TASK_REQUEST_ID`), which fails the run. Because
+  the server exits 0 when stdin closes, `finish` applies exec's exit rule.
+- **`StdioControl::launch_args`** (new, default `None`): a session may run a
+  different argv than the one it was built from. Codex's session runs
+  `app-server --listen stdio://` for an `exec` argv and keeps the `exec` argv
+  as its pre-submission `fallback`. `stdio_control` now also receives the
+  child cwd (needed for exec's Git trust check).
+- **Exact option mapping** (`exec/codex_app_server/launch.rs`): global
+  `-c/--enable/--disable/--strict-config` pass through; `--model`,
+  `--sandbox`, the bypass flag, `--ephemeral`, and `resume <id>` become
+  thread parameters; `--output-last-message` is written by the session from
+  the last agent message at settlement (so every consumer is unchanged);
+  `--json`/`--color` drop. Anything else (image, output schema, profile,
+  local provider, positional prompt, unknown flag) keeps the run on `exec`,
+  decided before launch. So does a run exec would refuse (no Git repository
+  and neither `--skip-git-repo-check` nor the bypass flag).
+- **Unattended requests** answered exactly as exec answers them (elicitation
+  cancelled, everything else `-32000`, never approved); an unreadable request
+  (e.g. null id) fails the run as `input_required` and the run is never ended
+  gracefully after that.
+- **Settlement**: after a `turn/completed`, under the mutation lock, a
+  `thread/read` must show the thread idle and no `turn/started` since;
+  otherwise stdin stays open (a steer can extend a turn or an idle
+  `turn/start` can begin one).
+- **Adapter `codex-app-server` revision 1**: steer uses the owner's running
+  turn as `expectedTurnId` (no separate state read: the guard *is* the
+  check); an answer naming another turn is `unknown`, never trusted; idle
+  turn only after `thread/read` idle; consented interruption waits for that
+  turn's own `turn/completed` (a turn that completed on its own is a refused
+  cancellation, and gets no replacement). No resend anywhere.
+- **Controller**: `SteeringController::set_provider_version` (new) — the
+  managed launch records the version it read from the provider before its
+  task is submitted.
+- **Research corrective pass** (bounded, one pass, by source reading plus
+  disposable tests rather than a research fleet): `non-interactive-sessions/codex.md`
+  now selects `app-server` with `exec-json` as fallback
+  (`feature_preservation: evidenced_full` for the mapped options);
+  `steering/codex.md` gained 0.157.1 evidence, the observed boundary and
+  receipt facts, and seven verification records
+  (`verification/codex-macos-0.157.1.json`).
+- **Grants**: `app-server-steer` (working) and `app-server-turn-start` (idle)
+  for macOS / 0.157.1 / non-interactive / Claudine origin. The
+  interrupt-then-start mechanism is implemented and verified but **not
+  granted**: the working case is researched as `non_interrupting`, the
+  generator (correctly) grants only a mechanism matching that support, and a
+  selectable non-interrupting route is always preferred anyway.
+
+### Defect found and fixed (pre-existing)
+
+Codex delivers agent messages and reasoning as whole items without a
+trailing newline. The content detector buffers partial lines across chunks,
+so N identical messages became one ever-growing line: **the repetition
+guard could never trip on Codex agent messages** (exec runs included), and
+automatic help could never warn. Completed items now end at a line boundary
+(`complete_line`); started/updated snapshots do not. Found by the L1
+automatic-help test timing out.
+
+### Checks so far (checkpoint)
+
+- `cargo nextest run -p claudine --lib app_server providers::codex steering`:
+  pass (8 reader/projection, 54 parser, 78 steering).
+- `cargo nextest run -p claudine-cli --bin claudine codex_app_server`: 22/22.
+- `cargo nextest run -p claudine-cli --features test-fixtures --test l1
+  codex_app_server`: 9/9 (automatic help sent under the grant on macOS; the
+  stop still at 30).
+- `just test-real real_codex_protocol`: 7/7 against Codex 0.157.1;
+  `just test-real real_codex_app_server`: 4/4, including **automatic help
+  followed by recovery through the production wrapper**.
+- `claudine-gen`/`catalog-types`: 224/224 after re-pinning two byte
+  baselines (`catalog.json` → 11599365317308326791,
+  `steering/generated.rs` → 8549140604224936995).
+
+### Codex: completion after the checkpoint
+
+- **Resume** (`exec resume <id>` → `thread/resume`) verified against the real
+  Codex (`real_codex_protocol_resumes_a_thread`: same thread, history seen by
+  the model).
+- **Existing L1 stubs** that modelled `codex exec` by draining stdin with
+  `cat` hung under the managed launch (nothing closes stdin before
+  readiness): `compose_system_prompt_lifetime` and three
+  `shipped_prompt_contract` tests. Real Codex answers `initialize` at once, so
+  this was a fixture assumption, not a product defect. The stubs now exit on
+  `app-server` like a Codex without one, which exercises the pre-submission
+  fallback to `exec` in those flows. Other L1 Codex stubs pass `--json`
+  explicitly (not a structured run) or run outside a Git repository without
+  the trust flag (stays on `exec`), so they are unaffected.
+- **Error-transport guard** caught one `error.to_string()` in the parser's
+  app-server branch; replaced by a structured trace.
+
+### Claude Code: native registry discovery (implemented)
+
+Passive, read-only inspection of the installed Claude Code 2.1.284 registry
+(field names, types, and masked patterns only; no values, no socket, no key
+file) confirmed the research's once-seen record shape: `<config>/sessions/<pid>.json`
+with `pid`, `sessionId`, `startedAt` (ms), `procStart` (a local-time `ps`
+string), `cwd`, `kind`, `entrypoint` (`cli`, `sdk-cli`, `sdk-ts`), `status`
+(`busy`, `idle`, `shell`), `version`, `name`, `messagingSocketPath`
+(`/tmp/cc-socks/<pid>.sock`).
+
+- `claudine::steering::native::claude_registry` (new): strict record reader
+  (required `pid`, `sessionId`, `startedAt`, `kind`, `entrypoint`; optional
+  but type-checked `status`, `cwd`, `name`, `version`), the live-session rule
+  (process running **and** started no later than `startedAt` + 2 s — a reused
+  PID names a newer process), state (`busy`/`idle`, else unknown), profile
+  (`interactive`+`cli` → `ordinary-interactive`; SDK/print sessions listed with
+  no profile, because the registry does not distinguish one-shot from
+  retained), and a `NativeDiscoverer` implementing the researched
+  `registry-<os>-native-interactive` method on all three OSes. The process
+  start time comes from the CLI's `cli_utils::process_start` (the same marker
+  managed registrations use); `sniff` exposes no such lookup.
+- `claudine steer` (`LocalService`) now runs it. **Behavior change,
+  spec-conformant:** without a daemon the listing used to fail (its only
+  source failed); it now succeeds with the native rows and a `managed`
+  discovery error ("partial discovery returns available observations plus
+  errors"). The L1 test was updated accordingly.
+- Every native Claude row is **unavailable**: the peer-socket delivery is
+  researched but its reply framing is undocumented and its receipt timing is
+  `unknown` (the generator refuses a grant without early acknowledgment), so
+  no sender was implemented. Next check (recorded in research gaps already):
+  capture sanitized reply frames in a disposable session gated by version +
+  `peerProtocol`.
+- **Hermeticity defect found by cross-check:** `dirs::home_dir()` ignores
+  `USERPROFILE` on Windows, so the L1 test read the build host's real home
+  there. The discoverer honors `CLAUDE_CONFIG_DIR` (absolute), which the steer
+  L1 tests now set to the fixture on every OS.
+
+### Kimi: finding (not implemented)
+
+The installed Kimi is **Kimi Code 2.0.2** (TypeScript `kimi-code`); its help
+has no `--wire`, and `kimi --wire` exits 1 (`unknown option '--wire'`). The
+wire protocol (with its `steer` method) belongs to the legacy Python
+`kimi-cli`. Two consequences:
+
+1. **Pre-existing wrapper defect (outside steering):** Claudine's default
+   non-interactive Kimi launch uses `--wire` (`profile/kimi.rs`,
+   `PromptDelivery::WireRpc`), so non-interactive `claudine kimi` cannot run
+   against the current Kimi product. Not fixed here (it changes the Kimi
+   execution interface, a research-selection question); raised for human
+   review.
+2. The steering research pins 0.28.1; 2.x is a major-version change, which
+   the roster rules treat as a new entry. A gap with that next check was added
+   to `docs/research/steering/kimi.md`.
+
+### Per-provider outcomes (plan item 6)
+
+| Provider | Discovery | Delivery / control | Outcome |
+| --- | --- | --- | --- |
+| Codex | managed: implemented (Claudine registration of the managed app-server launch); native: process inspection → coverage gap | `codex-app-server` r1: steer, idle turn, consented interruption | **verified-enabled** on macOS / Codex 0.157.1 (steer, idle turn); interruption implemented + verified, not granted (policy rule); Linux / native Windows **implemented, externally blocked** (fake-protocol verified on both; no real-Codex run there) |
+| Claude Code | native registry: **implemented** (macOS, Linux, Windows) | peer socket: not implemented | delivery **unknown** with concrete next check (reply framing, receipt timing); Windows delivery **evidenced blocked** (no external credential path, research) |
+| OpenCode | native: process inspection needing endpoint + credential → gap | managed server (`serve` + `run --attach`): not implemented | **implementable, deferred** (human review): every working case researched `unknown` and the research records that input to a busy session can be stranded; idle cases have no window in a one-shot run. Next check: disposable `prompt_async` during a busy session |
+| Kilo | native: process inspection → gap | managed `kilo serve`: not implemented | **implementable, deferred** (human review): macOS working case is researched `non_interrupting` (`queue_follow_up` at the end of the tool batch, which can rescue a loop) — the strongest HTTP candidate |
+| Gemini | native: process inspection → gap | managed ACP: not implemented | **implementable, deferred**: idle prompt + consented cancel-then-prompt only; automatic help **evidenced unsupported** (no non-interrupting active steer in 0.51.0 source) |
+| Goose | native: process inspection / ACP API → gaps | managed ACP steer (guarded by `expectedRunId`): not implemented | **externally blocked**: `goose` is not installed on the local hosts, so no disposable verification is possible; strongest ACP candidate once installed |
+| Kimi | native: registry/API → gaps | wire `steer` (legacy CLI only); web/ACP (research 0.28.1) | **unknown** pending a Kimi Code 2.x research refresh (major version); pre-existing wrapper defect above |
+| Qwen | native: process inspection → gap | managed daemon follow-up + idle prompt: not implemented | **implementable, deferred**: follow-ups start at the next turn, so automatic help is **evidenced unsupported** |
+| Pi | native: process inspection / RPC API → gaps (ordinary Pi exposes no control channel) | `pi-rpc` r1 (Phase 4) | **blocked** by the reviewed policy (unchanged); native disposition: no channel |
+| Antigravity | native: process inspection → gap | managed stream-JSON (idle only) | **unknown**: the structured-input schema is unestablished; next check: a versioned input contract |
+
+Process-inspection discovery was deliberately not implemented for any
+provider: every case it would list is `unknown`/`unsupported`, and a process
+alone carries no conversation identity, so such rows could never be targeted.
+They stay reported as `coverage_gaps`.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+| --- | --- |
+| Codex exact thread + expected-turn guard; stale turn refused, nothing delivered | unit `a_working_turn_is_steered_with_its_exact_turn_as_the_guard`, `refusals_mismatches_and_silence_are_reported_as_established`; real `real_codex_protocol_steers_a_working_turn_at_the_tool_boundary`, `real_codex_protocol_refuses_a_stale_turn_and_sends_nothing` |
+| Codex idle-start separation (fresh `thread/read`; never automatic) | unit `an_idle_thread_takes_a_turn_after_a_fresh_check_and_stays_open_for_it`; lib `a_managed_codex_run_is_steerable_at_its_verified_version`; real `real_codex_protocol_starts_an_idle_turn` |
+| Retained app-server ownership, settlement, EOF hazard, final message | unit `a_completed_idle_run_writes_the_final_message_and_closes_stdin_once`, `work_after_the_turn_keeps_the_run_open`, `a_delivery_and_the_settlement_decision_never_interleave`; real `real_codex_protocol_closing_stdin_mid_turn_abandons_it`; L1 `a_task_runs_over_the_app_server_and_the_settled_run_ends` |
+| Receipt timing (early while a tool runs and while generating); boundary end of batch | real `…_at_the_tool_boundary`, `…_steers_during_generation_at_the_end_of_the_response` |
+| Cancellation completion and partial outcomes | unit `consented_interruption_interrupts_waits_then_starts_the_replacement`, `interruption_phases_stay_separate_when_one_fails`; real `real_codex_protocol_interrupts_with_consent_and_keeps_the_phases` (tool stopped) |
+| Duplicate IDs; never resend | unit `an_unanswered_steer_is_unknown_and_never_resent`; real `real_codex_protocol_delivers_a_repeated_client_message_id_twice` (expected loss) |
+| Unattended requests as exec answers them; never approved; `input_required` | unit `server_requests_are_answered_as_exec_answers_them`, `an_input_required_run_is_never_ended_gracefully`; L1 `an_approval_request_is_refused_as_exec_refuses_it_never_approved`, `an_unreadable_request_fails_the_run_as_input_required` |
+| Pre-submission fallback only; no replay after submission | L1 `a_refused_initialize_falls_back_to_exec_before_submission`, `a_child_that_exits_before_it_is_ready_falls_back_with_its_stderr_shown`, `a_refused_task_fails_the_run_and_is_never_replayed`, `a_failed_turn_fails_the_run_like_exec` |
+| Exact option mapping; unmapped/untrusted stays on exec | unit `an_exec_argv_maps_to_an_equivalent_app_server_launch`, `resume_and_bypass_map_and_the_git_check_follows_exec`, `anything_without_an_exact_equivalent_stays_on_exec`; L1 `options_without_an_app_server_equivalent_stay_on_exec`; real `real_codex_app_server_leaves_an_untrusted_directory_to_exec`, `real_codex_protocol_resumes_a_thread` |
+| Resource/feature parity and output parity with exec | real `real_codex_app_server_runs_a_task_like_exec` (managed vs forced-exec: same answer, originators `claudine` vs `codex_exec`), `real_codex_app_server_fails_a_failed_turn_like_exec`; source evidence `source-exec-client-0-157-1` |
+| Projection and exec exit rule | lib `app_server::tests::*` (8), `providers::codex::tests::an_app_server_run_reads_like_an_exec_run`, `app_server_failures_exit_like_exec`, `an_exec_run_keeps_its_own_exit_code` |
+| Provider version established by the managed launch | unit `readiness_binds_the_thread_version_process_state`; lib `initialize_reads_the_exact_version_or_none` |
+| Grants exactly as reviewed; other versions/profiles unavailable | lib `shipped_catalog_activates_exactly_the_reviewed_grants`, `a_managed_codex_run_is_steerable_at_its_verified_version`; gen `committed_policy_is_valid`, drift pins |
+| Automatic help through the production wrapper; stop unchanged; warning + recovery | L1 `automatic_help_follows_the_granted_version_and_keeps_the_stop_schedule` (sent on macOS, notice elsewhere, stop at 30); real `real_codex_app_server_automatic_help_lets_a_repeating_run_recover` |
+| Codex item text reaches the detector as lines (defect) | lib `completed_messages_end_at_a_line_boundary_and_updates_do_not`, `reasoning_item_emits_reasoning_event` |
+| Claude registry discovery: robustness, PID reuse, state/profile, scan, all OSes | lib `claude_registry::tests::*` (8); L1 `native_claude_sessions_are_listed_from_claudes_registry`, `listing_without_a_daemon_reports_the_missing_route_and_changes_no_configuration` |
+
+### Input robustness matrices
+
+**Codex app-server messages (JSON line → `claudine::stream::protocol::codex::app_server`).**
+One test per record walks the cells from a real 0.157.1 record; the control
+row reads to its positive result. Arrays are not load-bearing.
+
+| Shape | response `id` | `result`/`error` | `error.code` | `userAgent` | `thread.id` / `turn.id` / `turnId` | `turn.status` / `status.type` |
+| --- | --- | --- | --- | --- | --- | --- |
+| absent | not a response (`Other`) | error (`Missing(result)`) | error | error | error | error |
+| explicit null | correlates nothing | error (`Null(error)`) | error | error | error | error |
+| wrong type | numeric id correlates nothing | error (`error` not an object) | error (`"-32600"`) | error | error (`12`, `["x"]`) | error |
+| empty | — | `{}` result → field errors | — | version `None` | error (non-empty required) | unknown value → error |
+| both present | — | error (`Ambiguous`) | — | — | — | — |
+| unknown value | — | — | — | non-dotted version → `None` | another thread's `thread/read` → error | `paused`/`busy` → error |
+| duplicate key | last wins (JSON; Codex never repeats) | same | same | same | same | same |
+| trailing content | not a record (`Other`) | same | same | same | same | same |
+
+A message the owner depends on that cannot be read never reads as success:
+an unreadable readiness answer fails readiness (fallback), an unreadable
+answer to a steering request is `unknown`, an unreadable server request is
+`input_required`.
+
+**Claude registry record (`<pid>.json`).** Walked in
+`a_record_walks_the_input_robustness_matrix` from a record with the observed
+2.1.284 shape (synthetic values).
+
+| Shape | `pid` | `sessionId` | `startedAt` | `kind`/`entrypoint` | `status`/`cwd`/`name`/`version` |
+| --- | --- | --- | --- | --- | --- |
+| absent | error | error | error | error | `None` (allowed) |
+| explicit null | error | error | error | error | error |
+| wrong type | error (`"4242"`, `-1`, `0`, > u32, `42.5`) | error (`7`) | error (string, negative) | error (array, number) | error (number) |
+| empty | — | error | — | reads (then unmapped) | reads (`""` status → unknown) |
+| duplicate key | last wins (JSON) | same | same | same | same |
+| trailing content | not a record | same | same | same | same |
+
+Plus file-level cells in `a_scan_reads_pid_named_records_and_keeps_live_sessions`:
+non-JSON, damaged, a record naming another PID than its file, non-PID file
+names, a directory, a missing registry.
+
+**Exec argv → managed launch** (`launch::plan`): every option is either an
+exact mapping or an explicit `Unmapped` reason (17 negative cells in
+`anything_without_an_exact_equivalent_stays_on_exec`).
+
+Smells checked: no `#[serde(default)]`, `unwrap_or_default`, or `.ok()` on a
+load-bearing field; `Option` is used only where absent is the documented
+meaning (optional registry fields, which reject `null`).
+
+### Checks run (final)
+
+- `just test --no-fail-fast` (claudine area): **8031 passed, 1 failed, 9
+  skipped**. The failure is the pre-existing
+  `compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch`
+  (darkmatter union work, recorded in Phases 5–6). Earlier runs in the phase
+  failed only on expected items since fixed: the dispatch inventory (re-blessed
+  twice) and the exec-only test stubs (updated).
+
+- `cargo nextest run -p claudine --lib app_server providers::codex steering claude_registry`: pass.
+- `cargo nextest run -p claudine-cli --bin claudine codex_app_server steer`: pass (22 session + 46 steer).
+- `cargo nextest run -p claudine-cli --features test-fixtures --test l1 codex_app_server steer_cli compose_system_prompt_lifetime shipped_prompt_contract dispatch_inventory error_guards`: pass.
+- Real tier against Codex 0.157.1 (macOS): `real_codex_protocol` 8/8
+  (including resume), `real_codex_app_server` 4/4.
+- `claudine-gen`/`catalog-types`: 224/224; `claudine-gen check` clean;
+  `steering check` clean for all ten providers (Codex 7/7 verification
+  records).
+- `just lint` (claudine area): clean for all five crates after three clippy
+  fixes in the new module (boxed enum variant, two needless closures).
+  `cargo clippy -p claudine-cli --all-targets --features
+  real-tests,test-fixtures,daemon-tests -- -D warnings`: clean.
+- Dispatch inventory re-blessed with the Phase 1–6 workaround (4 new
+  reference-class `Provider::Codex` sites in test code; no dispatch
+  conditionals; `dispatch_inventory.rs` unchanged).
+- `just cross-check claudine --os linux|windows app_server providers::codex claude_registry steering::`: Linux 148/148, native Windows pass (after the path fix below).
+- `just cross-check claudine-cli --os linux|windows --features test-fixtures codex_app_server steer_cli compose_system_prompt_lifetime shipped_prompt_contract`: Linux 48/48, native Windows 41/41 (after the hermeticity fix).
+- `just check-tier-coverage claudine`: nothing stranded. The new real-tier
+  tests live in the existing `real` binary (`real_` names; `test-real` is
+  live) and in the in-crate `real_codex_protocol` module behind `real-tests`,
+  like Phase 4's `real_pi_protocol`; the new `claudine-fake-codex` bin is gated
+  by `test-fixtures` like `claudine-fake-pi`.
+
+### Defects found and fixed during the phase
+
+- Codex agent messages and reasoning never formed detector lines (above).
+- Windows-only: a test used Unix-style absolute paths
+  (`registry_dir` test), and the steer L1 test read the host's real home
+  (`dirs::home_dir` ignores `USERPROFILE`). Both fixed.
+- Test fixtures modelling `codex exec` by draining stdin (above).
+
+### Environment limitations encountered
+
+- Provider CLIs (`codex --version`, `bh`, `claude --version`) and reads
+  outside the repository needed approval; real providers were reached only
+  through `real_` nextest targets, and a throwaway exploration test
+  (removed) captured Codex's schema/traffic, Claude's registry shape (names,
+  types, masked patterns only), and Kimi's help.
+- WebFetch summaries of upstream source were used only for exec's
+  server-request policy and client identity (quoted code) and were then
+  confirmed by the real-Codex tests; the protocol types came from the
+  installed binary's generated schema.
+- Writes under `.claude/skills/claudine/` were denied again. Intended skill
+  update (not applied), in addition to the Phase 1–6 items: add Library Module
+  Map rows for `secrets` and `steering` (including `native` discovery and the
+  two adapters: `pi-rpc` blocked, `codex-app-server` granted on macOS at Codex
+  0.157.1), and a "Wrapper & composition subsystems" row "Managed Codex
+  app-server: a structured `codex exec` argv whose every option maps exactly
+  runs `codex app-server --listen stdio://` (`exec/codex_app_server/`),
+  projected onto exec events by the Codex parser, answering server requests
+  as exec does, settling on `turn/completed` + idle `thread/read` before
+  closing stdin, writing `--output-last-message` itself; exec is the
+  pre-submission fallback | `topics/codex-app-server.md`".
+- Goose is not installed on this host.
+
+### Known gaps (not blockers for Phase 8)
+
+- Only Codex has an operational steering route, and only on macOS at 0.157.1.
+  Linux/Windows need a real-Codex run on those hosts before a grant.
+- A run whose agent never reaches another model request (one endless
+  response) is steered only when that response ends; the automatic send is
+  answered at once, but delivery waits for the boundary.
+- A managed Claudine Codex run and a native registry row cannot collide
+  (Codex writes no registry), but a managed `claudine claude` structured run
+  may appear twice (managed row without conversation + native `sdk-cli` row)
+  because managed Claude runs do not report their session to the controller.
+
+### Cross-OS assessment
+
+New production code has no `#[cfg]` branches. OS-sensitive pieces: the
+managed Codex child (process group / Job Object teardown through the shared
+spawn path), native discovery's home and process-start lookups, and the
+Windows pipe endpoint in L1. The fake-Codex L1 suite (including automatic
+help, which takes the "no grant" branch off macOS) and the registry tests
+passed natively on Linux and Windows; real Codex was run on macOS only.

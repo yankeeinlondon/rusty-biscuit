@@ -270,11 +270,73 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6:
   - claudine/docs/topics/automatic-steering.md
 skills_files_updated_during_phase_6: []
+source_files_during_phase_7:
+  - claudine/lib/src/stream/protocol/codex.rs
+  - claudine/lib/src/stream/protocol/codex/app_server.rs
+  - claudine/lib/src/stream/protocol/codex/app_server/tests.rs
+  - claudine/lib/src/stream/protocol/fixtures/codex-app-server-steer-0.157.1.jsonl
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/adapters.rs
+  - claudine/lib/src/steering/controller.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/native/mod.rs
+  - claudine/lib/src/steering/native/claude_registry.rs
+  - claudine/lib/src/steering/native/claude_registry/tests.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/mod.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/commands.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/launch.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/executor.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/tests.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/codex.rs
+  - claudine/cli/src/commands/wrap/profile/pi.rs
+  - claudine/cli/src/commands/wrap/profile/tests/pi_managed.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/steer/service.rs
+  - claudine/cli/tests/bin/fake_codex/main.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/common/codex_model.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/codex_app_server.rs
+  - claudine/cli/tests/l1/steer_cli.rs
+  - claudine/cli/tests/l1/compose_system_prompt_lifetime.rs
+  - claudine/cli/tests/l1/shipped_prompt_contract.rs
+  - claudine/cli/tests/real/main.rs
+  - claudine/cli/tests/real/real_codex_app_server.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/docs/providers/steering-activation.yaml
+  - claudine/docs/providers/catalog.json
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+docs_updated_during_phase_7:
+  - claudine/README.md
+  - claudine/docs/cli/steer.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/automatic-steering.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/docs/research/steering/codex.md
+  - claudine/docs/research/steering/kimi.md
+  - claudine/docs/research/non-interactive-sessions/codex.md
+  - claudine/features/2026-09-08-steering/verification/README.md
+docs_created_during_phase_7:
+  - claudine/docs/topics/codex-app-server.md
+skills_files_updated_during_phase_7: []
 ---
 # Steering implementation plan
 
-Status: Phases 1–6 implemented (2026-09-28; Pi steering blocked by a reviewed
-policy block, so no session is selectable yet); Phases 7–8 not started.
+Status: Phases 1–6 implemented; Phase 7 partially implemented with human
+review requested (2026-09-28). Codex managed runs are steerable on macOS at
+Codex 0.157.1; Pi steering stays blocked by a reviewed policy block; Phase 8
+not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -617,32 +679,35 @@ original failure path; it is not grounds to weaken detection.
 
 **Work**
 
-1. Visit every eligible entry in [providers.yaml](../../docs/providers.yaml),
+- [x] 1. Visit every eligible entry in [providers.yaml](../../docs/providers.yaml),
    respecting `skip_research`. Use this implementation order for the researched
    candidates: Codex, OpenCode, Claude Code, then remaining roster entries in
    roster order. Pi's managed candidate was addressed in Phase 4; include its
    native discovery/access disposition here. The roster remains authoritative.
-2. For each candidate, implement researched discovery and usable delivery/control
+- [ ] 2. For each candidate, implement researched discovery and usable delivery/control
    interfaces through shared protocol families and generated bindings. Keep
    ordinary native launches distinct from deliberately managed/server launches.
    Preserve provider features and exact compatibility probes.
-3. Codex: test exact thread/expected-turn guards, idle-start separation, retained
+- [ ] 3. Codex: test exact thread/expected-turn guards, idle-start separation, retained
    app-server ownership, receipt timing, and cancellation completion.
    OpenCode: test exposed-server versus internal launch access, same-user/session
    routing, early HTTP acceptance versus delivery, and partial interruption.
    Claude Code: test exact registry/socket framing, authentication per OS, inbound
    policy, correlation, and non-interactive held-message behavior.
-4. Apply equivalent case-specific work to Goose, Kimi, Qwen, Kilo, Antigravity,
+- [ ] 4. Apply equivalent case-specific work to Goose, Kimi, Qwen, Kilo, Antigravity,
    and any subsequent eligible roster additions. Reuse ACP/HTTP/stdio behavior
    where protocols actually match; do not force every operation into active-turn
    steering or implement an unsupported terminal-keystroke substitute.
-5. Close concrete gaps with versioned-source inspection and bounded disposable
+- [x] 5. Close concrete gaps with versioned-source inspection and bounded disposable
    tests. At most two corrective research passes per gap, with the requested
    model/effort. Preserve existing evidence and activation distinctions.
-6. Record each case as verified-enabled, implemented but externally blocked,
+- [x] 6. Record each case as verified-enabled, implemented but externally blocked,
    evidenced unsupported, or unknown with a concrete next check. Missing access
    or implementation is not proof of provider incapability. Do not leave known
    implementable work unfinished under a generic unknown label.
+
+- [x] Validation: fake-protocol failure tests and disposable exact-profile tests
+   for every enabled binding, as listed below.
 
 **Validation:** Fake-protocol failure tests plus disposable exact-profile delivery
 and interruption tests for every enabled binding. Include long tools/batches,
@@ -717,7 +782,7 @@ permission question or a fabricated all-green result.
 | Phase 4 | Implemented 2026-09-28; Pi steering blocked | Managed Pi RPC execution (`exec/control.rs`, `exec/pi_rpc/`) with pre-submission JSON fallback, unattended-request policy, settlement, Unix tool reaping; `pi-rpc` adapter reviewed and implemented; `retained-rpc` blocked by the new policy `blocks` list. Real Pi 0.87.1 (macOS) and fake-Pi (macOS/Linux/Windows) verified. See implementation-log.md |
 | Phase 5 | Implemented 2026-09-28 | `claudine steer` (`cli/src/commands/steer/`): list/JSON, explicit and picked sends, interactive consent, revalidation, receipts, exit codes; listings now carry the route's operation and the owner binding. Verified with fake service, scripted input, off-screen rendering, and a real daemon (macOS, Linux, native Windows). See implementation-log.md |
 | Phase 6 | Implemented 2026-09-28 | Detector early-warning/recovery signals (`ContentDetector::observe`), `claudine::steering::automatic` (setting, precedence, 3-opportunity budget, helper message), `AutomaticHelp` in the live sink sending to the execution's own controller, hard-stop priority, deduplicated notices, and steering replies excluded from the silence clock. No real session is eligible yet, so the production path shows the unavailable notice; delivery is proven with fixture eligibility. See implementation-log.md |
-| Phase 7 | Not started | Full-roster passive research available |
+| Phase 7 | Partially implemented 2026-09-28; human review requested | Codex managed app-server launch + `codex-app-server` adapter, **verified-enabled on macOS at Codex 0.157.1** (steer, idle turn; automatic help with recovery shown through the production wrapper); Claude Code native registry discovery (all OSes); every roster provider has a recorded outcome. OpenCode, Kilo, Gemini, Qwen adapters implementable but deferred; Goose externally blocked; Kimi needs a 2.x research refresh. See implementation-log.md |
 | Phase 8 | Not started | No new implementation validation claimed by this plan |
 
 ### Phase 1 progress (2026-09-28)
@@ -830,3 +895,31 @@ permission question or a fabricated all-green result.
   every key (JSON5 → `Value` loader); pinned by the matrix, not fixed here.
 - **Remaining blockers:** none for Phase 7. Phase 8's "automatic warning
   followed by recovery" end-to-end needs a provider with an automatic grant.
+
+### Phase 7 progress (2026-09-28)
+
+- **Changed:** see this file's `*_during_phase_7` frontmatter; protocol
+  facts, design decisions, per-provider outcomes, the requirement-to-test
+  map, and the input-robustness matrices are in
+  [implementation-log.md](implementation-log.md#phase-7).
+- **Checks:** `just test --no-fail-fast` (claudine area): 8031 passed, 1
+  failed (the pre-existing darkmatter union test), 9 skipped. `just lint`: clean. Real tier against Codex 0.157.1 on
+  macOS: `real_codex_protocol` 8/8, `real_codex_app_server` 4/4. `just
+  cross-check` (new and affected tests): Linux and native Windows pass.
+- **Enabled:** the first reviewed grants — `app-server-steer` (working) and
+  `app-server-turn-start` (idle) for Claudine-managed non-interactive Codex
+  runs on macOS at exactly 0.157.1. A real `claudine codex` run that repeats
+  itself receives the automatic warning at half the stop limit and recovers.
+- **Departures:** the Codex non-interactive research now selects the managed
+  app-server with `exec-json` as its fallback (corrective pass with source and
+  disposable-test evidence); `StdioControl` gained `launch_args` and
+  `stdio_control` receives the child cwd; the controller records a provider
+  version the launch establishes (`set_provider_version`); `steer --list`
+  without a daemon now succeeds with native rows (spec's partial-discovery
+  rule); interrupt-then-start is implemented and verified but not granted.
+- **Defects fixed:** Codex whole-item text never formed repetition-detector
+  lines (the repetition guard could not trip on Codex agent messages).
+- **Not done (human review):** plan items 2–4 are open for OpenCode, Kilo,
+  Gemini, Qwen, Goose, Kimi, and Antigravity (see the per-provider outcomes
+  table in the log). Pre-existing, outside steering: Claudine's
+  non-interactive Kimi launch uses `--wire`, which Kimi Code 2.0.2 rejects.
