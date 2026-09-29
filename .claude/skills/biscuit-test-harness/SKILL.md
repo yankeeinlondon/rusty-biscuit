@@ -297,7 +297,7 @@ On Linux, `xvfb::XvfbKitty` gives a real OS key press without touching
 the user's desktop: it starts its own `Xvfb`, runs kitty there, focuses
 kitty *on that display* (`SetInputFocus`; no window manager needed), and
 presses through XTEST. `harness()` returns a `KittyHarness` for typing and
-capture; `press_ctrl('c')` is the key. It needs no `BISCUIT_L3_TAKE_FOCUS`,
+capture; `press_ctrl('c')` and `press_escape()` are the keys. It needs no `BISCUIT_L3_TAKE_FOCUS`,
 but it is still L3 (`level3_` name, `RUN_LEVEL3=1`) because the press is
 an OS key event. Example: `claudine/cli/tests/level3/level3_drain_ctrl_c.rs`.
 
