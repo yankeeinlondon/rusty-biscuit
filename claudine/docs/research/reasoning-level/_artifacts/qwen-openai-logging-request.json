@@ -1,0 +1,16 @@
+{
+ "_note": "request body logged by --openai-logging with model.reasoningEffort=low set in project settings; model qwen3.5-plus on DashScope compatible-mode; no reasoning/reasoning_effort key is present - any tier collapses to enable_thinking",
+ "timestamp": "2026-09-29T16:54:43.281Z",
+ "request": {
+  "model": "qwen3.5-plus",
+  "stream": true,
+  "max_tokens": 65536,
+  "vl_high_resolution_images": true,
+  "preserve_thinking": true,
+  "enable_thinking": true
+ },
+ "reasoning_fields_present": [
+  "preserve_thinking",
+  "enable_thinking"
+ ]
+}

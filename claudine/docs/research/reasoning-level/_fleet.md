@@ -2,24 +2,28 @@
 sequence: "@claudine/docs/providers.yaml"
 file: "{{ctx.repo_root}}/claudine/docs/research/reasoning-level/{{state.file}}"
 topic: Reasoning Level
-# Research rotates over three agents by roster position. The order is chosen
-# so that no agent researches its own provider.
-agent: "{{ state.index % 3 == 1 ? 'opencode' : (state.index % 3 == 2 ? 'claude' : 'codex') }}"
-model: "{{ state.index % 3 == 1 ? 'zai-coding-plan/glm-5.3' : (state.index % 3 == 2 ? 'sonnet' : 'gpt-6-luna') }}"
-effort: "{{ state.index % 3 == 1 ? 'provider_default' : 'high' }}"
+# Research rotates over three researchers by roster position. The order is
+# chosen so that no agent researches its own provider. This is the only place
+# the rotation is written; `agent`, `model`, and `effort` follow from it.
+assigned: "{{ state.index % 3 == 1 ? 'opencode' : (state.index % 3 == 2 ? 'claude' : 'codex') }}"
+# `covering=<agent>` on the command line names a researcher that has reached
+# its usage limit. The agent this run launches then researches that
+# researcher's providers as well as its own, except a provider that is itself.
+covering: none
+agent: "{{ covering != 'none' && assigned == covering ? env.AGENT : assigned }}"
+model: "{{ agent == 'opencode' ? 'zai-coding-plan/glm-5.3' : (agent == 'claude' ? 'sonnet' : 'gpt-6-luna') }}"
+effort: "{{ agent == 'opencode' ? 'provider_default' : 'high' }}"
 # A sequence plans one agent before any step exists, and Claudine cannot yet
-# set reasoning effort from a prompt. So the fleet runs once per agent, each
-# run naming its agent, model, and effort. A run researches only the providers
-# assigned to its agent:
-#
-#   claudine sequence _fleet.md -y --opencode --model zai-coding-plan/glm-5.3
-#   claudine sequence _fleet.md -y --claude --model sonnet -- --effort high
-#   claudine sequence _fleet.md -y --codex --model gpt-6-luna -- -c model_reasoning_effort=high
+# set reasoning effort from a prompt. So the fleet runs once per researcher,
+# each run naming its agent, model, and effort. `just research <topic>` does
+# this, and covers for a researcher that reaches its usage limit.
 # `only=<slug>` on the command line researches one provider, for a pilot or a repair.
 only: all
 # One provider's rejected research must not stop the others.
 fail_fast: false
-update: "{{file_exists(file) && !markdown_body_empty(file)}}"
+# Read only the documents this run writes. Another run may be in the middle
+# of writing one of the others.
+update: "{{ env.AGENT == agent && file_exists(file) && !markdown_body_empty(file) }}"
 initialize:
     stack:
         - when: "state.skip_research == true"
@@ -33,6 +37,10 @@ initialize:
           action:
               - stderr: "**{{state.name}}** is assigned to {{agent}}, and this run launches {{env.AGENT}}; skipping"
               - skip
+        - when: "agent == state.slug"
+          action:
+              - stderr: "**{{state.name}}** would be researched by its own agent; skipping"
+              - skip
         - when: "env.MODEL != model"
           action:
               - warn: "**{{state.name}}** is assigned {{model}}, and this run launches {{env.MODEL}}"
@@ -40,12 +48,12 @@ initialize:
         # Current means the fleet confirmed the document against this revision
         # of the contract within 14 days. The `success` event writes
         # `contract_checked`; a document the fleet rejected never carries it.
-        - when: "file_exists(file) && frontmatter(file, 'schema_revision') == 1 && frontmatter(file, 'contract_checked') && !date_delta(frontmatter(file, 'contract_checked'), ctx.today, '14d')"
+        - when: "file_exists(file) && frontmatter(file, 'schema_revision') == 2 && frontmatter(file, 'contract_checked') && !date_delta(frontmatter(file, 'contract_checked'), ctx.today, '14d')"
           action:
               - stderr: "**{{state.name}}** has {{topic}} research confirmed on {{ frontmatter(file, 'contract_checked') }}; skipping"
               - skip
         - action:
-              - info: "Researching **{{topic}}** for **{{state.name}}** with {{agent}} / {{model}} (effort: {{effort}})"
+              - info: "Researching **{{topic}}** for **{{state.name}}** with {{agent}} / {{model}} (effort: {{effort}}){{ agent != assigned ? ', covering for ' + assigned : '' }}"
 start:
     stack:
         - when: "!has_binary(state.binary)"
@@ -69,6 +77,14 @@ success:
               - warn: "{{topic}} research for **{{state.name}}** does not satisfy its contract"
               - stderr: "{{{ contract.stdout }}}"
               - error: "the research document does not satisfy its contract"
+        - action:
+              - set:
+                    relations: "$(python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}')::result"
+        - when: "!relations.ok"
+          action:
+              - warn: "{{topic}} research for **{{state.name}}** breaks a relation its contract requires"
+              - stderr: "{{{ relations.stdout }}}"
+              - error: "the research document breaks a relation its contract requires"
         - action:
               - set_frontmatter: ["{{file}}", "contract_checked", "{{ctx.today}}"]
               - success: "{{topic}} research for **{{state.name}}** satisfies its contract: {{ link(file) }}"
@@ -116,25 +132,39 @@ record which levels it accepts.
 Other providers' documents in this directory are research outputs, not
 sources. Do not open or cite them.
 
-::block when="contract && !contract.ok"
+::block when="(contract && !contract.ok) || (relations && !relations.ok)"
 ## Your previous attempt was rejected
 
-The document you wrote did not satisfy the contract. Fix every problem below.
-Each one names the property, what is wrong, and what the property is for.
+The document you wrote was rejected. Fix every problem below and nothing
+else. Each one names the property and what is wrong with it.
 
+::end-block
+::block when="contract && !contract.ok"
 ```json
 {{contract.stdout}}
+```
+
+::end-block
+::block when="relations && !relations.ok"
+```text
+{{relations.stdout}}
 ```
 
 ::end-block
 ## The Contract
 
 Read `./_schema.yaml`, `./_types.yaml`, and `../_types.yaml` before writing.
-They define every property, its allowed values, and what to record in it. The
-fleet validates your document against them when you finish and rejects a
-document that does not conform.
+They define every property, its allowed values, and what to record in it.
 
-- Set `$schema: ./_schema.yaml` and `schema_revision: 1`.
+The fleet runs two checks when you finish and rejects a document that fails
+either. Run both yourself before you finish:
+
+```sh
+md schema validate '{{file}}' --no-trigger-schemas
+python3 '{{ctx.repo_root}}/claudine/docs/research/reasoning-level/_relations.py' '{{file}}'
+```
+
+- Set `$schema: ./_schema.yaml` and `schema_revision: 2`.
 - Set `provider: {{state.slug}}`, `agent: {{agent}}`, `model: {{model}}`, and
   `reasoning_effort: {{effort}}`.
 - Set `last_updated: {{ctx.today}}`. Keep `created` unchanged when the
@@ -143,29 +173,38 @@ document that does not conform.
   passes validation.
 - When a fact cannot be established, record `unknown` and add an entry to
   `gaps` that names the check that would settle it. Never guess, and never
-  leave a required property out.
+  leave a required property out. A gap names its `area`, and its `entry` when
+  it concerns one level, control, or model.
 - Every finding cites `evidence_ids`. Inference alone does not establish a
   level, a control, or a default.
 
 ## What to Establish
 
-1. **Levels.** Which level tokens does {{state.name}} accept? List them
-   weakest first and map each to the closest value of the contract's
-   provider-neutral scale, using the provider's own ordering.
+1. **Levels.** Which level tokens does {{state.name}} accept? List the levels
+   of its scale weakest first and map each to the closest value of the
+   contract's provider-neutral scale, using the provider's own ordering. A
+   mode that is not a point on the scale, such as one that also changes how
+   the agent works, goes after them with `outside_scale`.
 2. **Default.** Which level applies when the caller chooses nothing, and does
    that depend on the model or the account?
 3. **Controls.** Every way to choose a level: launch flags, configuration
    override flags, configuration keys, environment variables, a suffix on the
-   model name, commands typed inside a session, and fields of a request. For a
-   control usable at launch, give the exact arguments.
+   model name, commands typed inside a session, and fields of a request.
+   `arguments` holds command-line arguments only, one per entry. For an
+   environment variable or a configuration key, `name` is enough and
+   `arguments` stays empty.
 4. **Precedence.** When several controls are set, which wins? Give evidence
    for the order; do not assume flags beat variables beat files.
-5. **Models.** Which models accept which levels? Record each model whose
-   levels differ from the full list.
+5. **Models.** Which models accept which levels? Record only models whose
+   levels differ from the full list. Group models that share the same levels
+   under one pattern, such as `gpt-6-*`. Do not copy a model catalog; 40
+   entries is the limit.
 6. **An invalid level.** Request a level the provider does not accept and
    record what happens: a refusal, a failed request, a silent fallback.
 7. **Reporting.** Where does the provider state the level a run actually
-   used? This is how Claudine will confirm a request took effect.
+   used? This is how Claudine will confirm a request took effect. A file
+   pattern or an event name goes in `locator`; a command goes in `command`,
+   one argument per entry.
 8. **Reasoning output.** Does a non-interactive caller receive the reasoning
    text, a summary, or nothing?
 

@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 1
+schema_revision: 2
 provider: opencode
 created: 2026-09-29
 last_updated: 2026-09-29
@@ -10,153 +10,167 @@ reasoning_effort: high
 versions_examined:
 - 1.18.33
 evidence:
-- claim: The installed CLI is 1.18.33; `opencode run` accepts `--variant <string>` and `--thinking`, and has no reasoning-specific config override flag.
-  id: local-version-help
-  limitations: Help does not establish model support, invalid-value behavior, or the upstream's effective API payload.
-  location: opencode --version; opencode --help; opencode run --help (host terminal, 2026-09-29)
+- claim: Installed version 1.18.33 exposes `--variant <string>` and `--thinking`; help shows no reasoning-specific config override flag.
+  id: cli-help
+  limitations: Help does not establish model acceptance or actual upstream effort.
+  location: opencode --version; opencode --help; opencode run --help (2026-09-29)
   method: local_inspection
   observed_on: 2026-09-29
   version: 1.18.33
-- claim: The inspected user configs contain no reasoning variant or effort selection.
+- claim: '"The active config contains `provider.zai-coding-plan.models.glm-5.2.reasoning: true`, but no effort token; the other inspected files have no reasoning/effort/thinking/variant keys."'
   id: local-config
-  limitations: Project, managed, and remote configs were not exhaustively searched; these user files do not establish provider defaults.
-  location: ~/.config/opencode/opencode.json and ~/.config/opencode/config.json (host inspection, 2026-09-29)
+  limitations: The boolean is not an effort choice; project, managed, and remote config were not inspected.
+  location: ~/.config/opencode/opencode.json, opencode.jsonc, config.json (sanitized key inspection, 2026-09-29)
   method: local_inspection
   observed_on: 2026-09-29
   version: 1.18.33
-- claim: The catalog reports `minimax/MiniMax-M2.7-highspeed` with reasoning capability and no variants, while `minimax/MiniMax-M3` exposes `none` and `thinking`.
-  id: local-model-catalog
-  limitations: This authenticated/local snapshot covers one provider, not all OpenCode providers or custom models.
-  location: '`opencode models minimax --verbose` (host terminal, 2026-09-29)'
+- claim: Local MiniMax catalog has empty variant maps for `MiniMax-M2*` and variants `none` and `thinking` for `MiniMax-M3`.
+  id: minimax-catalog
+  limitations: Only local MiniMax catalog entries were checked; catalog entries do not establish upstream behavior.
+  location: opencode models minimax --verbose (2026-09-29)
   method: local_inspection
   observed_on: 2026-09-29
   version: 1.18.33
-- claim: Built-in variants include Anthropic `high` and `max`, OpenAI `none`, `minimal`, `low`, `medium`, `high`, `xhigh` with per-model variation, and Google `low` and `high`; the list is non-exhaustive.
-  id: official-models-docs
-  limitations: The page does not enumerate every model's variants or establish every variant's request payload.
+- claim: Built-in variant examples are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; providers/models expose subsets. Anthropic describes `high` as default and `max` as maximum thinking budget.
+  id: models-docs
+  limitations: Docs say the list is not comprehensive and are not version-pinned to the installed CLI.
   location: https://opencode.ai/docs/models/
   method: official_docs
   observed_on: 2026-09-29
-  version: 1.18.33
-- claim: The CLI documents `opencode run --variant` for provider-specific reasoning variants, `--thinking` to show thinking blocks, and `--format json` for raw events.
-  id: official-cli-docs
-  limitations: The page does not confirm that an upstream model accepted the selected variant.
+  version: unknown
+- claim: '`--variant` chooses provider-specific effort, `--thinking` shows thinking blocks, `--format json` emits raw events; documented environment variables include no direct effort variable.'
+  id: cli-docs
+  limitations: Rolling docs do not prove compatibility with installed 1.18.33 or upstream acceptance.
   location: https://opencode.ai/docs/cli/
   method: official_docs
   observed_on: 2026-09-29
-  version: 1.18.33
-- claim: Config layers include global, `OPENCODE_CONFIG`, project, `.opencode`/`OPENCODE_CONFIG_DIR`, `OPENCODE_CONFIG_CONTENT`, then managed settings.
-  id: official-config-docs
-  limitations: Config source precedence does not establish precedence between chosen variants, model options, and provider defaults.
+  version: unknown
+- claim: '`OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, and `OPENCODE_CONFIG_CONTENT` choose or supply configuration, not a direct effort value.'
+  id: config-docs
+  limitations: Configuration source precedence does not establish reasoning-control precedence.
   location: https://opencode.ai/docs/config/
   method: official_docs
   observed_on: 2026-09-29
-  version: 1.18.33
-- claim: Model options can set provider-specific values such as `reasoningEffort` and `thinking`; agent options override global model options, and models can define named variants.
-  id: official-model-options
-  limitations: Examples do not define one key/value vocabulary shared by all providers.
+  version: unknown
+- claim: Provider-specific options include `reasoningEffort` and `thinking`; agent options override global model options; variants can map names to option values.
+  id: model-config-docs
+  limitations: Options and variant names depend on provider and model.
   location: https://opencode.ai/docs/models/#configure-models
   method: official_docs
   observed_on: 2026-09-29
-  version: 1.18.33
-- claim: Documented environment variables include config-path/content variables but no direct reasoning-effort variable.
-  id: official-cli-environment
-  limitations: Config environment variables can supply custom config containing a model or agent setting.
-  location: https://opencode.ai/docs/cli/#environment-variables
+  version: unknown
+- claim: Current docs show `--model openai/gpt-5.2#high` and document `#variant` selection for a run, session, agent, or command.
+  id: suffix-docs
+  limitations: Not version-pinned; suffix compatibility with installed 1.18.33 was not verified.
+  location: https://opencode.ai/v2/docs/models
   method: official_docs
   observed_on: 2026-09-29
-  version: 1.18.33
-- claim: The run command passes `args.variant` into the session prompt or command request; absent `--thinking`, non-interactive mode hides reasoning parts.
-  id: source-run-variant
-  limitations: Passing the requested string does not show that the model accepts or uses it.
+  version: unknown
+- claim: '`run` passes `args.variant` into prompt/command requests and uses `args.thinking` for reasoning presentation.'
+  id: run-source
+  limitations: Passing a requested value does not prove the model used it.
   location: https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/cli/cmd/run.ts
   method: source_code
   observed_on: 2026-09-29
   version: 1.18.33
-- claim: The session prompt schema has an optional top-level `variant` string, and the requested variant is recorded in the user message model reference.
-  id: source-prompt-request
-  limitations: The stored value is the request, not an upstream provider receipt.
+- claim: Prompt requests take optional `variant`, fall back to a valid agent variant, and store the selection in session message model metadata.
+  id: prompt-source
+  limitations: Stored value is the request selection, not an upstream receipt.
   location: https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/prompt.ts
   method: source_code
   observed_on: 2026-09-29
   version: 1.18.33
-- claim: The source merges the custom config file after global config and inline `OPENCODE_CONFIG_CONTENT` after project and `.opencode` config.
-  id: source-config-loading
-  limitations: This establishes config-source merge order only.
-  location: https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/config/config.ts
-  method: source_code
-  observed_on: 2026-09-29
-  version: 1.18.33
-- claim: Built-in reasoning variant construction depends on model capabilities and provider/model family.
-  id: source-transform
-  limitations: The transform does not enumerate variants loaded from external model metadata or user config.
-  location: https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/transform.ts
-  method: source_code
-  observed_on: 2026-09-29
-  version: 1.18.33
-- claim: The run variant resolver orders its inputs as explicit `--variant`, saved per-model preference, then session history; invalid saved/session values are filtered against model variants, but an explicit CLI value is passed through.
-  id: source-variant-priority
-  limitations: This resolver's precedence does not establish precedence against config-defined model options or managed config, and does not itself prove how an unknown explicit variant affects the provider request.
+- claim: '`opencode run` resolves explicit `--variant`, then valid session-history variant, then saved per-model variant in `~/.local/state/opencode/model.json`.'
+  id: variant-source
+  limitations: Does not establish ordering against model/agent options, managed config, or model suffix.
   location: https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/cli/cmd/run/variant.shared.ts
   method: source_code
   observed_on: 2026-09-29
   version: 1.18.33
+- claim: Built-in variant maps depend on provider/model metadata and map common names to provider-specific request options.
+  id: transform-source
+  limitations: Does not enumerate external/custom variants or confirm upstream behavior.
+  location: https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/transform.ts
+  method: source_code
+  observed_on: 2026-09-29
+  version: 1.18.33
+- claim: Unsupported catalog name completed with exit code 0 and no CLI warning; export retained the requested name.
+  id: invalid-run
+  limitations: Cannot determine whether upstream ignored it, defaulted, or accepted it as undocumented.
+  location: opencode run --pure --model minimax/MiniMax-M3 --variant not-a-real-variant --format json (sanitized output, 2026-09-29)
+  method: disposable_test
+  observed_on: 2026-09-29
+  version: 1.18.33
+- claim: The noninteractive run emitted a `reasoning` JSON event when `--thinking` was enabled.
+  id: reasoning-run
+  limitations: One model does not establish output type across providers.
+  location: opencode run --pure --model minimax/MiniMax-M3 --thinking --format json (sanitized output, 2026-09-29)
+  method: disposable_test
+  observed_on: 2026-09-29
+  version: 1.18.33
+- claim: Exported session/message model metadata contains the requested variant but no distinct effective-level field.
+  id: export-run
+  limitations: Does not exclude provider-specific telemetry elsewhere.
+  location: opencode export ses_f12014ce9ffe91rprp0FJQ1SXo (sanitized output, 2026-09-29)
+  method: disposable_test
+  observed_on: 2026-09-29
+  version: 1.18.33
+support: some_models
 levels:
 - evidence_ids:
-  - official-models-docs
-  meaning: No reasoning, in the OpenAI built-in variant description.
+  - models-docs
+  meaning: OpenAI built-in variant for no reasoning.
   native: none
   normalized: off
 - evidence_ids:
-  - official-models-docs
-  meaning: Minimal reasoning effort, in the OpenAI built-in variant description.
+  - models-docs
+  meaning: OpenAI built-in variant for minimal reasoning effort.
   native: minimal
   normalized: minimal
 - evidence_ids:
-  - official-models-docs
-  meaning: Low effort; some providers describe this as a lower reasoning or token budget.
+  - models-docs
+  meaning: OpenAI built-in variant for low effort; some providers describe a lower effort or token budget.
   native: low
   normalized: low
 - evidence_ids:
-  - official-models-docs
-  meaning: Medium reasoning effort, in the OpenAI built-in variant description.
+  - models-docs
+  meaning: OpenAI built-in variant for medium reasoning effort.
   native: medium
   normalized: medium
 - evidence_ids:
-  - official-models-docs
-  meaning: High effort or thinking budget, depending on provider/model mapping.
+  - models-docs
+  meaning: OpenAI built-in variant for high effort; Anthropic describes a high thinking budget.
   native: high
   normalized: high
 - evidence_ids:
-  - official-models-docs
-  meaning: Extra-high reasoning effort in the OpenAI built-in variant description.
+  - models-docs
+  meaning: OpenAI built-in variant for extra-high reasoning effort.
   native: xhigh
   normalized: very_high
 - evidence_ids:
-  - official-models-docs
-  meaning: Maximum thinking budget in the Anthropic built-in variant description.
+  - models-docs
+  meaning: Anthropic built-in variant for maximum thinking budget.
   native: max
   normalized: maximum
 - evidence_ids:
-  - local-model-catalog
-  - source-transform
-  meaning: A model-specific thinking-enabled variant; the catalog does not expose an effort budget or ordinal for it.
+  - minimax-catalog
+  - transform-source
+  meaning: MiniMax M3 variant enabling adaptive thinking rather than naming an ordinal effort point.
   native: thinking
-  normalized: high
-support: some_models
+  normalized: outside_scale
 default_level:
   decided_by: unknown
   evidence_ids:
-  - local-config
-  - official-models-docs
+  - models-docs
+  - prompt-source
 controls:
 - arguments:
   - --variant
   - <level>
   changes_running_session: no
   evidence_ids:
-  - local-version-help
-  - source-run-variant
+  - cli-help
+  - run-source
   id: run-variant
   kind: launch_flag
   lasts: one_request
@@ -165,10 +179,23 @@ controls:
   - non_interactive
   name: --variant
   value: level_token
+- arguments:
+  - --model
+  - openai/gpt-5.2#<level>
+  changes_running_session: no
+  evidence_ids:
+  - suffix-docs
+  id: model-suffix
+  kind: model_suffix
+  lasts: one_request
+  launch_modes:
+  - non_interactive
+  name: --model
+  value: level_token
 - arguments: []
   changes_running_session: no
   evidence_ids:
-  - source-prompt-request
+  - prompt-source
   id: request-variant
   kind: request_field
   lasts: one_request
@@ -180,20 +207,7 @@ controls:
 - arguments: []
   changes_running_session: no
   evidence_ids:
-  - official-models-docs
-  - source-transform
-  id: model-variant-config
-  kind: config_file_key
-  lasts: until_changed
-  launch_modes:
-  - interactive
-  - non_interactive
-  name: provider.openai.models.gpt-5.variants
-  value: level_token
-- arguments: []
-  changes_running_session: no
-  evidence_ids:
-  - official-model-options
+  - model-config-docs
   id: model-options-config
   kind: config_file_key
   lasts: until_changed
@@ -205,8 +219,19 @@ controls:
 - arguments: []
   changes_running_session: no
   evidence_ids:
-  - official-model-options
-  - source-prompt-request
+  - model-config-docs
+  id: agent-options-config
+  kind: config_file_key
+  lasts: until_changed
+  launch_modes:
+  - interactive
+  - non_interactive
+  name: agent.deep-thinker.reasoningEffort
+  value: level_token
+- arguments: []
+  changes_running_session: no
+  evidence_ids:
+  - prompt-source
   id: agent-variant-config
   kind: config_file_key
   lasts: until_changed
@@ -216,9 +241,21 @@ controls:
   name: agent.build.variant
   value: level_token
 - arguments: []
+  changes_running_session: no
+  evidence_ids:
+  - variant-source
+  id: saved-variant
+  kind: config_file_key
+  lasts: until_changed
+  launch_modes:
+  - non_interactive
+  name: model.json
+  value: level_token
+- arguments: []
   changes_running_session: yes
   evidence_ids:
-  - official-models-docs
+  - models-docs
+  - variant-source
   id: variant-cycle
   kind: session_command
   lasts: until_changed
@@ -226,24 +263,13 @@ controls:
   - interactive
   name: variant_cycle
   value: level_token
-- arguments: []
-  changes_running_session: no
-  evidence_ids:
-  - source-variant-priority
-  id: saved-variant
-  kind: config_file_key
-  lasts: until_changed
-  launch_modes:
-  - interactive
-  - non_interactive
-  name: model.json
-  value: level_token
 - arguments:
   - --thinking
   changes_running_session: no
   evidence_ids:
-  - local-version-help
-  - source-run-variant
+  - cli-help
+  - run-source
+  - reasoning-run
   id: thinking-display
   kind: launch_flag
   lasts: one_session
@@ -251,113 +277,129 @@ controls:
   - non_interactive
   name: --thinking
   value: on_or_off
+precedence:
+- run-variant
+- variant-cycle
+- saved-variant
+- agent-variant-config
+- agent-options-config
+- model-options-config
 models:
 - accepts: []
   evidence_ids:
-  - local-model-catalog
-  model: minimax/MiniMax-M2.7-highspeed
+  - minimax-catalog
+  model: minimax/MiniMax-M2*
 - accepts:
   - none
   - thinking
   evidence_ids:
-  - local-model-catalog
+  - minimax-catalog
   model: minimax/MiniMax-M3
-precedence:
-- run-variant
-- saved-variant
-- variant-cycle
 invalid_level:
   behavior: unknown
   evidence_ids:
-  - local-version-help
-  - source-run-variant
-  warns: unknown
+  - invalid-run
+  - run-source
+  warns: no
 reporting:
   evidence_ids:
-  - source-prompt-request
-  - official-cli-docs
-  notes: Session message model.variant records the requested variant, and JSON step_finish events can report reasoning token counts. Neither confirms the upstream provider accepted or actually used the named level.
+  - export-run
+  - prompt-source
+  notes: Session export retains the requested variant, and JSON `step_finish` reports reasoning-token counts, but neither confirms the upstream's effective level.
   source: nowhere
 reasoning_output:
   control_id: thinking-display
   evidence_ids:
-  - source-run-variant
-  - official-cli-docs
-  reaches_caller: unknown
+  - run-source
+  - reasoning-run
+  reaches_caller: hidden
 gaps:
-- detail: 'The complete provider-wide token set is not fixed: model catalogs and custom variants vary, and the docs say their built-in list is not comprehensive.'
-  next_check: Enumerate variants from each exact models.dev and authenticated-provider catalog used by the Claudine deployment, including configured custom models.
-  subject: levels
-- detail: No universal native default is stated; without an OpenCode variant, behavior is delegated to the selected model/provider and may also depend on its account service.
-  next_check: Capture upstream requests and responses with no variant for each supported provider/model and representative account configuration.
-  subject: default-level
-- detail: The CLI forwards a variant string, but no disposable request used a value unsupported by the selected model.
-  next_check: Use a disposable mock OpenAI-compatible endpoint and a model with declared variants; request an undeclared value and inspect exit status, logs, and outbound request body.
-  subject: invalid-level
-- detail: OpenCode records the requested variant, but no inspected record proves the upstream used that level.
-  next_check: Inspect provider-side telemetry or an upstream response field that explicitly reports the effective reasoning effort.
-  subject: reporting
-- detail: '`--thinking` displays returned reasoning parts, but whether their text is full reasoning or a summary depends on provider/model.'
-  next_check: Run non-interactive requests with `--thinking --format json` on representative providers and classify the returned reasoning parts.
-  subject: reasoning-output
-- detail: Source establishes `--variant` over saved preference over session history for the run variant resolver, but does not establish precedence against model/agent config options, direct request fields, or managed settings across CLI modes.
-  next_check: Use a disposable local provider with conflicting values at each config/request layer and inspect final requests from TUI and `opencode run`.
-  subject: precedence
+- area: levels
+  detail: Built-in variants differ by provider/model, docs list is non-exhaustive, and custom variants can add arbitrary names; these examples are not a complete global token set.
+  next_check: Enumerate the exact enabled model catalogs and custom variants for each Claudine deployment.
+- area: default_level
+  detail: There is no established OpenCode-wide default; docs state Anthropic's built-in `high` default, while other defaults are model/provider-defined and may depend on upstream account behavior.
+  next_check: Run no-variant requests for supported provider/model and account classes and inspect request plus provider telemetry.
+- area: controls
+  detail: The rolling v2 docs describe `#variant`, but installed 1.18.33 suffix support was not tested.
+  entry: model-suffix
+  next_check: Test `--model provider/model#variant` with installed 1.18.33 against a disposable endpoint.
+- area: precedence
+  detail: Tagged source establishes explicit flag over session history over saved preference for `opencode run`; precedence against model/agent options, request fields, and `#variant` is not fully established.
+  next_check: Send conflicting values through a disposable mock provider via TUI, request API, and `opencode run` and inspect final requests.
+- area: models
+  detail: Only the local MiniMax catalog was inspected; variant sets vary across the broader provider/model catalog.
+  next_check: Inspect `opencode models <provider> --verbose` for each model Claudine offers and group only models whose sets differ.
+- area: invalid_level
+  detail: The tested unsupported name completed without a CLI warning, but it is unknown whether MiniMax ignored it, used a default, or accepted an undocumented value.
+  next_check: Send an unsupported name to a disposable request-capturing endpoint with a fixed variant catalog; inspect request, response, exit, and warning.
+- area: reporting
+  detail: Session metadata records the requested variant but no inspected surface confirms what effort the upstream actually applied.
+  next_check: Inspect provider telemetry or response metadata for an explicit effective-effort field per integration.
+- area: reasoning_output
+  detail: Default noninteractive presentation hides reasoning; with `--thinking`, full reasoning versus summaries depends on provider/model.
+  next_check: Compare `--thinking --format json` outputs for representative providers/models.
 changes:
-- Initial research document.
+- Updated to schema revision 2 and refreshed against installed 1.18.33, official docs/source, local config/catalog, and disposable runs.
+- Corrected resolver precedence and MiniMax catalog findings; distinguished requested variant metadata from confirmed effective effort.
+- Added config-option controls and documented remaining unknowns.
 requires_claudine_update: true
-reason: Claudine needs model-aware variant support because OpenCode uses provider-specific, model-specific names and some reasoning-capable models expose no selectable variant.
+reason: Claudine needs model-aware variant selection; OpenCode exposes no established provider-confirmed effective-level receipt, so Claudine cannot confirm the requested setting took effect.
 contract_checked: 2026-09-29
 ---
 
 ## Levels
 
-OpenCode's reasoning setting is a **model variant**, not a universal effort enum. `opencode run --variant` passes a variant name, and the selected provider maps it into its own request format. The built-in names documented across popular providers include `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. OpenCode says this list is not comprehensive, and models may support only a subset.
+OpenCode calls reasoning settings **variants**. It has no closed token set: names come from provider/model metadata and users may define custom variants. Its documented OpenAI examples, weakest first, are `none`, `minimal`, `low`, `medium`, `high`, and `xhigh`. Anthropic documents `high` and `max`, where `max` is its maximum thinking budget; Google documents `low` and `high`. These variants are provider-specific, and the official list is incomplete.
 
-The documented descriptions order the OpenAI-style values from no reasoning through extra-high. Anthropic documents `high` and `max` as its thinking-budget variants. One installed MiniMax model exposes the non-scalar token `thinking`; its catalog entry does not state an effort budget. Custom variants may use any configured name, so there is no closed CLI token list.
+The local MiniMax catalog lists `none` and `thinking` for `minimax/MiniMax-M3`. `thinking` enables adaptive thinking rather than naming an ordinal effort point, so it is outside the shared scale. Locally listed MiniMax M2 models have no catalog-defined variants.
 
 ## Choosing a Level
 
-For a one-shot run, pass the model's variant by flag:
+For one request, use the installed CLI's `--variant` flag:
 
 ```sh
 opencode run --model openai/gpt-5 --variant high "Review this change"
 ```
 
-The local 1.18.33 help shows `--variant <string>`. `--thinking` controls whether returned reasoning blocks are displayed; it does not select effort. `--format json` emits raw events.
+The session prompt API accepts a `variant` field. Current rolling docs also show a variant suffix, such as `--model openai/gpt-5.2#high`; compatibility with installed 1.18.33 was not verified.
 
-The session request API has a top-level `variant` string. In model configuration, `provider.<id>.models.<id>.variants` defines named variants; provider-specific options such as `options.reasoningEffort` can set request behavior directly. Agent options override global model options. Agent config can also select a variant with `agent.<name>.variant`.
+Configuration can set provider-specific options directly. For example, `provider.openai.models.gpt-5.options.reasoningEffort` sets OpenAI effort, and Anthropic uses a `thinking` option. Agent provider options override global model options; an agent can also select a variant with `agent.<name>.variant`. `variant_cycle` changes the active variant in an interactive session. OpenCode persists a per-model choice in `~/.local/state/opencode/model.json`.
 
-In the TUI, use the `variant_cycle` keybind to cycle the current model's variants. The model picker is `/models`. OpenCode stores a per-model variant preference in `~/.local/state/opencode/model.json`; the run resolver prioritizes an explicit `--variant`, then that saved value, then session history. No reasoning-setting environment variable or config override flag appears in the installed help or documented CLI environment-variable list. `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, and `OPENCODE_CONFIG_CONTENT` select or supply config sources; they are not direct effort variables.
+No direct effort environment variable or reasoning-specific config override flag appeared in installed help or the official environment-variable list. `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, and `OPENCODE_CONFIG_CONTENT` choose/supply config rather than select effort.
 
-The inspected files under `~/.config/opencode` had no reasoning level set. Config-source precedence is remote, global, `OPENCODE_CONFIG`, project, `.opencode`/`OPENCODE_CONFIG_DIR`, inline `OPENCODE_CONFIG_CONTENT`, then managed settings. That order does not establish whether a request variant, saved TUI choice, agent setting, or model option wins; see the precedence gap.
+For `opencode run`, source establishes explicit `--variant`, then valid session history, then saved per-model preference. If those do not supply a value, a valid agent `variant` may be used. Precedence against all model/agent options and the newer documented `#variant` form remains unresolved. `--thinking` controls reasoning display, not effort.
 
 ## Models
 
-The choice is model-specific. OpenCode's docs give examples of provider-level defaults, while the installed catalog provides these concrete exceptions:
+The local catalog showed these differences from the documented built-in variants:
 
-| Model | Selectable variants observed |
+| Model pattern | Selectable variants |
 | --- | --- |
-| `minimax/MiniMax-M2.7-highspeed` | None (`variants: {}`), despite reasoning capability |
+| `minimax/MiniMax-M2*` | None |
 | `minimax/MiniMax-M3` | `none`, `thinking` |
 
-The catalog snapshot covers the configured MiniMax provider only. The official built-in variant list is partial; query the exact catalog/model entry before offering a value to a caller.
+Use `opencode models <provider> --verbose` to inspect available variants. An empty variant map means no catalog-defined selectable variant, even when model metadata says reasoning is supported.
 
 ## Confirming the Level
 
-There is no provider-confirmed effective-level report established here. Session messages record the requested `model.variant`; raw JSON `step_finish` events can include reasoning token counts, which indicate reasoning activity but do not identify the accepted effort. Neither value confirms that the upstream service honored the requested variant.
+No established OpenCode record states the level the upstream actually applied. `opencode export <sessionID>` retains the requested variant in session metadata. JSON `step_finish` events report reasoning token counts, but neither confirms the upstream honored the selected level.
+
+By default, noninteractive output hides reasoning parts. `--thinking` emits reasoning blocks when the model returns them; the tested MiniMax M3 request produced a `reasoning` JSON event. Whether other providers return full reasoning, a summary, or none depends on the model.
 
 ## Sources
 
-- [OpenCode CLI documentation](https://opencode.ai/docs/cli/)
-- [OpenCode model and variant documentation](https://opencode.ai/docs/models/)
-- [OpenCode configuration documentation](https://opencode.ai/docs/config/)
-- [OpenCode v1.18.33 `run.ts`](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/cli/cmd/run.ts)
-- [OpenCode v1.18.33 session prompt schema](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/prompt.ts)
-- [OpenCode v1.18.33 config loading](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/config/config.ts)
+- [OpenCode models and variants](https://opencode.ai/docs/models/)
+- [OpenCode CLI](https://opencode.ai/docs/cli/)
+- [OpenCode configuration](https://opencode.ai/docs/config/)
+- [OpenCode v2 model suffix docs](https://opencode.ai/v2/docs/models)
+- [OpenCode v1.18.33 run command](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/cli/cmd/run.ts)
+- [OpenCode v1.18.33 prompt handling](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/session/prompt.ts)
+- [OpenCode v1.18.33 run variant resolver](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/cli/cmd/run/variant.shared.ts)
 - [OpenCode v1.18.33 provider transforms](https://github.com/anomalyco/opencode/blob/v1.18.33/packages/opencode/src/provider/transform.ts)
-- Local checks: `opencode --version`, `opencode --help`, `opencode run --help`, `opencode models minimax --verbose`, and read-only inspection of `~/.config/opencode/opencode.json` and `config.json` on 2026-09-29.
+- Local inspection on 2026-09-29: installed help, MiniMax catalog, and sanitized `~/.config/opencode` key inspection.
+- Disposable tests on 2026-09-29: unsupported variant request, `--thinking --format json`, and session export.
 
 ## Changelog
 
-- 2026-09-29: Initial research for OpenCode CLI 1.18.33.
+- 2026-09-29: Updated initial research to schema revision 2. Corrected variant precedence and MiniMax catalog data, added config-option controls and current documented `#variant` syntax, and separated requested variant metadata from a provider-confirmed effective level. Recorded remaining cross-provider gaps.

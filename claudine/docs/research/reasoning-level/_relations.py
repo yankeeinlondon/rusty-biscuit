@@ -1,8 +1,10 @@
-"""Relation checks for reasoning-level research: what the shape cannot express.
+"""Relations gate for reasoning-level research: what the contract's shape cannot express.
 
-Usage: reasoning_level_relations.py <research document>...
+Usage: _relations.py <research document>...
 
-A prototype of the relations gate, written for revision 2 of the contract.
+Interim. The fleet prompt runs it in its `success` event. It is to be replaced
+by one checker that reads each topic's relations from a declaration.
+
 Documents are read with every scalar as text, because `yes`, `no`, and `off`
 are truth values to a YAML 1.1 reader.
 """
@@ -88,7 +90,7 @@ def check(path):
     for p in prec:
         if p not in controls: bad('precedence-names-controls', f'precedence: `{p}` names no control')
     if len(set(prec)) != len(prec): bad('precedence-names-controls', 'precedence lists a control twice')
-    if len(controls) > 1 and not prec and not any(g for g in fm.get('gaps', []) if 'preced' in g['detail'].lower()):
+    if len(controls) > 1 and not prec and not any(g for g in fm.get('gaps', []) if g.get('area') == 'precedence'):
         bad('precedence-or-gap', 'several controls, no precedence, and no gap explaining why')
 
     # arguments: only for command-line kinds, and they carry the placeholder

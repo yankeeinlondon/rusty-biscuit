@@ -22,8 +22,3 @@ types:
         observed_on: date(required) -> Date the source was read or the observation was made
         claim: string(required; not-empty) -> The one thing this source establishes
         limitations: string(required; not-empty) -> What this source does not establish
-
-    gap:
-        subject: identifier@this -> Name of the entry the gap concerns, when it concerns one
-        detail: string(required; not-empty) -> What is not known, stated precisely enough for someone else to investigate
-        next_check: string(required; not-empty) -> The specific check that would close the gap

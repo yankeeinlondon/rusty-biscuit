@@ -1,10 +1,10 @@
-# Research contract for the reasoning-level topic, revision 1.
+# Research contract for the reasoning-level topic, revision 2.
 #
 # Records how each provider lets a caller choose how much reasoning a model
 # applies, so Claudine can offer one setting that works on every provider.
 # Every object shape is a named type, in ./_types.yaml or ../_types.yaml.
 $schema:
-    schema_revision: literal(1; required) -> Revision of this research contract; a document written for another revision is rejected
+    schema_revision: literal(2; required) -> Revision of this research contract; a document written for another revision is rejected
     provider: identifier(required)@../_types.yaml -> Roster slug of the provider this document describes
     created: date(required) -> Date this document was first written; kept unchanged on refresh
     last_updated: date(required) -> Date of the research run that produced this version
@@ -15,15 +15,15 @@ $schema:
     versions_examined: version[](required)@../_types.yaml -> Provider versions whose documentation, source, or behavior was examined
     evidence: evidence[](required)@../_types.yaml -> Every source a claim in this document rests on
     support: enum(every_model,some_models,none,unknown; required) -> Whether the provider lets a caller choose a reasoning level at all
-    levels: level[](required)@./_types.yaml -> Every level the provider accepts, weakest first; empty when the provider has none
+    levels: level[](required)@./_types.yaml -> Every level the provider accepts, with the levels of its scale weakest first and then any mode that is not a point on the scale; empty when the provider has none
     default_level: default_level(required)@./_types.yaml -> The level in force when the caller chooses nothing
     controls: control[](required)@./_types.yaml -> Every way a caller can choose the level, including ways that only work inside a session
     precedence: identifier[](required)@../_types.yaml -> Control names from strongest to weakest, showing which wins when several are set
-    models: model_levels[](required)@./_types.yaml -> Which levels each model accepts; one entry per model whose levels differ from the full list
+    models: model_levels[](required; max(40))@./_types.yaml -> Which levels each model accepts, only for models whose levels differ from the full list; models that share the same levels are grouped under one pattern and a catalog is never copied here
     invalid_level: invalid_level(required)@./_types.yaml -> What the provider does when asked for a level it or the model does not accept
     reporting: reporting(required)@./_types.yaml -> How a caller can confirm afterwards which level was actually used
     reasoning_output: reasoning_output(required)@./_types.yaml -> Whether the model's reasoning text reaches the caller
-    gaps: gap[](required)@../_types.yaml -> What remains unknown, each with the next check to run
+    gaps: gap[](required)@./_types.yaml -> What remains unknown, each with the next check to run; every value recorded as unknown has an entry here
     changes: string[](required) -> What changed in this document since the previous version
     requires_claudine_update: boolean(required) -> Whether a finding here means Claudine's code or metadata must change
     reason: string(required; not-empty) -> Why Claudine does or does not need to change

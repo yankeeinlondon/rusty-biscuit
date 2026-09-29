@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 1
+schema_revision: 2
 provider: goose
 created: 2026-09-29
 last_updated: 2026-09-29
@@ -10,14 +10,14 @@ reasoning_effort: provider_default
 versions_examined:
 - 1.52.0
 evidence:
-- claim: the latest goose release is v1.52.0, the version whose documentation and source this research examined
+- claim: v1.52.0 (released 2026-09-23) is the latest goose release at research time, and main is still at commit b92a80da, the commit this research examined; the version whose documentation, source, and behavior this document describes
   id: goose-releases
-  limitations: release notes were not reviewed for reasoning-related changes; goose is not installed on the research host so the version was not confirmed locally
+  limitations: release notes were scanned for reasoning-related changes but not exhaustively reviewed; goose is not installed on the research host so the version was not confirmed locally
   location: https://github.com/aaif-goose/goose/releases
   method: official_docs
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: the Muse Spark section documents the global GOOSE_THINKING_EFFORT environment variable accepting off, low, medium, high, or max, and a goose configure prompt offering Off/Low/Medium/High/Max where Max is sent as Meta's xhigh and Off is clamped to low because Muse Spark cannot disable reasoning
+- claim: the Muse Spark section documents the global GOOSE_THINKING_EFFORT environment variable accepting off, low, medium, high, or max, a goose configure prompt offering Off/Low/Medium/High/Max, and that Max is sent as Meta's xhigh while Off is clamped to low because Muse Spark cannot disable reasoning
   id: docs-effort-variable
   limitations: the page does not state precedence against other controls or the behavior of GOOSE_THINKING_EFFORT on non-Muse models
   location: https://goose-docs.ai/docs/getting-started/providers#meta-muse-spark-reasoning-effort
@@ -26,14 +26,14 @@ evidence:
   version: 1.52.0
 - claim: Gemini 3 thinking levels are Low (default, lighter reasoning) and High (deeper reasoning), offered as a Desktop dropdown and a goose configure prompt, with documented priority request_params.thinking_level, then GEMINI3_THINKING_LEVEL, then the default low
   id: docs-gemini3-levels
-  limitations: the page documents only low and high; it does not mention the medium thinking level the source maps for non-pro Gemini 3 models, nor that GEMINI3_THINKING_LEVEL is now a legacy key folded into the unified effort
+  limitations: the page documents only low and high; it does not mention the medium level the source maps for non-pro Gemini 3 models, nor that GEMINI3_THINKING_LEVEL is now a legacy key folded into the unified effort
   location: https://goose-docs.ai/docs/getting-started/providers#gemini-3-thinking-levels
   method: official_docs
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: documents CLAUDE_THINKING_TYPE (adaptive, enabled, disabled) for the Anthropic and Databricks providers with a stated default of adaptive for Claude 4.6+ models and disabled otherwise, and states GOOSE_CLI_SHOW_THINKING=1 is additionally required to see Claude thinking in the CLI
+- claim: the environment-variables guide documents CLAUDE_THINKING_TYPE (adaptive, enabled, disabled) for the Anthropic and Databricks providers with a stated default of adaptive for Claude 4.6+ models and disabled otherwise, and states GOOSE_CLI_SHOW_THINKING=1 is additionally required to see Claude thinking in the CLI; it also lists GEMINI3_THINKING_LEVEL (low, high) and the rule that environment variables take precedence over config file settings
   id: docs-claude-thinking
-  limitations: the stated default conflicts with the source, which sends an explicit thinking disable for adaptive-mode Claude models when no effort is chosen; documentation is unversioned and may lag the release
+  limitations: the stated Claude 4.6 default conflicts with the source, which sends an explicit thinking disable for adaptive-mode Claude models when no effort is chosen; documentation is unversioned and may lag the release
   location: https://goose-docs.ai/docs/guides/environment-variables#claude-thinking-configuration
   method: official_docs
   observed_on: 2026-09-29
@@ -52,16 +52,16 @@ evidence:
   method: official_docs
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: goose run and goose session accept --provider and --model overrides, the /model session command switches model or provider mid-session, and the documented flag and slash-command sets contain no effort or thinking option
+- claim: goose run and goose session accept --provider and --model overrides, the /model session command shows or switches the model or provider mid-session, --output-format accepts text, json, or stream-json, and the documented flag and slash-command sets contain no effort or thinking option
   id: docs-cli-commands
-  limitations: the page does not document the effort suffix that goose accepts on model names
+  limitations: the page does not document the effort suffix goose accepts on model names
   location: https://goose-docs.ai/docs/guides/goose-cli-commands
   method: official_docs
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: config.yaml lives at ~/.config/goose/config.yaml (macOS/Linux) or %APPDATA%\Block\goose\config\config.yaml (Windows), environment variables take precedence over config file settings, and goose info -v prints all active configuration values
+- claim: config.yaml lives at ~/.config/goose/config.yaml (macOS/Linux) or %APPDATA%\Block\goose\config\config.yaml (Windows), environment variables take precedence over config file settings, and goose info -v prints all active configuration values; GOOSE_THINKING_EFFORT is absent from the settings table
   id: docs-config-files
-  limitations: the settings table does not list GOOSE_THINKING_EFFORT, which the source reads from the same file
+  limitations: the settings table not listing GOOSE_THINKING_EFFORT is a documentation gap, not evidence the key is unread; the source reads it from the same file
   location: https://goose-docs.ai/docs/guides/config-files
   method: official_docs
   observed_on: 2026-09-29
@@ -87,21 +87,21 @@ evidence:
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: at session start the model config receives with_default_thinking_effort(get_goose_thinking_effort()), so the configured effort applies only when the model name carried no effort suffix and no explicit thinking_effort request param exists
+- claim: at session start the model config receives with_default_thinking_effort(get_goose_thinking_effort()), so the configured effort applies only when the model name carried no effort suffix and no explicit thinking_effort request param exists; a persisted raw value that does not parse (such as a harness default) is still an explicit pick and is never overwritten
   id: src-model-config-default
   limitations: does not describe what each wire format does when the effort remains unset
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose/src/model_config.rs
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: goose configure shows a Select thinking effort prompt with the items off (Off - No extended thinking), low, medium, high, and max (Max - No constraints on thinking depth), initial value off, whenever the chosen model is a reasoning model, and persists the choice with set_goose_thinking_effort, which writes GOOSE_THINKING_EFFORT to config.yaml
+- claim: goose configure shows a Select thinking effort prompt with the items off (Off - No extended thinking), low (Low - Better latency, lighter reasoning), medium (Medium - Moderate thinking), high (High - Deep reasoning), and max (Max - No constraints on thinking depth), initial value off, whenever the chosen model is a reasoning model, and persists the choice with set_goose_thinking_effort, which writes GOOSE_THINKING_EFFORT to config.yaml
   id: src-configure-prompt
   limitations: the prompt appears only when model metadata marks the model as reasoning; the choice is a default for future sessions, not a live change
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-cli/src/commands/configure.rs
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: the /model session command rebuilds the model config from the new model name through the same construction path, so an effort suffix in the name changes the session's effort, and the handler reports Session model switched from '<old>' to '<new>' for provider '<provider>'; switching is refused for ACP providers and providers that manage their own conversation context
+- claim: the /model session command rebuilds the model config from the new model name through model_config_from_user_config, so an effort suffix in the name changes the session's effort, and the handler reports Session model switched from '<old>' to '<new>' for provider '<provider>'; switching is refused for ACP providers and providers that manage their own conversation context, and /model with no argument prints only the model and provider
   id: src-model-command
   limitations: the success message prints model names, which have the suffix already stripped, so it does not state the effort
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-cli/src/session/mod.rs
@@ -122,21 +122,28 @@ evidence:
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: the ACP and Desktop effort menu offers only off for non-reasoning models, low, high, and max for GLM-5.3 and Kimi K3 reasoning models, and off, low, medium, high, max otherwise, with the current value defaulting to max for GLM-5.3 and Kimi K3 and off otherwise
+- claim: the ACP and Desktop effort menu offers only off for non-reasoning models, low, high, and max for GLM-5.3 and Kimi K3 reasoning models, and off, low, medium, high, max otherwise, with the current value defaulting to max for GLM-5.3 and Kimi K3 when nothing is configured and off otherwise
   id: src-effort-menus
   limitations: menu values, not wire parameters; a menu value can be advertised for a model whose serving format sends no effort field
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose/src/acp/response_builder.rs
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: for Anthropic-format providers an effort of low, medium, high, or max on an adaptive-mode Claude model (opus-4-6, opus-4-7, opus-4-8, opus-5, sonnet-4-6, sonnet-5) sends thinking type adaptive plus output_config.effort; on other Claude reasoning models it sends thinking type enabled with budget_tokens 4000, 10000, 16000, or 32000; effort off or unset sends thinking type disabled; always-on adaptive models (fable-5, fable-5.1, opus-5-5) cannot disable and default to effort high
+- claim: for Anthropic-format providers an effort of low, medium, high, or max on an adaptive-mode Claude model sends thinking type adaptive plus output_config.effort; on other Claude reasoning models it sends thinking type enabled with budget_tokens 4000, 10000, 16000, or 32000; effort off or unset sends thinking type disabled; always-on adaptive models cannot disable and default to effort high; an explicit budget_tokens request param (minimum 1024) takes precedence over the effort-derived budget
   id: src-anthropic-format
   limitations: whether Anthropic accepts output_config.effort max on the wire was not verified; the explicit-disable-when-unset behavior contradicts the environment-variables guide's stated default
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/formats/anthropic.rs
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: OpenAI Responses and xAI chat models receive reasoning_effort picked from a per-model supported list — gpt-5-pro and gpt-6-pro only high; gpt-6 Sol and Luna none, low, medium, high, xhigh, max; gpt-6-astra low, medium, high, xhigh, max; gpt-5.4, gpt-5.5, and gpt-5.6 none, low, medium, high, xhigh; other gpt-5 and o-series low, medium, high; grok-4.5 low, medium, high; grok-4.3 none, low, medium, high; grok-3-mini low, high — with goose's effort clamped to the first preferred level the model supports, and models outside these families receiving no reasoning_effort at all
+- claim: the canonical model registry marks Claude Opus 4.6, 4.7, 4.8, Opus 5, Sonnet 4.6, and Sonnet 5 as thinking_mode adaptive, and Claude Fable 5, Fable 5.1, and Opus 5.5 as thinking_mode always_on_adaptive, all with reasoning true
+  id: src-canonical-thinking-modes
+  limitations: the registry drives classification only; it does not itself define the wire mapping or the per-model effort lists of non-Claude providers
+  location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/canonical/data/canonical_models.json
+  method: source_code
+  observed_on: 2026-09-29
+  version: 1.52.0
+- claim: OpenAI Responses and xAI chat models receive reasoning_effort picked from a per-model supported list — gpt-5 and gpt-6 pro models only high; gpt-6 Sol and Luna none, low, medium, high, xhigh, max; gpt-6-astra low, medium, high, xhigh, max; gpt-5.4, gpt-5.5, and gpt-5.6 none, low, medium, high, xhigh; other gpt-5 and o-series low, medium, high; grok-4.5 low, medium, high; grok-4.3 none, low, medium, high; grok-3-mini low, high — with goose's effort clamped to the first preferred level the model supports, and models outside these families receiving no reasoning_effort at all
   id: src-openai-format
   limitations: the supported lists are goose's own compatibility table, not a live query of the provider
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/formats/openai.rs
@@ -185,7 +192,7 @@ evidence:
   method: source_code
   observed_on: 2026-09-29
   version: 1.52.0
-- claim: goose session export --format json serializes the whole session record, including model_config with its request_params.thinking_effort, so the effort goose applied to a session can be read back after the run
+- claim: goose session export --session-id <id> --format json serializes the whole session record, including model_config with its request_params.thinking_effort, so the effort goose applied to a session can be read back after the run; the record lives in sessions.db under the goose data dir
   id: src-session-record
   limitations: the stored value is what goose applied to the model config, not a provider-side confirmation of the level actually used
   location: https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-cli/src/commands/session.rs
@@ -232,7 +239,7 @@ levels:
   - src-openai-format
   - src-google-format
   - src-effort-menus
-  meaning: Moderate thinking. Maps to Anthropic budget_tokens 10000, OpenAI reasoning_effort medium, and Gemini 3 thinkingLevel medium (low on gemini-3-pro). Not offered for GLM-5.3, Kimi K3, grok-3-mini, or grok-4.5, where it clamps to high or low.
+  meaning: Moderate thinking (goose configure wording). Maps to Anthropic budget_tokens 10000, OpenAI reasoning_effort medium, and Gemini 3 thinkingLevel medium (low on gemini-3-pro). Not offered for GLM-5.3, Kimi K3, grok-3-mini, or grok-4.5, where it clamps to high or low.
   native: medium
   normalized: medium
 - evidence_ids:
@@ -242,7 +249,7 @@ levels:
   - src-google-format
   - src-codex-provider
   - docs-effort-variable
-  meaning: Deep reasoning. Maps to Anthropic budget_tokens 16000 (also the effort sent for always-on adaptive Claude models when nothing is chosen), OpenAI reasoning_effort high, Gemini 3 thinkingLevel high, and Muse Spark reasoning_effort high. The codex CLI provider defaults to this level.
+  meaning: Deep reasoning (goose configure wording). Maps to Anthropic budget_tokens 16000 (also the effort sent for always-on adaptive Claude models when nothing is chosen), OpenAI reasoning_effort high, Gemini 3 thinkingLevel high, and Muse Spark reasoning_effort high. The codex CLI provider defaults to this level.
   native: high
   normalized: high
 - evidence_ids:
@@ -525,7 +532,7 @@ models:
   - high
   evidence_ids:
   - src-openai-format
-  model: gpt-5-pro
+  model: gpt-*-pro
 - accepts:
   - low
   - high
@@ -572,6 +579,7 @@ models:
   default: off
   evidence_ids:
   - src-anthropic-format
+  - src-canonical-thinking-modes
   model: claude-sonnet-4-6
 - accepts:
   - low
@@ -581,6 +589,7 @@ models:
   default: high
   evidence_ids:
   - src-anthropic-format
+  - src-canonical-thinking-modes
   model: claude-fable-5
 - accepts:
   - off
@@ -601,6 +610,7 @@ invalid_level:
   - src-effort-menus
   - src-config-effort-key
   - src-agent-update-effort
+  message: 'Invalid thinking effort: <value>'
   warns: no
 reporting:
   evidence_ids:
@@ -609,7 +619,7 @@ reporting:
   - docs-config-files
   field: /model_config/request_params/thinking_effort
   locator: sessions.db
-  notes: Read the record back with goose session export --session-id <id> --format json; the field is absent when no effort was chosen, in which case the format-specific default applied. The value is what goose put on the model config, not a provider echo. The translated wire parameter for each request (reasoning_effort, thinking, thinkingConfig) is in the rotated request logs at llm_request.<N>.jsonl under the goose state dir's logs directory. goose info -v prints the config-file GOOSE_THINKING_EFFORT, but not a value supplied only through the environment.
+  notes: Read the record back with goose session export --session-id <id> --format json; the field is absent when no effort was chosen, in which case the format-specific default applied. The value is what goose put on the model config, not a provider echo. The translated wire parameter for each request (reasoning_effort, thinking, thinkingConfig) is in the rotated request logs at llm_request.<N>.jsonl under the goose state dir's logs directory, of which the 10 most recent are kept. goose info -v prints the config-file GOOSE_THINKING_EFFORT, but not a value supplied only through the environment.
   source: session_record
 reasoning_output:
   control_id: goose-cli-show-thinking
@@ -619,24 +629,33 @@ reasoning_output:
   - docs-viewing-reasoning
   reaches_caller: full_text
 gaps:
-- detail: 'goose is not installed on the research host, so no local runtime verification was possible: goose --version, help output, a disposable non-interactive session, and the request logs were all examined only through documentation and the source at commit b92a80da.'
-  next_check: 'Install goose on a disposable host (curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash), confirm the version, and re-run the observed checks: a GOOSE_THINKING_EFFORT run, a suffixed --model run, and the resulting llm_request log entries.'
-- detail: 'Whether the effort chosen for glm-5.3 over the zai_coding_plan provider (OpenAI-compatible chat endpoint) reaches the API: the chat-completions format sends no effort field for GLM models, while goose''s Desktop menu advertises low, high, and max for them.'
+- area: other
+  detail: goose is not installed on the research host, so no local runtime verification was possible; goose --version, help output, a disposable non-interactive session, and the request logs were all examined only through documentation and the source at commit b92a80da.
+  next_check: Install goose on a disposable host (curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash), confirm the version, and re-run the observed checks; a GOOSE_THINKING_EFFORT run, a suffixed --model run, and the resulting llm_request log entries.
+- area: models
+  detail: Whether the effort chosen for glm-5.3 over the zai_coding_plan provider (OpenAI-compatible chat endpoint) reaches the API; the chat-completions format sends no effort field for GLM models, while goose's Desktop menu advertises low, high, and max for them.
+  entry: glm-5.3
   next_check: Run goose with GOOSE_PROVIDER=zai_coding_plan, GOOSE_MODEL=glm-5.3, and GOOSE_THINKING_EFFORT=high, then inspect the newest llm_request.<N>.jsonl for a reasoning or thinking field in the request body.
-  subject: models
-- detail: Whether Anthropic accepts output_config.effort max, which goose sends for ThinkingEffort::Max on adaptive-mode Claude models.
+- area: models
+  detail: Whether Anthropic accepts output_config.effort max, which goose sends for ThinkingEffort::Max on adaptive-mode Claude models.
+  entry: claude-sonnet-4-6
   next_check: Send one request with GOOSE_THINKING_EFFORT=max on claude-sonnet-4-6 and observe whether the API accepts or rejects the effort value.
-  subject: models
-- detail: The interaction between OPENROUTER_PARAMETERS reasoning.effort and goose's unified thinking effort on OpenRouter models is undocumented and was not verified; both can address reasoning on the same request.
+- area: controls
+  detail: The interaction between OPENROUTER_PARAMETERS reasoning.effort and goose's unified thinking effort on OpenRouter models is undocumented and was not verified; both can address reasoning on the same request.
+  entry: openrouter-parameters
   next_check: Configure the openrouter provider with both OPENROUTER_PARAMETERS reasoning.effort and GOOSE_THINKING_EFFORT set to different values, run one prompt, and read which value appears in the request log.
-  subject: openrouter-parameters
-- detail: The environment-variables guide states CLAUDE_THINKING_TYPE defaults to adaptive for Claude 4.6+ models, but the source sends an explicit thinking disable for those models when no effort is chosen; the runtime behavior was not observed directly.
+- area: controls
+  detail: The environment-variables guide states CLAUDE_THINKING_TYPE defaults to adaptive for Claude 4.6+ models, but the source sends an explicit thinking disable for those models when no effort is chosen; the runtime behavior was not observed directly.
+  entry: claude-thinking-type
   next_check: Run goose with an Anthropic provider and claude-sonnet-4-6 with no effort set, and read the thinking field in the request log to confirm the disable is sent.
-  subject: claude-thinking-type
 changes:
-- Initial reasoning-level research for goose; first version of this document.
+- Migrated to contract revision 2; gaps now record area and entry instead of the revision-1 subject key.
+- Re-verified every finding for this refresh; v1.52.0 is still the latest release and main is still at commit b92a80da, so no behavioral drift was found in goose itself.
+- Added canonical-registry evidence (src-canonical-thinking-modes) backing the Claude adaptive and always-on model rows directly.
+- 'invalid_level now records the exact ACP refusal text for unparseable efforts (Invalid thinking effort: <value>).'
+- Broadened the gpt-5-pro models entry to the gpt-*-pro pattern, which is what the source matches.
 requires_claudine_update: true
-reason: 'Claudine''s goose wrapper cannot set a reasoning effort today, and this research shows a single reliable lever: the GOOSE_THINKING_EFFORT environment variable (tokens off, low, medium, high, max). Every model accepts it without error; on reasoning models goose translates it to the provider''s parameter and clamps it to the nearest level the model supports, while on non-reasoning models it has no effect beyond off. Mapping Claudine''s neutral effort scale onto that variable, with the model-name suffix (none/low/medium/high/xhigh, OpenAI Responses and xAI models only) as an alternative, is the change needed to offer one effort setting on goose.'
+reason: Claudine's goose wrapper cannot set a reasoning effort today, and this research shows a single reliable lever; the GOOSE_THINKING_EFFORT environment variable (tokens off, low, medium, high, max). Every model accepts it without error; on reasoning models goose translates it to the provider's parameter and clamps it to the nearest level the model supports, while on non-reasoning models it has no effect beyond off. Mapping Claudine's neutral effort scale onto that variable, with the model-name suffix (none/low/medium/high/xhigh, OpenAI Responses and xAI models only) as an alternative, is the change needed to offer one effort setting on goose.
 contract_checked: 2026-09-29
 ---
 
@@ -650,7 +669,7 @@ OpenAI `reasoning_effort`, Anthropic `thinking`/`output_config.effort`,
 Gemini `thinkingLevel`, or a token budget. This document is about the CLI
 (v1.52.0 era, examined 2026-09-29); goose was not installed on the research
 host, so every finding rests on the official documentation and the source at
-commit `b92a80da`.
+commit `b92a80da` (main, the direct successor of the v1.52.0 tag).
 
 ## Levels
 
@@ -671,8 +690,8 @@ There is **no single provider-wide default**. When nothing is chosen, goose
 sends no effort parameter and each format applies its own behavior, so the
 effective default is decided by the model:
 
-- Claude adaptive models (opus-4-6/4-7/4-8, opus-5, sonnet-4-6, sonnet-5):
-  thinking is explicitly **disabled** (see the drift note below).
+- Claude adaptive models (opus-4-6, opus-4-7, opus-4-8, opus-5, sonnet-4-6,
+  sonnet-5): thinking is explicitly **disabled** (see the drift note below).
 - Claude always-on adaptive models (fable-5, fable-5.1, opus-5-5): adaptive
   thinking at effort **high**; it cannot be turned off.
 - Pre-4.6 Claude reasoning models: thinking **disabled**.
@@ -725,7 +744,8 @@ GOOSE_THINKING_EFFORT=high goose run -t "explain this diff"
 `~/.config/goose/config.yaml` (macOS/Linux;
 `%APPDATA%\Block\goose\config\config.yaml` on Windows). `goose configure`
 writes it: choosing a reasoning model triggers a "Select thinking effort"
-prompt (`off`/`low`/`medium`/`high`/`max`, initially `off`).
+prompt (`off`/`low`/`medium`/`high`/`max`, initially `off`). The key is read
+from the file even though the settings table does not list it.
 
 ```yaml
 GOOSE_THINKING_EFFORT: high
@@ -734,7 +754,8 @@ GOOSE_THINKING_EFFORT: high
 **`/model` session command** — switch model (or provider) inside an
 interactive session; a suffix in the new name sets the effort. The
 confirmation message prints model names only, and the suffix is already
-stripped, so it never states the effort.
+stripped, so it never states the effort. Switching is refused for ACP
+providers and providers that manage their own conversation context.
 
 ```text
 /model o3-mini-high
@@ -749,19 +770,25 @@ unparseable value fails the request with `Invalid thinking effort: <value>`.
 the above funnel into. It can also be set directly in a custom provider's
 model definitions (`~/.config/goose/custom_providers/*.json`) or through the
 ACP provider-update request. An explicit value present before construction is
-the one thing the model-name suffix will not overwrite.
+the one thing the model-name suffix will not overwrite — even a value that
+does not parse as a `ThinkingEffort` (a harness `default`, say) is kept as an
+explicit pick.
 
 **Token budgets** — two request params bypass the named levels entirely:
-`budget_tokens` (Anthropic-format providers; any explicit effort is ignored
-while it is set; minimum 1024) and `thinking_budget` (Gemini 2.5; default
-8192, `0` disables on gemini-2.5-flash).
+`budget_tokens` (Anthropic-format providers; while it is set with no named
+effort, it decides the budget directly; minimum 1024, clamped to leave room
+for at least 1024 answer tokens) and `thinking_budget` (Gemini 2.5; default
+8192, `0` disables on gemini-2.5-flash, a negative value is replaced by the
+default with a warning).
 
 **Legacy keys** — still honored when `GOOSE_THINKING_EFFORT` is unset or
 unparseable, in this order: `CLAUDE_THINKING_TYPE` (`adaptive`/`enabled` →
 high, `disabled` → off), `CLAUDE_THINKING_ENABLED` (bool), and
 `GEMINI3_THINKING_LEVEL` (`low`/`high`). The codex CLI provider additionally
 reads `CODEX_REASONING_EFFORT` (`none`/`low`/`medium`/`high`/`xhigh`) when no
-unified effort exists at all.
+unified effort exists at all. Note that the legacy fallbacks fold into the
+one unified effort — `GEMINI3_THINKING_LEVEL` set in the environment affects
+every provider, not only Gemini.
 
 **`OPENROUTER_PARAMETERS`** — a config key (YAML object or JSON string) whose
 contents are merged into every OpenRouter request, so
@@ -795,11 +822,26 @@ From strongest to weakest, with the evidence for each step:
 A resumed session reuses its persisted model config, so the session's stored
 effort outlives changes to the environment.
 
+### An invalid level
+
+Two different behaviors, depending on where the bad value arrives:
+
+- A level **token the model does not accept** is never an error. Goose clamps
+  it to the nearest level the model supports (`medium` → `high` on grok-3-mini,
+  `off` → `low` on Muse Spark, `max` → `xhigh` on gpt-5.4) and sends that
+  instead, without warning. This is the behavior recorded in `invalid_level`.
+- A value that **does not parse at all** is silently discarded on the
+  launch/config path (`get_goose_thinking_effort` drops it and falls through
+  to the legacy chain), so the run proceeds with whatever the next control in
+  the chain supplies. The one refusal is the ACP method:
+  `session/set_thinking_effort` with an unparseable value fails the request
+  with `Invalid thinking effort: <value>`.
+
 ## Models
 
 Which levels a model accepts is goose's compatibility table plus the
 provider's own support; goose never errors on a level a model lacks — it
-clamps to the nearest supported one (see below). Levels below are goose
+clamps to the nearest supported one (see above). Levels below are goose
 tokens; the wire value may differ (`max` often travels as `xhigh`).
 
 | Model(s) | Accepts | Notes |
@@ -810,7 +852,7 @@ tokens; the wire value may differ (`max` often travels as `xhigh`).
 | gpt-5.4 / 5.5 / 5.6 | off, low, medium, high | max clamps to xhigh |
 | gpt-6 (Sol, Luna) | off, low, medium, high, max | full list on the wire |
 | gpt-6-astra | low, medium, high, max | off clamps to low |
-| gpt-5-pro, gpt-6-pro | high | every effort maps to high |
+| gpt-5-pro, gpt-6-pro (`gpt-*-pro`) | high | every effort maps to high |
 | o-series and other gpt-5 (o3-mini …) | low, medium, high | off → low, max → high |
 | grok-4.3 | off, low, medium, high | max → high |
 | grok-4.5 | low, medium, high | off → low, max → high |
@@ -824,6 +866,10 @@ tokens; the wire value may differ (`max` often travels as `xhigh`).
 | claude-sonnet-4-5 and earlier | off, low, medium, high, max | effort → `budget_tokens` 4000/10000/16000/32000; unset → disabled |
 | gpt-5.2-codex and other codex CLI models | off, low, medium, high, max | sent as `-c model_reasoning_effort=none|low|medium|high|xhigh`; default high |
 | non-reasoning models (gpt-4o, llama, …) | off | the menu offers nothing else |
+
+The Claude rows are backed by the canonical model registry
+(`canonical_models.json`), which marks Opus 4.6/4.7/4.8/5 and Sonnet 4.6/5
+`adaptive` and Fable 5/5.1 and Opus 5.5 `always_on_adaptive`.
 
 One caveat from the source: for GLM-5.3 served through `zai_coding_plan`
 (the OpenAI-compatible coding endpoint), the chat-completions format maps no
@@ -883,7 +929,7 @@ the reasoning text should use `stream-json` or `json`, not the text path.
 
 ## Sources
 
-- goose releases (v1.52.0 is latest at research time):
+- goose releases (v1.52.0 is latest at research time, released 2026-09-23):
   <https://github.com/aaif-goose/goose/releases>
 - Providers guide (effort variable, Muse Spark, Gemini 3 levels, OpenRouter
   parameters, viewing reasoning):
@@ -899,6 +945,7 @@ the reasoning text should use `stream-json` or `json`, not the text path.
   - [crates/goose-provider-types/src/formats/anthropic.rs](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/formats/anthropic.rs)
   - [crates/goose-provider-types/src/formats/openai.rs](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/formats/openai.rs)
   - [crates/goose-provider-types/src/formats/google.rs](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/formats/google.rs)
+  - [crates/goose-provider-types/src/canonical/data/canonical_models.json](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose-provider-types/src/canonical/data/canonical_models.json)
   - [crates/goose/src/config/base.rs](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose/src/config/base.rs)
   - [crates/goose/src/model_config.rs](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose/src/model_config.rs)
   - [crates/goose/src/agents/agent.rs](https://github.com/aaif-goose/goose/blob/b92a80daf4a77d7e854709965bdfdc489c0472d2/crates/goose/src/agents/agent.rs)
@@ -920,7 +967,13 @@ redirect to `goose-docs.ai`, and the repository moved from `block/goose` to
 
 ## Changelog
 
-- 2026-09-29 — initial version. Established the five-level `ThinkingEffort`
+- 2026-09-29 (refresh) — re-verified every finding; v1.52.0 is still the
+  latest release and main is still at `b92a80da`, so no goose-side drift was
+  found. Migrated the document to contract revision 2 (gaps now record
+  `area` and `entry`). Added canonical-registry evidence for the Claude
+  adaptive and always-on model rows, recorded the exact ACP refusal message
+  for unparseable efforts, and broadened the pro-model entry to `gpt-*-pro`.
+- 2026-09-29 (initial) — established the five-level `ThinkingEffort`
   scale (`off`/`low`/`medium`/`high`/`max` with aliases), the
   `GOOSE_THINKING_EFFORT` variable and config key, the model-name effort
   suffix (OpenAI Responses and xAI models only), the `/model` session command,
