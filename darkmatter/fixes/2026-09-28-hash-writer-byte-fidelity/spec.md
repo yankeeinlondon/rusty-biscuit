@@ -33,40 +33,17 @@ related:
     - 2026-09-28-content-policy
 human_review: false
 message_to_agent: |-
-    Phase 2 is complete. All Phase 1 `#[ignore]` gates are removed (library
-    and CLI) and every test passes. Phase 3 is docs and downstream only; no
-    writer change should be needed.
-
-    Facts the docs must state (see the `apply_hash_save_text` doc comment in
-    `darkmatter/lib/src/markdown/hash/write.rs`, which is now the source):
-    - each rewritten line keeps its own LF/CRLF/lone-CR terminator; extra
-      lines of a longer `hash` node repeat the previous line's terminator;
-    - an inserted property takes the terminator of the line it follows;
-    - a new block (no frontmatter) is terminated like the document's first
-      line, or LF, and goes after a leading BOM;
-    - `last_updated:` (empty) becomes `last_updated: 2026-09-28`; with a
-      comment, `last_updated:   # todo` becomes
-      `last_updated: 2026-09-28   # todo`;
-    - refusals (nothing written) on a date bump: `last_updated` with an
-      anchor, alias, or tag; a block or flow collection. Also any edit whose
-      output frontmatter fails to parse (e.g. replacing an anchored `hash`
-      that another key aliases).
-    - Refusal messages read: "`last_updated` uses a YAML anchor; replacing
-      it would change other values" (alias/tag likewise), and
-      "rewritten frontmatter did not parse: ...".
-
-    `restore_properties_text` / `insert_snapshot_node` still use the global
-    `detect_newline` rule and prepend a new block before a BOM (R1); the
-    skill must not claim otherwise. `new_frontmatter_block` and
-    `new_block_terminator` in `write.rs` are the reusable pieces for that
-    follow-up.
-
-    The shared node-property predicate is named `leading_node_property`
-    (returns the property kind) rather than the plan's
-    `starts_with_node_property`, so the refusal can name the kind.
-
-    Pre-existing, unrelated L1 failure on this branch:
-    `markdown::schemas::file_match::tests::conversion_emits_every_root_union_glob`.
+    All three phases are implemented. Phase 3 changed only docs and a skill:
+    darkmatter/docs/cli/hash.md, .claude/skills/darkmatter/frontmatter.md, and
+    one bullet in claudine/docs/topics/composition.md. The Claudine bullet is
+    outside the plan's file list. It documents that Claudine's closure now fails
+    with InlineHashMalformed, and writes nothing, on an anchored, aliased,
+    tagged, or collection last_updated. Two test failures already existed
+    before this fix and are unrelated:
+    darkmatter file_match::tests::conversion_emits_every_root_union_glob and
+    claudine-cli compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch.
+    The second was confirmed to fail at dadebc029, the commit before Phase 1.
+implemented: true
 ---
 
 # Hash Writer Byte Fidelity

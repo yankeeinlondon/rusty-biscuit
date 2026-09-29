@@ -6,6 +6,7 @@ started_phase: 1
 packages:
     - darkmatter
     - darkmatter-cli
+    - claudine
 source_files_during_phase_1:
     - darkmatter/lib/src/markdown/hash/write.rs
     - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
@@ -18,6 +19,22 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - darkmatter/docs/cli/hash.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/frontmatter.md
+source_code:
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+documentation:
+    - darkmatter/docs/cli/hash.md
+    - claudine/docs/topics/composition.md
+    - .claude/skills/darkmatter/frontmatter.md
+completed_phase: 3
+implemented: true
 ---
 
 # Implementation Log for 2026-09-28-hash-writer-byte-fidelity (3 phases)
@@ -278,3 +295,79 @@ it.
 
 No Darkmatter skill change was needed in Phase 2. Phase 3 owns the
 `frontmatter.md` update.
+
+## Phase 3
+
+Started and finished 2026-09-29 on macOS. Documentation, skill drift, and
+downstream verification only; no source file changed.
+
+### What changed
+
+- **`darkmatter/docs/cli/hash.md`.** I replaced the `--save` paragraph that
+  said the CLI "persists the canonical frontmatter (via the same serializer as
+  `md clean --save`)". It now describes the in-place writer: only the hash
+  property and a bumped `last_updated` change, and every other byte is kept,
+  including a BOM and each line's own terminator. It lists the per-line
+  terminator rules and gives a before/after example for an empty
+  `last_updated:` with a comment. A refusal list covers anchor, alias, or tag,
+  and a block or flow collection, with exit `1` and the file left unchanged.
+  It also covers the post-edit parse failure. The page does not mention this
+  fix.
+- **`.claude/skills/darkmatter/frontmatter.md`.** I added a note that
+  `restore_properties_text` still uses one newline for the whole file and
+  prepends a new block before a BOM (R1). I also added a "Text-Preserving Hash
+  Save" section with the per-line rules, the empty-date rule, the refusals, the
+  shared `leading_node_property` predicate, and output validation.
+- **`claudine/docs/topics/composition.md`. This goes beyond the plan's file
+  list.** Claudine's closure maps every writer error to
+  `CompositionError::InlineHashMalformed` before it writes (`closure.rs:181`).
+  So an anchored, aliased, tagged, or collection `last_updated` now fails the
+  closure without writing. The topic page's `hash` property section did not
+  say so, and the repo's drift rule treats omitted behavior as a defect. I
+  added one bullet, "Unwritable `last_updated`". No Claudine code changed.
+
+### Downstream verification
+
+- **Claudine fixtures.** `grep -rnE "last_updated:[[:space:]]*[&*!\[{]"
+  claudine` finds no fixture or test with a node property or collection on
+  `last_updated`. The only code hit is `closure/tests.rs:237`, where `{quote}`
+  is a `format!` placeholder for a quote character. No Claudine test depends
+  on the old anchored behavior.
+- **`just test claudine`** (repo root): 8316 run, 8315 pass, 11 skipped, 1
+  failed. The failure is
+  `claudine-cli::l1 compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch`
+  ("/spec: no existing file matched reference `features/x/spec.md`"). That
+  is schema root-union file matching, the same area as the known Darkmatter
+  `file_match` failure. **It already failed before this fix:** I ran the same
+  test in a throwaway detached worktree at `dadebc029`, the commit before
+  Phase 1, and it failed the same way. I then removed that worktree. All
+  Claudine closure tests pass.
+- **Darkmatter CLI.** The plan's filter `binary(hash_kind_save_diff) |
+  binary(hash)` matches nothing now, because the CLI tests are consolidated
+  into the `l1` binary. I used `cargo nextest run -p darkmatter-cli -E
+  'binary(l1) & test(/hash/)'`: 49 of 49 pass. The library's
+  `test(/hash::write/)` also passes, 50 of 50.
+
+### Gates
+
+- `just test --no-fail-fast` (darkmatter): 8670 run, 8669 pass, 12 skipped,
+  1 failed. The failure is the same
+  `markdown::schemas::file_match::tests::conversion_emits_every_root_union_glob`
+  that Phases 1 and 2 recorded, and it is unrelated to this fix.
+- `just lint` (darkmatter): exit 0. I ran it after the tests, not at the same
+  time.
+- `git diff --stat` for Phase 3 shows `darkmatter/docs/cli/hash.md`,
+  `.claude/skills/darkmatter/frontmatter.md`,
+  `claudine/docs/topics/composition.md`, and this plan and log. Only the
+  Claudine doc is outside the plan's list, as explained above. I did not run
+  `cargo fmt` or commit.
+
+### OS considerations
+
+Phase 3 changed only documentation, so it carries no OS risk. I did not run
+`just cross-check`.
+
+### Status
+
+Implementation complete, ready for review. Moving the fix to `_completed` is
+the author's step.

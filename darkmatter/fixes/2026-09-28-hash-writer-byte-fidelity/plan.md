@@ -1,12 +1,13 @@
 ---
 total_phases: 3
 created: 2026-09-29
-phase: 2
+phase: 3
 agent: claude/opus
 yolo: true
 packages:
     - darkmatter
     - darkmatter-cli
+    - claudine
 source_files_during_phase_1:
     - darkmatter/lib/src/markdown/hash/write.rs
     - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
@@ -19,6 +20,22 @@ source_files_during_phase_2:
 docs_updated_during_phase_2: []
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - darkmatter/docs/cli/hash.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/frontmatter.md
+source_code:
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+documentation:
+    - darkmatter/docs/cli/hash.md
+    - claudine/docs/topics/composition.md
+    - .claude/skills/darkmatter/frontmatter.md
+completed_phase: 3
+implemented: true
 ---
 
 # Plan: Hash Writer Byte Fidelity
@@ -79,13 +96,13 @@ code changes.
 - [x] One CLI L1 test proves the refusal end to end: `md hash --save` on an
       anchored `last_updated` exits non-zero and leaves the file's bytes
       unchanged.
-- [ ] Existing `write.rs`, CLI `hash_kind_save_diff.rs`, and Claudine closure
+- [x] Existing `write.rs`, CLI `hash_kind_save_diff.rs`, and Claudine closure
       tests pass unchanged.
-- [ ] The `apply_hash_save_text` doc comment states the per-line rule and the
+- [x] The `apply_hash_save_text` doc comment states the per-line rule and the
       refusals. `darkmatter/docs/cli/hash.md` describes the text-preserving
       writer, not "the same serializer as `md clean --save`". The Darkmatter
       skill's `frontmatter.md` matches.
-- [ ] `just test` and `just lint` pass in `darkmatter/`, and `just test
+- [x] `just test` and `just lint` pass in `darkmatter/`, and `just test
       claudine` passes from the repo root.
 
 ## Phase 1: Rulings, Spike, and Red Tests
@@ -331,7 +348,7 @@ Phase 1 tests green.
 
 ### Wave 3 (parallel, no shared files)
 
-- [ ] **User docs** (`darkmatter/docs/cli/hash.md`)
+- [x] **User docs** (`darkmatter/docs/cli/hash.md`)
     - Replace the `--save` Behavior paragraph's "persists the canonical
       frontmatter (via the same serializer as `md clean --save`)". It becomes:
       only the managed hash node and, when bumped, `last_updated` change;
@@ -341,12 +358,12 @@ Phase 1 tests green.
       and a non-scalar `last_updated`), stating that the file is not written.
       Include a compact before/after example for an empty `last_updated:`.
     - Per repo doc rules, do not mention or link this fix.
-- [ ] **Skill drift** (`.claude/skills/darkmatter/frontmatter.md`)
+- [x] **Skill drift** (`.claude/skills/darkmatter/frontmatter.md`)
     - Next to the `restore_properties_text` section, record the writer's
       per-line terminator rule and refusals. Note that restore still uses the
       global newline rule (R1), so the skill does not overstate what restore
       does.
-- [ ] **Downstream verification**
+- [x] **Downstream verification**
     - From the repo root, run `just test claudine`. Closure write-back calls
       `apply_hash_save_text` with `bump_last_updated = true`, so a
       Claudine-encoded document with an anchored `last_updated` would now be
@@ -356,10 +373,10 @@ Phase 1 tests green.
 
 ### Checkpoint 3 (final)
 
-- [ ] Every success criterion in the Summary section is checked.
-- [ ] `git diff --stat` touches only `write.rs`,
+- [x] Every success criterion in the Summary section is checked.
+- [x] `git diff --stat` touches only `write.rs`,
       `cli/tests/l1/hash_kind_save_diff.rs`, `docs/cli/hash.md`,
       `.claude/skills/darkmatter/frontmatter.md`, and this plan. No
       `cargo fmt`, and no commits unless asked.
-- [ ] Implementation status is reported as "implementation complete, ready
+- [x] Implementation status is reported as "implementation complete, ready
       for review". Moving the fix to `_completed` is the author's step.
