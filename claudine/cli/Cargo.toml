@@ -27,6 +27,13 @@ name = "claudine-fake-pi"
 path = "tests/bin/fake_pi/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only fake `codex` speaking Codex's app-server protocol and `exec
+# --json`, driven by `tests/l1/codex_app_server.rs`; gated like the others.
+[[bin]]
+name = "claudine-fake-codex"
+path = "tests/bin/fake_codex/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.

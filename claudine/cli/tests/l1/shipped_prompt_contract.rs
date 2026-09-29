@@ -360,7 +360,9 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
     fs::write(&spec, "---\nreview_iterations: '2'\n---\n# Example\n").unwrap();
     write_executable(
         &fixture.bin_dir().join("codex"),
-        "#!/bin/sh\n/bin/cat > \"$CLAUDINE_STDIN_FILE\"\nprintf '%s\\n' '---' 'ready: true' '---' > \"$CLAUDINE_REVIEW_FILE\"\nexit 0\n",
+        // An exec-only stub: it has no app-server, so the wrapper's managed
+        // launch falls back to `codex exec` before submitting the task.
+        "#!/bin/sh\ncase \"$1\" in app-server) echo 'stub codex: no app-server' >&2; exit 2;; esac\n/bin/cat > \"$CLAUDINE_STDIN_FILE\"\nprintf '%s\\n' '---' 'ready: true' '---' > \"$CLAUDINE_REVIEW_FILE\"\nexit 0\n",
     );
 
     let prompt = prompts.join("_reviews/feature-review.md");
@@ -483,7 +485,12 @@ fn compose_shipped_review_spec_inline(exit_code: i32) -> (bool, String, String) 
     std::fs::write(&spec, "---\ncreated: 2026-09-16\n---\n# Example\n").unwrap();
     write_executable(
         &fixture.bin_dir().join("codex"),
-        &format!("#!/bin/sh\n/bin/cat > \"$CLAUDINE_STDIN_FILE\"\nexit {exit_code}\n"),
+        // An exec-only stub: it has no app-server, so the wrapper's managed
+        // launch falls back to `codex exec` before submitting the task.
+        &format!(
+            "#!/bin/sh\ncase \"$1\" in app-server) echo 'stub codex: no app-server' >&2; exit 2;; esac\n\
+             /bin/cat > \"$CLAUDINE_STDIN_FILE\"\nexit {exit_code}\n"
+        ),
     );
     let delivered = fixture.cwd().join("stdin.txt");
 

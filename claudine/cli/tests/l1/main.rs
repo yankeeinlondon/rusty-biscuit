@@ -17,6 +17,7 @@ mod authored_text_rendering;
 mod cfg_gate;
 mod characterization_error_routes;
 mod cli_process_fixture;
+mod codex_app_server;
 mod command_routing;
 mod completion_cli;
 mod completion_compose;
