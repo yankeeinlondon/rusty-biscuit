@@ -783,6 +783,9 @@ fn exempt_candidate(rel_path: &str) -> bool {
             // Generated (`claudine-gen`), exhaustive-by-construction error-vocabulary
             // accessor — the analog of the stream-parser factory in mod.rs.
             | "claudine/lib/src/stream/providers/vocabulary.rs"
+            // Generated (`claudine-gen`), exhaustive-by-construction steering
+            // facts accessor — the same generated-table shape as vocabulary.rs.
+            | "claudine/lib/src/steering/generated.rs"
     ) {
         return true;
     }

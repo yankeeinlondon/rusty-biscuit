@@ -30,5 +30,6 @@ pub mod render;
 pub mod reporting;
 pub mod runaway;
 pub mod signals;
+pub mod steering;
 pub mod stream;
 pub mod system_prompt;
