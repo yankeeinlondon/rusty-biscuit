@@ -6,10 +6,10 @@ document's frontmatter and are evaluated against dates or observations of files,
 packages, symbols, programs, and web resources.
 
 **Status: in progress.** The four time and constant rules (`Evergreen`,
-`TimeSensitive`, `ValidFor`, `ValidUntil`) work end to end: the library
-evaluates and renews them, the `policy` CLI checks and renews documents, and an
-editor schema ships for DMLS. `FileChanged` and the other observation rules are
-planned; examples of those show the planned interface.
+`TimeSensitive`, `ValidFor`, `ValidUntil`) and `FileChanged` work end to end:
+the library evaluates and renews them, the `policy` CLI checks and renews
+documents, and an editor schema ships for DMLS. Package, symbol, and web rules
+are later extensions; the table below lists them as candidates.
 
 ## A Document's Lifecycle
 
@@ -89,7 +89,9 @@ content_policy:
 The path is relative to the document and must stay inside its repository, or,
 outside a repository, inside the directory the command runs from. Absolute and
 machine-specific paths are rejected, so a policy means the same thing on every
-machine.
+machine. The `blake3-lf` scheme ignores CRLF versus LF line endings, so a
+Windows checkout does not read as changed; `blake3` hashes raw bytes for binary
+files. `policy renew` computes and writes the fingerprint.
 
 Content Policy ships a schema for `content_policy` entries,
 [`schemas/content-policy.yaml`](schemas/content-policy.yaml), so editors running
@@ -122,9 +124,8 @@ Darkmatter's `md hash`, renew every rule that references `@last_updated`; the
 | `SymbolChanged` | Compare selected symbol content with recorded content | Replace the fingerprint |
 | `UrlChanged` / `SchemaChanged` | Compare selected remote content with recorded content | Replace the comparison baseline |
 
-The four time/constant rules are built; `FileChanged` is the next increment.
-Package, symbol, and remote policies are later
-extensions. File creation/removal and program installation/removal are also
+The four time/constant rules and `FileChanged` are built. Package, symbol, and
+remote policies are later extensions. File creation/removal and program installation/removal are also
 candidates; their state-versus-transition semantics need review.
 
 Renewability belongs to the rule type. Action is independently configurable:
@@ -156,13 +157,13 @@ renewal planning, and action precedence. Replaceable providers supply facts.
 Optional bundled integrations make those capabilities available to library
 callers as well as the CLI:
 
-| Capability | Intended integration |
+| Capability | Integration |
 | --- | --- |
-| Package releases and program availability | Sniff |
-| File reference resolution | Biscuit File |
-| Symbol extraction | Tree Hugger |
-| HTTP resource fetching | Biscuit File's fetching support, subject to adapter design |
-| Extracted web-page content | Reaper, when implemented |
+| Package releases and program availability | Sniff (planned) |
+| File reference resolution | Biscuit File: the built `FileAdapter`, behind the off-by-default `file-adapter` feature |
+| Symbol extraction | Tree Hugger (planned) |
+| HTTP resource fetching | Biscuit File's fetching support, subject to adapter design (planned) |
+| Extracted web-page content | Reaper, when implemented (planned) |
 
 Renewal is a library operation too: `plan_renewal` returns the proposed
 byte edits without writing, and `apply_renewal` writes them only to the exact
@@ -171,8 +172,11 @@ CLI.
 
 A provider reports a version, presence observation, or content snapshot; the
 library applies the policy. Time rules can evaluate without external providers.
-The initial architecture uses one library with optional integration modules.
-Exact Rust types and signatures will follow implementation design.
+A file rule needs a `FileProvider` and a base directory, set with
+`EvaluationContext::with_files` (and `RenewalContext::with_files`); an evidence
+map with no document behind it, such as a cache manifest, passes whatever
+directory its paths are relative to. Without a provider a file rule is
+`unknown`, never fresh.
 
 ## CLI
 
@@ -206,5 +210,5 @@ an environment variable before the built-in value.
 
 See [Policy Evaluation and Renewal](docs/topics/policy-lifecycle.md) for the
 lifecycle, the CLI's output and exit codes, the JSON report and plan fields,
-which YAML shapes renewal refuses, and which file paths a planned `FileChanged`
-rule can watch.
+which YAML shapes renewal refuses, and which file paths a `FileChanged` rule
+can watch.

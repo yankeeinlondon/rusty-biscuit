@@ -1,11 +1,11 @@
 # Policy Evaluation and Renewal
 
-**Status: in progress.** The time and constant rules (`Evergreen`,
-`TimeSensitive`, `ValidFor`, and `ValidUntil`) are built end to end: the
-library's frontmatter reader, evaluation, renewal, the `policy` CLI, and the
-editor schema. `FileChanged` and the reference to the editor schema from
-Darkmatter's base document schema are **planned**; the sections on them
-describe the agreed design.
+**Status: in progress.** Every rule is built end to end: the time and
+constant rules (`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil`)
+and `FileChanged`, through the library's frontmatter reader, evaluation,
+renewal, the `policy` CLI, and the editor schema. The reference to the editor
+schema from Darkmatter's base document schema is **planned**; its section
+describes the agreed design.
 
 Use content policies to tell an application when a Markdown document needs a
 refresh or should leave active use. A document can carry both kinds of rule:
@@ -116,8 +116,8 @@ used during research; a file rule needs a content fingerprint. A shared
 
 ### Watch a File for Changes
 
-A planned `FileChanged` rule names a file and the frontmatter property that
-holds its content fingerprint:
+A `FileChanged` rule names a file and the frontmatter property that holds its
+content fingerprint:
 
 ```yaml
 config_fingerprint: blake3-lf:9f2c41…e7
@@ -138,17 +138,47 @@ hashed:
 - `blake3` hashes the raw bytes. Use it for binary files, where CRLF is data.
 
 You do not compute the fingerprint by hand; `policy renew` writes it (see
-below), and it keeps whichever scheme the property already uses.
+[Renew a Watched File's Fingerprint](#renew-a-watched-files-fingerprint)), and
+it keeps whichever scheme the property already uses. A stored value must be a
+string of the form `<scheme>:<hex>`, in lowercase, and a `blake3-lf` or
+`blake3` value has exactly 64 hex digits. Anything else, such as a number,
+`blake3-lf:9F2C…` in uppercase, or a truncated digest, is a validation error,
+like a malformed date. A well-formed value under another scheme, such as
+`sha256:ab…`, is not an error, but the library cannot recompute it.
 
 | Situation | Rule result |
 | --- | --- |
 | The file's fingerprint matches the stored one | Not triggered |
 | The file's fingerprint differs | Triggered |
 | The file is missing or was deleted | Triggered, reason "source removed" |
-| The file exists but cannot be read | Unknown |
-| The path names a directory | Unknown |
-| The fingerprint property is absent or empty | Unknown (missing baseline) |
-| The stored scheme is not recognized | Unknown; never proof of a change or of freshness |
+| The file exists but cannot be read | Unknown (`unreadable_file`), and the reason names the failure |
+| The path names a directory | Unknown (`not_a_file`) |
+| The fingerprint property is absent or empty | Unknown (`missing_baseline`) |
+| The stored scheme is not recognized | Unknown (`incompatible_fingerprint`); never proof of a change or of freshness |
+| No file provider is configured (a library caller that set none) | Unknown (`missing_provider`) |
+| The path resolves outside the boundary (below) | Validation error: the document gets no verdict |
+
+A missing file triggers, while an unreadable one is unknown: the first was
+observed to be gone, and the second was not observed at all. The checks run in
+this order, so a missing file with nothing stored yet is still unknown:
+
+```mermaid
+flowchart TD
+    S[FileChanged rule] --> P{File provider configured?}
+    P -->|no| U1[unknown: missing_provider]
+    P -->|yes| O[Observe the watched file]
+    O --> B{Inside the boundary?}
+    B -->|no| X[Validation error, no verdict]
+    B -->|yes| F{Fingerprint stored?}
+    F -->|absent or empty| U2[unknown: missing_baseline]
+    F -->|unrecognized scheme| U3[unknown: incompatible_fingerprint]
+    F -->|blake3-lf or blake3| R{What was observed?}
+    R -->|bytes, same fingerprint| N[not triggered]
+    R -->|bytes, other fingerprint| T1[triggered: watched file changed]
+    R -->|nothing there| T2[triggered: source removed]
+    R -->|a directory| U4[unknown: not_a_file]
+    R -->|read failed| U5[unknown: unreadable_file]
+```
 
 #### Which Files a Rule Can Watch
 
@@ -163,6 +193,12 @@ A relative path starts from the document's directory. A library caller
 evaluating a record with no document behind it passes that directory instead;
 the boundary is always discovered, never passed in.
 
+The path is everything between `FileChanged(` and the comma before the
+property, exactly as written, with `/` as the separator on every OS. Only the
+property may have spaces around it: `FileChanged(src/a.rs,@fp)` and
+`FileChanged(src/a.rs,  @fp)` are the same rule, while
+`FileChanged( src/a.rs, @fp)` is rejected.
+
 | Path | Accepted? |
 | --- | --- |
 | `src/config.rs`, `./config.rs` | Yes |
@@ -174,7 +210,33 @@ the boundary is always discovered, never passed in.
 | Any path that ends up outside the boundary | No |
 
 A rejected path is a validation error, and so is a path that escapes the
-boundary. Outside a repository there are no packages, so `^` falls back to the
+boundary:
+
+```text
+$ policy check docs/leak.md
+error: docs/leak.md: invalid content policy
+  entry 1: `FileChanged` path `../../../elsewhere.rs` resolves outside the boundary: `/private/elsewhere.rs` is outside the document tree root `/private/tmp/cpdoc`; a document may watch only files inside its repository, or inside the directory the command started from when there is no repository
+```
+
+A few more rules decide which file a path names:
+
+- A bare path such as `src/config.rs` is looked up in the document's
+  directory only. It is not retried at the repository root, so
+  `config.rs` in `docs/guide.md` never silently watches a top-level
+  `config.rs`; it is missing instead.
+- `^` searches the package, then the package area, then the repository root.
+  The package is the nearest directory between the document and the
+  repository root that holds a `Cargo.toml` or `package.json`; the package
+  area is the first directory below the repository root.
+- Symlinks are followed. A link that leads outside the boundary is outside
+  it, whatever its name. A broken link reads as a missing file, so it
+  triggers ("source removed").
+- File-name case follows the file system: it matches case-insensitively on
+  macOS and Windows, and not on Linux.
+- Reports and fingerprints never show a resolved path; a report keeps the
+  path as written in the rule.
+
+Outside a repository there are no packages, so `^` falls back to the
 document tree root and names the same file as `&`. The boundary, and so the
 file a sigil names, depends on where you run the command: a rule in `~/writing/notes/doc.md` that
 watches `../drafts/x.md` is valid when checked from `~/writing` and invalid
@@ -188,7 +250,12 @@ and the second as a key; quote the whole rule to use one:
 ```yaml
 content_policy:
   - "FileChanged(notes/a #1.md, @notes_fingerprint)"
+  - "FileChanged(logs/run: 2.txt, @log_fingerprint)"
 ```
+
+In a one-line list, `[FileChanged(src/config.rs, @fp)]`, the `@` after the
+comma is reserved by YAML, so the frontmatter does not parse; quote the rule
+there as well.
 
 ## Evaluate Without Renewing
 
@@ -259,13 +326,13 @@ note: |
   Text whose value stays "Text"
 ```
 
-Renewal writes one date, the **update date**. It defaults to today's UTC date;
-an earlier date can be given, such as the day the content was regenerated, but
-a later one is rejected, because evaluation would read it as inconsistent. A
-baseline that already holds the update date is reported as unchanged. A
-baseline property that holds something other than a date, such as
-`last_updated: Sept 28`, is an error: renewal records updates and does not
-repair values.
+Renewal writes one date, the **update date**, to every date baseline. It
+defaults to today's UTC date; an earlier date can be given, such as the day the
+content was regenerated, but a later one is rejected, because evaluation would
+read it as inconsistent. A baseline that already holds its new value is
+reported as unchanged. A baseline property that holds something other than a
+date, such as `last_updated: Sept 28`, is an error: renewal records updates and
+does not repair values.
 
 That precision limits which YAML shapes renewal can edit. It refuses, and
 writes nothing, when:
@@ -326,19 +393,74 @@ content_policy: [ValidFor(3mo, 2026-09-28)]   # split at the comma
 The YAML itself is valid, so the policy check reports the error and shows the
 block-list form above as the fix.
 
+### Renew a Watched File's Fingerprint
+
+For a `FileChanged` rule, renewal reads the watched file and writes its
+current fingerprint to the rule's property:
+
+- A first capture (the property is absent or empty) writes a `blake3-lf:`
+  value.
+- An existing value keeps its scheme, so a property you set to `blake3:` once
+  stays `blake3:`.
+- A watched file that is missing, unreadable, or a directory is evidence
+  renewal does not have. It writes nothing, not even the other baselines, and
+  lists every such rule.
+- A stored value under a scheme the library cannot compute, such as
+  `sha256:…`, is reported for you to correct: replace it with a `blake3-lf:`
+  or `blake3:` value, or delete it to capture a new one.
+
+```text
+$ policy renew --plain --today 2026-10-01 docs/guide.md
+docs/guide.md: renewal on 2026-10-01 (preview; pass --write to apply)
+┌────────────────────┬─────────┬──────────────┬────────────┬───────────────────┐
+│ Baseline           │ Entries │ Change       │ From       │ To                │
+├────────────────────┼─────────┼──────────────┼────────────┼───────────────────┤
+│ last_updated       │ 1       │ renewed      │ 2026-09-28 │ 2026-10-01        │
+│ config_fingerprint │ 2       │ new baseline │ (none)     │ blake3-           │
+│                    │         │              │            │ lf:dd4af809…      │
+└────────────────────┴─────────┴──────────────┴────────────┴───────────────────┘
+```
+
+The table shortens a fingerprint to its scheme and 8 hex digits; `--write`
+writes the full value, and `--json` prints it:
+
+```yaml
+last_updated: 2026-10-01
+content_policy:
+  - ValidFor(3mo, @last_updated)
+  - FileChanged(../src/config.rs, @config_fingerprint)
+config_fingerprint: blake3-lf:dd4af8095f56c0302cdea19bb91f317e47c49e8291e49d2abc088ba4228ec8ce
+```
+
+The fingerprint written is the one the same run's evaluation saw: renewal
+reads each watched file once. A fingerprint property is a top-level property,
+so it renews even when the policy is a one-line list, as long as nothing inside
+the list changes. Two rules that write different fingerprints into one
+property conflict, and nothing is written.
+
+```text
+$ policy renew docs/guide.md   # after src/config.rs was deleted
+error: docs/guide.md: renewal is missing evidence; nothing was written
+  entry 2: the watched file `../src/config.rs` is missing, so there is no content to fingerprint
+```
+
 ### Renew from a Library
 
 The CLI is not the only way to renew. A library caller plans a renewal from a
 document's bytes, previews it, and applies it:
 
 ```rust
-use chrono::NaiveDate;
-use content_policy::{RenewalContext, apply_renewal, plan_renewal};
+use std::sync::Arc;
+use content_policy::{FileAdapter, RenewalContext, apply_renewal, plan_renewal};
 
 let path = std::path::Path::new("notes.md");
 let bytes = std::fs::read(path)?;
 // `RenewalContext::now()` uses the system clock's UTC date; tests pass a date.
-let context = RenewalContext::now().with_document("notes.md");
+// `with_files` lets `FileChanged` rules read their files, relative to the
+// document's directory (see "Evaluate File Rules from a Library").
+let context = RenewalContext::now()
+    .with_document("notes.md")
+    .with_files(Arc::new(FileAdapter::new()), ".");
 let plan = plan_renewal(&bytes, &context)?;
 if plan.nothing_to_renew() {
     println!("nothing to renew");
@@ -377,10 +499,10 @@ shape, and the names are stable:
 
 | Field | Meaning |
 | --- | --- |
-| `update_date` | The date every renewed baseline receives |
+| `update_date` | The date every renewed date baseline receives |
 | `fingerprint` | `xxh64:` and 16 hex digits of the bytes planned from; never written to the document |
 | `policy` | The policy's source (`declared` or `defaulted`), grammar version, and identity, as in a report |
-| `changes` | One per baseline: its `target` (an `inline` date in entry N, or a `property`), the entries it serves, its `kind` (`renewed`, `new_baseline`, or `unchanged`), and the previous and new dates |
+| `changes` | One per baseline: its `target` (an `inline` date in entry N, or a `property`), the entries it serves, its `kind` (`renewed`, `new_baseline`, or `unchanged`), and the `previous` and new `value`: a date, or a full fingerprint |
 | `edits` | The byte edits that make those changes, in document offsets |
 | `tab_repair` | The tab-indentation repair, listed separately and applied with `edits` |
 
@@ -390,8 +512,10 @@ plan with no changes means the policy has nothing to renew.
 
 Planning fails, and returns no plan, for a future update date, unreadable or
 invalid frontmatter, a baseline value that is not a date, a conflict (a
-renewed property that is also a `ValidUntil` deadline), or any refused shape.
-Every refusal and conflict is listed, not only the first. `RenewalPlan::apply_to`
+renewed property that is also a `ValidUntil` deadline, or one property given
+two different values), a `FileChanged` fingerprint it cannot capture
+(`MissingEvidence`), or any refused shape. Every refusal, conflict, and missing
+piece of evidence is listed, not only the first. `RenewalPlan::apply_to`
 does the same checks on bytes in memory, for a caller that stores documents
 somewhere other than a file.
 
@@ -479,6 +603,7 @@ A report serializes to JSON with these fields. The names are stable:
       "unknown_reason": null,
       "baseline": { "source": "property", "property": "last_updated", "value": "2026-09-28" },
       "deadline": null,
+      "file": null,
       "due": "2026-12-28",
       "reason": "Validity interval elapsed"
     }
@@ -495,10 +620,11 @@ A report serializes to JSON with these fields. The names are stable:
 | `status` | `fresh`, `unknown`, `stale`, or `expired` |
 | `action` | The winning confirmed action, or `null` |
 | `results[].rule` | The rule in canonical form, such as `ValidFor(3mo, 2026-09-28)` |
-| `results[].renewal` | `renewable` (`ValidFor`), `nonrenewable` (`ValidUntil`), or `no_baseline` |
+| `results[].renewal` | `renewable` (`ValidFor`, `FileChanged`), `nonrenewable` (`ValidUntil`), or `no_baseline` |
 | `results[].result` | `triggered`, `not_triggered`, or `unknown` |
-| `results[].unknown_reason` | `missing_baseline` (absent or empty date) or `inconsistent_baseline` (a baseline after the evaluation date); `null` otherwise |
+| `results[].unknown_reason` | `missing_baseline` (absent or empty date or fingerprint), `inconsistent_baseline` (a baseline after the evaluation date), `missing_provider`, `not_a_file`, `unreadable_file`, or `incompatible_fingerprint` (see [Watch a File for Changes](#watch-a-file-for-changes)); `null` otherwise |
 | `results[].baseline` / `deadline` | Where the `ValidFor` start or the `ValidUntil` deadline came from: `inline`, `property`, or `default_property`, with the property name and date |
+| `results[].file` | For `FileChanged`: the `path` as written, the `property`, the `stored` fingerprint, and the `current` one computed with the stored scheme (`blake3-lf` when nothing is stored); `null` for other rules, and `stored` or `current` is `null` when there is none |
 | `results[].due` | The date the rule triggers from, at 00:00 UTC |
 | `warnings` | Reader warnings, such as `tab_indentation_repaired` |
 
@@ -514,6 +640,90 @@ A library caller evaluates in one of three ways:
 
 Each takes the evaluation time explicitly. None of them writes anything, so
 checking a document never records a baseline.
+
+A `FileChanged` result for a file rule looks like this:
+
+```json
+{
+  "index": 1,
+  "rule": "FileChanged(../src/config.rs, @config_fingerprint)",
+  "action": "refresh",
+  "renewal": "renewable",
+  "result": "triggered",
+  "unknown_reason": null,
+  "baseline": null,
+  "deadline": null,
+  "file": {
+    "path": "../src/config.rs",
+    "property": "config_fingerprint",
+    "stored": "blake3-lf:dd4af8095f56c0302cdea19bb91f317e47c49e8291e49d2abc088ba4228ec8ce",
+    "current": "blake3-lf:843693ab61a570eaa200d60d02f0cff1b00b91105c40fe44645ec1e404f9327d"
+  },
+  "due": null,
+  "reason": "Watched file changed"
+}
+```
+
+### Evaluate File Rules from a Library
+
+A `FileChanged` rule needs a **file provider** to observe its file, and a
+**base directory** its relative paths start from. Both are set together on the
+context; without them every file rule is `unknown` (`missing_provider`):
+
+```rust
+use std::sync::Arc;
+use content_policy::{EvaluationContext, FileAdapter, evaluate_record};
+
+// A cache manifest with no document behind it: its paths are relative to the
+// artifact directory.
+let context = EvaluationContext::new(now)
+    .with_files(Arc::new(FileAdapter::new()), "/var/cache/artifacts/42");
+let report = evaluate_record(&manifest, &context)?;
+```
+
+`FileAdapter`, the bundled provider, reads the local file system through
+Biscuit File. It is behind the library's `file-adapter` feature, off by
+default so a time-only caller never compiles Git discovery (`gix`); the
+`policy` CLI turns it on. It discovers the boundary from the base directory
+for every file, as described in
+[Which Files a Rule Can Watch](#which-files-a-rule-can-watch). Outside a
+repository it uses the process's current directory as the document tree root,
+and a relative base directory starts there too; a caller that knows its
+starting directory, or a test that must not depend on the current directory,
+sets it with `FileAdapter::new().with_tree_root(dir)`.
+
+Any storage can supply files instead. A provider implements one synchronous
+method and reports what it saw, never a verdict; the library computes the
+fingerprint and decides the result, so every provider is judged the same way:
+
+```rust
+use content_policy::{FileObservation, FileProvider, FileRequest};
+
+struct Snapshot(std::collections::HashMap<String, Vec<u8>>);
+
+impl FileProvider for Snapshot {
+    fn observe(&self, request: &FileRequest<'_>) -> FileObservation {
+        match self.0.get(request.path) {
+            Some(bytes) => FileObservation::Present(bytes.clone()),
+            None => FileObservation::Missing,
+        }
+    }
+}
+```
+
+| Observation | Meaning |
+| --- | --- |
+| `Present(bytes)` | The file's content |
+| `Missing` | Nothing is there, a broken symlink included |
+| `NotAFile` | A directory or another non-file |
+| `Unreadable(reason)` | It exists but could not be read |
+| `OutsideBoundary(reason)` | The path leaves the boundary; the document gets a validation error |
+
+Every request carries the path exactly as written (it has already passed the
+path rules) and the base directory. Within one evaluation, or one renewal,
+each path is observed once, however many rules watch it.
+`FingerprintScheme::Blake3Lf.fingerprint(bytes)` computes the same value
+renewal writes, for a caller that stores fingerprints of its own.
 
 A policy can also be stored on its own as JSON, for example in a cache
 manifest:
@@ -550,7 +760,7 @@ styling, and `--json` prints the [report](#read-a-report) and nothing else:
 $ policy check --plain --at 2026-12-28 notes.md
 notes.md: stale, action refresh (declared policy, evaluated 2026-12-28 00:00 UTC)
 ┌───┬─────────────────────┬─────────┬───────────┬─────────────────┬────────────┐
-│ # │ Rule                │ Action  │ Result    │ Date            │ Due        │
+│ # │ Rule                │ Action  │ Result    │ Evidence        │ Due        │
 ├───┼─────────────────────┼─────────┼───────────┼─────────────────┼────────────┤
 │ 1 │ ValidFor(3mo,       │ refresh │ triggered │ 2026-09-28      │ 2026-12-28 │
 │   │ @last_updated)      │         │           │ (@last_updated) │            │
@@ -561,8 +771,31 @@ notes.md: stale, action refresh (declared policy, evaluated 2026-12-28 00:00 UTC
 
 The summary names the status, the winning action, and whether the policy was
 declared or is the default. When an unknown entry could still raise the action,
-it says so. The `Date` column shows where each baseline or deadline came from,
-and an unknown result names its reason, such as `unknown (missing baseline)`.
+it says so. The `Evidence` column shows where each baseline or deadline came
+from, or a file rule's stored fingerprint shortened to its scheme and 8 hex
+digits, and an unknown result names its reason, such as
+`unknown (missing baseline)`. A table holding a file rule breaks long rules and
+paths at `/` and `_` so it fits the terminal:
+
+```text
+$ policy check --plain --at 2026-10-01 docs/guide.md
+docs/guide.md: stale, action refresh (declared policy, evaluated 2026-10-01 00:00 UTC)
+┌───┬─────────────────────┬─────────┬───────────┬─────────────────┬────────────┐
+│ # │ Rule                │ Action  │ Result    │ Evidence        │ Due        │
+├───┼─────────────────────┼─────────┼───────────┼─────────────────┼────────────┤
+│ 1 │ ValidFor(3mo,       │ refresh │ not       │ 2026-10-01      │ 2027-01-01 │
+│   │ @last_updated)      │         │ triggered │ (@last_updated) │            │
+│ 2 │ FileChanged(../src/ │ refresh │ triggered │ blake3-         │            │
+│   │ config.rs, @config_ │         │           │ lf:dd4af809…    │            │
+│   │ fingerprint)        │         │           │                 │            │
+└───┴─────────────────────┴─────────┴───────────┴─────────────────┴────────────┘
+```
+
+A file rule's path starts from the document's directory, and outside a
+repository the boundary is the directory you run `policy` from, so
+`policy check notes/doc.md` from `~/writing` and `policy check doc.md` from
+`~/writing/notes` can disagree about a `../` path (see
+[Which Files a Rule Can Watch](#which-files-a-rule-can-watch)).
 Reader warnings, such as the notice that tab-indented frontmatter was repaired
 in memory, print below the table as part of the report, not on stderr.
 
@@ -578,7 +811,7 @@ it.
 | Exit | `policy check` | `policy renew` |
 | --- | --- | --- |
 | `0` | A report was produced, whatever its status: `stale`, `expired`, and `unknown` included | A preview was printed, the edits were written, or there was nothing to renew |
-| `1` | An invalid declaration, an unreadable file, or malformed frontmatter | Any error; nothing is written |
+| `1` | An invalid declaration (a watched path outside the boundary included), an unreadable document, or malformed frontmatter | Any error, a watched file renewal cannot fingerprint included; nothing is written |
 | `2` | A usage error, such as an unknown flag or a date not in `YYYY-MM-DD` form | The same |
 
 Errors go to stderr as text, in `--json` mode too, so stdout holds either the
@@ -686,7 +919,7 @@ types:
 
 | Type | Accepts |
 | --- | --- |
-| `short_form` | One compact rule: `Evergreen`, `TimeSensitive`, `ValidFor(<duration>)`, `ValidFor(<duration>, @name)`, `ValidFor(<duration>, YYYY-MM-DD)`, `ValidUntil(YYYY-MM-DD)`, or `ValidUntil(@name)` |
+| `short_form` | One compact rule: `Evergreen`, `TimeSensitive`, `ValidFor(<duration>)`, `ValidFor(<duration>, @name)`, `ValidFor(<duration>, YYYY-MM-DD)`, `ValidUntil(YYYY-MM-DD)`, `ValidUntil(@name)`, or `FileChanged(<path>, @name)` |
 | `long_form` | A `{rule, action}` entry, where `action` is `refresh`, `archive`, or `remove` |
 | `policy` | One list entry in either form |
 
@@ -695,7 +928,11 @@ or action, such as `Duration(3mo)`, `ValidFor(3w)`, or `action: delete`,
 before the document is ever checked. The schema is a convenience; evaluation
 is the authority and checks more. The schema checks a date's shape but not
 whether the day exists (`2026-02-30` passes), and it does not flag a
-`{rule, action}` entry that is missing `rule`, which evaluation reports.
+`{rule, action}` entry that is missing `rule`, which evaluation reports. For
+`FileChanged` it flags the one-argument form and a path with `,`, `)`, `\`,
+surrounding spaces, or a leading `/`, `~`, `@`, `%`, or `{{`; it cannot see a
+drive letter, a `vault:` or URL prefix, a `{{` later in the path, or whether
+the path stays inside the boundary.
 
 Today a schema cannot type a whole list of `policy` entries, so the schema
 applies to one entry per property. A document can use it through an inline
@@ -722,9 +959,10 @@ with no `$schema` of its own.
 ## Library Ownership
 
 The library defines policy meaning, interprets baselines, compares observations,
-and resolves actions. Providers obtain facts from the outside world. Optional
-bundled integrations are planned for existing package, file, symbol, and web
-capabilities; callers can substitute their own providers.
+and resolves actions. Providers obtain facts from the outside world. The file
+provider is built (`FileAdapter`, behind the `file-adapter` feature), and
+callers can substitute their own; bundled integrations for package, symbol,
+and web capabilities are later extensions.
 
 For example, a package provider reports a release version. The policy evaluator
 decides whether that version crosses the configured major or minor boundary.
@@ -742,5 +980,5 @@ values are not part of it: `ValidFor(3mo, 2026-09-28)` and
 name, not a date. Rule parameters such as durations, deadlines, and file paths
 do count. Renewal therefore never changes a policy's identity.
 
-Time and constant rules are built; file content changes (`FileChanged`) are
-the next increment.
+Time and constant rules and file content changes (`FileChanged`) are built;
+package, symbol, and web rules are later extensions.
