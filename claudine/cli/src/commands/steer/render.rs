@@ -316,7 +316,7 @@ pub(crate) fn outcome_explanation(outcome: SendOutcome) -> &'static str {
     }
 }
 
-fn outcome_word(outcome: SendOutcome) -> &'static str {
+pub(crate) fn outcome_word(outcome: SendOutcome) -> &'static str {
     match outcome {
         SendOutcome::Accepted => "accepted",
         SendOutcome::Queued => "queued",

@@ -124,7 +124,6 @@ impl ExecutionSteering {
         Self { controller, link }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "automatic help and provider adapters are its production callers"))]
     pub(crate) fn controller(&self) -> &SteeringController {
         &self.controller
     }

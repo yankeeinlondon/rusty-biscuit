@@ -22,7 +22,7 @@
 //! `claudine/docs/topics/steering-routing.md`.
 
 mod interact;
-mod render;
+pub(crate) mod render;
 mod service;
 #[cfg(test)]
 mod tests;

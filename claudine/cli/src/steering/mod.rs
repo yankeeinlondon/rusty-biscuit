@@ -2,11 +2,13 @@
 //! local Rendezvous daemon.
 //!
 //! - [`owner`] — the wrapper's per-execution controller and its control link.
+//! - [`automatic`] — automatic repetition help, sent to that controller.
 //! - [`requester`] — listing managed targets and routing a request to one.
 //! - `wire` — the typed ↔ protobuf conversions both sides share.
 //!
 //! Topic: `claudine/docs/topics/steering-routing.md`.
 
+pub(crate) mod automatic;
 pub(crate) mod owner;
 pub(crate) mod requester;
 mod wire;
