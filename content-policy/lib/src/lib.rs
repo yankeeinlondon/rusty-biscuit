@@ -7,6 +7,10 @@
 //! already holds, at an explicit evaluation time, and returns a [`Report`]
 //! with a status, an effective action, and a result for every entry.
 //!
+//! Renewal ([`plan_renewal`], [`apply_renewal`]) records a content update: it
+//! plans byte-exact edits that advance every renewable baseline, and applies
+//! them only to the bytes it planned from.
+//!
 //! See `content-policy/docs/topics/policy-lifecycle.md` for the behavior this
 //! crate implements.
 
@@ -17,6 +21,7 @@ mod grammar;
 mod model;
 mod normalized;
 pub mod reader;
+mod renew;
 pub mod time;
 
 pub use aggregate::{Aggregate, ResultKind, Status, aggregate};
@@ -31,4 +36,9 @@ pub use evaluate::{
 pub use model::{
     Action, Baseline, Deadline, Duration, DurationUnit, EvidenceRecord, GRAMMAR_VERSION, Policy,
     PolicyEntry, PolicyOptions, Renewal, Rule,
+};
+pub use renew::{
+    BaselineChange, BaselineTarget, ChangeKind, Conflict, ConflictKind, Refusal, RefusalReason,
+    RenewalContext, RenewalError, RenewalPlan, TextEdit, apply_renewal, plan_fingerprint,
+    plan_renewal,
 };

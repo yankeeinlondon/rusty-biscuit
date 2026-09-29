@@ -292,20 +292,11 @@ pub fn evaluate_document(
             (frontmatter.record().clone(), warnings)
         }
         Err(ReadError::DuplicateKey { key, message }) => {
-            let location = match key {
-                Some(name) => Location::Property { name, entry: None },
-                None => Location::Frontmatter,
-            };
-            let mut invalid = Invalid::new(vec![Diagnostic::new(
-                DiagnosticCode::DuplicateKey,
-                location,
-                format!(
-                    "a key is defined twice, and YAML tools disagree about which copy wins: \
-                     {message}"
-                ),
-            )]);
-            invalid.document.clone_from(&context.document);
-            return Err(DocumentError::Invalid(invalid));
+            return Err(DocumentError::Invalid(duplicate_key_invalid(
+                key,
+                &message,
+                context.document.clone(),
+            )));
         }
         Err(error) => {
             return Err(DocumentError::Read {
@@ -324,6 +315,26 @@ pub fn evaluate_document(
             Err(DocumentError::Invalid(invalid))
         }
     }
+}
+
+/// The validation error for a [`ReadError::DuplicateKey`], shared by
+/// evaluation and renewal.
+pub(crate) fn duplicate_key_invalid(
+    key: Option<String>,
+    message: &str,
+    document: Option<String>,
+) -> Invalid {
+    let location = match key {
+        Some(name) => Location::Property { name, entry: None },
+        None => Location::Frontmatter,
+    };
+    let mut invalid = Invalid::new(vec![Diagnostic::new(
+        DiagnosticCode::DuplicateKey,
+        location,
+        format!("a key is defined twice, and YAML tools disagree about which copy wins: {message}"),
+    )]);
+    invalid.document = document;
+    invalid
 }
 
 fn label(mut invalid: Invalid, context: &EvaluationContext) -> Invalid {
