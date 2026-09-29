@@ -37,6 +37,8 @@ This change does not add or alter a file-format or configuration reader, so the 
 
 ### [high] Interactive startup is broken for Kimi and unverified against most native providers
 
+**DECISION:** KIMI is not working until we update the research and get caught up to latest version. This WILL work but we are dependent on this research -> gen task. This should not prevent this spec from being marked as production ready.
+
 **Defect class:** Claudine equates an interactive-looking provider argument list with a native provider session that submits the first message and remains open for another turn.
 
 The `claudine-cli` [fleet assertion](../../cli/src/commands/wrap/profile/tests/positional.rs) checks the arguments from every [wrapper profile](../../cli/src/commands/wrap/profile/mod.rs), but cannot observe a provider's input handling or second turn. The [real Pi test](../../cli/tests/real/real_pi_interactive_startup.rs) does observe both turns and is clean. The [editor terminal test](../../cli/tests/level2/level2_edit_interactive_capture.rs) uses fake providers: it proves Claudine passes the edited text and a terminal through, but says nothing about how a native provider interprets them. For Kimi, the [Kimi profile](../../cli/src/commands/wrap/profile/kimi.rs) sends `--prompt`; the profile's own comment and the [getting-started page](../../docs/getting-started/index.md) say this is a one-turn mode. Thus the fleet test passes while the required user experience fails.

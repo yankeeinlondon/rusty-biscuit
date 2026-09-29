@@ -6,6 +6,8 @@ human_review_items:
     - |-
       **Kimi cannot start an interactive session with a first message. What should `claudine kimi --edit -i` promise?**
 
+      **DECISION:** KIMI is not working until we update the research and get caught up to latest version. This WILL work but we are dependent on this research -> gen task. This should not prevent this spec from being marked as production ready.
+
       The spec promises that every provider opens an interactive session with the edited text as the first message. Kimi Code's own docs say its only prompt option (`--prompt`) runs one prompt and exits. It has no positional message and no option that seeds an interactive session, and an open upstream feature request asks for exactly that. So today `claudine kimi "hello" -i` quietly runs a one-shot session instead of an interactive one. This must be decided before Phase 3 finishes, because Kimi's row in the new all-provider test must encode whichever answer you pick. Phase 2 does not depend on it.
 
       - **A. Exclude Kimi from the all-provider promise, and have `claudine kimi … -i` with a prompt fail clearly before launch** (for example "Kimi cannot start an interactive session with an initial prompt; drop `-i` or start `kimi` without a prompt").
