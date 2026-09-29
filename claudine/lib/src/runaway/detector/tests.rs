@@ -1,5 +1,7 @@
 use super::*;
 use crate::runaway::patterns::{ExitExpressionInput, PatternKind};
+
+mod warnings;
 use crate::runaway::{MAX_CYCLE_LENGTH, MAX_REPETITION_ALLOWED, Trip};
 
 /// Build a detector with the defaults and an empty pattern set.
