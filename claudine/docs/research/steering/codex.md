@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: codex
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -1407,6 +1407,7 @@ gaps:
     destination, active-turn guard, long-generation/tool behavior, acknowledgment,
     retry behavior, and interruption effects.
 changes:
+- "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
 - Refreshed the revision 1 Codex pilot into steering schema revision 2.
 - Separated the 24 ordinary baseline combinations from the managed app-server profile.
 - Added all six Claudine-managed non-interactive app-server cases; app-server is a

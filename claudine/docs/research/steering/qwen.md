@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: qwen
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -216,6 +216,7 @@ gaps:
   - { area: profile preservation, detail: "Daemon docs say boot configuration/context/extensions/skills are loaded, but local-only TUI commands/templates are absent and equivalence is untested.", next_check: "Compare inventories and behavior against an ordinary launch with identical explicit settings." }
   - { area: compatibility, detail: "No stable version range or completed native Linux/Windows runtime verification exists.", next_check: "Use a reviewed-version allowlist plus capability negotiation and test native macOS, Linux, and Windows; WSL counts only as Linux." }
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - Initial Qwen Code steering report using schema revision 2.
 requires_claudine_update: true
 reason: A future managed qwen serve profile could provide discoverable FIFO follow-up and idle-turn delivery, while ordinary sessions remain unknown and all activation is blocked by empty verification.

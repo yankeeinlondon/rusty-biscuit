@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 3
+schema_revision: 4
 provider: kimi
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -304,6 +304,7 @@ gaps:
   - { area: "Resource preservation", detail: "Web appears to use the ordinary configured runtime; ACP explicitly exposes skills and context, but prompt-template preservation is not documented precisely.", next_check: "Test enabled extensions/plugins, skills, templates, AGENTS/context files, MCP, and explicit provider settings in both managed profiles." }
   - { area: "OS coverage", detail: "Only native macOS binary/help was observed; Linux and native Windows are source-derived. WSL was not used and would count only as Linux-side evidence.", next_check: "Perform native Linux and native Windows passive compatibility and disposable delivery tests." }
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - "Initial Kimi steering report under schema revision 2."
   - "Separated ordinary CLI, web-server, and ACP retained-stdio launch profiles."
   - "Recorded source-derived web prompt queue/steer and ACP interrupt-then-submit candidates; left verification empty."
