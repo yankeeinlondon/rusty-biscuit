@@ -47,6 +47,7 @@ pub(crate) fn early_termination_message(termination: &EarlyTermination) -> Optio
             *stall_duration,
             context,
         )),
+        EarlyTermination::InputRequired { message } => Some(message.clone()),
     }
 }
 

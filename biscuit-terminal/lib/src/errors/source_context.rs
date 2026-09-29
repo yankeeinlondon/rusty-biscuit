@@ -191,40 +191,93 @@ impl SourceContext {
     /// within [`content`](Self::content). Windows are clamped to the
     /// frontmatter block, whose `---` delimiter lines they may include.
     ///
-    /// `None` when there is no frontmatter, no requested key resolves, or the
-    /// block uses anchors, aliases, or merge keys (`&`, `*`, `<<`), which make
-    /// a partial slice misleading. Unresolved keys are otherwise ignored.
-    /// There is no whole-block fallback.
+    /// `None` when there is no frontmatter or no requested key resolves.
+    /// Unresolved keys are otherwise ignored. There is no whole-block
+    /// fallback. It is also `None` when the block uses anchors, aliases, or
+    /// merge keys (`&`, `*`, `<<`), which make a partial slice misleading,
+    /// unless the selection already holds every line between the delimiters.
     pub fn focused_yaml_regions(
         &self,
         keys: &[YamlKeyPath],
         context: usize,
     ) -> Option<Vec<FocusedRegion>> {
+        self.select_regions(context, |lines, _| {
+            keys.iter()
+                .flat_map(|path| locate_key_regions(lines, path))
+                .collect()
+        })
+    }
+
+    /// Select the frontmatter lines that show the given 1-based `lines`, each
+    /// with `context` lines either side and its ancestor header lines.
+    ///
+    /// This is the counterpart of
+    /// [`focused_yaml_regions`](Self::focused_yaml_regions) for a caller that
+    /// has already located its target lines (for example, from a path syntax
+    /// [`YamlKeyPath`] does not model). Ancestors are the preceding lines that
+    /// open an enclosing mapping or sequence item, found by indentation.
+    ///
+    /// ## Returns
+    ///
+    /// The same shape as [`focused_yaml_regions`](Self::focused_yaml_regions),
+    /// with each requested line highlighted. Lines outside the frontmatter
+    /// block are ignored; `None` when none remains, and on the same unsafe-YAML
+    /// rule.
+    pub fn focused_line_regions(
+        &self,
+        lines: &[usize],
+        context: usize,
+    ) -> Option<Vec<FocusedRegion>> {
+        self.select_regions(context, |block_lines, first_line| {
+            let shapes: Vec<LineShape> = block_lines.iter().map(|l| LineShape::parse(l)).collect();
+            lines
+                .iter()
+                .filter_map(|line| line.checked_sub(first_line))
+                .filter(|&idx| idx < block_lines.len())
+                .map(|idx| KeyRegion {
+                    ancestors: indentation_ancestors(&shapes, idx),
+                    target: idx..=idx,
+                })
+                .collect()
+        })
+    }
+
+    /// Window, merge, and number the regions `locate` finds in the
+    /// frontmatter block.
+    ///
+    /// `locate` receives the block's lines and the absolute line number of
+    /// its first line, and returns block-relative (0-based) matches.
+    fn select_regions(
+        &self,
+        context: usize,
+        locate: impl FnOnce(&[&str], usize) -> Vec<KeyRegion>,
+    ) -> Option<Vec<FocusedRegion>> {
         let range = self.frontmatter.as_ref()?;
         let block = &self.content[range.clone()];
-        if has_unsafe_yaml_features(block) {
-            return None;
-        }
         let lines: Vec<&str> = block.lines().collect();
         let last = lines.len().checked_sub(1)?;
+        // Block index 0 is the source line after `range.start`'s newlines.
+        let first_line = self.content[..range.start].matches('\n').count() + 1;
 
         let mut shown: BTreeSet<usize> = BTreeSet::new();
         let mut highlighted: BTreeSet<usize> = BTreeSet::new();
-        for path in keys {
-            for found in locate_key_regions(&lines, path) {
-                let start = found.target.start().saturating_sub(context);
-                let end = found.target.end().saturating_add(context).min(last);
-                shown.extend(start..=end);
-                shown.extend(found.ancestors);
-                highlighted.insert(*found.target.start());
-            }
+        for found in locate(&lines, first_line) {
+            let start = found.target.start().saturating_sub(context);
+            let end = found.target.end().saturating_add(context).min(last);
+            shown.extend(start..=end);
+            shown.extend(found.ancestors);
+            highlighted.insert(*found.target.start());
         }
         if highlighted.is_empty() {
             return None;
         }
+        // A slice of an anchored block can hide what an alias expands to; a
+        // selection holding every line between the delimiters cannot.
+        let covers_block = (1..last).all(|idx| shown.contains(&idx));
+        if !covers_block && has_unsafe_yaml_features(block) {
+            return None;
+        }
 
-        // Block index 0 is the source line after `range.start`'s newlines.
-        let first_line = self.content[..range.start].matches('\n').count() + 1;
         let mut regions: Vec<FocusedRegion> = Vec::new();
         for idx in shown {
             let line = first_line + idx;
@@ -489,6 +542,29 @@ impl KeyWalk<'_, '_> {
         self.scope(idx + 1..child_end, seg + 1);
         self.ancestors.pop();
     }
+}
+
+/// The header lines enclosing block line `idx`, root-first: each preceding
+/// meaningful line that is less indented than the line below it in the chain,
+/// or a key line that owns a sequence item at its own indentation. The opening
+/// `---` delimiter is never an ancestor.
+fn indentation_ancestors(shapes: &[LineShape], idx: usize) -> Vec<usize> {
+    let mut indent = shapes[idx].indent;
+    let mut item = shapes[idx].item;
+    let mut ancestors = Vec::new();
+    for candidate in (1..idx).rev() {
+        let shape = &shapes[candidate];
+        if !shape.meaningful {
+            continue;
+        }
+        if shape.indent < indent || (item && !shape.item && shape.indent == indent) {
+            ancestors.push(candidate);
+            indent = shape.indent;
+            item = shape.item;
+        }
+    }
+    ancestors.reverse();
+    ancestors
 }
 
 /// Conservatively detect YAML features that make non-contiguous slicing unsafe.
@@ -960,5 +1036,57 @@ mod tests {
             .unwrap();
 
         assert_eq!(regions, vec![region(4, 4, &[4])]);
+    }
+
+    #[test]
+    fn focused_regions_unsafe_yaml_fully_covered_renders_the_whole_block() {
+        // Nothing is hidden when the window already spans every line.
+        let content = "---\nbase: &b\n  a: 1\ntail: *b\n---\n";
+        let regions = fm_ctx(content)
+            .focused_yaml_regions(&[YamlKeyPath::dotted("tail")], 3)
+            .unwrap();
+        assert_eq!(regions, vec![region(1, 5, &[4])]);
+    }
+
+    #[test]
+    fn focused_line_regions_keep_arm_and_parent_ancestors() {
+        // Line 14 is arm 2's `doc:`; its ancestors are the `- design:` marker
+        // (line 9) and `$schema:` (line 2).
+        let regions = fm_ctx(UNION_DOC).focused_line_regions(&[14], 1).unwrap();
+        assert_eq!(regions, vec![region(2, 2, &[]), region(9, 9, &[]), region(13, 15, &[14])]);
+
+        // Both arms' marker lines: each is its own target, with `$schema:`.
+        let regions = fm_ctx(UNION_DOC).focused_line_regions(&[3, 9], 0).unwrap();
+        assert_eq!(regions, vec![region(2, 3, &[3]), region(9, 9, &[9])]);
+    }
+
+    #[test]
+    fn focused_line_regions_find_the_owner_of_a_flush_sequence() {
+        let flush = "---\na: 1\nb: 2\nc: 3\nlist:\n- x\n- y\n- z\n---\n";
+        let regions = fm_ctx(flush).focused_line_regions(&[8], 0).unwrap();
+        assert_eq!(regions, vec![region(5, 5, &[]), region(8, 8, &[8])]);
+    }
+
+    #[test]
+    fn focused_line_regions_ignore_lines_outside_the_block() {
+        let ctx = schema_ctx();
+        assert_eq!(ctx.focused_line_regions(&[0, 500], 3), None);
+        assert_eq!(ctx.focused_line_regions(&[], 3), None);
+        let no_frontmatter =
+            SourceContext::new(PathBuf::from("/a.md"), PathBuf::from("a.md"), "body\n");
+        assert_eq!(no_frontmatter.focused_line_regions(&[1], 3), None);
+    }
+
+    #[test]
+    fn focused_regions_unsafe_yaml_covered_but_for_a_delimiter_is_kept() {
+        let content = "---\n# note\nseq: &s\n  - a\nprompt: x\nalias: *s\n---\n";
+        let regions = fm_ctx(content).focused_line_regions(&[5], 3).unwrap();
+        assert_eq!(regions, vec![region(2, 7, &[5])]);
+    }
+
+    #[test]
+    fn focused_line_regions_refuse_a_partial_slice_of_anchored_yaml() {
+        let content = "---\nbase: &b\n  a: 1\nx: 1\ny: 2\nz: 3\ntail: 2\n---\n";
+        assert_eq!(fm_ctx(content).focused_line_regions(&[7], 1), None);
     }
 }

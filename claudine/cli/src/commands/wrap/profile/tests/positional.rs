@@ -757,3 +757,405 @@ fn test_all_providers_flags_before_double_dash() {
         }
     }
 }
+
+// -- Interactive startup prompts (2026-09-18-edit-integration) ----------
+
+/// The argv an interactive launch ends with once `prompt_delivery` has run on
+/// the interactive entrypoint. Panics if the delivery would seed stdin: in an
+/// interactive session stdin is the user's terminal.
+fn interactive_startup_argv(provider: Provider, prompt: &str) -> Vec<String> {
+    let p = profile(provider);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, false);
+    let delivery = p
+        .prompt_delivery(&args, prompt, false)
+        .unwrap_or_else(|err| panic!("{provider:?}: interactive prompt_delivery failed: {err}"));
+    assert!(
+        !matches!(delivery, PromptDelivery::Stdin(_) | PromptDelivery::WireRpc(_)),
+        "{provider:?}: interactive delivery must not use stdin or wire RPC, got {delivery:?}"
+    );
+    let stdin_seed = delivery.apply_to(&mut args);
+    assert_eq!(stdin_seed, None, "{provider:?}: interactive stdin must stay the terminal");
+    args
+}
+
+fn with_prompt(template: &[&str], prompt: &str) -> Vec<String> {
+    template.iter().map(|arg| arg.replace("{P}", prompt)).collect()
+}
+
+/// Interactive startup argv per provider slug: `(slug, plain prompt, prompt
+/// opening with a Markdown bullet)`, with `{P}` standing for the prompt. Rows
+/// are keyed by slug so this fact table adds no provider dispatch site. The
+/// opt-in `real_native_interactive_startup` and `real_pi_interactive_startup`
+/// tests prove against the installed providers that each row except Kimi's
+/// submits the first turn and keeps the session open for a second.
+const INTERACTIVE_STARTUP_TABLE: &[(&str, &[&str], &[&str])] = &[
+    ("claude", &["{P}"], &["--", "{P}"]),
+    ("codex", &["{P}"], &["--", "{P}"]),
+    ("gemini", &["--prompt-interactive", "{P}"], &["--prompt-interactive={P}"]),
+    (
+        "goose",
+        &["run", "--text", "{P}", "--interactive"],
+        &["run", "--text={P}", "--interactive"],
+    ),
+    // Kimi has no native interactive startup-prompt surface: `--prompt` runs
+    // one turn and exits. This row pins today's argv while the author rules on
+    // the fleet-wide promise (ruling N2); it is not a verified interactive form.
+    ("kimi", &["--prompt", "{P}"], &["--prompt", "{P}"]),
+    ("opencode", &["--prompt", "{P}"], &["--prompt={P}"]),
+    ("qwen", &["--prompt-interactive", "{P}"], &["--prompt-interactive={P}"]),
+    ("kilo", &["--prompt", "{P}"], &["--prompt={P}"]),
+    ("pi", &["--", "{P}"], &["--", "{P}"]),
+    (
+        "antigravity",
+        &["--prompt-interactive", "{P}"],
+        &["--prompt-interactive={P}"],
+    ),
+];
+
+#[test]
+fn every_provider_delivers_an_interactive_startup_prompt() {
+    let fleet: std::collections::BTreeSet<&str> = claudine::provider::PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(|provider| provider.as_slug())
+        .collect();
+    assert_eq!(fleet.len(), PROVIDER_COUNT, "display order must list every provider once");
+    assert_eq!(
+        INTERACTIVE_STARTUP_TABLE.len(),
+        PROVIDER_COUNT,
+        "one expectation row per provider"
+    );
+
+    let plain = "Reply with the single word READY.";
+    let bullet = "- item one\n- item two\n\nReply with the single word READY.";
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let (_, plain_argv, bullet_argv) = INTERACTIVE_STARTUP_TABLE
+            .iter()
+            .find(|(slug, _, _)| *slug == provider.as_slug())
+            .unwrap_or_else(|| panic!("{provider:?}: no interactive startup expectation row"));
+        assert_eq!(
+            interactive_startup_argv(provider, plain),
+            with_prompt(plain_argv, plain),
+            "{provider:?}: plain interactive startup prompt"
+        );
+        assert_eq!(
+            interactive_startup_argv(provider, bullet),
+            with_prompt(bullet_argv, bullet),
+            "{provider:?}: bullet-first interactive startup prompt"
+        );
+    }
+}
+
+// -- The user's `--` separator ------------------------------------------
+
+/// How the first message reaches the wrapper in [`direct_wrap_argv_with_tail`].
+#[derive(Clone, Copy)]
+enum FirstMessage<'a> {
+    /// A positional prompt before the `--`: `claudine <p> [-i] hello -- …`.
+    /// clap keeps the `--` in the passthrough.
+    Positional(&'a str),
+    /// A prompt written in the editor: `claudine <p> [-i] --edit -- …`. clap
+    /// consumes the `--`, and the prompt arrives as `PromptSource::Inline`.
+    Edited(&'a str),
+}
+
+/// The child argv the direct wrapper builds for `claudine <provider> … --
+/// <tail>`: clap, the wrapper flag extractor, prompt extraction, the
+/// entrypoint, non-interactive flags, and prompt delivery, in the order
+/// `run_wrapper` applies them.
+fn direct_wrap_argv_with_tail(
+    provider: Provider,
+    interactive: bool,
+    message: FirstMessage<'_>,
+    tail: &[&str],
+) -> Vec<String> {
+    use clap::Parser;
+
+    #[derive(Debug, clap::Parser)]
+    #[command(disable_help_flag = true)]
+    struct Probe {
+        #[command(flatten)]
+        args: crate::commands::wrap::WrapperArgs,
+    }
+
+    let mut raw = vec!["claudine", provider.as_slug()];
+    if interactive {
+        raw.push("-i");
+    }
+    let prompt = match message {
+        FirstMessage::Positional(prompt) => {
+            raw.push(prompt);
+            prompt
+        }
+        FirstMessage::Edited(prompt) => {
+            raw.push("--edit");
+            prompt
+        }
+    };
+    raw.push("--");
+    raw.extend_from_slice(tail);
+    let raw: Vec<String> = raw.iter().map(|arg| arg.to_string()).collect();
+
+    let parsed = Probe::try_parse_from(&raw[1..])
+        .unwrap_or_else(|err| panic!("{provider:?}: {raw:?} must parse: {err}"))
+        .args;
+    let mut child_args = parsed.passthrough.clone();
+    let extracted = crate::commands::wrap::flags::extract_wrapper_flags_from_passthrough_with_raw(
+        &mut child_args,
+        &raw,
+    )
+    .unwrap();
+    assert!(
+        !extracted.edit && !extracted.interactive,
+        "{provider:?}: {raw:?}: the tail must not yield wrapper flags"
+    );
+    assert_eq!(parsed.edit, matches!(message, FirstMessage::Edited(_)));
+
+    let p = profile(provider);
+    let (mut args, source) = extract_prompt_source_from_passthrough(p, &child_args, false).unwrap();
+    match message {
+        FirstMessage::Positional(prompt) => assert_eq!(
+            source.as_inline(),
+            Some(prompt),
+            "{provider:?}: {raw:?}: the positional prompt must be found"
+        ),
+        FirstMessage::Edited(_) => assert!(
+            source.is_none(),
+            "{provider:?}: {raw:?}: the tail must not become the prompt, got {source:?}"
+        ),
+    }
+
+    let non_interactive = !interactive;
+    p.apply_entrypoint(&mut args, non_interactive);
+    if non_interactive {
+        p.apply_non_interactive_flags(&mut args).unwrap();
+    }
+    p.prompt_delivery(&args, prompt, non_interactive)
+        .unwrap()
+        .apply_to(&mut args);
+    args
+}
+
+/// The user's `--` is Claudine's boundary: the tail after it reaches every
+/// provider as options, never behind a separator, and the only `--` left is
+/// one the profile adds before a prompt.
+#[test]
+fn every_provider_receives_options_after_the_user_separator_as_options() {
+    let bullet = "- item one\n- item two";
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        for interactive in [true, false] {
+            for message in [
+                FirstMessage::Positional("hello"),
+                FirstMessage::Edited("hello"),
+                FirstMessage::Edited(bullet),
+            ] {
+                let args = direct_wrap_argv_with_tail(provider, interactive, message, &["--offline"]);
+                let context = format!("{provider:?} interactive={interactive}: {args:?}");
+                let option = args
+                    .iter()
+                    .position(|arg| arg == "--offline")
+                    .unwrap_or_else(|| panic!("{context}: --offline must be forwarded"));
+                let separators: Vec<usize> = args
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, arg)| *arg == "--")
+                    .map(|(index, _)| index)
+                    .collect();
+                assert!(separators.len() <= 1, "{context}: at most one `--`");
+                if let Some(&separator) = separators.first() {
+                    assert!(option < separator, "{context}: --offline must precede `--`");
+                    assert!(
+                        args[separator + 1].contains("hello") || args[separator + 1] == bullet,
+                        "{context}: a profile `--` only introduces the prompt"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The profiles that end options with their own `--` before an interactive
+/// dash-prefixed first message keep exactly that one separator, directly in
+/// front of the prompt, after the forwarded options.
+#[test]
+fn profile_separator_before_a_dash_prompt_is_the_only_separator() {
+    let bullet = "- item";
+    let mut with_own_separator = Vec::new();
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let args =
+            direct_wrap_argv_with_tail(provider, true, FirstMessage::Edited(bullet), &["--offline"]);
+        if !args.iter().any(|arg| arg == "--") {
+            continue;
+        }
+        with_own_separator.push(provider.as_slug());
+        assert_eq!(
+            args[args.len() - 3..],
+            ["--offline".to_string(), "--".to_string(), bullet.to_string()],
+            "{provider:?}: {args:?}"
+        );
+    }
+    assert_eq!(with_own_separator, ["claude", "codex", "pi"]);
+}
+
+#[test]
+fn goose_interactive_prompt_leads_with_run_so_other_flags_parse_as_run_options() {
+    let p = profile(Provider::Goose);
+    let mut args = vec!["--system".to_string(), "be brief".to_string()];
+    p.prompt_delivery(&args, "hello", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(
+        args,
+        vec!["run", "--text", "hello", "--interactive", "--system", "be brief"]
+    );
+}
+
+#[test]
+fn goose_interactive_prompt_follows_an_existing_run_entrypoint() {
+    let p = profile(Provider::Goose);
+    let mut args = vec!["run".to_string(), "--debug".to_string()];
+    p.prompt_delivery(&args, "- item", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["run", "--text=- item", "--interactive", "--debug"]);
+}
+
+#[test]
+fn goose_non_interactive_prompt_shape_is_unchanged() {
+    let p = profile(Provider::Goose);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, true);
+    p.prompt_delivery(&args, "hello", true)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["run", "-t", "hello"]);
+
+    let mut bare: Vec<String> = Vec::new();
+    p.prompt_delivery(&bare, "hello", true)
+        .unwrap()
+        .apply_to(&mut bare);
+    assert_eq!(bare, vec!["run", "-t", "hello"]);
+}
+
+#[test]
+fn kilo_interactive_prompt_uses_prompt_flag_not_the_project_positional() {
+    let p = profile(Provider::Kilo);
+    for (prompt, expected) in [
+        ("fix the bug", vec!["--prompt", "fix the bug"]),
+        ("- fix the bug", vec!["--prompt=- fix the bug"]),
+    ] {
+        let mut args = Vec::new();
+        p.prompt_delivery(&args, prompt, false)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(args, expected, "prompt {prompt:?}");
+    }
+}
+
+#[test]
+fn kilo_non_interactive_prompt_stays_positional_after_run() {
+    let p = profile(Provider::Kilo);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, true);
+    p.prompt_delivery(&args, "- fix the bug", true)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["run", "--", "- fix the bug"]);
+}
+
+#[test]
+fn kilo_rejects_an_oversized_prompt_in_both_modes() {
+    let p = profile(Provider::Kilo);
+    let huge = "x".repeat(768 * 1024 + 1);
+    for non_interactive in [true, false] {
+        let err = p.prompt_delivery(&[], &huge, non_interactive).unwrap_err();
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+    assert!(p.prompt_delivery(&[], &"x".repeat(768 * 1024), false).is_ok());
+}
+
+#[test]
+fn antigravity_interactive_prompt_uses_prompt_interactive_not_print() {
+    let p = profile(Provider::Antigravity);
+    for (prompt, expected) in [
+        ("review", vec!["--prompt-interactive", "review"]),
+        ("- review", vec!["--prompt-interactive=- review"]),
+    ] {
+        let mut args = Vec::new();
+        p.prompt_delivery(&args, prompt, false)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(args, expected, "prompt {prompt:?}");
+    }
+}
+
+#[test]
+fn antigravity_non_interactive_prompt_stays_print_last() {
+    let p = profile(Provider::Antigravity);
+    let mut args = Vec::new();
+    p.apply_entrypoint(&mut args, true);
+    p.apply_structured_stream(&mut args);
+    p.prompt_delivery(&args, "- review", true)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(
+        args[args.len() - 2..],
+        ["--print".to_string(), "- review".to_string()]
+    );
+    assert!(!args.iter().any(|a| a.starts_with("--prompt-interactive")));
+}
+
+#[test]
+fn pi_interactive_prompt_is_a_positional_message_after_end_of_options() {
+    let p = profile(Provider::Pi);
+    for prompt in ["review the plan", "- review\n- the plan"] {
+        let mut args = Vec::new();
+        let stdin_seed = p
+            .prompt_delivery(&args, prompt, false)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(stdin_seed, None, "stdin must stay the terminal");
+        assert_eq!(args, vec!["--".to_string(), prompt.to_string()]);
+    }
+}
+
+#[test]
+fn pi_interactive_prompt_starting_with_at_is_not_read_as_a_file() {
+    let p = profile(Provider::Pi);
+    let mut args = Vec::new();
+    p.prompt_delivery(&args, "@alice please review", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["--", " @alice please review"]);
+
+    // Only a leading `@` is touched; a mid-prompt mention is left alone.
+    let mut args = Vec::new();
+    p.prompt_delivery(&args, "ask @alice", false)
+        .unwrap()
+        .apply_to(&mut args);
+    assert_eq!(args, vec!["--", "ask @alice"]);
+}
+
+#[test]
+fn pi_interactive_rejects_a_prompt_too_large_for_argv() {
+    let p = profile(Provider::Pi);
+    let err = p
+        .prompt_delivery(&[], &"x".repeat(768 * 1024 + 1), false)
+        .unwrap_err();
+    assert!(err.to_string().contains("too large"), "{err}");
+    assert!(p.prompt_delivery(&[], &"x".repeat(768 * 1024), false).is_ok());
+}
+
+#[test]
+fn pi_non_interactive_prompt_stays_on_stdin_whatever_its_size_or_prefix() {
+    let p = profile(Provider::Pi);
+    for prompt in ["- item".to_string(), "@file".to_string(), "x".repeat(768 * 1024 + 1)] {
+        let mut args = Vec::new();
+        let stdin_seed = p
+            .prompt_delivery(&args, &prompt, true)
+            .unwrap()
+            .apply_to(&mut args);
+        assert_eq!(stdin_seed.as_deref(), Some(prompt.as_str()));
+        assert!(args.is_empty());
+    }
+}

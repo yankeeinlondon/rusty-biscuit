@@ -94,7 +94,7 @@ Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare st
 
 ### The `shell` exception
 
-`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception. They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
+`shell` commands (positional `shell: "…"` and key/value `command:`) are the single early-binding exception, and so are the commands inside a `set` value written as a whole-value `$( … )` (see [Reading a Command's Result](#reading-a-commands-result)). They are approved during pre-flight, so they are resolved **then**, against early-binding surfaces only (`doc.*`, `ctx.*`, `env.*`, read-side functions). The approved command is byte-identical to the executed command. A late-binding reference (`err`/`timing`/`current`/`current_env`) inside a shell command is rejected at prepare time with a typed error naming the property path — those values do not exist yet at pre-flight.
 
 Lifecycle YAML accepts only `set: {property: value}`; the positional
 `set(key, value)` spelling belongs to the separate capability and loop-control
@@ -278,7 +278,74 @@ start:
         on_error: "typecheck failed"
 ```
 
-A non-zero exit code is an action error unless `no_error: true` is set.
+A non-zero exit code is an action error unless `no_error: true` is set. A
+`shell` action returns nothing; to branch on a command, read its result with
+`set`.
+
+### Reading a Command's Result
+
+A `set` value written as a whole-value `$( … )` runs the command when the
+action executes and stores what it produced. The frontmatter
+[result suffixes](../../../../darkmatter/docs/inline/fm-shell-expansion.md#reading-a-commands-result)
+apply: no suffix stores the trimmed stdout (a non-zero exit fails the action),
+`::ok` a boolean, `::exit-code` a number, and `::result` an object
+`{ ok, code, stdout, stderr }` a later `when:` can read with dotted access.
+
+```yaml
+start:
+  stack:
+    - action:
+        - set:
+            sha: "$(git rev-parse --short HEAD)"
+            diff: "$(git diff --quiet)::result"
+    - when: "!diff.ok"
+      action:
+        - info: "Uncommitted changes at {{ sha }}: exit {{ diff.code }}"
+```
+
+Two lifetimes apply to such a value, and they are separate:
+
+```mermaid
+flowchart LR
+    A["pre-flight<br/>resolve {{ … }} from early-binding values"] --> B["approve the bare command<br/>(no suffix)"]
+    B --> C{"event fires,<br/>guard passes?"}
+    C -- no --> D["nothing runs"]
+    C -- yes --> E["run the approved bytes<br/>in a fresh result cache"]
+    E --> F{"every value<br/>succeeded?"}
+    F -- yes --> G["write every destination"]
+    F -- no --> H["write none"]
+```
+
+- **The command bytes are fixed at pre-flight.** Arguments resolve once from
+  early-binding values, pre-flight approves exactly those bytes, and the action
+  runs them. A later `set` of a value the command interpolated does not change
+  what runs.
+- **The result is produced each time the action executes.** Each executed
+  `set` gets its own result cache: two values naming the same command share one
+  run, but a command read in `start` and again in `success` runs twice, because
+  the agent may have changed the answer.
+- **It runs only when the action runs**: after its `when:` passes, never at
+  pre-flight, never under `--dry-run`, and never for an item whose guard is
+  false.
+- **Every value reads the pre-write state**, and no destination is written
+  unless every value succeeds. Expression values evaluate first, so a failing
+  expression runs no command. A command that already ran is **not undone** when
+  a later value fails: its external effects stand.
+- **Only an exit status becomes a value.** A missing, blacklisted, denied, or
+  timed-out command fails the action (Claudine has no allowed-timeout mode), a
+  command ended by a signal fails it, and a user interruption keeps its
+  cancellation outcome: `no_error: true` cannot turn it into `ok: false`.
+- **Only a top-level, whole-value `$( … )` runs.** `"sha $(cmd)"`, and a
+  `$( … )` inside a nested object or list, are stored as text.
+- Like a `shell` action, it runs from `start` or a later event, in Claudine's
+  working directory. It is refused in `initialize`, in every item including one
+  whose guard is false, and cannot run in an early catch handler before
+  pre-flight reaches `start`. A `set` in `start` is legal in a document that
+  also has `initialize`. A sequence task's `set` (`setup:`, `teardown:`, or a
+  `side_effect:` task) cannot run a command and refuses a whole-value `$( … )`.
+
+A `capture:` option on the `shell` action is not available; `set` is the one
+way a lifecycle step reads a command's result.
 
 ### Side-Effect Actions
 
@@ -336,14 +403,14 @@ Stack expressions have access to four late-binding roots in addition to frontmat
 |------|--------------|--------|
 | `err` | `blocked`, `failure`, `finalize` | faceted fields below (`code`, `category`, `disposition`, `origin`, `detail.*`, plus promoted conveniences) |
 | `timing` | every event | `document_ms`, `total_ms`, `step_ms` (all optional) |
-| `current` | every event | `current.<key>` for every `ctx.<key>`, observed when the reference is reached |
+| `current` | every event | `current.<key>` for every `ctx.<key>`, observed once per event: every read in one event's notification fields and stack agrees |
 | `current_env` | every event | `current_env.<KEY>` for every `env.<KEY>`, reread from the live process environment when the reference is reached |
 
 `err` and `timing` are Claudine globals. `current` and `current_env` are
 Darkmatter **reserved roots**: Claudine supplies the invocation's refresh
 capability, and a key that capability does not hold renders `null` with a
 `PartialRuntimeCapture` diagnostic rather than probing the host. Lazy is
-bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) and `current_env.*` refresh at reference time. See
+bounded by the request: Repository metadata and topology (`repo`, `repo_root`, `packages`, `area`, and the rest of the repository keys) are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does; only mutable Git and filesystem facts (`branch`, `recent_commits`, `dirty_files`) refresh from one event to the next, and `current_env.*` is reread at reference time. A gate that asks about now — "is anything staged yet?" — reads `current`; `ctx` holds what this composition run observed when it started. See
 [Context Variables — Binding time](../state-management/context-variables.md#binding-time-eager-ctx-lazy-current).
 
 `err` is only meaningful in events that can carry an error. Using bare `err` (or `err.*`) in `initialize`, `start`, `success`, or `loop` is rejected at parse time.
@@ -466,7 +533,16 @@ Loop execution runs `initialize` once at the start, then re-enters each iteratio
 
 The condition is checked at the **end** of each iteration, against the state that iteration ran with, and the actions are applied only when the loop continues. A loop therefore always runs at least once, and a counter counts one further than it reads: `while: "n < 2"` counting from `0` runs three times. To run zero times, `skip` from `initialize`. See [Looping — Iteration semantics](looping.md#iteration-semantics) for the full counting table.
 
-The `loop:` block's own fields can read ordinary frontmatter, which is how the example above would report progress. They cannot currently read the ambient loop values (`state.loop.*`, spelled `_loop_*` by the current engine): referencing one there fails the run with an "unknown root" error, which is a known defect. `start`, `success`, `failure`, and `finalize` can read them.
+The `loop:` block's own fields and stack read ordinary frontmatter and the ambient loop values (`_loop_count`, `_loop_is_first`, `_loop_is_last`, `_loop_last_output`, `_loop_last_exit_code`). Inside the gate these describe the iteration that just finished, the same values the `while`/`until` condition reads, so on the pass that ends the loop `_loop_count` is the number of iterations that ran:
+
+```yaml
+loop:
+  until: "_loop_count >= 2"
+  action: increment(counter)
+  info: "gate after iteration {{_loop_count}}"
+```
+
+This prints `gate after iteration 1` and then `gate after iteration 2`, and the loop stops after the second iteration.
 
 ## Examples
 
@@ -563,11 +639,11 @@ loop:
     - increment(iteration)
   stderr: "loop gate"
   stack:
-    - action: { info: "finished iteration {{iteration}} of {{max_iterations}}" }
+    - action: { info: "finished iteration {{_loop_count}} of {{max_iterations}}" }
 ---
 ```
 
-This runs three times. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads the document's own `iteration` counter because the `loop:` block cannot currently read `_loop_count` (see [Loop Gate Concerns](#loop-gate-concerns)).
+This runs three times and reports `finished iteration 1 of 3`, then `2 of 3`, then `3 of 3`. The gate follows each iteration and asks its question of the iteration that just ran, so `<` is right here: with `<=` the gate after the third iteration would still say "continue" and a fourth would run. The message reads `_loop_count`, which inside the `loop:` block is the count of the iteration that just finished (see [Loop Gate Concerns](#loop-gate-concerns)).
 
 ### Recover from a usage cap by switching providers
 
@@ -743,9 +819,40 @@ success:
 
 A positional action body such as `message: "review {{iteration}} passed"` is not affected. That string is not an expression literal; Claudine interpolates it as template text.
 
-### `LifecycleEvaluationError`: surviving span
+### Template text in a value is data, not an error
 
-Some template text only appears at event time, typically a frontmatter value that itself holds `{{ … }}` (for example, one a `set_frontmatter` stored). Static validation cannot see it. As a backstop, `reject_surviving_spans` runs after event-time resolution and before dispatch: a top-level communication field whose resolved text still contains a span fails the event, and the side effect is not sent. The error carries the lifecycle property (`in success.say`) and the typed `SurvivingSpan` reason, which selects a hint to concatenate with `+` (or use `{{{ … }}}` for intentional braces) instead of the missing-path hint that ordinary evaluation errors get. A stack action operand that resolves to template text is re-expanded when its message renders. An unknown root in that text then fails as an ordinary expression error.
+Some values only hold template syntax at event time: a frontmatter value a `set_frontmatter` stored, a file an agent wrote, or the output of a `{{{ … }}}` escape. The authored text of a lifecycle field or action operand is scanned **once**; whatever its spans insert is data and is delivered exactly as written. It is never refused and never expanded a second time.
+
+```yaml
+# log.md, written by the agent:  message_to_agent: "see {{ title }}"
+success:
+  info: "agent says: {{ frontmatter('log.md', 'message_to_agent') }}"
+# prints: agent says: see {{ title }}
+```
+
+The same holds for a `set:` value, a `proxy` `with:` value, a side-effect argument, and a shell command: a pre-flight-resolved command runs its approved bytes as they stand. The one exception is a `with:` value for a lifecycle key (see [Passing values with `with:`](flow-control-reference.md#passing-values-with-with)).
+
+What is still checked is the syntax **you** wrote. Every `{{ … }}` span in an authored lifecycle string must resolve when the event fires. Lifecycle evaluation is strict, so an unknown root or a malformed expression fails the event before any side effect dispatches, whether the span is the whole value or sits inside other text ([`LifecycleUndefinedVariable`](#lifecycleundefinedvariable)). The check never looks inside what a span returned, so an agent's words cannot trip it:
+
+| Value | Result |
+|-------|--------|
+| `info: "{{ spec_fil }}"` (authored typo) | fails: unknown root |
+| `info: "done: {{ spec_fil }}"` (authored typo in text) | fails: unknown root |
+| `info: "{{ note }}"` where `note` is `see {{ title }}` | prints `see {{ title }}` |
+
+Ordinary frontmatter and the body, which compose before the run, keep Darkmatter's rules: an unresolved whole value is an error, while an unresolved span in mixed text leaves the span in place with a warning. See [Whole-Value Frontmatter Expansion Is Executable State](../composition.md#whole-value-frontmatter-expansion-is-executable-state).
+
+#### Frontmatter an action writes is data
+
+`set_frontmatter`, `merge_frontmatter`, `append_frontmatter`, and `prepend_frontmatter` write the **result** of evaluating their value, so what lands in the file is data. A string that contains `{{` or `$(` is stored as a literal token and reads back on the next run as the same text, never as a template:
+
+```yaml
+success:
+  stack:
+    - action: { set_frontmatter: ["state.md", "last_note", "{{ frontmatter('log.md', 'message_to_agent') }}"] }
+```
+
+This also means these effects cannot write a template into a file. An authored `{{{ title }}}` writes the text `{{ title }}` as data, and the next run shows those braces instead of the title. To give a file a template, author it in that file. The token format, and how to edit one by hand, are described in [Values an Agent Writes](../frontmatter-properties.md#values-an-agent-writes); [Side Effects](../state-management/side-effects.md) covers the verbs.
 
 ### `LifecycleUndefinedVariable`
 

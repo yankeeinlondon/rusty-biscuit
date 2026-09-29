@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 3
+schema_revision: 4
 provider: goose
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -261,6 +261,7 @@ gaps:
   - { area: interruption race, detail: "Cancel lacks expectedRunId and a direct acknowledgment; the wrong newly active run could be canceled after a race.", next_check: "Request an upstream guarded cancellation operation or prove a safe serialization strategy in a disposable server." }
   - { area: model provenance, detail: "The task supplied gpt-5.6-sol/low, but resolved execution metadata was not exposed.", next_check: "Have the sequence launcher retain resolved model and effort metadata and audit it before accepting fleet output." }
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - "Created the first Goose steering report under schema revision 2; no prior goose.md existed to refresh and therefore created is today's date."
   - "Reverified prior ACP leads against v1.49.0 and replaced the older generic ACP view with the guarded custom steering request, correlated pickup, and explicit activation block."
   - "Separated ordinary CLI coverage from the managed authenticated ACP server profile and left retained stdio as a separately identified future profile gap."

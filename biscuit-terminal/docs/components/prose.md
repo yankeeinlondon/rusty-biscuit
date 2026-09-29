@@ -8,7 +8,7 @@ Styled inline text component for rich cross-target output. Prose is the primary 
 1. **Block tags** — `<bold>text</bold>` (auto-reset on close, nestable).
 2. **Markdown subset** — `[desc](url)`, `**bold**`, `_italics_` (per the [Prose+ spec](../../features/2026-05-05-prose-plus/spec.md)).
 
-The two grammars compose freely. Raw input is first lowered by the Markdown pre-processor (fenced code blocks → links → bold → italics), then parsed by the bracketed-tag parser **directly into** the shared `renderable::tree::RenderNode` shape. Terminal, browser, and Markdown output all fold that one tree through the shared tree renderers; Prose carries no component-local rendering IR.
+The two grammars compose freely. Raw input is first lowered by the Markdown pre-processor (fenced code blocks → code spans → links → bold → italics), then parsed by the bracketed-tag parser **directly into** the shared `renderable::tree::RenderNode` shape. Terminal, browser, and Markdown output all fold that one tree through the shared tree renderers; Prose carries no component-local rendering IR.
 
 > The atomic-token grammar (`{{bold}}…{{reset}}`) was removed in the
 > 2026-05-17 Prose cross-target work. A stray `{{…}}` now renders as
@@ -76,19 +76,28 @@ println!("{}", prose.display(&term));
 
 ### Markdown Subset
 
-Three Markdown forms are recognized in addition to bracketed tags. They are pre-processed into an equivalent internal tag form before the render tree is built.
+Three Markdown forms are recognized in addition to bracketed tags, and inline code spans are kept opaque. They are pre-processed into an equivalent internal tag form before the render tree is built.
 
 | Markdown        | Equivalent tag                | Notes                                   |
 |-----------------|-------------------------------|-----------------------------------------|
 | `[desc](ref)`   | `<a href="ref">desc</a>`      | URL contents protected from later phases |
 | `**text**`      | `<b>text</b>`                 | Only the doubled-asterisk form is bold  |
 | `_text_`        | `<i>text</i>`                 | Only the single-underscore form is italic |
+| `` `code` ``    | unchanged, backticks included | Nothing inside is interpreted           |
 
 **Strict subset.** `__bold__` is not bold and `*italics*` is not italic — both pass through as literal text. This is intentional: the Prose+ spec keeps each emphasis style mapped to a single sigil so authored intent is unambiguous.
 
-### Flanking Rules (Intra-word Inhibition)
+**Code spans are opaque.** A backtick run opens a code span when a later run of the same length closes it. The backticks stay visible, and no emphasis, link, or tag syntax inside the span is interpreted, so `` See `_pr/_report.md`. `` renders exactly as written. A backtick run with no matching closer is literal text. Unlike CommonMark, a Prose backslash escape still applies inside a code span.
 
-To prevent identifiers, env-var names, and file paths from being chewed up by emphasis pre-processing, an emphasis delimiter (`_` or `**`) is treated as **literal text** when it sits between two word characters (Unicode alphanumeric). This is the "intra-word inhibition" rule.
+### Flanking Rules
+
+An emphasis delimiter opens or closes emphasis only where CommonMark's left- and right-flanking rules allow it. Everywhere else it is **literal text**. This keeps identifiers, env-var names, and file paths from being chewed up by emphasis pre-processing.
+
+- A delimiter can **open** only when it is left-flanking: it is not followed by whitespace, and it is either not followed by punctuation or is preceded by whitespace or punctuation.
+- A delimiter can **close** only when it is right-flanking, the mirror image of the rule above.
+- An `_` that is both left- and right-flanking opens only after punctuation and closes only before it.
+- Neither `_` nor `**` ever opens or closes between two word characters (Unicode alphanumeric). For `**` this is stricter than CommonMark, and deliberate: `foo**bar**baz` stays literal.
+- A closer counts only at the tag nesting depth of its opener, so emphasis never straddles a tag boundary and no stray `</i>` or `</b>` can reach the output.
 
 | Input | Output | Why |
 |-------|--------|-----|
@@ -98,13 +107,14 @@ To prevent identifiers, env-var names, and file paths from being chewed up by em
 | `foo**bar**baz` | `foo**bar**baz` | Both `**` runs intra-word |
 | `**foo**bar**baz**` | `<b>foo**bar**baz</b>` | Outer `**` flanked; inner pairs intra-word |
 | `(_text_)`, `hit _Esc_.` | `<i>text</i>`, `hit <i>Esc</i>.` | Punctuation neighbours form boundaries |
+| `**_pr/open.md** and **_pr/triage.md**` | `<b>_pr/open.md</b> and <b>_pr/triage.md</b>` | No later `_` can close the one after `**`, so it stays literal |
+| `'_loop_count' in '{{ _loop_count }}'` | unchanged | An `_` after a space cannot close |
+| `<b>a _b</b> c_` | unchanged | The closer lies outside the tag that holds the opener |
 | `<dim>=OPENCODE_CONFIG_CONTENT</dim>` | unchanged | Tag wrapper preserved; intra-word `_` not triggered inside body |
-
-The rule is symmetric — the same predicate gates openers and closers — and applies to both `_` (italics) and `**` (bold). The Prose+ implementation deliberately uses this simpler rule rather than full CommonMark left/right-flanking classification: terminal markup is overwhelmingly ASCII identifiers, predictability beats spec parity, and the simple rule covers every documented acceptance case.
 
 ### Escape Mechanism
 
-A backslash escapes the immediately following character, treating it as literal text. Escapable characters are `*`, `_`, `[`, `]`, `(`, `)`, `<`, `>`, `{`, and `\` itself. Use this when you need a Markdown sigil to render literally **and** the flanking rule wouldn't already inhibit it.
+A backslash escapes the immediately following character, treating it as literal text. Escapable characters are `*`, `_`, `[`, `]`, `(`, `)`, `<`, `>`, `{`, and `\` itself.
 
 | Input | Output |
 |-------|--------|
@@ -113,7 +123,11 @@ A backslash escapes the immediately following character, treating it as literal 
 | `\\` | `\` (literal backslash) |
 | `\<not a tag\>` | `<not a tag>` (literal angle brackets) |
 
-In practice, dynamic content interpolated into a Prose format string usually does **not** require escaping — the flanking rule already protects identifier-shaped values. Reach for the escape mechanism when you need a literal sigil at a position where it *would* otherwise trigger emphasis (e.g. `\_emphasis_` where you want a leading literal `_`).
+**Escape text you did not write as markup.** Author-supplied text (a frontmatter `description`, a document name), identifiers, paths, and error messages spliced into a Prose format string must pass through `Prose::escape_text` first. The flanking rules make identifier-shaped values safe, but text such as `_draft_` or `**note**` would still be read as emphasis. `Prose::escape_text` output renders exactly as the input on every target, including inside a code span. For a value placed in a tag attribute, use `Prose::quoted_attr` instead.
+
+```rust
+let cell = Prose::new(format!("<i><dim>{}</dim></i>", Prose::escape_text(description)));
+```
 
 ### Supported Tags
 

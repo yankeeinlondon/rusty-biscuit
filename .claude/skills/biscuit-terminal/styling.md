@@ -144,11 +144,11 @@ A strict CommonMark subset is recognised in addition to block tags. Markdown for
 | `**text**`      | `<b>text</b>`                  |
 | `_text_`        | `<i>text</i>`                  |
 
-Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted.
+Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass through as literal text. The pre-processor runs in a fixed order: fenced code blocks → code spans → links → bold → italics → block-tag parser. Link URLs are placeholdered before the bold/italics phases so a URL like `https://example.com/path_with_underscores` is never re-interpreted. An inline code span (`` `x_y` ``) keeps its backticks and is opaque: nothing inside it is interpreted.
 
-#### Flanking rule (intra-word inhibition)
+#### Flanking rules
 
-`_` and `**` are treated as **literal text** when they sit between two word characters (Unicode alphanumerics on both sides). This protects identifier-shaped strings from being mangled when interpolated into Prose format strings:
+`_` and `**` open or close emphasis only where CommonMark's left-/right-flanking rules allow (an `_` that is both opens only after punctuation and closes only before it). Neither ever acts between two word characters, and a closer counts only at its opener's tag depth, so no stray `</i>` can leak:
 
 | Input | Output | Why |
 |-------|--------|-----|
@@ -157,15 +157,14 @@ Strict subset — `__bold__` and `*italics*` are **not** recognised; both pass t
 | `foo**bar**baz` | `foo**bar**baz` | Both `**` runs intra-word |
 | `**foo**bar**baz**` | `<b>foo**bar**baz</b>` | Outer `**` flanked; inner pairs intra-word |
 | `(_text_)` | `(<i>text</i>)` | Punctuation neighbours form boundaries |
+| `**_pr/a.md** **_pr/b.md**` | `<b>_pr/a.md</b> <b>_pr/b.md</b>` | No valid closer for either `_` |
 | `<dim>=OPENCODE_CONFIG_CONTENT</dim>` | unchanged | Tag wrapper preserved; intra-word `_` not triggered inside body |
 
-The rule is symmetric across openers and closers and applies to both `_` and `**`. It is a deliberately simpler rule than full CommonMark left/right-flanking — terminal markup is overwhelmingly ASCII identifiers and predictability beats spec parity.
-
-**Practical consequence for callers:** dynamic content interpolated into a Prose format string (env-var keys, file paths, identifiers) usually does **not** require escaping — the flanking rule already protects identifier-shaped values.
+**Practical consequence for callers:** author text, identifiers, paths, and error messages spliced into a Prose format string go through `Prose::escape_text` (attribute values through `Prose::quoted_attr`). Do not hand-roll a partial escaper; one that skips `_`, `*`, or `[` lets `_draft_` become italics.
 
 #### Escape mechanism
 
-A backslash escapes the immediately following character. Escapable: `* _ [ ] ( ) < > { \`. Use this when you need a literal Markdown sigil at a position where the flanking rule would *not* already inhibit it (e.g. `\_emphasis_` for a leading literal `_`).
+A backslash escapes the immediately following character. Escapable: `* _ [ ] ( ) < > { \`. `Prose::escape_text` applies it to every escapable character.
 
 ```
 \_text\_  →  _text_   (literal underscores, no italics)

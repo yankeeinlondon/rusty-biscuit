@@ -26,6 +26,8 @@ mod level2_dry_run_approval_capture;
 #[cfg(unix)]
 mod level2_dry_run_metadata_capture;
 #[cfg(unix)]
+mod level2_edit_interactive_capture;
+#[cfg(unix)]
 mod level2_explicit_operation_file_miss;
 #[cfg(unix)]
 mod level2_file_resolution_capture;
@@ -35,6 +37,8 @@ mod level2_incomplete_subagents_capture;
 mod level2_initialize_generated_transclusion;
 #[cfg(unix)]
 mod level2_inline_compose_mismatch_capture;
+#[cfg(unix)]
+mod level2_inline_prompt_scrollback;
 #[cfg(unix)]
 mod level2_interrupt_feedback_capture;
 #[cfg(unix)]

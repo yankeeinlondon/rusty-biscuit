@@ -14,14 +14,26 @@ $prompt:
 lifecycle: true
 flow: true
 testing: true
-# Rendered in the body on purpose: a file with no real span skips the interpolation
-# pass, and its `{{{ … }}}` literals would then reach the agent as triple braces.
-as_of: 2026-09-20
-# The defect warnings at the end are gated on this spec: each renders only while the spec is
-# still at this active path and its finding id is absent from the spec's `fixed:` list. Fixing
-# a defect means adding its id there; nothing in this file needs editing. `&` pins the
-# repository root, and is used because `ctx` is not available to a transcluded file.
-defects_spec: "&claudine/fixes/2026-09-20-lifecycle-handoff-gaps/spec.md"
+# The defect warnings at the end are gated on the fix `2026-09-20-lifecycle-handoff-gaps`,
+# found by its directory name anywhere under `claudine/fixes/`, so moving it between lifecycle
+# directories changes nothing here. A warning renders while its finding id is absent from the
+# spec's `fixed:` list and the spec's `status` is not `completed`. Fixing a defect means adding
+# its id there; nothing in this file needs editing. When the spec cannot be trusted (no match,
+# two matches, frontmatter that does not parse, a `status` or `fixed` of the wrong shape), a
+# notice says why and every warning renders: an unreadable list never hides a warning.
+defects_matches: "{{ find_files('&claudine/fixes/**/2026-09-20-lifecycle-handoff-gaps/spec.md') }}"
+defects_read: "{{ length(defects_matches) == 1 ? try_frontmatter(defects_matches[0]) : null }}"
+defects_spec: "{{ defects_read.value }}"
+defects_fixed: "{{ defects_spec.fixed }}"
+defects_status: "{{ defects_spec.status }}"
+defects_lookup_notice: "{{ length(defects_matches) == 0 ? 'no `spec.md` was found in a `2026-09-20-lifecycle-handoff-gaps` directory under `claudine/fixes/`' : length(defects_matches) > 1 ? 'more than one specification matched, so none was read: ' + as_csv(defects_matches) : !defects_read.ok ? 'its frontmatter could not be read: ' + defects_read.error : '' }}"
+defects_status_notice: "{{ defects_lookup_notice ? '' : !has_key(defects_spec, 'status') ? '`status` is missing' : is_null(defects_status) ? '`status` is null' : !is_string(defects_status) || defects_status == '' ? '`status` is not a non-empty string' : '' }}"
+# Counting the recognized ids catches a wrong-typed, unknown, or repeated entry without
+# filtering it out: the count falls short of the list's length.
+defects_known_ids: "{{ is_array(defects_fixed) ? (contains(defects_fixed, 'F1') ? 1 : 0) + (contains(defects_fixed, 'F2') ? 1 : 0) + (contains(defects_fixed, 'F3') ? 1 : 0) + (contains(defects_fixed, 'F4') ? 1 : 0) + (contains(defects_fixed, 'F5') ? 1 : 0) + (contains(defects_fixed, 'F6') ? 1 : 0) + (contains(defects_fixed, 'F7') ? 1 : 0) + (contains(defects_fixed, 'F8') ? 1 : 0) + (contains(defects_fixed, 'D1') ? 1 : 0) + (contains(defects_fixed, 'D2') ? 1 : 0) : 0 }}"
+defects_fixed_notice: "{{ defects_lookup_notice ? '' : !has_key(defects_spec, 'fixed') ? '`fixed` is missing' : is_null(defects_fixed) ? '`fixed` is null' : !is_array(defects_fixed) ? '`fixed` is not a list' : length(defects_fixed) != defects_known_ids ? '`fixed` holds an entry that is not one of the finding ids F1–F8, D1, D2, or holds one twice' : '' }}"
+defects_trusted: "{{ !defects_lookup_notice && !defects_status_notice && !defects_fixed_notice }}"
+defects_completed: "{{ !defects_lookup_notice && !defects_status_notice && defects_status == 'completed' }}"
 ---
 
 ## How Claudine Prompts Work
@@ -36,20 +48,20 @@ Three commands run a prompt:
 | `claudine inline-compose <file>` | the agent writes the document's own body, driven by a frontmatter `prompt:` |
 | `claudine sequence <file>` | runs an ordered list of steps, each its own composition |
 
-This describes Claudine as of **{{ as_of }}**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
+This describes Claudine as of **2026-09-28**. When it disagrees with the references or with what you observe, they win, so when a fact here matters to your decision, confirm it. `claudine context` lists every `ctx` property, `claudine context --expressions` lists every function and operator, and `claudine context --side-effects` lists every mutation verb. The references are `claudine/docs/topics/composition.md`, `claudine/docs/topics/flow-control/lifecycle.md`, `claudine/docs/topics/flow-control/`, and `darkmatter/docs/inline/`.
 
 ### Composition: what runs before the agent sees anything
 
 - **Interpolation.** {{{ expr }}} is evaluated in the body and in frontmatter values. A frontmatter value that is *exactly one* span keeps the expression's type, so a span holding `true` yields a boolean and not the string. To show brace syntax without evaluating it, wrap it in a third pair of braces.
 - **Inline code is scanned; fenced code is not.** Backticks do not protect a brace span. A fenced code block protects everything inside it, including directives.
-- **`::file <ref>`** transcludes another file, recursively, as part of the same composition. `set.<key>=<value>` overrides the child's frontmatter and `when="<expr>"` makes the inclusion conditional. Prefixes choose where a reference is searched: `./` and `../` are relative to the authoring file, `^` walks package, package area, then repository root, `&` is the repository root, `@` is Claudine's registered roots, and `~/` is home.
+- **`::file <ref>`** transcludes another file, recursively, as part of the same composition. `set.<key>=<value>` overrides the child's frontmatter and `when="<expr>"` makes the inclusion conditional. A shell command that fails inside the included file fails the composition exactly as it would written inline; any other failure there replaces the file with a "could not transclude" notice and a warning. Prefixes choose where a reference is searched: `./` and `../` are relative to the authoring file, `^` walks package, package area, then repository root, `&` is the repository root, `@` is Claudine's registered roots, and `~/` is home.
 - **`::block when="<expr>"` … `::end-block`** keeps or drops a region of the body. Blocks nest.
 - **`::shell <command>`** and **`::shell-block`** splice a command's output into the body. The default timeout is 10 seconds and a non-zero exit fails the composition, so give a command that may fail a fallback (`when_error=` on a block, `--when-error` on a single directive). Output is spliced raw; it cannot be wrapped in a fence.
-- **Frontmatter `$(command)`** stores trimmed stdout in a property, and the whole value must be the expression. `::timeout:<seconds>` extends the limit. An exit status can be captured with a shell idiom.
+- **Frontmatter `$(command)`** stores trimmed stdout in a property, and the whole value must be the expression. `::timeout:<seconds>` extends the limit. A result suffix reads the outcome instead of the text, and a non-zero exit then stores a value rather than failing: `::ok` is a boolean, `::exit-code` a number, and `::result` an object `{ ok, code, stdout, stderr }`.
 
 ```yaml
 commits_ahead: "$(git rev-list --count origin/main..HEAD)::timeout:30"
-tree_is_clean: "$(git diff --quiet && echo yes || echo no)"
+tree_is_clean: "$(git diff --quiet)::ok"
 ```
 
 **Shell approval happens once, up front.** Before anything runs, Claudine collects every command the document could execute, including those in branches that will never be taken, and asks the caller to approve any that are not whitelisted. Approved bytes are executed bytes. A built-in blacklist cannot be overridden: it covers `git push`, `git branch`, `git checkout`, `git reset`, `git rebase`, `rm`, `mv`, `cp`, `curl`, `ssh`, package installs, and `>` redirection, among others. Work the blacklist forbids has to be done by the agent.
@@ -57,7 +69,7 @@ tree_is_clean: "$(git diff --quiet && echo yes || echo no)"
 ### `ctx`, `current`, and when each is read
 
 - **`ctx`** is evaluated **once, eagerly, for each composition run**, and only for the properties that appear on the page. It is available in the body, in frontmatter, and in lifecycle hooks. It describes the world as the run began.
-- **`current`** is the lazy counterpart: `current.<key>` has exactly the shape of `ctx`, and each key is read when the expression that names it evaluates. There is no nesting under it, and a path that is not a `ctx` key fails the run. Its use is in lifecycle hooks, which evaluate when their event fires; a body is composed up front, so `current` there is read at composition time.
+- **`current`** is the lazy counterpart: `current.<key>` has exactly the shape of `ctx`, and is observed once per lifecycle event, so every read in one event sees the same value and the next event observes afresh. There is no nesting under it, and a path that is not a `ctx` key fails the run. Its use is in lifecycle hooks, which evaluate when their event fires; a body is composed up front, so `current` there is read at composition time.
 - Ask which moment your question is about. "Were there staged files when this began?" is `ctx`. "Is anything staged right now?", asked from a hook after the run may have changed things, is `current`. A body that must show the agent the present state uses `::shell`.
 - `ctx` is rich, and lists work directly as gates: `ctx.dirty_files` is falsy when empty. Useful groups are git state (`branch`, `dirty_files`, `staged_files`, `untracked_files`, `dirty_source_code_files`, `merge_conflicts`), blast radius (`dirty_packages`, `dirty_package_areas`, and the booleans `current_package_has_dirty_files` and `current_package_area_has_dirty_files`), location (`repo`, `repo_root`, `area`, `area_description`, `current_package`), target (`agent`, `model`), and host and clock (`os`, `now`, `today`, `timestamp`).
 - Functions that reach the network, such as `branch_exists_on_remote()` and `pr_list()`, fail the run when the host is not on the network allowlist, which denies everything by default. Do not put one in a gate that must not raise.
@@ -120,7 +132,7 @@ Flow control:
 Rules that shape a design:
 
 - **`initialize` is shell-free**, and a document that declares `initialize` may not use a frontmatter `$(…)` at all. Approval cannot lift either rule. Put shell work in `start` or later, or drop `initialize` and gate from `start`.
-- **A lifecycle `shell` action cannot hand back its output or exit status.** A non-zero exit fails the item unless `no_error: true`. To branch on a command's result, use the frontmatter form shown above.
+- **A lifecycle `shell` action cannot hand back its output or exit status.** A non-zero exit fails the item unless `no_error: true`. To branch on a command's result from `start` or later, assign it with `set` and a whole-value `$(…)`, which takes the same suffixes as the frontmatter form (`set: { clean: "$(git diff --quiet)::ok" }`), then gate the next item on it. The command is approved up front like every other.
 - **Verify in `success`; do not trust the agent's exit.** Have the agent record its outcome in a file, read it with `frontmatter(file, 'key')`, and end the stack with an unconditional `error` so that a missing outcome is a failure.
 - **Nudge before giving up.** When the outcome is missing, `resume` the session once and ask for it. Runtime state does not survive re-entry, so record that the nudge happened with `set_frontmatter` on a file.
 - **A bounded retry counts on disk.** `retry: N` has no exhaustion event. Use `increment_frontmatter` in `start`, which fires on every attempt, and gate a "gave up" branch on the count.
@@ -138,8 +150,9 @@ Rules that shape a design:
     - A step becomes conditional when its prompt calls `skip` from `initialize` after reading the shared report.
     - The same document may appear in more than one step.
     - A step's document may declare `interactive: true` and runs interactively. Only the sequence document itself may not.
+    - A step's document may `proxy`; the target runs within the same step, and the step completes once.
     - `sequence_id` names the run and is the right seed for a per-run file name.
-- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `_loop_count`, `_loop_is_first`, and `_loop_is_last`.
+- **A loop** (`loop: { while | until, action, max }`) repeats one document. Each iteration is a full composition cycle, and `initialize` fires only on the first. **The condition is checked at the end of an iteration**, against the state that iteration ran with, and the `action` is applied only when the loop continues. A loop therefore always runs at least once, and `while: "n < 2"` counting from `0` runs three times (`n` is `0`, `1`, then `2`). For zero iterations, `skip` from `initialize`. The ambient values are `_loop_count`, `_loop_is_first`, `_loop_is_last`, `_loop_last_output`, and `_loop_last_exit_code`. A `proxy` from any event of an iteration ends the loop and hands off.
 - **In this repository every git commit goes through `prompts/commit.md`.** A stage that produces changes stages them and hands off; it never runs `git commit`.
 ::end-block
 
@@ -151,42 +164,65 @@ Rules that shape a design:
 - **Say what is out of bounds.** A stage that must not commit, push, or repair has to be told so, along with which stage does.
 - Claudine already appends a system prompt telling a non-interactive agent that nobody can answer it. Do not repeat that; add only what is specific to the task, such as where to record what it cannot ask.
 
-::block when="file_exists(defects_spec)"
+::block when="!defects_completed"
 
 ### Defects to design around
 
-Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-handoff-gaps`. The list is read from that specification when this prompt is composed, so an item that appears here has not been fixed. Do not copy a workaround out of `prompts/_pr/` for a defect that is not listed.
+Each item below is an open defect, specified in the fix `2026-09-20-lifecycle-handoff-gaps`. The list is read from that specification's `status` and `fixed:` list when this prompt is composed, so an item that appears here has not been fixed. Do not copy a workaround out of `prompts/_pr/` for a defect that is not listed.
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F1')"
+::block when="!defects_trusted"
+**The defect list could not be read, so every known defect is listed below, including any that may already be fixed.** Confirm a defect against the specification before designing around it.
+
+::block when="defects_lookup_notice"
+- The specification lookup failed: {{ defects_lookup_notice }}.
+::end-block
+::block when="defects_status_notice"
+- The specification's {{ defects_status_notice }}.
+::end-block
+::block when="defects_fixed_notice"
+- The specification's {{ defects_fixed_notice }}.
+::end-block
+
+::end-block
+
+::block when="!defects_trusted || !contains(defects_fixed, 'F1')"
 - **`ctx` git state is reused across composition runs.** A proxy target, a later sequence step, a later loop iteration, and a retried attempt all see the first run's working tree. A hook that needs the present state reads `current`, and a body uses `::shell`.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F2')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F2')"
 - **A `proxy` fired from inside a looping document is recorded but not performed.** Use `retry` for bounded repetition when the document also has to hand off.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F3')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F3')"
 - **A shell command in a transcluded partial is not pre-approved when it interpolates a value that arrived through `proxy … with:`.** Keep such commands inline in the target.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F4')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F4')"
 - **An `error` in a `success` stack fires `failure` and `finalize`, but the process exits `0` and prints no error.** Put a `warn` beside it, and do not depend on the exit code.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F5')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F5')"
 - **A `ctx` property mentioned only in a transcluded file renders empty.** Claudine evaluates the properties found on the root page and does not look through `::file`. A partial that reads `ctx` works only when the prompt including it mentions the same property, so have a partial take what it needs through `set.<key>=` instead.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F7')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F6')"
+- **Some loop references describe a condition checked before each iteration.** It is checked after each iteration, against the state that iteration ran with, so a loop always runs at least once and `while: "n < 2"` counting from `0` runs three times. Count iterations by that rule, not by a page that says a loop can run zero times.
+::end-block
+
+::block when="!defects_trusted || !contains(defects_fixed, 'F7')"
 - **A `proxy` inside a sequence `prompt:` task is refused** with a "no owning coordinator" error. A sequence step cannot hand off; make the target its own step.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'F8')"
+::block when="!defects_trusted || !contains(defects_fixed, 'F8')"
 - **The `loop:` block's own `info`, `warn`, `message`, and stack cannot read the `_loop_*` values**, and referencing one there fails the run. Report loop progress from `start` or `success`, which can.
 ::end-block
 
-::block when="!contains(frontmatter(defects_spec, 'fixed'), 'D1')"
+::block when="!defects_trusted || !contains(defects_fixed, 'D1')"
 - **Interpolation literals are converted only in a file that also contains a real span.** A file whose every brace span is a literal reaches the agent with its triple braces intact. Give such a file one real span.
+::end-block
+
+::block when="!defects_trusted || !contains(defects_fixed, 'D2')"
+- **Claudine's run header can show a `description` wrongly.** Underscores are read as emphasis even inside inline code, so `_pr/open.md` can appear as `pr/open.md`, and a stray `</i>` can appear. A diagnostic that quotes a name such as `_loop_count` loses its underscore the same way. The source is right: read names from the file, and do not rename files or variables to suit the header.
 ::end-block
 
 ::end-block

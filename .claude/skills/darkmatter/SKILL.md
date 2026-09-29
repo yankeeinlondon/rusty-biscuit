@@ -47,7 +47,7 @@ away from their references or replace their content with placeholders.
 | DMLS architecture, protocol behavior, and rollout history | [dmls.md](dmls.md) |
 | Render tree, style lowering, disclosure blocks, code blocks | [rendering.md](rendering.md) |
 | Terminal rendering options | [terminal.md](terminal.md) |
-| Frontmatter model | [frontmatter.md](frontmatter.md) |
+| Frontmatter model, literal tokens, in-place leaf edits | [frontmatter.md](frontmatter.md) |
 | Error/status block conventions | [errors.md](errors.md) |
 | Document comparison | [comparison.md](comparison.md) |
 | Module layout | [structure.md](structure.md) |
@@ -258,11 +258,34 @@ rule lives in the lexer, never in `is_identifier_char`. Any cursor-side scan
 rather than add `-` to a character class, which would merge `foo--bar`.
 
 A `{{ … }}` that cannot be parsed or evaluated fails full-document
-composition regardless of `fail_fast`. Every scan is single-pass: text an
-expression, file read, shell command, or literal produced is data and is
-never scanned again (`compose/value_origin.rs` for frontmatter,
-`DataRanges` in `compose/body_origin.rs` for the body); a directive
-scanner must read the masked view (`parse_utils::structural_view`). `interpolate_text`/`interpolate_value` take an explicit
+composition regardless of `fail_fast`.
+
+**Inserted text is data.** Every authored span is scanned once. Produced text
+is never scanned again. This covers expression results, file reads, shell
+output, `{{{ }}}` results, data overrides, decoded tokens, and values a parent
+passes to a child. There is intentionally no fixed point:
+`note: "fixed {{{ area }}}"` renders `{{ note }}` as `fixed {{ area }}`. A
+template that relied on a rescan is rewritten at the source. Rules to keep:
+
+- Origin travels beside values. Frontmatter uses `compose/value_origin.rs`,
+  and the body uses `DataRanges`. A directive scanner reads
+  `parse_utils::structural_view`.
+- Frontmatter `$( … )` runs only when its *authored source* is a whole value.
+- Guards judge authored syntax, never flattened text.
+- `--set` (`with_set_overrides`) stays an authored template, and its failures
+  name the override (`SourceRef::Supplied`). Callers pass produced values
+  with `with_data_overrides` or `with_override_layers`.
+- A stored `"{{!data:v1:<base64url>}}"` (`markdown::literal_token`) is a data
+  string. Loaders keep it encoded, and readers call `decode_literal_tokens`.
+- A malformed token is a located, authoring-fatal `MalformedLiteralToken`.
+- Data is never schema-pending (`holds_pending_syntax`).
+- `hash::locate_frontmatter_leaves` finds a leaf's bytes for an in-place
+  write.
+
+Details are in [compose.md](compose.md#inserted-text-is-data) and
+[frontmatter.md](frontmatter.md#literal-tokens).
+
+`interpolate_text`/`interpolate_value` take an explicit
 `ExpressionFailurePolicy`. Pass `Strict` from document stages. Use `Lenient`
 only for `compose_subtree(..., Lenient)` and preflight discovery (see
 [compose.md](compose.md#error-handling)). The error carries the authored

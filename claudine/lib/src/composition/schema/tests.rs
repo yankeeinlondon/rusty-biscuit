@@ -1034,6 +1034,33 @@ fn status_report_marks_invalid_required_correctly() {
 }
 
 #[test]
+fn status_report_judges_a_caller_file_from_the_launch_area() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  spec: 'file(required;eager)'\n---\nbody\n",
+    );
+    let launch = TempDir::new().unwrap();
+    fs::create_dir_all(launch.path().join("fixes/x")).unwrap();
+    fs::write(launch.path().join("fixes/x/spec.md"), "# Spec\n").unwrap();
+
+    let state = |spec: &str| {
+        let overrides = serde_json::json!({ "spec": spec });
+        build_schema_status_report(&source, Some(&overrides), Some(launch.path()))
+            .unwrap()
+            .unwrap()
+            .required[0]
+            .state
+    };
+    assert_eq!(
+        state("fixes/x/spec.md"),
+        PropertyState::Valid,
+        "the document directory lacks the file; the launch area has it",
+    );
+    assert_eq!(state("fixes/y/spec.md"), PropertyState::Invalid);
+}
+
+#[test]
 fn status_report_overrides_supply_missing_required() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
@@ -2131,4 +2158,117 @@ fn status_report_marks_document_dir_file_valid() {
         PropertyState::Valid,
         "a file value resolvable against the document dir must report Valid: {spec:?}",
     );
+}
+
+// -- stored literal tokens and data overrides are final values (N6) ---------
+
+/// A stored literal token is judged by the text it holds and is never
+/// "pending composition": a valid decoded value passes, an invalid optional
+/// one is dropped, and the source handed on keeps the token bytes.
+#[test]
+fn a_stored_literal_token_is_judged_by_its_text() {
+    use darkmatter::markdown::literal_token::{encode, encode_yaml_scalar};
+    let dir = TempDir::new().unwrap();
+    let valid = make_source(
+        &dir,
+        &format!(
+            "---\n$schema:\n  mode: 'enum(alpha, beta)'\nmode: {}\n---\nbody\n",
+            encode_yaml_scalar("alpha")
+        ),
+    );
+    let pre = pre_validate_schema(&valid, None, None).expect("the decoded text is in the enum");
+    assert_eq!(
+        pre.source.markdown.frontmatter().as_map()["mode"],
+        serde_json::json!(encode("alpha")),
+        "the token is kept for composition to decode"
+    );
+    let status = build_schema_status_report(&valid, None, None).unwrap().unwrap();
+    assert!(!status.has_invalid_optional, "{status:?}");
+
+    let invalid = make_source(
+        &dir,
+        &format!(
+            "---\n$schema:\n  count: 'number'\ncount: {}\n---\nbody\n",
+            encode_yaml_scalar("$(echo 1)")
+        ),
+    );
+    let (scrubbed, _, dropped) = drop_invalid_optionals(invalid, None, None);
+    assert!(
+        !scrubbed.markdown.frontmatter().as_map().contains_key("count"),
+        "a token holding command text is data, not a pending command"
+    );
+    assert_eq!(dropped.len(), 1);
+}
+
+/// A data override holding template text is judged; the same text typed by a
+/// person stays a template and is deferred to composition.
+#[test]
+fn a_data_override_is_judged_and_an_authored_one_is_deferred() {
+    use crate::composition::LayeredOverrides;
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  count: 'number(required)'\ncount: 1\n---\nbody\n",
+    );
+    let value = serde_json::json!({"count": "{{ n }}"});
+
+    let authored = LayeredOverrides::from_parts(Some(&value), &Default::default());
+    pre_validate_layered_for_mode(&source, &authored, None, CompositionMode::ChainedDocument)
+        .expect("an authored template is deferred to composition");
+
+    let data_keys = std::collections::BTreeSet::from(["count".to_string()]);
+    let data = LayeredOverrides::from_parts(Some(&value), &data_keys);
+    let error =
+        pre_validate_layered_for_mode(&source, &data, None, CompositionMode::ChainedDocument)
+            .expect_err("a data string cannot satisfy `number`");
+    assert!(matches!(error, CompositionError::SchemaValidation { .. }), "{error:?}");
+}
+
+#[test]
+fn provided_file_match_partial_in_a_union_reports_unresolved_file_reference() {
+    // A root union used to fall back to the generic SchemaValidation. The glob
+    // now comes from the arm that declares `spec` as `file(match)`, or from the
+    // D1 merge of every such arm.
+    let dir = TempDir::new().unwrap();
+    let overrides = serde_json::json!({ "spec": "everywhere" });
+    for (schema, expected) in [
+        (
+            "  - spec: 'file(required;match(**/*spec*.md);eager)'\n  - design: 'file(required)'\n",
+            vec!["**/*spec*.md"],
+        ),
+        (
+            "  - spec: 'file(required;match(**/features/**/spec.md);eager)'\n  \
+             - spec: 'file(required;match(**/fixes/**/spec.md, **/features/**/spec.md);eager)'\n",
+            vec!["**/features/**/spec.md", "**/fixes/**/spec.md"],
+        ),
+    ] {
+        let source = make_source(&dir, &format!("---\n$schema:\n{schema}---\nbody\n"));
+        let err = pre_validate_schema(&source, Some(&overrides), None)
+            .expect_err("a union file(match) partial with no literal match must fail");
+        let CompositionError::UnresolvedFileReference {
+            property,
+            provided,
+            patterns,
+            is_array,
+            reason,
+            ..
+        } = err
+        else {
+            panic!("{schema}: expected UnresolvedFileReference, got {err}");
+        };
+        assert_eq!(property, "spec");
+        assert_eq!(provided, "everywhere");
+        assert_eq!(patterns, expected, "{schema}");
+        assert!(!is_array);
+        assert!(reason.contains("no existing file matched reference"), "{reason}");
+    }
+
+    // Arms that disagree on the array shape offer no single glob.
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  - spec: 'file(required;match(**/*spec*.md);eager)'\n  \
+         - spec: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+    );
+    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err("still invalid");
+    assert!(matches!(err, CompositionError::SchemaValidation { .. }), "{err}");
 }

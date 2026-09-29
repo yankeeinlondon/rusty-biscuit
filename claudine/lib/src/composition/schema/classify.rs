@@ -205,6 +205,11 @@ pub(super) fn is_required(shape: Option<&SchemaShape>, name: &str) -> bool {
 /// candidates. The CLI catches this variant and drives a confirmation dialog
 /// (single match) or chooser (multiple), mirroring the missing-property loop.
 ///
+/// A root union qualifies too: the glob comes from the arm a literal
+/// discriminant settles, the arm that declares the property as
+/// `file(match)`, or the D1 merge when several do (see
+/// [`supplied::file_reference_target`]).
+///
 /// Returns `None` when no problem qualifies, so the caller falls back to the
 /// generic [`CompositionError::SchemaValidation`]. Only the first qualifying
 /// property is surfaced; the interactive retry re-runs validation and picks up
@@ -215,39 +220,19 @@ pub(super) fn classify_unresolved_file_reference(
     effective: Option<&EffectiveSchema>,
     instance: &serde_json::Value,
 ) -> Option<CompositionError> {
-    let shape = match effective?.simplified.as_ref()? {
-        SimplifiedSchema::Single(s) => s,
-        SimplifiedSchema::Union(_) => return None,
-    };
+    let effective = effective?;
     for problem in problems {
-        // Only Darkmatter's `NoMatch` ("no existing file matched reference")
-        // is a resolvable partial — a parse/resolution error is a genuinely
-        // bad value that a glob walk cannot rescue.
-        if !problem.message.contains("no existing file matched reference") {
+        if !problem.message.contains(supplied::NO_MATCH) {
             continue;
         }
         let Some(name) = top_level_pointer_segment(&problem.path) else {
             continue;
         };
-        let Some(atom) = atom_for_property(shape, &name) else {
-            continue;
-        };
-        if !matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File)) {
-            continue;
-        }
-        let patterns: Vec<String> = atom
-            .constraints
-            .iter()
-            .find_map(|c| match c {
-                Constraint::Match(p) => Some(p.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
         // A bare `file` (no glob) has nothing to walk — leave it to the generic
         // validation path.
-        if patterns.is_empty() {
+        let Some(target) = supplied::file_reference_target(effective, &name, instance) else {
             continue;
-        }
+        };
         let Some(provided) = provided_partial_value(instance.get(&name)) else {
             continue;
         };
@@ -255,8 +240,8 @@ pub(super) fn classify_unresolved_file_reference(
             source_path: source_path.to_path_buf(),
             property: name,
             provided,
-            patterns,
-            is_array: atom.is_array,
+            patterns: target.patterns,
+            is_array: target.is_array,
             reason: problem.message.clone(),
         });
     }
@@ -568,42 +553,32 @@ pub fn build_schema_status_report_for_mode(
         }
     }
 
-    status_report_for_instance(
-        &effective,
-        phase,
-        &source.resolved_path,
-        fm_map,
-    )
+    // Judged on the text composition reads; `fm_map` keeps stored tokens so
+    // the status below still sees them as data rather than pending.
+    let instance =
+        crate::composition::closure::stored_text(&serde_json::Value::Object(fm_map.clone()));
+    let mut report = match phase {
+        Some(phase) => effective.validate_for_phase(&instance, phase),
+        None => Ok(effective.validate(&instance)),
+    }
     .map_err(|error| {
         schema_error_to_composition_error(
             &source.resolved_path,
             error.to_string(),
             Some(&error),
         )
-    })
-}
-
-/// Build the per-property status of `instance` against an already-resolved
-/// effective schema, judged at `phase` (`None` = unphased).
-///
-/// Shared by the pre-prepare launch report and the retained launch report on
-/// a prepared composition; the completion verdict renders through the same
-/// shape so both ends of a run look alike.
-pub(in crate::composition) fn status_report_for_instance(
-    effective: &EffectiveSchema,
-    phase: Option<SchemaPhase>,
-    source_path: &std::path::Path,
-    fm_map: serde_json::Map<String, serde_json::Value>,
-) -> Result<Option<SchemaStatusReport>, SchemaError> {
-    let instance = serde_json::Value::Object(fm_map.clone());
-    let report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase)?,
-        None => effective.validate(&instance),
-    };
+    })?;
+    let caller_resolved =
+        caller_resolved_file_properties(&report.problems, set_overrides, file_ref_fallback_dir);
+    report.problems.retain(|problem| {
+        matches!(problem.kind, ValidationProblemKind::Missing)
+            || !top_level_pointer_segment(&problem.path)
+                .is_some_and(|name| caller_resolved.contains(&name))
+    });
     Ok(status_report_from_validation(
-        effective,
+        &effective,
         phase,
-        source_path,
+        &source.resolved_path,
         fm_map,
         &report,
     ))

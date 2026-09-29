@@ -202,13 +202,11 @@ fn no_cache_combines_with_timeout_either_order() {
 #[test]
 fn rejects_invalid_suffix_after_expression() {
     let result = parse_shell_value("$(uuidgen)::bogus", "key", None);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("Unexpected trailing content")
-    );
+    let message = result.unwrap_err().to_string();
+    assert!(message.contains("Unrecognized suffix `::bogus`"), "{message}");
+    for suffix in ["::ok", "::exit-code", "::result", "::timeout:<seconds>", "::no-cache"] {
+        assert!(message.contains(suffix), "{message}");
+    }
 }
 
 #[test]

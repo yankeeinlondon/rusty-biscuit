@@ -27,6 +27,18 @@ When composing a document graph, Darkmatter uses one request context for the who
 
 Context capture is **demand-driven**: a document is scanned for `ctx.*` references and only the groups it references are captured. If a document uses only `{{ ctx.today }}`, no git discovery, OS detection, or hardware probing occurs. Within a captured group, all properties in that group are computed; the laziness is at the group boundary, not per-property.
 
+The scan reads what composition executes. Every frontmatter string counts, however deeply nested. In the body, a mention inside a fenced or indented code block is an example and captures nothing, because body interpolation skips those blocks too:
+
+````md
+Run `{{ ctx.os }}`-specific steps.   <- captures the OS group
+
+```md
+{{ ctx.dirty_files }}                <- an example; captures nothing
+```
+````
+
+A document that sets `interpolate_code_blocks: true` interpolates its code blocks, so their mentions count again. An interpolation literal (`{{{ ctx.os }}}`) never counts.
+
 ### The request context and its authority
 
 `ComposeOptions` is the context authority for a composition. It carries the captured `ComposeContext` and a `ContextAuthority` that decides whether that context may grow:

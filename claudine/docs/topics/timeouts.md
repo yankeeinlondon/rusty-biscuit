@@ -512,7 +512,14 @@ a lifecycle `failure`/`finalize` stack can branch on the `err` global
 | Termination | `error_kind` | Failure event | Recovery path |
 |---|---|---|---|
 | `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `failure` stack `Retry`/`Resume` |
-| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` / `stalled_generation` | `AgentFailure` | none (fail-fast) |
+| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` / `stalled_generation` / `input_required` | `AgentFailure` | none (fail-fast) |
+
+`input_required` is not a content guard, but it ends the run the same way: a
+managed provider is waiting for human input that no one can give and that has
+no documented safe answer (for example, a Pi extension UI request whose method
+Pi does not document). Claudine never invents an answer, so the run is failed
+rather than left waiting; a retry would reach the same request. See
+[Managed Pi RPC execution](pi-rpc.md#unattended-requests).
 
 `repeated_stream_error` is an OpenCode-specific stderr backstop: consecutive
 `message="stream error"` records crossing `MAX_CONSECUTIVE_STREAM_ERRORS` (5)

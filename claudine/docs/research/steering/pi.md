@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 3
+schema_revision: 4
 provider: pi
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -99,7 +99,13 @@ compatibility:
   - { mechanism_id: rpc-abort-submit, profile_id: retained-rpc, os: linux, versions_verified: [], documented_version_bounds: unknown, read_only_check: "Inspect all phase types.", success_criteria: "Exact match.", failure_behavior: "Disable fallback.", evidence_ids: [official-rpc] }
   - { mechanism_id: rpc-abort-submit, profile_id: retained-rpc, os: windows, versions_verified: [], documented_version_bounds: unknown, read_only_check: "Inspect all types and Windows behavior.", success_criteria: "Exact match.", failure_behavior: "Disable fallback.", evidence_ids: [official-rpc] }
 verification:
-- assertions:
+- id: pi-rpc-abort-bash-cleanup-0844
+  assertion_kinds:
+  - cancellation_established
+  - process_cleanup
+  - resource_preservation
+  - expected_loss
+  assertions:
   - abort acknowledgment followed by absence of marked external tool process at observation
   - provider SIGKILL leaves marked external tool process alive at observation
   - fixture cleanup removes surviving owned process
@@ -118,7 +124,11 @@ verification:
   session_state: working
   tested_on: 2026-09-08
 
-- assertions:
+- id: pi-rpc-steer-switch-0844
+  assertion_kinds:
+  - target_identity
+  - expected_loss
+  assertions:
   - old session remains observable during a pending switch
   - steering acknowledged during switch is lost when switch completes
   - steering queued after switch reaches the new session once
@@ -135,7 +145,10 @@ verification:
   provider_version: 0.84.4
   session_state: idle
   tested_on: 2026-09-08
-- assertions:
+- id: pi-rpc-steer-crash-0844
+  assertion_kinds:
+  - expected_loss
+  assertions:
   - provider killed after observed steering acknowledgment
   - queued steering neither saved in transcript nor consumed by model before abrupt termination
   evidence_ids:
@@ -152,7 +165,12 @@ verification:
   session_state: working
   tested_on: 2026-09-08
 
-- assertions:
+- id: pi-rpc-abort-failures-0844
+  assertion_kinds:
+  - target_identity
+  - cancellation_established
+  - expected_loss
+  assertions:
   - same session and idle after abort
   - cooperative tool waits canceled without normal completion
   - uncleared steering persists once in transcript and reaches explicit next model turn
@@ -171,7 +189,10 @@ verification:
   provider_version: 0.84.4
   session_state: working
   tested_on: 2026-09-08
-- assertions:
+- id: pi-rpc-steer-eof-0844
+  assertion_kinds:
+  - expected_loss
+  assertions:
   - acknowledged steering not consumed or persisted after stdin EOF while tools are held
   - successful process exit does not prove delivery
   - no automatic replay after unobserved acknowledgment
@@ -189,7 +210,15 @@ verification:
   session_state: working
   tested_on: 2026-09-08
 
-- assertions:
+- id: pi-rpc-steer-active-0844
+  assertion_kinds:
+  - target_identity
+  - acceptance_signal
+  - delivery_boundary
+  - running_work_preserved
+  - conversation_delivery
+  - duplicate_behavior
+  assertions:
   - acceptance precedes tool completion
   - both tool calls finish before subsequent model input contains steering
   - same session after settlement
@@ -207,7 +236,12 @@ verification:
   provider_version: 0.84.4
   session_state: working
   tested_on: 2026-09-08
-- assertions:
+- id: pi-rpc-idle-prompt-0844
+  assertion_kinds:
+  - target_identity
+  - conversation_delivery
+  - resource_preservation
+  assertions:
   - template and skill expansion reach model
   - context loaded
   - same conversation across idle prompts
@@ -274,6 +308,7 @@ gaps:
   - { area: OS, detail: "Only macOS passive evidence; Linux/native Windows absent.", next_check: "Run native passive checks and later disposable tests." }
   - { area: model_provenance, detail: "Model/effort are launcher-supplied; resolved execution metadata is not exposed here.", next_check: "Persist resolved metadata when backend exposes it." }
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - "Refreshed schema revision 1 pilot to revision 2 with launch profiles and complete case products."
   - "Added access, receipt, framing, compatibility, queue, and interruption records."
   - "Corrected stale claim: v0.84.4 AgentSession emits agent_settled and RPC forwards it; agent_end is lower-level."

@@ -34,6 +34,56 @@ mod tests {
     use crate::discovery::detection::UnderlineSupport;
     use crate::terminal::Terminal;
 
+    // ── Author text renders as written ────────────────────────────────
+
+    fn plain(input: &str) -> String {
+        crate::utils::escape_codes::strip_escape_codes(Prose::new(input).render_optimistic(None))
+    }
+
+    #[test]
+    fn description_with_underscored_file_names_keeps_every_character() {
+        let description = "1. **_pr/open.md** opens it.\n2. **_pr/triage.md** triages it.\n\nSee `_pr/_report.md`.";
+        let rendered = plain(&format!("<i><dim>{description}</dim></i>"));
+        assert_eq!(
+            rendered,
+            "1. _pr/open.md opens it.\n2. _pr/triage.md triages it.\n\nSee `_pr/_report.md`."
+        );
+    }
+
+    #[test]
+    fn escaped_author_text_renders_verbatim() {
+        let description = "1. **_pr/open.md** opens it.\n2. **_pr/triage.md** triages it.\n\nSee `_pr/_report.md`. </i> {x}";
+        let rendered = plain(&format!(
+            "<i><dim>{}</dim></i>",
+            Prose::escape_text(description)
+        ));
+        assert_eq!(rendered, description);
+    }
+
+    #[test]
+    fn diagnostic_quoting_a_leading_underscore_identifier_keeps_it() {
+        let rendered = plain("unknown root '_loop_countx' in '{{ _loop_countx }}'");
+        assert_eq!(
+            rendered,
+            "unknown root '_loop_countx' in '{{ _loop_countx }}'"
+        );
+    }
+
+    #[test]
+    fn mismatched_emphasis_never_leaks_a_tag() {
+        for input in ["**a _b** c_", "_a **b_ c**", "<dim>_x</dim> y_"] {
+            let rendered = plain(input);
+            assert!(
+                !rendered.contains("</"),
+                "{input:?} leaked markup: {rendered:?}"
+            );
+            assert!(
+                !rendered.contains("<i>") && !rendered.contains("<b>"),
+                "{input:?}: {rendered:?}"
+            );
+        }
+    }
+
     // ── Former atomic-token syntax is now literal text ───────────────
 
     #[test]

@@ -269,6 +269,27 @@ The normalizer treats it as a hard stop for rule scans and copies the
 tail verbatim. Every rule helper uses `first_dash_dash_index` to find
 the boundary; new rules must do the same.
 
+A provider wrapper then consumes that `--` as its own boundary. The
+arguments after it are never read as Claudine flags, and they reach the
+provider as options, without the `--`, ahead of any separator the provider
+profile adds before the first message:
+
+```sh
+claudine pi "hello" -i -- --offline   # launches: pi --offline -- hello
+claudine codex -- --edit --version    # launches: codex --edit --version
+                                      # (Claudine's editor stays closed)
+```
+
+Only the first `--` is Claudine's; a later one stays in the tail. The
+tail is still searched for the first message when none came before the
+`--` (`claudine codex -- --json "summarize"` sends `summarize` as the
+prompt), and an argument right after a later `--` counts as that message
+even when it starts with `-`:
+
+```sh
+claudine opencode -- -- "- fix the bug"   # prompt: "- fix the bug"
+```
+
 ### 6. Let clap render every user-facing error
 
 The pre-parser never emits an error message. Unknown arguments, invalid

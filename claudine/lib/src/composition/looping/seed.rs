@@ -2,10 +2,12 @@
 //! that lifts iteration-control variables (and, optionally, the full parsed
 //! lifecycle config) out of a resolved composition source.
 
+use darkmatter::markdown::compose::OverrideOrigin;
 use serde_json::{Map, Value};
 
 use super::super::error::CompositionError;
 use super::super::lifecycle::LifecycleConfig;
+use super::super::runtime_state::LayeredOverrides;
 use super::super::prepare::{BootstrapPreparation, PrepareOptions, prepare_direct, prepare_inline};
 use super::super::types::{CompositionMode, LoopConfig, ResolvedCompositionSource};
 use super::config::extract_control_variables;
@@ -13,8 +15,9 @@ use super::config::extract_control_variables;
 /// Build the initial frontmatter for a loop from resolved control variables.
 ///
 /// Runs one compose pass to resolve the document, then lifts only:
-/// - CLI `set_overrides` keys, carried verbatim so the body sees them every
-///   iteration;
+/// - the authored CLI `set_overrides` keys, carried verbatim so the body sees
+///   them every iteration (data override keys, such as a `proxy.with:`
+///   overlay, stay in the prepare options' own layer instead);
 /// - control variables (action targets, condition identifiers, and identifiers
 ///   referenced by action-value templates), resolved from
 ///   `effective_frontmatter`.
@@ -97,7 +100,7 @@ pub fn build_loop_seed_with_lifecycle(
         seed: lift_seed(
             config,
             &prepared.effective_frontmatter,
-            prepare_options.set_overrides.as_ref(),
+            &prepare_options.layered_overrides(),
         ),
         lifecycle: prepared.lifecycle,
         initialize_frontmatter: prepared.effective_frontmatter.as_object().cloned().unwrap_or_default(),
@@ -120,7 +123,7 @@ pub fn build_loop_seed_from_bootstrap(
         seed: lift_seed(
             config,
             &bootstrap.effective_frontmatter,
-            bootstrap.input_layers.set_overrides.as_ref(),
+            &bootstrap.input_layers.layered_overrides(),
         ),
         lifecycle: bootstrap.lifecycle.clone(),
         initialize_frontmatter: bootstrap.effective_frontmatter.as_object().cloned().unwrap_or_default(),
@@ -130,12 +133,12 @@ pub fn build_loop_seed_from_bootstrap(
 fn lift_seed(
     config: &LoopConfig,
     effective: &Value,
-    set_overrides: Option<&Value>,
+    caller: &LayeredOverrides,
 ) -> Map<String, Value> {
     let mut seed = Map::new();
 
-    if let Some(Value::Object(set_overrides)) = set_overrides {
-        for (key, value) in set_overrides {
+    for (key, value) in caller.values() {
+        if caller.origin_of(key) == OverrideOrigin::Authored {
             seed.insert(key.clone(), value.clone());
         }
     }

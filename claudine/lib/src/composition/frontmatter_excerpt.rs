@@ -1,11 +1,19 @@
-//! Captured frontmatter YAML for rendering an error-attached source excerpt.
+//! Focused frontmatter YAML for an error-attached source excerpt.
 //!
 //! When a composition error is rooted in a prompt file's YAML frontmatter, the
-//! report is far easier to act on if it shows the frontmatter itself with the
-//! offending line highlighted. [`FrontmatterExcerpt`] captures the verbatim
-//! frontmatter block (delimiters included, so its line numbers match the source
-//! file) plus the 1-based line to highlight, and renders it through the
-//! [`CodeBlock`] component.
+//! report is far easier to act on if it shows the lines involved. A
+//! [`FrontmatterExcerpt`] holds only the focused regions of the block: each
+//! located line with [`EXCERPT_CONTEXT_LINES`] of context either side, plus the
+//! header lines that enclose it (a `$schema:` parent, the `- …` line opening a
+//! union arm). It renders each region as a [`CodeBlock`] numbered with its real
+//! source lines, joined by a `⋮` elision line. When nothing is locatable, no
+//! excerpt is captured; the whole block renders only when the focused regions
+//! already cover every line of it.
+//!
+//! Line *selection* comes from `biscuit-terminal`'s
+//! [`SourceContext::focused_line_regions`]; this module resolves Claudine's
+//! property paths (sequence indexes, re-rooted task paths, `$schema`
+//! declarations) to the lines it focuses.
 //!
 //! The excerpt is attached to an error at the render boundary (see
 //! `CompositionError::enrich_frontmatter`) and appended after the primary
@@ -13,45 +21,102 @@
 //! output to avoid exposing frontmatter into pipes, logs, and CI — the same
 //! privacy posture the inline-compose / sequence mismatch diagnostic uses.
 
+use std::path::PathBuf;
+
 use biscuit_terminal::discovery::detection::ColorDepth;
+use biscuit_terminal::errors::SourceContext;
 use biscuit_terminal::prelude::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::dsl::CodeBlockMeta;
 
-/// A captured frontmatter block plus the line to highlight, ready to render as
-/// a YAML [`CodeBlock`] appended to an error report.
+/// Lines of context shown above and below each focused line (ruling D2; there
+/// is deliberately no configuration surface).
+pub const EXCERPT_CONTEXT_LINES: usize = 3;
+
+/// The focused regions of a frontmatter block, ready to render as YAML
+/// [`CodeBlock`]s appended to an error report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontmatterExcerpt {
-    /// The frontmatter block including its `---` delimiter lines, so a
-    /// 1-based line within `block` equals the same line in the source file.
-    block: String,
-    /// 1-based source-file line to highlight, when the offending property could
-    /// be located within the frontmatter. `None` renders a plain numbered block.
-    highlight_line: Option<usize>,
+    /// Non-adjacent runs of source lines, ascending.
+    regions: Vec<ExcerptRegion>,
     /// Whether stderr was a TTY when the excerpt was captured. Gates rendering:
-    /// non-TTY output omits the block entirely.
+    /// non-TTY output omits the excerpt entirely.
     stderr_is_tty: bool,
 }
 
+/// One contiguous run of frontmatter source lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExcerptRegion {
+    /// The run's source text, without a trailing line-ending.
+    text: String,
+    /// 1-based source-file line of the run's first line.
+    start_line: usize,
+    /// 1-based source-file lines to highlight within the run.
+    highlighted: Vec<usize>,
+}
+
 impl FrontmatterExcerpt {
-    /// Capture an excerpt from a document's full source text.
-    ///
-    /// `property` is a dotted frontmatter key (e.g. `"success.message"`) to
-    /// highlight; when `None` or not locatable, no line is highlighted.
+    /// Capture the excerpt for one dotted frontmatter property
+    /// (e.g. `"success.message"`, `"initialize.stack[0].action[1].set"`).
     ///
     /// ## Returns
     ///
-    /// `None` when `source_text` has no well-formed frontmatter block.
-    pub fn capture(source_text: &str, property: Option<&str>, stderr_is_tty: bool) -> Option<Self> {
+    /// `None` when `source_text` has no well-formed frontmatter block or the
+    /// property cannot be located in it.
+    pub fn capture(source_text: &str, property: &str, stderr_is_tty: bool) -> Option<Self> {
+        Self::capture_properties(source_text, &[property], stderr_is_tty)
+    }
+
+    /// Capture the union of the excerpts for several dotted frontmatter
+    /// properties. Properties that cannot be located are skipped.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when `source_text` has no well-formed frontmatter block or none
+    /// of the properties can be located.
+    pub fn capture_properties(
+        source_text: &str,
+        properties: &[impl AsRef<str>],
+        stderr_is_tty: bool,
+    ) -> Option<Self> {
         let block = capture_frontmatter_block(source_text)?;
-        let highlight_line = property.and_then(|p| locate_property_line(&block, p));
-        Some(Self {
-            block,
-            highlight_line,
-            stderr_is_tty,
-        })
+        let lines = properties
+            .iter()
+            .filter_map(|property| locate_property_line(&block, property.as_ref()))
+            .collect();
+        Self::focus(&block, lines, stderr_is_tty)
+    }
+
+    /// Capture the excerpt for properties a schema problem names.
+    ///
+    /// Each property is shown where the document sets it (an exact frontmatter
+    /// key, when one exists) and where `$schema` declares it: under an inline
+    /// `$schema` mapping, or in every arm of a `$schema` union.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when `source_text` has no well-formed frontmatter block or no
+    /// property is found in either place.
+    pub fn capture_schema_properties(
+        source_text: &str,
+        properties: &[impl AsRef<str>],
+        stderr_is_tty: bool,
+    ) -> Option<Self> {
+        let block = capture_frontmatter_block(source_text)?;
+        let located = located_paths(&block);
+        let lines = properties
+            .iter()
+            .flat_map(|property| {
+                let property = property.as_ref();
+                located
+                    .iter()
+                    .filter(move |(path, _)| path == property || declares(path, property))
+                    .map(|(_, line)| *line)
+            })
+            .collect();
+        Self::focus(&block, lines, stderr_is_tty)
     }
 
     /// Capture an excerpt for a schema-body parse failure, mapping a byte span
@@ -73,7 +138,8 @@ impl FrontmatterExcerpt {
     ///
     /// ## Returns
     ///
-    /// `None` when `source_text` has no well-formed frontmatter block.
+    /// `None` when `source_text` has no well-formed frontmatter block or
+    /// neither the property nor `$schema` can be located.
     pub fn capture_schema_span(
         source_text: &str,
         property: Option<&str>,
@@ -81,32 +147,49 @@ impl FrontmatterExcerpt {
         stderr_is_tty: bool,
     ) -> Option<Self> {
         let block = capture_frontmatter_block(source_text)?;
-        let highlight_line = property
+        let line = property
             .and_then(|p| locate_property_line(&block, p))
             .map(|line| line + value_line_offset(&block, line, span_start))
             .or_else(|| locate_property_line(&block, "$schema"));
-        Some(Self {
-            block,
-            highlight_line,
-            stderr_is_tty,
-        })
+        Self::focus(&block, line.into_iter().collect(), stderr_is_tty)
     }
 
-    /// Capture a near-miss frontmatter excerpt by line number.
+    /// Capture the excerpt around a 1-based source line.
     ///
-    /// Recognizes a matched dash-only (`----`+) fence pair at the top of the
-    /// document and returns the block with the requested line highlighted.
-    /// This is used for errors like `FrontmatterFenceMismatch` where the
-    /// offending token is the delimiter itself, not a YAML property.
+    /// Used where the error carries a document line rather than a property: a
+    /// YAML parse error with a location, or `FrontmatterFenceMismatch`, whose
+    /// offending token is the delimiter itself. The block is the `---`
+    /// frontmatter, or else a matched dash-only (`----`+) near-miss fence pair.
     ///
     /// ## Returns
     ///
-    /// `None` when `source_text` has no matched near-miss dash-only fence pair.
+    /// `None` when `source_text` has neither block, or `line` is outside it.
     pub fn capture_line(source_text: &str, line: usize, stderr_is_tty: bool) -> Option<Self> {
-        let block = capture_near_miss_frontmatter_block(source_text)?;
-        Some(Self {
+        let block = capture_frontmatter_block(source_text)
+            .or_else(|| capture_near_miss_frontmatter_block(source_text))?;
+        Self::focus(&block, vec![line], stderr_is_tty)
+    }
+
+    /// Focus `block` (whose line 1 is the source file's line 1) on `lines`.
+    fn focus(block: &str, lines: Vec<usize>, stderr_is_tty: bool) -> Option<Self> {
+        let context = SourceContext::with_frontmatter(
+            PathBuf::new(),
+            PathBuf::new(),
             block,
-            highlight_line: Some(line),
+            Some(0..block.len()),
+        );
+        let source_lines: Vec<&str> = block.lines().collect();
+        let regions = context
+            .focused_line_regions(&lines, EXCERPT_CONTEXT_LINES)?
+            .into_iter()
+            .map(|region| ExcerptRegion {
+                text: source_lines[region.start_line - 1..region.end_line].join("\n"),
+                start_line: region.start_line,
+                highlighted: region.highlighted,
+            })
+            .collect();
+        Some(Self {
+            regions,
             stderr_is_tty,
         })
     }
@@ -114,36 +197,89 @@ impl FrontmatterExcerpt {
     /// Render the excerpt as a trailing appendix for an error report.
     ///
     /// Returns an empty string in non-TTY output (privacy gating). Otherwise
-    /// returns the YAML [`CodeBlock`] prefixed with a blank-line separator. SGR
-    /// and OSC 8 escapes are stripped when the terminal has no color depth, so
+    /// returns a blank-line separator and one YAML [`CodeBlock`] per region,
+    /// numbered with source lines, with a `⋮` line between regions. SGR and
+    /// OSC 8 escapes are stripped when the terminal has no color depth, so
     /// redirected / `NO_COLOR` output stays plain text.
     pub fn render_appendix(&self, term: &Terminal) -> String {
         if !self.stderr_is_tty {
             return String::new();
         }
-        let mut meta = CodeBlockMeta {
-            line_numbering: true,
-            ..CodeBlockMeta::default()
-        };
-        if let Some(line) = self.highlight_line {
-            meta.highlight.add_line(line);
+        let mut rendered = String::new();
+        for (idx, region) in self.regions.iter().enumerate() {
+            let mut meta = CodeBlockMeta {
+                line_numbering: true,
+                ..CodeBlockMeta::default()
+            };
+            for line in &region.highlighted {
+                meta.highlight.add_line(*line);
+            }
+            let block = CodeBlock::yaml(region.text.clone())
+                .with_meta(meta)
+                .with_start_line(region.start_line)
+                .render(term);
+            if idx > 0 {
+                rendered.push('\n');
+                rendered.push_str(&" ".repeat(gutter_column(&block)));
+                rendered.push_str("⋮\n");
+            }
+            rendered.push_str(block.trim_end_matches('\n'));
         }
-        let rendered = CodeBlock::yaml(self.block.clone()).with_meta(meta).render(term);
         let body = if matches!(term.color_depth, ColorDepth::None) {
             strip_escape_codes(&rendered)
         } else {
             rendered
         };
-        format!("\n\n{}", body.trim_end_matches('\n'))
+        format!("\n\n{body}")
     }
 }
 
 #[cfg(test)]
 impl FrontmatterExcerpt {
-    /// Test-only accessor for the captured highlight line.
+    /// Test-only accessor for the first highlighted line.
     pub fn highlight_line(&self) -> Option<usize> {
-        self.highlight_line
+        self.highlighted_lines().first().copied()
     }
+
+    /// Test-only accessor for every highlighted line, ascending.
+    pub fn highlighted_lines(&self) -> Vec<usize> {
+        self.regions
+            .iter()
+            .flat_map(|region| region.highlighted.iter().copied())
+            .collect()
+    }
+
+    /// Test-only accessor for each region's inclusive source-line span.
+    pub fn line_spans(&self) -> Vec<(usize, usize)> {
+        self.regions
+            .iter()
+            .map(|region| (region.start_line, region.start_line + region.text.lines().count() - 1))
+            .collect()
+    }
+}
+
+/// The display column of the line-number gutter's `│` in a rendered block, so
+/// an elision line can sit in it. `0` when the block draws no gutter (a
+/// terminal without color renders a plain fence).
+fn gutter_column(rendered_block: &str) -> usize {
+    strip_escape_codes(rendered_block)
+        .lines()
+        .find_map(|row| row.chars().position(|c| c == '│'))
+        .unwrap_or(0)
+}
+
+/// Whether the located `path` is a `$schema` declaration of `property`: under
+/// an inline `$schema` mapping (`$schema.spec`) or in a union arm
+/// (`$schema[1].spec`).
+fn declares(path: &str, property: &str) -> bool {
+    let Some(rest) = path.strip_prefix("$schema") else {
+        return false;
+    };
+    let rest = match rest.strip_prefix('[').and_then(|r| r.split_once(']')) {
+        Some((index, tail)) if index.parse::<usize>().is_ok() => tail,
+        _ => rest,
+    };
+    rest.strip_prefix('.') == Some(property)
 }
 
 /// Capture the frontmatter block **including** its `---` delimiter lines.
@@ -229,43 +365,7 @@ fn is_dash_only_fence(text: &str) -> bool {
 /// assert_eq!(locate_property_line(block, "success.message"), Some(16));
 /// ```
 pub fn locate_property_line(block: &str, dotted_property: &str) -> Option<usize> {
-    let mut parents: Vec<(isize, String)> = Vec::new();
-    let mut indexes = std::collections::HashMap::<(isize, String), usize>::new();
-    let mut located = Vec::<(String, usize)>::new();
-
-    for (idx, line) in block.lines().enumerate() {
-        if is_blank_or_comment(line) || line.trim() == "---" {
-            continue;
-        }
-        let indent = indent_of(line);
-        while parents
-            .last()
-            .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
-        {
-            parents.pop();
-        }
-        let parent = parents.last().map_or("", |(_, path)| path.as_str());
-        let trimmed = line.trim_start();
-
-        let path = if let Some(rest) = trimmed.strip_prefix('-') {
-            let counter = indexes.entry((indent, parent.to_string())).or_default();
-            let item = format!("{parent}[{counter}]");
-            *counter += 1;
-            let rest = rest.trim_start();
-            match key_name(rest) {
-                Some(key) => join_property(&item, key),
-                None => item,
-            }
-        } else {
-            let Some(key) = key_name(trimmed) else {
-                continue;
-            };
-            join_property(parent, key)
-        };
-        located.push((path.clone(), idx + 1));
-        parents.push((indent, path));
-    }
-
+    let located = located_paths(block);
     if let Some((_, line)) = located.iter().find(|(path, _)| path == dotted_property) {
         return Some(*line);
     }
@@ -282,6 +382,55 @@ pub fn locate_property_line(block: &str, dotted_property: &str) -> Option<usize>
         }
     }
     None
+}
+
+/// Every key and sequence item in `block` as a dotted path (`a.b[0].c`) with
+/// its 1-based line.
+///
+/// A `- key: …` line yields both the item (`a[0]`) and its first key
+/// (`a[0].key`); the item's later keys sit at the key's column, so they are
+/// its siblings (`a[0].other`), not its children.
+fn located_paths(block: &str) -> Vec<(String, usize)> {
+    let mut parents: Vec<(isize, String)> = Vec::new();
+    let mut indexes = std::collections::HashMap::<(isize, String), usize>::new();
+    let mut located = Vec::<(String, usize)>::new();
+
+    for (idx, line) in block.lines().enumerate() {
+        if is_blank_or_comment(line) || line.trim() == "---" {
+            continue;
+        }
+        let indent = indent_of(line);
+        while parents
+            .last()
+            .is_some_and(|(parent_indent, _)| *parent_indent >= indent)
+        {
+            parents.pop();
+        }
+        let parent = parents.last().map_or("", |(_, path)| path.as_str()).to_string();
+        let trimmed = line.trim_start();
+
+        if trimmed == "-" || trimmed.starts_with("- ") {
+            let counter = indexes.entry((indent, parent.clone())).or_default();
+            let item = format!("{parent}[{counter}]");
+            *counter += 1;
+            located.push((item.clone(), idx + 1));
+            parents.push((indent, item.clone()));
+
+            let rest = &trimmed[1..];
+            let body = rest.trim_start();
+            if let Some(key) = key_name(body) {
+                let key_col = indent + 1 + (rest.len() - body.len()) as isize;
+                let path = join_property(&item, key);
+                located.push((path.clone(), idx + 1));
+                parents.push((key_col, path));
+            }
+        } else if let Some(key) = key_name(trimmed) {
+            let path = join_property(&parent, key);
+            located.push((path.clone(), idx + 1));
+            parents.push((indent, path));
+        }
+    }
+    located
 }
 
 fn join_property(parent: &str, key: &str) -> String {
@@ -360,218 +509,4 @@ fn key_name(line: &str) -> Option<&str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Note: written as one literal (no `\`-newline continuations) because those
-    // would strip the leading YAML indentation that the nesting tests rely on.
-    const DOC: &str = "---\ntitle: Example\niteration: 1\nsuccess:\n    message: \"done at {{review_file}}\"\n    effect: cheer\nfailure:\n    message: \"failed\"\n---\nbody\n";
-
-    #[test]
-    fn block_includes_delimiters_so_lines_match_file() {
-        let block = capture_frontmatter_block(DOC).unwrap();
-        assert!(block.starts_with("---\n"));
-        assert!(block.ends_with("\n---"));
-        // Line 1 is the opening delimiter, matching the source file.
-        assert_eq!(block.lines().next(), Some("---"));
-    }
-
-    #[test]
-    fn block_none_without_closing_delimiter() {
-        assert_eq!(capture_frontmatter_block("---\ntitle: x\nbody\n"), None);
-    }
-
-    #[test]
-    fn block_none_without_opening_delimiter() {
-        assert_eq!(capture_frontmatter_block("title: x\n"), None);
-    }
-
-    #[test]
-    fn locate_top_level_key() {
-        let block = capture_frontmatter_block(DOC).unwrap();
-        // `iteration:` is the 3rd line of the file (after `---`, `title:`).
-        assert_eq!(locate_property_line(&block, "iteration"), Some(3));
-    }
-
-    #[test]
-    fn locate_nested_key() {
-        let block = capture_frontmatter_block(DOC).unwrap();
-        // `success.message` is on line 5.
-        assert_eq!(locate_property_line(&block, "success.message"), Some(5));
-    }
-
-    #[test]
-    fn locate_nested_key_under_second_parent() {
-        let block = capture_frontmatter_block(DOC).unwrap();
-        // `failure.message` is on line 8 — must not match `success.message`.
-        assert_eq!(locate_property_line(&block, "failure.message"), Some(8));
-    }
-
-    #[test]
-    fn locate_nested_sequence_value() {
-        let block = capture_frontmatter_block(
-            "---\nsuccess:\n    stack:\n        - action:\n            - set:\n                metadata:\n                    files:\n                        - \"{{unknown_root}}\"\n---\n",
-        )
-        .unwrap();
-        assert_eq!(
-            locate_property_line(
-                &block,
-                "success.stack[0].action[0].set.metadata.files[0]"
-            ),
-            Some(8)
-        );
-    }
-
-    #[test]
-    fn locate_absent_key_is_none() {
-        let block = capture_frontmatter_block(DOC).unwrap();
-        assert_eq!(locate_property_line(&block, "missing"), None);
-        assert_eq!(locate_property_line(&block, "success.absent"), None);
-    }
-
-    #[test]
-    fn locate_does_not_match_value_substring() {
-        let block = capture_frontmatter_block(DOC).unwrap();
-        // `message` appears as a value-bearing key under success/failure but
-        // never as a top-level key.
-        assert_eq!(locate_property_line(&block, "message"), None);
-    }
-
-    #[test]
-    fn capture_returns_none_without_frontmatter() {
-        assert!(FrontmatterExcerpt::capture("no frontmatter", Some("x"), true).is_none());
-    }
-
-    #[test]
-    fn appendix_empty_when_not_tty() {
-        let excerpt = FrontmatterExcerpt::capture(DOC, Some("success.message"), false).unwrap();
-        let term = Terminal::new_optimistic(80);
-        assert_eq!(excerpt.render_appendix(&term), "");
-    }
-
-    #[test]
-    fn appendix_shows_yaml_when_tty() {
-        let excerpt = FrontmatterExcerpt::capture(DOC, Some("success.message"), true).unwrap();
-        let term = Terminal::new_optimistic(80);
-        let rendered = strip_escape_codes(excerpt.render_appendix(&term));
-        assert!(rendered.contains("message"), "got: {rendered}");
-        assert!(rendered.contains("iteration"), "got: {rendered}");
-    }
-
-    #[test]
-    fn appendix_plain_when_no_color() {
-        let excerpt = FrontmatterExcerpt::capture(DOC, Some("success.message"), true).unwrap();
-        let term = Terminal::builder()
-            .width(80)
-            .color_depth(ColorDepth::None)
-            .build();
-        let rendered = excerpt.render_appendix(&term);
-        assert!(
-            !rendered.contains('\x1b'),
-            "plain appendix must have no escape bytes; got: {rendered:?}"
-        );
-    }
-
-    // An inline `$schema` mapping whose `spec` type-string has a bad constraint
-    // separator (`,` instead of `;`). `spec` is the 3rd file line.
-    const SCHEMA_DOC: &str =
-        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nbody\n";
-
-    #[test]
-    fn schema_span_highlights_offending_property_line() {
-        // The span points into the single-line `spec` type string, so it must
-        // land on the property's own line (line 3), not the `$schema` parent.
-        let excerpt =
-            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, Some("$schema.spec"), 13, true)
-                .unwrap();
-        assert_eq!(excerpt.highlight_line, Some(3));
-    }
-
-    #[test]
-    fn schema_span_does_not_highlight_unrelated_line() {
-        // The top-level `spec: "x"` value on line 4 must never be highlighted in
-        // place of the `$schema.spec` type-string line.
-        let excerpt =
-            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, Some("$schema.spec"), 13, true)
-                .unwrap();
-        assert_ne!(excerpt.highlight_line, Some(4));
-    }
-
-    #[test]
-    fn schema_span_falls_back_to_schema_parent_without_property() {
-        // A structural failure with no real property name falls back to the
-        // `$schema:` parent line (line 2).
-        let excerpt =
-            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, None, 0, true).unwrap();
-        assert_eq!(excerpt.highlight_line, Some(2));
-    }
-
-    #[test]
-    fn value_line_offset_zero_for_single_line_value() {
-        let block = capture_frontmatter_block(SCHEMA_DOC).unwrap();
-        // Any in-range span into the single-line `spec` value crosses no newline.
-        assert_eq!(value_line_offset(&block, 3, 0), 0);
-        assert_eq!(value_line_offset(&block, 3, 13), 0);
-    }
-
-    #[test]
-    fn value_line_offset_counts_newlines_across_continuation_lines() {
-        // Defensive mechanic: when a value's reconstructed text spans physical
-        // lines (a YAML block scalar), the offset counts the line-breaks the span
-        // crosses. Real SimplifiedSchema type strings are single-line, so this
-        // path returns 0 in practice; the test pins the multi-line arithmetic.
-        let doc = "---\n$schema:\n    spec: a\n      b\n      c\n---\nbody\n";
-        let block = capture_frontmatter_block(doc).unwrap();
-        // Reconstructed value text for `spec` is "a\nb\nc"; a span past the first
-        // newline lands one continuation line down, past the second lands two.
-        assert_eq!(value_line_offset(&block, 3, 0), 0);
-        assert_eq!(value_line_offset(&block, 3, "a\nb".len()), 1);
-        assert_eq!(value_line_offset(&block, 3, "a\nb\nc".len()), 2);
-    }
-
-    #[test]
-    fn schema_span_appendix_withheld_when_not_tty() {
-        let excerpt =
-            FrontmatterExcerpt::capture_schema_span(SCHEMA_DOC, Some("$schema.spec"), 13, false)
-                .unwrap();
-        let term = Terminal::new_optimistic(80);
-        assert_eq!(excerpt.render_appendix(&term), "");
-    }
-
-    const NEAR_MISS_DOC: &str = "----\nname: cross-platform\ndescription: near-miss fence\n----\n# Body\n";
-
-    #[test]
-    fn capture_line_recognizes_four_dash_fence() {
-        let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, true).unwrap();
-        assert_eq!(excerpt.highlight_line, Some(1));
-        assert!(excerpt.block.starts_with("----\n"), "block must include opening fence");
-        assert!(excerpt.block.ends_with("\n----"), "block must include closing fence");
-    }
-
-    #[test]
-    fn capture_line_none_for_plain_prose() {
-        assert!(FrontmatterExcerpt::capture_line("no frontmatter here\n", 1, true).is_none());
-    }
-
-    #[test]
-    fn capture_line_none_for_valid_three_dash_fence() {
-        assert!(FrontmatterExcerpt::capture_line(DOC, 1, true).is_none());
-    }
-
-    #[test]
-    fn capture_line_appendix_empty_when_not_tty() {
-        let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, false).unwrap();
-        let term = Terminal::new_optimistic(80);
-        assert_eq!(excerpt.render_appendix(&term), "");
-    }
-
-    #[test]
-    fn capture_line_appendix_highlights_fence_line() {
-        let excerpt = FrontmatterExcerpt::capture_line(NEAR_MISS_DOC, 1, true).unwrap();
-        assert_eq!(excerpt.highlight_line, Some(1));
-        let term = Terminal::new_optimistic(80);
-        let rendered = strip_escape_codes(excerpt.render_appendix(&term));
-        assert!(rendered.contains("name:"), "yaml block missing: {rendered}");
-        assert!(rendered.contains("----"), "fence line missing: {rendered}");
-    }
-}
+mod tests;

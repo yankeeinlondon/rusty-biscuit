@@ -417,20 +417,7 @@ impl Markdown {
                 Ok(resolved) => resolved,
                 Err(failure) => {
                     let (anchor, error) = *failure;
-                    // A child that cannot read its runtime context would be
-                    // replaced by a notice: the partially composed document
-                    // the missing-capture contract forbids.
-                    let is_structural = matches!(
-                        error,
-                        MarkdownError::Transclusion(ref inner)
-                            if matches!(
-                                inner.as_ref(),
-                                transclusion::TransclusionError::CycleDetected { .. }
-                                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
-                                    | transclusion::TransclusionError::RemoteFetchFailed { .. }
-                            )
-                    ) || error.missing_runtime_context().is_some();
-                    if is_structural || options.fail_fast {
+                    if transclusion_failure_is_fatal(&error) || options.fail_fast {
                         return Err(error);
                     }
                     // Tolerating the failure is a promise that the output stays
@@ -562,5 +549,106 @@ impl Markdown {
             ""
         };
         format!("{indent}{notice}{newline}")
+    }
+}
+
+/// Whether a transcluded child's failure must fail the compose instead of
+/// being replaced by a notice.
+///
+/// A child that cannot read its runtime context would leave the partially
+/// composed document the missing-capture contract forbids. A child command
+/// missing from the approval set is a broken pre-flight invariant, not a
+/// failure an author can tolerate.
+fn transclusion_failure_is_fatal(error: &MarkdownError) -> bool {
+    matches!(
+        error,
+        MarkdownError::Transclusion(inner)
+            if matches!(
+                inner.as_ref(),
+                transclusion::TransclusionError::CycleDetected { .. }
+                    | transclusion::TransclusionError::MaxDepthExceeded { .. }
+                    | transclusion::TransclusionError::RemoteFetchFailed { .. }
+            )
+    ) || error.missing_runtime_context().is_some()
+        || error.pre_approval_violation().is_some()
+        || error.shell_span_failure()
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::markdown::compose::ShellBlockError;
+    use crate::markdown::compose::shell_blocks::types::SourceExcerpt;
+    use crate::markdown::compose::shell_expansion::types::{ShellCommandOrigin, ShellExpansionError};
+
+    /// A `NotPreApproved` for `echo main`, as execution raises it.
+    pub(crate) fn not_pre_approved() -> ShellExpansionError {
+        ShellExpansionError::NotPreApproved {
+            ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
+                "part.md".into(),
+                "part.md".into(),
+                "echo main\n",
+            )),
+            command: "echo main".to_string(),
+            origin: ShellCommandOrigin::Body { line: 1 },
+            source_desc: " (in part.md)".to_string(),
+        }
+    }
+
+    /// The same failure as a `::shell-block` command, where a `when_error`
+    /// fallback would apply to an ordinary command failure.
+    pub(crate) fn not_pre_approved_in_shell_block() -> MarkdownError {
+        MarkdownError::from(ShellBlockError::Command {
+            block_start_line: 1,
+            command_line: 2,
+            partial_output: Box::default(),
+            excerpt: SourceExcerpt::from_text("echo main\n", 2, 2, 1),
+            source: Box::new(not_pre_approved()),
+            source_file: None,
+        })
+    }
+
+    #[test]
+    fn a_pre_approval_violation_in_a_child_is_fatal() {
+        for error in [
+            MarkdownError::from(not_pre_approved()),
+            not_pre_approved_in_shell_block(),
+        ] {
+            assert!(error.pre_approval_violation().is_some(), "{error:?}");
+            assert!(transclusion_failure_is_fatal(&error), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn a_child_shell_failure_is_fatal() {
+        let not_found = || ShellExpansionError::CommandNotFound {
+            ctx: Box::new(biscuit_terminal::errors::SourceContext::new(
+                "part.md".into(),
+                "part.md".into(),
+                "nope\n",
+            )),
+            command: "nope".to_string(),
+            origin: ShellCommandOrigin::Body { line: 1 },
+        };
+        let in_block = MarkdownError::from(ShellBlockError::Command {
+            block_start_line: 1,
+            command_line: 2,
+            partial_output: Box::default(),
+            excerpt: SourceExcerpt::from_text("nope\n", 2, 2, 1),
+            source: Box::new(not_found()),
+            source_file: None,
+        });
+        for error in [MarkdownError::from(not_found()), in_block] {
+            assert!(error.pre_approval_violation().is_none(), "{error:?}");
+            assert!(error.shell_span_failure(), "{error:?}");
+            assert!(transclusion_failure_is_fatal(&error), "{error:?}");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_child_failure_stays_tolerable() {
+        let error = MarkdownError::Transform("ordinary".to_string());
+        assert!(!error.shell_span_failure());
+        assert!(!transclusion_failure_is_fatal(&error));
     }
 }

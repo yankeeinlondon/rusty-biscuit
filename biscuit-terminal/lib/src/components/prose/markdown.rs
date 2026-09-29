@@ -8,11 +8,25 @@
 //! | `[desc](ref)`     | `<a href="ref">desc</a>`          |
 //! | `**text**`        | `<b>text</b>`                     |
 //! | `_text_`          | `<i>text</i>`                     |
+//! | `` `code` ``      | `` `code` `` with its contents escaped |
 //!
-//! The conversion order is fixed: links → bold → italics. Each phase
-//! respects backslash escapes (`\*`, `\_`, `\[`, `\]`, `\(`, `\)`) so
-//! literal Markdown characters survive untouched and reach the token
-//! parser as-is.
+//! The conversion order is fixed: fenced code blocks → code spans → links →
+//! bold → italics. Each phase respects backslash escapes (`\*`, `\_`, `\[`,
+//! `\]`, `\(`, `\)`) so literal Markdown characters survive untouched and
+//! reach the token parser as-is.
+//!
+//! An inline code span keeps its backticks and is otherwise opaque: its
+//! unescaped contents are backslash-escaped, so no emphasis, link, or tag
+//! syntax inside it is ever interpreted. Unlike CommonMark, a Prose backslash
+//! escape still applies inside a code span, so escaped text never gains a
+//! second backslash.
+//!
+//! Emphasis delimiters follow the CommonMark left- and right-flanking rules
+//! (`_` additionally may not open or close inside a word, and `**` keeps the
+//! stricter Prose rule that it never opens or closes inside a word), and a
+//! closing delimiter is accepted only at the tag nesting depth of its opener.
+//! A delimiter that cannot form valid emphasis stays literal text, so the
+//! pre-processor never emits an unbalanced tag.
 //!
 //! Link conversion is *atomic*: the reference (URL) portion of a link is
 //! lifted out of the input stream into a placeholder during link parsing
@@ -21,30 +35,91 @@
 //! `https://example.com/path_with_underscores` — are never re-interpreted
 //! as Markdown emphasis markers.
 
+use super::tokens::is_recognized_opening_tag;
+
 const HREF_PLACEHOLDER_MARK: char = '\u{0001}';
 
-/// Returns `true` when `ch` is an alphanumeric "word" character for the
-/// purposes of flanking rules. Backslash, `<`, whitespace, punctuation,
-/// and end-of-input are all non-word neighbours and therefore form a
-/// boundary at which an emphasis delimiter may open or close.
+/// Returns `true` when `ch` is an alphanumeric "word" character.
 fn is_word_neighbour(ch: Option<char>) -> bool {
     matches!(ch, Some(c) if c.is_alphanumeric())
 }
 
 /// Returns `true` when an emphasis delimiter sits between two word
-/// characters and must therefore be treated as a literal rather than a
-/// delimiter. This is the rule that prevents identifiers like
-/// `OPENCODE_CONFIG_CONTENT` or `foo**bar**baz` from being chewed up by
-/// the bold/italics pre-processor.
-///
-/// We deliberately use a simple "alphanumeric on both sides" predicate
-/// rather than the full CommonMark left/right-flanking rules: terminal
-/// markup is overwhelmingly ASCII identifiers, predictability matters
-/// more than spec parity, and the simpler rule covers every documented
-/// acceptance case in
-/// [`biscuit-terminal/features/2026-05-05-prose-plus/spec.md`].
+/// characters. Prose never lets such a delimiter open or close emphasis, so
+/// identifiers like `OPENCODE_CONFIG_CONTENT` or `foo**bar**baz` stay
+/// literal.
 fn is_intra_word(prev: Option<char>, next: Option<char>) -> bool {
     is_word_neighbour(prev) && is_word_neighbour(next)
+}
+
+/// CommonMark punctuation, approximated as any character that is neither
+/// alphanumeric nor whitespace (tag brackets and placeholder sentinels
+/// included).
+fn is_punctuation(ch: char) -> bool {
+    !ch.is_alphanumeric() && !ch.is_whitespace()
+}
+
+/// Start and end of input count as whitespace for flanking purposes.
+fn is_space_or_edge(ch: Option<char>) -> bool {
+    ch.is_none_or(char::is_whitespace)
+}
+
+/// CommonMark left-flanking delimiter run: not followed by whitespace, and
+/// either not followed by punctuation or preceded by whitespace/punctuation.
+fn is_left_flanking(prev: Option<char>, next: Option<char>) -> bool {
+    match next {
+        None => false,
+        Some(n) if n.is_whitespace() => false,
+        Some(n) => !is_punctuation(n) || is_space_or_edge(prev) || prev.is_some_and(is_punctuation),
+    }
+}
+
+/// CommonMark right-flanking delimiter run: not preceded by whitespace, and
+/// either not preceded by punctuation or followed by whitespace/punctuation.
+fn is_right_flanking(prev: Option<char>, next: Option<char>) -> bool {
+    match prev {
+        None => false,
+        Some(p) if p.is_whitespace() => false,
+        Some(p) => !is_punctuation(p) || is_space_or_edge(next) || next.is_some_and(is_punctuation),
+    }
+}
+
+/// Which way a delimiter run may act.
+#[derive(Clone, Copy)]
+enum Delimiter {
+    /// `**` — opens when left-flanking, closes when right-flanking.
+    Bold,
+    /// `_` — the CommonMark underscore rule: a run that is both left- and
+    /// right-flanking opens only after punctuation and closes only before it.
+    Italic,
+}
+
+impl Delimiter {
+    fn can_open(self, prev: Option<char>, next: Option<char>) -> bool {
+        if is_intra_word(prev, next) || !is_left_flanking(prev, next) {
+            return false;
+        }
+        match self {
+            Delimiter::Bold => true,
+            Delimiter::Italic => !is_right_flanking(prev, next) || prev.is_some_and(is_punctuation),
+        }
+    }
+
+    fn can_close(self, prev: Option<char>, next: Option<char>) -> bool {
+        if is_intra_word(prev, next) || !is_right_flanking(prev, next) {
+            return false;
+        }
+        match self {
+            Delimiter::Bold => true,
+            Delimiter::Italic => !is_left_flanking(prev, next) || next.is_some_and(is_punctuation),
+        }
+    }
+}
+
+/// The characters on either side of `chars[start..start + len]`.
+fn neighbours(chars: &[char], start: usize, len: usize) -> (Option<char>, Option<char>) {
+    let prev = start.checked_sub(1).map(|i| chars[i]);
+    (prev, chars.get(start + len).copied())
 }
 
 /// Sentinel character marking a lifted fenced code block. It is a C0
@@ -135,7 +210,7 @@ fn convert_fenced_code_blocks(input: &str) -> (String, Vec<FencedCode>) {
 
 /// Apply the full Markdown pre-processing pipeline.
 ///
-/// Order: fenced code blocks → links → bold → italics. The text output is
+/// Order: fenced code blocks → code spans → links → bold → italics. The text output is
 /// fed into the block-tag parser; the lifted code blocks are handed to it
 /// alongside so it can resolve placeholders without ever re-parsing a
 /// code body as markup. Backslash escapes for `*`, `_`, `[`, `]`, `(`,
@@ -143,13 +218,104 @@ fn convert_fenced_code_blocks(input: &str) -> (String, Vec<FencedCode>) {
 /// literal characters via Phase 1's escape handling.
 pub(super) fn preprocess_markdown(input: &str) -> Preprocessed {
     let (with_code, code_blocks) = convert_fenced_code_blocks(input);
-    let (with_links, hrefs) = convert_links(&with_code);
+    let with_spans = escape_code_spans(&with_code);
+    let (with_links, hrefs) = convert_links(&with_spans);
     let with_bold = convert_bold(&with_links);
     let with_italics = convert_italics(&with_bold);
     Preprocessed {
         text: restore_hrefs(&with_italics, &hrefs),
         code_blocks,
     }
+}
+
+/// Phase 0b: make every inline code span opaque by backslash-escaping each
+/// escapable character inside it. The backticks stay as literal text.
+///
+/// A backtick run opens a span only when a later run of the same length
+/// closes it; an unmatched run is literal. Tag declarations outside a span
+/// and existing escapes anywhere are copied through untouched.
+fn escape_code_spans(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut output = String::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
+        if ch == '\\' && i + 1 < chars.len() && is_escapable(chars[i + 1]) {
+            output.push(ch);
+            output.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+
+        if ch == '<'
+            && let Some(next) = copy_tag_declaration(&chars, i, &mut output)
+        {
+            i = next;
+            continue;
+        }
+
+        if ch == '`' {
+            let run = backtick_run_len(&chars, i);
+            match closing_backtick_run(&chars, i + run, run) {
+                Some(close) => {
+                    output.extend(&chars[i..i + run]);
+                    let mut j = i + run;
+                    while j < close {
+                        let inner = chars[j];
+                        // An existing escape is kept as is, so text that
+                        // `Prose::escape_text` already escaped is not escaped twice.
+                        if inner == '\\' && j + 1 < close && is_escapable(chars[j + 1]) {
+                            output.push(inner);
+                            output.push(chars[j + 1]);
+                            j += 2;
+                            continue;
+                        }
+                        if is_escapable(inner) {
+                            output.push('\\');
+                        }
+                        output.push(inner);
+                        j += 1;
+                    }
+                    output.extend(&chars[close..close + run]);
+                    i = close + run;
+                }
+                None => {
+                    output.extend(&chars[i..i + run]);
+                    i += run;
+                }
+            }
+            continue;
+        }
+
+        output.push(ch);
+        i += 1;
+    }
+
+    output
+}
+
+/// Length of the backtick run starting at `start`.
+fn backtick_run_len(chars: &[char], start: usize) -> usize {
+    chars[start..].iter().take_while(|&&c| c == '`').count()
+}
+
+/// Index of the first backtick run of exactly `len` at or after `start`.
+fn closing_backtick_run(chars: &[char], start: usize, len: usize) -> Option<usize> {
+    let mut i = start;
+    while i < chars.len() {
+        if chars[i] == '`' {
+            let run = backtick_run_len(chars, i);
+            if run == len {
+                return Some(i);
+            }
+            i += run;
+        } else {
+            i += 1;
+        }
+    }
+    None
 }
 
 /// Characters that participate in backslash escape sequences during
@@ -328,22 +494,12 @@ fn convert_bold(input: &str) -> String {
         }
 
         if ch == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
-            // Flanking rule: `**` is a bold opener only when it does NOT sit
-            // between two word characters. This keeps identifiers like
-            // `foo**bar**baz` from triggering bold.
-            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
-            let next = if i + 2 < chars.len() {
-                Some(chars[i + 2])
-            } else {
-                None
-            };
-            if !is_intra_word(prev, next)
+            let (prev, next) = neighbours(&chars, i, 2);
+            if Delimiter::Bold.can_open(prev, next)
                 && let Some(end) = find_closing_double(&chars, i + 2, '*')
             {
                 output.push_str("<b>");
-                for c in &chars[i + 2..end] {
-                    output.push(*c);
-                }
+                output.extend(&chars[i + 2..end]);
                 output.push_str("</b>");
                 i = end + 2;
                 continue;
@@ -395,22 +551,12 @@ fn convert_italics(input: &str) -> String {
         }
 
         if ch == '_' {
-            // Flanking rule: `_` is an italics opener only when it does NOT
-            // sit between two word characters. This keeps identifiers like
-            // `OPENCODE_CONFIG_CONTENT` from being italicised mid-word.
-            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
-            let next = if i + 1 < chars.len() {
-                Some(chars[i + 1])
-            } else {
-                None
-            };
-            if !is_intra_word(prev, next)
+            let (prev, next) = neighbours(&chars, i, 1);
+            if Delimiter::Italic.can_open(prev, next)
                 && let Some(end) = find_closing_single(&chars, i + 1, '_')
             {
                 output.push_str("<i>");
-                for c in &chars[i + 1..end] {
-                    output.push(*c);
-                }
+                output.extend(&chars[i + 1..end]);
                 output.push_str("</i>");
                 i = end + 1;
                 continue;
@@ -424,23 +570,48 @@ fn convert_italics(input: &str) -> String {
     output
 }
 
+/// Tracks how deeply the closer search has descended into recognized tags
+/// since the opener. A closer is valid only at depth zero, and the search
+/// fails once it walks out of the tag that contains the opener, so emphasis
+/// can never straddle a tag boundary and unbalance the tag stream.
+struct TagDepth(usize);
+
+impl TagDepth {
+    /// Account for the tag declaration at `chars[start..end]`. Returns
+    /// `false` when it closes a tag the opener sits inside.
+    fn step(&mut self, chars: &[char], start: usize, end: usize) -> bool {
+        let content: String = chars[start + 1..end - 1].iter().collect();
+        if content.starts_with('/') {
+            if self.0 == 0 {
+                return false;
+            }
+            self.0 -= 1;
+        } else if is_recognized_opening_tag(&content) {
+            self.0 += 1;
+        }
+        true
+    }
+}
+
 /// Locate a closing `marker`+`marker` pair (e.g. `**`) at or after `start`,
-/// honouring backslash escapes, skipping over `<…>` tag declarations
-/// embedded in the prose, and applying the same intra-word inhibition as
-/// the opener: a doubled marker that sits between two word characters
-/// cannot close. Returns the index of the first marker of the closing
-/// pair, or `None` if no closer is found before EOF.
+/// honouring backslash escapes and tag nesting ([`TagDepth`]). Only a pair
+/// that [`Delimiter::Bold`] allows to close counts. Returns the index of the
+/// first marker of the closing pair, or `None` if no closer is found.
 fn find_closing_double(chars: &[char], start: usize, marker: char) -> Option<usize> {
+    let mut depth = TagDepth(0);
     let mut i = start;
     while i + 1 < chars.len() {
         let ch = chars[i];
-        if ch == '\\' && i + 1 < chars.len() && is_escapable(chars[i + 1]) {
+        if ch == '\\' && is_escapable(chars[i + 1]) {
             i += 2;
             continue;
         }
         if ch == '<'
             && let Some(end) = scan_past_tag_declaration(chars, i)
         {
+            if !depth.step(chars, i, end) {
+                return None;
+            }
             i = end;
             continue;
         }
@@ -448,19 +619,12 @@ fn find_closing_double(chars: &[char], start: usize, marker: char) -> Option<usi
             if i == start {
                 return None;
             }
-            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
-            let next = if i + 2 < chars.len() {
-                Some(chars[i + 2])
-            } else {
-                None
-            };
-            if is_intra_word(prev, next) {
-                // Doubled marker is intra-word — keep scanning, this is
-                // not a real closer.
-                i += 2;
-                continue;
+            let (prev, next) = neighbours(chars, i, 2);
+            if depth.0 == 0 && Delimiter::Bold.can_close(prev, next) {
+                return Some(i);
             }
-            return Some(i);
+            i += 2;
+            continue;
         }
         i += 1;
     }
@@ -468,14 +632,13 @@ fn find_closing_double(chars: &[char], start: usize, marker: char) -> Option<usi
 }
 
 /// Locate a closing single-character `marker` at or after `start`,
-/// honouring backslash escapes, skipping over `<…>` tag declarations,
-/// treating doubled `marker` runs (`__`) as opaque so a single `_`
-/// inside a `__…__` sequence cannot terminate an outer italics run, and
-/// applying the same intra-word inhibition as the opener: a single
-/// marker that sits between two word characters cannot close.
-/// Returns the index of the closing marker, or `None` if no closer is
-/// found before EOF.
+/// honouring backslash escapes and tag nesting ([`TagDepth`]), and treating
+/// doubled `marker` runs (`__`) as opaque so a single `_` inside a `__…__`
+/// sequence cannot terminate an outer italics run. Only a marker that
+/// [`Delimiter::Italic`] allows to close counts. Returns the index of the
+/// closing marker, or `None` if no closer is found.
 fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usize> {
+    let mut depth = TagDepth(0);
     let mut i = start;
     while i < chars.len() {
         let ch = chars[i];
@@ -486,6 +649,9 @@ fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usi
         if ch == '<'
             && let Some(end) = scan_past_tag_declaration(chars, i)
         {
+            if !depth.step(chars, i, end) {
+                return None;
+            }
             i = end;
             continue;
         }
@@ -497,18 +663,10 @@ fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usi
             if i == start {
                 return None;
             }
-            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
-            let next = if i + 1 < chars.len() {
-                Some(chars[i + 1])
-            } else {
-                None
-            };
-            if is_intra_word(prev, next) {
-                // Intra-word single marker — keep scanning.
-                i += 1;
-                continue;
+            let (prev, next) = neighbours(chars, i, 1);
+            if depth.0 == 0 && Delimiter::Italic.can_close(prev, next) {
+                return Some(i);
             }
-            return Some(i);
         }
         i += 1;
     }
@@ -888,5 +1046,74 @@ mod tests {
         assert_eq!(pre.code_blocks[0].body, "</code-block><red>x</red>");
         assert!(!pre.text.contains("<red>"));
         assert!(!pre.text.contains("</code-block>"));
+    }
+
+    // ── CommonMark flanking, code spans, and tag balance ─────────────
+
+    #[test]
+    fn underscore_after_bold_opener_with_no_valid_closer_is_literal() {
+        let input = "1. **_pr/open.md** opens it.\n2. **_pr/triage.md** triages it.";
+        assert_eq!(
+            pp(input),
+            "1. <b>_pr/open.md</b> opens it.\n2. <b>_pr/triage.md</b> triages it."
+        );
+    }
+
+    #[test]
+    fn underscore_preceded_by_space_cannot_close() {
+        assert_eq!(
+            pp("unknown root '_loop_countx' in '{{ _loop_countx }}'"),
+            "unknown root '_loop_countx' in '{{ _loop_countx }}'"
+        );
+    }
+
+    #[test]
+    fn underscore_followed_by_space_cannot_open() {
+        assert_eq!(pp("a_ b_"), "a_ b_");
+        assert_eq!(pp("x _ y _"), "x _ y _");
+    }
+
+    #[test]
+    fn underscore_between_punctuation_opens_and_closes() {
+        assert_eq!(pp("\"_quoted_\""), "\"<i>quoted</i>\"");
+    }
+
+    #[test]
+    fn code_span_contents_are_escaped_and_backticks_kept() {
+        assert_eq!(pp("See `_pr/_report.md`."), r"See `\_pr/\_report.md`.");
+        assert_eq!(pp("`**x** <red>y</red>`"), r"`\*\*x\*\* \<red\>y\</red\>`");
+    }
+
+    #[test]
+    fn code_span_keeps_existing_escapes() {
+        assert_eq!(pp(r"`\_a_`"), r"`\_a\_`");
+    }
+
+    #[test]
+    fn code_span_needs_matching_backtick_run() {
+        assert_eq!(pp("``a`b``"), r"``a`b``");
+        assert_eq!(pp("`unclosed _x_"), "`unclosed <i>x</i>");
+    }
+
+    #[test]
+    fn code_span_shields_emphasis_delimiters_from_outer_pairing() {
+        assert_eq!(pp("_a `b_` c_"), r"<i>a `b\_` c</i>");
+    }
+
+    #[test]
+    fn emphasis_cannot_close_across_a_tag_boundary() {
+        assert_eq!(pp("<b>a _b</b> c_"), "<b>a _b</b> c_");
+        assert_eq!(pp("_a <dim>b_ c</dim>"), "_a <dim>b_ c</dim>");
+        assert_eq!(pp("**a <dim>b** c</dim>"), "**a <dim>b** c</dim>");
+    }
+
+    #[test]
+    fn emphasis_may_contain_a_whole_tag() {
+        assert_eq!(pp("_a <dim>b</dim> c_"), "<i>a <dim>b</dim> c</i>");
+    }
+
+    #[test]
+    fn unrecognized_tag_does_not_block_emphasis() {
+        assert_eq!(pp("_see Vec<T> here_"), "<i>see Vec<T> here</i>");
     }
 }

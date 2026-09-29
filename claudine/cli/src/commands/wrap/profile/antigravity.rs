@@ -7,9 +7,10 @@ use super::{PromptDelivery, WrapperProfile, has_flag};
 ///
 /// agy is bespoke and non-streaming: its structured non-interactive output is
 /// `agy --print <prompt> --output-format json`, a SINGLE buffered JSON envelope
-/// (parsed by `AntigravitySemanticStreamParser`). The prompt is the VALUE of
-/// `--print` (agy ignores stdin), so `prompt_delivery` appends `--print
-/// <prompt>` LAST — keeping the value adjacent to its flag for Go's flag parser.
+/// (parsed by `AntigravitySemanticStreamParser`). agy ignores stdin, so the
+/// prompt is a flag VALUE: `--print <prompt>` appended LAST in non-interactive
+/// mode (adjacent to its flag for Go's flag parser), `--prompt-interactive
+/// <prompt>` in an interactive session.
 /// The structured selector is `--output-format json` (overridden here because
 /// the catalog records it as `OutputFormat::Json`, not the `Stream` record the
 /// default `apply_structured_stream` keys on). Resume is `agy --conversation
@@ -49,8 +50,23 @@ impl WrapperProfile for AntigravityWrapper {
         &self,
         _args: &[String],
         prompt: &str,
-        _non_interactive: bool,
+        non_interactive: bool,
     ) -> Result<PromptDelivery> {
+        if !non_interactive {
+            // `--prompt-interactive` "runs an initial prompt interactively and
+            // continues the session" (agy 1.1.0); `--print` would run headless
+            // and exit. Go's flag parser takes the next argv item as the value
+            // whatever its first character, but the attached form keeps a
+            // `-`-prefixed prompt unambiguous.
+            return Ok(if prompt.starts_with('-') {
+                PromptDelivery::AppendArgs(vec![format!("--prompt-interactive={prompt}")])
+            } else {
+                PromptDelivery::AppendArgs(vec![
+                    "--prompt-interactive".to_string(),
+                    prompt.to_string(),
+                ])
+            });
+        }
         // The prompt is the value of `--print` (aliases `-p`/`--prompt`); agy
         // ignores stdin. Appending `["--print", <prompt>]` LAST keeps the flag
         // and its value adjacent and last on argv, so the other flags

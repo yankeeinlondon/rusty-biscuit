@@ -10,7 +10,11 @@
 //!   (`ctx.recent_commits` and `recent_commits(count)`);
 //! - the fixed-versus-refreshable distinction — repository metadata and
 //!   topology are fixed by the request's repository observation, and only
-//!   mutable Git and filesystem facts refresh at reference time.
+//!   mutable Git and filesystem facts refresh;
+//! - Claudine's run rule (fix `2026-09-20-lifecycle-handoff-gaps`, R1): `ctx`
+//!   is evaluated once for each composition run, stated in the same words on
+//!   every Claudine page that explains binding time, and `current` is
+//!   observed once per lifecycle event.
 //!
 //! `PAGES` is the spec's "## Documentation" list, less the Claudine skill's
 //! `lifecycle.md` and `composition.md`: those were snapshot copies, now
@@ -22,6 +26,10 @@
 //! paragraph or a CRLF checkout does not break a phrase.
 
 use std::path::{Path, PathBuf};
+
+/// Claudine's per-composition-run rule, which every Claudine page that
+/// explains binding time states in exactly these words.
+const RUN_RULE: &str = "**`ctx` is evaluated once for each composition run.** A composition run is one document being composed and executed: a document invoked directly or adopted through `proxy`, each sequence step (each task of a serial group; a parallel group shares one capture until a sibling re-enters), each loop iteration, and each retry or resume attempt. Transclusion does not start a run: a document and every file it includes share one `ctx`. `current` is observed once per lifecycle event.";
 
 /// Workspace-relative `/`-separated page path, phrases it must contain.
 const PAGES: &[(&str, &[&str])] = &[
@@ -35,17 +43,19 @@ const PAGES: &[(&str, &[&str])] = &[
             "`current` does not contain a `ctx` member and `current_env` does not contain an `env` member",
             "`ctx.recent_commits` holds the last 10 commits captured at the start of the run; `recent_commits(count)`",
             "are fixed by the request's repository observation",
-            "Only mutable Git and filesystem facts refresh at reference time",
+            "Only mutable Git and filesystem facts refresh from one event to the next",
+            RUN_RULE,
         ],
     ),
     (
         ".claude/skills/claudine/SKILL.md",
         &[
-            "`current.<key>` is the same key evaluated lazily at reference time",
+            "`current.<key>` is the same key as `ctx.<key>` read lazily",
             "`current_env.<key>` is the lazy mirror of `env.<key>`",
             "(`ctx.recent_commits` / `recent_commits(count)`) shares one definition",
             "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
-            "refresh at reference time",
+            "refresh between events",
+            RUN_RULE,
         ],
     ),
     (
@@ -78,9 +88,10 @@ const PAGES: &[(&str, &[&str])] = &[
     (
         "claudine/docs/topics/composition.md",
         &[
-            "`current.<key>` observes a fact through the invocation's refresh capability",
+            "`current.<key>` observes a fact through the invocation's refresh capability once per lifecycle event",
             "`current_env.<KEY>` rereads the live process environment",
             "are fixed by the request's repository observation, so `current.repo` always reads what `ctx.repo` does",
+            RUN_RULE,
         ],
     ),
 ];

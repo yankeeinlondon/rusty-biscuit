@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use biscuit_file::{FileResolutionContext, LaunchMagicScope, home_dir};
 use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
 use sniff::filesystem::docs::MarkdownMeta;
-use sniff::filesystem::git::{FileChange, GitInfo};
+use sniff::filesystem::git::{FileChange, GitInfo, RecentCommits};
 use sniff::filesystem::repo::RepoInfo;
 use sniff::filesystem::LanguageBreakdown;
 use sniff::hardware::{GpuInfo, HardwareInfo};
@@ -77,11 +77,18 @@ impl PreparedContextConsumer {
 
 /// Request-local accounting for discovery and preparation work.
 ///
-/// `runtime_evidence_captures` counts, per group, the calls that ran the
-/// group's initializer; `runtime_evidence_reuses` counts the calls a cache or
-/// already-retained evidence answered. A group requested `n` times therefore
-/// sums to `n` across the two maps, and a second capture is a duplicate
-/// computation rather than an invisible repeat.
+/// Every requested group lands in exactly one of three per-group maps:
+///
+/// - `runtime_evidence_captures`: calls that ran a *stable* group's
+///   initializer. Stable evidence (host facts, languages, documents) is
+///   observed at most once per invocation, so a second capture is a duplicate
+///   computation rather than an invisible repeat.
+/// - `volatile_observations`: calls that observed a *volatile* group (Git
+///   working state: `git`, `file_changes`, `git_history`) for a composition
+///   run. These are expected once per requesting run, never more.
+/// - `runtime_evidence_reuses`: calls that retained evidence answered.
+///
+/// A group requested `n` times therefore sums to `n` across the three maps.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvocationWorkSnapshot {
     pub git_root_discoveries: usize,
@@ -113,6 +120,7 @@ pub struct InvocationWorkSnapshot {
     pub document_epochs: BTreeMap<usize, DocumentEpochWork>,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
+    pub volatile_observations: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
 }
 
@@ -127,6 +135,10 @@ pub struct DocumentEpochWork {
     pub launch_context_extensions: usize,
     pub ambient_fallbacks: usize,
     pub prepared_context_consumers: BTreeMap<String, usize>,
+    /// Volatile groups this epoch's own calls observed. A group its run had
+    /// already observed (a parallel sibling's shared capture, or an earlier
+    /// stage of the same run) is a reuse and does not appear here.
+    pub volatile_observations: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Default)]
@@ -135,6 +147,7 @@ struct DocumentEpochRecorder {
     launch_context_extensions: AtomicUsize,
     ambient_fallbacks: AtomicUsize,
     prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
+    volatile_observations: Mutex<BTreeMap<String, usize>>,
 }
 
 impl DocumentEpochRecorder {
@@ -147,6 +160,11 @@ impl DocumentEpochRecorder {
             ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
             prepared_context_consumers: self
                 .prepared_context_consumers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+            volatile_observations: self
+                .volatile_observations
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone(),
@@ -178,6 +196,10 @@ impl InvocationWorkSnapshot {
             prepared_context_consumers: map_delta(
                 &self.prepared_context_consumers,
                 &before.prepared_context_consumers,
+            ),
+            volatile_observations: map_delta(
+                &self.volatile_observations,
+                &before.volatile_observations,
             ),
         }
     }
@@ -226,6 +248,7 @@ struct InvocationWork {
     document_epochs: Mutex<BTreeMap<usize, Arc<DocumentEpochRecorder>>>,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
+    volatile_observations: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
 }
 
@@ -265,6 +288,11 @@ impl InvocationWork {
                 .clone(),
             runtime_evidence_reuses: self
                 .runtime_evidence_reuses
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+            volatile_observations: self
+                .volatile_observations
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone(),
@@ -309,11 +337,65 @@ struct RepositoryEntry {
     source_evidence: Mutex<HashMap<PathBuf, Arc<SourceEvidence>>>,
 }
 
+/// Source-scanned evidence that keeps its invocation lifetime.
+///
+/// Languages and documents describe the repository's contents at a
+/// granularity no single run changes in a way a prompt depends on, so one scan
+/// per source directory serves the whole invocation. Git working state is not
+/// here: it belongs to [`RunEvidence`].
 #[derive(Debug, Default)]
 struct SourceEvidence {
-    file_changes: OnceLock<Result<Option<Vec<FileChange>>, Arc<sniff::SniffError>>>,
     languages: OnceLock<Result<Option<LanguageBreakdown>, Arc<sniff::SniffError>>>,
     documents: OnceLock<Result<Option<Vec<MarkdownMeta>>, Arc<sniff::SniffError>>>,
+}
+
+/// Volatile repository evidence observed for one composition run.
+///
+/// Git working state — the branch, worktree, and merge-conflict facts, the
+/// staged/dirty/untracked file changes, and the recent commit history — can
+/// change between runs, including by another process, so an invocation never
+/// retains it. A run observes each volatile group at most once, on the first
+/// request for it, and every later request in the same run (another stage,
+/// the post-`initialize` reread, a transcluded source naming the group)
+/// reuses that observation. A new run starts from an empty scope, so which
+/// run first mentioned a property has no effect on what a later run sees.
+///
+/// Cloning shares the scope: the siblings of a parallel sequence group hold
+/// clones of one run so they begin from one view of the working tree.
+#[derive(Debug, Clone, Default)]
+pub struct RunEvidence {
+    repositories: Arc<Mutex<Vec<RunRepository>>>,
+}
+
+/// One repository's volatile cells within a run.
+type RunRepository = (Arc<RepositoryEntry>, Arc<VolatileEvidence>);
+
+#[derive(Debug, Default)]
+struct VolatileEvidence {
+    git: OnceLock<Result<Option<GitInfo>, Arc<sniff::SniffError>>>,
+    file_changes: OnceLock<Result<Option<Vec<FileChange>>, Arc<sniff::SniffError>>>,
+    /// `Ok(None)` when the repository has no root to walk history from.
+    recent_commits: OnceLock<Result<Option<RecentCommits>, Arc<sniff::SniffError>>>,
+}
+
+impl RunEvidence {
+    /// This run's cells for one repository; entries are compared by identity
+    /// because the invocation hands out exactly one entry per repository.
+    fn for_repository(&self, repository: &Arc<RepositoryEntry>) -> Arc<VolatileEvidence> {
+        let mut repositories = self
+            .repositories
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, cells)) = repositories
+            .iter()
+            .find(|(entry, _)| Arc::ptr_eq(entry, repository))
+        {
+            return Arc::clone(cells);
+        }
+        let cells = Arc::new(VolatileEvidence::default());
+        repositories.push((Arc::clone(repository), Arc::clone(&cells)));
+        cells
+    }
 }
 
 impl RepositoryEntry {
@@ -693,11 +775,17 @@ impl CurrentProvider for LaunchRefresh {
 /// The recorder belongs to the token, not to a before/after interval on the
 /// invocation. Overlapping sequence workers therefore cannot contribute to
 /// one another's exact construction, extension, fallback, or consumer map.
+///
+/// An epoch also carries the [`RunEvidence`] of the composition run it
+/// belongs to. Every capture and extension through the epoch observes
+/// volatile Git state from that run; stable evidence still comes from the
+/// invocation.
 #[derive(Debug, Clone)]
 pub struct DocumentEpoch {
     id: usize,
     invocation: InvocationContext,
     work: Arc<DocumentEpochRecorder>,
+    run: RunEvidence,
 }
 
 impl DocumentEpoch {
@@ -722,27 +810,42 @@ impl DocumentEpoch {
         self.id
     }
 
+    /// The composition run this epoch observes volatile evidence from.
+    pub fn run_evidence(&self) -> &RunEvidence {
+        &self.run
+    }
+
     /// Capture this epoch's one launch-anchored context construction.
     pub fn capture_launch_context(
         &self,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ComposeContext {
-        let context = self.invocation.capture_launch_context(requirements);
+        let context =
+            self.invocation
+                .capture_launch_context_in(&self.run, Some(&self.work), requirements);
         self.work
             .launch_context_constructions
             .fetch_add(1, Ordering::Relaxed);
         context
     }
 
-    /// Extend this epoch's retained context from the invocation's launch evidence.
+    /// Extend this epoch's retained context from the invocation's launch
+    /// evidence and this epoch's run.
+    ///
+    /// Only groups the context is missing are projected, so an already
+    /// observed value is never replaced: extension within a run is not a
+    /// refresh.
     pub fn extend_launch_context(
         &self,
         context: &mut darkmatter::markdown::compose::ComposeContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> bool {
-        let extended = self
-            .invocation
-            .extend_launch_context(context, requirements);
+        let extended = self.invocation.extend_launch_context_in(
+            &self.run,
+            Some(&self.work),
+            context,
+            requirements,
+        );
         if extended {
             self.work
                 .launch_context_extensions
@@ -779,8 +882,22 @@ impl DocumentEpoch {
 }
 
 impl InvocationContext {
-    /// Begin one independently attributable canonical document epoch.
+    /// Begin one independently attributable canonical document epoch that
+    /// opens a new composition run.
+    ///
+    /// Use this at every run boundary: a document invoked or adopted, a
+    /// sequence step or serial group member, a loop iteration, a retry, and a
+    /// resume.
     pub fn begin_document_epoch(&self) -> DocumentEpoch {
+        self.begin_document_epoch_in(&RunEvidence::default())
+    }
+
+    /// Begin a document epoch inside an existing composition run.
+    ///
+    /// For a second document epoch that is not a new run: a sequence step's
+    /// task and its prompt document, or a parallel group sibling's first
+    /// preparation, which shares the group's capture.
+    pub fn begin_document_epoch_in(&self, run: &RunEvidence) -> DocumentEpoch {
         let id = self
             .inner
             .work
@@ -797,6 +914,7 @@ impl InvocationContext {
             id,
             invocation: self.clone(),
             work,
+            run: run.clone(),
         }
     }
 
@@ -1051,12 +1169,15 @@ impl InvocationContext {
     /// (`datetime`, `agent`) and groups that only clone what the repository
     /// entry already carries (`git`, `repo`) are therefore always reuses.
     ///
+    /// Volatile groups are observed once per `run`, never per invocation.
+    ///
     /// This is the *source* projection: repository facts come from the supplied
     /// document's repository and package area. Canonical prepared `ctx.*` must
     /// instead use [`Self::capture_launch_context`], which pairs the launch
     /// anchor with launch evidence as one operation.
     pub fn runtime_evidence(
         &self,
+        run: &RunEvidence,
         source: &SourceContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
@@ -1064,6 +1185,8 @@ impl InvocationContext {
             &source.repository.inner,
             &source.base_dir,
             source.repository_root.as_deref(),
+            run,
+            None,
             requirements,
         )
     }
@@ -1080,8 +1203,13 @@ impl InvocationContext {
     /// Source-scanned groups (`file_changes`, `languages`, `documents`) scan
     /// from the launch base when requested, and Git/repository facts project
     /// the launch repository — never a document source's repository. No
-    /// ambient CWD, HOME, environment, Git, or topology discovery runs; the
-    /// retained caches answer every group.
+    /// ambient CWD, HOME, environment, or topology discovery runs; the
+    /// retained caches answer every stable group.
+    ///
+    /// Called on the invocation rather than a [`DocumentEpoch`], the capture
+    /// is its own composition run: volatile Git state is observed for this
+    /// call and retained nowhere. A caller whose stages must agree on one
+    /// observation captures and extends through one epoch instead.
     ///
     /// Callers apply the resolved target's `env_overrides` (agent/model
     /// identity) on the returned snapshot through `env_mut`; that is the
@@ -1092,10 +1220,21 @@ impl InvocationContext {
         &self,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ComposeContext {
+        self.capture_launch_context_in(&RunEvidence::default(), None, requirements)
+    }
+
+    fn capture_launch_context_in(
+        &self,
+        run: &RunEvidence,
+        epoch: Option<&DocumentEpochRecorder>,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ComposeContext {
         let evidence = self.project_evidence(
             &self.inner.launch_repository,
             &self.inner.launch_cwd,
             self.launch_repository_root_spelling().as_deref(),
+            run,
+            epoch,
             requirements,
         );
         let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
@@ -1122,8 +1261,21 @@ impl InvocationContext {
     ///
     /// Counts one `launch_context_extensions` per extension that populated at
     /// least one missing group.
+    ///
+    /// Like [`Self::capture_launch_context`], an invocation-level extension
+    /// observes a missing volatile group for this call alone.
     pub fn extend_launch_context(
         &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> bool {
+        self.extend_launch_context_in(&RunEvidence::default(), None, context, requirements)
+    }
+
+    fn extend_launch_context_in(
+        &self,
+        run: &RunEvidence,
+        epoch: Option<&DocumentEpochRecorder>,
         context: &mut darkmatter::markdown::compose::ComposeContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> bool {
@@ -1135,6 +1287,8 @@ impl InvocationContext {
             &self.inner.launch_repository,
             &self.inner.launch_cwd,
             self.launch_repository_root_spelling().as_deref(),
+            run,
+            epoch,
             &missing,
         );
         if context.extend_with_evidence(requirements, &evidence) {
@@ -1173,17 +1327,24 @@ impl InvocationContext {
     /// entry and base differ.
     /// Repository-dependent groups also receive retained Git identity and
     /// topology evidence, even without an explicit Git or Repo group request.
+    ///
+    /// Stable groups read the invocation's caches. Volatile groups (`Git`,
+    /// `FileChanges`, `GitHistory`) read `run`, observing on the run's first
+    /// request; `epoch` is credited with any observation this call makes.
     #[allow(clippy::too_many_lines)]
     fn project_evidence(
         &self,
         repository: &Arc<RepositoryEntry>,
         base_dir: &Path,
         repository_root: Option<&Path>,
+        run: &RunEvidence,
+        epoch: Option<&DocumentEpochRecorder>,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
         use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
 
         let mut evidence = ContextCaptureEvidence::new(self.inner.environment.clone());
+        let volatile = run.for_repository(repository);
         let needs_repository = requirements.iter().any(|group| {
             matches!(
                 group,
@@ -1193,9 +1354,34 @@ impl InvocationContext {
                     | ContextGroup::Documents
             )
         });
+        let mut observed_git = false;
+        // `ctx.branch`, `ctx.worktree`, and `ctx.merge_conflicts` are this
+        // run's observation. Identity-only consumers (`ctx.repo`, the
+        // document hash) keep the launch observation, so a run that names no
+        // Git fact pays for no Git status.
+        let git_info = match (repository.failure(), requirements.contains(ContextGroup::Git)) {
+            (Some(_), _) => None,
+            (None, false) => repository.git_info.clone(),
+            (None, true) => match volatile
+                .git
+                .get_or_init(|| {
+                    observed_git = true;
+                    repository
+                        .observation
+                        .detect_git(&launch_git_request())
+                        .map_err(Arc::new)
+                })
+                .as_ref()
+            {
+                Ok(git) => git.clone(),
+                // A failed re-observation keeps the launch observation rather
+                // than dropping the group.
+                Err(_) => repository.git_info.clone(),
+            },
+        };
         if repository.failure().is_none() {
             if needs_repository || requirements.contains(ContextGroup::Git) {
-                evidence = evidence.with_git(repository.git_info.clone());
+                evidence = evidence.with_git(git_info.clone());
             }
             if needs_repository && !matches!(repository.topology.get(), Some(Err(_))) {
                 evidence = evidence.with_repository(
@@ -1224,12 +1410,10 @@ impl InvocationContext {
                 ContextGroup::Invocation => {
                     evidence = evidence.with_invocation_cwd(Some(self.inner.launch_cwd.clone()));
                 }
-                ContextGroup::DateTime
-                | ContextGroup::Agent
-                | ContextGroup::Git
-                | ContextGroup::Repo => {}
+                ContextGroup::DateTime | ContextGroup::Agent | ContextGroup::Repo => {}
+                ContextGroup::Git => captured = observed_git,
                 ContextGroup::FileChanges => {
-                    if let Ok(changes) = source_evidence
+                    if let Ok(changes) = volatile
                         .file_changes
                         .get_or_init(|| {
                             captured = true;
@@ -1291,20 +1475,23 @@ impl InvocationContext {
                         evidence = evidence.with_os(Some(os.clone()));
                     }
                     if repository.failure().is_none() {
-                        evidence = evidence.with_git(repository.git_info.clone());
+                        evidence = evidence.with_git(git_info.clone());
                     }
                 }
                 ContextGroup::GitHistory => {
-                    if repository.failure().is_none() {
-                        captured = true;
-                        match repository_root {
-                            Some(root) => {
-                                if let Ok(set) = recent_commits_at(root, 10) {
-                                    evidence = evidence.with_recent_commits(Some(set));
-                                }
-                            }
-                            None => evidence = evidence.with_recent_commits(None),
-                        }
+                    if repository.failure().is_none()
+                        && let Ok(commits) = volatile
+                            .recent_commits
+                            .get_or_init(|| {
+                                captured = true;
+                                repository_root
+                                    .map(|root| recent_commits_at(root, 10))
+                                    .transpose()
+                                    .map_err(Arc::new)
+                            })
+                            .as_ref()
+                    {
+                        evidence = evidence.with_recent_commits(commits.clone());
                     }
                 }
                 ContextGroup::Network => {
@@ -1346,10 +1533,15 @@ impl InvocationContext {
                 }
             }
             let name = context_group_name(group);
-            if captured {
-                self.record_runtime_evidence_capture(name);
-            } else {
-                self.record_runtime_evidence_reuse(name);
+            match (captured, is_volatile(group)) {
+                (true, true) => {
+                    record_group(&self.inner.work.volatile_observations, name);
+                    if let Some(epoch) = epoch {
+                        record_group(&epoch.volatile_observations, name);
+                    }
+                }
+                (true, false) => self.record_runtime_evidence_capture(name),
+                (false, _) => self.record_runtime_evidence_reuse(name),
             }
         }
         evidence
@@ -1859,6 +2051,17 @@ fn record_group(counts: &Mutex<BTreeMap<String, usize>>, group: impl Into<String
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *counts.entry(group.into()).or_insert(0) += 1;
+}
+
+/// Whether `group` is Git working state, observed per composition run rather
+/// than per invocation.
+fn is_volatile(group: darkmatter::markdown::compose::ContextGroup) -> bool {
+    use darkmatter::markdown::compose::ContextGroup;
+
+    matches!(
+        group,
+        ContextGroup::Git | ContextGroup::FileChanges | ContextGroup::GitHistory
+    )
 }
 
 fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'static str {

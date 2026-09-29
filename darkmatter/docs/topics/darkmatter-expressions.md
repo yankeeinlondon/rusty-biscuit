@@ -18,7 +18,7 @@ surface that runs it:
 | Surface | Form |
 | --- | --- |
 | Frontmatter interpolation (pass 1, pre-shell) | `key: "{{ ... }}"` |
-| Frontmatter interpolation (pass 2, post-shell) | `key: "{{ ... }}"` |
+| Frontmatter interpolation (pass 2, post-shell; deferred keys only) | `key: "{{ ... }}"` |
 | `$()` frontmatter shell ternary condition | `key: "$( cond ? a : b )"` |
 | `$()` frontmatter shell ternary branch | `key: "$( cond ? a : b )"` |
 | Body interpolation | `{{ ... }}` |
@@ -112,6 +112,13 @@ Darkmatter falls back to `ctx.<key>`. So `repo` resolves to `ctx.repo`. The
 reserved `doc` namespace is intercepted **before** this fallback, so bare `doc`
 always means the frontmatter object and never falls back to `ctx.doc`.
 
+An expression is evaluated once, where it is written. Whatever it returns is
+**data**: if a value, a file read, or a shell command yields text that contains
+`{{ … }}` or `$( … )`, that text is inserted as written and never evaluated.
+To build a string from several values, concatenate inside one expression
+(`{{ "in " + area }}`) rather than returning a template to be evaluated later.
+See [Inserted Text Is Data](../inline/interpolation.md#inserted-text-is-data).
+
 ### Nullable directive targets
 
 Optional schema properties remain nullable until the document or caller binds
@@ -193,6 +200,8 @@ A triple-brace span `{{{ ... }}}` is an **interpolation literal**. It is recogni
 - `{{{ {{ x }} }}}` composes to `{{ {{ x }} }}` with `x` unevaluated.
 - The literal closes at the first subsequent `}}}`; an unclosed `{{{` falls back to legacy `{{` scanning.
 - Literals are inert on every scanner consumer: interpolation, DMLS diagnostics, demand-driven context capture, and remote-reference discovery.
+- The output is data. `note: "{{{ area }}}"` makes `note` the text `{{ area }}`, and a later `{{ note }}` inserts that text; no later pass or transcluded child evaluates it.
+- `{{!data:` after two braces is not an expression: it opens a [literal token](../inline/interpolation.md#literal-tokens), a stored string that only tools write. Show the spelling with `{{{!data:…}}}`.
 
 Use interpolation literals when documentation needs to display `{{ ... }}` syntax rather than evaluate it. The fenced-code-block alternative remains the way to show literal `{{{ ... }}}` syntax itself.
 
@@ -486,10 +495,12 @@ refresh it after changing the catalog.
 | Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL). | `file_exists("fixture.md")` ⇒ `true` |
 | Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
 | Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
+| Filesystem | `try_frontmatter(file)` | Reads the frontmatter of a Markdown file as `{ok, value, error}`; a missing, unreadable, or unparsable file gives `ok` false and its reason instead of failing. | `try_frontmatter("fixture.md").value.title` ⇒ `Fixture Title` |
 | Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown body has only whitespace. | `markdown_body_empty("fixture.md")` ⇒ `false` |
 | Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
 | Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
 | Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md", {})` ⇒ `true` |
+| Filesystem | `find_files(pattern)` | Returns every file a glob reference matches (`&dir/**/name.md`), as sorted absolute paths; the path before the first wildcard is the directory searched. | `length(find_files("**/note.md"))` ⇒ `2` |
 | Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
 | Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
 | Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
@@ -607,6 +618,13 @@ whether a local path exists; they operate on the resolved path shape.
 | `absolute(path)` | the absolute form of a path | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
 | `has_command(cmd)` | whether a command is runnable on the host | **no** |
+
+`frontmatter(path, …)` and `markdown_title(path)` decode a stored
+[literal token](../inline/interpolation.md#literal-tokens) to the text it
+holds, so `{{ frontmatter('log.md', 'note') }}` never inserts a
+`{{!data:v1:…}}` spelling. Like every expression result, the returned value is
+data: it is inserted once and never evaluated. A malformed token comes back
+unchanged.
 
 `has_command(cmd)` is a `PATH`/executable existence probe: it reports whether
 `cmd` can be run on the host and **never executes** it, so it needs no command
@@ -866,8 +884,12 @@ cicd_list({ statuses: ["failed", "cancelled"], branch: "main", limit: 10 })
 
 ## Token Resolution in `$()` Shell Expressions
 
-A frontmatter `$( … )` value is a **shell expansion**, but the engine and the
-shell coexist inside it. A token in **executed position** (a non-ternary
+A frontmatter `$( … )` value is a **shell expansion** only when the author wrote
+it that way: a value that becomes `$( … )` through interpolation, a file read,
+or shell output is text (see
+[Only Authored Commands Run](../inline/fm-shell-expansion.md#only-authored-commands-run)).
+Within an authored `$( … )`, the engine and the
+shell coexist. A token in **executed position** (a non-ternary
 directive body, or a ternary branch) resolves by this precedence ladder:
 
 1. **Quoted** (single/double) → string literal.

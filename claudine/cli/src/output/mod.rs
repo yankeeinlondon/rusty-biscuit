@@ -128,7 +128,7 @@ pub(crate) fn log_wrapper_header(
     // For compose-based prompts, show the source file instead of the prompt text.
     // For static string prompts, show truncated prompt text as before.
     if let Some(filename) = compose_source_hint {
-        let prose_safe = filename.replace('<', "\\<");
+        let prose_safe = Prose::escape_text(filename);
         header_parts.push(
             Prose::new(format!(
                 "<dim><i>prompt sourced from <blue>{prose_safe}</blue></i></dim>"
@@ -144,7 +144,7 @@ pub(crate) fn log_wrapper_header(
         let term_width = term.width() as usize;
         let available = term_width.saturating_sub(used);
         let truncated = truncate_args(&escaped, available);
-        let prose_safe = truncated.replace('<', "\\<");
+        let prose_safe = Prose::escape_text(&truncated);
         header_parts.push(Prose::new(format!("<dim>{prose_safe}</dim>")).render(term));
     }
 

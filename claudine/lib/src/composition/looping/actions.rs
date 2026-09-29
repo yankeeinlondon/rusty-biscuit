@@ -151,9 +151,10 @@ fn apply_action_with_context(
 /// When `lookup` is `None`, returns a clone of the input unchanged.
 ///
 /// String leaves containing templates are rendered through Darkmatter's
-/// expression engine using the provided lookup, then re-parsed as JSON when
-/// possible so numeric, boolean, and `null` template results land as their
-/// proper JSON types. Strings without templates and non-string scalars are
+/// expression engine using the provided lookup. A leaf that is exactly one
+/// `{{ … }}` span keeps the expression's typed result; mixed text renders to a
+/// string and stays one — it is never re-parsed as JSON, because the inserted
+/// values are data. Strings without templates and non-string scalars are
 /// passed through. Arrays and objects are walked recursively.
 fn render_action_value(
     value: &Value,
@@ -238,7 +239,7 @@ fn render_string_with_lookup(
     }
 
     output.push_str(&raw[cursor..]);
-    Ok(serde_json::from_str(&output).unwrap_or(Value::String(output)))
+    Ok(Value::String(output))
 }
 
 /// Sized newtype around a borrowed `&dyn EvaluationLookup` so it can be passed

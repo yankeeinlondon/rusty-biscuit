@@ -153,7 +153,7 @@ pub(super) fn emit_preflight_blocked_and_finalize_in_context(
         runtime_state: None,
         err: Some(&err_info),
         timing: Some(&timing),
-        current,
+        current: current.as_ref().map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
         base_dir,
         ctx_base_dir,

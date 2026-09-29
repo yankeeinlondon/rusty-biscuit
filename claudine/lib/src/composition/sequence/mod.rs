@@ -122,11 +122,12 @@ pub fn resolve_sequence_plan_with(
 
     // The frontmatter's insertion-ordered map is projected into a plain JSON
     // object once here: expression lookups only ever read it by key, and the
-    // conversion keeps every downstream signature on one map type.
+    // conversion keeps every downstream signature on one map type. Stored
+    // literal tokens are decoded, as composition would read them.
     let frontmatter: Map<String, Value> = fm
         .as_map()
         .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
+        .map(|(key, value)| (key.clone(), crate::composition::closure::stored_text(value)))
         .collect();
     let mut plan = match grammar::classify_source(&sequence_value)? {
         // A directly invoked YAML document is itself the formal document, so it

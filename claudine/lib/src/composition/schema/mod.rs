@@ -530,6 +530,45 @@ pub fn pre_validate_schema_for_mode(
     file_ref_fallback_dir: Option<&std::path::Path>,
     mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
+    pre_validate_with_origin(
+        source,
+        set_overrides,
+        &std::collections::BTreeSet::new(),
+        file_ref_fallback_dir,
+        mode,
+    )
+}
+
+/// [`pre_validate_schema_for_mode`] for overrides that carry their origin.
+///
+/// A data override (a runtime value, never typed by a person) is final, so a
+/// value holding `{{` or `$(` is judged rather than deferred to composition.
+///
+/// ## Errors
+///
+/// See [`pre_validate_schema`].
+pub fn pre_validate_layered_for_mode(
+    source: &ResolvedCompositionSource,
+    overrides: &crate::composition::LayeredOverrides,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    mode: CompositionMode,
+) -> Result<PreValidatedSchema, CompositionError> {
+    pre_validate_with_origin(
+        source,
+        Some(&overrides.to_value()),
+        overrides.data_keys(),
+        file_ref_fallback_dir,
+        mode,
+    )
+}
+
+fn pre_validate_with_origin(
+    source: &ResolvedCompositionSource,
+    set_overrides: Option<&serde_json::Value>,
+    data_keys: &std::collections::BTreeSet<String>,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+    mode: CompositionMode,
+) -> Result<PreValidatedSchema, CompositionError> {
     let phase = launch_phase_for_mode(mode);
     let no_schema = !source
         .markdown
@@ -546,8 +585,12 @@ pub fn pre_validate_schema_for_mode(
 
     // First pass: drop non-template invalid optionals so the prepare-time
     // pipeline (and the preflight Darkmatter pass) sees a clean slate.
-    let (source, set_overrides, dropped_optionals) =
-        drop_invalid_optionals(source.clone(), set_overrides.cloned(), file_ref_fallback_dir);
+    let (source, set_overrides, dropped_optionals) = drop_invalid_optionals_with_origin(
+        source.clone(),
+        set_overrides.cloned(),
+        data_keys,
+        file_ref_fallback_dir,
+    );
 
     let effective = match load_effective_schema(&source, file_ref_fallback_dir) {
         Ok(Some(e)) => e,
@@ -565,7 +608,10 @@ pub fn pre_validate_schema_for_mode(
         Err(err) => return Err(err),
     };
 
-    let mut instance = build_effective_instance(&source, set_overrides.as_ref());
+    // Deferral is decided on the raw values, where a stored literal token is
+    // visibly data; validation judges the text composition will read.
+    let raw_instance = build_effective_instance(&source, set_overrides.as_ref());
+    let mut instance = crate::composition::closure::stored_text(&raw_instance);
     normalize_file_array_values(&mut instance, Some(&effective));
     let report = match phase {
         Some(phase) => effective.validate_for_phase(&instance, phase).map_err(|error| {
@@ -585,24 +631,8 @@ pub fn pre_validate_schema_for_mode(
         });
     }
 
-    let caller_resolved_eager_files: std::collections::HashSet<_> = file_ref_fallback_dir
-        .zip(set_overrides.as_ref().and_then(serde_json::Value::as_object))
-        .map(|(fallback, overrides)| {
-            report
-                .problems
-                .iter()
-                .filter(|problem| {
-                    matches!(problem.code, ValidationProblemCode::InvalidFileReference)
-                })
-                .filter_map(|problem| top_level_pointer_segment(&problem.path))
-                .filter(|property| {
-                    overrides.get(property).is_some_and(|value| {
-                        file_override_resolves_from(value, fallback)
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let caller_resolved_eager_files =
+        caller_resolved_file_properties(&report.problems, set_overrides.as_ref(), file_ref_fallback_dir);
 
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
     // whose raw value contains template syntax, because Darkmatter may
@@ -619,7 +649,7 @@ pub fn pre_validate_schema_for_mode(
             let caller_resolved = !matches!(p.kind, ValidationProblemKind::Missing)
                 && top_level_pointer_segment(&p.path)
                     .is_some_and(|name| caller_resolved_eager_files.contains(&name));
-            !caller_resolved && is_composition_independent(p, &instance)
+            !caller_resolved && is_composition_independent(p, &raw_instance, data_keys)
         })
         .cloned()
         .collect();
@@ -761,8 +791,28 @@ fn normalize_file_array_values(
 /// callers (notably `sequence`) that want to scrub doc-wide invalid
 /// optionals before per-step validation.
 pub fn drop_invalid_optionals(
+    source: ResolvedCompositionSource,
+    set_overrides: Option<serde_json::Value>,
+    file_ref_fallback_dir: Option<&std::path::Path>,
+) -> (
+    ResolvedCompositionSource,
+    Option<serde_json::Value>,
+    Vec<DroppedOptional>,
+) {
+    drop_invalid_optionals_with_origin(
+        source,
+        set_overrides,
+        &std::collections::BTreeSet::new(),
+        file_ref_fallback_dir,
+    )
+}
+
+/// [`drop_invalid_optionals`] where the overrides named in `data_keys` are
+/// data: final values, dropped when invalid whatever text they hold.
+fn drop_invalid_optionals_with_origin(
     mut source: ResolvedCompositionSource,
     mut set_overrides: Option<serde_json::Value>,
+    data_keys: &std::collections::BTreeSet<String>,
     file_ref_fallback_dir: Option<&std::path::Path>,
 ) -> (
     ResolvedCompositionSource,
@@ -799,7 +849,11 @@ pub fn drop_invalid_optionals(
         }
     }
 
-    let report = effective.validate(&serde_json::Value::Object(instance.clone()));
+    // Judged on decoded text; only a judgment is made here, and the source
+    // handed on keeps its stored tokens.
+    let report = effective.validate(&crate::composition::closure::stored_text(
+        &serde_json::Value::Object(instance.clone()),
+    ));
     if report.valid {
         return (source, set_overrides, dropped);
     }
@@ -829,7 +883,7 @@ pub fn drop_invalid_optionals(
                 // composition. The prepare-time validator will run
                 // drop-and-retry against the composed value if it is
                 // genuinely invalid.
-                if value_needs_composition(instance.get(&name)) {
+                if !data_keys.contains(&name) && value_needs_composition(instance.get(&name)) {
                     continue;
                 }
                 if !to_drop.iter().any(|(n, _)| n == &name) {
@@ -882,6 +936,34 @@ pub fn drop_invalid_optionals(
     (source, set_overrides, dropped)
 }
 
+/// The top-level properties whose file-reference verdict is on a caller
+/// override that resolves from the caller's launch area.
+///
+/// The validator judges every value from the document's directory; a caller
+/// value resolves from where the caller launched, so such a verdict is about
+/// the wrong base and must not be shown or enforced as invalid.
+pub(super) fn caller_resolved_file_properties(
+    problems: &[ValidationProblem],
+    overrides: Option<&serde_json::Value>,
+    launch_area: Option<&std::path::Path>,
+) -> std::collections::HashSet<String> {
+    let Some((launch_area, overrides)) =
+        launch_area.zip(overrides.and_then(serde_json::Value::as_object))
+    else {
+        return std::collections::HashSet::new();
+    };
+    problems
+        .iter()
+        .filter(|problem| matches!(problem.code, ValidationProblemCode::InvalidFileReference))
+        .filter_map(|problem| top_level_pointer_segment(&problem.path))
+        .filter(|property| {
+            overrides
+                .get(property)
+                .is_some_and(|value| file_override_resolves_from(value, launch_area))
+        })
+        .collect()
+}
+
 fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path) -> bool {
     match value {
         serde_json::Value::String(raw) => biscuit_file::FileReference::new(raw)
@@ -899,18 +981,22 @@ fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path
 /// `Missing` always stands: no template can conjure a key absent from both raw
 /// frontmatter and overrides. `Type`/`Invalid` stand only when the problem's
 /// top-level property in `instance` holds no template or shell syntax, since
-/// composition may still turn such a value valid. Shared by the pre-validator
-/// and root-union arm selection so both judge arms by the same rule.
+/// composition may still turn such a value valid; a property named in
+/// `data_keys` is data and always stands. Shared by the pre-validator and
+/// root-union arm selection so both judge arms by the same rule.
 pub(super) fn is_composition_independent(
     problem: &ValidationProblem,
     instance: &serde_json::Value,
+    data_keys: &std::collections::BTreeSet<String>,
 ) -> bool {
     match problem.kind {
         ValidationProblemKind::Missing => true,
         ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
-            let raw = top_level_pointer_segment(&problem.path)
-                .and_then(|name| instance.as_object().and_then(|map| map.get(&name)));
-            !value_needs_composition(raw)
+            let Some(name) = top_level_pointer_segment(&problem.path) else {
+                return true;
+            };
+            data_keys.contains(&name)
+                || !value_needs_composition(instance.as_object().and_then(|map| map.get(&name)))
         }
     }
 }
@@ -919,11 +1005,12 @@ pub(super) fn is_composition_independent(
 /// (`{{ ... }}`) or a frontmatter shell expression (`$(...)`) somewhere
 /// in any string descendant. Pre-validation must not drop or invalidate
 /// such values, because composition (template interpolation and shell
-/// expansion) may transform them into valid frontmatter.
+/// expansion) may transform them into valid frontmatter. A stored literal
+/// token is data, never pending.
 fn value_needs_composition(value: Option<&serde_json::Value>) -> bool {
     let Some(value) = value else { return false };
     match value {
-        serde_json::Value::String(s) => s.contains("{{") || s.contains("$("),
+        serde_json::Value::String(s) => darkmatter::markdown::literal_token::holds_pending_syntax(s),
         serde_json::Value::Array(items) => items.iter().any(|v| value_needs_composition(Some(v))),
         serde_json::Value::Object(map) => map.values().any(|v| value_needs_composition(Some(v))),
         _ => false,

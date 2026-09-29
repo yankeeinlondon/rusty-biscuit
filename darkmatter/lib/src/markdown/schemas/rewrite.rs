@@ -348,8 +348,6 @@ fn rewrite_property_union(
 /// Leaves the value verbatim when:
 /// - the value is not a string (Decision #7),
 /// - the value is a remote URL ([`is_remote_url`], Decision #7),
-/// - the value still holds a `$(...)` or unresolved `{{` marker — left for
-///   the post-shell re-validation (Decision #4),
 /// - the resolved path is `None` (a non-local reference validation accepted,
 ///   Decision #7),
 /// - rewriting produces a byte-identical string (idempotence fast path,
@@ -366,12 +364,6 @@ fn rewrite_file_value(
     // Remote URLs are left verbatim — there is no local path to project
     // (Decision #7).
     if is_remote_url(raw) {
-        return None;
-    }
-    // Composition-pending values (still holding `$(...)` or unresolved `{{`)
-    // are left verbatim — the post-shell re-validation will rewrite them
-    // once they expand (Decision #4).
-    if raw.contains("$(") || raw.contains("{{") {
         return None;
     }
     // Resolve through the shared document-backed context — the same resolver

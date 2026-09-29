@@ -11,6 +11,8 @@ use claudine::stream::StreamProtocol;
 use claudine::system_prompt::PreparedSystemPrompt;
 use color_eyre::eyre::{Result, bail};
 
+use super::exec::control::StdioControl;
+
 // The native-output and positional test suites (`tests/*.rs`) reconstruct the
 // catalog matching logic and reach these enums through `use super::super::*`.
 // The production bodies that referenced them moved into `apply`, so the imports
@@ -622,6 +624,16 @@ pub(crate) trait WrapperProfile: Send + Sync {
         apply::apply_structured_stream(self.provider(), args)
     }
 
+    /// The retained-stdin control session a structured launch with `args`
+    /// needs, when those args select the provider's managed control
+    /// interface. The session then owns the child's stdin and submits the
+    /// prompt that would otherwise be seeded on it.
+    ///
+    /// Default: `None` (the prompt is an ordinary stdin seed).
+    fn stdio_control(&self, _args: &[String]) -> Option<std::sync::Arc<dyn StdioControl>> {
+        None
+    }
+
     /// Whether Claudine can recover a final assistant body after an
     /// interactive session ends for inline composition closure.
     ///
@@ -779,5 +791,6 @@ mod tests {
     mod apply_yolo;
     mod native_output;
     mod overlay_strategy;
+    mod pi_managed;
     mod positional;
 }

@@ -55,7 +55,7 @@ registration order (substrate → wiki → frontmatter → DSL).
 | substrate (Markdown) | inside a link path / after `#` | document paths; `#`-anchor names for the target; fenced-code language tokens |
 | wiki | inside `[[ … ]]` | wiki targets (path style configurable) and `#heading` names; never inserts a `.md` extension |
 | frontmatter | inside the frontmatter block | schema keys (required-marked), enum values, boolish scaffolds, `file(...)` paths, `style.*` keys, `suggest(...)` value candidates, and `ctx.*` variables |
-| DSL | on a `::` line or inside `{{ }}` | directive names, per-family option keys/enum values, and interpolation variables/functions |
+| DSL | on a `::` line, inside `{{ }}`, or after a frontmatter `$( … )` | directive names, per-family option keys/enum values, interpolation variables/functions, and `$()` suffixes |
 
 ### `suggest(...)` value candidates
 
@@ -67,6 +67,16 @@ for block-sequence items (`- value`), and a suggest-bearing union arm wins over
 the enum / boolish / file families for the same position. The candidates come
 from the schema itself (via the library's `suggestions_for_path`), so DMLS
 holds no parallel suggestion table.
+
+## Shell suffix completion (`$( … )::`)
+
+After the closing `)` of a frontmatter `$( … )` value, completion offers the
+five suffixes: `::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, and
+`::no-cache`, filtered by the `::…` you have typed. A suffix the value already
+carries is not offered again, and neither is a second result suffix, so after
+`$(git diff --quiet)::ok::` only `::timeout:<seconds>` and `::no-cache` remain.
+Each item's `detail` says what the suffix does; `::timeout:` is inserted
+without a number.
 
 ## Interpolation completion (`{{ … }}`)
 

@@ -14,21 +14,26 @@
 //!
 //! ## Layer precedence
 //!
-//! A just-in-time composition folds four layers into one `set_overrides`
-//! object, lowest precedence first (spec → *Execution Architecture*):
+//! A just-in-time composition folds four layers into one [`LayeredOverrides`],
+//! lowest precedence first (spec → *Execution Architecture*):
 //!
 //! 1. the live source document's frontmatter (Darkmatter's own base — not
 //!    represented here)
-//! 2. prompt/task `params` and sequence user setters
-//! 3. accumulated runtime mutations
-//! 4. the reserved per-step overlay (`state`/`previous`/`next`/`sequence_id`)
+//! 2. evaluated task `params` (data), then sequence user setters (authored)
+//! 3. accumulated runtime mutations and `outputs` (data)
+//! 4. the reserved per-step overlay (`state`/`previous`/`next`/`sequence_id`,
+//!    data)
 //!
 //! [`layered_set_overrides`] is the single place that ordering is encoded.
+//! Only user setters are authored templates; every data value reaches
+//! Darkmatter raw and is never scanned for `{{ … }}` or `$( … )`.
 
+use std::collections::BTreeSet;
 use std::sync::Mutex;
 
 use darkmatter::effects::{EffectEngine, EffectError};
 use darkmatter::markdown::FrontmatterMap;
+use darkmatter::markdown::compose::{ComposeOptions, OverrideLayer, OverrideOrigin};
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 
@@ -226,53 +231,184 @@ pub fn trim_transport_newline(text: &str) -> &str {
     }
 }
 
-/// Fold the just-in-time composition layers into one `set_overrides` object.
+/// Top-level frontmatter overrides together with the origin of each key.
 ///
-/// Later arguments win. `outputs` is always present in the result — a document
-/// composed outside any sequence still resolves `{{ last(outputs) }}` — so this
-/// is the single guarantee behind the spec's "single-document `compose` /
-/// `inline-compose` use the same key" rule.
+/// This is the one shape runtime values take on their way into Darkmatter. A
+/// key is either **authored** — a person typed it (`--set`, `key=value`), so it
+/// is a template scanned once like the document's own frontmatter — or
+/// **data** — the run produced it (agent or task output, a lifecycle `set:`, a
+/// loop value, the step overlay, a `proxy.with:` overlay), so Darkmatter never
+/// evaluates its `{{ … }}` or runs its `$( … )`. Values stay raw and typed;
+/// origin travels beside them and no token or escaping is ever added.
+///
+/// [`apply_to`](Self::apply_to) is the only place Claudine hands overrides to
+/// Darkmatter compose options.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LayeredOverrides {
+    values: Map<String, Value>,
+    data_keys: BTreeSet<String>,
+}
+
+impl LayeredOverrides {
+    /// No overrides.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every key of `values` as authored.
+    pub fn authored(values: Option<&Value>) -> Self {
+        let mut overrides = Self::new();
+        overrides.push(OverrideOrigin::Authored, values);
+        overrides
+    }
+
+    /// Every key of `values` as data.
+    pub fn data(values: Option<&Value>) -> Self {
+        let mut overrides = Self::new();
+        overrides.push(OverrideOrigin::Data, values);
+        overrides
+    }
+
+    /// A `proxy.with:` overlay as data.
+    ///
+    /// A `null` overlay value removes the key from the target's frontmatter
+    /// instead (the CLI's `merge_frontmatter_overlay`) and contributes no
+    /// override.
+    pub fn proxy_overlay(overlay: &indexmap::IndexMap<String, Value>) -> Self {
+        let mut overrides = Self::new();
+        for (key, value) in overlay {
+            if !value.is_null() {
+                overrides.insert(OverrideOrigin::Data, key.clone(), value.clone());
+            }
+        }
+        overrides
+    }
+
+    /// Rebuild from an effective override object and the keys in it that are
+    /// data. A listed key absent from `values` is ignored.
+    pub fn from_parts(values: Option<&Value>, data_keys: &BTreeSet<String>) -> Self {
+        let values = match values {
+            Some(Value::Object(map)) => map.clone(),
+            _ => Map::new(),
+        };
+        let data_keys = data_keys
+            .iter()
+            .filter(|key| values.contains_key(*key))
+            .cloned()
+            .collect();
+        Self { values, data_keys }
+    }
+
+    /// Layer every key of `layer` on top: each replaces any earlier value and
+    /// takes `origin`. A non-object layer contributes nothing.
+    pub fn push(&mut self, origin: OverrideOrigin, layer: Option<&Value>) {
+        if let Some(Value::Object(map)) = layer {
+            for (key, value) in map {
+                self.insert(origin, key.clone(), value.clone());
+            }
+        }
+    }
+
+    /// Layer `other` on top, keeping the origin of each of its keys.
+    pub fn extend(&mut self, other: &LayeredOverrides) {
+        for (key, value) in &other.values {
+            self.insert(other.origin_of(key), key.clone(), value.clone());
+        }
+    }
+
+    /// Set one key with `origin`, replacing any earlier value.
+    pub fn insert(&mut self, origin: OverrideOrigin, key: String, value: Value) {
+        match origin {
+            OverrideOrigin::Authored => self.data_keys.remove(&key),
+            OverrideOrigin::Data => self.data_keys.insert(key.clone()),
+        };
+        self.values.insert(key, value);
+    }
+
+    /// Guarantee an `outputs` key without disturbing one a layer supplied.
+    ///
+    /// Preparation applies this to every composition so library-only callers
+    /// and tests — which never build layers through [`layered_set_overrides`]
+    /// — still see an initialized accumulator rather than an undefined root.
+    pub fn initialize_outputs(&mut self) {
+        if !self.values.contains_key(OUTPUTS_KEY) {
+            self.insert(
+                OverrideOrigin::Data,
+                OUTPUTS_KEY.to_string(),
+                Value::Array(Vec::new()),
+            );
+        }
+    }
+
+    /// Where `key`'s value came from. An absent key reads as authored.
+    pub fn origin_of(&self, key: &str) -> OverrideOrigin {
+        if self.data_keys.contains(key) {
+            OverrideOrigin::Data
+        } else {
+            OverrideOrigin::Authored
+        }
+    }
+
+    /// The effective values, whatever their origin.
+    pub fn values(&self) -> &Map<String, Value> {
+        &self.values
+    }
+
+    /// The effective values as one JSON object.
+    pub fn to_value(&self) -> Value {
+        Value::Object(self.values.clone())
+    }
+
+    /// The keys whose values are data.
+    pub fn data_keys(&self) -> &BTreeSet<String> {
+        &self.data_keys
+    }
+
+    /// Hand these overrides to Darkmatter, authored keys as templates and data
+    /// keys as inert values.
+    pub fn apply_to(&self, options: ComposeOptions) -> ComposeOptions {
+        let mut authored = Map::new();
+        let mut data = Map::new();
+        for (key, value) in &self.values {
+            match self.origin_of(key) {
+                OverrideOrigin::Authored => authored.insert(key.clone(), value.clone()),
+                OverrideOrigin::Data => data.insert(key.clone(), value.clone()),
+            };
+        }
+        options.with_override_layers([
+            OverrideLayer::authored(Value::Object(authored)),
+            OverrideLayer::data(Value::Object(data)),
+        ])
+    }
+}
+
+/// Fold the just-in-time composition layers into one [`LayeredOverrides`].
+///
+/// Later arguments win. `base` keeps its own origins (user setters are
+/// authored; a loop's carried values or a `proxy.with:` overlay are data);
+/// runtime mutations, `outputs`, and the reserved overlay are always data.
+/// `outputs` is always present in the result — a document composed outside any
+/// sequence still resolves `{{ last(outputs) }}` — so this is the single
+/// guarantee behind the spec's "single-document `compose` / `inline-compose`
+/// use the same key" rule.
 pub fn layered_set_overrides(
-    user_setters: Option<&Value>,
+    base: LayeredOverrides,
     runtime: Option<&RuntimeSnapshot>,
     reserved_overlay: Option<&Value>,
-) -> Value {
-    let mut merged = Map::new();
-    merge_object_into(&mut merged, user_setters);
+) -> LayeredOverrides {
+    let mut merged = base;
     if let Some(runtime) = runtime {
         for (key, value) in &runtime.mutations {
-            merged.insert(key.clone(), value.clone());
+            merged.insert(OverrideOrigin::Data, key.clone(), value.clone());
         }
     }
     merged.insert(
+        OverrideOrigin::Data,
         OUTPUTS_KEY.to_string(),
         runtime.map_or_else(|| Value::Array(Vec::new()), RuntimeSnapshot::outputs_value),
     );
-    merge_object_into(&mut merged, reserved_overlay);
-    Value::Object(merged)
-}
-
-/// Guarantee an `outputs` key on a caller-built override object without
-/// disturbing any layer the caller already folded in.
-///
-/// Preparation applies this to every composition so library-only callers and
-/// tests — which never build layers through [`layered_set_overrides`] — still
-/// see an initialized accumulator rather than an undefined root.
-pub fn with_initialized_outputs(overrides: Option<Value>) -> Value {
-    let mut merged = Map::new();
-    merge_object_into(&mut merged, overrides.as_ref());
+    merged.push(OverrideOrigin::Data, reserved_overlay);
     merged
-        .entry(OUTPUTS_KEY.to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    Value::Object(merged)
-}
-
-fn merge_object_into(target: &mut Map<String, Value>, source: Option<&Value>) {
-    if let Some(Value::Object(map)) = source {
-        for (key, value) in map {
-            target.insert(key.clone(), value.clone());
-        }
-    }
 }
 
 #[cfg(test)]

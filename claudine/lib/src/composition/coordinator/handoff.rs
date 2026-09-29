@@ -336,7 +336,7 @@ impl ProxyHandoff {
 pub enum SurfacedHandoff {
     /// An evaluated request awaiting commit by the command-level ledger.
     ///
-    /// Produced by the `initialize` and document-loop-gate routes, whose
+    /// Produced by the loop engine's `initialize` route, whose
     /// commit failures follow the setup-error route — the same typed
     /// diagnostic a direct invocation's `initialize` failure produces, with
     /// no catch events owed yet.

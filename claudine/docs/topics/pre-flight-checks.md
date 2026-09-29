@@ -8,7 +8,7 @@ Shell commands can appear in three places during a Claudine session:
 
 1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
 2. **Frontmatter `$(cmd)` expressions** — top-level frontmatter string values of the form `$(command arg ...)` are evaluated by Darkmatter's frontmatter shell expansion phase, with the command's trimmed `stdout` written back into the frontmatter. Example: `today: $(date +%Y-%m-%d)`.
-3. **Lifecycle `shell` stack actions** — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
+3. **Lifecycle `shell` stack actions** — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`), and every command a lifecycle `set` value written as a whole-value `$( … )` can run (both branches of a ternary). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session. A `set` value's command is approved under its bare bytes: `set: { clean: "$(git diff --quiet)::ok" }` approves `git diff --quiet`.
 
 Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
@@ -60,7 +60,41 @@ The `claudine sequence` orchestrator runs both phases **per step** during its up
 
 ### Phase 1: Template Directives
 
-Claudine asks Darkmatter to walk the full document graph and return every `::shell` directive it finds. Darkmatter runs interpolation first (using the same state that will be used during actual composition) so that template variables and dynamic transclusion paths resolve correctly. The result is a list of concrete commands with their source file and line number.
+Claudine asks Darkmatter to walk the full document graph and return every `::shell` directive it finds. Darkmatter runs interpolation first so that template variables and dynamic transclusion paths resolve correctly. The result is a list of concrete commands with their source file and line number.
+
+The rule that makes the approval set trustworthy: **a command is discovered with the bytes it will execute with.** Discovery builds its compose options with the same function the preparation that executes the document uses, so both see the same state:
+
+- the document's own frontmatter defaults and derived values;
+- the immediate `proxy` `with:` overlay of a handed-off document;
+- caller values (`--set`, `key=value`) and run-produced values (loop values, lifecycle `set`, `outputs`);
+- the reserved sequence inputs (`state`, `previous`, `next`);
+- the same launch snapshot and the same source-relative base directory.
+
+A transcluded partial is discovered with the state composition hands it: its parent's composed values as defaults, overlaid by the directive's own `set.*` values. A partial nested two levels deep inherits through its parent the same way.
+
+```md
+<!-- router.md -->
+---
+start:
+  stack:
+    - action: {action: proxy, target: './target.md', with: {base: main}}
+---
+
+<!-- target.md -->
+---
+base: string(required)
+---
+::file ./part.md
+
+<!-- part.md -->
+::shell-block when_error="(unavailable)"
+git rev-parse --short {{ base }}
+::end-block
+```
+
+The partial's command is approved as `git rev-parse --short main`, exactly what runs. Commands inside a `when=`-false block or a `::file … when=` that is false are still discovered and approved (discovery is condition-blind), but they do not run.
+
+Some values have no knowable bytes until the command runs: a shell probe such as `has_alias(…)` (discovery never launches the login shell), `as_markdown(…)` content, a lazy `current.*` or `current_env.*` read, and a frontmatter `$(…)` value that has not been expanded yet. A command built from one of these, directly or through a frontmatter value that reads one (in the same document or inherited by a partial), fails pre-flight with a dynamic command shape error naming the value, instead of being approved in a shape it will not run in. A caller override of such a value makes the command approvable again.
 
 Each command is checked against shell policy (blacklist, whitelist, approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
 
@@ -69,15 +103,21 @@ Each command is checked against shell policy (blacklist, whitelist, approval cac
 Shell actions in `initialize` are validation errors, including false branches;
 whitelists, cached approvals, and `--yolo` cannot allow them.
 
-After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `start`, `success`, `blocked`, `failure`, `finalize`, and `loop`.
+After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `start`, `success`, `blocked`, `failure`, `finalize`, and `loop` — and the commands of every `set` value written as a whole-value `$( … )`. Preparation fixes those commands' bytes from early-binding values first, so pre-flight approves exactly what the action later runs; see [Reading a Command's Result](flow-control/lifecycle.md#reading-a-commands-result).
 
 These commands flow through the same `resolve_shell_approvals` function and the same shared approval cache. Any command already approved in phase 1 is a cache hit. Only genuinely new commands trigger additional prompts.
 
-### Per-Attempt Audit (Passthrough Only)
+### Re-Audits: Handoffs, Retries, and Loop Iterations
 
-In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harness loop re-audits shell commands on every attempt (`Retry`, `Proxy`). This is necessary because the source file may change between iterations — a `Proxy` action can point to a different file with different `::shell` directives. The per-attempt audit reads the raw source text and discovers source-page directives via line-level scanning.
+An approval covers the bytes it was granted for, never a changed command. Every time a document is prepared again with different state, its commands are discovered again with that state and audited:
 
-Composition flows (`claudine compose`, `claudine inline-compose`) do **not** re-audit on each attempt. Template directives were discovered through Darkmatter's graph walker (which respects `::block when="false"` guards), and lifecycle shell commands were approved in phase 2. The approval handler is frozen after the first attempt so `Proxy`/`Retry` iterations cannot trigger new interactive prompts — only cached or whitelisted commands pass.
+- **A `proxy` target** gets its own full audit, as if it were invoked directly.
+- **A `retry` or `resume`** re-reads the document and audits its template commands with the attempt's state.
+- **A loop iteration** audits the template commands and the lifecycle `shell` commands its own state produces (`_loop_*`, carried values, lifecycle `set`). A command such as `::shell echo run-{{ n }}` is a new command on every iteration.
+
+The approval handler is frozen after the first attempt, so these re-audits never prompt behind a running agent: a command already in the approval cache or the whitelist passes, and a new one is refused with the same "requires approval" error pre-flight gives. The first loop iteration is the exception; nothing has launched yet, so it may still prompt. A `proxy` target reopens the approval window for its own commands.
+
+In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harness loop re-audits on every attempt by scanning the raw source text for directives, since there is no template composition step.
 
 ### Approval Policy
 
@@ -142,6 +182,8 @@ No provider session was started.
 ### Command Not Pre-Approved at Runtime
 
 A shell command was encountered during composition or harness execution that was not in the pre-approved set. This should never happen — it means the pre-flight scanner missed a command.
+
+It is always a hard failure of the composition: nothing absorbs it. A `when_error` fallback applies only to a command that ran and failed, a transcluded partial that fails for this reason is not replaced by a "could not transclude" notice, an `as_markdown(…) || fallback` does not fall back, and a lifecycle `no_error` does not suppress it.
 
 ```
 Shell command 'sniff repo packages' was not pre-approved and cannot

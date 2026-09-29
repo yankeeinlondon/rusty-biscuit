@@ -20,12 +20,15 @@ pub(crate) fn append_resume_passthrough_args(resume_args: &mut Vec<String>, base
             // OpenCode structured run on the stderr-bridge contract: without
             // it the relaunch loses the progress signal the
             // stalled-generation backstop reads.
-            "--json" | "--verbose" | "--print-logs"
+            // `--approve`/`--no-approve` is Pi's per-run project-trust
+            // decision, which the resumed run must repeat.
+            "--json" | "--verbose" | "--print-logs" | "--approve" | "--no-approve"
                 if !resume_args.iter().any(|arg| arg == &base_args[index]) =>
             {
                 resume_args.push(base_args[index].clone());
             }
-            "--output-format" | "--format" | "--output-last-message" | "--log-level" => {
+            // `--mode` selects Pi's structured interface (RPC or JSON).
+            "--output-format" | "--format" | "--output-last-message" | "--log-level" | "--mode" => {
                 if index + 1 < base_args.len()
                     && !resume_args.iter().any(|arg| arg == &base_args[index])
                 {
@@ -96,6 +99,16 @@ mod tests {
                 "INFO",
             ])
         );
+    }
+
+    /// A resumed Pi run keeps its structured interface and trust decision;
+    /// without them Pi reads the piped follow-up as a plain-text print run.
+    #[test]
+    fn passthrough_carries_pi_mode_and_trust() {
+        let mut resume_args = args(&["--session-id", "abc"]);
+        let base = args(&["--extension", "./x.ts", "--no-approve", "--mode", "rpc"]);
+        append_resume_passthrough_args(&mut resume_args, &base);
+        assert_eq!(resume_args, args(&["--session-id", "abc", "--no-approve", "--mode", "rpc"]));
     }
 
     #[test]

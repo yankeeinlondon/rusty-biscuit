@@ -335,7 +335,9 @@ fn iter_with_value_expressions<'a>(
     surfaces: &mut Vec<LifecycleExpressionSurface<'a>>,
 ) {
     match value {
-        ProxyWithValue::Null => {}
+        // A shell value's `{{ … }}` spans are resolved, and late-binding roots
+        // refused, when preflight fixes its command bytes.
+        ProxyWithValue::Null | ProxyWithValue::Shell(_) => {}
         ProxyWithValue::Scalar(expr) => surfaces.push(LifecycleExpressionSurface {
             path: prefix.clone(),
             signal,
@@ -733,9 +735,13 @@ pub fn validate_no_err_in_no_error_events(
 
     // Stack surfaces: an expression surface is rejected for a bare `err`
     // anywhere in its tree; a string literal (a single-parameter message body)
-    // is rejected for a bare `err` inside any of its `{{ … }}` spans.
+    // is rejected for a bare `err` inside any of its `{{ … }}` spans. Shell text
+    // stamped by pre-flight holds resolved data, not authored spans.
+    let stamped = pre_resolved_shell_texts(lifecycle);
     for surface in iter_stack_expression_surfaces(lifecycle) {
-        if surface.signal.can_carry_error() {
+        if surface.signal.can_carry_error()
+            || stamped.iter().any(|expr| std::ptr::eq(*expr, surface.expr))
+        {
             continue;
         }
         if surface_references_err(surface.expr) {
@@ -747,6 +753,26 @@ pub fn validate_no_err_in_no_error_events(
         }
     }
     Ok(())
+}
+
+/// The shell `command`/`on_error` expressions pre-flight (C3) already stamped
+/// with their resolved bytes ([`ShellAction::pre_resolved`]).
+fn pre_resolved_shell_texts(lifecycle: &LifecycleConfig) -> Vec<&Expr> {
+    let mut texts = Vec::new();
+    for signal in LifecycleSignal::ALL {
+        let Some(stack) = lifecycle.stack(signal) else {
+            continue;
+        };
+        for action in stack.iter().flat_map(|item| item.actions.iter()) {
+            if let LifecycleActionKind::Shell(shell) = &action.kind
+                && shell.pre_resolved
+            {
+                texts.push(&shell.command);
+                texts.extend(shell.on_error.as_ref());
+            }
+        }
+    }
+    texts
 }
 
 /// Whether an expression surface references the lifecycle `err` global, either
@@ -842,7 +868,8 @@ fn references_bare_err(expr: &Expr) -> bool {
 /// audit posture).
 ///
 /// `on_error` commands are also collected because they execute on
-/// non-zero exit. Each entry's property path names the source location
+/// non-zero exit, and so are the preflight-resolved commands of every `set`
+/// shell value. Each entry's property path names the source location
 /// (e.g. `start.stack[1].action.command`).
 pub fn collect_lifecycle_shell_commands(
     lifecycle: &LifecycleConfig,
@@ -853,6 +880,42 @@ pub fn collect_lifecycle_shell_commands(
             let property = surface.path.to_string();
             if property.ends_with(".command") || property.ends_with(".on_error") {
                 commands.push((literal, property));
+            }
+        }
+    }
+    commands.extend(collect_set_shell_commands(lifecycle));
+    commands
+}
+
+/// The commands every lifecycle `set` shell value can run, one entry per
+/// chained command of each reachable pipeline, named by the value's property
+/// (e.g. `start.stack[0].action[1].set.sha`).
+///
+/// Only a value preflight resolved has known bytes; an unresolved one
+/// contributes nothing and refuses to run.
+fn collect_set_shell_commands(lifecycle: &LifecycleConfig) -> Vec<(String, String)> {
+    let mut commands = Vec::new();
+    for signal in LifecycleSignal::ALL {
+        let Some(stack) = lifecycle.stack(signal) else {
+            continue;
+        };
+        for (index, item) in stack.iter().enumerate() {
+            for (action_index, action) in item.actions.iter().enumerate() {
+                let LifecycleActionKind::RuntimeSet(set) = &action.kind else {
+                    continue;
+                };
+                for (key, shell) in set.shell_values() {
+                    let Some(resolved) = shell.resolved.as_ref() else {
+                        continue;
+                    };
+                    let property = format!(
+                        "{}.stack[{index}].action[{action_index}].set.{key}",
+                        signal.property_name()
+                    );
+                    for command in resolved.commands() {
+                        commands.push((command, property.clone()));
+                    }
+                }
             }
         }
     }

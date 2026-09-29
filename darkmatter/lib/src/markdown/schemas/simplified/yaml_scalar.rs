@@ -52,6 +52,11 @@ impl DecodedScalar {
         }
     }
 
+    /// The empty scalar a bare `key:` authors (YAML null), located at `at`.
+    pub(crate) fn empty(at: usize) -> Self {
+        Self::contiguous(String::new(), vec![at])
+    }
+
     /// The decoded scalar text (quotes removed, escapes resolved).
     pub fn decoded(&self) -> &str {
         &self.decoded

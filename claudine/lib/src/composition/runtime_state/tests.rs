@@ -173,42 +173,120 @@ fn layer_precedence_is_setters_then_mutations_then_overlay() {
     state.append_output("prior");
 
     let overrides = layered_set_overrides(
-        Some(&json!({"shared": "setter", "only_setter": 1})),
+        LayeredOverrides::authored(Some(&json!({"shared": "setter", "only_setter": 1}))),
         Some(&state.snapshot()),
         Some(&json!({"state": {"name": "blue"}})),
     );
+    let values = overrides.values();
 
-    assert_eq!(overrides["shared"], json!("mutation"), "mutations outrank user setters");
-    assert_eq!(overrides["only_setter"], json!(1));
-    assert_eq!(overrides["state"], json!({"name": "blue"}), "the overlay is layered last");
-    assert_eq!(overrides[OUTPUTS_KEY], json!(["prior"]));
+    assert_eq!(values["shared"], json!("mutation"), "mutations outrank user setters");
+    assert_eq!(values["only_setter"], json!(1));
+    assert_eq!(values["state"], json!({"name": "blue"}), "the overlay is layered last");
+    assert_eq!(values[OUTPUTS_KEY], json!(["prior"]));
+}
+
+#[test]
+fn only_user_setters_are_authored_and_every_runtime_layer_is_data() {
+    let state = RuntimeState::new();
+    state
+        .set(&engine(), "carried", json!("see {{ title }}"), &base())
+        .unwrap();
+    state.append_output("INJECTED");
+
+    let overrides = layered_set_overrides(
+        LayeredOverrides::authored(Some(&json!({"typed": "{{ title }}", "carried": "x"}))),
+        Some(&state.snapshot()),
+        Some(&json!({"state": {"name": "{{ title }}"}})),
+    );
+
+    assert_eq!(overrides.origin_of("typed"), OverrideOrigin::Authored);
+    for key in ["carried", OUTPUTS_KEY, "state"] {
+        assert_eq!(overrides.origin_of(key), OverrideOrigin::Data, "`{key}` is run output");
+    }
+    assert_eq!(
+        overrides.values()["carried"],
+        json!("see {{ title }}"),
+        "a data value stays raw: no token, no escaping"
+    );
+    assert_eq!(overrides.values()[OUTPUTS_KEY], json!(["INJECTED"]));
+}
+
+#[test]
+fn a_later_layer_gives_a_key_its_own_origin() {
+    let mut overrides = LayeredOverrides::data(Some(&json!({"note": "from proxy", "kept": 1})));
+    overrides.push(OverrideOrigin::Authored, Some(&json!({"note": "typed"})));
+    assert_eq!(overrides.origin_of("note"), OverrideOrigin::Authored);
+    assert_eq!(overrides.values()["note"], json!("typed"));
+    assert_eq!(overrides.origin_of("kept"), OverrideOrigin::Data);
+
+    overrides.push(OverrideOrigin::Data, Some(&json!({"note": "produced"})));
+    assert_eq!(overrides.origin_of("note"), OverrideOrigin::Data);
+
+    let mut extended = LayeredOverrides::authored(Some(&json!({"kept": 2, "own": 3})));
+    extended.extend(&overrides);
+    assert_eq!(extended.origin_of("kept"), OverrideOrigin::Data);
+    assert_eq!(extended.origin_of("own"), OverrideOrigin::Authored);
+}
+
+#[test]
+fn from_parts_ignores_data_keys_that_are_no_longer_present() {
+    let data_keys = ["gone".to_string(), "kept".to_string()].into_iter().collect();
+    let overrides = LayeredOverrides::from_parts(Some(&json!({"kept": 1, "typed": 2})), &data_keys);
+    assert_eq!(overrides.data_keys().iter().collect::<Vec<_>>(), vec!["kept"]);
+    assert_eq!(overrides.origin_of("typed"), OverrideOrigin::Authored);
+    assert_eq!(overrides.origin_of("gone"), OverrideOrigin::Authored, "absent reads as authored");
+}
+
+/// The Darkmatter boundary: authored keys still fill in, data keys stay exact.
+#[test]
+fn apply_to_hands_authored_keys_as_templates_and_data_keys_verbatim() {
+    let mut overrides = LayeredOverrides::authored(Some(&json!({"typed": "{{ title }}"})));
+    overrides.push(
+        OverrideOrigin::Data,
+        Some(&json!({"produced": "{{ title }} and {{…}} and $(echo X)"})),
+    );
+    let markdown: darkmatter::markdown::Markdown =
+        "---\ntitle: t\n---\n[{{ typed }}] [{{ produced }}]\n".into();
+    let (composed, _) = markdown
+        .compose_with(overrides.apply_to(ComposeOptions::new()))
+        .unwrap();
+    assert_eq!(
+        composed.content().trim(),
+        "[t] [{{ title }} and {{…}} and $(echo X)]"
+    );
 }
 
 #[test]
 fn a_reserved_overlay_key_cannot_be_displaced_by_a_setter() {
     let overrides = layered_set_overrides(
-        Some(&json!({"state": "hijacked", "outputs": ["hijacked"]})),
+        LayeredOverrides::authored(Some(&json!({"state": "hijacked", "outputs": ["hijacked"]}))),
         Some(&RuntimeState::new().snapshot()),
         Some(&json!({"state": {"name": "blue"}})),
     );
-    assert_eq!(overrides["state"], json!({"name": "blue"}));
-    assert_eq!(overrides[OUTPUTS_KEY], json!([]), "the accumulator wins over a setter");
+    assert_eq!(overrides.values()["state"], json!({"name": "blue"}));
+    assert_eq!(overrides.values()[OUTPUTS_KEY], json!([]), "the accumulator wins over a setter");
 }
 
 #[test]
 fn outputs_is_initialized_even_with_no_runtime_state() {
-    let overrides = layered_set_overrides(None, None, None);
-    assert_eq!(overrides[OUTPUTS_KEY], json!([]));
+    let overrides = layered_set_overrides(LayeredOverrides::new(), None, None);
+    assert_eq!(overrides.values()[OUTPUTS_KEY], json!([]));
+    assert_eq!(overrides.origin_of(OUTPUTS_KEY), OverrideOrigin::Data);
 }
 
 #[test]
-fn with_initialized_outputs_seeds_only_when_absent() {
-    let seeded = with_initialized_outputs(Some(json!({"topic": "rust"})));
-    assert_eq!(seeded[OUTPUTS_KEY], json!([]));
-    assert_eq!(seeded["topic"], json!("rust"));
+fn initialize_outputs_seeds_only_when_absent() {
+    let mut seeded = LayeredOverrides::authored(Some(&json!({"topic": "rust"})));
+    seeded.initialize_outputs();
+    assert_eq!(seeded.values()[OUTPUTS_KEY], json!([]));
+    assert_eq!(seeded.origin_of(OUTPUTS_KEY), OverrideOrigin::Data);
+    assert_eq!(seeded.values()["topic"], json!("rust"));
 
-    let preserved = with_initialized_outputs(Some(json!({OUTPUTS_KEY: ["kept"]})));
-    assert_eq!(preserved[OUTPUTS_KEY], json!(["kept"]));
+    let mut preserved = LayeredOverrides::authored(Some(&json!({OUTPUTS_KEY: ["kept"]})));
+    preserved.initialize_outputs();
+    assert_eq!(preserved.values()[OUTPUTS_KEY], json!(["kept"]));
 
-    assert_eq!(with_initialized_outputs(None), json!({ OUTPUTS_KEY: [] }));
+    let mut empty = LayeredOverrides::new();
+    empty.initialize_outputs();
+    assert_eq!(empty.to_value(), json!({ OUTPUTS_KEY: [] }));
 }

@@ -12,7 +12,7 @@ use biscuit_terminal::terminal::Terminal;
 use chrono::{DateTime, Utc};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::context::merge::CtxMergeError;
-use darkmatter::markdown::compose::shell_expansion::ShellExpansionError;
+use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 
 use darkmatter::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
 use darkmatter::markdown::compose::expression::{
@@ -367,6 +367,23 @@ pub enum CompositionError {
     /// `clippy::result_large_err` floor, and the caller names the file.
     #[error("could not reconcile the inline document: {0}")]
     InlineArtifactEditFailed(#[source] MarkdownError),
+
+    /// The agent's frontmatter edit cannot be saved as written.
+    ///
+    /// Either it is not valid YAML after the closure's narrow repair (a
+    /// duplicate key, bad nesting, a missing delimiter), or a value the agent
+    /// wrote that must be stored as a literal token has no exact source span.
+    /// The caller rolls the document back to its pre-run bytes.
+    #[error(
+        "the agent's frontmatter edit to {} cannot be saved: {rejection}",
+        biscuit_file::to_portable_string(path)
+    )]
+    InlineAgentFrontmatterRejected {
+        /// The active document the agent edited.
+        path: PathBuf,
+        /// The line, value, and reason at fault.
+        rejection: Box<super::closure::AgentFrontmatterRejection>,
+    },
 
     /// The agent left the document body empty or semantically unchanged.
     ///
@@ -3140,9 +3157,10 @@ impl CompositionError {
     ///
     /// Called at the render boundary — after all control-flow `match`es on the
     /// unwrapped variant — so the wrapper never interferes with upstream
-    /// decision-making. For errors that do not relate to frontmatter, or when
-    /// `source` has no parseable frontmatter block, the error is returned
-    /// unchanged. Idempotent: an already-wrapped error is returned as-is.
+    /// decision-making. For errors that do not relate to frontmatter, when
+    /// `source` has no parseable frontmatter block, or when nothing the error
+    /// names can be located in it, the error is returned unchanged.
+    /// Idempotent: an already-wrapped error is returned as-is.
     pub fn enrich_frontmatter(
         self,
         source: &ResolvedCompositionSource,
@@ -3167,7 +3185,17 @@ impl CompositionError {
                 FrontmatterExcerpt::capture_line(source_text, line, stderr_is_tty)
             }
             FrontmatterHighlight::Property(property) => {
-                FrontmatterExcerpt::capture(source_text, Some(&property), stderr_is_tty)
+                FrontmatterExcerpt::capture(source_text, &property, stderr_is_tty)
+            }
+            FrontmatterHighlight::Properties(properties) => {
+                FrontmatterExcerpt::capture_properties(source_text, &properties, stderr_is_tty)
+            }
+            FrontmatterHighlight::SchemaProperties(properties) => {
+                FrontmatterExcerpt::capture_schema_properties(
+                    source_text,
+                    &properties,
+                    stderr_is_tty,
+                )
             }
             FrontmatterHighlight::SchemaSpan {
                 property,
@@ -3178,9 +3206,6 @@ impl CompositionError {
                 span_start,
                 stderr_is_tty,
             ),
-            FrontmatterHighlight::BlockOnly => {
-                FrontmatterExcerpt::capture(source_text, None, stderr_is_tty)
-            }
         };
         match excerpt {
             Some(excerpt) => CompositionError::WithFrontmatter {
@@ -3206,7 +3231,12 @@ impl CompositionError {
                 MarkdownError::FrontmatterFenceMismatch { line, .. } => {
                     Some(FrontmatterHighlight::Line(*line))
                 }
-                _ => Some(FrontmatterHighlight::BlockOnly),
+                // The YAML parser numbers lines within the block's interior;
+                // the opening `---` is source line 1.
+                MarkdownError::FrontmatterParse { source, .. } => source
+                    .location()
+                    .map(|location| FrontmatterHighlight::Line(location.line() + 1)),
+                _ => None,
             },
             CompositionError::LifecycleNestedSpanInLiteral { property, .. }
             | CompositionError::LifecycleUndefinedVariable { property, .. }
@@ -3302,36 +3332,46 @@ impl CompositionError {
                 Some(FrontmatterHighlight::Property("hash".to_string()))
             }
             CompositionError::UnsupportedInteractiveSchema { property, .. } => {
-                Some(FrontmatterHighlight::Property(property.clone()))
+                Some(FrontmatterHighlight::SchemaProperties(vec![property.clone()]))
             }
+            // A missing property is absent from the frontmatter by definition,
+            // so its `$schema` declaration is what can be shown.
             CompositionError::MissingProperties {
                 missing,
                 pointer_paths,
                 ..
-            } => match (missing.split_first(), pointer_paths.split_first()) {
-                (Some((only, [])), _) => Some(FrontmatterHighlight::Property(only.name.clone())),
-                (_, Some((only, []))) => {
-                    Some(FrontmatterHighlight::Property(pointer_to_dotted(only)))
-                }
-                _ => Some(FrontmatterHighlight::BlockOnly),
-            },
-            CompositionError::SchemaValidation { problems, .. } => match problems.split_first() {
-                Some((only, [])) => Some(FrontmatterHighlight::Property(pointer_to_dotted(only))),
-                _ => Some(FrontmatterHighlight::BlockOnly),
-            },
+            } => Some(FrontmatterHighlight::SchemaProperties(
+                missing
+                    .iter()
+                    .map(|property| property.name.clone())
+                    .chain(pointer_paths.iter().map(|pointer| pointer_to_dotted(pointer)))
+                    .collect(),
+            )),
+            CompositionError::SchemaValidation { problems, .. } => {
+                Some(FrontmatterHighlight::SchemaProperties(
+                    problems.iter().map(|pointer| pointer_to_dotted(pointer)).collect(),
+                ))
+            }
             CompositionError::UnresolvedFileReference { property, .. } => {
-                Some(FrontmatterHighlight::Property(property.clone()))
+                Some(FrontmatterHighlight::SchemaProperties(vec![property.clone()]))
             }
             // A whole-value frontmatter interpolation failure names its receiving
-            // key — focus the excerpt on that line rather than dumping the whole
-            // block. Body interpolation (key `None`) falls through to BlockOnly.
+            // key. Body interpolation (key `None`) and every other compose
+            // failure point into the body, so they get no excerpt.
             CompositionError::ComposeFailed(MarkdownError::Interpolation {
                 key: Some(key),
                 ..
             }) => Some(FrontmatterHighlight::Property(key.clone())),
-            CompositionError::InlineComposeSequenceMismatch { .. }
-            | CompositionError::ComposeFailed(_)
-            | CompositionError::ShellExpansionFailed { .. } => Some(FrontmatterHighlight::BlockOnly),
+            // Both keys are authored whenever this error fires.
+            CompositionError::InlineComposeSequenceMismatch { .. } => Some(
+                FrontmatterHighlight::Properties(vec!["prompt".to_string(), "sequence".to_string()]),
+            ),
+            CompositionError::ShellExpansionFailed { error, .. } => match error.origin() {
+                Some(ShellCommandOrigin::Frontmatter { key, .. }) => {
+                    Some(FrontmatterHighlight::Property(key.clone()))
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -3346,17 +3386,20 @@ pub enum LifecycleEvaluationReason {
     /// error.
     #[default]
     Expression,
-    /// Resolution finished but a `{{ … }}` span survived in the rendered text.
-    SurvivingSpan {
-        /// The first surviving span, braces included.
-        span: String,
-    },
 }
 
-/// How a frontmatter-rooted error should be highlighted in the captured excerpt.
+/// What a frontmatter-rooted error's excerpt should focus on.
+///
+/// An error whose focus cannot be located in the document gets no excerpt.
 enum FrontmatterHighlight {
-    /// Highlight a dotted frontmatter property key.
+    /// A dotted frontmatter property key.
     Property(String),
+    /// Several dotted frontmatter property keys, shown together.
+    Properties(Vec<String>),
+    /// Properties a schema problem names: each at its frontmatter key, when
+    /// the document sets one, and at its `$schema` declaration (in every arm
+    /// of a union).
+    SchemaProperties(Vec<String>),
     /// Highlight a 1-based document line (used for delimiter-level errors).
     Line(usize),
     /// Highlight a schema property whose type-and-constraint string failed to
@@ -3367,8 +3410,6 @@ enum FrontmatterHighlight {
         property: Option<String>,
         span_start: usize,
     },
-    /// Show the frontmatter block with no line highlighted.
-    BlockOnly,
 }
 
 #[cfg(test)]

@@ -89,6 +89,28 @@ pub trait CurrentProvider: std::fmt::Debug + Send + Sync {
     fn refresh(&self, key: &str) -> CurrentRefresh;
 }
 
+/// A provider that answers each key from its first observation.
+#[derive(Debug)]
+struct MemoizedProvider {
+    inner: Arc<dyn CurrentProvider>,
+    memo: Mutex<HashMap<String, CurrentRefresh>>,
+}
+
+impl CurrentProvider for MemoizedProvider {
+    fn refresh(&self, key: &str) -> CurrentRefresh {
+        if let Some(observed) = lock(&self.memo).get(key) {
+            return observed.clone();
+        }
+        // Observed outside the lock: a provider may take a while, and two
+        // first reads racing is harmless because the first stored wins.
+        let observed = self.inner.refresh(key);
+        lock(&self.memo)
+            .entry(key.to_string())
+            .or_insert(observed)
+            .clone()
+    }
+}
+
 /// The `Repo` group as one Darkmatter-owned request observed it: the projected
 /// `ctx` values of every key in that group, plus the root and topology behind
 /// them.
@@ -191,6 +213,10 @@ impl CurrentProvider for AnchoredRefresh {
 #[derive(Clone, Default)]
 pub struct CurrentAuthority {
     provider: Option<Arc<dyn CurrentProvider>>,
+    /// The provider [`Self::memoized`] wraps. Kept apart from `provider` so a
+    /// memoized authority re-scoped for a new unit of work starts an empty
+    /// memo instead of layering one over a stale one.
+    unmemoized: Option<Arc<dyn CurrentProvider>>,
     diagnostics: Arc<Mutex<Vec<ContextMergeDiagnostic>>>,
     /// The ambient provider's repository observation. It lives on the
     /// request handle rather than the provider because a Darkmatter-owned
@@ -216,7 +242,31 @@ impl CurrentAuthority {
     #[must_use]
     pub fn with_provider(&self, provider: Arc<dyn CurrentProvider>) -> Self {
         Self {
+            unmemoized: Some(Arc::clone(&provider)),
             provider: Some(provider),
+            ..self.clone()
+        }
+    }
+
+    /// This authority with a new memo shared by every read made through the
+    /// returned handle and its clones: the first read of a key observes it,
+    /// and every later read of that key returns the same observation.
+    ///
+    /// Darkmatter itself scopes a memo to one expression. An embedder whose
+    /// unit of work spans many expressions calls this at the start of each
+    /// unit — Claudine does so for each lifecycle event, so every `current.*`
+    /// read in one event agrees and the next event observes afresh. Calling it
+    /// on an already memoized authority starts a new, empty memo.
+    #[must_use]
+    pub fn memoized(&self) -> Self {
+        let Some(inner) = self.unmemoized.clone() else {
+            return self.clone();
+        };
+        Self {
+            provider: Some(Arc::new(MemoizedProvider {
+                inner,
+                memo: Mutex::new(HashMap::new()),
+            })),
             ..self.clone()
         }
     }
@@ -812,6 +862,31 @@ mod tests {
             cloned.resolve("current.branch", &context()).unwrap().unwrap(),
             Some(json!("feature")),
             "a clone shares the provider but never an observation",
+        );
+        assert_eq!(provider.observations(), 2);
+    }
+
+    /// A memoized authority holds one observation per key across expression
+    /// scopes, and re-memoizing it starts over rather than keeping the old one.
+    #[test]
+    fn a_memoized_authority_agrees_across_scopes_until_re_memoized() {
+        let provider = ScriptedRefresh::new([("branch", json!("main"))]);
+        let event = authority(&provider).memoized();
+        let first = CurrentScope::new(event.clone());
+        assert_eq!(first.resolve("current.branch", &context()).unwrap().unwrap(), Some(json!("main")));
+
+        provider.set("branch", json!("feature"));
+        let second = CurrentScope::new(event.clone());
+        assert_eq!(
+            second.resolve("current.branch", &context()).unwrap().unwrap(),
+            Some(json!("main")),
+            "a second expression in the same unit reuses the observation",
+        );
+        let next = CurrentScope::new(event.memoized());
+        assert_eq!(
+            next.resolve("current.branch", &context()).unwrap().unwrap(),
+            Some(json!("feature")),
+            "the next unit observes afresh",
         );
         assert_eq!(provider.observations(), 2);
     }

@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 3
+schema_revision: 4
 provider: claude
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -788,6 +788,7 @@ gaps:
     detail: "Official docs state each session exports its own socket and token and never inherits a parent's socket; no evidence shows caller-supplied CLAUDE_CODE_MESSAGING_TOKEN is honored."
     next_check: "Treat caller token injection as unsupported unless Anthropic documents it; a future disposable test may confirm rejection without using real sessions."
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - "Refreshed the revision 1 pilot into schema revision 2 with an explicit ordinary-peer launch profile, profile-linked discovery and compatibility, full protocol intent/guard/queue fields, and separate initial-receipt guarantees."
   - "Revalidated Claude Code 2.1.263 through Sniff and local help, rechecked official cross-session, Remote Control, Channels, CLI, and overview documentation, and recorded that no session registry or socket was live during the refresh."
   - Split ordinary interactive, ordinary one-shot non-interactive, and retained non-interactive launch profiles; split active-turn steering from idle-turn start mechanisms.

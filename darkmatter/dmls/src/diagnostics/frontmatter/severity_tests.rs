@@ -126,6 +126,28 @@ fn pending_values_are_deferred_before_parsing() {
     }
 }
 
+/// A stored literal token is data, not authored expression text: it is
+/// neither parsed as an expression nor deferred, so no diagnostic anchors in
+/// its encoded bytes, even when the text it holds is not a valid expression.
+#[test]
+fn a_literal_token_is_not_parsed_as_an_expression() {
+    let token = darkmatter::markdown::literal_token::encode_yaml_scalar("{{ x ((");
+    let text = format!("---\n$schema:\n  when: expression\nwhen: {token}\n---\n\nbody\n");
+    with_ctx(&text, |ctx| {
+        let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_deref()).unwrap();
+        let bundle = ctx.overlay.and_then(|overlay| overlay.bundle()).unwrap();
+        let rejecting = bundle.effective.validate_with_options(
+            &serde_json::json!({ "when": "1 +" }),
+            &PositionMap::new(),
+            &ValidationOptions::default(),
+        );
+        let expression_values = crate::providers::frontmatter::expression_values(ctx, ast);
+        let mut out = Vec::new();
+        expression_diagnostics(ctx, ast, &rejecting, &expression_values, &mut out);
+        assert!(out.is_empty(), "{out:#?}");
+    });
+}
+
 #[test]
 fn existing_malformed_code_action_is_offered_at_error_severity() {
     let text = "# Doc\n\n{{ > invalid }}\n";

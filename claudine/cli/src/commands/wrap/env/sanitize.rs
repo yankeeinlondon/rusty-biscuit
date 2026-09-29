@@ -8,6 +8,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 
 use claudine::invocation_context::EnvBaseline;
+pub(crate) use claudine::secrets::is_sensitive_key_name as is_sensitive_key;
+use claudine::secrets::has_credential_prefix;
 use color_eyre::eyre::{Result, bail};
 
 pub(crate) fn validate_include_names(include: &[String]) -> Result<HashSet<String>> {
@@ -116,29 +118,13 @@ pub(crate) fn ambient_sensitive_env() -> HashMap<OsString, OsString> {
         .collect()
 }
 
-pub(crate) fn is_sensitive_key(key: &str) -> bool {
-    let uppercase = key.to_ascii_uppercase();
-    uppercase.contains("API_KEY")
-        || uppercase.contains("TOKEN")
-        || uppercase.contains("PASSWORD")
-        || uppercase.contains("SECRET")
-        || uppercase.contains("PRIVATE_KEY")
-        || uppercase.contains("CREDENTIAL")
-        || uppercase.contains("ACCESS_KEY")
-        || uppercase.contains("PASSPHRASE")
-        || (uppercase.ends_with("_KEY") && !uppercase.contains("PUBLIC_KEY"))
-        || uppercase.ends_with("_AUTH")
-        || uppercase.ends_with("_PAT")
-        || uppercase.ends_with("_PWD")
-        || uppercase.ends_with("_PEM")
-}
-
 /// Redact values in CLI args that look like they contain secrets.
 ///
 /// Scans for patterns like `--api-key=sk-...` or `--token sk-...` and
 /// replaces the value portion with `****`. Matching is case-insensitive for
-/// flag names, and a few common short aliases (`-k`) and token-value shapes
-/// (`sk-`, `ghp_`, `xox[bp]-`, `AKIA`) are also redacted.
+/// flag names, and the short alias `-k` and any bare argument starting with a
+/// shared credential-token prefix
+/// ([`claudine::secrets::CREDENTIAL_TOKEN_PREFIXES`]) are also redacted.
 pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
     let sensitive_prefixes: &[&str] = &[
         "--api-key",
@@ -199,7 +185,7 @@ pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
         }
 
         // Value-shape redaction: bare secret-looking tokens.
-        if looks_like_secret_token(arg) {
+        if has_credential_prefix(arg) {
             result.push("****".to_string());
             continue;
         }
@@ -208,13 +194,4 @@ pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
     }
 
     result
-}
-
-/// Returns `true` when a bare argument value starts with a known secret prefix.
-fn looks_like_secret_token(value: &str) -> bool {
-    value.starts_with("sk-")
-        || value.starts_with("ghp_")
-        || value.starts_with("xoxb-")
-        || value.starts_with("xoxp-")
-        || value.starts_with("AKIA")
 }

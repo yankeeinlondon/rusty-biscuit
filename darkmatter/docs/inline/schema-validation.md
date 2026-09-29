@@ -123,7 +123,7 @@ A few behaviours worth knowing:
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
 - Conversion collects **every** independent per-property failure into one aggregate rather than stopping at the first, so a schema with two bad definitions reports two problems (and DMLS anchors one diagnostic per property). A structural failure that makes further traversal meaningless is still a single error.
-- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* only and never rejects a value.
+- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* and never rejects a value on its own; only a root union whose arms disagree on a property's globs enforces them, to choose between those arms (see [Root unions](#root-unions-and-file-match)).
 
 ## Validation Phases
 
@@ -403,6 +403,45 @@ direct variables and static member/index selections share this presentation
 behavior without changing effective frontmatter. The raw record remains
 unchanged so fresh preparation can apply another active document's schema
 without recapturing ambient state.
+
+A root union selects a file arm without committing to one. When several arms
+accept the caller's values, or none does, a caller property is still
+materialized when every contending arm declares it as the same kind of file,
+because the value resolves from the caller's origin whichever arm applies:
+
+```yaml
+$schema:
+  - kind: 'literal(feature)'
+    spec: 'file(required;eager;match(**/features/**/spec.md))'
+  - kind: 'literal(fix)'
+    spec: 'file(required;eager;match(**/fixes/**/spec.md))'
+```
+
+`--set spec=fixes/x/spec.md` from the repository root resolves from the root,
+and its glob then selects the `fix` arm (below). When the arms disagree on
+the file mode (`spec: string` in one, `spec: file` in the other) or one omits
+the property, the caller value stays raw, and the eager-`file` rewrite leaves
+it raw too rather than re-anchor it as though the document had authored it.
+
+### Root unions and file `match`
+
+The two arms above declare `spec` with different globs, so each glob is
+compiled into its arm as `x-darkmatter-match`, and an existing file outside it
+rules the arm out:
+
+| Value | Result |
+|---|---|
+| `spec=fixes/x/spec.md` | the `feature` arm is ruled out; the `fix` arm applies |
+| `spec=features/x/spec.md` | the `fix` arm is ruled out; the `feature` arm applies |
+| `kind=fix spec=features/x/spec.md` | invalid: `` `…/features/x/spec.md` is outside this schema arm's `match(**/fixes/**/spec.md)` `` |
+
+The same judgment runs wherever an arm is chosen: caller-file projection,
+coercion, and the final verdict. When every arm fails, an arm ruled out by its
+glob is reported only if all of them were, so the reader sees the requirement
+of the arm the path selected. A glob no other arm contests, a missing file, and
+template or shell syntax are never judged; the comparison uses `/` spelling
+relative to the launch directory, where completion walks the glob. The full
+rule is in [Defining Schemas — Files](../topics/schemas/definition.md#files).
 
 ## Interaction With `--set` and `--state`
 

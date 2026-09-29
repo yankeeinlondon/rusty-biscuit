@@ -134,7 +134,10 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   interpolation into a literal.
 - **Shell awareness** — `::shell` and frontmatter `$()` values hover with an
   approved / denied / unknown policy verdict, and denied built-ins raise a
-  `darkmatter.security.*` diagnostic. Nothing is ever executed.
+  `darkmatter.security.*` diagnostic. A `$()` value's suffixes complete, hover
+  with their meaning, and raise `dm.shell.invalid_suffix` when compose would
+  reject them. A quoted `$()` value is recognized like an unquoted one. Nothing
+  is ever executed.
 - **Fenced-code languages** — unknown fence languages are flagged with a
   nearest-match suggestion.
 

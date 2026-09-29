@@ -85,6 +85,7 @@ impl BlockError for CompositionError {
             | CompositionError::MissingProperties { .. }
             | CompositionError::CompletionBodyUnchanged { .. }
             | CompositionError::CompletionSchemaFailed { .. }
+            | CompositionError::InlineAgentFrontmatterRejected { .. }
             | CompositionError::UnsupportedInteractiveSchema { .. } => schema::status_block(self),
 
             // Selection / target family.
@@ -167,8 +168,8 @@ pub(super) fn render_file_link(path: &std::path::Path) -> String {
     });
     match absolute.and_then(|path| url::Url::from_file_path(path).ok()) {
         Some(href) => format!(
-            "<a href=\"{}\">{escaped_label}</a>",
-            escape_prose_path(href.as_str())
+            "<a href={}>{escaped_label}</a>",
+            Prose::quoted_attr(href.as_str())
         ),
         None => escaped_label,
     }
@@ -180,18 +181,10 @@ fn optional_line(line: usize) -> Value {
     if line > 0 { json!(line) } else { Value::Null }
 }
 
+/// Escape author or diagnostic text for splicing into Prose markup, so paths,
+/// identifiers such as `_loop_count`, and messages render exactly as written.
 pub(super) fn escape_prose_path(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' | '"' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    Prose::escape_text(input)
 }
 
 /// Map a `ComposeFailed`'s inner [`MarkdownError`] to a composition code,
@@ -381,6 +374,11 @@ impl Diagnostic for CompositionError {
                 "composition.invalid_file_reference"
             }
             CompositionError::CompletionBodyUnchanged { .. } => "composition.body_unchanged",
+            // The agent produced the document, so its output postcondition
+            // failed, not the author's document.
+            CompositionError::InlineAgentFrontmatterRejected { .. } => {
+                "document.invalid_frontmatter"
+            }
             CompositionError::CompletionSchemaFailed { .. } => "composition.completion_schema",
             CompositionError::InlineArtifactUnreadable { .. } => "io.read_failed",
             CompositionError::InlineGuardMissing { .. } => "usage.invalid_argument",
@@ -615,6 +613,13 @@ impl Diagnostic for CompositionError {
             CompositionError::AtomicWriteFailed { path, .. }
             | CompositionError::InlineRollbackFailed { path, .. } => {
                 base["path"] = json!(biscuit_file::to_portable_string(path));
+            }
+            // `document.invalid_frontmatter` declares `doc`, `property`,
+            // `problems`.
+            CompositionError::InlineAgentFrontmatterRejected { path, rejection } => {
+                base["doc"] = json!(biscuit_file::to_portable_string(path));
+                base["property"] = json!(rejection.property);
+                base["problems"] = json!([rejection.to_string()]);
             }
             // `io.read_failed` declares `path`.
             CompositionError::InlineArtifactUnreadable { path, .. } => {

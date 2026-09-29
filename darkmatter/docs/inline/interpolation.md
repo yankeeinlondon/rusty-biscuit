@@ -4,7 +4,7 @@ The Darkmatter compose pipeline provides interpolation of frontmatter, context, 
 
 Interpolation happens in two stages during the compose pipeline (see the [pipeline overview](../darkmatter-compose-pipeline.md)):
 
-1. **Frontmatter Interpolation** — resolves `{{ }}` expressions inside frontmatter values using seed (non-templated) frontmatter, the `doc` / `doc.*` namespace, `ctx.*`, and `env.*`. This stage itself runs in **two passes** that bracket frontmatter shell expansion (pass 1 pre-shell, pass 2 post-shell). See [Frontmatter Interpolation](./fm-interpolation.md) for full details.
+1. **Frontmatter Interpolation** — resolves `{{ }}` expressions inside frontmatter values using seed (non-templated) frontmatter, the `doc` / `doc.*` namespace, `ctx.*`, and `env.*`. This stage itself runs in **two passes** that bracket frontmatter shell expansion (pass 1 pre-shell, pass 2 post-shell, which scans only the keys pass 1 deferred). See [Frontmatter Interpolation](./fm-interpolation.md) for full details.
 2. **Body Interpolation** — resolves `{{ }}` expressions in the document body using the effective state (frontmatter + external state + context).
 
 Both stages also expose the [read-side functions](../topics/darkmatter-expressions.md#read-side-functions) (`file_exists`, `frontmatter`, `absolute`, `relative`, …) and the `doc.*` namespace — the same grammar resolves identically across every surface.
@@ -229,7 +229,18 @@ composes to `Body: fixed {{ area }}`.
 
 ## Inserted Text Is Data
 
-Every authored span is scanned **once**. The text an expression returns, a file read (`frontmatter(...)`), a shell command's output, and a literal's output are data: Darkmatter never scans them again for `{{ … }}`, `{{{ … }}}`, a whole-value `$( … )`, or a body directive (`::shell`, `::shell-block`, `::file`, `::code`, `::url`, `::block`). This holds in frontmatter, in the body, and in transcluded children, which receive their parent's composed values as data.
+Every authored span is scanned **once**. The text an expression returns, a file read (`frontmatter(...)`), a shell command's output, a literal's output, a decoded [literal token](#literal-tokens), and a caller's data override are data: Darkmatter never scans them again for `{{ … }}`, `{{{ … }}}`, a whole-value `$( … )`, or a body directive (`::shell`, `::shell-block`, `::file`, `::code`, `::url`, `::block`). This holds in frontmatter, in the body, and in transcluded children, which receive their parent's composed values as data.
+
+```mermaid
+flowchart LR
+    A["authored text<br/>(document, --set, --state)"] -->|scanned once| B["expression, file read,<br/>shell command, {{{ … }}}"]
+    B --> C["result: data"]
+    D["data override,<br/>decoded literal token,<br/>parent's composed state"] --> C
+    C -->|inserted as text| E["composed output"]
+    C -. never scanned again .-> B
+```
+
+The rule exists so that text Darkmatter did not author cannot become an instruction. A value that came from a file, a command, or an AI agent's output can mention `{{ ctx.repo }}` or `$(rm -rf x)` and still compose to exactly those characters.
 
 | Inserted text | Result |
 | ------------- | ------ |
@@ -243,6 +254,127 @@ Every authored span is scanned **once**. The text an expression returns, a file 
 A text replacement (`replace:`) writes its value as authored text when the value is authored, so a replacement can still expand to a directive, and as data when the value was itself produced (for example `replace: {X: "{{ y }}"}`).
 
 A caller can inject data directly: `ComposeOptions::with_data_overrides` and `ComposeOptions::with_override_layers` insert values that are never scanned. `--set` / `with_set_overrides` values are authored templates: a person typed them.
+
+```bash
+md compose doc.md --set '{"note": "{{ title }}!"}'   # note becomes "<title>!"
+```
+
+Because a `--set` value is scanned, it can also fail to parse. The error names the override rather than the document, which never defined the key:
+
+```text
+MarkdownError: interpolation failed
+The note frontmatter property failed to evaluate `…`:
+parse error: Unexpected character: '…' at position 0
+The value came from a command-line override (`--set`), not from the document.
+```
+
+An error in a value the document authored keeps its `Defined in:` file, line, and excerpt.
+
+### Migrating from Rescanning
+
+Earlier releases rescanned the text a replacement produced, repeating until nothing changed (a fixed point, capped at ten passes). A template could therefore build another template: a ternary branch holding `{{ x }}`, a frontmatter value holding `{{{ x }}}` that the body later evaluated, or a shell command whose output contained `{{ x }}`. That rescan is gone, and those inner spans now compose as literal text.
+
+To keep the old output, make every expression an authored span. Either concatenate inside one expression:
+
+```md
+<!-- Before: relied on a rescan; now composes to "inside {{proj}} now" -->
+Nested: {{ proj ? "inside {{proj}} now" : "none" }}
+
+<!-- After: composes to "inside Darkmatter now" -->
+Nested: {{ proj ? "inside " + proj + " now" : "none" }}
+```
+
+or write the span unescaped where it should be evaluated, instead of deferring it with `{{{ … }}}`:
+
+```yaml
+# Before: body {{ tmpl }} rendered "Hello Ada"; it now renders "Hello {{ name }}"
+tmpl: "Hello {{{ name }}}"
+
+# After: an authored span, evaluated here; body {{ tmpl }} renders "Hello Ada"
+tmpl: "Hello {{ name }}"
+```
+
+A `{{{ … }}}` escape now always means "show these braces", in every later pass and every transcluded child. [`lint_expression`](#braces-inside-string-literals) finds nested spans inside quoted literals and suggests the `+` rewrite.
+
+### Literal Tokens
+
+A file can also store a frontmatter string as data, so the next compose of that file does not read it as a template. A tool writes the value as a **literal token**: `{{!data:v1:` plus the string's UTF-8 bytes in unpadded URL-safe base64, then `}}`. It is always written as a double-quoted YAML scalar.
+
+```yaml
+---
+area: claudine
+# The string `fixed {{ area }} parsing`, stored as data
+summary: "{{!data:v1:Zml4ZWQge3sgYXJlYSB9fSBwYXJzaW5n}}"
+---
+{{ summary }}
+```
+
+This composes to `fixed {{ area }} parsing`. Frontmatter pass 1 decodes the token once, and the decoded string is data: it is never evaluated, never converted, and never a shell command, even when it reads `$(echo X)`. The file keeps the token until a person edits it.
+
+```mermaid
+flowchart LR
+    A["summary: &quot;{{!data:v1:…}}&quot;"] -->|load| B["token text (loaders keep it)"]
+    B -->|compose pass 1| C["decoded string, marked data"]
+    C --> D["expressions read it as text"]
+    B -->|decode_literal_tokens| E["decoded string for a reader"]
+```
+
+| Written | Result |
+| ------- | ------ |
+| `k: "{{!data:v1:JChlY2hvIFgp}}"` | the string `$(echo X)`, never run |
+| `k: "{{!data:v1:}}"` | the empty string |
+| `k: "see {{!data:v1:YQ}}"` | error: a token must be the entire value |
+| `k: " {{!data:v1:YQ}}"` | error: nothing may surround the token, whitespace included |
+| `k: "{{!data:v2:YQ}}"` | error: unsupported version |
+| `{{!data:v1:YQ}}` in the body | error: tokens exist only as frontmatter values |
+| `{{ 'a {{!data:v1:YQ}}' }}` | error: a token inside an expression |
+| `k: "{{{!data:v1:YQ}}}"`, `\{{!data:v1:YQ}}` | the spelling as text, via the usual escapes |
+
+A malformed or misplaced token fails composition under every policy, preflight included, with the token's line and column; it is never read as an expression.
+
+```text
+MarkdownError: malformed literal token
+The k frontmatter property holds `{{!data:v2:YQ}}`, which is not a valid literal token:
+unsupported literal token version `v2` (this build reads `v1`)
+Defined in: doc.md
+Expression at line: 2, column: 5
+```
+ A token inside a fenced or indented code block is not scanned, like any other `{{`.
+
+- **Reading a file's values.** Loaders keep tokens encoded. A reader that needs the strings calls `darkmatter::markdown::literal_token::decode_literal_tokens` on a loaded value, or `Frontmatter::decoded_literal_tokens`. Do not hand the decoded values back to composition as authored text, because it would scan them. A lexical "is this still a template?" check uses `literal_token::holds_pending_syntax`, which never treats a whole token as pending. The `frontmatter(path)` / `frontmatter(path, prop)` and `markdown_title(path)` expression functions decode for you: `{{ frontmatter('log.md', 'note') }}` inserts the text a stored token holds, never its `{{!data:v1:…}}` spelling. What they return is data, like any expression result, and a malformed token comes back unchanged instead of failing the expression.
+- **Decoding one token.** `literal_token::decode(token)` returns the string or a `TokenError` (`NotAToken`, `Unterminated`, `MissingVersion`, `UnsupportedVersion`, `InvalidPayload`, `InvalidUtf8`, `Embedded`). `decode_leaf(value)` returns `None` for a value that is not a token at all.
+- **Finding a token's bytes.** `darkmatter::markdown::hash::locate_frontmatter_leaves(document, paths)` returns the exact source range of each requested string leaf (quotes and a block scalar's header included), so a writer can replace one value in place without re-serializing the document. It refuses a leaf behind an anchor, alias, tag, or `<<` merge, a plain flow-collection item, and a nested sequence.
+- **Writing a token.** `literal_token::encode_yaml_scalar(value)` returns the quoted scalar and `encode(value)` the bare token. Decide from where the value came from, never from what it looks like: a string that already resembles a token is encoded again.
+- **Lifecycle keys.** A key the caller defers to event time (Claudine's lifecycle stacks) keeps its raw text, token included, for the caller that evaluates it.
+
+#### Editing a Token by Hand
+
+A token is written by tools, but a person can change the value it holds. Decode the payload, edit the text, and write it back in one of two ways.
+
+```sh
+# Decode: prints `fixed {{ area }} parsing`
+python3 -c 'import base64,sys; p=sys.argv[1]; print(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)).decode())' \
+  Zml4ZWQge3sgYXJlYSB9fSBwYXJzaW5n
+
+# Encode the edited text: prints `{{!data:v1:…}}`
+python3 -c 'import base64,sys; print("{{!data:v1:" + base64.urlsafe_b64encode(sys.argv[1].encode()).decode().rstrip("=") + "}}")' \
+  'fixed {{ area }} parsing, and more'
+```
+
+1. **Re-encode it** and paste the new token between double quotes. The value stays data. This is the only safe choice when the text contains a whole-value `$( … )`.
+2. **Write a plain quoted value** instead. The key is now authored, and Darkmatter scans it like any other frontmatter you wrote.
+
+The second choice is where edits go wrong. Pasting the decoded text back verbatim turns every `{{ … }}` into a template again, and a value that is exactly `$( … )` into a shell command:
+
+```yaml
+# The token held `fixed {{ area }} parsing`
+summary: "fixed {{ area }} parsing"     # template: composes to "fixed claudine parsing"
+summary: "fixed {{{ area }}} parsing"   # text: composes to "fixed {{ area }} parsing"
+```
+
+Use `{{{ … }}}` for each brace pair you want to keep as text, or re-encode. A hand-edited token that no longer decodes fails composition with its line and column, so a typo in the payload cannot slip through as an expression.
+
+> **Follow-up.** The language server (DMLS) does not yet show a token's decoded text on hover or inline, so an editor displays the raw `{{!data:v1:…}}` spelling. Until it does, decode with the commands above or with `literal_token::decode`.
 
 
 ## Escaping an Opener with a Backslash
@@ -303,3 +435,4 @@ See the source modules:
 - `darkmatter/lib/src/markdown/compose/interpolation/` — lexer, evaluator, rewriter
 - `darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs` — frontmatter-specific interpolation engine
 - `darkmatter/lib/src/markdown/compose/value_origin.rs` and `body_origin.rs` — which frontmatter values and body bytes are data
+- `darkmatter/lib/src/markdown/literal_token.rs` — the `{{!data:v1:…}}` codec and `decode_literal_tokens`

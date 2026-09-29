@@ -108,6 +108,9 @@ If a command fails with no matching error handler:
 - Output from already-succeeded commands is preserved in the error
 - The error includes the failing command's source excerpt
 - The block is not partially rendered into the document
+- The composition stops, even when the block is in a file included with
+  `::file`: the error names that file, and the file is never replaced by a
+  "could not transclude" notice
 
 In terminal error output, preserved partial output is visually demoted with
 Prose `<dim>` styling. If shell-block error output gains a dedicated HTML

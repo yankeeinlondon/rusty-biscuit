@@ -67,41 +67,46 @@ pub(super) fn execute_terminal_event(
         } else {
             "blocked"
         };
-        // A raised top-level interpolation fails the event closed before its
-        // stack runs (mirroring `StackExecutionContext::execute_event`): report
-        // it as the event's evaluation error so the caller halts the run.
-        if let Some(info) = emit_lifecycle_top_level_already_recorded(
-            guard,
-            signal,
-            materialized,
-            source_path,
-            repo_root,
-            term,
-            effect_engine,
-            err,
-            loop_start,
-        ) {
-            return TerminalEventOutcome {
-                outcome: LifecycleEventOutcome {
-                    evaluation_error: Some(info),
-                    ..Default::default()
-                },
-                downgrade_err: None,
-                effective_event: event_name,
-            };
-        }
-        // Now run the success/blocked stack exactly once.
-        let outcome = run_lifecycle_stack_only(
-            guard,
-            signal,
-            materialized,
-            source_path,
-            repo_root,
-            term,
-            effect_engine,
-            err,
-            loop_start,
-        );
+        // The top-level communication and the stack are one event, so they
+        // share one context and therefore one `current` observation.
+        let outcome = {
+            let timing = capture_lifecycle_timing(loop_start);
+            let ctx = build_lifecycle_stack_context_for_materialized(
+                signal,
+                materialized,
+                source_path,
+                repo_root,
+                guard.context().launch_area,
+                guard.effective_prepared_context(),
+                term,
+                guard.emitter(),
+                guard.context().settings,
+                guard.context().messaging,
+                effect_engine,
+                err,
+                Some(&timing),
+            );
+            // A raised top-level interpolation fails the event closed before
+            // its stack runs (mirroring `StackExecutionContext::execute_event`):
+            // report it as the event's evaluation error so the caller halts the
+            // run.
+            if let Some(info) = ctx.emit_top_level_for_signal(guard.config()) {
+                return TerminalEventOutcome {
+                    outcome: LifecycleEventOutcome {
+                        evaluation_error: Some(info),
+                        ..Default::default()
+                    },
+                    downgrade_err: None,
+                    effective_event: event_name,
+                };
+            }
+            // Now run the success/blocked stack exactly once.
+            let mut ctx = ctx;
+            if !guard.start_emitted() {
+                ctx.shell_runner = &claudine::composition::lifecycle_executor::DisabledShellRunner;
+            }
+            ctx.execute_stack_for_signal(guard.config())
+        };
         if let Some(StackControl::Error { reason }) = outcome.control.as_ref() {
             // The stack downgraded the run. Re-designate the already-recorded
             // terminal signal to `Failure` (keeping `terminal_emitted` true so
@@ -112,9 +117,13 @@ pub(super) fn execute_terminal_event(
             // The already-fired success/blocked top-level communication is
             // intentionally preserved.
             guard.redesignate_terminal_to_failure();
+            // A reasonless `error` gets the same default message as one raised
+            // from `start`, so `err.msg` and the rendered error never go blank.
             let action_error = LifecycleErrorInfo::from_action_failure(
                 "error",
-                reason.clone().unwrap_or_default(),
+                reason
+                    .clone()
+                    .unwrap_or_else(|| format!("lifecycle {event_name} error")),
             );
             let failure_outcome = run_failure_event_for_downgrade(
                 guard,
@@ -193,48 +202,6 @@ pub(super) fn run_failure_event_for_downgrade(
     guard.run_event_stack(LifecycleSignal::Failure, &ctx)
 }
 
-/// Emit only the top-level communication properties for `signal` (no stack),
-/// for a terminal slot the caller has **already** recorded.
-///
-/// Used by [`execute_terminal_event`] for `success`/`blocked`: the caller takes
-/// the terminal slot via [`LifecycleRunGuard::record_event_emission`] and then
-/// calls this to fire the communication surface *before* the stack runs, per
-/// the spec's top-level-before-stack contract. This helper does **not** record
-/// emission state — the caller owns that.
-///
-/// Returns the late-binding evaluation error if the top-level interpolation
-/// raised, so the terminal-phase caller can halt the run before the stack runs.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_lifecycle_top_level_already_recorded(
-    guard: &claudine::composition::LifecycleRunGuard<'_>,
-    signal: LifecycleSignal,
-    materialized: &MaterializedHarnessPrompt,
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    term: &Terminal,
-    effect_engine: &EffectEngine,
-    err: Option<&LifecycleErrorInfo>,
-    loop_start: std::time::Instant,
-) -> Option<LifecycleErrorInfo> {
-    let timing = capture_lifecycle_timing(loop_start);
-    let ctx = build_lifecycle_stack_context_for_materialized(
-        signal,
-        materialized,
-        source_path,
-        repo_root,
-        guard.context().launch_area,
-        guard.effective_prepared_context(),
-        term,
-        guard.emitter(),
-        guard.context().settings,
-        guard.context().messaging,
-        effect_engine,
-        err,
-        Some(&timing),
-    );
-    ctx.emit_top_level_for_signal(guard.config())
-}
-
 /// Run one lifecycle event (top-level + stack), recording emission state in
 /// `guard` and returning the event outcome.
 ///
@@ -275,53 +242,13 @@ pub(super) fn run_lifecycle_event(
     guard.run_event_stack(signal, &ctx)
 }
 
-/// Run only the stack for `signal` (no top-level communication).
-///
-/// Used to preview success/blocked stacks for explicit `Error` control actions
-/// before committing to the terminal signal.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn run_lifecycle_stack_only(
-    guard: &claudine::composition::LifecycleRunGuard<'_>,
-    signal: LifecycleSignal,
-    materialized: &MaterializedHarnessPrompt,
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    term: &Terminal,
-    effect_engine: &EffectEngine,
-    err: Option<&LifecycleErrorInfo>,
-    loop_start: std::time::Instant,
-) -> LifecycleEventOutcome {
-    let timing = capture_lifecycle_timing(loop_start);
-    let ctx = build_lifecycle_stack_context_for_materialized(
-        signal,
-        materialized,
-        source_path,
-        repo_root,
-        guard.context().launch_area,
-        guard.effective_prepared_context(),
-        term,
-        guard.emitter(),
-        guard.context().settings,
-        guard.context().messaging,
-        effect_engine,
-        err,
-        Some(&timing),
-    );
-    let mut ctx = ctx;
-    if !guard.start_emitted() {
-        ctx.shell_runner = &claudine::composition::lifecycle_executor::DisabledShellRunner;
-    }
-    ctx.execute_stack_for_signal(guard.config())
-}
-
 /// Build a stack context from a materialized prompt and guard-derived routes.
 ///
 /// `timing` is the lifecycle stack-only global; callers capture it fresh per
-/// event — see the `run_lifecycle_event` /
-/// `emit_lifecycle_top_level_already_recorded` / `run_lifecycle_stack_only`
-/// helpers. The lazy `current` / `current_env` roots are served by the
+/// event — see [`run_lifecycle_event`] and [`execute_terminal_event`]. Build
+/// one context per event: the lazy `current` root is served by the
 /// invocation's refresh authority, taken from the materialization's document
-/// epoch.
+/// epoch, and memoized for this context so every read in the event agrees.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
     signal: LifecycleSignal,
@@ -359,10 +286,11 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
         runtime_state: Some(&materialized.runtime_state),
         err,
         timing,
+        // One event, one `current` observation per key.
         current: materialized
             .document_epoch
             .as_ref()
-            .map(claudine::invocation_context::DocumentEpoch::current_authority),
+            .map(|epoch| epoch.current_authority().memoized()),
         group: None,
         base_dir,
         ctx_base_dir: launch_area,

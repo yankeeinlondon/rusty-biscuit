@@ -23,5 +23,5 @@ pub(crate) use shell_options::{
 };
 pub(crate) use types::{
     AttemptLaunch, HarnessPromptMode, HarnessPromptState, MaterializedHarnessPrompt,
-    harness_prompt_mode_label,
+    UnrecoveredLifecycleDowngrade, harness_prompt_mode_label,
 };

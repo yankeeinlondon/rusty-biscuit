@@ -76,6 +76,22 @@ agent: qwen
 Just a body.
 ";
 
+/// Fixture whose description has leading underscores in bold file names and
+/// an inline code span, the text that once lost its underscores and leaked a
+/// literal `</i>` into the header.
+const FIXTURE_UNDERSCORED_DESCRIPTION: &str = "\
+---
+name: Described Doc
+agent: goose
+description: |-
+    1. **_pr/open.md** opens it.
+    2. **_pr/triage.md** triages it.
+
+    See `_pr/_report.md`.
+---
+Just a body.
+";
+
 /// Fixture with no `agent` frontmatter and no explicit provider flag.
 const FIXTURE_NO_AGENT: &str = "\
 ---
@@ -261,6 +277,32 @@ fn row_raw<'a>(frame: &'a CapturedFrame, label: &str) -> Option<&'a str> {
         .iter()
         .position(|l| l.contains(&format!("│ {label}")))
         .and_then(|i| raw_lines.get(i).copied())
+}
+
+/// The Value-column lines of the Description row, as (plain, raw) pairs.
+fn description_cell_lines<'a>(frame: &'a CapturedFrame) -> Vec<(String, &'a str)> {
+    let raw_lines: Vec<&str> = frame.raw.lines().collect();
+    let mut cell = Vec::new();
+    let mut inside = false;
+    for (index, line) in frame.plain.lines().enumerate() {
+        let cells: Vec<&str> = line.split('│').collect();
+        if cells.len() < 4 {
+            continue;
+        }
+        let field = cells[1].trim();
+        if field == "Description" {
+            inside = true;
+        } else if !field.is_empty() {
+            inside = false;
+        }
+        if inside {
+            cell.push((
+                cells[2].trim().to_string(),
+                raw_lines.get(index).copied().unwrap_or_default(),
+            ));
+        }
+    }
+    cell
 }
 
 /// A single styling attribute decoded from a CSI `m` sequence in a terminal
@@ -844,4 +886,45 @@ fn level2_dry_run_reused_tmux_pane_does_not_reuse_previous_agent_rows() {
     assert!(common::strip_ansi(row).contains("Agent Not Installed"), "{row:?}");
     assert!(has_yellow(row), "{row:?}");
     assert!(has_dim(row), "{row:?}");
+}
+
+/// The Description cell shows the authored text character for character, in
+/// italic + dim, with no markup token reaching the terminal.
+#[test]
+#[serial(level2_terminal)]
+fn level2_dry_run_description_renders_as_authored_in_tmux() {
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+
+    let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
+    let capture = run_dry_run_compose_with_doc(
+        &mut harness,
+        FIXTURE_UNDERSCORED_DESCRIPTION,
+        "claudine-dryrun-description-l2",
+    );
+
+    let cell = description_cell_lines(&capture.frame);
+    let plain: Vec<&str> = cell.iter().map(|(text, _)| text.as_str()).collect();
+    assert_eq!(
+        plain,
+        [
+            "1. **_pr/open.md** opens it.",
+            "2. **_pr/triage.md** triages it.",
+            "",
+            "See `_pr/_report.md`.",
+        ],
+        "plain:\n{}",
+        capture.frame.plain,
+    );
+    assert!(
+        !capture.frame.plain.contains("</i>"),
+        "a markup token reached the pane:\n{}",
+        capture.frame.plain,
+    );
+    for (text, raw) in cell.iter().filter(|(text, _)| !text.is_empty()) {
+        let attrs = decode_attrs(raw);
+        assert!(
+            attrs.contains(&Attr::Dim) && attrs.contains(&Attr::Italic),
+            "expected `{text}` to render italic + dim.\ndecoded: {attrs:?}\nrow: {raw:?}",
+        );
+    }
 }

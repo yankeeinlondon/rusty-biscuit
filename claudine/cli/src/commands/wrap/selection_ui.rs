@@ -29,7 +29,7 @@ use claudine::provider::Provider;
 pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider> {
     let options: Vec<ChoiceOption<Provider>> =
         plan.options.iter().map(provider_option_to_choice).collect();
-    let height = crate::commands::schema_interactive::chooser_height(options.len());
+    let height = crate::commands::schema_interactive::chooser_height(options.len(), false);
 
     let mut state = ChooseOneState::from_options(options);
 

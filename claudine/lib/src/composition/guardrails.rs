@@ -32,6 +32,25 @@ const DEFAULT_GUARDRAILS: &str = "\
 >   properties. They are owned by the caller and will be restored if changed.
 > - If the document declares a `$schema`, every property you set must match
 >   its declared type.
+> - A frontmatter value you write is kept exactly as text, including any `#`
+>   and everything after it. If you mean `#` to start a YAML comment, quote
+>   the value (`note: \"see issue\"  # why`) or put the comment on its own
+>   line.
+> - Your final response is a summary of what you did (two or three short
+>   paragraphs), not the document content. Do not repeat the body in your
+>   response.
+";
+
+const SHIPPED_GUARDRAILS_2026_09_06: &str = "\
+> **IMPORTANT:**
+>
+> - The document you are updating is {document_path}. Write the
+>   requested content into its body and any requested properties into its
+>   frontmatter, then re-read the file to confirm it is well-formed.
+> - Never modify the `prompt`, `hash`, or `last_updated` frontmatter
+>   properties. They are owned by the caller and will be restored if changed.
+> - If the document declares a `$schema`, every property you set must match
+>   its declared type.
 > - Your final response is a summary of what you did (two or three short
 >   paragraphs), not the document content. Do not repeat the body in your
 >   response.
@@ -86,6 +105,7 @@ const HISTORICAL_SHIPPED_GUARDRAILS: &[&str] = &[
     SHIPPED_GUARDRAILS_2026_03_27,
     SHIPPED_GUARDRAILS_2026_09_01,
     SHIPPED_GUARDRAILS_2026_09_05,
+    SHIPPED_GUARDRAILS_2026_09_06,
 ];
 
 /// Load the guardrail template from `.claudine/inline-compose.md` (creating it
@@ -213,6 +233,9 @@ mod tests {
         assert!(DEFAULT_GUARDRAILS.contains("`prompt`, `hash`, or `last_updated`"));
         assert!(DEFAULT_GUARDRAILS.contains("must match\n>   its declared type"));
         assert!(DEFAULT_GUARDRAILS.contains("summary of what you did"));
+        // The plain-scalar rule (spec R4): `#` in an agent-written value is text.
+        assert!(DEFAULT_GUARDRAILS.contains("including any `#`"));
+        assert!(DEFAULT_GUARDRAILS.contains("quote\n>   the value"));
         for retired in [
             "Return the replacement Markdown body",
             "Do not edit the source file directly",

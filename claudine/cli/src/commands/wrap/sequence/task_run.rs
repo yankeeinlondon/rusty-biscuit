@@ -31,26 +31,29 @@
 //! either way: the bar is added on the rendering path only.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use claudine::composition::lifecycle_executor::{StackExecutionContext, SystemShellRunner};
 use claudine::composition::{
     self, CompositionError, CompositionExecutionRequest, CompositionMode, DefaultLifecycleEmitter,
-    PreparedComposition, ResolvedExecutionTarget, RuntimeState, SequenceTaskResult,
+    PreparedComposition, ResolvedExecutionTarget, RunLedger, RuntimeState, SequenceTaskResult,
+    SharedRunLedger,
 };
 use claudine::composition::sequence::preflight::{PreflightAction, PreflightGroup, PreflightTask};
 use claudine::composition::sequence::task::{
     PromptRunOutcome, PromptTaskRequest, PromptTaskRunner, SystemTaskShell, TaskExecution,
-    TaskOutcome, TaskStatus,
+    TaskOutcome, TaskRun, TaskStatus,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
-use claudine::invocation_context::{InvocationContext, SourceContext};
+use claudine::invocation_context::{InvocationContext, RunEvidence, SourceContext};
 use claudine::render::{TaskBar, TaskLiveOutput, TaskStream, TaskStreamSink};
 use claudine::system_prompt::SystemPromptArgs;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::EffectiveStateBuilder;
 use serde_json::Value;
 
+use crate::commands::compose::CompositionKind;
+use crate::commands::compose::prep::StepScope;
 use crate::commands::wrap::composition::execute_composition_request_inner;
 
 use super::iterate::{SequenceRunContext, StepOutcome};
@@ -67,6 +70,8 @@ pub(super) fn run_step_task(
     target: Option<&ResolvedExecutionTarget>,
     runtime_state: &std::sync::Arc<RuntimeState>,
     compose_perf: Option<darkmatter::markdown::compose::ComposePerfReport>,
+    // The step's composition run, which the task and its prompt document join.
+    step_run: &RunEvidence,
 ) -> StepOutcome {
     let frontmatter = effective_frontmatter(prepared);
     let state = match EffectiveStateBuilder::new()
@@ -88,7 +93,7 @@ pub(super) fn run_step_task(
     };
 
     let (task_source_context, task_context, document_epoch) =
-        prepare_task_context(&run.prep_context.invocation, task, env_overrides);
+        prepare_task_context(&run.prep_context.invocation, task, env_overrides, step_run);
     document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Lifecycle,
     );
@@ -164,6 +169,7 @@ pub(super) fn run_step_task(
         interrupt: Some(run.interrupted.as_ref()),
         stream: sink.as_ref(),
         live: live.as_ref(),
+        run_evidence: Some(step_run),
     }
     .run();
 
@@ -203,6 +209,7 @@ fn prepare_task_context(
     invocation: &InvocationContext,
     task: &PreflightTask,
     env_overrides: &BTreeMap<String, String>,
+    run: &RunEvidence,
 ) -> (
     SourceContext,
     darkmatter::markdown::compose::ComposeContext,
@@ -216,7 +223,8 @@ fn prepare_task_context(
     // One launch-anchored snapshot per task epoch: launch repository and
     // package facts come from the invocation owner, while the task document's
     // own `SourceContext` (returned alongside) still drives file resolution.
-    let document_epoch = invocation.begin_document_epoch();
+    // The epoch joins the task's run, which its prompt document joins too.
+    let document_epoch = invocation.begin_document_epoch_in(run);
     let mut task_context = document_epoch.capture_launch_context(&requirements);
     for (key, value) in env_overrides {
         task_context.env_mut().insert(key.clone(), value.clone());
@@ -296,8 +304,49 @@ fn push_action_scan(action: &PreflightAction, scan: &mut String) {
     }
 }
 
+/// What every task of `group` mentions, nested groups included: each task's
+/// own fields and its prompt document's root page.
+///
+/// A prompt document is read as it stands now, since an earlier step may have
+/// rewritten it; the preflight graph's copy is the fallback.
+fn group_requirements(
+    group: &PreflightGroup,
+    graph: &claudine::composition::sequence::preflight::PreflightGraph,
+) -> darkmatter::markdown::compose::ContextRequirements {
+    let mut scan = String::new();
+    // A task's scan already covers nested groups' fields.
+    for task in &group.tasks {
+        push_task_scan(task, &mut scan);
+    }
+    let mut documents = darkmatter::markdown::compose::ContextRequirements::default();
+    let mut pending: Vec<&PreflightTask> = group.tasks.iter().collect();
+    while let Some(task) = pending.pop() {
+        match &task.action {
+            PreflightAction::Prompt { path, .. } => {
+                let fresh = darkmatter::markdown::Markdown::try_from(path.as_path()).ok();
+                let document = fresh
+                    .as_ref()
+                    .or_else(|| graph.prompt_document(path).map(|document| &document.markdown));
+                if let Some(document) = document {
+                    documents = documents.union(
+                        &darkmatter::markdown::compose::ContextRequirements::for_document(document),
+                    );
+                }
+            }
+            PreflightAction::Group(nested) => pending.extend(nested.tasks.iter()),
+            PreflightAction::Shell { .. } | PreflightAction::SideEffect { .. } => {}
+        }
+    }
+    darkmatter::markdown::compose::ContextRequirements::for_content(&scan).union(&documents)
+}
+
 fn push_json_scan<T: serde::Serialize>(value: &T, scan: &mut String) {
-    push_scan(&serde_json::to_string(value).unwrap_or_default(), scan);
+    // An empty scan would silently under-capture; these fields are plain data
+    // and always serialize.
+    push_scan(
+        &serde_json::to_string(value).expect("preflight task fields always serialize"),
+        scan,
+    );
 }
 
 fn push_scan(text: &str, scan: &mut String) {
@@ -384,6 +433,32 @@ impl<'a> WrapperPromptRunner<'a> {
 }
 
 impl PromptTaskRunner for WrapperPromptRunner<'_> {
+    fn open_member_run(&self, task: &PreflightTask) -> Option<TaskRun> {
+        let run = RunEvidence::default();
+        let (_, context, epoch) =
+            prepare_task_context(&self.run.prep_context.invocation, task, self.env_overrides, &run);
+        epoch.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+        );
+        Some(TaskRun { context, run })
+    }
+
+    fn open_group_run(&self, group: &PreflightGroup) -> Option<TaskRun> {
+        let run = RunEvidence::default();
+        let invocation = &self.run.prep_context.invocation;
+        // Capturing the union here observes every Git group any sibling
+        // names, once, before the first sibling starts.
+        let epoch = invocation.begin_document_epoch_in(&run);
+        let mut context = epoch.capture_launch_context(&group_requirements(group, self.run.graph));
+        for (key, value) in self.env_overrides {
+            context.env_mut().insert(key.clone(), value.clone());
+        }
+        epoch.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+        );
+        Some(TaskRun { context, run })
+    }
+
     fn run(&self, request: &PromptTaskRequest) -> Result<PromptRunOutcome, CompositionError> {
         *self.record() = PromptRunRecord::default();
 
@@ -425,6 +500,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             .compose
             .for_referenced_document(request.inline_compose, &prompt_source_context);
         prompt_compose_context.caller_input_records = &caller_input_records;
+        prompt_compose_context.run_evidence = request.run_evidence.as_ref();
         let composed = super::jit::compose_step(
             &source,
             &prompt_compose_context,
@@ -440,9 +516,26 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
         let resolved =
             shared.resolve_session_interactivity(composed.prepared.selection_hints.interactive);
         let mut env_overrides = self.env_overrides.clone();
+        let mut task_owned_env = super::jit::step_owned_env(self.run.effective_fail_fast);
         if let Some(operation) = &request.operation {
             env_overrides.insert("OPERATION".to_string(), operation.clone());
+            task_owned_env.insert("OPERATION".to_string(), operation.clone());
         }
+
+        // This task's own handoff chain. Each run of a task starts one, so
+        // parallel siblings never share a chain and two of them may adopt the
+        // same target; a cycle is still a cycle within one task (R8).
+        let task_ledger: SharedRunLedger = Arc::new(Mutex::new(RunLedger::new(
+            source.resolved_path.clone(),
+            Arc::clone(&self.run.compose.approval_cache),
+        )));
+        let runtime_state = request
+            .runtime
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::clone(self.runtime_state));
+        let task_file_resolution_context =
+            prompt_source_context.file_resolution_context().clone();
+        let task_caller_input_records = caller_input_records.clone();
 
         let execution = CompositionExecutionRequest {
             mode: if request.inline_compose {
@@ -493,25 +586,53 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             // The task executor's cell, not the sequence's: a parallel group
             // member hands over its private buffer, so the launched document's
             // own lifecycle `set` stays invisible to its siblings.
-            runtime_state: request
-                .runtime
-                .clone()
-                .or_else(|| Some(std::sync::Arc::clone(self.runtime_state))),
+            runtime_state: Some(std::sync::Arc::clone(&runtime_state)),
             // The task executor publishes the entry after `teardown`, not here.
             suppress_output_commit: true,
             // Carries this task's bar to the thread draining the child's stdout.
             task_frame_writer: request.frame_writer.clone(),
             proxy_overlay: indexmap::IndexMap::new(),
-            handoff_ledger: None,
+            handoff_ledger: Some(Arc::clone(&task_ledger)),
             adopted_handoff: None,
         };
 
+        let kind = if request.inline_compose {
+            CompositionKind::Inline
+        } else {
+            CompositionKind::Direct
+        };
+        // A handoff the document raised stays inside this task: the target
+        // keeps the task's inputs, cell, output policy, and bar, and its result
+        // is the task's. Setup, teardown, and output publication belong to the
+        // task executor around this call, so each still happens once.
+        let task_scope = StepScope {
+            caller_overrides: request.set_overrides.clone(),
+            runtime_state,
+            suppress_output_commit: true,
+            task_frame_writer: request.frame_writer.clone(),
+            env_overrides: task_owned_env,
+            operation: request.operation.clone(),
+        };
         let outcome = execute_composition_request_inner(
             execution,
             self.run.verbose,
             None,
             self.run.perf_enabled,
         )
+        .and_then(|mut outcome| {
+            if let Some(surfaced) = outcome.handoff.take() {
+                (outcome.exit_code, outcome.final_output) = super::iterate::run_step_proxy_loop(
+                    surfaced,
+                    &task_ledger,
+                    self.run,
+                    kind,
+                    &task_scope,
+                    task_caller_input_records,
+                    &task_file_resolution_context,
+                )?;
+            }
+            Ok(outcome)
+        })
         .map_err(|error| CompositionError::SequenceTaskPromptLaunch {
             task: request.reference.clone(),
             path: request.path.clone(),
@@ -651,7 +772,7 @@ mod tests {
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
-        let (source, context, _) = prepare_task_context(&invocation, &task, &env);
+        let (source, context, _) = prepare_task_context(&invocation, &task, &env, &RunEvidence::default());
 
         // File resolution stays source-relative: the task document's own
         // repository drives references and provenance.
@@ -693,7 +814,7 @@ mod tests {
             ("MODEL".to_string(), "gpt-5".to_string()),
         ]);
 
-        let (source, context, _) = prepare_task_context(&invocation, &task, &env);
+        let (source, context, _) = prepare_task_context(&invocation, &task, &env, &RunEvidence::default());
 
         assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
         assert_eq!(
@@ -717,7 +838,7 @@ mod tests {
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
 
         let (_, context, _) =
-            prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
+            prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new(), &RunEvidence::default());
 
         assert_eq!(context.get("repo_root"), None);
     }
@@ -783,7 +904,7 @@ mod tests {
             let mut task = fixture.task();
             plant(&mut task);
 
-            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new(), &RunEvidence::default());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
@@ -825,7 +946,7 @@ mod tests {
             let mut task = fixture.task();
             task.action = action;
 
-            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new(), &RunEvidence::default());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),

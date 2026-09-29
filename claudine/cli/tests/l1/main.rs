@@ -13,6 +13,7 @@ mod agent_cwd;
 #[cfg(unix)]
 mod agent_text_is_data;
 mod argv_normalization;
+mod authored_text_rendering;
 mod cfg_gate;
 mod characterization_error_routes;
 mod cli_process_fixture;
@@ -55,6 +56,7 @@ mod contamination_probes;
 mod context_command;
 mod contextual_errors;
 mod ctx_launch_anchor;
+mod ctx_per_run;
 mod detached_audio;
 mod diagnostic_discovery;
 mod dispatch_inventory;
@@ -67,6 +69,7 @@ mod handle_blocking_output;
 mod handle_deadline;
 mod handle_message_drain;
 mod handle_repo_config;
+mod handoff_owners;
 mod hooks_cli;
 #[cfg(unix)]
 mod inline_completion_lifecycle;
@@ -94,17 +97,29 @@ mod level1_review_router_partial_pty;
 mod level1_schema_prompt_pty;
 #[cfg(unix)]
 mod level1_structured_error_message;
+mod lifecycle_downgrade_outcome;
 mod lifecycle_message_drain;
 #[cfg(windows)]
 mod lifecycle_message_drain_console_windows;
 mod lifecycle_message_drain_interrupt;
 #[cfg(unix)]
 mod loop_cli;
+mod loop_gate_ambient;
 mod loop_initialize_state;
 mod mcp_cli;
+mod override_boundary_guard;
+mod preflight_execution_parity;
+mod pr_flow_rehearsal;
+mod prompt_guide_defects;
+mod lifecycle_set_shell_values;
 #[cfg(unix)]
 mod prompt_reporting;
+// Installs the `claudine-fake-pi` fixture binary, which only `test-fixtures`
+// builds.
+#[cfg(feature = "test-fixtures")]
+mod pi_managed_rpc;
 mod propagated_context_fixtures;
+mod prose_escape_guard;
 mod protect_cli;
 mod provider_error_finalize;
 mod run_harness_loop_call_sites;

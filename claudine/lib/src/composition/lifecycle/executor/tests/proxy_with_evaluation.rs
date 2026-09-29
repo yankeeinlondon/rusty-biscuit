@@ -292,25 +292,62 @@ fn err_in_a_with_value_is_allowed_on_an_error_carrying_event() {
 }
 
 #[test]
-fn a_raw_span_stored_in_frontmatter_never_reaches_the_overlay() {
-    // A frontmatter value that is itself template text would otherwise ride
-    // into the overlay and be evaluated a second time, at the target. It must
-    // not — including from inside a resolved container.
-    for (label, state) in [
-        ("scalar", json!({"payload": "{{ target_side }}"})),
-        ("nested", json!({"payload": {"inner": "{{ target_side }}"}})),
-        ("array", json!({"payload": ["ok", "{{ target_side }}"]})),
+fn a_raw_span_stored_in_frontmatter_reaches_the_overlay_as_data() {
+    // A frontmatter value that is itself template text is data (N10). It rides
+    // into the overlay verbatim, including from inside a resolved container;
+    // the target receives the overlay as a data layer, so nothing evaluates it
+    // a second time there.
+    for (label, state, expected) in [
+        (
+            "scalar",
+            json!({"payload": "{{ target_side }}"}),
+            json!("{{ target_side }}"),
+        ),
+        (
+            "nested",
+            json!({"payload": {"inner": "{{ target_side }}"}}),
+            json!({"inner": "{{ target_side }}"}),
+        ),
+        (
+            "array",
+            json!({"payload": ["ok", "{{ target_side }}"]}),
+            json!(["ok", "{{ target_side }}"]),
+        ),
     ] {
         let outcome = run_failure(proxy_stack(json!({"x": "{{ payload }}"})), state, None);
-        assert!(
-            outcome.control.is_none(),
-            "{label}: a surviving span must abort the handoff"
-        );
+        assert!(outcome.evaluation_error.is_none(), "{label}: {:?}", outcome.evaluation_error);
+        let (_, overlay, _) = proxy_of(&outcome);
+        assert_eq!(overlay.get("x"), Some(&expected), "{label}");
+    }
+}
+
+#[test]
+fn run_time_template_text_cannot_become_the_targets_lifecycle_configuration() {
+    // A lifecycle key is reparsed by the target as its own stack and evaluated
+    // at event time, outside compose, so data carrying a span there fails
+    // closed — scalar, nested, and inside an array alike. The same data under
+    // an ordinary key is accepted above.
+    for (key, state) in [
+        ("success", json!({"payload": {"info": "{{ secret }}"}})),
+        ("loop", json!({"payload": {"actions": ["ok", "{{ secret }}"]}})),
+        ("failure", json!({"payload": "{{ secret }}"})),
+    ] {
+        let outcome = run_failure(proxy_stack(json!({key: "{{ payload }}"})), state, None);
+        assert!(outcome.control.is_none(), "{key}: the handoff must abort");
         let info = outcome
             .evaluation_error
-            .unwrap_or_else(|| panic!("{label}: expected an evaluation error"));
-        assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed", "{label}");
+            .unwrap_or_else(|| panic!("{key}: expected an evaluation error"));
+        assert_eq!(info.variant, "LifecycleProxyWithEvaluationFailed", "{key}");
+        assert!(info.msg.contains("{{ secret }}"), "{key}: {}", info.msg);
     }
+
+    // Authored structure without run-time template text still installs.
+    let outcome = run_failure(
+        proxy_stack(json!({"success": "{{ payload }}"})),
+        json!({"payload": {"info": "done"}}),
+        None,
+    );
+    assert!(outcome.evaluation_error.is_none(), "{:?}", outcome.evaluation_error);
 }
 
 // ---------------------------------------------------------------------------

@@ -74,8 +74,21 @@ pub struct PrepareOptions {
     /// Canonical command paths supply this with `prepared_context`; library
     /// compatibility callers may omit both.
     pub document_epoch: Option<crate::invocation_context::DocumentEpoch>,
-    /// Frontmatter `--set` overrides (JSON object).
+    /// Effective frontmatter overrides (JSON object): `--set` plus any runtime
+    /// layers folded on top.
     pub set_overrides: Option<serde_json::Value>,
+    /// Top-level keys of [`set_overrides`](Self::set_overrides) whose values
+    /// are data, never templates. Set both through
+    /// [`set_layered_overrides`](Self::set_layered_overrides).
+    pub data_override_keys: std::collections::BTreeSet<String>,
+    /// The immediate `proxy.with:` overlay of a document entered through a
+    /// hand-off (empty otherwise).
+    ///
+    /// Its values were evaluated in the source document, so compose receives
+    /// them as the lowest **data** layer, beneath every override above. It
+    /// belongs to this document alone and is never part of the invocation's
+    /// [`CallerInputLayers`](super::CallerInputLayers).
+    pub proxy_overlay: indexmap::IndexMap<String, serde_json::Value>,
     /// Immutable raw caller overrides paired with their launch-time origins.
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Commands pre-approved during pre-flight shell discovery.
@@ -157,6 +170,29 @@ pub struct PrepareOptions {
     pub defer_schema_verdict: bool,
 }
 
+impl PrepareOptions {
+    /// The overrides with the origin of each key.
+    pub fn layered_overrides(&self) -> super::runtime_state::LayeredOverrides {
+        super::runtime_state::LayeredOverrides::from_parts(
+            self.set_overrides.as_ref(),
+            &self.data_override_keys,
+        )
+    }
+
+    /// Replace the overrides and their origins together.
+    pub fn set_layered_overrides(&mut self, overrides: super::runtime_state::LayeredOverrides) {
+        self.data_override_keys = overrides.data_keys().clone();
+        self.set_overrides = Some(overrides.to_value());
+    }
+
+    /// [`set_layered_overrides`](Self::set_layered_overrides) as a builder.
+    #[must_use]
+    pub fn with_layered_overrides(mut self, overrides: super::runtime_state::LayeredOverrides) -> Self {
+        self.set_layered_overrides(overrides);
+        self
+    }
+}
+
 /// The early-binding snapshot a canonical preparation composes against.
 ///
 /// Returns the caller's snapshot when it supplied one; otherwise captures a
@@ -227,11 +263,12 @@ impl darkmatter::markdown::compose::CurrentProvider for UnsuppliedRefresh {
 /// The one `ComposeOptions` shape every canonical preparation stage composes
 /// with.
 ///
-/// Body preparation, inline preparation, the initialize-bootstrap read, and the
-/// proxy target's pre-flight shell audit all build their options here. They
-/// used to build them separately, three times, and the copies disagreed — the
-/// audit discovered commands against one option set while the compose that
-/// executed them used another.
+/// Body preparation, inline preparation, the initialize-bootstrap read, and
+/// every document-level pre-flight shell audit ([`approve_document_shell`]:
+/// a directly invoked document, a proxy target, a retry or resume, a loop
+/// iteration) all build their options here. They used to build them
+/// separately, and the copies disagreed — the audit discovered commands
+/// against one option set while the compose that executed them used another.
 fn canonical_compose_options(
     source_path: &Path,
     ctx: &ComposeContext,
@@ -286,9 +323,10 @@ fn canonical_compose_options(
     // altering the delivered text and defeating line-count-based report
     // truncation. Preserve the source line breaks for prompt delivery.
     .with_incidental_newline_mode(darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve);
-    compose_opts = compose_opts.with_set_overrides(
-        super::runtime_state::with_initialized_outputs(options.set_overrides.clone()),
-    );
+    let mut overrides = super::runtime_state::LayeredOverrides::proxy_overlay(&options.proxy_overlay);
+    overrides.extend(&options.layered_overrides());
+    overrides.initialize_outputs();
+    compose_opts = overrides.apply_to(compose_opts);
     compose_opts = compose_opts.with_caller_input_records(options.caller_input_records.clone());
     if !options.name_coercion_keys.is_empty() {
         compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
@@ -386,25 +424,48 @@ pub fn preflight_document_shell(
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
 ) -> Result<std::collections::HashSet<String>, CompositionError> {
-    observe_prepared_context(
-        options,
-        crate::invocation_context::PreparedContextConsumer::Preflight,
-    );
-    let ctx = derive_compose_context(source, options);
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options, None);
-    match super::resolve_shell_approvals(
-        Some(&source.markdown),
-        Some(&compose_opts),
-        approval_options,
-        None,
-        None,
-    ) {
+    match approve_document_shell(source, options, approval_options) {
         Ok(result) => Ok(result.approved_commands),
         Err(CompositionError::PreFlightDiscoveryFailed(_)) => {
             Ok(std::collections::HashSet::new())
         }
         Err(e) => Err(e),
     }
+}
+
+/// Discover and approve a document's template shell surface (frontmatter
+/// `$(...)`, body `::shell`/`::shell-block`, and every transcluded child)
+/// with the exact options its preparation composes with.
+///
+/// This is the one resolver for approved bytes: the discovery walk and the
+/// compose that executes run on [`canonical_compose_options`] built from the
+/// same `options`, so both see the same target defaults, `proxy.with:`
+/// overlay, caller and runtime layers, reserved sequence inputs, snapshot, and
+/// source-relative base directory.
+///
+/// ## Errors
+///
+/// A discovery-walk failure (`PreFlightDiscoveryFailed`), or any approval
+/// failure [`resolve_shell_approvals`](super::resolve_shell_approvals)
+/// returns.
+pub fn approve_document_shell(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    approval_options: &crate::harness::ShellApprovalOptions,
+) -> Result<super::PreFlightResult, CompositionError> {
+    observe_prepared_context(
+        options,
+        crate::invocation_context::PreparedContextConsumer::Preflight,
+    );
+    let ctx = derive_compose_context(source, options);
+    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options, None);
+    super::resolve_shell_approvals(
+        Some(&source.markdown),
+        Some(&compose_opts),
+        approval_options,
+        None,
+        None,
+    )
 }
 
 /// Walk up from a file path to find the nearest `.git` directory.
@@ -759,12 +820,13 @@ fn effective_surface(
     // Lifecycle communication/action strings are deferred by design (C1): they
     // keep their `{{ }}` spans through prepare and resolve at event-time via
     // DM2 (C2), where strict mode fails closed on undefined roots and malformed
-    // expressions, and the post-DM2 dispatch-time leak guard (C4) backstops a
-    // surviving span before any side effect is sent. The undefined-variable
-    // scan therefore does not run over these deferred strings — it would flag
-    // the authored spans as bugs. Two static scans stay because their defects
-    // hold regardless of binding time: a nested span inside a single-pass
-    // literal (above) and a bare `err` in a no-error event.
+    // expressions; what a span inserts is data and is sent as is. The
+    // undefined-variable scan therefore does not run over these deferred
+    // strings — it would flag the authored spans as bugs. Two static scans stay
+    // because their defects hold regardless of binding time: a nested span
+    // inside a single-pass literal (above) and a bare `err` in a no-error
+    // event. The `err` scan skips the shell text C3 just stamped: that is
+    // resolved data, and C3 already refused an authored late-binding `err`.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
     Ok((selection_hints, lifecycle))
 }

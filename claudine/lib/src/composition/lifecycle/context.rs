@@ -165,16 +165,10 @@ impl LifecycleErrorInfo {
     /// same failure renders.
     pub fn from_error_or_action(verb: impl Into<String>, error: &(dyn StdError + 'static)) -> Self {
         let variant = verb.into();
-        let mut info = match Self::select(error) {
+        match Self::select(error) {
             Some(snapshot) => Self::from_snapshot("LifecycleAction", variant, snapshot),
             None => Self::from_action_failure(variant, error.to_string()),
-        };
-        if let Some(super::executor::LifecycleExprError::SurvivingSpan { span }) =
-            error.downcast_ref::<super::executor::LifecycleExprError>()
-        {
-            info.reason = LifecycleEvaluationReason::SurvivingSpan { span: span.clone() };
         }
-        info
     }
 
     /// Attach the lifecycle property that raised, unless a more specific one

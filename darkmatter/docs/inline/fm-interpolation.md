@@ -69,8 +69,8 @@ Frontmatter interpolation is a single-pass transform over top-level frontmatter 
 
 Each top-level key is classified as one of:
 
-- **Seed value**: the value tree contains no interpolation expressions anywhere
-- **Templated value**: the value tree contains at least one interpolation expression somewhere
+- **Seed value**: the value tree contains no authored interpolation expressions anywhere. A data value (an expression's result, a data override, a decoded [literal token](./interpolation.md#literal-tokens), or state inherited from a parent document) is always a seed, even when its text contains `{{`
+- **Templated value**: the value tree contains at least one authored interpolation expression somewhere
 
 Only seed values participate in lookup for the frontmatter interpolation pass.
 A templated key joins them once it has resolved — see
@@ -106,17 +106,41 @@ Expansion. Pass 1 runs _first_ — before Schema Validation and shell expansion 
 and **defers** any templated key that references a whole-value `$(...)` shell
 value, since that literal form must survive into shell expansion. Pass 2 runs
 _after_ shell expansion and resolves the deferred keys against the now-concrete
-values. A single pass therefore cannot always suffice.
+values.
 
-1. Recursive Interpolation
-    
-    Here's an example:
+```yaml
+---
+sha: "$(git rev-parse --short HEAD)"
+label: "build {{ sha }}"   # deferred by pass 1, resolved by pass 2
+title: "{{ ctx.repo }}"    # resolved by pass 1
+---
+```
 
-    ```yaml
-    area: "{{ctx.current_package_area}}"
-    
-    ```
+Pass 2 scans **only the keys pass 1 deferred**, each once, from the value the
+author wrote. It never re-reads a value pass 1 already produced, and it never
+scans shell output. Both are data, so a result that happens to contain
+`{{ … }}` stays that text:
 
+```yaml
+---
+c: C
+sh: "$(printf %s%s 'x {' '{ c }}')"   # prints, and sh is, the text `x {{ c }}`
+pre: "pre {{ sh }}"                   # pre is `pre x {{ c }}`
+---
+```
+
+Earlier releases re-partitioned every key after shell expansion and evaluated
+such results again (`sh` became `x C`). See
+[Migrating from Rescanning](./interpolation.md#migrating-from-rescanning) for
+the rewrite that keeps an old document's output.
+
+### Literal Tokens Are Decoded First
+
+Before classification, pass 1 replaces each whole-value
+[literal token](./interpolation.md#literal-tokens) (`"{{!data:v1:…}}"`), at any
+depth, with the string it holds and marks it as data. That value is a seed: it
+is never evaluated, converted, or run as a shell command. A malformed token, or
+a token that is only part of a value, fails composition at its line and column.
 
 
 ## Available Variables
@@ -274,6 +298,14 @@ md compose doc.md --set '{base: "/tmp/project"}'
 
 The resulting `spec` value becomes `/tmp/project/spec.md`.
 
+`--set` and `--state` values are **authored**: a person typed them, so they are
+scanned exactly like frontmatter the document wrote. `--set '{note: "{{ base }}/x"}'`
+evaluates. A library caller that passes a value it did not author, such as
+captured program output, uses `ComposeOptions::with_data_overrides` or a
+`OverrideLayer::data(...)` layer in `with_override_layers`; those values are
+never scanned (see
+[Inserted Text Is Data](./interpolation.md#inserted-text-is-data)).
+
 ## Missing Variables And Errors
 
 Frontmatter interpolation uses the same expression grammar and evaluator as body interpolation.
@@ -292,7 +324,10 @@ That means:
 
 A parse or evaluation failure stops the compose run, whatever `fail_fast` is
 set to, in mixed text and whole values alike. The error names the document,
-the frontmatter key's line, and the expression.
+the frontmatter key's line, and the expression. When the failing value came
+from a `--set` override, the error says so ("The value came from a
+command-line override (`--set`), not from the document.") and shows no
+document excerpt, because the document never defined it.
 
 ### Whole Values Keep Their Type
 
@@ -339,6 +374,10 @@ That means it directly affects:
 - `prologue` and `epilogue` references
 - page-block `when="..."`
 - child-document inherited state during transclusion
+
+Each of these reads the resolved values as data. Body interpolation inserts
+`{{ spec }}` as text and never evaluates braces inside it, and a transcluded
+child does not re-evaluate an inherited value.
 
 ## Compose Reporting
 

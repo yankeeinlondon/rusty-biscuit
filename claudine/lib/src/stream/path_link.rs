@@ -101,22 +101,9 @@ fn escape_href(input: &str) -> String {
     out
 }
 
-/// Escape visible text so stray `<`, `>`, `{`, `\` cannot be parsed as
-/// Prose markup. Mirrors the `escape_prose` helper in the CLI's
-/// `live_semantic_sink`, duplicated here so the library does not depend
-/// on the CLI crate.
+/// Escape visible text so it renders exactly as written inside Prose markup.
 fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
+    biscuit_terminal::components::prose::Prose::escape_text(input)
 }
 
 #[cfg(test)]

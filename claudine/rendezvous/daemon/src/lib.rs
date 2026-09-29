@@ -19,6 +19,7 @@ pub mod repos;
 pub mod server;
 pub mod service;
 pub mod session_log;
+pub mod steering;
 pub mod storage;
 pub mod sync;
 
@@ -34,5 +35,6 @@ pub use register::{RegisterError, RegisterStore, owner_peer_id};
 pub use server::{DaemonConfig, ServerError, ServerHandle};
 pub use service::RendezvousService;
 pub use session_log::{AppendOutcome, ExportedUpdate, SessionLogError, SessionLogManager};
+pub use steering::SteeringRouter;
 pub use storage::{PairingValue, Storage, StorageError};
 pub use sync::{SYNC_PROTOCOL_VERSION, SyncChunkOutcome, SyncError, SyncOutcome, SyncService};

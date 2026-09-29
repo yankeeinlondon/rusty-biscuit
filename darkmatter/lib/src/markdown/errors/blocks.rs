@@ -391,6 +391,22 @@ pub(crate) fn interpolation_block(
                 .body(body)
                 .hint(hint)
         }
+        ExpressionError::MalformedLiteralToken(reason) => {
+            let mut body = vec![Prose::new(format!(
+                "{scope} holds <dim>`{}`</dim>, which is not a valid literal token:\n\n{}",
+                Prose::escape_text(expression),
+                Prose::escape_text(&reason.to_string())
+            ))];
+            push_on_disk_locus(&mut body, key, expression, source);
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", "malformed literal token"))
+                .body(body)
+                .hint(
+                    "A literal token stores one string as data and is written by tools, not \
+                     by hand. Restore the value the tool wrote, or replace the whole token \
+                     with ordinary text.",
+                )
+        }
         other => {
             let mut body = vec![Prose::new(format!(
                 "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",

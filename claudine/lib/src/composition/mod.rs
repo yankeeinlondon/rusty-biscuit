@@ -48,7 +48,8 @@ mod types;
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use authored_order::AuthoredOrder;
 pub use closure::{
-    BodyRejection, CLOSURE_OWNED_PROPERTIES, InlineArtifact, InlineReconciliation,
+    AgentFrontmatterRejection, BodyRejection, CLOSURE_OWNED_PROPERTIES, EncodeError, InlineArtifact,
+    InlineReconciliation,
     reconcile_inline_artifact, reconcile_inline_artifact_with_evidence, restore_inline_baseline,
 };
 pub use completion::{
@@ -108,8 +109,7 @@ pub use lifecycle_executor::{
 pub use looping::{
     DEFAULT_MAX_ITERATIONS, LoopExecutionOptions, LoopExecutionResult, LoopIterationContext,
     LoopIterationOutput, LoopSeed, build_loop_seed, build_loop_seed_from_bootstrap,
-    build_loop_seed_with_lifecycle, execute_loop,
-    execute_loop_with_config, execute_loop_with_lifecycle,
+    build_loop_seed_with_lifecycle, execute_loop_with_lifecycle,
 };
 pub use looping::{LoopAmbient, LoopExpressionLookup, evaluate_condition};
 pub use looping::{
@@ -124,8 +124,8 @@ pub use preflight::{
 pub use prepare::{
     BootstrapPreparation, BootstrapRequest, DocumentEntryReason, DocumentPreparation,
     LoopOwnership, PreparationStages, PrepareOptions, PromptSource, SchemaStage, SourceBasis,
-    bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell, prepare_bootstrap,
-    prepare_direct, prepare_document, prepare_inline,
+    approve_document_shell, bind_agent_workspace, preflight_bootstrap_shell, preflight_document_shell,
+    prepare_bootstrap, prepare_direct, prepare_document, prepare_inline,
 };
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;
@@ -138,14 +138,15 @@ pub use resolve::{
     with_prompt_magic_roots, without_formal_sequence_keys,
 };
 pub use runtime_state::{
-    OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState, layered_set_overrides,
-    trim_transport_newline, with_initialized_outputs,
+    LayeredOverrides, OUTPUTS_KEY, RuntimeMutationError, RuntimeSnapshot, RuntimeState,
+    layered_set_overrides, trim_transport_newline,
 };
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
-    pre_validate_schema, pre_validate_schema_for_mode, prepare_direct_with_schema,
+    pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,
+    prepare_direct_with_schema,
     prepare_direct_with_schema_and_prompt, prepare_inline_with_schema, render_optional_line,
     render_required_line, schema_status_report_prose,
 };

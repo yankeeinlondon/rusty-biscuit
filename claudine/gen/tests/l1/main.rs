@@ -14,6 +14,7 @@ mod pipeline;
 mod registry_coverage;
 mod signals_sidecar_mirror;
 mod signals_validation;
+mod steering_activation;
 mod steering_check;
 mod test_layout;
 mod vocabulary;

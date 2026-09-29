@@ -284,6 +284,9 @@
   precedence (Feature C) can emit negative-lookahead `patternProperties`: such
   schemas opt into `jsonschema`'s backtracking `fancy-regex` engine, while every
   lookaround-free schema stays on the linear (ReDoS-safe) `regex` engine.
+- `darkmatter/lib` takes a direct `base64` dependency (already in the tree) for
+  the payload of the `{{!data:v1:…}}` literal token, which stores one
+  frontmatter string as data (unpadded URL-safe alphabet).
 - `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
   stack: `lsp-server` (stdio framing, in-memory test connections) +
   `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family

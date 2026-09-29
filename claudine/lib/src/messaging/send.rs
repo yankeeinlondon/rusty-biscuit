@@ -499,36 +499,24 @@ fn failure_hint(error: &str) -> Option<&'static str> {
 /// Webhook URLs are secrets: the path segment after `/webhooks/{id}/` or
 /// `/services/...` is a bearer credential. This helper swaps any Discord or
 /// Slack webhook URL match with a stable placeholder before the string is
-/// rendered in user-facing warnings, logs, or test snapshots.
+/// rendered in user-facing warnings, logs, or test snapshots. The URL shapes
+/// are the shared [`SecretFamily::WebhookUrl`] rules.
+///
+/// [`SecretFamily::WebhookUrl`]: crate::secrets::SecretFamily::WebhookUrl
 fn redact_webhook_urls(input: &str) -> String {
-    use std::sync::LazyLock;
-    static DISCORD_WEBHOOK_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(
-            r"https://(?:discord\.com|discordapp\.com)/api/webhooks/[0-9]+/[A-Za-z0-9._-]+",
-        )
-        .expect("discord webhook redaction regex")
-    });
-    static SLACK_WEBHOOK_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(r"https://hooks\.slack\.com/services/[A-Za-z0-9/_-]+")
-            .expect("slack webhook redaction regex")
-    });
-
-    let redacted = DISCORD_WEBHOOK_URL_RE.replace_all(input, "<redacted-webhook-url>");
-    let redacted = SLACK_WEBHOOK_URL_RE.replace_all(&redacted, "<redacted-webhook-url>");
-    redacted.into_owned()
+    let mut redacted = input.to_string();
+    for regex in crate::secrets::family_regexes(crate::secrets::SecretFamily::WebhookUrl) {
+        redacted = regex
+            .replace_all(&redacted, "<redacted-webhook-url>")
+            .into_owned();
+    }
+    redacted
 }
 
-/// Escape Prose markup tokens so arbitrary error text can't be interpreted
-/// as markup when embedded in a `Status::from_prose` body.
-///
-/// Covers `< >` (HTML-style tags), `{{ }}` (template syntax), and `**`
-/// (bold) which are the most likely to appear in reqwest/serde error strings.
+/// Escape arbitrary error text so it renders exactly as written when embedded
+/// in a `Status::from_prose` body.
 pub(super) fn prose_escape(text: &str) -> String {
-    text.replace('<', "\\<")
-        .replace('>', "\\>")
-        .replace("{{", "\\{{")
-        .replace("}}", "\\}}")
-        .replace("**", "\\*\\*")
+    biscuit_terminal::components::prose::Prose::escape_text(text)
 }
 
 /// Internal payload structure for the async send task.

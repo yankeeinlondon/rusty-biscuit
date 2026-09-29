@@ -888,11 +888,11 @@ fn synthesized_mixed_and_ordinary_frontmatter_values_still_launch() {
     assert!(stderr.contains("a in claudine b"), "{stderr}");
 }
 
-/// D4: a frontmatter value that holds template text reaches the event-time
-/// guard, which names the lifecycle key and the typed reason and selects the
-/// concatenate/`{{{ … }}}` hint rather than the missing-path one.
+/// A frontmatter value that holds template text is data at event time (N10):
+/// a `{{{ … }}}` escape produced it, so the lifecycle message sends the braces
+/// verbatim instead of refusing them or expanding them a second time.
 #[test]
-fn surviving_span_at_event_time_names_the_property_and_specific_hint() {
+fn a_template_text_value_is_sent_verbatim_at_event_time() {
     let fixture = CliProcessFixture::named("nested-span-runtime-backstop");
     fixture.seed_user_config();
     let marker = install_marker_provider(&fixture);
@@ -905,16 +905,13 @@ fn surviving_span_at_event_time_names_the_property_and_specific_hint() {
 
     let (success, stderr) =
         run_with_marker(&fixture, &marker, &["compose", "--goose", doc.to_str().unwrap()]);
-    assert!(!success, "{stderr}");
-    assert!(stderr.contains("lifecycle evaluation error"), "{stderr}");
-    assert!(stderr.contains("start.info"), "the property is named:\n{stderr}");
+    assert!(success, "{stderr}");
+    assert!(!stderr.contains("lifecycle evaluation error"), "{stderr}");
     assert!(
-        stderr.contains("still contains `{{ctx.repo_name}}` after every interpolation pass"),
-        "the typed reason is rendered:\n{stderr}"
+        stderr.contains("{{ctx.repo_name}}"),
+        "the escape's braces are sent as text:\n{stderr}"
     );
-    assert!(stderr.contains("concatenate with `+`"), "{stderr}");
-    assert!(!stderr.contains("resolve the missing"), "the old hint must not appear:\n{stderr}");
-    assert_eq!(provider_runs(&marker), 0);
+    assert_eq!(provider_runs(&marker), 1);
 }
 
 /// `retry` and `resume` re-read the document and run canonical preparation

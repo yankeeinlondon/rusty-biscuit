@@ -10,7 +10,8 @@
 //!   [`format::DARKMATTER_URL_SCHEME_KEYWORD`],
 //!   [`format::DARKMATTER_TYPE_DEFINITION_KEYWORD`], and
 //!   [`format::DARKMATTER_SCHEMA_KEYWORD`] keywords on top of Draft 2020-12.
-//!   (`match(...)` is suggestion metadata only and has no validation keyword.)
+//!   A root union that contests a `file(match(...))` glob also carries
+//!   [`super::file_match::DARKMATTER_MATCH_KEYWORD`].
 //! - **Caching** — compiling a `Validator` is several milliseconds of work;
 //!   the [`ValidatorCache`] hashes the canonicalised schema bytes and reuses
 //!   compiled validators across calls. The default bound (64 entries) is
@@ -68,6 +69,8 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// [`Self::validator_for`] because it varies per document. It participates in
 /// the cache key alongside the schema JSON so validators preserve the
 /// document-first, then repository-relative candidate plan of their document.
+/// The request's file-resolution context is part of cache identity too, since
+/// it supplies the repository tier of that plan.
 /// [`Self::file_ref_fallback_dir`] is also part of cache identity for
 /// diagnostic parity, but is not a resolution candidate for document-authored
 /// references.
@@ -95,6 +98,10 @@ struct CacheInner {
 
 struct CacheEntry {
     validator: Arc<Validator>,
+    /// The request context the validator's `file` formats captured. A hit must
+    /// match it exactly: a validator compiled without a repository root would
+    /// otherwise drop the repository tier for every later request.
+    context: Option<biscuit_file::FileResolutionContext>,
     last_used: u64,
 }
 
@@ -161,9 +168,14 @@ impl ValidatorCache {
         schema: &Value,
         base_dir: Option<&Path>,
     ) -> Result<Arc<Validator>, SchemaError> {
-        let key = canonical_hash(schema, base_dir, self.file_ref_fallback_dir.as_deref());
+        let key = canonical_hash(
+            schema,
+            base_dir,
+            self.file_ref_fallback_dir.as_deref(),
+            self.file_resolution_context.as_ref(),
+        );
         // Fast path: hit.
-        if let Some(hit) = self.lookup(&key) {
+        if let Some(hit) = self.lookup(&key, self.file_resolution_context.as_ref()) {
             return Ok(hit);
         }
         // Miss: build outside the lock to keep contention low.
@@ -173,20 +185,32 @@ impl ValidatorCache {
             self.file_ref_fallback_dir.as_deref(),
             self.file_resolution_context.as_ref(),
         )?);
-        self.insert(key, validator.clone());
+        self.insert(key, validator.clone(), self.file_resolution_context.clone());
         Ok(validator)
     }
 
-    fn lookup(&self, key: &u64) -> Option<Arc<Validator>> {
+    fn lookup(
+        &self,
+        key: &u64,
+        context: Option<&biscuit_file::FileResolutionContext>,
+    ) -> Option<Arc<Validator>> {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
         let entry = guard.entries.get_mut(key)?;
+        if entry.context.as_ref() != context {
+            return None;
+        }
         entry.last_used = tick;
         Some(entry.validator.clone())
     }
 
-    fn insert(&self, key: u64, validator: Arc<Validator>) {
+    fn insert(
+        &self,
+        key: u64,
+        validator: Arc<Validator>,
+        context: Option<biscuit_file::FileResolutionContext>,
+    ) {
         let mut guard = self.inner.lock().expect("validator cache lock poisoned");
         guard.tick = guard.tick.wrapping_add(1);
         let tick = guard.tick;
@@ -195,6 +219,7 @@ impl ValidatorCache {
             key,
             CacheEntry {
                 validator,
+                context,
                 last_used: tick,
             },
         );
@@ -309,6 +334,14 @@ pub(crate) fn build_validator_in_context(
         .with_keyword(
             format::DARKMATTER_SCHEMA_KEYWORD,
             format::schema_keyword_factory,
+        )
+        .with_keyword(
+            super::file_match::DARKMATTER_MATCH_KEYWORD,
+            super::file_match::match_keyword_factory(
+                base_dir.map(PathBuf::from),
+                file_ref_fallback_dir.map(PathBuf::from),
+                file_resolution_context.cloned(),
+            ),
         );
     opts.build(schema)
         .map_err(|err| SchemaError::BuildValidator {
@@ -386,13 +419,24 @@ pub(super) fn collect_root_union_problems_with_anchors(
         per_arm.push(problems);
     }
     // Closest-matching arm: the one with the fewest problems. Ties broken by
-    // arm order (stable: smaller index wins).
+    // arm order (stable: smaller index wins). An arm whose `match`
+    // glob rejected the file is ruled out, so it is reported only when every
+    // arm was.
     per_arm
         .into_iter()
         .enumerate()
-        .min_by_key(|(idx, problems)| (problems.len(), *idx))
+        .min_by_key(|(idx, problems)| {
+            (problems.iter().any(is_match_rule_out), problems.len(), *idx)
+        })
         .map(|(_, problems)| problems)
         .unwrap_or_default()
+}
+
+fn is_match_rule_out(problem: &ValidationProblem) -> bool {
+    problem.schema_path.as_ref().is_some_and(|path| {
+        path.segments().last().map(String::as_str)
+            == Some(super::file_match::DARKMATTER_MATCH_KEYWORD)
+    })
 }
 
 /// Maps one `jsonschema::ValidationError` into one-or-more public problems.
@@ -440,7 +484,8 @@ fn build_problems(
             .iter()
             .flat_map(|arm| arm.iter())
             .filter(|nested| {
-                nested.instance_path().as_str() == parent && is_file_format_error(nested)
+                nested.instance_path().as_str() == parent
+                    && (is_file_format_error(nested) || is_match_keyword_error(nested))
             })
             .flat_map(|nested| build_problems(nested, positions, arm_index, anchors))
             .collect();
@@ -479,6 +524,11 @@ fn build_problems(
         }
     }
     vec![build_problem(err, positions, arm_index, anchors)]
+}
+
+/// A root-union arm's `match` glob rejected the file; see [`super::file_match`].
+fn is_match_keyword_error(err: &jsonschema::ValidationError<'_>) -> bool {
+    err.schema_path().as_str().ends_with(super::file_match::DARKMATTER_MATCH_KEYWORD)
 }
 
 fn is_file_format_error(err: &jsonschema::ValidationError<'_>) -> bool {
@@ -1051,7 +1101,12 @@ fn default_capacity() -> usize {
 /// security boundary. An accidental collision could only serve a wrong
 /// validator, and XXH64's collision resistance over these small distinct inputs
 /// is more than adequate (repo convention — [`biscuit_hash`]).
-fn canonical_hash(schema: &Value, base_dir: Option<&Path>, fallback: Option<&Path>) -> u64 {
+fn canonical_hash(
+    schema: &Value,
+    base_dir: Option<&Path>,
+    fallback: Option<&Path>,
+    context: Option<&biscuit_file::FileResolutionContext>,
+) -> u64 {
     // `serde_json::to_vec` is stable per the active feature set; this is
     // sufficient for cache identity (false misses are tolerable, false hits
     // are not — which `to_vec` guarantees because identical Values
@@ -1067,6 +1122,17 @@ fn canonical_hash(schema: &Value, base_dir: Option<&Path>, fallback: Option<&Pat
     bytes.push(0xff);
     if let Some(dir) = fallback {
         bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
+    }
+    // The repository anchors keep requests with and without a repository in
+    // separate slots; the full context is compared on lookup.
+    for anchor in [
+        context.and_then(biscuit_file::FileResolutionContext::repository_root),
+        context.and_then(biscuit_file::FileResolutionContext::package_area),
+    ] {
+        bytes.push(0xff);
+        if let Some(dir) = anchor {
+            bytes.extend_from_slice(dir.to_string_lossy().as_bytes());
+        }
     }
     biscuit_hash::xx_hash_bytes(&bytes)
 }
@@ -1094,6 +1160,40 @@ mod tests {
         let v2 = cache.validator_for(&schema, None).unwrap();
         assert!(Arc::ptr_eq(&v1, &v2));
         assert_eq!(cache.len(), 1);
+    }
+
+    /// A validator compiled without a repository root must not answer for a
+    /// request that has one: the shared cache would otherwise drop the
+    /// repository tier of an implicit path for the rest of the process.
+    #[test]
+    fn cache_keeps_validators_for_different_resolution_contexts_apart() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        let base_dir = repo.path().join("prompts");
+        std::fs::create_dir_all(&base_dir).unwrap();
+        std::fs::create_dir_all(repo.path().join("fixes/x")).unwrap();
+        std::fs::write(repo.path().join("fixes/x/spec.md"), "# Spec\n").unwrap();
+        let schema = json!({
+            "type": "object",
+            "properties": { "spec": { "type": "string", "format": "darkmatter-file" } }
+        });
+        let instance = json!({ "spec": "fixes/x/spec.md" });
+
+        let without_repository = ValidatorCache::with_capacity(4)
+            .with_file_resolution_context(biscuit_file::FileResolutionContext::new(&base_dir));
+        let with_repository = without_repository.clone().with_file_resolution_context(
+            biscuit_file::FileResolutionContext::new(&base_dir)
+                .with_repository_root(repo.path()),
+        );
+
+        let first = without_repository.validator_for(&schema, Some(&base_dir)).unwrap();
+        assert!(!first.is_valid(&instance), "the document directory alone lacks the file");
+        let second = with_repository.validator_for(&schema, Some(&base_dir)).unwrap();
+        assert!(second.is_valid(&instance), "the repository tier finds the file");
+        let third = without_repository.validator_for(&schema, Some(&base_dir)).unwrap();
+        assert!(
+            !third.is_valid(&instance),
+            "the context-free request still judges without the repository",
+        );
     }
 
     #[test]
@@ -1572,10 +1672,8 @@ mod tests {
     }
 
     fn darkmatter_file_match_schema() -> Value {
-        // `match(...)` is suggestion metadata only and is never lowered into
-        // the compiled JSON Schema, so the eager existence behavior here comes
-        // purely from `format: darkmatter-file`. The bare `x-darkmatter-match`
-        // annotation is an unknown keyword that JSON Schema ignores.
+        // A single schema never lowers `match(...)`, so the eager existence
+        // behavior here comes purely from `format: darkmatter-file`.
         json!({
             "type": "object",
             "properties": {

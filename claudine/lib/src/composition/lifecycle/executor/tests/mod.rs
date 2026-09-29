@@ -285,4 +285,5 @@ mod event_time_interpolation;
 mod filesystem_lookup;
 mod mutation_visibility;
 mod runtime_set;
+mod set_shell_values;
 mod proxy_with_evaluation;

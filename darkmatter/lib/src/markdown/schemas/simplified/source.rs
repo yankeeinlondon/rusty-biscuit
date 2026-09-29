@@ -494,14 +494,21 @@ impl BlockLocator<'_> {
                 if explicit_indicator_content(item_content, '?').is_some()
                     || mapping_separator(item_content).is_some()
                 {
-                    let first = if explicit_indicator_content(item_content, '?').is_some() {
-                        self.explicit_pair(item_start..line.end, indent + 2)?
+                    // The item's keys align with its first key. The closed v1
+                    // grammar keeps the conventional `- ` width.
+                    let item_indent = if self.multi_line_scalars {
+                        indent + relative
                     } else {
-                        self.pair(item_start..line.end, indent + 2)?
+                        indent + 2
+                    };
+                    let first = if explicit_indicator_content(item_content, '?').is_some() {
+                        self.explicit_pair(item_start..line.end, item_indent)?
+                    } else {
+                        self.pair(item_start..line.end, item_indent)?
                     };
                     let mut pairs = vec![first];
                     while let Some(next) = self.lines.get(self.next).cloned() {
-                        if next.indent != indent + 2
+                        if next.indent != item_indent
                             || sequence_content(&self.source[next.content_start..next.end]).is_some()
                         {
                             break;
@@ -510,11 +517,11 @@ impl BlockLocator<'_> {
                         if explicit_indicator_content(next_content, '?').is_some() {
                             self.next += 1;
                             pairs.push(
-                                self.explicit_pair(next.content_start..next.end, indent + 2)?,
+                                self.explicit_pair(next.content_start..next.end, item_indent)?,
                             );
                         } else if mapping_separator(next_content).is_some() {
                             self.next += 1;
-                            pairs.push(self.pair(next.content_start..next.end, indent + 2)?);
+                            pairs.push(self.pair(next.content_start..next.end, item_indent)?);
                         } else {
                             break;
                         }
@@ -620,13 +627,25 @@ impl BlockLocator<'_> {
                 self.inline_value(value_range, indent)
             }
         } else {
-            let child_indent = self
-                .lines
-                .get(self.next)
-                .filter(|line| line.indent > indent)
-                .map(|line| line.indent)
-                .ok_or_else(projection_error)?;
-            self.node(child_indent)
+            let next = self.lines.get(self.next).cloned();
+            match next {
+                Some(line) if line.indent > indent => self.node(line.indent),
+                // `serde_yaml_ng` writes a mapping's sequence value without
+                // indenting it (`key:\n- a`), and an empty value is null.
+                Some(line)
+                    if self.multi_line_scalars
+                        && line.indent == indent
+                        && sequence_content(&self.source[line.content_start..line.end])
+                            .is_some() =>
+                {
+                    self.sequence(indent)
+                }
+                _ if self.multi_line_scalars => Ok(LocatedValue {
+                    span: value_range.start..value_range.start,
+                    kind: LocatedKind::Scalar(DecodedScalar::empty(value_range.start)),
+                }),
+                _ => Err(projection_error()),
+            }
         }
     }
 }

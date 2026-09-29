@@ -8,6 +8,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let proto = "proto/rendezvous.proto";
     println!("cargo:rerun-if-changed={proto}");
-    tonic_prost_build::compile_protos(proto)?;
+    tonic_prost_build::configure()
+        // The delivery frame dwarfs the empty `accepted` frame beside it in
+        // the same oneof; boxing keeps every `SteeringControlDown` small.
+        .boxed(".rendezvous.SteeringControlDown.kind.delivery")
+        .compile_protos(&[proto], &["proto"])?;
     Ok(())
 }

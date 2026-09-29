@@ -42,7 +42,9 @@ Webhook URLs embed a secret token in the path, so they are never surfaced raw:
 - Secret input buffers are masked during entry in the TUI.
 - **All** webhook send errors and test-connection failures pass through
   `redact_webhook_urls` before display, so a failing send cannot leak the token
-  via an error string.
+  via an error string. The Discord and Slack URL shapes it replaces with
+  `<redacted-webhook-url>` are the shared webhook rules described in
+  [Secret Recognition](secret-recognition.md).
 
 ## Relationship to lifecycle and hook actions
 

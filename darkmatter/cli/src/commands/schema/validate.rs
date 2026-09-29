@@ -469,10 +469,9 @@ fn format_location(problem: &ValidationProblem) -> String {
     }
 }
 
-/// Escape angle-bracketed snippets in arbitrary messages so they don't get
-/// interpreted as Prose markup.
+/// Escape text so it renders exactly as written inside Prose markup.
 fn escape_prose(input: &str) -> String {
-    input.replace('<', "&lt;").replace('>', "&gt;")
+    Prose::escape_text(input)
 }
 
 fn emit_schema_error(err: &SchemaError) {

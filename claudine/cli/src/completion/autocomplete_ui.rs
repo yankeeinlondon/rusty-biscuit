@@ -27,7 +27,7 @@ use biscuit_tui::core::{SplitDirection, SplitPane, SplitRatio};
 use biscuit_tui::prelude::*;
 use claudine::composition::FileDetail;
 use darkmatter::markdown::CodeBlock;
-use crossterm::event::{Event, KeyCode};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -117,9 +117,9 @@ fn schema_content(detail: &FileDetail, term: &Terminal) -> RenderableTerminalCon
 
 /// Drive a single-file confirmation dialog.
 ///
-/// Returns `Ok(true)` for Y/Enter, `Ok(false)` for n/Esc. Ctrl+C is left
-/// to the caller's SIGINT handler and will surface as an I/O error if
-/// raw-mode reading is interrupted.
+/// Returns `Ok(true)` for Y/Enter, `Ok(false)` for n/Esc. Raw mode delivers
+/// Ctrl+C as a key rather than a signal, so it returns an error of
+/// [`CANCELLED_KIND`], as the `run_standalone` choosers do.
 pub fn confirm_one_file(detail: &FileDetail) -> io::Result<bool> {
     let term = crate::log::terminal();
     let prose = render_confirmation_dialog(detail, &term);
@@ -139,6 +139,9 @@ fn read_confirm_key() -> io::Result<bool> {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => return Ok(true),
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => return Ok(false),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Err(io::Error::new(CANCELLED_KIND, "interrupted"));
+                }
                 _ => {}
             }
         }

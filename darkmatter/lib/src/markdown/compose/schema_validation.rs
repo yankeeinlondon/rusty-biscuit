@@ -47,13 +47,15 @@ use crate::markdown::schemas::{
 };
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
+use super::value_origin::{DataPaths, ValuePathSegment};
 
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
     let mut trigger_registry = None;
     let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
-    let projection = prepare_caller_projection(markdown, options, &prepared)?;
+    let data = DataPaths::default();
+    let projection = prepare_caller_projection(markdown, options, &prepared, &data)?;
     projection.install(markdown);
     let consumer = source_path(markdown, options);
     let mut report = ComposeReport::new();
@@ -62,6 +64,7 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
         options,
         &prepared,
         &projection,
+        &data,
         &consumer,
         &mut report,
     )
@@ -228,6 +231,7 @@ pub(crate) fn run_with_registry(
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
+    data: &DataPaths,
     consumer: &Path,
     compose_report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
@@ -263,7 +267,7 @@ pub(crate) fn run_with_registry(
         }
     };
 
-    ensure_projection_stable(effective.as_ref(), markdown, options, projection)?;
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)?;
 
     if let Some(effective) = effective.as_ref() {
         materialize_optional_document_bindings(markdown, effective);
@@ -273,7 +277,7 @@ pub(crate) fn run_with_registry(
         // Coerce schema-recognized scalars to their declared types and write the
         // coerced top-level properties back, so real types flow to every later
         // stage and into the composed output.
-        let (instance, composition_pending) = build_validation_instance(markdown, options);
+        let (instance, composition_pending) = build_validation_instance(markdown, options, data);
         let outcome =
             coerce_frontmatter_with_pending(&effective.json_schema, &instance, &composition_pending);
         if outcome.changed
@@ -373,7 +377,7 @@ pub(crate) fn run_with_registry(
             let Some(name) = top_level_pointer_segment(&p.path) else {
                 return true;
             };
-            !value_pending_composition(fm_map.get(&name))
+            !value_pending_composition(&name, fm_map.get(&name), data)
         })
         .cloned()
         .collect();
@@ -395,32 +399,97 @@ pub(crate) fn run_with_registry(
     // composition-independent gate passed, so it is safe to rewrite present
     // document-authored eager-`file` values to resolved repo-relative paths.
     // Caller-originated overrides are restored as absolute native paths so
-    // later consumers retain their launch-area provenance. The rewrite shares
+    // later consumers retain their launch-area provenance; one the projection
+    // left unclassified is never rewritten. The rewrite shares
     // the same instance-construction loop as coercion, so `$schema` and
     // `options.exclude_keys` stay outside the write-back; pending keys are
     // skipped the same way.
     if let Some(effective) = effective.as_ref() {
-        let (instance, composition_pending) = build_validation_instance(markdown, options);
+        let (instance, composition_pending) = build_validation_instance(markdown, options, data);
         let outcome = effective.normalize_frontmatter(&instance, &composition_pending);
         if outcome.changed
             && let serde_json::Value::Object(rewritten) = outcome.value
         {
+            let records = caller_input_records(options);
             let fm_map = markdown.frontmatter_mut().as_map_mut();
             for (key, value) in rewritten {
                 if composition_pending.contains(&key) {
                     continue;
                 }
-                let value = projection
-                    .native
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or(value);
+                let value = match projection.native.get(&key) {
+                    Some(native) => native.clone(),
+                    // A caller value the projection could not classify keeps its
+                    // raw form: the rewrite would re-anchor it on the document.
+                    None if records.contains_key(&key) => continue,
+                    None => value,
+                };
                 fm_map.insert(key, value);
             }
         }
     }
 
     Ok(())
+}
+
+/// Judges the values a frontmatter shell result suffix (`::ok`,
+/// `::exit-code`, `::result`) produced, after shell expansion.
+///
+/// The first pass deferred these keys while they still held `$( … )`, and a
+/// typed value is a new kind of value no downstream owner expects to coerce,
+/// so this pass reports a problem on any of `keys` as final. Unsuffixed shell
+/// values keep their existing contract: their stdout text is left to the
+/// downstream schema owner. Nothing is written back.
+///
+/// ## Errors
+///
+/// [`MarkdownError::SchemaValidationFailed`] naming the typed values that do
+/// not satisfy the schema.
+pub(crate) fn validate_typed_shell_values(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    prepared: &PreparedSchemas,
+    keys: &HashSet<String>,
+) -> MarkdownResult<()> {
+    let Some(schemas) = prepared.schemas.as_ref() else {
+        return Ok(());
+    };
+    if keys.is_empty() || options.defer_schema_verdict {
+        return Ok(());
+    }
+    let path = source_path(markdown, options);
+    let description = markdown
+        .frontmatter()
+        .as_map()
+        .get("description")
+        .and_then(|v| v.as_str().map(String::from));
+    let report = match options.schema_phase {
+        Some(phase) => schemas.validate_for_phase(markdown, phase),
+        None => schemas.validate(markdown),
+    }
+    .map_err(|err| MarkdownError::SchemaValidationFailed {
+        path: path.clone(),
+        problems: Vec::new(),
+        summary: format!("schema could not be prepared: {err}"),
+        description: description.clone(),
+        source: Some(Box::new(err)),
+    })?;
+    let problems: Vec<_> = report
+        .problems
+        .into_iter()
+        .filter(|problem| {
+            top_level_pointer_segment(&problem.path).is_some_and(|name| keys.contains(&name))
+        })
+        .collect();
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(MarkdownError::SchemaValidationFailed {
+        path,
+        problems,
+        summary: "a shell result value did not satisfy the schema".to_string(),
+        description,
+        source: None,
+    })
 }
 
 /// Rechecks only caller-file classification against the current effective
@@ -430,6 +499,7 @@ pub(crate) fn verify_projection_stability(
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
+    data: &DataPaths,
 ) -> MarkdownResult<()> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
@@ -451,7 +521,7 @@ pub(crate) fn verify_projection_stability(
             });
         }
     };
-    ensure_projection_stable(effective.as_ref(), markdown, options, projection)
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection, data)
 }
 
 /// Adds composition bindings for eligible document-owned schema properties.
@@ -486,6 +556,7 @@ pub(crate) fn prepare_caller_projection(
     markdown: &Markdown,
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
+    data: &DataPaths,
 ) -> MarkdownResult<CallerProjection> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(CallerProjection::default());
@@ -507,7 +578,7 @@ pub(crate) fn prepare_caller_projection(
             });
         }
     };
-    let (instance, composition_pending) = caller_classification_instance(markdown, options);
+    let (instance, composition_pending) = caller_classification_instance(markdown, options, data);
     resolve_caller_file_overrides(
         effective.as_ref(),
         options,
@@ -534,8 +605,9 @@ fn ensure_projection_stable(
     markdown: &Markdown,
     options: &ComposeOptions,
     projection: &CallerProjection,
+    data: &DataPaths,
 ) -> MarkdownResult<()> {
-    let (instance, composition_pending) = caller_classification_instance(markdown, options);
+    let (instance, composition_pending) = caller_classification_instance(markdown, options, data);
     let current = classify_caller_overrides(effective, options, &instance, &composition_pending);
     for key in &projection.classified {
         if projection.modes.get(key) != current.get(key) {
@@ -550,14 +622,15 @@ fn ensure_projection_stable(
 fn caller_classification_instance(
     markdown: &Markdown,
     options: &ComposeOptions,
+    data: &DataPaths,
 ) -> (serde_json::Value, HashSet<String>) {
-    let (mut instance, mut composition_pending) = build_validation_instance(markdown, options);
+    let (mut instance, mut composition_pending) = build_validation_instance(markdown, options, data);
     let Some(object) = instance.as_object_mut() else {
         return (instance, composition_pending);
     };
     for (key, record) in caller_input_records(options) {
         if !options.exclude_keys.contains(&key) {
-            if value_pending_composition(Some(record.raw())) {
+            if value_pending_composition(&key, Some(record.raw()), data) {
                 composition_pending.insert(key.clone());
             } else {
                 composition_pending.remove(&key);
@@ -679,14 +752,23 @@ fn classify_caller_overrides(
         .collect()
 }
 
+/// The caller's values with the base their file references resolve from.
+///
+/// Without explicit records, every override is a caller value: authored
+/// (`--set`) and data alike. Origin decides whether a value is scanned for
+/// templates, not where a relative path in it points.
 fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::CallerInputRecords {
     if !options.caller_input_records().is_empty() {
         return options.caller_input_records().clone();
     }
-    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
-    else {
+    let overrides: Vec<(&String, &serde_json::Value)> = [&options.set_overrides, &options.data_overrides]
+        .into_iter()
+        .filter_map(|layer| layer.as_ref().and_then(serde_json::Value::as_object))
+        .flatten()
+        .collect();
+    if overrides.is_empty() {
         return Default::default();
-    };
+    }
     let origin = match (
         options.file_resolution_context.as_ref(),
         options.file_ref_fallback_dir.as_ref(),
@@ -699,7 +781,7 @@ fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::C
         (None, None) => return Default::default(),
     };
     overrides
-        .iter()
+        .into_iter()
         .map(|(key, value)| {
             (
                 key.clone(),
@@ -741,8 +823,10 @@ fn select_file_mode(
             let applicable: Vec<_> = arms
                 .iter()
                 .filter(|arm| {
+                    // Which file mode applies is independent of a contested
+                    // `match`: an arm that glob rules out is still a file arm.
                     crate::markdown::schemas::validate::build_validator_in_context(
-                        arm,
+                        &without_match_keyword(arm),
                         Some(context.base_dir()),
                         None,
                         Some(context),
@@ -759,6 +843,27 @@ fn select_file_mode(
     None
 }
 
+fn without_match_keyword(schema: &serde_json::Value) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .filter(|(key, _)| {
+                key.as_str() != crate::markdown::schemas::file_match::DARKMATTER_MATCH_KEYWORD
+            })
+            .map(|(key, value)| (key.clone(), without_match_keyword(value)))
+            .collect(),
+        serde_json::Value::Array(items) => items.iter().map(without_match_keyword).collect(),
+        other => other.clone(),
+    }
+}
+
+/// The schema fragments each top-level property is projected through.
+///
+/// A root `anyOf`/`oneOf` contributes the one arm that applies. When no single
+/// arm applies (several fit, or none does), it contributes only the caller
+/// file properties its contending arms agree on
+/// ([`caller_file_fragments_shared_by`]). Returns `None` only when an `allOf`
+/// arm cannot apply.
 fn collect_applicable_root_schema_fragments<'a>(
     schema: &'a serde_json::Value,
     instance: &serde_json::Value,
@@ -807,7 +912,7 @@ fn collect_applicable_root_schema_fragments<'a>(
         let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) else {
             continue;
         };
-        let candidates: Vec<_> = arms
+        let judged: Vec<_> = arms
             .iter()
             .filter_map(|arm| {
                 let fragments = collect_applicable_root_schema_fragments(
@@ -825,29 +930,31 @@ fn collect_applicable_root_schema_fragments<'a>(
                     composition_pending,
                     &fragments,
                 );
-                (applicability != RootArmApplicability::None)
-                    .then_some((applicability, fragments))
+                Some((applicability, fragments))
             })
             .collect();
-        let exact: Vec<_> = candidates
-            .iter()
-            .filter(|(applicability, _)| *applicability == RootArmApplicability::Exact)
-            .collect();
-        let selected_arm = match exact.as_slice() {
-            [(_, fragments)] => fragments,
-            [] => {
-                let pending: Vec<_> = candidates
-                    .iter()
-                    .filter(|(applicability, _)| {
-                        *applicability == RootArmApplicability::Pending
-                    })
-                    .collect();
-                let [(_, fragments)] = pending.as_slice() else {
-                    return None;
-                };
-                fragments
+        let with = |wanted: RootArmApplicability| -> Vec<_> {
+            judged
+                .iter()
+                .filter(|(applicability, _)| *applicability == wanted)
+                .map(|(_, fragments)| fragments)
+                .collect()
+        };
+        let exact = with(RootArmApplicability::Exact);
+        let pending = with(RootArmApplicability::Pending);
+        let contending = match (exact.len(), pending.len()) {
+            (1, _) | (0, 1) => exact.into_iter().chain(pending).take(1).collect(),
+            (0, 0) => judged.iter().map(|(_, fragments)| fragments).collect(),
+            (0, _) => pending,
+            _ => exact,
+        };
+        let undecided;
+        let selected_arm = match contending.as_slice() {
+            [fragments] => *fragments,
+            arms => {
+                undecided = caller_file_fragments_shared_by(arms, records);
+                &undecided
             }
-            _ => return None,
         };
         for (key, fragments) in selected_arm.iter() {
             selected
@@ -858,6 +965,44 @@ fn collect_applicable_root_schema_fragments<'a>(
     }
 
     Some(selected)
+}
+
+/// The caller-record properties whose file mode every contending arm agrees
+/// on, for a root union that could not commit to one arm.
+///
+/// A caller's file value resolves from the caller's origin whichever arm
+/// finally applies, so an undecided union must not drop that origin and leave
+/// the value to be judged from the document's directory. A property qualifies
+/// only when every contending arm declares it with exactly one file fragment of
+/// the same mode; an arm that omits it or types it otherwise would read the
+/// projected absolute path as a different value. The first arm's fragments
+/// stand for all of them, since the mode alone decides how the value resolves.
+fn caller_file_fragments_shared_by<'a>(
+    arms: &[&HashMap<String, Vec<&'a serde_json::Value>>],
+    records: &crate::markdown::compose::CallerInputRecords,
+) -> HashMap<String, Vec<&'a serde_json::Value>> {
+    let Some((first, rest)) = arms.split_first() else {
+        return HashMap::new();
+    };
+    let arm_mode = |fragments: &HashMap<String, Vec<&serde_json::Value>>,
+                    key: &str,
+                    record: &crate::markdown::compose::CallerInputRecord| {
+        let modes: Vec<_> = fragments
+            .get(key)?
+            .iter()
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .collect();
+        (modes.len() == 1).then(|| modes[0])
+    };
+    records
+        .iter()
+        .filter_map(|(key, record)| {
+            let mode = arm_mode(first, key, record)?;
+            rest.iter()
+                .all(|arm| arm_mode(arm, key, record) == Some(mode))
+                .then(|| (key.clone(), first[key].clone()))
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1235,9 +1380,9 @@ fn caller_projection_failure(
     }
 }
 
-/// Returns `true` when `value` is still composition-pending — it holds a
-/// frontmatter shell expression (`$(...)`) or an unresolved Darkmatter
-/// template (`{{ ... }}`) somewhere in any string descendant.
+/// Returns `true` when top-level `key`'s `value` is still composition-pending:
+/// an authored string descendant holds a frontmatter shell expression
+/// (`$(...)`) or an unresolved Darkmatter template (`{{ ... }}`).
 ///
 /// This stage runs after template interpolation but before shell expansion.
 /// A value that survives interpolation still holding `{{ ... }}` could not be
@@ -1247,12 +1392,25 @@ fn caller_projection_failure(
 /// their `$(...)` counterparts, must not be failed here: the consumer
 /// re-validates the post-shell effective frontmatter once every expression
 /// has resolved.
-fn value_pending_composition(value: Option<&serde_json::Value>) -> bool {
+///
+/// Data is final: a data leaf (a runtime override, an expression result, a
+/// decoded literal token) and a stored literal token are never pending,
+/// whatever text they hold.
+fn value_pending_composition(
+    key: &str,
+    value: Option<&serde_json::Value>,
+    data: &DataPaths,
+) -> bool {
     let Some(value) = value else { return false };
+    let authored = data.authored_view(&mut vec![ValuePathSegment::Key(key.to_string())], value);
+    holds_pending_syntax(&authored)
+}
+
+fn holds_pending_syntax(value: &serde_json::Value) -> bool {
     match value {
-        serde_json::Value::String(s) => s.contains("$(") || s.contains("{{"),
-        serde_json::Value::Array(items) => items.iter().any(|v| value_pending_composition(Some(v))),
-        serde_json::Value::Object(map) => map.values().any(|v| value_pending_composition(Some(v))),
+        serde_json::Value::String(s) => crate::markdown::literal_token::holds_pending_syntax(s),
+        serde_json::Value::Array(items) => items.iter().any(holds_pending_syntax),
+        serde_json::Value::Object(map) => map.values().any(holds_pending_syntax),
         _ => false,
     }
 }
@@ -1269,6 +1427,7 @@ fn value_pending_composition(value: Option<&serde_json::Value>) -> bool {
 fn build_validation_instance(
     markdown: &Markdown,
     options: &ComposeOptions,
+    data: &DataPaths,
 ) -> (serde_json::Value, std::collections::HashSet<String>) {
     let fm_map = markdown.frontmatter().as_map();
     let mut object = serde_json::Map::with_capacity(fm_map.len());
@@ -1280,7 +1439,7 @@ fn build_validation_instance(
         if options.exclude_keys.contains(key) {
             continue;
         }
-        if value_pending_composition(Some(value)) {
+        if value_pending_composition(key, Some(value), data) {
             composition_pending.insert(key.clone());
         }
         object.insert(key.clone(), value.clone());
@@ -2743,6 +2902,65 @@ mod tests {
         assert_eq!(
             label_result.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("spec.md")),
+        );
+    }
+
+    /// Two arms both accept the caller's path, so no single arm is committed;
+    /// the value still resolves from the launch area, not the document's
+    /// directory, whichever arm finally applies.
+    #[test]
+    fn undecided_root_union_resolves_a_caller_file_from_the_launch_area() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        let resolved = launch_dir.join("fixes").join("x").join("spec.md");
+        std::fs::create_dir_all(resolved.parent().unwrap()).unwrap();
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = dir.path().join("prompts/prompt.md");
+        let schema = "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager;match(**/features/**/spec.md))'\n  - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n";
+
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "fixes/x/spec.md" }));
+        let (composed, _) = md_with_schema_and_source(schema, &doc_path)
+            .compose_with(options)
+            .unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(resolved.to_string_lossy())),
+        );
+    }
+
+    /// Arms that disagree on whether the property is a file leave the caller's
+    /// value unprojected, and the eager-file rewrite does not re-anchor it on
+    /// the document's repository either.
+    #[test]
+    fn undecided_root_union_leaves_a_caller_value_whose_file_mode_is_disputed_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let resolved = repo.join("fixes/x/spec.md");
+        std::fs::create_dir_all(resolved.parent().unwrap()).unwrap();
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = repo.join("prompts/prompt.md");
+        let schema = "$schema:\n  - spec: 'file(required;eager)'\n  - spec: 'string(required)'\n";
+        let absolute = resolved.to_string_lossy().into_owned();
+
+        let context = biscuit_file::FileResolutionContext::new(&repo)
+            .with_repository_root(&repo)
+            .with_source_path(&doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_resolution_context(context)
+            .with_file_ref_fallback_dir(&repo)
+            .with_set_overrides(serde_json::json!({ "spec": absolute }));
+        let (composed, _) = md_with_schema_and_source(schema, &doc_path)
+            .compose_with(options)
+            .unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(absolute)),
+            "a caller value is never rewritten to the repository-relative `fixes/x/spec.md`",
         );
     }
 

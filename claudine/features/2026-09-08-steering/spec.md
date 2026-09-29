@@ -1,3 +1,73 @@
+---
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+status: planned
+implemented: false
+implemented_by: claude/opus
+review_iterations: 0
+human_review: false
+message_to_agent: |-
+    Phases 1-4 are implemented. Read claudine/features/2026-09-08-steering/implementation-log.md
+    (Phase 4 first), claudine/docs/topics/pi-rpc.md, steering-activation.md (new "Blocking a
+    profile" section), and steering-routing.md.
+
+    - Pi steering is BLOCKED by design, not missing: docs/providers/steering-activation.yaml now
+      has a required `blocks:` list, and `pi/retained-rpc` is blocked because Pi's steer/prompt
+      carry no expected-session guard and an enabled extension can switch sessions (the
+      switch-race record pi-rpc-steer-switch-0844 still loses the message on Pi 0.87.1).
+      Eligibility reports `Blocker::ProfileBlocked` first, before state or version. Do not lift the
+      block or add a grant without new evidence that answers its reason. Phase 5 should build
+      `claudine steer` against fake executors (the plan's stated fallback) and must render blocked
+      rows as unavailable with the block's reason.
+    - A managed Pi run now registers with `profile_id: Some("retained-rpc")` and the real
+      `pi-rpc` executor (cli/src/commands/wrap/exec/pi_rpc/executor.rs); every other launch
+      still maps to no profile. `ExecutionFacts.provider_version` is still `None`: the wrapper
+      does not run `pi --version`. A future grant needs it (a background version query would
+      avoid adding launch latency; check L1 fakes that record argv before adding one).
+    - The seam for providers whose managed launch is a stdio protocol is
+      `commands/wrap/exec/control.rs::StdioControl`, passed to `run_child_stream_semantic` and
+      returned by `WrapperProfile::stdio_control(&args)`. Readiness is checked before the task is
+      submitted; a pre-submission failure runs the session's `FallbackLaunch`. Phase 7 adapters
+      (Codex app-server, Claude stream-json, ACP) should reuse it rather than cloning the Kimi wire
+      session. Pi-specific protocol reading lives in
+      `claudine::stream::protocol::pi::rpc` (strict readers) and the parser in
+      `lib/src/stream/providers/pi.rs`.
+    - Phase 6 automatic help: a steering-capable session binds the controller and reports
+      Working on `agent_start` and Idle on `agent_settled`. A settled one-shot Pi run closes stdin
+      and refuses new steering, so automatic help has only the working window.
+    - New `EarlyTermination::InputRequired` (`error_kind = "input_required"`, Aborted,
+      `HumanInputRequested` signal) fails a run that waits on unanswerable input.
+    - Tests: CI-runnable fake Pi at cli/tests/bin/fake_pi (bin `claudine-fake-pi`,
+      `test-fixtures`), driven by cli/tests/l1/pi_managed_rpc.rs. Real tier:
+      `just test-real real_pi_` (needs `pi` on PATH). The probe fixture
+      tests/fixtures/steering/pi-probe.ts was updated for Pi 0.87 (system prompt moved into a
+      `system` message) and now calls its tool batch once per task.
+    - Unchanged gotchas: the error-transport guard wants typed `#[source]` errors rendered once via
+      `crate::steering::render_chain`; re-bless docs/providers/dispatch-inventory.json when
+      `Provider::` references change (env-prefixed commands need approval; the log describes the
+      workaround); the requester's `expect(dead_code)` markers go away when `claudine steer`
+      lands; current steering byte pin is 10005189633011121167.
+    - Skill files under .claude/skills/claudine/ still could not be written; the intended edits
+      from Phases 1-4 are listed in each phase's "Environment limitations" in the log.
+---
 # Steering Running Agent Sessions
 
 Status: Ready for phased implementation; provider activation remains evidence-gated.

@@ -63,8 +63,8 @@ pub(crate) use resume::{
 };
 use wrapper_stages::{
     apply_opencode_yolo_config_overlay, detect_wrapper_harness, emit_preflight_preamble,
-    parse_cli_timeouts, prepare_stream_and_prompt, resolve_and_apply_system_prompt,
-    run_execution_stage, validate_timeout_constraints,
+    parse_cli_timeouts, prepare_stream_and_prompt, reject_interactive_timeouts,
+    resolve_and_apply_system_prompt, run_execution_stage, validate_timeout_constraints,
 };
 
 use biscuit_terminal::terminal::Terminal;
@@ -318,6 +318,7 @@ fn run_provider_wrapper_inner(
     let mut env_overrides: Vec<(String, String)> = Vec::new();
     let mut deferred_warnings: Vec<String> = Vec::new();
     let mut deferred_messages: Vec<String> = Vec::new();
+    reject_interactive_timeouts(&args, interactive_requested)?;
 
     // ------------------------------------------------------------------
     // Stage 3: Extract and optionally edit the prompt source
@@ -391,15 +392,9 @@ fn run_provider_wrapper_inner(
     // ------------------------------------------------------------------
     // Stage 5: Validate and parse timeouts
     // ------------------------------------------------------------------
-    validate_timeout_constraints(
-        &args,
-        interactive_requested,
-        non_interactive_requested,
-        edit_requested,
-    )?;
+    validate_timeout_constraints(&args, non_interactive_requested)?;
     let cli_timeout_duration = parse_cli_timeouts(&args)?;
 
-    // The effective interactivity state is determined solely by the explicit flag.
     let effective_non_interactive = non_interactive_requested;
     let term = wrap_terminal_for_mode(effective_non_interactive);
 

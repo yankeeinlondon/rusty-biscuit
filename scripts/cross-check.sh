@@ -77,7 +77,9 @@
 # honoring the global excludes at `$XDG_CONFIG_HOME/git/ignore`) dies with
 # "Host is down" — before a single test runs (2026-09-10). The Unix preamble
 # therefore sets GIT_CONFIG_GLOBAL=/dev/null (fetch/reset/clean/checkout need
-# no identity) and points XDG_CONFIG_HOME at an empty local directory.
+# no identity) and points XDG_CONFIG_HOME at an empty local directory. It also
+# sets the UTF-8 locale hosted CI runs with (`LANG=C.UTF-8`, `LC_ALL` unset),
+# since a `LANG=C` host selects ASCII glyph fallbacks in terminal output.
 #
 # A WSL run whose tested tree IS the outgoing head's tree, on a clean remote
 # worktree, with no test filter, becomes a published `wsl2-ubuntu` validation
@@ -524,6 +526,11 @@ repo="\$base/rusty-biscuit"
 export GIT_CONFIG_GLOBAL=/dev/null
 export XDG_CONFIG_HOME="\$base/.xdg-empty"
 mkdir -p "\$XDG_CONFIG_HOME"
+# Hosted CI runners use a UTF-8 locale. A host whose shells run \`LANG=C\` (the
+# Linux build host) makes terminal detection choose ASCII glyph fallbacks, so
+# glyph assertions would go red there and nowhere else.
+unset LC_ALL
+export LANG=C.UTF-8
 ${required_backends:+export BISCUIT_TEST_REQUIRED_BACKENDS='${required_backends}'}
 ${min_free_gib:+export BISCUIT_BUILD_MIN_FREE_GIB='${min_free_gib}'}
 lock="\$base/.cross-check.lock"

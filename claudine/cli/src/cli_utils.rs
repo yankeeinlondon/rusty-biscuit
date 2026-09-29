@@ -6,6 +6,21 @@ use color_eyre::eyre::{Result, eyre};
 use std::path::{Path, PathBuf};
 use url::Url;
 
+/// Start time (seconds since the Unix epoch) of a live process. Paired with
+/// the PID it identifies a process across PID reuse.
+pub(crate) fn process_start(pid: u32) -> Option<u64> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    system.process(pid).map(sysinfo::Process::start_time)
+}
+
 /// Convert a local path into a file URL, resolving relative paths against the
 /// process working directory.
 pub(crate) fn file_url(path: &Path) -> Option<Url> {

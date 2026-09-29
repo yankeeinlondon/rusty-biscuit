@@ -442,7 +442,7 @@ fn prompt_for_property(
                 .iter()
                 .map(|m| ChoiceOption::new(m.as_str(), m.as_str(), m.clone()))
                 .collect();
-            let height = chooser_height(options.len());
+            let height = chooser_height(options.len(), true);
             let state = ChooseOneState::from_options(options).with_label(label);
             let selected: Option<String> = run_standalone(ChooseOne::new(), state, height)?;
             match selected {
@@ -460,7 +460,7 @@ fn prompt_for_property(
                 .iter()
                 .map(|m| ChoiceOption::new(m.as_str(), m.as_str(), m.clone()))
                 .collect();
-            let height = chooser_height(options.len());
+            let height = chooser_height(options.len(), true);
             let state = ChooseManyState::from_options(options).with_label(label);
             let selected: Vec<String> = run_standalone(ChooseMany::new(), state, height)?;
             Ok(serde_json::Value::Array(
@@ -541,11 +541,9 @@ fn collect_number(
             state = state.with_value(&buf);
             state.set_validation_error(err);
         }
-        // Height 4 (label, input, error, hint) keeps the inline viewport's
-        // bottom-row help-hint overlay off the validation-error row
-        // (`inner_area.y + 1`). At height 3 the hint and error collide on the
-        // last row and the hint wins, hiding the parse error on a retry.
-        let raw: String = run_standalone(TextInput::new(), state, inline_height(4))?;
+        // Three content rows (label, input, validation error): the widget
+        // draws the error only when a row exists below the input.
+        let raw: String = run_standalone(TextInput::new(), state, inline_height(3))?;
         match parse_number(&raw, integer, min, max) {
             Ok(value) => return Ok(value),
             Err(message) => {
@@ -603,34 +601,34 @@ fn parse_number(
     Ok(value)
 }
 
-fn inline_height(rows: u16) -> Option<HeightSpec> {
-    Some(HeightSpec::Cells(rows))
+/// Rows `run_standalone`'s default chrome adds around the widget: one row of
+/// top padding and one of bottom padding, and the help hint is overlaid on
+/// that bottom row. A viewport sized to the widget's content alone leaves the
+/// widget no rows to draw in, or lets the hint cover its last one.
+const STANDALONE_CHROME_ROWS: u16 = 2;
+
+/// Inline viewport height for a widget that draws `content_rows` rows.
+fn inline_height(content_rows: u16) -> Option<HeightSpec> {
+    Some(HeightSpec::Cells(content_rows.saturating_add(STANDALONE_CHROME_ROWS)))
 }
 
-/// Rows a `ChooseOne`/`ChooseMany` inline viewport needs besides its option
-/// rows: the `LabelPosition::Above` label line and the help-hint row, which
-/// `run_standalone` overlays on the viewport's last row (it reserves nothing).
+/// Cap on a chooser's inline viewport; a longer option list scrolls.
+const CHOOSER_MAX_ROWS: u16 = 8;
+
+/// Inline viewport height for a `ChooseOne`/`ChooseMany` prompt with
+/// `option_count` options, plus the `LabelPosition::Above` row when
+/// `labeled`, capped at [`CHOOSER_MAX_ROWS`]. Always `Some`, so the prompt
+/// never enters the alternate screen.
 ///
 /// The choosers' other conditional rows cannot appear for these callers:
 /// the fuzzy-filter search line needs `with_filter_enabled(true)` and the
 /// validation-error line needs a `required` or `min_selections` input, and
-/// the `from_options` states set neither. The unlabeled provider picker
-/// leaves the label row blank.
-const CHOOSER_CHROME_ROWS: usize = 2;
-
-/// Cap on a chooser's inline viewport; a longer option list scrolls.
-const CHOOSER_MAX_ROWS: usize = 8;
-
-/// Inline viewport height for a `ChooseOne`/`ChooseMany` prompt with
-/// `option_count` options: one row per option plus [`CHOOSER_CHROME_ROWS`],
-/// capped at [`CHOOSER_MAX_ROWS`]. Always `Some`, so the prompt never enters
-/// the alternate screen.
-pub(crate) fn chooser_height(option_count: usize) -> Option<HeightSpec> {
-    let rows = option_count
-        .saturating_add(CHOOSER_CHROME_ROWS)
-        .min(CHOOSER_MAX_ROWS);
-    // `rows <= CHOOSER_MAX_ROWS`, which fits in a `u16`.
-    inline_height(rows as u16)
+/// the `from_options` states set neither.
+pub(crate) fn chooser_height(option_count: usize, labeled: bool) -> Option<HeightSpec> {
+    let content = option_count.saturating_add(usize::from(labeled));
+    let cap = usize::from(CHOOSER_MAX_ROWS - STANDALONE_CHROME_ROWS);
+    // `content.min(cap) <= cap`, which fits in a `u16`.
+    inline_height(content.min(cap) as u16)
 }
 
 fn collect_file(

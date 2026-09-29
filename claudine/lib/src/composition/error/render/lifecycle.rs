@@ -7,7 +7,6 @@
 
 use super::super::*;
 use super::{escape_prose_path, render_file_link};
-use crate::composition::LifecycleExprError;
 
 /// Render the [`StatusBlock`] for a lifecycle-family [`CompositionError`].
 pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
@@ -151,12 +150,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 Some(property) => format!("<cyan>`{}`</cyan>", Prose::escape_text(property)),
                 None => lifecycle_evaluation_surface_label(surface),
             };
-            // A surviving span's typed reason renders in full; `message` is the
-            // length-clamped notification-safe copy.
             let reason_text = match reason.as_ref() {
-                LifecycleEvaluationReason::SurvivingSpan { span } => Prose::escape_text(
-                    &LifecycleExprError::SurvivingSpan { span: span.clone() }.to_string(),
-                ),
                 LifecycleEvaluationReason::Expression => escape_prose_path(message),
             };
             let body = format!(
@@ -165,12 +159,6 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                  <b>Reason:</b> {reason_text}"
             );
             let hint = match reason.as_ref() {
-                LifecycleEvaluationReason::SurvivingSpan { .. } => {
-                    "A `{{ … }}` inside a quoted string is never interpolated here: \
-                     concatenate with `+` instead (`'in ' + ctx.area`), or write \
-                     `{{{ … }}}` when the braces are meant literally. A frontmatter value \
-                     read at event time must hold resolved text, not template syntax."
-                }
                 LifecycleEvaluationReason::Expression => {
                     "This is a crashed expression, not a clean `false` guard: the run \
                      halts and exits non-zero. Fix the expression (resolve the missing \

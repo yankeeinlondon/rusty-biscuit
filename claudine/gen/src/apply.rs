@@ -69,6 +69,8 @@ pub struct FullScopeArtifacts<'a> {
     pub vocabulary: &'a str,
     /// [`crate::agentic_clis::build_agentic_clis`] output, written into Darkmatter.
     pub agentic_clis: &'a str,
+    /// [`crate::steering_catalog::build_steering_catalog`] output.
+    pub steering: &'a str,
 }
 
 /// Applies regenerated artifacts under `area`: one `data.rs` per scoped
@@ -158,6 +160,16 @@ pub fn apply_generations(
     apply_one(
         &crate::agentic_clis::agentic_clis_path(area),
         artifacts.agentic_clis,
+        &mut outcome,
+        &mut quit,
+        decide,
+        None,
+        || None,
+    )?;
+
+    apply_one(
+        &crate::steering_catalog::steering_catalog_path(area),
+        artifacts.steering,
         &mut outcome,
         &mut quit,
         decide,
@@ -314,6 +326,7 @@ mod tests {
         families: "families\n",
         vocabulary: "vocabulary\n",
         agentic_clis: "agentic\n",
+        steering: "steering\n",
     };
 
     fn generation(slug: &str, data_rs: &str) -> Generation {
@@ -362,8 +375,8 @@ mod tests {
 
         assert_eq!(
             outcome.written.len(),
-            6,
-            "data.rs, catalog.json, signals, families, vocabulary, agentic CLIs"
+            7,
+            "data.rs, catalog.json, signals, families, vocabulary, agentic CLIs, steering"
         );
         assert!(outcome.declined.is_empty());
         assert_eq!(
@@ -376,6 +389,7 @@ mod tests {
         assert!(crate::vocabulary::vocabulary_path(area).is_file());
         assert!(crate::agentic_clis::agentic_clis_path(area).starts_with(dir.path()));
         assert!(crate::agentic_clis::agentic_clis_path(area).is_file());
+        assert!(crate::steering_catalog::steering_catalog_path(area).is_file());
 
         // Second run: everything clean, callback never invoked.
         let outcome = apply_generations(area, &["claude"], std::slice::from_ref(&generation), ARTIFACTS, &mut |_,
@@ -383,7 +397,7 @@ mod tests {
             panic!("clean files must not prompt")
         })
         .unwrap();
-        assert_eq!(outcome.clean.len(), 6);
+        assert_eq!(outcome.clean.len(), 7);
         assert!(outcome.written.is_empty() && outcome.declined.is_empty());
     }
 
@@ -412,8 +426,8 @@ mod tests {
         assert!(outcome.written.is_empty());
         assert_eq!(
             outcome.declined.len(),
-            6,
-            "data.rs, catalog.json, signals, families, vocabulary, agentic CLIs"
+            7,
+            "data.rs, catalog.json, signals, families, vocabulary, agentic CLIs, steering"
         );
         assert_eq!(
             std::fs::read_to_string(committed_data_path(area, "claude")).unwrap(),
@@ -428,12 +442,13 @@ mod tests {
         assert!(snippet.contains("OLD_VAR"), "{snippet}");
         assert!(snippet.contains("reason: TODO"), "{snippet}");
         // Only data.rs gets a field-keyed pin — catalog.json, signals,
-        // families, vocabulary, and the agentic CLI table do not.
+        // families, vocabulary, the agentic CLI table, and steering do not.
         assert!(outcome.declined[1].override_snippet.is_none());
         assert!(outcome.declined[2].override_snippet.is_none());
         assert!(outcome.declined[3].override_snippet.is_none());
         assert!(outcome.declined[4].override_snippet.is_none());
         assert!(outcome.declined[5].override_snippet.is_none());
+        assert!(outcome.declined[6].override_snippet.is_none());
     }
 
     #[test]
@@ -459,8 +474,8 @@ mod tests {
         assert_eq!(calls, 1, "quit stops further prompting");
         assert_eq!(
             outcome.declined.len(),
-            7,
-            "both data.rs plus catalog.json, signals, families, vocabulary, and agentic CLIs"
+            8,
+            "both data.rs plus catalog.json, signals, families, vocabulary, agentic CLIs, and steering"
         );
         assert!(outcome.written.is_empty());
     }

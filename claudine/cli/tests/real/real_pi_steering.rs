@@ -14,10 +14,19 @@ use tempfile::TempDir;
 
 const DEADLINE: Duration = Duration::from_secs(45);
 
+/// `CLAUDINE_PI_BINARY`, else `pi` on `PATH`. A missing binary fails the
+/// test; it is never counted as verified.
+fn pi_binary() -> PathBuf {
+    std::env::var_os("CLAUDINE_PI_BINARY")
+        .map(PathBuf::from)
+        .or_else(|| which::which("pi").ok())
+        .expect("set CLAUDINE_PI_BINARY or put a Sniff-discovered Pi on PATH")
+}
+
 #[test]
 #[ignore = "requires explicit Pi binary; controlled switch and abrupt termination experiments"]
 fn real_pi_rpc_switch_and_crash() {
-    let binary = PathBuf::from(std::env::var_os("CLAUDINE_PI_BINARY").expect("set Pi binary"));
+    let binary = pi_binary();
     let version = Command::new(&binary).arg("--version").output().unwrap();
     assert!(version.status.success());
     let version = String::from_utf8(version.stdout).unwrap();
@@ -133,7 +142,7 @@ fn stored_steering_count(rpc: &RpcChild) -> usize {
 #[test]
 #[ignore = "requires explicit Pi binary; abort and EOF tests only use disposable children"]
 fn real_pi_rpc_abort_and_disconnect() {
-    let binary = PathBuf::from(std::env::var_os("CLAUDINE_PI_BINARY").expect("set Pi binary"));
+    let binary = pi_binary();
     let version = Command::new(&binary).arg("--version").output().unwrap();
     assert!(version.status.success());
     let version = String::from_utf8(version.stdout).unwrap();
@@ -319,8 +328,7 @@ impl Drop for RpcChild {
 #[test]
 #[ignore = "requires explicit Pi binary; runs disposable real-provider protocol experiments"]
 fn real_pi_rpc_steering_contract() {
-    let binary = PathBuf::from(std::env::var_os("CLAUDINE_PI_BINARY")
-        .expect("set CLAUDINE_PI_BINARY to a Sniff-discovered Pi executable"));
+    let binary = pi_binary();
     let version = Command::new(&binary).arg("--version").output().unwrap();
     assert!(version.status.success(), "Pi version query must succeed");
     let version = String::from_utf8(version.stdout).unwrap();

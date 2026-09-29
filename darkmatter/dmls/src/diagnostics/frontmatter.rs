@@ -652,6 +652,11 @@ fn expression_diagnostics(
     for value in expression_values {
         let expression = value.expression();
         let path = ast.path_at(value.index);
+        // A stored literal token is data, not authored expression text; its
+        // source bytes cannot anchor a parse error in the decoded text.
+        if matches!(darkmatter::markdown::literal_token::decode_leaf(expression), Some(Ok(_))) {
+            continue;
+        }
         if is_pending_expression_value(expression) {
             // Schema validation defers a pending `{{ … }}` / `$(…)` value, so
             // it is not yet a final expression to parse or resolve. Only a

@@ -16,8 +16,8 @@ pub use code::{ensure_vertical_spacing, generate_safe_fence, infer_language, wra
 pub use conditions::evaluate_condition;
 pub use engine::{find_preceding_heading_level, relevel_with_overflow};
 pub(crate) use engine::{
-    ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine, build_resolution_cache,
-    child_inherited_origin,
+    ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine, apply_directive_set_overlay,
+    build_resolution_cache, markdown_child_options,
 };
 pub use parser::{parse_directives, parse_frontmatter_refs};
 pub(crate) use parser::parse_directives_in;

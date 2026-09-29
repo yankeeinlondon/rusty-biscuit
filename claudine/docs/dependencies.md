@@ -94,6 +94,21 @@ edges exist to serve.
   CI and the tier recipes enable them. The contract and CLI `real-tests`
   features similarly keep live-provider targets opt-in.
 
+## Steering Routing
+
+See [Steering Routing](topics/steering-routing.md).
+
+- `claudine` (library) depends on `uuid` (`v4`, the version the CLI already
+  uses) for random steering execution and request identifiers.
+- `claudine-cli` depends on `tokio-stream` (already in the graph through
+  `rendezvous-daemon`) for the owner's outbound `SteeringControl` request
+  stream. Its dev-dependency on `tokio` adds `test-util` so the control link's
+  retry backoff is asserted on a paused clock. The wrapper's process-start
+  identity reuses the `sysinfo` edge described under Budget Ledger Process
+  Identity (`cli_utils::process_start`).
+- `rendezvous-client` adds `tokio-stream` as a dev-dependency for the
+  steering round-trip test's owner stream.
+
 ## Lifecycle Requeue
 
 - `claudine-cli` depends on `rendezvous-client` and `rendezvous-core` on every

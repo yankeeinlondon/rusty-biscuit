@@ -314,7 +314,7 @@ fn emit_dry_run_outcome(
         // Dry-run never produces a per-iteration summary.
         iteration_signals: None,
         terminal_signal: None,
-        initialize_handoff: None,
+        handoff: None,
         final_output: None,
     }
 }
@@ -1351,9 +1351,6 @@ fn construct_lifecycle_runtime(
         // event and no per-event sniff scan runs. `current.*` stays event-time
         // and is captured below.
         let lifecycle_context = {
-            let fm_json =
-                serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
-            let scan = format!("{fm_json}\n{}", request.prepared.prompt);
             let mut ctx = request.prepared.compose_context.clone();
             if let Some(epoch) = request.prepared.document_epoch.as_ref() {
                 epoch.record_prepared_context_consumer(
@@ -1366,7 +1363,12 @@ fn construct_lifecycle_runtime(
             }
             if let Some(invocation) = request.invocation_context.as_ref() {
                 let requirements =
-                    darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
+                    darkmatter::markdown::compose::ContextRequirements::for_frontmatter([
+                        &request.prepared.effective_frontmatter,
+                    ])
+                    .union(&darkmatter::markdown::compose::ContextRequirements::for_content(
+                        &request.prepared.prompt,
+                    ));
                 if let Some(epoch) = request.prepared.document_epoch.as_ref() {
                     epoch.extend_launch_context(&mut ctx, &requirements);
                 } else {
@@ -1506,7 +1508,7 @@ pub(super) fn route_initialize(
                             iteration_signals: None,
                             terminal_signal: None,
                             final_output: None,
-                            initialize_handoff: None,
+                            handoff: None,
                         },
                     )));
                 }
@@ -1738,7 +1740,9 @@ fn provider_run_handoff(
         runtime_state: None,
         err: None,
         timing: Some(&lifecycle_timing),
-        current: lifecycle_current.clone(),
+        current: lifecycle_current
+            .as_ref()
+            .map(darkmatter::markdown::compose::CurrentAuthority::memoized),
         group: None,
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
@@ -1848,7 +1852,7 @@ fn provider_run_handoff(
                 iteration_signals: None,
                 terminal_signal: None,
                 final_output: None,
-                initialize_handoff: Some(committed),
+                handoff: Some(committed),
             })
         }
         // Dry-run proxies (and every other transition) stay on the in-harness

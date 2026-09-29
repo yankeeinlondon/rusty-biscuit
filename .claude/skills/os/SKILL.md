@@ -111,6 +111,19 @@ push mode.
   Buck2) list `MonorepoLayer::packages` in walk order, so a complete-JSON
   assertion must sort those lists; `lockfile_provenance::normalized_any`
   does so only for `provenance == "leaf-markers"` (2026-09-26).
+- **Red only on the `BUILD_LINUX` host, an ASCII `>` where the test expects
+  `▶` (or another glyph):** that host's shells run with `LANG=C`, and both
+  in-process terminal detection and `CliProcessFixture`'s children read it,
+  so `biscuit-terminal` selects its ASCII fallbacks. Hosted CI runs
+  `LANG=C.UTF-8`; `cross-check` now exports the same (2026-09-28), but an ad
+  hoc SSH session on that host does not. A test whose assertion needs a
+  Unicode glyph should pin `LC_ALL=C.UTF-8` on its spawned command
+  (`sequence_groups`).
+- **A substring count red on Linux, green on macOS, in rendered CLI output:**
+  the temp path in the message has a different length (`/tmp/<name>-<pid>-…`
+  vs `/var/folders/…`), so the terminal wraps at a different word and splits
+  the phrase being counted. Count in whitespace-collapsed output, never in the
+  wrapped text (`lifecycle_downgrade_outcome`, 2026-09-28).
 - **Red only on `windows-latest`:** GitHub's runner has an 8.3 short-name TEMP
   (`RUNNER~1`) that no developer machine has, plus verbatim `\\?\` spellings
   from `canonicalize`. Read the path-spelling traps in

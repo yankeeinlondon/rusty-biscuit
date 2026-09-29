@@ -52,6 +52,13 @@ DMLS projects Darkmatter's typed surfaces into LSP:
 Completion and validation must call the same schema-arm selection and parser
 authorities. A completion-only reconstruction is drift.
 
+Frontmatter `$( … )` suffixes follow the same rule: completion, hover, and the
+`dm.shell.invalid_suffix` diagnostic (`providers/dsl.rs`) read the library's
+`FRONTMATTER_SHELL_SUFFIXES`, `describe_suffix`, and
+`parse_frontmatter_shell_suffixes`, the grammar `md compose` parses with.
+`frontmatter_shell_values` strips a quoted scalar's quotes before parsing,
+because the YAML span includes them.
+
 ## Unknown identifiers
 
 `dm.expression.unknown_identifier` is a **Warning** on body `{{ … }}` and on
@@ -89,6 +96,9 @@ uses for the same condition.
   `work-counters` feature, which dmls enables as a dev-dependency only).
   `many_aliases_of_one_long_expression_share_its_text_and_one_decode` pins the
   shared target (`Arc::ptr_eq`) and one decode (`ALIAS_TARGET_DECODES`).
+  `expression_diagnostics` skips a value that is a whole literal token
+  (`{{!data:v1:…}}`): it is data, and its encoded bytes cannot anchor a parse
+  error (`a_literal_token_is_not_parsed_as_an_expression`).
   `expression_diagnostics` parses and reports each authored expression once,
   so an anchored value and its aliases never double-report; a malformed one
   whose property's union accepts it keeps its parse error for a later alias

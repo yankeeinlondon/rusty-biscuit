@@ -196,6 +196,10 @@ Supporting helpers live alongside the trait:
   `FocusedRegion` runs with absolute line numbers, returning `None` rather
   than falling back to the whole block; `YamlKeyPath::in_every_arm("$schema",
   "doc")` matches a key in every sequence-item arm of a union.
+  `focused_line_regions(lines, context)` does the same for 1-based lines a
+  caller has already located, finding each line's enclosing headers by
+  indentation. Both return `None` for a block with anchors, aliases, or merge
+  keys unless the selection covers every line between its delimiters.
   `focused_yaml_excerpt(keys)` renders those regions (whole block when none
   resolve). Use
   this for any error variant whose origin is a file so the rendered block

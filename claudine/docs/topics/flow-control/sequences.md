@@ -177,6 +177,10 @@ sequence: <file-ref> [-> <offset.path>] [::<operator>(<args>)]
 - `::` is an **operator** on the resolved list. Exactly one per reference.
 - Expression (`{{ … }}`) and shell (`$( … )`) sources produce lists directly and
   take no suffix.
+- A stored literal token (`"{{!data:v1:…}}"`, the form Claudine uses to save
+  text an agent wrote) is refused with `SequenceInvalid`. It is data, and data
+  must not choose which steps run. See
+  [Values an Agent Writes](../frontmatter-properties.md#values-an-agent-writes).
 
 The suffix parser respects quoted arguments, so a path containing a space or an
 `@`, and an operator argument containing a comma, all survive.
@@ -303,6 +307,11 @@ Before anything runs, Claudine walks the **entire task graph**:
   `doc.*`, `ctx.*`, `env.*`. A shell string referencing `outputs` or a
   runtime-mutated value is a typed preflight error — route that work through a
   `prompt` or `side_effect` task instead.
+- **Git working state is observed once for the whole walk.** Static preflight
+  is one discovery run: every referenced document (and every file it includes)
+  that names a Git fact such as `ctx.staged_files` reads the same observation.
+  Each step then observes Git state again when it runs, as its own composition
+  run, so a step still sees what earlier steps changed.
 - **Provider and model resolve once**, producing a per-step target vector.
 
 A preflight failure aborts the sequence regardless of `fail_fast`. Preparation
@@ -333,6 +342,12 @@ State layering, lowest precedence to highest:
 3. accumulated runtime mutations (what `set` writes)
 4. the reserved per-step overlay
 
+Layers 1 and 2 are authored, so their `{{ … }}` and `$( … )` spans are
+templates. Layers 3 and 4 are produced by the run, so they reach composition as
+**data**: a value holding `{{ ctx.repo }}` stays that text, through arrays and
+objects too. Evaluated task `params` and group `variables` are data for the
+same reason.
+
 **Live-disk chaining.** Because each step re-reads the source, an
 inline-compose sequence's body write-backs — and any frontmatter an agent edits
 mid-run — are visible to later steps. Mid-run *external* edits take effect too;
@@ -361,6 +376,12 @@ The previous task's output is `{{ last(outputs) }}`.
   mid-sequence.
 - `outputs` is reserved: it cannot be authored as state, set via `--set`, or
   written by `set`.
+- Entries are **data**. An entry is stored raw and typed, and reaches
+  predicates, functions such as `last(outputs)`, logs, and the next step's
+  prompt exactly as the task printed it. If a task prints `{{ ctx.repo }}`,
+  the next step's `{{ last(outputs) }}` renders the characters `{{ ctx.repo }}`,
+  not the repository name, and a printed `$(cmd)` is never offered for
+  approval.
 
 **What an entry contains.** The task's captured, undecorated stdout. Terminal
 status rendering, stderr, lifecycle messages, color bars, and provider protocol
@@ -399,6 +420,8 @@ side_effect:
   assignment must observe the first
 - it writes to the **in-memory runtime layer**, never to disk. That is what
   distinguishes it from `set_frontmatter`, which targets a file.
+- the value it stores is the evaluation's result, so later steps read it as
+  data, not as a template
 - top-level keys only; reserved keys are rejected
 - outside a sequence it still works, mutating the state visible to later
   lifecycle actions and loop iterations in the same run

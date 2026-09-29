@@ -118,10 +118,40 @@ impl ContextRequirements {
     }
 
     /// Scans both authored frontmatter values and the document body.
+    ///
+    /// The body follows body interpolation's executable-span rule: a
+    /// `ctx.*` mention inside a fenced or indented code block is an example,
+    /// not a reference, unless the document opts into
+    /// `interpolate_code_blocks: true`. Inline code spans and every
+    /// frontmatter string, lifecycle blocks included, are scanned whole, as
+    /// frontmatter interpolation scans them.
     pub fn for_document(document: &crate::markdown::Markdown) -> Self {
-        let frontmatter =
-            serde_json::to_string(document.frontmatter().as_map()).unwrap_or_default();
-        Self::for_content(&format!("{frontmatter}\n{}", document.content()))
+        let mut requirements = Self::for_frontmatter(document.frontmatter().as_map().values());
+        let code_is_executable =
+            matches!(document.fm_get::<bool>("interpolate_code_blocks"), Ok(Some(true)));
+        let body = match code_is_executable {
+            true => scan_needed_groups(document.content()),
+            false => scan_executable_body_groups(document.content()),
+        };
+        requirements.groups.extend(body);
+        requirements
+    }
+
+    /// Scans every string in a frontmatter mapping's values, at any depth.
+    ///
+    /// Takes the values alone because keys are names, never expressions.
+    pub fn for_frontmatter<'a>(values: impl IntoIterator<Item = &'a serde_json::Value>) -> Self {
+        let mut groups = HashSet::from([ContextGroup::DateTime]);
+        let mut pending: Vec<&serde_json::Value> = values.into_iter().collect();
+        while let Some(value) = pending.pop() {
+            match value {
+                serde_json::Value::String(text) => groups.extend(scan_needed_groups(text)),
+                serde_json::Value::Array(items) => pending.extend(items),
+                serde_json::Value::Object(map) => pending.extend(map.values()),
+                serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+            }
+        }
+        Self { groups }
     }
 
     /// Requires every public runtime-context group.
@@ -143,7 +173,7 @@ impl ContextRequirements {
     }
 
     /// Every group required by this set or by `other`.
-    pub(crate) fn union(&self, other: &Self) -> Self {
+    pub fn union(&self, other: &Self) -> Self {
         Self {
             groups: self.groups.union(&other.groups).copied().collect(),
         }
@@ -187,6 +217,24 @@ const FUNCTION_GROUPS: &[(&str, ContextGroup)] = &[
     ("ipv6", ContextGroup::Network),
     ("has_agentic_cli", ContextGroup::Agent),
 ];
+
+/// [`scan_needed_groups`] for a Markdown body, skipping fenced and indented
+/// code blocks exactly as body interpolation skips them.
+fn scan_executable_body_groups(content: &str) -> HashSet<ContextGroup> {
+    let code_regions = ExpressionFinder::new(content).code_regions().to_vec();
+    if code_regions.is_empty() {
+        return scan_needed_groups(content);
+    }
+    // Blank each region to spaces rather than cutting it out, so the text on
+    // either side keeps its offsets and no `ctx.` is spliced together across
+    // a removed block.
+    let mut masked = content.as_bytes().to_vec();
+    for (start, end) in code_regions {
+        masked[start..end].iter_mut().for_each(|byte| *byte = b' ');
+    }
+    let masked = String::from_utf8(masked).expect("masking whole code blocks keeps UTF-8 intact");
+    scan_needed_groups(&masked)
+}
 
 /// Finds the runtime-context domains referenced by `ctx.KEY` expressions and
 /// by calls to the [`FUNCTION_GROUPS`] functions.
@@ -469,6 +517,45 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
         assert!(requirements.contains(ContextGroup::Git));
         assert!(requirements.contains(ContextGroup::Os));
         assert!(!requirements.contains(ContextGroup::Gpu));
+    }
+
+    /// A fenced or indented example is not composed, so it demands nothing;
+    /// inline code is composed, so it does.
+    #[test]
+    fn document_body_code_blocks_demand_no_context() {
+        let document: crate::markdown::Markdown = "Example:\n\n```md\n{{ ctx.dirty_files }}\n```\n\n    {{ ctx.gpu }}\n\nInline `{{ ctx.os }}`.\n"
+            .into();
+
+        let requirements = ContextRequirements::for_document(&document);
+
+        assert!(!requirements.contains(ContextGroup::FileChanges));
+        assert!(!requirements.contains(ContextGroup::Gpu));
+        assert!(requirements.contains(ContextGroup::Os));
+    }
+
+    /// `interpolate_code_blocks: true` composes code blocks, so their mentions
+    /// are references again.
+    #[test]
+    fn interpolated_code_blocks_demand_their_context() {
+        let document: crate::markdown::Markdown =
+            "---\ninterpolate_code_blocks: true\n---\n```md\n{{ ctx.dirty_files }}\n```\n".into();
+
+        assert!(ContextRequirements::for_document(&document).contains(ContextGroup::FileChanges));
+    }
+
+    /// Frontmatter is scanned at every depth, lifecycle stacks included, and a
+    /// fence inside a frontmatter string does not hide a mention: frontmatter
+    /// interpolation reads code as it reads prose.
+    #[test]
+    fn frontmatter_strings_are_scanned_at_every_depth() {
+        let document: crate::markdown::Markdown = "---\nstart:\n    stack:\n        - when: \"length(ctx.staged_files) > 0\"\n          action:\n              - info: \"on {{ ctx.branch }}\"\nnote: |\n    ```\n    {{ ctx.os }}\n    ```\n---\nBody.\n"
+            .into();
+
+        let requirements = ContextRequirements::for_document(&document);
+
+        for group in [ContextGroup::FileChanges, ContextGroup::Git, ContextGroup::Os] {
+            assert!(requirements.contains(group), "missing {group:?}");
+        }
     }
 
     #[test]

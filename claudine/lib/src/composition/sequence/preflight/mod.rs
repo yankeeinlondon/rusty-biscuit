@@ -353,7 +353,8 @@ impl<'a> Loader<'a> {
             .frontmatter()
             .as_map()
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            // Composition reads a stored literal token as its text.
+            .map(|(k, v)| (k.clone(), crate::composition::closure::stored_text(v)))
             .collect();
         if let Value::Object(overrides) = overlay.as_set_overrides(None) {
             frontmatter.extend(overrides);

@@ -429,6 +429,39 @@ pub(crate) fn resolve_document_file_ref_shape(
         })
 }
 
+/// Resolves a document-backed reference to the first existing **directory**
+/// in its candidate plan, or `None` when no candidate is a directory.
+///
+/// File resolution takes only regular files, so a directory reference is
+/// read from the same candidate order instead: `&dir` is the repository
+/// root's `dir`, `^dir` the package, package-area, then repository `dir`.
+///
+/// ## Errors
+///
+/// Propagates the typed [`FileReferenceError`] when the plan cannot be built
+/// (an invalid context or a missing home, vault, or repository anchor).
+pub(crate) fn resolve_document_directory(
+    file_ref: &FileReference,
+    base_dir: &Path,
+    magic_paths: &[(PathBuf, PathPosition)],
+    request_context: Option<&biscuit_file::FileResolutionContext>,
+) -> Result<Option<PathBuf>, FileReferenceError> {
+    let ctx = match request_context {
+        Some(snapshot) => snapshot.for_base(base_dir),
+        None => crate::markdown::compose::util::document_resolution_context(
+            base_dir,
+            None,
+            magic_paths,
+            None,
+        ),
+    };
+    Ok(file_ref
+        .candidate_plan(&ctx)?
+        .into_iter()
+        .map(|candidate| candidate.path().to_path_buf())
+        .find(|path| path.is_dir()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

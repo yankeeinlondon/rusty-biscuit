@@ -196,22 +196,30 @@ fn failure_hint_discord_rate_limit() {
     );
 }
 
+/// Render `markup` as plain text, the way a `Status::from_prose` body shows it.
+fn rendered_plain(markup: &str) -> String {
+    use biscuit_terminal::components::prose::Prose;
+    biscuit_terminal::utils::escape_codes::strip_escape_codes(
+        Prose::new(markup).render_optimistic(None),
+    )
+}
+
 #[test]
 fn prose_escape_neutralizes_angle_brackets() {
-    assert_eq!(
-        prose_escape("<script>alert('x')</script>"),
-        "\\<script\\>alert('x')\\</script\\>"
-    );
+    let text = "<script>alert('x')</script>";
+    assert_eq!(rendered_plain(&prose_escape(text)), text);
 }
 
 #[test]
 fn prose_escape_neutralizes_template_and_bold_tokens() {
-    assert_eq!(prose_escape("{{variable}}"), "\\{{variable\\}}");
-    assert_eq!(prose_escape("**bold**"), "\\*\\*bold\\*\\*");
-    assert_eq!(
-        prose_escape("Error: {{url}} and **token**"),
-        "Error: \\{{url\\}} and \\*\\*token\\*\\*"
-    );
+    for text in [
+        "{{variable}}",
+        "**bold**",
+        "Error: {{url}} and **token**",
+        "_leading_ underscore and `code_span`",
+    ] {
+        assert_eq!(rendered_plain(&prose_escape(text)), text);
+    }
 }
 
 // =====================================================================

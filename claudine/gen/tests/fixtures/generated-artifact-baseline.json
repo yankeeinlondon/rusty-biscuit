@@ -2,10 +2,11 @@
   "algorithm": "xxh64",
   "seed": 0,
   "artifacts": [
-    { "path": "docs/providers/catalog.json", "hash": "4992177613331685818" },
+    { "path": "docs/providers/catalog.json", "hash": "14015590831747458428" },
     { "path": "lib/src/signals/generated.rs", "hash": "6641532667373100434" },
     { "path": "lib/src/model_catalog/families_generated.rs", "hash": "11704988274204864472" },
     { "path": "lib/src/stream/providers/vocabulary.rs", "hash": "537241315263662569" },
+    { "path": "lib/src/steering/generated.rs", "hash": "10005189633011121167" },
     { "path": "lib/src/provider/antigravity/data.rs", "hash": "12939088638076069542" },
     { "path": "lib/src/provider/claude/data.rs", "hash": "911876181393434815" },
     { "path": "lib/src/provider/codex/data.rs", "hash": "12727705138327263807" },
@@ -14,7 +15,7 @@
     { "path": "lib/src/provider/kilo/data.rs", "hash": "5422643129856984303" },
     { "path": "lib/src/provider/kimi/data.rs", "hash": "3836535313942094980" },
     { "path": "lib/src/provider/opencode/data.rs", "hash": "15234864195975480763" },
-    { "path": "lib/src/provider/pi/data.rs", "hash": "2889607625502041169" },
+    { "path": "lib/src/provider/pi/data.rs", "hash": "11409995824083696371" },
     { "path": "lib/src/provider/qwen/data.rs", "hash": "16044807788105734804" }
   ]
 }
