@@ -1188,6 +1188,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: unicode, identifiers, parsing_
 
+- [unicode-segmentation](https://crates.io/crates/unicode-segmentation) _v1_
+
+    _Splits text into grapheme clusters (user-perceived characters). `biscuit-tui` clips static table cells on cluster boundaries so a combining accent or joined emoji is never split._
+
+    _Tags: unicode, text, terminal_
+
 - [unicode-width](https://crates.io/crates/unicode-width) _v0.2_
 
     _Determine displayed width of Unicode characters for terminal rendering._

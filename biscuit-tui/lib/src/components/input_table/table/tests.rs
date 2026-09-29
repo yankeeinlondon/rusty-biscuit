@@ -911,3 +911,292 @@ fn new_still_panics_on_cell_type_mismatch() {
     });
     assert!(result.is_err(), "new should panic on cell type mismatch");
 }
+
+// -- Content-based static widths and ellipsis clipping --------------------
+//
+// These tests observe layout through the rendered buffer so they hold across
+// changes to the private width helper's signature.
+
+// Tests ignored as "phase-2 scaffold" describe layout the renderer does not
+// implement yet; the change that implements it removes those `#[ignore]`s.
+
+fn static_column(id: &str, text: &str) -> InputTableColumn {
+    InputTableColumn::StaticText {
+        id: id.into(),
+        text: text.into(),
+    }
+}
+
+fn text_column(id: &str) -> InputTableColumn {
+    InputTableColumn::TextInput {
+        id: id.into(),
+        config: TextInputConfig::default(),
+    }
+}
+
+/// A `Step` label column followed by two text columns seeded `X` and `Y`,
+/// so the start of each text column is visible in the rendered line.
+fn step_table(labels: &[&str]) -> InputTableState {
+    let columns = vec![
+        static_column("step", "Step"),
+        text_column("provider"),
+        text_column("model"),
+    ];
+    let rows = labels
+        .iter()
+        .map(|label| {
+            Row::new(vec![
+                RowCell::new("step", CellValue::StaticText((*label).into())),
+                RowCell::new("provider", CellValue::Text("X".into())),
+                RowCell::new("model", CellValue::Text("Y".into())),
+            ])
+        })
+        .collect();
+    InputTableState::new(columns, rows)
+}
+
+fn render_into(state: &mut InputTableState, width: u16, height: u16) -> Buffer {
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    InputTable.render(area, &mut buf, state);
+    buf
+}
+
+/// Visible text of `y` in `[from, to)`, skipping the cells a wide grapheme
+/// covers so a two-cell character reads as one symbol.
+fn visible_text(buf: &Buffer, y: u16, from: u16, to: u16) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let mut out = String::new();
+    let mut x = from;
+    while x < to {
+        let symbol = buf[(x, y)].symbol();
+        out.push_str(symbol);
+        x += (UnicodeWidthStr::width(symbol) as u16).max(1);
+    }
+    out
+}
+
+fn row_text(buf: &Buffer, y: u16) -> String {
+    visible_text(buf, y, 0, buf.area.width)
+}
+
+/// Column where `symbol` first appears on row `y`.
+fn column_of(buf: &Buffer, y: u16, symbol: &str) -> Option<u16> {
+    (0..buf.area.width).find(|&x| buf[(x, y)].symbol() == symbol)
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn static_column_shows_full_label_at_80_columns() {
+    let mut state = step_table(&["1 implement", "12 review-5"]);
+    let buf = render_into(&mut state, 80, 4);
+
+    assert!(row_text(&buf, 0).starts_with("1 implementX"), "{:?}", row_text(&buf, 0));
+    assert!(row_text(&buf, 1).starts_with("12 review-5X"), "{:?}", row_text(&buf, 1));
+    assert_eq!(column_of(&buf, 1, "X"), Some(11));
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn static_column_width_includes_off_screen_rows_and_survives_scrolling() {
+    let labels = ["1 a", "2 b", "3 c", "4 d", "5 e", "6 the-longest-label"];
+    let mut state = step_table(&labels);
+
+    let before = render_into(&mut state, 80, 3);
+    assert!(
+        !row_text(&before, 2).contains("the-longest-label"),
+        "the long row must start off screen"
+    );
+    assert_eq!(column_of(&before, 0, "X"), Some(19));
+
+    for _ in 0..5 {
+        InputTable.handle_event(&mut state, press(KeyCode::Down));
+    }
+    let after = render_into(&mut state, 80, 3);
+    let last = row_text(&after, 2);
+    assert!(last.starts_with("6 the-longest-labelX"), "{last:?}");
+    assert_eq!(column_of(&after, 0, "X"), Some(19), "scrolling changed widths");
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn resizing_down_clips_with_ellipsis_and_resizing_up_restores() {
+    let mut state = step_table(&["12 review-5"]);
+
+    let wide = render_into(&mut state, 80, 1);
+    assert!(row_text(&wide, 0).starts_with("12 review-5X"));
+
+    // Text budgets (20 + 20) still fit; the label shrinks to the rest.
+    let narrow = render_into(&mut state, 45, 1);
+    assert!(row_text(&narrow, 0).starts_with("12 r…X"), "{:?}", row_text(&narrow, 0));
+
+    let restored = render_into(&mut state, 80, 1);
+    assert!(row_text(&restored, 0).starts_with("12 review-5X"));
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn multiple_static_columns_share_the_reduction_left_to_right() {
+    let columns = vec![
+        static_column("a", "A"),
+        static_column("b", "B"),
+        text_column("t"),
+    ];
+    let row = Row::new(vec![
+        RowCell::new("a", CellValue::StaticText("abcdefghij".into())),
+        RowCell::new("b", CellValue::StaticText("klmnopqrst".into())),
+        RowCell::new("t", CellValue::Text("X".into())),
+    ]);
+    let mut state = InputTableState::new(columns, vec![row]);
+
+    // 34 - 20 leaves 14 cells: an even 7 + 7.
+    let even = render_into(&mut state, 34, 1);
+    assert!(row_text(&even, 0).starts_with("abcdef…klmnop…X"), "{:?}", row_text(&even, 0));
+
+    // 13 cells: the left column keeps the odd cell.
+    let odd = render_into(&mut state, 33, 1);
+    assert!(row_text(&odd, 0).starts_with("abcdef…klmno…X"), "{:?}", row_text(&odd, 0));
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn emergency_allocation_divides_width_evenly_and_caps_static_columns() {
+    let mut state = step_table(&["12 review-5"]);
+
+    // 3 + 20 + 20 cannot fit in 30: every column gets 10.
+    let buf = render_into(&mut state, 30, 1);
+    assert!(row_text(&buf, 0).starts_with("12 review…X"), "{:?}", row_text(&buf, 0));
+    assert_eq!(column_of(&buf, 0, "X"), Some(10));
+    assert_eq!(column_of(&buf, 0, "Y"), Some(20));
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn one_cell_static_column_shows_only_the_ellipsis() {
+    let mut state = step_table(&["12 review-5"]);
+    let buf = render_into(&mut state, 3, 1);
+    assert_eq!(buf[(0, 0)].symbol(), "…");
+    assert_eq!(buf[(1, 0)].symbol(), "X");
+    assert_eq!(buf[(2, 0)].symbol(), "Y");
+}
+
+#[test]
+fn zero_cell_static_column_draws_nothing() {
+    let columns = vec![
+        text_column("provider"),
+        text_column("model"),
+        static_column("step", "Step"),
+    ];
+    let row = Row::new(vec![
+        RowCell::new("provider", CellValue::Text("X".into())),
+        RowCell::new("model", CellValue::Text("Y".into())),
+        RowCell::new("step", CellValue::StaticText("12 review-5".into())),
+    ]);
+    let mut state = InputTableState::new(columns, vec![row]);
+    let buf = render_into(&mut state, 2, 1);
+    assert_eq!(row_text(&buf, 0), "XY");
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn wide_characters_are_omitted_whole_and_never_cross_the_column() {
+    let columns = vec![static_column("step", "Step"), text_column("t")];
+    let row = Row::new(vec![
+        RowCell::new("step", CellValue::StaticText("12 日本語テキスト".into())),
+        RowCell::new("t", CellValue::Text("X".into())),
+    ]);
+    let mut state = InputTableState::new(columns, vec![row]);
+
+    let full = render_into(&mut state, 80, 1);
+    assert!(row_text(&full, 0).starts_with("12 日本語テキストX"));
+
+    // Six label cells: `12 日` fills five, `…` the sixth.
+    let six = render_into(&mut state, 26, 1);
+    assert_eq!(visible_text(&six, 0, 0, 6), "12 日…");
+    assert_eq!(column_of(&six, 0, "X"), Some(6));
+
+    // Seven label cells: `本` would straddle the `…`, so it is left out and
+    // the spare cell stays blank.
+    let seven = render_into(&mut state, 27, 1);
+    assert_eq!(visible_text(&seven, 0, 0, 7), "12 日… ");
+    assert_eq!(column_of(&seven, 0, "X"), Some(7));
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn grapheme_clusters_are_never_split_by_clipping() {
+    use unicode_segmentation::UnicodeSegmentation;
+
+    for label in ["cafe\u{301} au lait", "ab\u{1F469}\u{200D}\u{1F469}\u{200D}\u{1F467}cd-ef"] {
+        let columns = vec![static_column("step", "Step"), text_column("t")];
+        let row = Row::new(vec![
+            RowCell::new("step", CellValue::StaticText(label.into())),
+            RowCell::new("t", CellValue::Text("X".into())),
+        ]);
+        let mut state = InputTableState::new(columns, vec![row]);
+        let clusters: Vec<&str> = label.graphemes(true).collect();
+
+        // 23..=28 keeps the text budget (20) and gives the label 3..=8 cells,
+        // narrower than either label.
+        for width in 23..=28u16 {
+            let buf = render_into(&mut state, width, 1);
+            let label_cells = width - 20;
+            assert_eq!(column_of(&buf, 0, "X"), Some(label_cells), "width {width}");
+            for x in 0..label_cells {
+                let symbol = buf[(x, 0)].symbol();
+                assert!(
+                    symbol == "…" || symbol == " " || clusters.contains(&symbol),
+                    "{label:?} at width {width}: cell {x} holds a split cluster {symbol:?}"
+                );
+            }
+            assert!(
+                visible_text(&buf, 0, 0, label_cells).trim_end().ends_with('…'),
+                "{label:?} at width {width} was clipped without an ellipsis"
+            );
+        }
+    }
+
+    // The combining accent stays in the same cell as its base letter.
+    let columns = vec![static_column("step", "Step"), text_column("t")];
+    let row = Row::new(vec![
+        RowCell::new("step", CellValue::StaticText("cafe\u{301} au lait".into())),
+        RowCell::new("t", CellValue::Text("X".into())),
+    ]);
+    let mut state = InputTableState::new(columns, vec![row]);
+    let buf = render_into(&mut state, 26, 1);
+    assert_eq!(buf[(3, 0)].symbol(), "e\u{301}");
+    assert_eq!(buf[(5, 0)].symbol(), "…");
+}
+
+#[test]
+#[ignore = "phase-2 scaffold: content-based static widths"]
+fn all_static_table_sizes_to_content_and_shrinks_left_to_right() {
+    let columns = vec![static_column("a", "A"), static_column("b", "B")];
+    let row = Row::new(vec![
+        RowCell::new("a", CellValue::StaticText("alpha-long".into())),
+        RowCell::new("b", CellValue::StaticText("beta-longer".into())),
+    ]);
+    let mut state = InputTableState::new(columns, vec![row]);
+
+    let wide = render_into(&mut state, 80, 1);
+    assert_eq!(row_text(&wide, 0).trim_end(), "alpha-longbeta-longer");
+
+    // 10 + 11 into 12: a reduction of 9, the left column keeping the odd cell.
+    let narrow = render_into(&mut state, 12, 1);
+    assert_eq!(row_text(&narrow, 0), "alpha…beta-…");
+}
+
+#[test]
+fn clipping_is_display_only_and_submission_returns_full_text() {
+    let mut state = step_table(&["12 review-5"]);
+    render_into(&mut state, 45, 1);
+    render_into(&mut state, 3, 1);
+
+    let outcome = InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
+    assert_eq!(outcome, EventOutcome::Submitted);
+    assert_eq!(
+        state.value()[0].get("step"),
+        Some(&CellValue::StaticText("12 review-5".into()))
+    );
+    assert_eq!(state.rows_typed()[0], state.value()[0]);
+}
