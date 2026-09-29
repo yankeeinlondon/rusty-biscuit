@@ -5,7 +5,10 @@ fix: 2026-09-27-union-partial-file-completion/review-1.md
 spec: 2026-09-27-union-partial-file-completion/spec.md
 reviewed_by: codex/gpt-6-sol
 created: 2026-09-28T08:25:50-07:00
-implemented: false
+implemented: true
+next: 2026-09-27-union-partial-file-completion/review-2.md
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-27-union-partial-file-completion/log.md
 ready: false
 findings:
     - "[high] Root-union file selection can reject a valid caller-owned path"
