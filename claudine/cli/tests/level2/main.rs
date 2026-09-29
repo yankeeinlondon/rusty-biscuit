@@ -36,6 +36,8 @@ mod level2_initialize_generated_transclusion;
 #[cfg(unix)]
 mod level2_inline_compose_mismatch_capture;
 #[cfg(unix)]
+mod level2_inline_prompt_scrollback;
+#[cfg(unix)]
 mod level2_interrupt_feedback_capture;
 #[cfg(unix)]
 mod level2_invalid_file_reference_capture;

@@ -17,7 +17,7 @@ Additional expectations for the Claudine test suite:
 - Tests that mutate process-global state, especially environment variables, should stack `#[serial_test::serial]` directly on the test.
 - Environment setup/teardown should use `test_toolkit::EnvGuard` instead of local guard types. `EnvGuard::set` and `EnvGuard::remove` are unsafe and require the test to serialize environment access.
 - Use `test_toolkit::trace_phase!` only for meaningful setup, body, or teardown boundaries where a tracing span helps diagnose hangs or fixture failures.
-- PTY coverage stays manual-only and lives under the L2 filter set: `cargo test -p claudine-cli --test level2_pty_tests -- --ignored` (or `just test-l2`)
+- PTY tests (`cli/tests/l1/level1_*_pty.rs`) are Level 1: they prove from raw bytes what an interactive prompt sends and launches, for example that it never enters the alternate screen. A PTY renders nothing and keeps no scrollback, so a promise about what the terminal shows is proved at Level 2 (`just test-l2`), inside tmux and WezTerm. `level2_inline_prompt_scrollback.rs` is the example: it prints lines before the provider picker, the `$schema` prompts, and the partial-file chooser and confirmation, and checks that those lines stay in the terminal history, that each widget's rows are drawn, and that closing the prompt leaves no blank rows behind
 - Snapshot updates should be reviewed with `cargo insta review` and accepted with `cargo insta accept`
 - Benchmarks are opt-in and non-gating: `cargo bench -p claudine --bench runtime_hot_paths`
 - CLI integration helpers live under `claudine/cli/tests/common/mod.rs`

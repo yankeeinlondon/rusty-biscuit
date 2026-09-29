@@ -360,8 +360,12 @@ fn resolve_file_value_portably_renders_missing_windows_shaped_path() {
 
 #[test]
 fn chooser_height_fits_short_lists_and_caps_long_ones() {
-    assert_eq!(chooser_height(2), Some(HeightSpec::Cells(4)));
-    assert_eq!(chooser_height(6), Some(HeightSpec::Cells(8)));
-    assert_eq!(chooser_height(7), Some(HeightSpec::Cells(8)));
-    assert_eq!(chooser_height(usize::MAX), Some(HeightSpec::Cells(8)));
+    // Two chrome rows (top padding, bottom padding under the hint) surround
+    // the options, and a labeled chooser adds its label row.
+    assert_eq!(chooser_height(2, false), Some(HeightSpec::Cells(4)));
+    assert_eq!(chooser_height(3, true), Some(HeightSpec::Cells(6)));
+    assert_eq!(chooser_height(6, false), Some(HeightSpec::Cells(8)));
+    assert_eq!(chooser_height(6, true), Some(HeightSpec::Cells(8)));
+    assert_eq!(chooser_height(7, false), Some(HeightSpec::Cells(8)));
+    assert_eq!(chooser_height(usize::MAX, true), Some(HeightSpec::Cells(8)));
 }
