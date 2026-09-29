@@ -42,6 +42,17 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - biscuit-tui/docs/components/input_table.md
+    - biscuit-tui/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-tui/SKILL.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Plan: sequence review screen
@@ -281,21 +292,21 @@ verifying those tests exist.
 
 All independent; run as one parallel wave.
 
-- [ ] **Doc 4.1:** `biscuit-tui/docs/components/input_table.md`: sizing rules
+- [x] **Doc 4.1:** `biscuit-tui/docs/components/input_table.md`: sizing rules
   with a compact example per rule, display-only clipping, and a Mermaid diagram
   of the allocation tiers. Audience: a developer with no repo experience.
   Update the biscuit-tui README and `docs/dependencies.md` (R1).
-- [ ] **Doc 4.2:** `claudine/docs/cli/sequence.md` and
+- [x] **Doc 4.2:** `claudine/docs/cli/sequence.md` and
   `claudine/docs/topics/execution-flow.md`: row eligibility table, original
   numbering, empty-table exception, unchanged gates. Describe behavior
   directly; do not name the fix or the dated spec directory.
-- [ ] **Doc 4.3:** Correct touched symbol docs that imply every draft is
+- [x] **Doc 4.3:** Correct touched symbol docs that imply every draft is
   displayed or that static text cannot vary by row (`InputTableColumn::StaticText`,
   `compute_column_widths`, `review_sequence`, draft type). Apply the Code
   Comment Quality rules: fix drift, delete tautologies.
-- [ ] **Doc 4.4:** `.claude/skills/claudine/` and `.claude/skills/biscuit-tui/`:
+- [x] **Doc 4.4:** `.claude/skills/claudine/` and `.claude/skills/biscuit-tui/`:
   update guidance only where it describes the changed workflow.
-- [ ] **Doc 4.5:** Write the implementation log (in the spec directory):
+- [x] **Doc 4.5:** Write the implementation log (in the spec directory):
   rulings taken, spike evidence, any departure from the spec, and the
   focus-rule outcome (fixed with evidence, or **unresolved**).
 

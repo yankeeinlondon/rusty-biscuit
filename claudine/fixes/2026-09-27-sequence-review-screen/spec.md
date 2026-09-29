@@ -9,12 +9,13 @@ review_iterations: 0
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phases 2 and 3 are done. `just test` / `just lint` pass in biscuit-tui and claudine. Read the "## Phase 2" and "## Phase 3" sections of implementation-log.md first.
+    Phases 2-4 are done. Phase 4 changed docs and skills only, no source code. Read the "## Phase 4" section of implementation-log.md first.
 
-    - Phase 3 added tests only, no production code: `a_label_at_the_u16_boundary_saturates_its_preferred_width` and `saturated_static_columns_render_clipped_at_every_width_without_overflow` (biscuit-tui table/tests.rs), and `a_wrong_row_count_with_hidden_steps_fails_the_run_instead_of_cancelling_or_truncating` (claudine-cli sequence/review/tests.rs, through `live_targets`, the seam sequence/mod.rs calls).
-    - Behavior decisions docs must describe (Phase 4): `Esc` and `Ctrl+C` on the review screen now exit 130 with no step started (the old 130 branch was dead). A review that returns the wrong number of rows is an error (not a cancellation, never a partial merge). The agent-state pre-prompt message (`Invalid Agent:` etc.) prints only when the table actually opens. Shell pre-flight approval runs before the agent gate. Tier 3 (emergency) leaves cells unused when a static column is capped at its preferred width. Very long static labels saturate at u16::MAX preferred width and clip with `…`. Each InputTable cell rectangle is cleared before drawing, and focus is shown with the theme's `label_style` (bold by default), with no underline.
-    - Already corrected in code docs during Phase 2 (Doc 4.3 can verify rather than redo): `review_sequence`, `SequenceStepDraft` (its `resolved_provider` doc had drifted), `InputTableColumn::StaticText`, `CellState::StaticText`, `compute_column_widths`.
-    - The dispatch inventory records line numbers: if you touch claudine/cli/src production code, run `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` in claudine/.
+    - `just test` / `just lint` pass in biscuit-tui (1012 passed) and claudine (8051 passed, run with NEXTEST_TEST_THREADS=6).
+    - Docs now describe the review screen in claudine/docs/cli/sequence.md ("The review screen" under "Choosing providers"), claudine/docs/topics/execution-flow.md (Phase 1b/1c), the exit-code table in claudine/docs/topics/flow-control/sequences.md, and InputTable sizing in biscuit-tui/docs/components/input_table.md ("Column Sizing").
+    - Drift fixed in execution-flow.md: it claimed `--provider` locks the provider cell; an explicit provider actually bypasses the review screen.
+    - The stale-statement grep in Phase 5 (`rg "four cells|StaticText.*schema" biscuit-tui claudine/docs`) came back empty at the end of Phase 4.
+    - Focus-rule outcome is recorded as fixed with headless buffer evidence; no real-terminal (L2) coverage was added, so `just test-l2` is not required by the plan.
     - The host is often heavily loaded. If an untouched claudine or claudine-gen test times out, rerun it alone or with NEXTEST_TEST_THREADS=6 before investigating.
 $schema:
     status: |-

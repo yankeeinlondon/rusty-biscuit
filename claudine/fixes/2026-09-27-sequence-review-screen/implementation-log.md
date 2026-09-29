@@ -41,6 +41,17 @@ source_files_during_phase_3:
 docs_updated_during_phase_3: []
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4: []
+docs_updated_during_phase_4:
+    - biscuit-tui/docs/components/input_table.md
+    - biscuit-tui/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/sequences.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/biscuit-tui/SKILL.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Implementation Log for 2026-09-27-sequence-review-screen (5 phases)
@@ -492,3 +503,89 @@ cases are the tests above.
   terminals, so no cross-host run was needed.
 - Skills: nothing changed that `.claude/skills/claudine/` or
   `.claude/skills/biscuit-tui/` describes.
+
+## Phase 4
+
+Documentation and comments only. No source code changed. Skills loaded:
+`claudine`, `biscuit-tui`.
+
+### Docs written
+
+- **Doc 4.1: `biscuit-tui/docs/components/input_table.md`.** New
+  "Column Sizing" section: a preferred-width table per column type, the
+  off-screen-rows rule, a Mermaid flowchart of the three allocation tiers,
+  one worked example per tier, and a clipping table (`12 review…`,
+  `12 日…` plus a blank cell, `…` at width 1, nothing at 0). Every example
+  number was checked against an existing test (`static_column_shows_full_label_at_80_columns`,
+  `multiple_static_columns_share_the_reduction_left_to_right`,
+  `emergency_allocation_divides_width_evenly_and_caps_static_columns`) or
+  worked from `compute_column_widths` (the capped `4, 10, 10` case). The
+  `StaticText` column-type bullet now says rows can differ. Behavioral Notes
+  gained focus styling (`label_style`, no underline) and cell clearing
+  (anything painted under a cell's rectangle is overwritten).
+  `biscuit-tui/README.md`: the `InputTable` row mentions content sizing and
+  `…`. It has no dependency list, and `biscuit-tui` has no per-area
+  `docs/dependencies.md`; the root `docs/dependencies.md` entry for
+  `unicode-segmentation` was written in Phase 1 (R1), so nothing more was
+  needed there.
+- **Doc 4.2: Claudine.** `claudine/docs/cli/sequence.md` has a new
+  "The review screen" subsection under "Choosing providers": the
+  eligibility table, a YAML example showing gapped numbering (`1 implement`,
+  `3 review`), mapping by position, `Ctrl+S` / `Esc` / Ctrl+C (exit `130`),
+  the empty-table exception (no screen, no `Invalid Agent:` note), the
+  headless gate still applying first, and approval running before the
+  screen. The Mermaid node and the "Fail-fast and exit codes" paragraph were
+  updated to match. `claudine/docs/topics/execution-flow.md` Phase 1b/1c now
+  describes drafts for every step, the baseline conversion, eligibility,
+  merge by `step_index`, the row-count error, `130` on cancel, and the empty
+  path.
+    - **Drift found and corrected:** the execution-flow "Affected by" table
+      said `--provider` locks the provider cell in the review table. An
+      explicit provider bypasses the review entirely (`needs_review` returns
+      false when `shared_state` is `None`), as `sequence.md` already said.
+      The row now says so.
+    - **Also updated (not named in the plan):**
+      `claudine/docs/topics/flow-control/sequences.md`'s exit-code table,
+      because `130` now also covers leaving the review screen.
+- **Doc 4.3: symbol docs.** Verified, no edits needed. Phase 2 had already
+  corrected `InputTableColumn::StaticText`, `CellState::StaticText`,
+  `compute_column_widths`, `preferred_column_widths`, `clip_with_ellipsis`,
+  `review_sequence`, and `SequenceStepDraft`; each still matches the code.
+  The `sequence/review.rs` docs match too. `rg` for "four cells", "one row
+  per step", "identical text", and "natural width" across the touched
+  crates, docs, and skills finds nothing stale.
+- **Doc 4.4: skills.** `.claude/skills/biscuit-tui/SKILL.md`: added
+  `unicode-segmentation` to the dependency list and two `InputTable` bullets
+  (width tiers with no public width option; focus is `label_style` only and
+  cells are cleared first). `.claude/skills/claudine/timeline.md`: a
+  2026-09-29 entry (updated `last_updated` and refreshed its Darkmatter
+  `hash` with `md hash`, which matched before the edit). Nothing else in the
+  claudine skill describes the review screen.
+- No `docs/` page names this fix or its dated directory.
+
+### Rulings, spike, departures, focus outcome (Doc 4.5 summary)
+
+- Rulings R1–R11: see Phase 1. All adopted as recommended; R11 was added
+  to fix the ambiguous "remainder left to right" wording for shrinking.
+- Spike: headless buffer inspection confirmed blanket `UNDERLINED` on blank
+  cells in the focused rectangle, on the first row only because initial
+  focus is there, and stale styling after a focus move in a reused buffer.
+- Departures from the spec, all now described in the docs:
+    - `Esc` and Ctrl+C on the review screen exit `130` (the old branch was
+      dead; the spec said "retain existing cancellation behavior").
+    - The pre-prompt message prints only when the table opens.
+    - Tier 3 leaves cells unused when a static column is capped.
+    - Cell rectangles are cleared before drawing, so anything painted under
+      the table inside a cell is overwritten.
+- **Focus-rule outcome: fixed, with buffer evidence** (criterion 5 tests in
+  Phase 2). Not re-checked in a real terminal; the spec allows headless
+  evidence when it answers the question, and it did.
+
+### Gates (Phase 4)
+
+- `biscuit-tui`: `just lint` exits 0; `just test` gives 1012 passed,
+  7 skipped (includes the `question` CLI unit tests).
+- `claudine`: `just lint` exits 0; `NEXTEST_TEST_THREADS=6 just test` gives
+  8051 passed, 9 skipped, no failures or timeouts.
+- No tests were added or renamed, so tier placement is unchanged. No
+  `cargo fmt` was run. No cross-host run: nothing OS-dependent changed.
