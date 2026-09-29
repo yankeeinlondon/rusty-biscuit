@@ -364,9 +364,13 @@ pub struct ProviderPickerPlan {
 }
 
 /// Per-step draft for sequence review.
+///
+/// Every step has a draft, but only steps whose outer executable can launch a
+/// provider (a prompt, task, group, or body step) are shown for review.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SequenceStepDraft {
-    /// Zero-based step index.
+    /// Zero-based index of the step in the whole sequence; reviewed choices
+    /// are mapped back by this index, never by row number or name.
     pub step_index: usize,
     /// Display name for the step.
     pub step_name: String,
@@ -380,7 +384,8 @@ pub struct SequenceStepDraft {
     pub provider_locked: bool,
     /// Whether the model is locked by an explicit CLI flag.
     pub model_locked: bool,
-    /// The resolved provider when locked (`provider_locked=true`), otherwise `None`.
+    /// The provisional provider: the explicit flag, the auto-selected agent,
+    /// or the picker plan's default. `None` when the plan has no options.
     pub resolved_provider: Option<Provider>,
 }
 

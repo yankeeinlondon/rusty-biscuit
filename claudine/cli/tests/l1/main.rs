@@ -144,6 +144,8 @@ mod sequence_jit;
 #[cfg(unix)]
 mod sequence_magic_reference;
 #[cfg(unix)]
+mod sequence_planned_model;
+#[cfg(unix)]
 mod sequence_overlay_pty;
 #[cfg(unix)]
 mod sequence_perf;

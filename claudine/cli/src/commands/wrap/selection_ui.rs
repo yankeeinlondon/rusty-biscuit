@@ -46,9 +46,12 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 /// Present a multi-step review screen for sequence execution.
 ///
 /// Built on [`biscuit_tui::InputTable`] + [`biscuit_tui::run_standalone`].
-/// Each step becomes one row with three columns:
+/// Each supplied draft becomes one row; the caller passes only the steps
+/// offered for review, so shell and side-effect steps have no row. A row has
+/// three columns:
 ///
-/// 1. **Step label** (`StaticText`) — the step name, read-only.
+/// 1. **Step label** (`StaticText`) — the draft's original one-based step
+///    position and name, read-only.
 /// 2. **Provider** (`ChooseOne` or `StaticText`) — editable when not
 ///    locked by an explicit CLI flag; otherwise a read-only display of
 ///    the locked provider.
@@ -59,8 +62,9 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 ///    read-only display of the locked model.
 ///
 /// On [`EventOutcome::Submitted`] (Ctrl+S), the typed row values are
-/// decoded into one [`ResolvedExecutionTarget`] per step.  On
-/// [`EventOutcome::Cancelled`] (Esc), an abort error is returned.
+/// decoded into one [`ResolvedExecutionTarget`] per draft, in draft order.
+/// On [`EventOutcome::Cancelled`] (Esc), an abort error is returned. Empty
+/// `drafts` return an empty vector without opening the table.
 ///
 /// ## Errors
 ///
@@ -552,6 +556,32 @@ mod tests {
         assert_eq!(
             rows[1].get("step"),
             Some(&CellValue::StaticText("2 Step 2".into()))
+        );
+    }
+
+    /// Rows for a filtered subset keep each step's original one-based
+    /// position, not the row number.
+    #[test]
+    fn filtered_drafts_keep_original_step_positions() {
+        let plan = SequenceStepDraft {
+            step_index: 0,
+            step_name: "plan".into(),
+            ..make_draft(Provider::Claude, false, false, None)
+        };
+        let lint = SequenceStepDraft {
+            step_index: 3,
+            step_name: "lint".into(),
+            ..make_draft(Provider::Claude, false, false, None)
+        };
+        let catalog = ModelCatalogService::new();
+        let rows = build_initial_rows(&[plan, lint], &catalog);
+        let labels: Vec<_> = rows.iter().map(|row| row.get("step").cloned()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                Some(CellValue::StaticText("1 plan".into())),
+                Some(CellValue::StaticText("4 lint".into())),
+            ]
         );
     }
 }

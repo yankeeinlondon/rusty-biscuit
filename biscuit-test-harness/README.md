@@ -507,7 +507,7 @@ though the product were broken. Focus the window first, inject globally.
 ### `xvfb` (Linux, private display)
 
 Types: `XvfbDisplay` (`start`, `name`) and `XvfbKitty` (`can_launch`,
-`launch`, `harness`, `press_ctrl`).
+`launch`, `harness`, `press_ctrl`, `press_escape`).
 
 ```rust
 use biscuit_test_harness::xvfb::XvfbKitty;
@@ -516,11 +516,12 @@ let kitty = XvfbKitty::launch(160, 50)?;   // own Xvfb, own kitty window
 let mut pane = kitty.harness();            // a KittyHarness: type, capture
 pane.send_command_with_env("sleep 60", &[])?;
 kitty.press_ctrl('c')?;                    // XTEST Ctrl+C on that display
+kitty.press_escape()?;                     // XTEST Escape
 ```
 
 `launch` starts `Xvfb -displayfd` (a free display number, local socket
 only) and kitty with `--config NONE` and a private remote-control
-socket. `press_ctrl` moves X input focus to kitty *on the private
+socket. `press_ctrl` and `press_escape` move X input focus to kitty *on the private
 display* with `SetInputFocus`, confirms it with `GetInputFocus`, then
 sends XTEST press and release events. No window manager runs there, and
 none is needed. The events enter the X server where a physical keyboard's
