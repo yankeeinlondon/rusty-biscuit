@@ -16,7 +16,7 @@ prompt: |-
   Make sure the content is standards based (CommonMark + GFM) and idiomatic Markdown. Tables are Markdown tables. Links are Markdown links. If you want to create a visualization you should feel free to use Mermaid code blocks to describe the visualization.
 last_updated: 2026-03-17
 content_policy:
-- Duration(3mo)
+  - ValidFor(3mo)
 ---
 
 # WezTerm Multiplexing
