@@ -23,6 +23,12 @@ fn managed_row(execution: u128, provider: Provider, cwd: &str, key: Option<(Proc
         availability: AvailabilitySummary::unavailable("owner verdict"),
         observed_at: Utc::now(),
         session_key: key.map(|(process, conversation)| (process, conversation.to_string())),
+        binding: Some(ManagedTarget {
+            execution: ExecutionId::from_u128(execution),
+            wrapper: process(1, "wrapper"),
+            generation: crate::steering::identity::ConversationGeneration(1),
+            conversation: None,
+        }),
     }
 }
 
@@ -159,6 +165,7 @@ async fn identical_sessions_merge_and_rows_sort_by_roster_directory_and_id() {
     let merged = &report.sessions[2];
     assert_eq!(merged.origins, [ObservationSource::Managed, ObservationSource::Native]);
     assert_eq!(merged.availability.reason.as_deref(), Some("owner verdict"), "the owner's verdict is kept");
+    assert!(merged.binding.is_some(), "the managed binding survives the merge, so the row stays routable");
     assert_eq!(report.sessions[3].origins, [ObservationSource::Native]);
     assert!(report.errors.is_empty());
 }
@@ -297,6 +304,7 @@ fn listing_json_carries_the_specified_fields_and_no_identity_key() {
             "launch_profile",
             "name",
             "observed_at",
+            "operation",
             "origins",
             "provider",
             "provider_version",
@@ -312,5 +320,7 @@ fn listing_json_carries_the_specified_fields_and_no_identity_key() {
     assert_eq!(serde_json::to_value(&kimi).unwrap()["provider"], "kimi");
     assert_eq!(json["origins"], serde_json::json!(["managed"]));
     assert!(json["name"].is_null(), "unknown values are explicit nulls");
+    assert!(json["operation"].is_null(), "an unavailable row offers no operation");
+    assert!(json.get("binding").is_none(), "the owner binding is internal routing state");
 }
 

@@ -363,6 +363,30 @@ fn shipped_policy_blocks_pi_managed_rpc_with_its_reason() {
     assert!(crate::steering::adapters::is_usable(crate::steering::adapters::PI_RPC));
 }
 
+/// The summary names the operation its route performs, so a requester
+/// sends exactly what was listed; an unavailable summary names none.
+#[test]
+fn the_summary_names_the_preferred_routes_operation() {
+    let grants = all_grants();
+    let summary = |state, grants: &[ActivationGrant]| evaluate_with(&session(state), &FACTS, grants, &implemented).manual.summary();
+
+    let working = summary(ExecutionState::Working, &grants);
+    assert_eq!((working.availability, working.operation), (SteeringAvailability::NonInterrupting, Some(O::SteerActiveTurn)));
+    let idle = summary(ExecutionState::Idle, &grants);
+    assert_eq!((idle.availability, idle.operation), (SteeringAvailability::NonInterrupting, Some(O::StartIdleTurn)));
+
+    let only_abort = [grant("abort", O::InterruptThenSubmit, ExecutionState::Working)];
+    let interrupting = summary(ExecutionState::Working, &only_abort);
+    assert_eq!(
+        (interrupting.availability, interrupting.operation),
+        (SteeringAvailability::InterruptionRequired, Some(O::InterruptThenSubmit))
+    );
+
+    let none = summary(ExecutionState::Working, &[]);
+    assert_eq!((none.availability, none.operation), (SteeringAvailability::Unavailable, None));
+    assert_eq!(AvailabilitySummary::unavailable("x").operation, None);
+}
+
 #[test]
 fn a_profile_block_outranks_a_matching_grant_and_spares_other_profiles() {
     let blocks = [ProfileBlock { provider: "pi", profile_id: "managed", reason: "reviewed refusal" }];

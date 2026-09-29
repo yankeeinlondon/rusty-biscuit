@@ -34,7 +34,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use super::eligibility::{AvailabilitySummary, SessionFacts};
-use super::identity::{ProcessStartIdentity, SteeringTargetId};
+use super::identity::{ManagedTarget, ProcessStartIdentity, SteeringTargetId};
 use super::vocabulary::{DiscoveryMethod, ExecutionState, HostOs, LaunchMode, LaunchOrigin, SteeringAvailability};
 use crate::provider_id::Provider;
 
@@ -74,6 +74,11 @@ pub struct SessionListing {
     /// with equal values are the same session.
     #[serde(skip)]
     pub session_key: Option<(ProcessStartIdentity, String)>,
+    /// The owner's binding when this row was listed (managed rows only). A
+    /// request routed from this row names it as `expected`, so a wrapper
+    /// restart or conversation switch since listing is refused, not followed.
+    #[serde(skip)]
+    pub binding: Option<ManagedTarget>,
 }
 
 /// What one native discoverer saw of one session.
@@ -318,6 +323,7 @@ fn native_listing(provider: Provider, os: HostOs, observation: NativeObservation
         availability,
         observed_at: Utc::now(),
         session_key: Some((observation.process, observation.conversation)),
+        binding: None,
     }
 }
 
