@@ -1,0 +1,41 @@
+# Reviewed steering activation policy. Hand-owned; never generated.
+#
+# Research (`docs/research/steering/<slug>.md`) records what providers do and
+# what disposable tests established. This file records what Claudine has
+# reviewed and implemented. A steering case becomes selectable only when all
+# of these hold:
+#
+#   1. `adapters` lists a reviewed adapter (id + revision) that binds the
+#      mechanism, and the library's `IMPLEMENTED_ADAPTERS` contains the same
+#      id + revision.
+#   2. `grants` names the exact provider, mechanism, operation, adapter
+#      revision, profile, OS, provider version, launch mode, origin, and
+#      session state.
+#   3. `claudine-gen` accepts the grant: the researched case, operation
+#      semantics, early receipt timing, and access all agree, and the named
+#      verification records match that exact case, passed, document no
+#      expected loss, and together cover the operation's required assertions.
+#
+# Both keys are required; an empty list means "nothing reviewed". Quote
+# version numbers that YAML could read as numbers (for example "1.2").
+#
+# Adapter entry:
+#   - id: pi-rpc
+#     revision: 1
+#     provider: pi
+#     mechanism_ids: [rpc-steer]
+#
+# Grant entry:
+#   - provider: pi
+#     mechanism_id: rpc-steer
+#     operation: steer_active_turn
+#     adapter: { id: pi-rpc, revision: 1 }
+#     profile_id: retained-rpc
+#     os: macos
+#     provider_version: "0.84.4"
+#     launch_mode: non_interactive
+#     origin: claudine
+#     session_state: working
+#     verification_ids: [<verification id>]
+adapters: []
+grants: []
