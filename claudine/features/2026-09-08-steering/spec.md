@@ -1,3 +1,56 @@
+---
+$schema:
+    status: |-
+        enum(
+            draft-spec,
+            finalized-spec,
+            planned,
+            implemented,
+            review-findings,
+            human-in-the-loop,
+            completed,
+            on-hold,
+            abandoned
+        ) -> an indicator of progress for this specification
+    reviewed: boolean -> indicates whether the specification file has been reviewed by another agent from the one which created the spec
+    reviewed_by: string -> the agent and model used in the spec review
+    reviewed_on: date -> the date the spec was reviewed
+    review_iterations: number -> the number of implementation reviews have taken place in the review/fix cycle
+    clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
+    implemented: boolean -> indicates whether this spec's plan has been implemented
+    implemented_by: string -> the agent who implemented the plan
+status: planned
+implemented: false
+implemented_by: claude/opus
+review_iterations: 0
+human_review: false
+message_to_agent: |-
+    Phase 1 is implemented. Read claudine/features/2026-09-08-steering/implementation-log.md
+    and claudine/docs/topics/steering-activation.md before starting.
+
+    - Shared contracts now exist: `claudine::steering::{identity, contract, eligibility, adapters}`
+      over `claudine_catalog_types::steering` (re-exported as `claudine::steering::vocabulary`).
+      Phase 2 steering audit events should log `SteeringRequest`/`SteeringResult` fields; note
+      `SteeringMessage`'s `Debug` deliberately omits the text, and `as_str()` is for in-memory
+      delivery only.
+    - The steering research contract is now revision 4 (verification rows have `id` and typed
+      `assertion_kinds`; `expected_loss` records can never activate). Any new verification record
+      must carry both.
+    - Activation is hand-reviewed in claudine/docs/providers/steering-activation.yaml (empty today).
+      Enabling a mechanism later needs: a reviewed adapter entry, an equal entry in
+      `lib/src/steering/adapters.rs::IMPLEMENTED_ADAPTERS` (an L1 test enforces equality), an exact
+      grant whose verification records match the case (origin `claudine` for wrapper-managed
+      sessions; the existing Pi records are `native`), then `claudine providers generate --yes`
+      and a new byte pin in claudine/gen/tests/fixtures/generated-artifact-baseline.json
+      (compute with `cargo run -p biscuit-hash-cli -- --file <path>`).
+    - `setup_required` access passes only with a matching reviewed grant; otherwise it is reported
+      as setup guidance in `Blocker::NotActivated { setup }`.
+    - `lib/src/steering/generated.rs` is exempt in cli/tests/l1/dispatch_inventory.rs; re-bless
+      docs/providers/dispatch-inventory.json when Provider references change
+      (`CLAUDINE_UPDATE_INVENTORY=1` needed approval in this environment).
+    - Skill files under .claude/skills/claudine/ could not be written in this session; the intended
+      edits are listed in the implementation log and still need applying.
+---
 # Steering Running Agent Sessions
 
 Status: Ready for phased implementation; provider activation remains evidence-gated.

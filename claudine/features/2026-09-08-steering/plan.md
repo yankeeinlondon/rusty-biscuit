@@ -2,10 +2,60 @@
 total_phases: 8
 start_phase: 1
 implemented: false
+packages:
+  - claudine-catalog-types
+  - claudine-gen
+  - claudine
+  - claudine-cli
+source_files_during_phase_1:
+  - claudine/catalog-types/src/steering.rs
+  - claudine/catalog-types/src/lib.rs
+  - claudine/catalog-types/Cargo.toml
+  - claudine/gen/src/steering_catalog.rs
+  - claudine/gen/src/steering_check.rs
+  - claudine/gen/src/apply.rs
+  - claudine/gen/src/errors.rs
+  - claudine/gen/src/inputs.rs
+  - claudine/gen/src/lib.rs
+  - claudine/gen/src/main.rs
+  - claudine/gen/tests/l1/steering_activation.rs
+  - claudine/gen/tests/l1/main.rs
+  - claudine/gen/tests/l1/drift.rs
+  - claudine/gen/tests/l1/generate_ux.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/lib/src/lib.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/adapters.rs
+  - claudine/lib/src/steering/contract.rs
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/identity.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/cli/tests/l1/dispatch_inventory.rs
+  - claudine/docs/providers/steering-activation.yaml
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/research/steering/_schema.yaml
+docs_updated_during_phase_1:
+  - claudine/README.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/docs/research/steering/_fleet.md
+  - claudine/docs/research/steering/antigravity.md
+  - claudine/docs/research/steering/claude.md
+  - claudine/docs/research/steering/codex.md
+  - claudine/docs/research/steering/gemini.md
+  - claudine/docs/research/steering/goose.md
+  - claudine/docs/research/steering/kilo.md
+  - claudine/docs/research/steering/kimi.md
+  - claudine/docs/research/steering/opencode.md
+  - claudine/docs/research/steering/pi.md
+  - claudine/docs/research/steering/qwen.md
+docs_created_during_phase_1:
+  - claudine/docs/topics/steering-activation.md
+skills_files_updated_during_phase_1: []
 ---
 # Steering implementation plan
 
-Status: Ready for non-interactive execution; implementation phases not started.
+Status: Phase 1 implemented (2026-09-28); Phases 2–8 not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -80,30 +130,30 @@ interface, and reviewed adapter implementation are separate gates.
 
 **Work**
 
-- [ ] 1. Add shared steering and execution-interface vocabulary to
+- [x] 1. Add shared steering and execution-interface vocabulary to
    [catalog-types](../../catalog-types/src/lib.rs), keeping transport, encoding,
    operation intent, receipt strength, execution state, and delivery state distinct.
    Define typed runtime request/result and identity contracts in the Claudine
    library. Preserve explicit unknown and partial-interruption outcomes.
-- [ ] 2. Extend [research loading](../../gen/src/inputs.rs),
+- [x] 2. Extend [research loading](../../gen/src/inputs.rs),
    [field ownership](../../gen/src/registry.rs), catalog coercion, and
    [Rust emission](../../gen/src/emit/mod.rs). Consume the existing steering
    records and execution selections rather than reauthoring provider facts.
-- [ ] 3. Extend the maintained checker with deterministic activation applicability:
+- [x] 3. Extend the maintained checker with deterministic activation applicability:
    exact provider/version/OS/profile/origin/state/operation, adapter revision,
    and required assertion coverage. Represent reviewed adapter bindings by
    implemented identifiers, separate from the generated factual catalog.
    Add typed assertion/adapter references if the current prose-only assertion
    lists cannot support deterministic decisions; preserve historical records as
    evidence without automatically making them activation grants.
-- [ ] 4. Derive manual and automatic eligibility from operation effects, delivery
+- [x] 4. Derive manual and automatic eligibility from operation effects, delivery
    boundaries, access, compatibility, and applicable verification. A next-turn
    follow-up is not active-loop rescue. A terminal-only response cannot satisfy
    prompt return-after-acceptance without separately established early acceptance.
-- [ ] 5. Regenerate affected catalog/provider artifacts and update their existing drift
+- [x] 5. Regenerate affected catalog/provider artifacts and update their existing drift
    and hash baselines. Keep all unimplemented or insufficiently verified bindings
    unavailable, with an actionable reason.
-- [ ] Validation: generator/catalog unit tests; all-roster steering check;
+- [x] Validation: generator/catalog unit tests; all-roster steering check;
    deterministic regeneration; negative activation fixtures.
 
 **Validation:** Generator/catalog unit tests; maintained steering check for all
@@ -431,7 +481,7 @@ permission question or a fabricated all-green result.
 
 | Phase | Status | Evidence |
 | --- | --- | --- |
-| Phase 1 | Not started | Existing research/checker are the baseline |
+| Phase 1 | Implemented 2026-09-28 | Typed vocabulary, research revision 4, activation policy + checker, generated `lib/src/steering/generated.rs`, runtime eligibility; nothing activated. See implementation-log.md |
 | Phase 2 | Not started | Shared recognition sources identified |
 | Phase 3 | Not started | Existing local IPC contract is the baseline |
 | Phase 4 | Not started | Seven scoped Pi research records; wrapper verification required |
@@ -439,3 +489,17 @@ permission question or a fabricated all-green result.
 | Phase 6 | Not started | Warning, recovery, and cap decisions resolved in spec |
 | Phase 7 | Not started | Full-roster passive research available |
 | Phase 8 | Not started | No new implementation validation claimed by this plan |
+
+### Phase 1 progress (2026-09-28)
+
+- **Changed:** see this file's `source_files_during_phase_1` and
+  `docs_*_during_phase_1` frontmatter; details and the requirement-to-test map
+  are in [implementation-log.md](implementation-log.md).
+- **Checks:** catalog-types 30/30, `claudine --lib steering` 30/30,
+  `claudine-gen` 192/192, `claudine-gen steering check` clean for all ten
+  providers at revision 4, `claudine-gen check` clean, `just lint` clean.
+  `just test`: 7787 passed, 9 skipped.
+- **Departure:** steering is a standalone generated artifact (like the stream
+  vocabulary), not a `ProviderInfo` registry field.
+- **Remaining blockers:** none for Phase 2. No adapter is implemented and the
+  activation policy is empty, so every case is unavailable by design.
