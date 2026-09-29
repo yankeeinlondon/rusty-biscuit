@@ -368,6 +368,11 @@ that persists the body.
 - **Malformed existing hash** — if the source file contains a malformed
   `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
   before any write occurs, leaving the file on disk untouched.
+- **Unwritable `last_updated`** — if `last_updated` carries a YAML anchor
+  (`&name`), alias (`*name`), or tag (`!tag`), or holds a list or mapping, the
+  date cannot be stamped without changing other values, so the closure fails
+  the same way and writes nothing. The same happens if the edited frontmatter
+  would no longer parse.
 
 This behavior is implemented by [`reconcile_inline_artifact`] in the closure
 module, using `inline_hash_options`, `plan_hash_save`,
