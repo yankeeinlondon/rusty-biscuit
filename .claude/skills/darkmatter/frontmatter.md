@@ -100,6 +100,33 @@ whitespace stays significant.
 `restore_properties_text` needs parseable YAML. A consumer repairing
 malformed YAML (Claudine's inline closure) repairs first and restores second.
 
+Restore still picks **one** newline for the whole file (`detect_newline`) and
+prepends a new block before a leading BOM; only the hash writer below has the
+per-line rules.
+
+## Text-Preserving Hash Save
+
+`apply_hash_save_text` (behind `md hash --save` and Claudine's closure
+write-back) changes only the managed `hash` node and, on a bump,
+`last_updated`. Its terminator rules are per line, never per file:
+
+- replacement `hash` line *i* takes original node line *i*'s terminator; extra
+  lines repeat the previous line's;
+- an inserted property takes the terminator of the line before it (the opening
+  `---` for empty frontmatter);
+- a new block goes after a leading BOM and uses the first line's terminator, or
+  LF;
+- an empty `last_updated:` becomes `last_updated: {today}`, keeping a comment
+  (one space is supplied before `#` when none was authored); `~` and `null`
+  are ordinary values.
+
+It returns `MarkdownError::FrontmatterTextEdit` and no text when a bump meets a
+`last_updated` with an anchor, alias, or tag (the shared
+`leading_node_property` predicate, also used by `locate_frontmatter_leaves`) or
+a block or flow collection, and when the rewritten frontmatter fails
+`parse_text_frontmatter` (for example, a replaced `hash` orphans an alias). A
+decision with no new stored hash returns `None` without parsing.
+
 ## Literal Tokens
 
 A frontmatter string an operation produced (agent output, an effect write) is

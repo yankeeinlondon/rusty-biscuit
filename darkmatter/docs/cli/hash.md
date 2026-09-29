@@ -123,9 +123,37 @@ hash:
 
 ### `--save` Behavior
 
-`--save` decides what to write and, when a write is needed, the CLI persists the
-canonical frontmatter (via the same serializer as `md clean --save`) followed by
-the original body bytes, unchanged.
+`--save` decides what to write and, when a write is needed, edits the file in
+place. Only the stored hash property and, when the date is bumped,
+`last_updated` change. Every other byte is kept: property order, quoting,
+comments, indentation, the body, a leading byte-order mark, and each line's own
+terminator (LF, CRLF, or a lone CR), even in a file that mixes them.
+
+- A rewritten line keeps its own terminator. When the new hash takes more lines
+  than the old one, each extra line uses the terminator of the line above it.
+- A newly added property uses the terminator of the line it follows.
+- A document without frontmatter gains a new block after its byte-order mark,
+  terminated like the document's first line (LF when it has none).
+- An empty `last_updated:` gets one space and the date. A trailing comment is
+  kept:
+
+  ```yaml
+  # before
+  last_updated: # set on save
+  # after
+  last_updated: 2026-09-29 # set on save
+  ```
+
+When the date needs bumping, `--save` refuses, exits `1`, and leaves the file
+byte-for-byte unchanged if `last_updated`:
+
+- carries a YAML anchor (`&name`), alias (`*name`), or tag (`!tag`), because
+  replacing it would change other values that share it;
+- is a collection (a list or mapping, in block or `[...]` / `{...}` flow form)
+  rather than a single value.
+
+`--save` also refuses when the edited frontmatter would no longer parse, for
+example when replacing the hash would orphan an alias that points into it.
 
 - No stored hash → writes the first baseline and exits `0`.
 - No content change → leaves the file untouched and exits `0`.
