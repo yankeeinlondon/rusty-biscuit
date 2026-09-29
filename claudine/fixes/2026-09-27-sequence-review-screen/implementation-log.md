@@ -52,6 +52,35 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-tui/SKILL.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - biscuit-tui/lib/Cargo.toml
+    - biscuit-tui/lib/src/components/input_table/table.rs
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+    - biscuit-tui/lib/src/components/input_table/column.rs
+    - biscuit-tui/lib/src/components/input_table/cell.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/lib/src/composition/types.rs
+    - Cargo.lock
+documentation:
+    - docs/dependencies.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-tui/docs/components/input_table.md
+    - biscuit-tui/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - .claude/skills/biscuit-tui/SKILL.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 5
+implemented: true
 ---
 
 # Implementation Log for 2026-09-27-sequence-review-screen (5 phases)
@@ -589,3 +618,118 @@ Documentation and comments only. No source code changed. Skills loaded:
   8051 passed, 9 skipped, no failures or timeouts.
 - No tests were added or renamed, so tier placement is unchanged. No
   `cargo fmt` was run. No cross-host run: nothing OS-dependent changed.
+
+## Phase 5
+
+Final validation only. No source, doc, or skill file changed. Skills
+loaded: `claudine`.
+
+### Gates
+
+- `biscuit-tui`: `just test` gives 1012 passed, 7 skipped. This includes
+  the `question` CLI unit tests (`biscuit-tui-cli::bin/question`).
+  `just lint` exits 0.
+- `claudine`: `NEXTEST_TEST_THREADS=6 just test` gives 8051 passed
+  (12 slow), 9 skipped, with no failures or timeouts. `just lint` exits 0.
+- `just test-l2`: not run. No real-terminal test was added or changed in
+  any phase; the focus evidence is headless buffer tests.
+- No `cargo fmt` was run. There were no failures, pre-existing or new.
+
+### Portability sweep
+
+- The fix's own code has no `cfg(unix)`, `cfg(windows)`, `std::os::`, path,
+  or process use: `input_table/{table.rs, column.rs, cell.rs, table/tests.rs}`,
+  `sequence/review.rs`, `sequence/review/tests.rs`, and `selection_ui.rs`.
+  The widths and clipping use `unicode-width` and `unicode-segmentation`,
+  which behave the same on every OS.
+- The only `cfg(unix)` in `sequence/mod.rs` is the SIGINT handler, which
+  already existed (it pairs with a `cfg(not(unix))` console-coordinator
+  branch). This fix did not touch it.
+- The new L1 CLI test `sequence_live_shell_only_no_agent_still_aborts_headless`
+  is `cfg(unix)` like its neighbors in `wrap_sequence_composition.rs`,
+  because it uses a `#!/bin/sh` provider stub. The gate logic it checks
+  (`needs_review`, `live_targets`) is covered on every OS by the pure unit
+  tests in `sequence/review/tests.rs`.
+- No cross-host run: nothing OS-dependent changed. CI covers Linux and
+  macOS on the pull request. Add the `ci:all-os` label to get Windows and
+  WSL2 before merge.
+
+### Stale-statement grep
+
+- `rg "four cells|StaticText.*schema" biscuit-tui claudine/docs`: no matches.
+- `rg "2026-09-27|sequence-review-screen"` over `claudine/docs`,
+  `biscuit-tui/docs`, the README, and both skills matches only
+  `.claude/skills/claudine/timeline.md` (a change history, which names
+  fixes by design) and `claudine/docs/rollout-strategy.md`. That file is a
+  planning roadmap whose purpose is to list specs. This fix did not touch
+  it, and its status line for this fix ("Draft; not reviewed") is now out
+  of date. It is left for the author, who owns the roadmap.
+
+### Acceptance criteria read-through
+
+- [x] **1. Content widths and resizing:** `static_column_shows_full_label_at_80_columns`
+  (`12 review-5` at 80 columns),
+  `static_column_width_includes_off_screen_rows_and_survives_scrolling`,
+  `resizing_down_clips_with_ellipsis_and_resizing_up_restores`.
+- [x] **2. Narrow and Unicode labels:** `multiple_static_columns_share_the_reduction_left_to_right`,
+  `emergency_allocation_divides_width_evenly_and_caps_static_columns`,
+  `zero_cell_static_column_draws_nothing`, `one_cell_static_column_shows_only_the_ellipsis`,
+  `wide_characters_are_omitted_whole_and_never_cross_the_column`,
+  `grapheme_clusters_are_never_split_by_clipping` (combining sequence and a
+  ZWJ emoji), `all_static_table_sizes_to_content_and_shrinks_left_to_right`,
+  `clipping_is_display_only_and_submission_returns_full_text`,
+  `column_widths_never_exceed_the_available_width_and_follow_the_tiers`
+  (property test), `very_long_static_values_saturate_instead_of_wrapping`,
+  `saturated_static_columns_render_clipped_at_every_width_without_overflow`.
+- [x] **3. Row mapping:** `eligibility_follows_the_outer_executable`,
+  `shipped_review_loop_hides_exactly_its_stage_steps`,
+  `baseline_targets_match_the_review_bypassed_conversion`,
+  `interleaved_steps_review_only_eligible_rows_and_merge_by_step_index`,
+  `repeated_names_map_by_position_not_name`,
+  `hidden_first_and_last_steps_keep_their_baseline`,
+  `all_hidden_steps_never_open_the_review`,
+  `unexpected_row_count_is_rejected_before_merging`,
+  `merge_rejects_a_count_mismatch_without_touching_the_baseline`,
+  `a_wrong_row_count_with_hidden_steps_fails_the_run_instead_of_cancelling_or_truncating`,
+  `selection_ui::tests::filtered_drafts_keep_original_step_positions`.
+- [x] **4. Opening and cancellation:**
+  - empty table: `all_hidden_steps_never_open_the_review`,
+    `a_shell_only_sequence_on_a_terminal_never_opens_the_review`
+  - gates: `review_opens_only_for_a_prompting_state_on_a_terminal`,
+    `a_bypassed_review_never_calls_the_callback_and_keeps_the_baseline`,
+    L1 `sequence_live_shell_only_no_agent_still_aborts_headless`
+  - dry run: the `--dry-run` branch of `execute_sequence` builds its targets
+    through `dry_run_sequence_target`. It never creates drafts or calls
+    `live_targets`, so it cannot reach the review screen, and the existing
+    `sequence_dry_run_*` L1 tests still pass.
+  - cancellation: `leaving_the_review_with_esc_or_ctrl_c_yields_no_targets`,
+    `review_cancellation_propagates_its_kind`
+  - No test calls `run_standalone`, launches a provider, or plays audio.
+- [x] **5. Focus rendering:** `focused_choice_cell_draws_no_underline_on_blank_cells`,
+  `focused_choice_cell_stays_distinguishable_and_keeps_the_active_option_style`,
+  `moving_focus_clears_the_old_focus_styling_in_the_same_buffer`,
+  `focused_text_input_cell_has_no_underline_and_clears_when_focus_moves`.
+  Outcome: fixed, with headless buffer evidence (see Phase 1 spike).
+- [x] **6. Existing consumers:** both areas' `just test` and `just lint`
+  pass (see Gates above), and the `question` CLI tests are included. No
+  L2 test was needed. Portability: see the sweep above.
+- [x] **7. Docs and comments:** `claudine/docs/cli/sequence.md` ("The review
+  screen"), `claudine/docs/topics/execution-flow.md`,
+  `biscuit-tui/docs/components/input_table.md` ("Column Sizing"), and
+  `biscuit-tui/README.md` were updated in Phase 4. The symbol docs were
+  corrected in Phase 2. None of the `docs/` pages names this fix.
+
+### Test placement
+
+No tests were added or renamed in this phase. In earlier phases:
+
+- The unit tests live in in-crate `#[cfg(test)]` modules.
+- The CLI test is in the declared `claudine-cli` `tests/l1/` binary.
+- No test name uses a tier marker.
+- The one repository file read by a test (`prompts/review-loop.md`) is
+  read with `include_str!`.
+
+### Status
+
+Implementation complete, ready for review. The spec was not moved,
+`just complete` was not run, and nothing was committed.

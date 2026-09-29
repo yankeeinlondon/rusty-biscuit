@@ -53,6 +53,35 @@ docs_created_during_phase_4: []
 skills_files_updated_during_phase_4:
     - .claude/skills/biscuit-tui/SKILL.md
     - .claude/skills/claudine/timeline.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5: []
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_code:
+    - biscuit-tui/lib/Cargo.toml
+    - biscuit-tui/lib/src/components/input_table/table.rs
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+    - biscuit-tui/lib/src/components/input_table/column.rs
+    - biscuit-tui/lib/src/components/input_table/cell.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/lib/src/composition/types.rs
+    - Cargo.lock
+documentation:
+    - docs/dependencies.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - biscuit-tui/docs/components/input_table.md
+    - biscuit-tui/README.md
+    - claudine/docs/cli/sequence.md
+    - claudine/docs/topics/execution-flow.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - .claude/skills/biscuit-tui/SKILL.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 5
+implemented: true
 ---
 
 # Plan: sequence review screen
@@ -312,15 +341,15 @@ All independent; run as one parallel wave.
 
 ## Phase 5: Final validation
 
-- [ ] `just test` and `just lint` in `biscuit-tui`.
-- [ ] `just test` and `just lint` in `claudine` (includes `question` unit tests).
-- [ ] `just test-l2` only if real-terminal coverage was added or changed; keep
+- [x] `just test` and `just lint` in `biscuit-tui`.
+- [x] `just test` and `just lint` in `claudine` (includes `question` unit tests).
+- [x] `just test-l2` only if real-terminal coverage was added or changed; keep
   windows out of focus.
-- [ ] Portability sweep: no `#[cfg(unix)]`-only assumptions in new code;
+- [x] Portability sweep: no `#[cfg(unix)]`-only assumptions in new code;
   load the `os` skill before claiming any OS untestable. Macos runs locally;
   Linux and Windows are covered by CI (`ci:all-os` label if the author wants
   Windows before merge).
-- [ ] Grep for stale statements: `rg "four cells|StaticText.*schema" biscuit-tui claudine/docs`.
-- [ ] Manual read-through against spec criteria 1-7; tick each in the log.
-- [ ] Stop at "implementation complete, ready for review". Do not commit unless
+- [x] Grep for stale statements: `rg "four cells|StaticText.*schema" biscuit-tui claudine/docs`.
+- [x] Manual read-through against spec criteria 1-7; tick each in the log.
+- [x] Stop at "implementation complete, ready for review". Do not commit unless
   told to, do not move the spec, do not run `just complete`.

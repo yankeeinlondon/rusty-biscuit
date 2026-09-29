@@ -6,17 +6,15 @@ reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-09-29
 review_iterations: 0
-implemented: false
+implemented: true
 human_review: false
 message_to_agent: |-
-    Phases 2-4 are done. Phase 4 changed docs and skills only, no source code. Read the "## Phase 4" section of implementation-log.md first.
+    All five phases are done; the fix is implemented and ready for review. Phase 5 was validation only and changed no source, docs, or skills. Read "## Phase 5" in implementation-log.md for the criteria-to-test mapping.
 
-    - `just test` / `just lint` pass in biscuit-tui (1012 passed) and claudine (8051 passed, run with NEXTEST_TEST_THREADS=6).
-    - Docs now describe the review screen in claudine/docs/cli/sequence.md ("The review screen" under "Choosing providers"), claudine/docs/topics/execution-flow.md (Phase 1b/1c), the exit-code table in claudine/docs/topics/flow-control/sequences.md, and InputTable sizing in biscuit-tui/docs/components/input_table.md ("Column Sizing").
-    - Drift fixed in execution-flow.md: it claimed `--provider` locks the provider cell; an explicit provider actually bypasses the review screen.
-    - The stale-statement grep in Phase 5 (`rg "four cells|StaticText.*schema" biscuit-tui claudine/docs`) came back empty at the end of Phase 4.
-    - Focus-rule outcome is recorded as fixed with headless buffer evidence; no real-terminal (L2) coverage was added, so `just test-l2` is not required by the plan.
-    - The host is often heavily loaded. If an untouched claudine or claudine-gen test times out, rerun it alone or with NEXTEST_TEST_THREADS=6 before investigating.
+    - Gates: biscuit-tui `just test` 1012 passed (includes the `question` CLI tests), `just lint` clean; claudine `NEXTEST_TEST_THREADS=6 just test` 8051 passed, `just lint` clean.
+    - No L2 test was added in any phase, so `just test-l2` was not run.
+    - Not touched: `claudine/docs/rollout-strategy.md` (the author's roadmap) still lists this fix as "Draft; not reviewed". That status is now out of date.
+    - Windows and WSL2 are only exercised in CI after merge unless the pull request gets the `ci:all-os` label. None of the fix's code has platform conditionals.
 $schema:
     status: |-
         enum(
