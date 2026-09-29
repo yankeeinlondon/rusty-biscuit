@@ -25,43 +25,49 @@ implemented_by: claude/opus
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phases 1-2 are implemented. Read claudine/features/2026-09-08-steering/implementation-log.md,
-    claudine/docs/topics/steering-activation.md, claudine/docs/topics/secret-recognition.md, and
-    the "Steering Audit Records" section of claudine/docs/topics/traces-and-logging.md first.
+    Phases 1-3 are implemented. Read claudine/features/2026-09-08-steering/implementation-log.md
+    (Phase 3 first), claudine/docs/topics/steering-routing.md, steering-activation.md,
+    secret-recognition.md, and docs/rendezvous/local-ipc.md section 15.
 
-    - Shared contracts: `claudine::steering::{identity, contract, eligibility, adapters, audit}`
-      over `claudine_catalog_types::steering` (re-exported as `claudine::steering::vocabulary`).
-      `SteeringMessage`'s `Debug` omits the text; `as_str()` is for in-memory delivery only.
-    - Every send path (Phase 3 routing, Phase 5 CLI, Phase 6 automatic warnings) must go through
-      `steering::audit::audited_send(&SteeringAuditLog::default_location(), &request, &context,
-      |request| DeliveryReport { .. })`. It records the masked request, calls delivery exactly once,
-      and returns the delivery's own result; audit failures are returned as content-free
-      `AuditFailure`s and must never trigger a resend or fail the agent. Render/trace only the
-      returned `RedactedText` error/echo, never raw provider text. Record a late outcome with
-      `AuditedSend::late.record(..)`, never as a new send. No caller exists yet.
-    - `AuditContext.opportunity` (`OpportunityId`, new in `steering::identity`) is where Phase 6
-      puts the automatic warning opportunity; it is not on `SteeringRequest`. Move it there only
-      if Phase 6 needs the request itself to carry it.
-    - Any text that may contain secrets goes through `claudine::secrets` (`Redactor`,
-      `mask_secrets`, `is_sensitive_key_name`); do not add another pattern list.
-    - The steering research contract is now revision 4 (verification rows have `id` and typed
-      `assertion_kinds`; `expected_loss` records can never activate). Any new verification record
-      must carry both.
-    - Activation is hand-reviewed in claudine/docs/providers/steering-activation.yaml (empty today).
-      Enabling a mechanism later needs: a reviewed adapter entry, an equal entry in
-      `lib/src/steering/adapters.rs::IMPLEMENTED_ADAPTERS` (an L1 test enforces equality), an exact
-      grant whose verification records match the case (origin `claudine` for wrapper-managed
-      sessions; the existing Pi records are `native`), then `claudine providers generate --yes`
-      and a new byte pin in claudine/gen/tests/fixtures/generated-artifact-baseline.json
-      (compute with `cargo run -p biscuit-hash-cli -- --file <path>`).
-    - `setup_required` access passes only with a matching reviewed grant; otherwise it is reported
-      as setup guidance in `Blocker::NotActivated { setup }`.
-    - `lib/src/steering/generated.rs` is exempt in cli/tests/l1/dispatch_inventory.rs; re-bless
-      docs/providers/dispatch-inventory.json when Provider references change
-      (`CLAUDINE_UPDATE_INVENTORY=1` needed approval in this environment).
-    - Skill files under .claude/skills/claudine/ could not be written in Phases 1 or 2; the intended
-      edits are listed in both phases' "Environment limitations" in the implementation log and
-      still need applying.
+    - Ownership: every wrapped structured-stream child gets a
+      `crate::steering::owner::ExecutionSteering` (cli/src/steering/owner.rs), created next to
+      `SessionPresence` in `harness_orch/attempt.rs` and `wrapper_stages.rs` via
+      `ExecutionSteering::for_wrapped_child`. It registers with `profile_id: None` and the
+      `NoAdapter` executor, so every managed session lists as unavailable
+      (`UNMAPPED_PROFILE_REASON`). Phase 4 must: map the Pi RPC launch to research profile
+      `retained-rpc` (`ExecutionFacts.profile_id`), set `provider_version`, pass a real
+      `SteeringExecutor` (use `ExecutionSteering::start_with` or extend `for_wrapped_child`),
+      and call `controller().set_state(..)`, `set_conversation(..)` (every change bumps the
+      generation), and `set_provider_process(..)` from the Pi event stream. The interactive
+      passthrough (`exec::run_child`) is deliberately not registered.
+    - `claudine::steering::controller::SteeringExecutor::deliver(request, route, deadlines)`
+      returns a `DeliveryReport`; build results with `SteeringResult::submitted/interrupted`.
+      The controller already enforces bounds, deadlines, dedup, stale checks, receipt capping,
+      and auditing (do not call `audited_send` again inside an executor). It must never read the
+      provider's stdout itself; the stream reader stays independent and should resolve the
+      executor's pending acceptance (e.g. via a oneshot keyed by the RPC request id). Deliver
+      should resolve by `deadlines.acceptance`; a late report is only logged.
+    - Enabling Pi still needs everything listed in Phase 2's note: a reviewed adapter entry in
+      docs/providers/steering-activation.yaml equal to `lib/src/steering/adapters.rs::
+      IMPLEMENTED_ADAPTERS`, an exact grant whose verification records are origin `claudine`
+      (the existing Pi records are `native`), `claudine providers generate --yes`, and a new
+      byte pin for lib/src/steering/generated.rs in
+      claudine/gen/tests/fixtures/generated-artifact-baseline.json
+      (`cargo run -p biscuit-hash-cli -- --file <path>`; current pin 9856002447674120557).
+    - Requesters (Phase 5 `claudine steer`) use `crate::steering::requester::{DaemonManagedSource,
+      route_to_owner}` and `claudine::steering::discovery::discover`; both carry
+      `#[cfg_attr(not(test), expect(dead_code, ...))]` markers that must be removed when the
+      command lands. `RoutedSend::detail(&request)` is the redacted text to render. Listing
+      rows serialize providers as slugs (`steering::provider_by_slug`).
+    - The error-transport guard (`just lint` -> lint-transport) rejects `to_string()`/`format!`
+      of a typed error in `map_err` closures and `Err(..)` arms: keep `#[source]` chains and
+      render with `crate::steering::render_chain` at the boundary.
+    - L1 `CliProcessFixture` now sets a private unreachable `RENDEZVOUS_ENDPOINT`; tests that
+      boot a daemon override it. CLI daemon-backed tests need `--features daemon-tests`.
+    - Re-bless docs/providers/dispatch-inventory.json when `Provider::` references change
+      (`CLAUDINE_UPDATE_INVENTORY=1` needed approval; see the log for the workaround).
+    - Skill files under .claude/skills/claudine/ still could not be written; the intended edits
+      from Phases 1-3 are listed in each phase's "Environment limitations" in the log.
 ---
 # Steering Running Agent Sessions
 

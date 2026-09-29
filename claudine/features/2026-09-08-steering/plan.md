@@ -7,6 +7,9 @@ packages:
   - claudine-gen
   - claudine
   - claudine-cli
+  - rendezvous-core
+  - rendezvous-daemon
+  - rendezvous-client
 source_files_during_phase_1:
   - claudine/catalog-types/src/steering.rs
   - claudine/catalog-types/src/lib.rs
@@ -77,10 +80,60 @@ docs_updated_during_phase_2:
 docs_created_during_phase_2:
   - claudine/docs/topics/secret-recognition.md
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+  - claudine/catalog-types/src/steering.rs
+  - claudine/gen/src/steering_catalog.rs
+  - claudine/gen/tests/l1/steering_activation.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/lib/Cargo.toml
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/lib/src/steering/identity.rs
+  - claudine/lib/src/steering/contract.rs
+  - claudine/lib/src/steering/audit.rs
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/controller.rs
+  - claudine/lib/src/steering/controller/tests.rs
+  - claudine/lib/src/steering/discovery.rs
+  - claudine/lib/src/steering/discovery/tests.rs
+  - claudine/rendezvous/core/proto/rendezvous.proto
+  - claudine/rendezvous/core/build.rs
+  - claudine/rendezvous/core/src/lib.rs
+  - claudine/rendezvous/daemon/src/lib.rs
+  - claudine/rendezvous/daemon/src/server.rs
+  - claudine/rendezvous/daemon/src/service.rs
+  - claudine/rendezvous/daemon/src/steering.rs
+  - claudine/rendezvous/daemon/src/steering/tests.rs
+  - claudine/rendezvous/client/Cargo.toml
+  - claudine/rendezvous/client/tests/steering_round_trip.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/cli_utils.rs
+  - claudine/cli/src/budget/run.rs
+  - claudine/cli/src/steering/mod.rs
+  - claudine/cli/src/steering/owner.rs
+  - claudine/cli/src/steering/requester.rs
+  - claudine/cli/src/steering/wire.rs
+  - claudine/cli/src/steering/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/docs/providers/dispatch-inventory.json
+  - Cargo.lock
+docs_updated_during_phase_3:
+  - claudine/README.md
+  - claudine/docs/dependencies.md
+  - claudine/docs/rendezvous/local-ipc.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/traces-and-logging.md
+docs_created_during_phase_3:
+  - claudine/docs/topics/steering-routing.md
+skills_files_updated_during_phase_3: []
 ---
 # Steering implementation plan
 
-Status: Phases 1–2 implemented (2026-09-28); Phases 3–8 not started.
+Status: Phases 1–3 implemented (2026-09-28); Phases 4–8 not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -236,31 +289,34 @@ solve regressions by deleting required audit text or changing unrelated privacy 
 
 **Work**
 
-1. Extend Rendezvous core protobuf, client, and daemon with a local-only managed
+- [x] 1. Extend Rendezvous core protobuf, client, and daemon with a local-only managed
    control stream, target listing, and send routing. Reuse
    [local IPC protections](../../docs/rendezvous/local-ipc.md). Do not add the
    daemon/database dependency to ordinary wrapper execution or duplicate its
    Unix/Windows transport implementation.
-2. Connect an execution-owned controller to the wrapper lifecycle near
+- [x] 2. Connect an execution-owned controller to the wrapper lifecycle near
    [session reporting](../../cli/src/commands/wrap/session_report.rs). Keep control
    registration distinct from replicated presence and its reporting opt-out.
    The controller exclusively owns provider I/O, correlates requests, and
    serializes mutations while continuously draining output/events.
-3. Implement per-execution UUIDs, wrapper/process-start identity, provider
+- [x] 3. Implement per-execution UUIDs, wrapper/process-start identity, provider
    conversation generation, disconnect cleanup, and fresh target checks. Invalidate
    targets on conversation replacement; reject stale IDs rather than retargeting.
-4. Implement bounded routing: 16 pending requests per execution, one automatic
+- [x] 4. Implement bounded routing: 16 pending requests per execution, one automatic
    request pending/in flight, 10-second manual acceptance and 2-second automatic
    deadlines. Discard expired unsent requests; report unknown after ambiguous
    submission. Never replay on reconnection or duplicate correlation IDs.
-5. Build a discovery aggregator over managed control registrations and generated
+- [x] 5. Build a discovery aggregator over managed control registrations and generated
    native-discovery bindings. Use the five-second/four-concurrent-provider bounds,
    exact-identity deduplication, unknown states, partial discovery errors, and
    unavailable reasons specified in the spec. History and mesh presence are hints,
    not proof of local ownership, liveness, or a writable channel.
-6. Keep direct automatic delivery available inside an owner when Rendezvous is
+- [x] 6. Keep direct automatic delivery available inside an owner when Rendezvous is
    absent. Expose missing external routing as unavailable; daemon failure must
    not fail the wrapped task. Native provider discovery remains independent.
+
+- [x] Validation: fake-controller integration tests, Unix socket / named-pipe
+   ownership, and no message text in replicated or durable storage.
 
 **Validation:** Fake-controller integration tests for concurrent senders, stale
 IDs, reused PIDs, duplicate observations, disconnect/reconnect, missing daemon,
@@ -510,7 +566,7 @@ permission question or a fabricated all-green result.
 | --- | --- | --- |
 | Phase 1 | Implemented 2026-09-28 | Typed vocabulary, research revision 4, activation policy + checker, generated `lib/src/steering/generated.rs`, runtime eligibility; nothing activated. See implementation-log.md |
 | Phase 2 | Implemented 2026-09-28 | `claudine::secrets` (one catalog + key-name recognizer; scrub, webhook, and wrapper sanitization migrated), `steering::audit` typed JSONL records under `~/.claudine/logs/steering/`; no live send path calls it yet. See implementation-log.md |
-| Phase 3 | Not started | Existing local IPC contract is the baseline |
+| Phase 3 | Implemented 2026-09-28 | `steering::controller` (bounded, serialized, audited owner queue), `steering::discovery` aggregator over generated discovery records, in-memory Rendezvous `SteeringControl`/`ListManagedTargets`/`RouteSteering`, wrapper owner link; every managed session registers as unavailable until Phase 4 maps a profile. See implementation-log.md |
 | Phase 4 | Not started | Seven scoped Pi research records; wrapper verification required |
 | Phase 5 | Not started | CLI contract resolved in spec |
 | Phase 6 | Not started | Warning, recovery, and cap decisions resolved in spec |
@@ -544,3 +600,20 @@ permission question or a fabricated all-green result.
   home path, `<redacted>`, `****`, env stripping) are unchanged.
 - **Remaining blockers:** none for Phase 3. `steering::audit::audited_send` is
   the seam Phase 3 routing must call; no caller exists yet.
+
+### Phase 3 progress (2026-09-28)
+
+- **Changed:** see this file's `*_during_phase_3` frontmatter; design
+  decisions and the requirement-to-test map are in
+  [implementation-log.md](implementation-log.md#phase-3).
+- **Checks:** `just test` (claudine area): 7840 passed, 9 skipped, 0 failed.
+  CLI steering tests with `daemon-tests`: 12/12. Rendezvous area `just test`:
+  284 passed; `just lint` clean in both areas. `just cross-check
+  rendezvous-client` passed on native Windows (named pipes) and Linux.
+- **Departures:** the generator now also projects research `discovery`
+  records and a roster-order constant; the daemon closes its steering router
+  on shutdown (a defect found by the tests: graceful shutdown waited forever
+  on a connected owner); routed requests must be manual.
+- **Remaining blockers:** none for Phase 4. Every wrapped execution registers
+  with `profile_id: None`, so it is listed as unavailable until Phase 4 maps
+  the Pi RPC launch to `retained-rpc` and supplies an executor.
