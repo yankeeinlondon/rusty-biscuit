@@ -105,6 +105,123 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - content-policy/docs/topics/policy-lifecycle.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/content-policy/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_code:
+    - Cargo.lock
+    - Cargo.toml
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+    - biscuit-file/lib/src/yaml/analyze/engine.rs
+    - biscuit-file/lib/src/yaml/analyze/locate.rs
+    - biscuit-file/lib/src/yaml/analyze/mod.rs
+    - biscuit-file/lib/src/yaml/analyze/scan.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/locate.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/scan.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/tab_indentation.rs
+    - biscuit-file/lib/src/yaml/mod.rs
+    - biscuit-file/lib/tests/corpus/yaml_corpus.json
+    - darkmatter/cli/src/commands/hash.rs
+    - darkmatter/lib/src/effects/verbs.rs
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/hash/options.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/tab_indentation_repair_parity.rs
+    - content-policy/cli/Cargo.toml
+    - content-policy/cli/src/main.rs
+    - content-policy/justfile
+    - content-policy/lib/Cargo.toml
+    - content-policy/lib/src/lib.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - content-policy/lib/src/model.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/grammar.rs
+    - content-policy/lib/src/normalized.rs
+    - content-policy/lib/src/time.rs
+    - content-policy/lib/src/aggregate.rs
+    - content-policy/lib/src/reader.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/robustness_matrix.rs
+    - content-policy/lib/tests/fixtures/stamped-note.md
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/tests/common/mod.rs
+    - content-policy/lib/tests/renewal.rs
+    - content-policy/cli/src/args.rs
+    - content-policy/cli/src/commands.rs
+    - content-policy/cli/src/output.rs
+    - content-policy/cli/tests/common/mod.rs
+    - content-policy/cli/tests/check.rs
+    - content-policy/cli/tests/renew.rs
+    - content-policy/cli/tests/lifecycle.rs
+    - content-policy/schemas/content-policy.yaml
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/boundary_containment.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - content-policy/lib/src/path_form.rs
+    - content-policy/lib/src/fingerprint.rs
+    - content-policy/lib/src/provider.rs
+    - content-policy/lib/src/file_adapter.rs
+    - content-policy/lib/tests/file_changed.rs
+    - content-policy/lib/tests/file_renewal.rs
+    - content-policy/lib/tests/file_adapter.rs
+    - content-policy/lib/tests/fake/mod.rs
+    - content-policy/cli/tests/file_changed.rs
+documentation:
+    - biscuit-file/lib/README.md
+    - darkmatter/docs/cli/hash.md
+    - darkmatter/docs/cli/clean.md
+    - content-policy/docs/dependencies.md
+    - docs/dependencies.md
+    - claudine/docs/getting-started/index.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/about.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/cmux.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/ghostty.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/tmux.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/wezterm.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/zellij.md
+    - claudine/docs/research/acp/gemini-cli.md
+    - claudine/docs/research/acp/json-rpc.md
+    - claudine/docs/research/acp/kimi-code-cli.md
+    - .claude/skills/playa/audio-programming/Android.md
+    - .claude/skills/playa/audio-programming/IOS.md
+    - .claude/skills/playa/audio-programming/crates.md
+    - .claude/skills/playa/audio-programming/linux.md
+    - .claude/skills/playa/audio-programming/macOS.md
+    - .claude/skills/playa/audio-programming/typescript-libraries.md
+    - .claude/skills/playa/audio-programming/windows.md
+    - sniff/docs/research/audio-programming/Android.md
+    - sniff/docs/research/audio-programming/IOS.md
+    - sniff/docs/research/audio-programming/crates.md
+    - sniff/docs/research/audio-programming/linux.md
+    - sniff/docs/research/audio-programming/macOS.md
+    - sniff/docs/research/audio-programming/typescript-libraries.md
+    - sniff/docs/research/audio-programming/windows.md
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - biscuit-file/docs/topics/file-references.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/content-policy/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+completed_phase: 6
+implemented: true
 packages:
     - content-policy
     - content-policy-cli
@@ -827,7 +944,12 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 13 (gated task in parallel with the rest)
 
-- [ ] **6.1 Darkmatter base-schema line** (spec task 4; AC 21 second half)
+- [x] **6.1 Darkmatter base-schema line** (spec task 4; AC 21 second half)
+    - **Outcome (2026-09-29): blocked on dependency, skipped per R1.** The
+      dependency is still `draft-spec`, and this tree's `md schema validate`
+      rejects `policy[]@…content-policy.yaml` ("cannot apply `[]`/constraints
+      to the union-typed named type"). Remaining steps are listed in the
+      implementation log, Phase 6, task 6.1.
     - **Gate:** `2026-09-28-recursive-schema-types` has landed, meaning
       `policy[]` over a union-typed named type loads. If it has not, record
       "blocked on dependency" in the implementation log and skip this task
@@ -844,14 +966,14 @@ Phase 2 and on tasks 1.2 and 1.3.
       ordinary Markdown document with no `$schema` validates a mixed list and
       flags `Duration(3mo)` and `action: delete`.
     - `cargo tree` shows no new dependency.
-- [ ] **6.2 content-policy skill** (R17)
+- [x] **6.2 content-policy skill** (R17)
     - Add `.claude/skills/content-policy/SKILL.md`, under 200 lines. It covers
       the library API entry points, the rule grammar, the renewal limits, the
       `file-adapter` feature, the dependency rule (never depend on Darkmatter),
       and the `just` recipes.
     - Add pointers to the new UTC-stamp behavior in the `darkmatter` and
       `claudine` skills, where they mention `last_updated`.
-- [ ] **6.3 Cross-OS evidence**
+- [x] **6.3 Cross-OS evidence**
     - Load the `os` skill.
     - Run `just test content-policy` and `just test biscuit-file` on native
       Windows and on WSL2 through the hosts the skill names. Focus on the path
@@ -859,7 +981,7 @@ Phase 2 and on tasks 1.2 and 1.3.
       CRLF fingerprinting.
     - Record the evidence in the implementation log. Fix any failure forward
       in this phase.
-- [ ] **6.4 Final audit**
+- [x] **6.4 Final audit**
     - Walk AC 1–33 and map each to its test name in the implementation log.
     - Re-run the robustness smell grep.
     - Confirm that no `docs/` page names this spec, and that no **planned**
@@ -871,7 +993,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Phase 6 checkpoint
 
-- [ ] `just test`, `just test-l2`, and `just lint` pass in every touched area.
-- [ ] `just ci-local --plan` has been reviewed.
-- [ ] Either 6.1 is done, or it is logged as blocked on
+- [x] `just test`, `just test-l2`, and `just lint` pass in every touched area.
+- [x] `just ci-local --plan` has been reviewed.
+- [x] Either 6.1 is done, or it is logged as blocked on
   `2026-09-28-recursive-schema-types` with the remaining steps listed.

@@ -101,6 +101,123 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_6: []
+docs_updated_during_phase_6:
+    - content-policy/docs/topics/policy-lifecycle.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/content-policy/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_code:
+    - Cargo.lock
+    - Cargo.toml
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/src/yaml/analyze/diagnostic.rs
+    - biscuit-file/lib/src/yaml/analyze/engine.rs
+    - biscuit-file/lib/src/yaml/analyze/locate.rs
+    - biscuit-file/lib/src/yaml/analyze/mod.rs
+    - biscuit-file/lib/src/yaml/analyze/scan.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/diagnostic.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/locate.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/mod.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/scan.rs
+    - biscuit-file/lib/src/yaml/analyze/tests/tab_indentation.rs
+    - biscuit-file/lib/src/yaml/mod.rs
+    - biscuit-file/lib/tests/corpus/yaml_corpus.json
+    - darkmatter/cli/src/commands/hash.rs
+    - darkmatter/lib/src/effects/verbs.rs
+    - darkmatter/lib/src/markdown/hash/mod.rs
+    - darkmatter/lib/src/markdown/hash/options.rs
+    - darkmatter/cli/tests/l1/clean_frontmatter.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/tab_indentation_repair_parity.rs
+    - content-policy/cli/Cargo.toml
+    - content-policy/cli/src/main.rs
+    - content-policy/justfile
+    - content-policy/lib/Cargo.toml
+    - content-policy/lib/src/lib.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - content-policy/lib/src/model.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/grammar.rs
+    - content-policy/lib/src/normalized.rs
+    - content-policy/lib/src/time.rs
+    - content-policy/lib/src/aggregate.rs
+    - content-policy/lib/src/reader.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/robustness_matrix.rs
+    - content-policy/lib/tests/fixtures/stamped-note.md
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/tests/common/mod.rs
+    - content-policy/lib/tests/renewal.rs
+    - content-policy/cli/src/args.rs
+    - content-policy/cli/src/commands.rs
+    - content-policy/cli/src/output.rs
+    - content-policy/cli/tests/common/mod.rs
+    - content-policy/cli/tests/check.rs
+    - content-policy/cli/tests/renew.rs
+    - content-policy/cli/tests/lifecycle.rs
+    - content-policy/schemas/content-policy.yaml
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/boundary_containment.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - content-policy/lib/src/path_form.rs
+    - content-policy/lib/src/fingerprint.rs
+    - content-policy/lib/src/provider.rs
+    - content-policy/lib/src/file_adapter.rs
+    - content-policy/lib/tests/file_changed.rs
+    - content-policy/lib/tests/file_renewal.rs
+    - content-policy/lib/tests/file_adapter.rs
+    - content-policy/lib/tests/fake/mod.rs
+    - content-policy/cli/tests/file_changed.rs
+documentation:
+    - biscuit-file/lib/README.md
+    - darkmatter/docs/cli/hash.md
+    - darkmatter/docs/cli/clean.md
+    - content-policy/docs/dependencies.md
+    - docs/dependencies.md
+    - claudine/docs/getting-started/index.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/about.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/cmux.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/ghostty.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/tmux.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/wezterm.md
+    - biscuit-terminal/docs/research/terminal-multiplexing/zellij.md
+    - claudine/docs/research/acp/gemini-cli.md
+    - claudine/docs/research/acp/json-rpc.md
+    - claudine/docs/research/acp/kimi-code-cli.md
+    - .claude/skills/playa/audio-programming/Android.md
+    - .claude/skills/playa/audio-programming/IOS.md
+    - .claude/skills/playa/audio-programming/crates.md
+    - .claude/skills/playa/audio-programming/linux.md
+    - .claude/skills/playa/audio-programming/macOS.md
+    - .claude/skills/playa/audio-programming/typescript-libraries.md
+    - .claude/skills/playa/audio-programming/windows.md
+    - sniff/docs/research/audio-programming/Android.md
+    - sniff/docs/research/audio-programming/IOS.md
+    - sniff/docs/research/audio-programming/crates.md
+    - sniff/docs/research/audio-programming/linux.md
+    - sniff/docs/research/audio-programming/macOS.md
+    - sniff/docs/research/audio-programming/typescript-libraries.md
+    - sniff/docs/research/audio-programming/windows.md
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - biscuit-file/docs/topics/file-references.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/content-policy/SKILL.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+completed_phase: 6
+implemented: true
 packages:
     - content-policy
     - content-policy-cli
@@ -1171,3 +1288,173 @@ that bear on them:
   `validate_contained_candidate`. The content-policy skill itself is task 6.2.
   The `os` skill needs nothing new: the one OS trap met here, the macOS
   `/var` spelling, is already recorded there.
+
+## Phase 6
+
+### 6.1 Darkmatter base-schema line: blocked on dependency (R1)
+
+- `2026-09-28-recursive-schema-types` is still `status: draft-spec`, and its
+  only commit is the planning commit `9e90a3fd0`.
+- The gate was also checked by behavior, not by status alone. With `md` built
+  from this tree, a baseline holding
+  `$schema: {content_policy: "policy[]@<repo>/content-policy/schemas/content-policy.yaml"}`
+  fails to load: "cannot convert SimplifiedSchema for `policy` to JSON Schema:
+  cannot apply `[]`/constraints to the union-typed named type `policy@…`".
+  The same baseline without `[]` loads, and flags `Duration(3mo)` and
+  `action: delete` on a single entry, which confirms the schema file itself is
+  sound.
+- Skipped per R1. Nothing under `darkmatter/` changed in this phase.
+- **Remaining steps once the dependency lands** (spec task 4, second half of
+  AC 21):
+  1. Add `content_policy: "policy[]@../../../content-policy/schemas/content-policy.yaml"`
+     beside `last_updated` in the base schema Darkmatter loads at that time
+     (today `darkmatter/docs/schemas/darkmatter.yaml`; `darkmatter/schemas/partials/doc.yaml`
+     is loaded by no runtime code).
+  2. Apply spike S1's fix (`spikes/embedded-schema-ref/findings.md`): embed
+     the referenced file and expand the embedded baseline's imports against a
+     table of embedded files. Without it the embedded baseline fails to
+     convert, and DMLS panics at `mod.rs` (`expect("baseline schema must
+     convert")`).
+  3. Resolve with the author how AC 21 applies to `md schema validate`, which
+     never uses the embedded baseline for a document with no `$schema` (S1).
+  4. If the dependency lets constraints apply to union references, add
+     `(required)` on `long_form.rule`, and invert the assertion in
+     `darkmatter::l1 content_policy_editor_schema` that a long form without
+     `rule` is not flagged.
+  5. Add a Darkmatter test and a DMLS test: an ordinary document with no
+     `$schema` validates a mixed list and flags `Duration(3mo)` and
+     `action: delete`. Check that `cargo tree` shows no new dependency.
+  6. Remove the **planned** markers in `content-policy/README.md` ("Applying it
+     to every document through Darkmatter's base schema is planned") and
+     `content-policy/docs/topics/policy-lifecycle.md` (status paragraph and
+     "Get Help in the Editor"), and the matching sentence in the
+     `content-policy` skill.
+
+### 6.2 content-policy skill
+
+- New `.claude/skills/content-policy/SKILL.md` (about 175 lines, under the
+  200-line limit). It covers the rule grammar and status/action model, the
+  library entry points (evaluate document/record/policy, `PolicyOptions`,
+  the reader, strict JSON policies, identity, renewal), providers and the
+  off-by-default `file-adapter` feature, renewal limits and refused shapes,
+  the dependency rule and `just deps-check`, the writers of `last_updated`,
+  the CLI, the editor schema's current limit, and the `just` recipes and test
+  layout.
+- Every API name in it was checked against `lib/src/lib.rs` and the defining
+  modules. One draft error was caught: `Policy::from_text` parses CLI text,
+  not JSON; strict JSON is `Policy::from_json`.
+- The skill states the editor schema's limit in its own words, without naming
+  the dependency spec.
+- UTC-stamp pointers:
+  - `.claude/skills/darkmatter/SKILL.md`, CLI orientation: `md hash --save`
+    bumps `last_updated` to the UTC date (`hash::last_updated_stamp`) and so
+    renews `@last_updated` policies.
+  - `.claude/skills/claudine/SKILL.md` (inline-compose row) and
+    `.claude/skills/claudine/cli-reference.md` (inline-compose section):
+    "today's date" becomes "today's UTC date", with a pointer to the
+    `content-policy` skill.
+  - Neither skill mentioned `last_updated` in a body line other than these
+    write-back descriptions (other hits are the skills' own frontmatter).
+- `darkmatter::l1 current_root_documentation_contract` and
+  `current_root_migration_guard` read `.claude/skills/claudine/SKILL.md`. Both
+  pass (4/4) after the edit.
+
+### 6.3 Cross-OS evidence
+
+The `os` skill was loaded first. Hosts available: `BUILD_LINUX=build-linux`,
+`BUILD_WIN=build-win-native`, `BUILD_WSL=build-win`. No Rust source changed in
+this phase, so these runs cover the Phase 5 code.
+
+- WSL2 (`just cross-check <pkg> --os wsl`, nextest archive built as
+  `ubuntu-latest` and run as `wsl2-ubuntu`, exactly as CI does):
+  - `content-policy`: 128/128. The archive carries the package's declared
+    features, so the 13 `file_adapter` tests ran (symlinks, boundary escape,
+    `&`/`^` sigils, and the unreadable-file test).
+  - `content-policy-cli`: 39/39.
+  - `biscuit-file`: 833/833.
+  - `just ci-local --plan` now shows `content-policy/wsl2-ubuntu/L1` as
+    `reuse local`.
+
+### 6.4 Final audit
+
+#### Acceptance criteria → tests
+
+Test names are `binary::test` within the `content-policy` or
+`content-policy-cli` package unless another package is named. The per-phase
+maps above carry the full lists; this is the closure view.
+
+| AC | Status | Test(s) or check |
+| --- | --- | --- |
+| 1 | covered | `evaluation::compact_and_long_forms_normalize_consistently`, `inline_referenced_and_defaulted_baselines_evaluate_alike`, `an_absent_policy_uses_the_callers_default` |
+| 2 | covered | `evaluation::evidence_values_table_in_every_date_position`, `yaml_1_1_spellings_in_a_date_position`, `quoted_and_unquoted_dates_are_equivalent` |
+| 3 | covered | `evaluation::valid_until_takes_effect_at_utc_midnight`, `valid_for_is_due_on_its_computed_date`, `month_ends_and_leap_years_clamp`, `a_future_baseline_is_unknown_not_fresh`, `time::tests::*` |
+| 4 | covered | `aggregate::tests::every_combination_of_up_to_three_entries_follows_the_tables`, `entry_order_never_changes_the_result`, `named_rows` |
+| 5 | covered | `evaluation::evaluation_never_captures_a_baseline` |
+| 6 | covered | `renewal::every_renewable_entry_is_renewed_and_nothing_else_changes`, `renewing_a_referenced_deadline_is_a_conflict`, `one_refused_target_means_no_partial_plan`, `renew::tests::identical_writes_consolidate_and_different_ones_conflict`; incomplete file capture in `file_renewal::unavailable_evidence_writes_nothing_and_lists_every_issue` |
+| 7 | covered | `evaluation::lifecycle_steps_through_the_library`, `renewal::lifecycle_steps_through_the_library`, `content-policy-cli lifecycle::the_lifecycle_example_through_the_cli` |
+| 8 | covered | `file_changed::every_row_of_the_outcome_table`, `blake3_lf_is_stable_across_line_endings_and_blake3_is_not`, `the_one_argument_form_is_a_validation_error`, `the_evidence_map_api_uses_the_callers_base_directory`; `file_renewal::a_first_capture_writes_a_blake3_lf_fingerprint`, `renewal_keeps_an_existing_scheme`, `the_file_changed_lifecycle_with_a_fake_provider`; `file_adapter::the_file_changed_lifecycle_on_disk`; `content-policy-cli file_changed::the_file_changed_lifecycle_through_the_cli` |
+| 9 | covered | Package-area conventions (`sniff repo package-areas`, justfile recipes, `just check-tier-coverage content-policy`: nothing stranded); cross-OS evidence in 6.3 and Phase 5; docs and the new `content-policy` skill (6.2) |
+| 10 | covered | `evaluation::fail_closed_declarations_never_yield_fresh`, `an_absent_policy_uses_the_callers_default`, `grammar::tests::policy_new_enforces_shape`, `robustness_matrix::serialized_policy_matrix` (newer grammar version) |
+| 11 | covered | `evaluation::a_plain_evidence_map_needs_no_document`; `just deps-check` (default and `--all-features`), run by `just lint` |
+| 12 | covered | `renewal::darkmatter_comparison_table`, `spike_matrix_accepted_shapes`, `apply_writes_the_planned_bytes_and_refuses_a_changed_file` |
+| 13 | covered (review) | `content-policy/README.md`, `docs/topics/policy-lifecycle.md`; one drift fixed in this phase (below) |
+| 14 | covered | `renewal::refused_shapes_name_their_reason`, `flow_lists_renew_only_outside_the_brackets` |
+| 15 | covered | `content-policy-cli check::needs_action_prints_true_for_a_confirmed_trigger`, `…_false_for_a_fresh_document`, `…_unknown_when_nothing_is_confirmed_and_evidence_is_missing`, `needs_action_exits_one_only_for_errors` |
+| 16 | covered | `evaluation::legacy_duration_and_update_policy`, `migrated_documents_evaluate_without_diagnostics`; `content-policy-cli check::the_migrated_repository_documents_check_without_diagnostics` |
+| 17 | covered | `evaluation::the_flow_list_comma_trap`; `renewal::spike_matrix_accepted_shapes` ("quoted flow-list reference"), `invalid_declarations_and_duplicate_keys_are_errors` |
+| 18 | covered | `evaluation::duplicate_top_level_keys_are_validation_errors`, `reader::tests::duplicate_keys_are_rejected_anywhere_in_the_block` |
+| 19 | covered | `renewal::a_document_without_frontmatter_gets_a_new_block` |
+| 20 | partly covered (recorded departure) | `darkmatter markdown::hash::options::tests::last_updated_stamp_uses_the_utc_date` (shared helper), `darkmatter-cli commands::hash::tests::hash_save_stamps_last_updated_with_the_utc_date` (`md hash`, end to end). Claudine's write-back calls the same helper and is covered by the helper test only. Darkmatter's effect writer computes the UTC stamp but never writes `last_updated` (Phase 1.4 departure), so it has no observable output to test |
+| 21 | first half covered; second half **blocked** | `darkmatter::l1 content_policy_editor_schema::*` (7). The base-schema half waits on `2026-09-28-recursive-schema-types` (6.1) |
+| 22 | covered | `just deps-check`; `cargo tree -p content-policy` shows no PDF crate and no `gix` by default |
+| 23 | covered | `normalized::tests::identity_*`, `renewal::renewal_keeps_the_policy_identity`, `file_changed::identity_includes_the_path_and_property_but_not_the_fingerprint` |
+| 24 | covered | `content-policy-cli check::{key,default_policy,date_property}_{built_in_value…,environment_variable_overrides…,flag_overrides…}`, `renew::renew_reads_the_shared_configuration` |
+| 25 | covered | `content-policy-cli renew::the_preview_labels_a_first_capture_new_baseline_and_writes_nothing`, `json_output_is_the_plan_alone`, `nothing_to_renew_is_not_an_error` |
+| 26 | covered | `evaluation::a_dotted_reference_is_rejected_even_when_the_literal_key_exists` |
+| 27 | covered | `biscuit-file` `yaml::analyze::tests::tab_indentation::*`; `darkmatter::l1 tab_indentation_repair_parity::*`; `evaluation::tab_indented_frontmatter_is_evaluated_with_a_warning`, `unquoted_templates_are_rejected_with_the_reason`; `renewal::tab_indented_frontmatter_lists_and_applies_the_repair`; `content-policy-cli check::tab_indented_frontmatter_reports_a_status_and_a_warning`, `renew::the_tab_repair_is_listed_separately_and_applied_with_write` |
+| 28 | covered | `evaluation::a_clip_chomped_block_scalar_as_the_last_key_reads_like_darkmatter`, `reader::tests::clip_chomped_block_scalar_as_last_key_has_no_trailing_newline` |
+| 29 | covered | `biscuit-file` `yaml::analyze::tests::scan::*zero_indent*`, `yaml::analyze::tests::locate::*` (multi-line `None`, anchor/tag/alias); `renewal::spike_matrix_accepted_shapes` ("zero-indent list") |
+| 30 | covered | `renewal::darkmatter_comparison_table`, `mixed_line_endings_are_kept_per_line` |
+| 31 | covered | `renewal::refused_shapes_name_their_reason`, `renew::tests::a_span_that_does_not_decode_to_the_parsed_value_is_refused`, `the_safety_net_refuses_a_corrupted_edit` |
+| 32 | covered | `file_changed::every_rejected_lexical_path_form_is_a_validation_error`; `file_adapter::*` resolution rows (listed in the Phase 5 map); `content-policy-cli file_changed::the_boundary_depends_on_the_starting_directory_outside_a_repository` |
+| 33 | covered | `file_changed::a_path_containing_a_comma_or_a_closing_parenthesis_is_a_validation_error`, `a_quoted_rule_whose_path_holds_a_yaml_trap_evaluates` |
+
+#### Robustness smell grep (re-run)
+
+`content-policy/lib/src`: no `#[serde(default)]`, no `filter_map(`, and no
+`Option<Option<…>>` (absent versus null is distinguished on raw
+`serde_json::Value`s, never through `Option<T>`). Four hits remain, each
+justified:
+
+- `file_adapter.rs` `strip_prefix(..).ok()`: package-area discovery, not a
+  parse; a base outside the root has no area, which is correct.
+- `grammar.rs` `classify_date`: `parse_from_str(..).ok()` maps a failed parse
+  to `DateText::NotADate`, which becomes an invalid-date diagnostic. The
+  failure is reported, not dropped.
+- `renew.rs` `.unwrap_or_default()` on the record: only reached for
+  `ReadOutcome::NoFrontmatter`, the documented "no frontmatter means an empty
+  record under the default policy" case (AC 19).
+- `renew.rs` `inline_date`: `.ok()?` locates an inline date that evaluation
+  has already validated, one step earlier in the same plan.
+
+#### Docs and comments
+
+- No `docs/` page, README, or the new skill names this spec or
+  `2026-09-28-recursive-schema-types`. (The skill's first draft named the
+  dependency; it now states the limit instead.)
+- Remaining **planned** markers describe undelivered behavior only: the
+  base-schema line (6.1) and the future package, symbol, and web providers.
+- **Drift found and fixed (code taken as correct):**
+  `docs/topics/policy-lifecycle.md` said Darkmatter's effect writes bump
+  `last_updated` and that "all three" writers stamp the UTC date. In code
+  (`darkmatter/lib/src/effects/verbs.rs`, `save`) the effect writer calls
+  `plan_hash_save(None, …)`, whose first-baseline branch always returns
+  `bump_last_updated: false`, so `last_updated` is never written there. The
+  page now names `md hash --save` and Claudine's write-back as the two writers
+  and says effect writes renew nothing. The README did not repeat the claim.
+- Rustdoc: no stale "planned", "TODO", phase, or "not yet" wording in
+  `content-policy/lib/src` or `cli/src`. No symbol's behavior changed in this
+  phase, so no other rustdoc needed an edit.
+- Spec frontmatter: `status: implemented`, `implemented_by: claude/opus`,
+  `implemented: true`. Stopped at "implementation complete, ready for
+  review"; the spec was not moved and `just complete` was not run.
