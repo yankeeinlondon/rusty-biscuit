@@ -353,6 +353,15 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   `claudine/features/_completed/2026-07-02-provider-metadata/spike-local-runners.md`.
   For runner-specific depth, prefer the **local-llm-runners** skill (distilled tables);
   the research docs remain the source of truth.
+- `reasoning-level/` — how each provider lets a caller choose how much reasoning a
+  model applies: the levels as the provider spells them, every control that chooses
+  one (with exact launch arguments), which models accept which levels, what happens
+  to a level the provider does not accept, and where a run records the level it
+  used. The first topic written to the narrow-contract standard: the contract is
+  `_schema.yaml` plus named types in `_types.yaml`, shared types live in
+  `claudine/docs/research/_types.yaml`, every property carries a description, and
+  the fleet prompt validates the document in its `success` event and retries a
+  rejected document once. Not yet read by the generator.
 - `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
   authored (every live topic directory carries a `_schema.yaml` sidecar as of
   2026-07-03, including `mcp/`, `acp/`, `hooks/`, `resume/`, `skills/`,
