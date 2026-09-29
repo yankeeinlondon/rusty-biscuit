@@ -631,24 +631,8 @@ fn pre_validate_with_origin(
         });
     }
 
-    let caller_resolved_eager_files: std::collections::HashSet<_> = file_ref_fallback_dir
-        .zip(set_overrides.as_ref().and_then(serde_json::Value::as_object))
-        .map(|(fallback, overrides)| {
-            report
-                .problems
-                .iter()
-                .filter(|problem| {
-                    matches!(problem.code, ValidationProblemCode::InvalidFileReference)
-                })
-                .filter_map(|problem| top_level_pointer_segment(&problem.path))
-                .filter(|property| {
-                    overrides.get(property).is_some_and(|value| {
-                        file_override_resolves_from(value, fallback)
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let caller_resolved_eager_files =
+        caller_resolved_file_properties(&report.problems, set_overrides.as_ref(), file_ref_fallback_dir);
 
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
     // whose raw value contains template syntax, because Darkmatter may
@@ -950,6 +934,34 @@ fn drop_invalid_optionals_with_origin(
     }
 
     (source, set_overrides, dropped)
+}
+
+/// The top-level properties whose file-reference verdict is on a caller
+/// override that resolves from the caller's launch area.
+///
+/// The validator judges every value from the document's directory; a caller
+/// value resolves from where the caller launched, so such a verdict is about
+/// the wrong base and must not be shown or enforced as invalid.
+pub(super) fn caller_resolved_file_properties(
+    problems: &[ValidationProblem],
+    overrides: Option<&serde_json::Value>,
+    launch_area: Option<&std::path::Path>,
+) -> std::collections::HashSet<String> {
+    let Some((launch_area, overrides)) =
+        launch_area.zip(overrides.and_then(serde_json::Value::as_object))
+    else {
+        return std::collections::HashSet::new();
+    };
+    problems
+        .iter()
+        .filter(|problem| matches!(problem.code, ValidationProblemCode::InvalidFileReference))
+        .filter_map(|problem| top_level_pointer_segment(&problem.path))
+        .filter(|property| {
+            overrides
+                .get(property)
+                .is_some_and(|value| file_override_resolves_from(value, launch_area))
+        })
+        .collect()
 }
 
 fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path) -> bool {

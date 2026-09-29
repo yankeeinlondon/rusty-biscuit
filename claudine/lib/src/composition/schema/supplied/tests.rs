@@ -376,3 +376,86 @@ fn undecided_union_leaves_a_resolvable_literal_alone() {
     );
     assert!(pending.is_empty(), "{pending:?}");
 }
+
+/// An existing caller file selects the arm whose contested `spec` glob admits
+/// it, and that arm alone drives completion of a sibling partial.
+#[test]
+fn an_existing_file_selects_the_arm_whose_contested_glob_admits_it() {
+    let dir = tempfile::tempdir().unwrap();
+    for tree in ["features", "fixes"] {
+        std::fs::create_dir_all(dir.path().join(tree).join("x")).unwrap();
+        std::fs::write(dir.path().join(tree).join("x/spec.md"), "# Spec\n").unwrap();
+    }
+    let path = dir.path().join("prompt.md");
+    std::fs::write(
+        &path,
+        "---\n\
+         $schema:\n\
+         \x20 - spec: 'file(required;eager;match(**/features/**/spec.md))'\n\
+         \x20   plan: 'file(required;eager;match(**/features/**/plan.md))'\n\
+         \x20 - spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n\
+         \x20   plan: 'file(required;eager;match(**/fixes/**/plan.md))'\n\
+         ---\nbody\n",
+    )
+    .unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let context = FileResolutionContext::new(dir.path());
+    for (tree, expected) in [
+        ("fixes", "**/fixes/**/plan.md"),
+        ("features", "**/features/**/plan.md"),
+    ] {
+        let records = CallerInputLayers::from_caller_overrides(
+            Some(json!({"spec": format!("{tree}/x/spec.md"), "plan": "partial"})),
+            context.clone(),
+        )
+        .caller_input_records;
+        let pending = unresolved_supplied_files(&source, &records, &context.for_source(&path));
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        let CompositionError::UnresolvedFileReference { property, patterns, .. } =
+            &pending[0].error
+        else {
+            panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
+        };
+        assert_eq!(property, "plan");
+        assert_eq!(patterns, &vec![expected.to_string()], "spec in {tree}");
+    }
+}
+
+/// A partial names no file yet, so it rules no arm out: a settled arm keeps
+/// its own glob, and an undecided union still merges both (ruling D1).
+#[test]
+fn a_partial_never_rules_a_contested_arm_out() {
+    let settled = format!(
+        "{}kind: fix\n---\nbody\n",
+        two_tree_union(FEATURES_SPEC, FIXES_SPEC).trim_end_matches("---\nbody\n")
+    );
+    let pending = pending_for(&settled, json!({"spec": "cli"}));
+    let CompositionError::UnresolvedFileReference { patterns, .. } = &pending[0].error else {
+        panic!("expected UnresolvedFileReference, got {:?}", pending[0].error);
+    };
+    assert_eq!(patterns, &vec!["**/fixes/**/spec.md".to_string()]);
+}
+
+/// The late verdict offers only the settled arm's candidates: a file from the
+/// other arm's tree would fail the settled arm's contested glob.
+#[test]
+fn late_verdict_on_a_settled_union_completes_against_that_arm_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("prompt.md");
+    let settled = format!(
+        "{}kind: fix\n---\nbody\n",
+        two_tree_union(FEATURES_SPEC, FIXES_SPEC).trim_end_matches("---\nbody\n")
+    );
+    std::fs::write(&path, settled).unwrap();
+    let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
+    let error = super::super::pre_validate_schema(
+        &source,
+        Some(&json!({"spec": "cli"})),
+        Some(dir.path()),
+    )
+    .unwrap_err();
+    let CompositionError::UnresolvedFileReference { patterns, .. } = error else {
+        panic!("expected UnresolvedFileReference, got {error:?}");
+    };
+    assert_eq!(patterns, vec!["**/fixes/**/spec.md".to_string()]);
+}

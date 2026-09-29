@@ -1849,12 +1849,11 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
 
         // Control: a resolvable literal passes the early check and runs
         // `initialize`, so the check below is the only thing that stops it.
-        // The path is absolute because a root union still judges a relative
-        // caller path from the document's directory once it picks an arm.
-        let spec = fixture.cwd().canonicalize().unwrap().join("features/2026-06-30-style/spec.md");
+        // The path is relative to the launch directory, which the document's
+        // `prompts/` directory is not.
         let output = fixture
             .command()
-            .args(["compose", "--goose", "prompts/plan.md", &format!("spec={}", spec.display())])
+            .args(["compose", "--goose", "prompts/plan.md", "spec=features/2026-06-30-style/spec.md"])
             .output()
             .unwrap();
         let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
@@ -1881,4 +1880,123 @@ fn compose_unresolved_caller_file_fails_before_initialize_when_non_interactive()
         assert!(!events.exists(), "{label}: initialize must not run; stderr:\n{plain}");
         assert!(!count_path.exists(), "{label}: no provider should launch; stderr:\n{plain}");
     }
+}
+
+/// A caller's file value resolves from the launch directory whatever the
+/// schema shape: a single schema, a root union whose discriminator is settled,
+/// and one whose arms both accept the value, each outside and inside a Git
+/// repository, with the path spelled relative and absolute.
+///
+/// The document lives in `prompts/`, which holds no `fixes/` tree, so a value
+/// judged from the document's directory fails the run.
+#[cfg(unix)]
+#[test]
+fn compose_caller_file_resolves_from_the_launch_directory_for_every_schema_shape() {
+    let (fixture, count_path, _events) = caller_file_fixture("compose-caller-file-shapes");
+    let spec = fixture.cwd().join("fixes/x/spec.md");
+    fs::create_dir_all(spec.parent().unwrap()).unwrap();
+    fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
+    let prompts = fixture.cwd().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    let union = concat!(
+        "$schema:\n",
+        "  - kind: 'literal(feature)'\n",
+        "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
+        "  - kind: 'literal(fix)'\n",
+        "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
+    );
+    let shapes = [
+        ("single schema", "$schema:\n  spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n".to_string()),
+        ("union with a settled discriminator", format!("{union}kind: fix\n")),
+        ("undecided union", union.to_string()),
+    ];
+    let absolute = fixture.cwd().canonicalize().unwrap().join("fixes/x/spec.md");
+
+    for repository in ["outside a repository", "inside a repository"] {
+        if repository == "inside a repository" {
+            fixture.initialize_repository();
+        }
+        for (shape, schema) in &shapes {
+            fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
+            for value in ["fixes/x/spec.md".to_string(), absolute.display().to_string()] {
+                let output = fixture
+                    .command()
+                    .args(["compose", "--goose", "prompts/plan.md", &format!("spec={value}")])
+                    .env("COLUMNS", "1000")
+                    .output()
+                    .unwrap();
+                let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+                let label = format!("{shape}, {repository}, spec={value}");
+                assert!(output.status.success(), "{label}: should compose; stderr:\n{plain}");
+                assert!(count_path.exists(), "{label}: the provider should launch; stderr:\n{plain}");
+                fs::remove_file(&count_path).unwrap();
+            }
+        }
+    }
+}
+
+/// Ruling D1 through `claudine compose`: a file outside an arm's contested
+/// `match` glob rules that arm out, while a single schema's glob only suggests.
+///
+/// Only the `fix` arm requires `severity`, so an undecided union that fails on
+/// a missing `severity` for a `fixes/…` path proves the `feature` arm, which
+/// would otherwise accept it, was ruled out by its glob.
+#[cfg(unix)]
+#[test]
+fn compose_contested_file_match_selects_and_rejects_union_arms() {
+    let (fixture, count_path, _events) = caller_file_fixture("compose-contested-match");
+    for tree in ["features", "fixes"] {
+        let spec = fixture.cwd().join(tree).join("x/spec.md");
+        fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
+    }
+    let prompts = fixture.cwd().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    let union = concat!(
+        "$schema:\n",
+        "  - kind: 'literal(feature)'\n",
+        "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
+        "  - kind: 'literal(fix)'\n",
+        "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
+        "    severity: 'string(required)'\n",
+    );
+    let single = "$schema:\n  spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n".to_string();
+    let settled = format!("{union}kind: fix\nseverity: high\n");
+    let run = |schema: &str, args: &[&str]| {
+        fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
+        let _ = fs::remove_file(&count_path);
+        let output = fixture
+            .command()
+            .args(["compose", "--goose", "prompts/plan.md"])
+            .args(args)
+            .env("COLUMNS", "1000")
+            .output()
+            .unwrap();
+        let plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        (output.status.success() && count_path.exists(), plain)
+    };
+
+    for (label, schema, args) in [
+        ("single schema, matching path", single.as_str(), vec!["spec=fixes/x/spec.md"]),
+        ("single schema, path outside its glob", single.as_str(), vec!["spec=features/x/spec.md"]),
+        ("settled fix arm, fixes path", settled.as_str(), vec!["spec=fixes/x/spec.md"]),
+        ("undecided union, features path", union, vec!["spec=features/x/spec.md"]),
+        (
+            "undecided union, fixes path with severity",
+            union,
+            vec!["spec=fixes/x/spec.md", "severity=high"],
+        ),
+    ] {
+        let (launched, stderr) = run(schema, &args);
+        assert!(launched, "{label}: the provider should launch; stderr:\n{stderr}");
+    }
+
+    let (launched, stderr) = run(&settled, &["spec=features/x/spec.md"]);
+    assert!(!launched, "settled fix arm, features path: must not launch; stderr:\n{stderr}");
+    assert!(stderr.contains("match(**/fixes/**/spec.md)"), "stderr:\n{stderr}");
+
+    let (launched, stderr) = run(union, &["spec=fixes/x/spec.md"]);
+    assert!(!launched, "undecided union, fixes path: must not launch; stderr:\n{stderr}");
+    assert!(stderr.contains("severity"), "the fix arm applies; stderr:\n{stderr}");
+    assert!(!stderr.contains("match(**/"), "the feature arm is ruled out; stderr:\n{stderr}");
 }

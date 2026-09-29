@@ -695,9 +695,18 @@ runtime mutation, and sequence/task-authored values retain their own ownership
 and are not relabeled as caller input.
 
 Before frontmatter interpolation pass 1, Darkmatter applies the active
-document's effective schema to each caller record. Exactly one applicable file
-arm must be selected; ambiguous or unmatched unions remain the responsibility
-of normal schema validation. A selected local `file(eager)` value resolves from
+document's effective schema to each caller record. For a root union, the arm
+the caller's values apply to decides whether a property is a file. When no
+single arm applies, because several accept the values or none does, a caller
+property is still materialized if every contending arm declares it as the same
+kind of file: the value resolves from the caller origin whichever arm wins.
+With the two-arm `features`/`fixes` schema shown under
+[Provided Partial File References](#provided-partial-file-references),
+`spec=fixes/x/spec.md` typed at the repository root resolves from the root even
+though the prompt lives in `prompts/`. When the arms disagree (one declares
+`spec: string`, another `spec: file`) or one omits the property, it stays raw
+for normal schema validation, and the eager-file rewrite never re-anchors a
+raw caller value on the document. A selected local `file(eager)` value resolves from
 the caller origin and must identify an existing file. A selected non-recursive
 lazy `file` value binds to the first ordered, lexically normalized candidate
 from that same origin without checking whether it exists. Lazy HTTP(S)
@@ -827,7 +836,7 @@ When Interactive Mode is allowed, claudine first prints a per-property status re
 | `string` / `date` / `datetime` / `time` / `url` / `email` / `file` | text input with format hint |
 | `object`, `any`, property-level union, root-level union without projection | `UnsupportedInteractiveSchema` |
 
-Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
+Each widget renders inline, directly below the status report, in a viewport sized to its label, rows, and help hint (choosers show at most 8 terminal rows and scroll beyond that). None switches to the alternate screen, so earlier output stays in scrollback. Numeric inputs reprompt with an inline error on parse failure instead of aborting. Collected values feed back into the override set; composition re-runs with the new overrides before any provider session starts.
 
 ### Provided Partial File References
 
@@ -846,7 +855,7 @@ $schema:
 
 The `match(...)` glob is consulted **only after** literal path resolution fails, so valid explicit paths keep their existing behavior. Both required-eager and optional-eager file properties reach this resolution. Lazy file properties may name future output files and do not enter this early completion pass. Zero glob+substring matches, a declined confirmation (`n`/`Esc`), or a cancelled dialog or chooser (`Ctrl-C`) fall back to the original `no existing file matched reference` schema-validation error unchanged.
 
-Root-union schemas get the same completion. The caller's inputs first pick the arm they apply to; a sibling whose value is still a template (`doc: "{{spec || design}}"`) cannot rule an arm out, because composition may yet make it valid. When no single arm applies, completion still runs if **every** arm in contention declares the property as an eager `file(match)` of the same shape, because the file must exist whichever arm wins. The chooser then searches all of those arms' globs, de-duplicated in arm order, and the picked path settles the arm:
+Root-union schemas get the same completion. The caller's inputs first pick the arm they apply to; a sibling whose value is still a template (`doc: "{{spec || design}}"`) cannot rule an arm out, because composition may yet make it valid. When no single arm applies, completion still runs if **every** arm in contention declares the property as an eager `file(match)` of the same shape, because the file must exist whichever arm wins. The chooser then searches all of those arms' globs, de-duplicated in arm order:
 
 ```yaml
 $schema:
@@ -856,9 +865,20 @@ $schema:
     spec: 'file(required;eager;match(**/fixes/**/spec.md))'
 ```
 
-`spec=cli` lists matching specs from both trees; picking `fixes/…/spec.md` fails the first arm's `match`, so the `fix` arm applies. If any contending arm types the property differently (a `string`, a lazy `file`, `file[]` against `file`) or does not declare it, the pass stays out and the full verdict decides.
+`spec=cli` lists matching specs from both trees. The pick is a literal path, and the arms' globs then settle which arm applies: picking `fixes/…/spec.md` rules the `feature` arm out, so only the `fix` arm's requirements and types apply. The pick resolves from the launch directory, because both arms declare `spec` as an eager `file` (see [Caller File Provenance and Materialization](#caller-file-provenance-and-materialization)). If any contending arm types the property differently (a `string`, a lazy `file`, `file[]` against `file`) or does not declare it, the pass stays out and the full verdict decides.
 
-Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The glob compile and walk live in `claudine-cli`; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
+A glob decides between arms only where the arms disagree about it. In a root union whose arms declare the same property with different `match(...)` globs, an **existing** file outside an arm's glob rules that arm out, whether you typed the path, picked it in the chooser, or the document authored it. A single schema's glob, or one no other arm contests, still only suggests candidates:
+
+| Schema and input | Result |
+|---|---|
+| single schema `match(**/fixes/**/spec.md)`, `spec=features/x/spec.md` | accepted: the glob only suggests |
+| the union above with `kind: fix`, `spec=features/x/spec.md` | rejected: the path is outside the `fix` arm's `match(**/fixes/**/spec.md)` |
+| the union above, `spec=fixes/x/spec.md` | the `fix` arm applies |
+| the union above, `spec=features/x/spec.md` | the `feature` arm applies |
+
+A partial such as `cli` names no file yet, so it rules no arm out; a settled `kind: fix` still offers only the `fixes` tree. Paths are compared in `/` spelling relative to the launch directory, the same anchor the chooser walks, so every file the chooser offers is one its arm accepts. When the late verdict reports an unresolved value on a union whose literal discriminant is settled, the chooser searches only that arm's glob.
+
+Every report of an unresolved caller value names the directory that value was resolved from, which is the launch directory for `key=value`, not the prompt's directory. This holds for the verdict reached after `initialize` as well as for the early pass. When Interactive Mode is denied (not both stdin and stderr TTYs, `--silent`, etc.), the original error is preserved byte-for-byte so scripts and CI output are unaffected. The directory walk lives in `claudine-cli`, and the glob comparison is Darkmatter's `FileMatchGlobs`, the one validation uses; the library only classifies the failure into the typed `UnresolvedFileReference { property, provided, patterns }` signal and never gains a `globset`/`ignore` dependency.
 
 Supplied eager file inputs are resolved **before `initialize` consumes them**,
 including on a proxy target that first declares their file schema. Candidate
@@ -871,7 +891,8 @@ choose a file automatically; the usual TTY, configuration, and `--silent`
 gates still apply.
 
 For a root-level schema union, an arm is chosen after deferring existence
-checks on caller-supplied files and treating templated values as undecided.
+checks on caller-supplied files and treating templated values as undecided;
+an existing caller file outside a glob the arm contests rules it out.
 When exactly one arm applies, its declaration drives completion. When no arm
 applies, or several do, completion runs only through the merged-glob rule
 above; otherwise it defers to canonical preparation without guessing a file

@@ -2258,7 +2258,6 @@ dependencies = [
  "darkmatter-cli",
  "dirs",
  "expectrl",
- "globset",
  "ignore",
  "indexmap 2.14.0",
  "inquire",

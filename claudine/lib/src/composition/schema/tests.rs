@@ -1034,6 +1034,33 @@ fn status_report_marks_invalid_required_correctly() {
 }
 
 #[test]
+fn status_report_judges_a_caller_file_from_the_launch_area() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  spec: 'file(required;eager)'\n---\nbody\n",
+    );
+    let launch = TempDir::new().unwrap();
+    fs::create_dir_all(launch.path().join("fixes/x")).unwrap();
+    fs::write(launch.path().join("fixes/x/spec.md"), "# Spec\n").unwrap();
+
+    let state = |spec: &str| {
+        let overrides = serde_json::json!({ "spec": spec });
+        build_schema_status_report(&source, Some(&overrides), Some(launch.path()))
+            .unwrap()
+            .unwrap()
+            .required[0]
+            .state
+    };
+    assert_eq!(
+        state("fixes/x/spec.md"),
+        PropertyState::Valid,
+        "the document directory lacks the file; the launch area has it",
+    );
+    assert_eq!(state("fixes/y/spec.md"), PropertyState::Invalid);
+}
+
+#[test]
 fn status_report_overrides_supply_missing_required() {
     let dir = TempDir::new().unwrap();
     let source = make_source(

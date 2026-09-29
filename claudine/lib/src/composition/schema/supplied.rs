@@ -2,9 +2,11 @@
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::CallerInputRecords;
+use darkmatter::markdown::schemas::file_match::{contested_match_patterns, file_match_admits};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
+    select_literal_discriminant_arm,
 };
 
 use super::{
@@ -196,10 +198,17 @@ pub(super) fn unresolved_caller_file(
 /// The glob a validator's file-reference verdict on `name` is completed against.
 ///
 /// A single schema reads the property's own `file(match)` declaration. A root
-/// union reads every arm that declares `name` as a `file(match)`: one such arm
-/// is that arm's glob, and several merge by the D1 rule (arm order, then
-/// pattern order, de-duplicated) provided they agree on the array shape.
-pub(super) fn file_reference_target(effective: &EffectiveSchema, name: &str) -> Option<FileTarget> {
+/// union whose literal discriminant in `instance` settles one arm reads only
+/// that arm, because a file from another arm's glob would now be rejected by
+/// the settled arm's own. Otherwise it reads every arm that declares `name` as
+/// a `file(match)`: one such arm is that arm's glob, and several merge by the
+/// D1 rule (arm order, then pattern order, de-duplicated) provided they agree
+/// on the array shape.
+pub(super) fn file_reference_target(
+    effective: &EffectiveSchema,
+    name: &str,
+    instance: &serde_json::Value,
+) -> Option<FileTarget> {
     let file_atom = |shape: &SchemaShape| match shape.properties.get(name) {
         Some(PropertyDef::Single(atom)) => file_match_target(atom),
         _ => None,
@@ -207,6 +216,19 @@ pub(super) fn file_reference_target(effective: &EffectiveSchema, name: &str) -> 
     match effective.simplified.as_ref()? {
         SimplifiedSchema::Single(shape) => file_atom(shape),
         SimplifiedSchema::Union(arms) => {
+            let json_arms = effective
+                .json_schema
+                .get("anyOf")
+                .and_then(serde_json::Value::as_array)
+                .filter(|json_arms| json_arms.len() == arms.len());
+            if let Some(settled) = json_arms
+                .and_then(|json_arms| select_literal_discriminant_arm(json_arms, instance))
+            {
+                return match &arms[settled] {
+                    SchemaArm::Inline(shape) => file_atom(shape),
+                    SchemaArm::FileRef(_) => None,
+                };
+            }
             let mut merged: Option<FileTarget> = None;
             for target in arms.iter().filter_map(|arm| match arm {
                 SchemaArm::Inline(shape) => file_atom(shape),
@@ -288,10 +310,37 @@ fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> Str
 /// as opposed to a parse or resolution error that a glob walk cannot rescue.
 pub(super) const NO_MATCH: &str = "no existing file matched reference";
 
+/// Whether every existing caller file this arm declares falls inside the
+/// `match` glob the arm contests with its siblings.
+///
+/// Each arm is validated alone below, where Darkmatter cannot tell which of
+/// its globs discriminate, so the arm-level rule is applied here through the
+/// same judgment Darkmatter's validator makes: a value naming no existing file
+/// (a partial the chooser will complete) never rules an arm out.
+fn admits_contested_files(arms: &[SchemaArm], index: usize, records: &CallerInputRecords) -> bool {
+    records.iter().all(|(name, record)| {
+        let Some(patterns) = contested_match_patterns(arms, index, name) else {
+            return true;
+        };
+        let values: Vec<&str> = match record.raw() {
+            serde_json::Value::String(value) => vec![value.as_str()],
+            serde_json::Value::Array(values) => {
+                values.iter().filter_map(serde_json::Value::as_str).collect()
+            }
+            _ => Vec::new(),
+        };
+        values
+            .into_iter()
+            .all(|value| file_match_admits(value, patterns, record.origin()))
+    })
+}
+
 /// Decide which arms a caller's file inputs are judged against.
 ///
 /// A root union needs a unique applicable arm before its file metadata has
-/// meaning. Two relaxations apply when judging each arm. Existence is relaxed
+/// meaning. An existing caller file outside a glob the arm contests rules it
+/// out ([`admits_contested_files`]). Two relaxations apply when judging each
+/// arm. Existence is relaxed
 /// only for caller-owned files, because initialization still owns that verdict.
 /// A problem on a value that still needs composition (`{{…}}`/`$(…)`) is
 /// ignored, by the same rule the pre-validator uses, because composition may
@@ -322,7 +371,7 @@ fn supplied_file_arms<'a>(
     schema_source.frontmatter_mut().as_map_mut().shift_remove("$schema");
     let mut shapes = Vec::with_capacity(arms.len());
     let mut applicable = Vec::new();
-    for arm in arms {
+    for (index, arm) in arms.iter().enumerate() {
         let SchemaArm::Inline(shape) = arm else {
             return None;
         };
@@ -350,6 +399,9 @@ fn supplied_file_arms<'a>(
             .with_baseline(SimplifiedSchema::Single(relaxed))
             .ok()?;
         let projected = schemas.effective_for(&schema_source).ok()??;
+        if !admits_contested_files(arms, index, records) {
+            continue;
+        }
         let report = projected.validate(&candidate);
         if report
             .problems

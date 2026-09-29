@@ -565,6 +565,11 @@ fn union_partial_declined_or_cancelled_fails_before_the_provider_picker() {
     }
 }
 
+/// The D1 prompt body. `count` is authored as a number; the `features` arm
+/// types it `string` and the `fixes` arm `number`, so the composed text shows
+/// which arm coerced it.
+const FIX_ARM_BODY: &str = "count: 5\n---\nSpec document: {{spec}}\nCount is a number: {{ is_number(count) }}\n";
+
 /// R7.4 (ruling D1): arms discriminated by an optional `kind`, each declaring
 /// `spec` as an eager `file(match)` over its own tree. The chooser searches
 /// both trees, and picking the `fixes` spec composes under the `fixes` arm.
@@ -572,6 +577,10 @@ fn union_partial_declined_or_cancelled_fails_before_the_provider_picker() {
 /// With `initialize` the early supplied-file pass offers the chooser (the D1
 /// fallback); without it the pre-validator's union classification does. Both
 /// surfaces must agree.
+///
+/// Both arms accept the instance, so only the picked path's glob can select
+/// the `fixes` arm; its `number` typing of `count` is visible in the prompt
+/// the provider receives.
 #[test]
 fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes() {
     expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
@@ -591,14 +600,16 @@ fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes() {
         "$schema:\n",
         "  - kind: 'literal(feature)'\n",
         "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
+        "    count: 'string'\n",
         "  - kind: 'literal(fix)'\n",
         "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
+        "    count: 'number'\n",
     );
     let initialize = "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n";
 
     for (label, extra) in [("with initialize", initialize), ("without initialize", "")] {
         let md_file = fixture.cwd().join("plan.md");
-        fs::write(&md_file, format!("---\n{schema}{extra}---\nSpec document: {{{{spec}}}}\n")).unwrap();
+        fs::write(&md_file, format!("---\n{schema}{extra}{FIX_ARM_BODY}")).unwrap();
         let _ = fs::remove_file(&marker);
 
         let cmd = compose_command(&fixture, &md_file, "spec", "cli");
@@ -623,9 +634,73 @@ fn d1_union_chooser_lists_both_trees_and_the_fixes_pick_composes() {
             panic!("{label}: the fixes arm should validate and launch; transcript:\n{plain}")
         });
         assert!(
-            launched_with.contains("fixes/cli-switches/spec.md"),
-            "{label}: the provider should receive the fixes spec; stub saw:\n{launched_with}"
+            launched_with.contains("fixes/cli-switches/spec.md")
+                && launched_with.contains("Count is a number: true"),
+            "{label}: the provider should receive the fixes spec under the fixes arm; stub saw:\n{launched_with}"
         );
         assert!(!plain.contains("schema validation"), "{label}: composition should validate:\n{plain}");
     }
+}
+
+/// The D1 union again, but with the prompt in `prompts/`, no `initialize`,
+/// inside a Git repository: the chooser's pick resolves from the launch
+/// directory rather than the prompt's, its glob selects the `fixes` arm
+/// (visible in how `count` is coerced), and the run composes and launches.
+#[test]
+fn d1_union_chooser_pick_composes_for_a_prompt_outside_the_launch_directory() {
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let fixture = CliProcessFixture::named("level1-provided-partial-d1-prompts-dir");
+    fixture.initialize_repository();
+    let marker = fixture.cwd().join("launched.flag");
+    stage_recording_goose_stub(fixture.bin_dir(), &marker);
+    for spec in ["features/cli-colors/spec.md", "fixes/cli-switches/spec.md"] {
+        let path = fixture.cwd().join(spec);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "---\ntitle: Spec\n---\nSpec body.\n").unwrap();
+    }
+    let md_file = fixture.cwd().join("prompts/plan.md");
+    fs::create_dir_all(md_file.parent().unwrap()).unwrap();
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  - kind: 'literal(feature)'\n",
+            "    spec: 'file(required;eager;match(**/features/**/spec.md))'\n",
+            "    count: 'string'\n",
+            "  - kind: 'literal(fix)'\n",
+            "    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n",
+            "    count: 'number'\n",
+        ).to_string()
+            + FIX_ARM_BODY,
+    )
+    .unwrap();
+
+    let cmd = compose_command(&fixture, &md_file, "spec", "cli");
+    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
+
+    let pre = wait_for_marker(&mut session, "Enter=Submit", Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    let plain = common::strip_ansi(&pre);
+    assert!(
+        plain.contains("features/cli-colors/spec.md") && plain.contains("fixes/cli-switches/spec.md"),
+        "the chooser should list a match from each tree; transcript:\n{plain}"
+    );
+
+    // Path order puts `features/…` first; `j` moves to `fixes/…`.
+    session.write_all(b"j\r").expect("pick the fixes spec");
+    session.flush().ok();
+    let transcript = drain_until(&mut session, pre, Duration::from_secs(15), || marker.exists());
+    let plain = common::strip_ansi(&transcript);
+
+    let launched_with = fs::read_to_string(&marker).unwrap_or_else(|_| {
+        panic!("the picked spec should compose and launch; transcript:\n{plain}")
+    });
+    assert!(
+        launched_with.contains("fixes/cli-switches/spec.md")
+            && launched_with.contains("Count is a number: true"),
+        "the provider should receive the fixes spec under the fixes arm; stub saw:\n{launched_with}"
+    );
+    assert!(!plain.contains("schema validation"), "composition should validate:\n{plain}");
 }
