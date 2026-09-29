@@ -23,6 +23,7 @@ mod jit;
 mod phase1c;
 mod report;
 mod resolve;
+mod review;
 mod task_frames;
 mod task_run;
 

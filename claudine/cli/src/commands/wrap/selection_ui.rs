@@ -554,4 +554,30 @@ mod tests {
             Some(&CellValue::StaticText("2 Step 2".into()))
         );
     }
+
+    /// Rows for a filtered subset keep each step's original one-based
+    /// position, not the row number.
+    #[test]
+    fn filtered_drafts_keep_original_step_positions() {
+        let plan = SequenceStepDraft {
+            step_index: 0,
+            step_name: "plan".into(),
+            ..make_draft(Provider::Claude, false, false, None)
+        };
+        let lint = SequenceStepDraft {
+            step_index: 3,
+            step_name: "lint".into(),
+            ..make_draft(Provider::Claude, false, false, None)
+        };
+        let catalog = ModelCatalogService::new();
+        let rows = build_initial_rows(&[plan, lint], &catalog);
+        let labels: Vec<_> = rows.iter().map(|row| row.get("step").cloned()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                Some(CellValue::StaticText("1 plan".into())),
+                Some(CellValue::StaticText("4 lint".into())),
+            ]
+        );
+    }
 }
