@@ -329,7 +329,6 @@ fn test_hash_save_failure_does_not_modify_flow_mapping() {
 }
 
 #[test]
-#[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: node-property refusal"]
 fn test_hash_save_refuses_anchored_last_updated_without_writing() {
     let fixture = CliProcessFixture::named(
         "hash-kind-save-diff-test-hash-save-refuses-anchored-last-updated-without-writing",

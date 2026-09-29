@@ -246,15 +246,27 @@ fn semantic_frontmatter_delta(
 /// Applies a hash-save decision directly to authored Markdown source.
 ///
 /// Only the complete top-level node named by [`MdHashOptions::property`] and,
-/// when requested by the decision, the `last_updated` scalar are changed. The
-/// document newline style and all other frontmatter and body bytes are retained.
-/// A document without frontmatter gains a minimal frontmatter block.
+/// when requested by the decision, the `last_updated` scalar are changed. Every
+/// other frontmatter and body byte is retained, including each line's own
+/// terminator:
+///
+/// - a rewritten line keeps its original LF, CRLF, or lone-CR terminator; when
+///   the replacement `hash` node has more lines than the original, each extra
+///   line repeats the terminator of the line before it;
+/// - an inserted property takes the terminator of the line it follows;
+/// - a document without frontmatter gains a minimal block terminated like the
+///   document's first line (LF when it has none), placed after a leading BOM.
+///
+/// An empty `last_updated:` is written as `last_updated: {today}`, keeping any
+/// authored comment. The rewritten frontmatter is parsed before it is returned.
 ///
 /// ## Errors
 ///
-/// Returns [`MarkdownError::FrontmatterTextEdit`] when the YAML root is not a
-/// supported block mapping, a managed semantic key occurs more than once, or a
-/// managed node cannot be replaced without ambiguity.
+/// Returns [`MarkdownError::FrontmatterTextEdit`], and no text, when the YAML
+/// root is not a supported block mapping; a managed semantic key occurs more
+/// than once; a managed node cannot be replaced without ambiguity; a date bump
+/// meets a `last_updated` that is a block or flow collection or carries an
+/// anchor, alias, or tag; or the rewritten frontmatter does not parse.
 pub fn apply_hash_save_text(
     document_text: &str,
     decision: &SaveDecision,
@@ -264,47 +276,38 @@ pub fn apply_hash_save_text(
     let Some(new_stored) = decision.new_stored.as_ref() else {
         return Ok(None);
     };
+    let hash_value = new_stored.to_frontmatter_value();
 
-    let newline = detect_newline(document_text);
     let Some(extraction) = extract_frontmatter_block(document_text)? else {
-        let hash_entry = serialize_entry(
-            &options.property,
-            &new_stored.to_frontmatter_value(),
-            newline,
-        )?;
-        let mut block = format!("---{newline}{hash_entry}");
+        let newline = new_block_terminator(document_text);
+        let mut yaml = apply_terminators(&serialize_entry(&options.property, &hash_value)?, &[newline]);
         if decision.bump_last_updated {
-            block.push_str(&format!("{LAST_UPDATED_KEY}: {today}{newline}"));
+            yaml.push_str(&format!("{LAST_UPDATED_KEY}: {today}{newline}"));
         }
-        block.push_str("---");
-        block.push_str(newline);
-        block.push_str(document_text);
-        return Ok(Some(block));
+        return validated(new_frontmatter_block(document_text, &yaml)).map(Some);
     };
 
     validate_block_mapping(extraction.yaml)?;
     let mut updated = document_text.to_string();
     let hash_node = locate_node(extraction.yaml, &options.property)?;
-    let replacement = match hash_node.as_ref() {
-        Some(node) => serialize_existing_entry(
-            &extraction.yaml[node.range.clone()],
-            node,
-            &new_stored.to_frontmatter_value(),
-            newline,
-        )?,
-        None => serialize_entry(
-            &options.property,
-            &new_stored.to_frontmatter_value(),
-            newline,
-        )?,
-    };
-
     match hash_node {
         Some(node) => {
+            let node_text = &extraction.yaml[node.range.clone()];
+            let replacement = apply_terminators(
+                &serialize_existing_entry(node_text, &node, &hash_value)?,
+                &line_terminators(node_text),
+            );
             let range = absolute_range(&extraction.yaml_span, node.range);
             updated.replace_range(range, &replacement);
         }
-        None => updated.insert_str(extraction.yaml_span.end, &replacement),
+        None => {
+            let insert_at = extraction.yaml_span.end;
+            let replacement = apply_terminators(
+                &serialize_entry(&options.property, &hash_value)?,
+                &[preceding_terminator(document_text, insert_at)],
+            );
+            updated.insert_str(insert_at, &replacement);
+        }
     }
 
     if decision.bump_last_updated {
@@ -315,20 +318,52 @@ pub fn apply_hash_save_text(
         match last_updated {
             Some(node) => {
                 let node_text = &refreshed.yaml[node.range.clone()];
-                let replacement = rewrite_date_scalar(node_text, &node, today, newline)?;
+                let replacement = rewrite_date_scalar(node_text, &node, today)?;
                 let range = absolute_range(&refreshed.yaml_span, node.range);
                 if updated[range.clone()] != replacement {
                     updated.replace_range(range, &replacement);
                 }
             }
-            None => updated.insert_str(
-                refreshed.yaml_span.end,
-                &format!("{LAST_UPDATED_KEY}: {today}{newline}"),
-            ),
+            None => {
+                let insert_at = refreshed.yaml_span.end;
+                let newline = preceding_terminator(&updated, insert_at);
+                updated.insert_str(insert_at, &format!("{LAST_UPDATED_KEY}: {today}{newline}"));
+            }
         }
     }
 
-    Ok(Some(updated))
+    validated(updated).map(Some)
+}
+
+/// Returns `document` when its frontmatter still parses after an edit.
+fn validated(document: String) -> MarkdownResult<String> {
+    match parse_text_frontmatter(&document) {
+        Ok(_) => Ok(document),
+        Err(error) => Err(text_edit_error(format!(
+            "rewritten frontmatter did not parse: {error}"
+        ))),
+    }
+}
+
+/// Prepends a frontmatter block holding `yaml` (already terminated) to a
+/// document that has none, keeping a leading BOM first.
+fn new_frontmatter_block(document: &str, yaml: &str) -> String {
+    let (bom, rest) = match document.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", document),
+    };
+    let newline = new_block_terminator(rest);
+    format!("{bom}---{newline}{yaml}---{newline}{rest}")
+}
+
+/// The terminator of a new block's lines: the document's first line
+/// terminator, or LF when the document has none.
+fn new_block_terminator(document: &str) -> &str {
+    line_spans(document)
+        .first()
+        .map(|line| &document[line.content_end..line.end])
+        .filter(|terminator| !terminator.is_empty())
+        .unwrap_or("\n")
 }
 
 /// One step of a path from the frontmatter root to a value.
@@ -552,7 +587,7 @@ pub fn locate_frontmatter_leaves(
         if !matches!(located.kind, SchemaValueKind::Scalar) || located.span.is_empty() {
             return fail(UnlocatedLeafReason::UnsupportedShape);
         }
-        if matches!(document.as_bytes()[located.span.start], b'&' | b'*' | b'!') {
+        if leading_node_property(&document.as_bytes()[located.span.start..]).is_some() {
             return fail(UnlocatedLeafReason::NodeProperties);
         }
         let Some((scalar, end)) = decode_scalar_node(prefix, located.span.start, parent_indent)
@@ -806,62 +841,131 @@ fn parse_semantic_key(raw: &str) -> MarkdownResult<String> {
     }
 }
 
-fn serialize_entry(
-    key: &str,
-    value: &serde_json::Value,
-    newline: &str,
-) -> MarkdownResult<String> {
+/// Serializes one `key: value` entry with LF terminators.
+fn serialize_entry(key: &str, value: &serde_json::Value) -> MarkdownResult<String> {
     let mut map = indexmap::IndexMap::new();
     map.insert(key.to_string(), value);
-    let serialized = serde_yaml_ng::to_string(&map)
-        .map_err(|error| text_edit_error(format!("managed value could not be serialized: {error}")))?;
-    Ok(serialized.replace('\n', newline))
+    serde_yaml_ng::to_string(&map)
+        .map_err(|error| text_edit_error(format!("managed value could not be serialized: {error}")))
 }
 
+/// Serializes `value` under the authored key spelling of an existing node,
+/// with LF terminators.
 fn serialize_existing_entry(
     node_text: &str,
     node: &TextNode,
     value: &serde_json::Value,
-    newline: &str,
 ) -> MarkdownResult<String> {
     let key_end = node.key_end - node.range.start;
     let key_source = &node_text[..key_end];
-    let canonical = serialize_entry("managed", value, newline)?;
+    let canonical = serialize_entry("managed", value)?;
     let colon = mapping_colon(canonical.lines().next().unwrap_or_default())
         .ok_or_else(|| text_edit_error("serialized managed value did not contain a mapping key"))?;
     Ok(format!("{key_source}{}", &canonical[colon..]))
 }
 
-fn rewrite_date_scalar(
-    node_text: &str,
-    node: &TextNode,
-    today: &str,
-    newline: &str,
-) -> MarkdownResult<String> {
-    if node.range.end > node.first_line_end {
-        return Err(text_edit_error("`last_updated` must be a scalar value"));
+/// The terminator of every line in `text`, in order (blank and comment lines
+/// included); an unterminated final line contributes `""`.
+fn line_terminators(text: &str) -> Vec<&str> {
+    line_spans(text)
+        .into_iter()
+        .map(|line| &text[line.content_end..line.end])
+        .collect()
+}
+
+/// Re-terminates LF-terminated `serialized` output line by line: line *i*
+/// takes `terminators[i]`, and a line past the end of `terminators` (or whose
+/// original was unterminated) repeats the previous line's terminator.
+fn apply_terminators(serialized: &str, terminators: &[&str]) -> String {
+    let mut out = String::with_capacity(serialized.len() + terminators.len());
+    let mut previous = "\n";
+    for (index, line) in serialized.split_inclusive('\n').enumerate() {
+        let Some(content) = line.strip_suffix('\n') else {
+            out.push_str(line);
+            break;
+        };
+        if let Some(terminator) = terminators.get(index).filter(|terminator| !terminator.is_empty()) {
+            previous = terminator;
+        }
+        out.push_str(content);
+        out.push_str(previous);
     }
-    let content_end = node_text
-        .strip_suffix(newline)
-        .map_or(node_text.len(), str::len);
-    let line = &node_text[..content_end];
+    out
+}
+
+/// The terminator of the line ending at `insert_at`, or LF at the start of
+/// `document`.
+fn preceding_terminator(document: &str, insert_at: usize) -> &'static str {
+    let before = &document.as_bytes()[..insert_at];
+    if before.ends_with(b"\r\n") {
+        "\r\n"
+    } else if before.ends_with(b"\r") {
+        "\r"
+    } else {
+        "\n"
+    }
+}
+
+/// The YAML node property (`anchor`, `alias`, or `tag`) that `value` starts
+/// with, if any.
+fn leading_node_property(value: &[u8]) -> Option<&'static str> {
+    match value.first() {
+        Some(b'&') => Some("anchor"),
+        Some(b'*') => Some("alias"),
+        Some(b'!') => Some("tag"),
+        _ => None,
+    }
+}
+
+/// Rewrites a single-line `last_updated` node to `today`, keeping its authored
+/// key, spacing, quote style, comment, and terminator.
+fn rewrite_date_scalar(node_text: &str, node: &TextNode, today: &str) -> MarkdownResult<String> {
+    if node.range.end > node.first_line_end {
+        return Err(text_edit_error(format!("`{LAST_UPDATED_KEY}` must be a scalar value")));
+    }
+    let (line, terminator) = match line_spans(node_text).first() {
+        Some(span) => (
+            &node_text[..span.content_end],
+            &node_text[span.content_end..span.end],
+        ),
+        None => (node_text, ""),
+    };
     let colon = node.key_end - node.range.start;
+    let key = &line[..=colon];
     let after_colon = &line[colon + 1..];
     let leading_len = after_colon.len() - after_colon.trim_start().len();
     let leading = &after_colon[..leading_len];
     let value_and_comment = &after_colon[leading_len..];
+    if let Some(property) = leading_node_property(value_and_comment.as_bytes()) {
+        return Err(text_edit_error(format!(
+            "`{LAST_UPDATED_KEY}` uses a YAML {property}; replacing it would change other values"
+        )));
+    }
+    if value_and_comment.starts_with(['[', '{']) {
+        return Err(text_edit_error(format!("`{LAST_UPDATED_KEY}` must be a scalar value")));
+    }
     let comment_start = yaml_comment_start(value_and_comment).unwrap_or(value_and_comment.len());
     let old_value = value_and_comment[..comment_start].trim_end();
+
+    // An empty value is null by absence: write one space before the date, and
+    // move the authored run before a comment behind the date so `#` never
+    // touches it.
+    if old_value.is_empty() {
+        let comment = &value_and_comment[comment_start..];
+        if comment.is_empty() {
+            return Ok(format!("{key} {today}{terminator}"));
+        }
+        let spacing = if leading.is_empty() { " " } else { leading };
+        return Ok(format!("{key} {today}{spacing}{comment}{terminator}"));
+    }
+
     let comment_prefix = &value_and_comment[old_value.len()..];
     let rendered = match old_value.as_bytes().first() {
         Some(b'\'') => format!("'{today}'"),
         Some(b'"') => format!("\"{today}\""),
         _ => today.to_string(),
     };
-    Ok(format!(
-        "{}{leading}{rendered}{comment_prefix}{newline}",
-        &line[..=colon]
-    ))
+    Ok(format!("{key}{leading}{rendered}{comment_prefix}{terminator}"))
 }
 
 fn yaml_comment_start(value: &str) -> Option<usize> {
@@ -1449,13 +1553,6 @@ mod tests {
         }
     }
 
-    // Byte-fidelity coverage. An `#[ignore = "red until phase 2 ..."]` test
-    // pins behavior the writer does not have yet; phase 2 of
-    // `2026-09-28-hash-writer-byte-fidelity` removes each gate as it lands the
-    // fix. Confirm they fail for the expected reason with:
-    //
-    //     cargo nextest run -p darkmatter --lib --run-ignored only textual_save
-
     const CANONICAL_HASH: &str = "aaaa000000000000-bbbb000000000000";
     const TODAY: &str = "2026-09-28";
 
@@ -1555,7 +1652,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: empty date value"]
     fn textual_save_case1_empty_date_gets_one_space() {
         let source = "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated:\ntitle: x\n---\n";
         assert_eq!(
@@ -1565,7 +1661,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: empty date value"]
     fn textual_save_case1_empty_date_gets_one_space_crlf() {
         let source = "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated:\r\n---\r\n";
         assert_eq!(
@@ -1575,7 +1670,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: empty date value"]
     fn textual_save_case2_empty_date_keeps_comment_spacing() {
         let source = "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated:   # todo\n---\n";
         assert_eq!(
@@ -1585,7 +1679,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
     fn textual_save_case3_lf_date_line_in_crlf_file_keeps_lf() {
         let source = "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated: 2026-01-01\n---\r\nBody\r\n";
         assert_eq!(
@@ -1595,7 +1688,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
     fn textual_save_case4_lone_cr_terminators_survive() {
         let source = "---\rhash: aaaa000000000000-bbbb000000000000\rlast_updated: 2026-01-01\r---\rBody\r";
         assert_eq!(
@@ -1605,7 +1697,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: BOM stays first"]
     fn textual_save_case5_bom_stays_before_new_block() {
         let source = "\u{feff}# Title\n\nBody\n";
         assert_eq!(
@@ -1615,7 +1706,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: node-property refusal"]
     fn textual_save_case6_refuses_anchored_date() {
         let reason = assert_refused_canonical(
             "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: &lu 2026-01-01\nreviewed: *lu\n---\n",
@@ -1626,7 +1716,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: node-property refusal"]
     fn textual_save_refuses_aliased_tagged_and_bare_anchored_dates() {
         for (source, property) in [
             (
@@ -1649,6 +1738,25 @@ mod tests {
     }
 
     #[test]
+    fn textual_save_repeated_save_is_byte_stable() {
+        // Saving the written document again with the same decision reproduces
+        // it exactly, so terminators, spacing, and a BOM do not drift.
+        for source in [
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated:\ntitle: x\n---\n",
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated:   # todo\n---\n",
+            "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated: 2026-01-01\n---\r\nBody\r\n",
+            "---\rhash: aaaa000000000000-bbbb000000000000\rlast_updated: 2026-01-01\r---\rBody\r",
+            "\u{feff}# Title\n\nBody\n",
+            "---\nhash:\r\n  kind: structured\n  value: old\r\ntitle: x\r\n---\nBody\n",
+        ] {
+            let first = saved_canonical(source, true);
+            let second = saved_canonical(&first, true);
+            assert_eq!(second, first, "{source:?}");
+            assert_fidelity(source, &second, true);
+        }
+    }
+
+    #[test]
     fn textual_save_without_bump_ignores_date_node_properties() {
         // Only a date bump inspects `last_updated`; a hash-only save leaves an
         // anchored date and its alias untouched.
@@ -1660,7 +1768,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
     fn textual_save_inserted_date_inherits_preceding_terminator_in_mixed_file() {
         // An LF line before the insertion point in an otherwise CRLF file.
         assert_eq!(
@@ -1709,7 +1816,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
     fn textual_save_hash_only_multi_line_node_keeps_each_line_terminator() {
         // Same line count: line i keeps original line i's terminator.
         assert_eq!(
@@ -1735,7 +1841,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
     fn textual_save_lone_cr_hash_only_replacement() {
         assert_eq!(
             saved_canonical("---\rtitle: x\rhash: old\r---\rBody\r", false),
@@ -1772,7 +1877,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
     fn textual_save_new_block_uses_first_body_terminator() {
         assert_eq!(
             saved_canonical("# T\rBody\r", true),
@@ -1785,13 +1889,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: output validation"]
     fn textual_save_refuses_hash_replacement_that_orphans_an_alias() {
         assert_refused_canonical("---\nhash: &h old\nother: *h\n---\nBody\n", false);
     }
 
     #[test]
-    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: robustness matrix"]
     fn textual_save_last_updated_robustness_matrix() {
         const CONTROL: &str = concat!(
             "---\n",
@@ -1820,8 +1922,14 @@ mod tests {
         }
         use Outcome::{Date, Refused, Written};
 
-        let rows: [(&str, &str, &str, Outcome); 25] = [
+        let rows: [(&str, &str, &str, Outcome); 26] = [
             ("control", DATE_LINE, DATE_LINE, Date(BUMPED_LINE)),
+            (
+                "empty with trailing whitespace",
+                DATE_LINE,
+                "last_updated:   \n",
+                Date(BUMPED_LINE),
+            ),
             (
                 "absent",
                 DATE_LINE,
