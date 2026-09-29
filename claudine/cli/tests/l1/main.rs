@@ -114,6 +114,10 @@ mod prompt_guide_defects;
 mod lifecycle_set_shell_values;
 #[cfg(unix)]
 mod prompt_reporting;
+// Installs the `claudine-fake-pi` fixture binary, which only `test-fixtures`
+// builds.
+#[cfg(feature = "test-fixtures")]
+mod pi_managed_rpc;
 mod propagated_context_fixtures;
 mod prose_escape_guard;
 mod protect_cli;
