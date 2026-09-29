@@ -1,0 +1,41 @@
+adjacent-default: commits=2, step=34, dimensions=278.67285x65.31604, tag_collisions=1
+  A parents=[] tags=["feature/very-long-exact-branch-reference-alpha"]
+  B parents=["A"] tags=["origin/very-long-exact-branch-reference-beta"]
+  tag_box=("A", "feature/very-long-exact-branch-reference-alpha", -110.58203, -23.5, 120.08203, -8.5)
+  tag_box=("B", "origin/very-long-exact-branch-reference-beta", -62.59082, -23.5, 156.09082, -8.5)
+adjacent-spaced: commits=2, step=246.66406, dimensions=631.91016x65.31604, tag_collisions=0
+  A parents=[] tags=["feature/very-long-exact-branch-reference-alpha"]
+  B parents=["A"] tags=["origin/very-long-exact-branch-reference-beta"]
+  tag_box=("A", "feature/very-long-exact-branch-reference-alpha", -110.58203, -23.5, 120.08203, -8.5)
+  tag_box=("B", "origin/very-long-exact-branch-reference-beta", 150.07324, -23.5, 368.75488, -8.5)
+merge-default: commits=5, step=34, dimensions=318.07813x159.86285, tag_collisions=0
+  FORK parents=[] tags=[]
+  TIP parents=["FORK"] tags=["feature/merged-branch"]
+  PARENT parents=["FORK"] tags=[]
+  MERGE parents=["PARENT"] tags=["origin/main", "main-at-merge"]
+  AFTER parents=["MERGE"] tags=[]
+  tag_box=("TIP", "feature/merged-branch", -12.683594, 48.5, 106.18359, 63.5)
+  tag_box=("MERGE", "main-at-merge", 91.226074, -23.5, 170.27393, -8.5)
+  tag_box=("MERGE", "origin/main", 91.226074, -39.5, 170.27393, -24.5)
+merge-repaired: commits=5, step=134.86719, dimensions=822.41406x159.86285, tag_collisions=0
+  FORK parents=[] tags=[]
+  TIP parents=["FORK"] tags=["feature/merged-branch"]
+  PARENT parents=["FORK"] tags=[]
+  MERGE parents=["PARENT", "TIP"] tags=["origin/main", "main-at-merge"]
+  AFTER parents=["MERGE"] tags=[]
+  tag_box=("TIP", "feature/merged-branch", 88.18359, 48.5, 207.05078, 63.5)
+  tag_box=("MERGE", "main-at-merge", 393.82764, -23.5, 472.8755, -8.5)
+  tag_box=("MERGE", "origin/main", 393.82764, -39.5, 472.8755, -24.5)
+old-compressed-repaired: commits=8, step=152.42578, dimensions=1391.4844x165.25731, tag_collisions=0
+  FORK parents=[] tags=[]
+  +999 parents=["FORK"] tags=[]
+  TIP parents=["+999"] tags=["feature/old-merged-branch"]
+  +4999 parents=["FORK"] tags=[]
+  PARENT parents=["+4999"] tags=[]
+  MERGE parents=["PARENT", "TIP"] tags=["origin/main", "main-at-merge"]
+  +2999 parents=["MERGE"] tags=[]
+  NOW parents=["+2999"] tags=["main"]
+  tag_box=("TIP", "feature/old-merged-branch", 257.38867, 48.5, 393.81445, 63.5)
+  tag_box=("MERGE", "main-at-merge", 767.355, -23.5, 846.40283, -8.5)
+  tag_box=("MERGE", "origin/main", 767.355, -39.5, 846.40283, -24.5)
+  tag_box=("NOW", "main", 1110.5454, -23.5, 1144.9155, -8.5)

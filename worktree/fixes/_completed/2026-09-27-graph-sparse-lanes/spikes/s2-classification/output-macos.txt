@@ -1,0 +1,83 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.26s
+    Starting 1 test across 1 binary (122 tests skipped)
+       START [         ] (1/1) worktree-cli commands::git_graph::tests::spike_s2_observed_sparse_lanes_today
+S2 line feat/schema-enhancement: parent=None fork=Some("d2") merged_into=None tip=Some("389e3dc") entries=["+50", "a811c10", "5ddf29b", "4385291", "4002e8b", "389e3dc"]
+S2 line fix/wt-ux: parent=None fork=Some("M104") merged_into=None tip=Some("ff61ca9") entries=["+63", "49f02c6", "B1", "1e514f6", "d0063a1", "ff61ca9"]
+S2 line fix/sniff: parent=Some("fix/wt-ux") fork=Some("W1") merged_into=None tip=Some("51bfb8a") entries=["+89", "85b1c02", "34022b8", "7966e7a", "1bfaea2", "51bfb8a"]
+S2 default: ["a0f1d1e", "d2", "+3", "dfbdce6", "a91fbf0", "92d4328", "3102d9a", "f234565", "2658996", "d12", "M103", "d13", "M104"]
+S2 incomplete=true
+S2 classify [wt-ux, main] = Ok(IntegratedOtherwise { candidate: 0, first_parent: "49f02c6c0bb69c6e1f8aa14c72ef8491587e394d" })
+S2 classify [main] = Ok(MergedDirectly { candidate: 0, merge: "999032d8920ff3de2bb73d220ccec383c134e9a9", first_parent: "82ecff7c3af06d7d7826f15b125964de0eb0809d" })
+S2 classify [wt-ux] = Ok(IntegratedOtherwise { candidate: 0, first_parent: "49f02c6c0bb69c6e1f8aa14c72ef8491587e394d" })
+S2 merge_base(M104^1, tip) = W1 (W1? true)
+S2 MERMAID-BEGIN
+gitGraph
+    branch fix/sniff
+    checkout main
+    commit id: "a0f1d1e"
+    checkout fix/sniff
+    commit id: "+89" type: HIGHLIGHT
+    commit id: "85b1c02"
+    commit id: "34022b8"
+    commit id: "7966e7a"
+    commit id: "1bfaea2"
+    commit id: "51bfb8a"
+    checkout main
+    commit id: "12ee425"
+    branch feat/schema-enhancement
+    checkout feat/schema-enhancement
+    commit id: "+50" type: HIGHLIGHT
+    commit id: "a811c10"
+    commit id: "5ddf29b"
+    commit id: "4385291"
+    commit id: "4002e8b"
+    commit id: "389e3dc"
+    checkout main
+    commit id: "+3" type: HIGHLIGHT
+    commit id: "dfbdce6"
+    commit id: "a91fbf0"
+    commit id: "92d4328"
+    commit id: "3102d9a"
+    commit id: "f234565"
+    commit id: "2658996"
+    commit id: "5fb5502"
+    commit id: "f2a3857"
+    commit id: "82ecff7"
+    commit id: "999032d" tag: "main" tag: "origin/main"
+    branch fix/wt-ux
+    checkout fix/wt-ux
+    commit id: "+63" type: HIGHLIGHT
+    commit id: "49f02c6"
+    commit id: "b6d2e53"
+    commit id: "1e514f6"
+    commit id: "d0063a1"
+    commit id: "ff61ca9"
+    checkout main
+S2 MERMAID-END
+S2 plan 200x60: columns=193 rows=25 trimmed=20 incomplete=true step=81.05371 natural_width=1228.9033
+S2 PLANNED-BEGIN
+gitGraph
+    branch fix/sniff
+    checkout main
+    commit id: "a0f1d1e"
+    checkout fix/sniff
+    commit id: "+92" type: HIGHLIGHT
+    commit id: "1bfaea2"
+    commit id: "51bfb8a"
+    checkout main
+    commit id: "12ee425"
+    branch feat/schema-enhancement
+    checkout feat/schema-enhancement
+    commit id: "+54" type: HIGHLIGHT
+    commit id: "389e3dc"
+    checkout main
+    commit id: "+12" type: HIGHLIGHT
+    commit id: "999032d" tag: "main" tag: "origin/main"
+    branch fix/wt-ux
+    checkout fix/wt-ux
+    commit id: "+67" type: HIGHLIGHT
+    commit id: "ff61ca9"
+    checkout main
+S2 PLANNED-END
+        PASS [   1.760s] (1/1) worktree-cli commands::git_graph::tests::spike_s2_observed_sparse_lanes_today
+     Summary [   1.761s] 1 test run: 1 passed, 122 skipped

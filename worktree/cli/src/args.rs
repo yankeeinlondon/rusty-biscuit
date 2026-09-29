@@ -27,6 +27,19 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub perf: bool,
 
+    /// Wait for a full update from origin, ignoring recent answers (listing only)
+    #[arg(long, short = 'r', global = true)]
+    pub refresh: bool,
+
+    /// Check origin with Git only, never the provider API, for this repository
+    /// from now on (listing only; recorded in ~/.wt.json)
+    #[arg(long, global = true)]
+    pub ignore_api: bool,
+
+    /// Fast-forward the local default branch to origin/<default> (listing only)
+    #[arg(long = "fast-forward", visible_alias = "ff", global = true)]
+    pub fast_forward: bool,
+
     /// Print the shell integration (cd wrapper + completions) for a shell
     #[arg(long, value_name = "SHELL", hide = true, value_parser = parse_shell)]
     pub completions: Option<Shell>,
@@ -99,6 +112,14 @@ pub enum Commands {
     InternalRefresh {
         /// The repository's main checkout
         repo: std::path::PathBuf,
+
+        /// The attempt id to record (default: a new one)
+        #[arg(long, value_name = "ID")]
+        attempt: Option<String>,
+
+        /// Ignore the open-PR freshness window and write a completion receipt
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -128,6 +149,8 @@ const AFTER_HELP: &str = "\
 Examples:
   wt                    List all worktrees (default)
   wt list               List all worktrees with status
+  wt -r                 List after a full update from origin
+  wt --ff               Fast-forward the default branch to origin, then list
   wt create feature/x   Create a new worktree for branch feature/x
   wt create fix/y --from feat/theme
                         Fork fix/y from feat/theme instead of the current branch

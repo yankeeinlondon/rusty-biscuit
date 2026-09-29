@@ -10,6 +10,7 @@
 //! - `serde(default)` is used where empty/null values should deserialize cleanly
 //! - GitLab uses `iid` (internal ID) scoped to projects, not global `id`
 
+pub mod branches;
 pub mod common;
 pub mod issues;
 pub mod merge_requests;
@@ -17,6 +18,7 @@ pub mod pipelines;
 pub mod projects;
 pub mod releases;
 
+pub use branches::*;
 pub use common::*;
 pub use issues::*;
 pub use merge_requests::*;
@@ -31,6 +33,40 @@ pub use releases::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_deserialization() {
+        let json = r#"{
+            "name": "feature/x",
+            "merged": false,
+            "protected": false,
+            "default": false,
+            "developers_can_push": false,
+            "developers_can_merge": false,
+            "can_push": true,
+            "web_url": "https://gitlab.example.com/group/project/-/tree/feature/x",
+            "commit": {
+                "id": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+                "short_id": "7fd1a60b",
+                "created_at": "2026-09-27T10:00:00.000+00:00",
+                "parent_ids": ["4eb2b5bc5ad0b5d5b9e1f6f4a5b1c0e2d3f4a5b6"],
+                "title": "Add feature",
+                "message": "Add feature",
+                "author_name": "Example",
+                "author_email": "example@example.com",
+                "authored_date": "2026-09-27T10:00:00.000+00:00",
+                "committer_name": "Example",
+                "committer_email": "example@example.com",
+                "committed_date": "2026-09-27T10:00:00.000+00:00",
+                "web_url": "https://gitlab.example.com/group/project/-/commit/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+            }
+        }"#;
+
+        let branch: Branch = serde_json::from_str(json).unwrap();
+        assert_eq!(branch.name, "feature/x");
+        assert_eq!(branch.commit.id, "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d");
+        assert!(!branch.default);
+    }
 
     #[test]
     fn user_deserialization() {

@@ -173,7 +173,9 @@ Kitty, per test and without any host session: `KittyInstance::launch(cols,
 lines)` (macOS) starts a private Kitty through `open -g` at exactly that
 cell size, never focused, and `screenshot()` captures what it drew via
 `screencapture -l`. Its window is visible (a `--start-as=hidden` window is
-never drawn: black screenshots). `open` hands the pane the test's env, so
+never drawn: black screenshots), and Kitty does not render it while another
+window covers it: empty screenshots, so a pixel test must skip visibly or
+fail on an empty capture, never pass. `open` hands the pane the test's env, so
 unset the host's `TERM_PROGRAM` before detection-sensitive programs, and
 `get-text` returns soft-wrapped lines whole. Details and the pixel geometry:
 `biscuit-test-harness/README.md`, "A private Kitty per test"; worked example:

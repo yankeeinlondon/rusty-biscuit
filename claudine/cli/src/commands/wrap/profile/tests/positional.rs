@@ -785,7 +785,10 @@ fn with_prompt(template: &[&str], prompt: &str) -> Vec<String> {
 
 /// Interactive startup argv per provider slug: `(slug, plain prompt, prompt
 /// opening with a Markdown bullet)`, with `{P}` standing for the prompt. Rows
-/// are keyed by slug so this fact table adds no provider dispatch site.
+/// are keyed by slug so this fact table adds no provider dispatch site. The
+/// opt-in `real_native_interactive_startup` and `real_pi_interactive_startup`
+/// tests prove against the installed providers that each row except Kimi's
+/// submits the first turn and keeps the session open for a second.
 const INTERACTIVE_STARTUP_TABLE: &[(&str, &[&str], &[&str])] = &[
     ("claude", &["{P}"], &["--", "{P}"]),
     ("codex", &["{P}"], &["--", "{P}"]),
@@ -841,6 +844,157 @@ fn every_provider_delivers_an_interactive_startup_prompt() {
             "{provider:?}: bullet-first interactive startup prompt"
         );
     }
+}
+
+// -- The user's `--` separator ------------------------------------------
+
+/// How the first message reaches the wrapper in [`direct_wrap_argv_with_tail`].
+#[derive(Clone, Copy)]
+enum FirstMessage<'a> {
+    /// A positional prompt before the `--`: `claudine <p> [-i] hello -- …`.
+    /// clap keeps the `--` in the passthrough.
+    Positional(&'a str),
+    /// A prompt written in the editor: `claudine <p> [-i] --edit -- …`. clap
+    /// consumes the `--`, and the prompt arrives as `PromptSource::Inline`.
+    Edited(&'a str),
+}
+
+/// The child argv the direct wrapper builds for `claudine <provider> … --
+/// <tail>`: clap, the wrapper flag extractor, prompt extraction, the
+/// entrypoint, non-interactive flags, and prompt delivery, in the order
+/// `run_wrapper` applies them.
+fn direct_wrap_argv_with_tail(
+    provider: Provider,
+    interactive: bool,
+    message: FirstMessage<'_>,
+    tail: &[&str],
+) -> Vec<String> {
+    use clap::Parser;
+
+    #[derive(Debug, clap::Parser)]
+    #[command(disable_help_flag = true)]
+    struct Probe {
+        #[command(flatten)]
+        args: crate::commands::wrap::WrapperArgs,
+    }
+
+    let mut raw = vec!["claudine", provider.as_slug()];
+    if interactive {
+        raw.push("-i");
+    }
+    let prompt = match message {
+        FirstMessage::Positional(prompt) => {
+            raw.push(prompt);
+            prompt
+        }
+        FirstMessage::Edited(prompt) => {
+            raw.push("--edit");
+            prompt
+        }
+    };
+    raw.push("--");
+    raw.extend_from_slice(tail);
+    let raw: Vec<String> = raw.iter().map(|arg| arg.to_string()).collect();
+
+    let parsed = Probe::try_parse_from(&raw[1..])
+        .unwrap_or_else(|err| panic!("{provider:?}: {raw:?} must parse: {err}"))
+        .args;
+    let mut child_args = parsed.passthrough.clone();
+    let extracted = crate::commands::wrap::flags::extract_wrapper_flags_from_passthrough_with_raw(
+        &mut child_args,
+        &raw,
+    )
+    .unwrap();
+    assert!(
+        !extracted.edit && !extracted.interactive,
+        "{provider:?}: {raw:?}: the tail must not yield wrapper flags"
+    );
+    assert_eq!(parsed.edit, matches!(message, FirstMessage::Edited(_)));
+
+    let p = profile(provider);
+    let (mut args, source) = extract_prompt_source_from_passthrough(p, &child_args, false).unwrap();
+    match message {
+        FirstMessage::Positional(prompt) => assert_eq!(
+            source.as_inline(),
+            Some(prompt),
+            "{provider:?}: {raw:?}: the positional prompt must be found"
+        ),
+        FirstMessage::Edited(_) => assert!(
+            source.is_none(),
+            "{provider:?}: {raw:?}: the tail must not become the prompt, got {source:?}"
+        ),
+    }
+
+    let non_interactive = !interactive;
+    p.apply_entrypoint(&mut args, non_interactive);
+    if non_interactive {
+        p.apply_non_interactive_flags(&mut args).unwrap();
+    }
+    p.prompt_delivery(&args, prompt, non_interactive)
+        .unwrap()
+        .apply_to(&mut args);
+    args
+}
+
+/// The user's `--` is Claudine's boundary: the tail after it reaches every
+/// provider as options, never behind a separator, and the only `--` left is
+/// one the profile adds before a prompt.
+#[test]
+fn every_provider_receives_options_after_the_user_separator_as_options() {
+    let bullet = "- item one\n- item two";
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        for interactive in [true, false] {
+            for message in [
+                FirstMessage::Positional("hello"),
+                FirstMessage::Edited("hello"),
+                FirstMessage::Edited(bullet),
+            ] {
+                let args = direct_wrap_argv_with_tail(provider, interactive, message, &["--offline"]);
+                let context = format!("{provider:?} interactive={interactive}: {args:?}");
+                let option = args
+                    .iter()
+                    .position(|arg| arg == "--offline")
+                    .unwrap_or_else(|| panic!("{context}: --offline must be forwarded"));
+                let separators: Vec<usize> = args
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, arg)| *arg == "--")
+                    .map(|(index, _)| index)
+                    .collect();
+                assert!(separators.len() <= 1, "{context}: at most one `--`");
+                if let Some(&separator) = separators.first() {
+                    assert!(option < separator, "{context}: --offline must precede `--`");
+                    assert!(
+                        args[separator + 1].contains("hello") || args[separator + 1] == bullet,
+                        "{context}: a profile `--` only introduces the prompt"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The profiles that end options with their own `--` before an interactive
+/// dash-prefixed first message keep exactly that one separator, directly in
+/// front of the prompt, after the forwarded options.
+#[test]
+fn profile_separator_before_a_dash_prompt_is_the_only_separator() {
+    let bullet = "- item";
+    let mut with_own_separator = Vec::new();
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let args =
+            direct_wrap_argv_with_tail(provider, true, FirstMessage::Edited(bullet), &["--offline"]);
+        if !args.iter().any(|arg| arg == "--") {
+            continue;
+        }
+        with_own_separator.push(provider.as_slug());
+        assert_eq!(
+            args[args.len() - 3..],
+            ["--offline".to_string(), "--".to_string(), bullet.to_string()],
+            "{provider:?}: {args:?}"
+        );
+    }
+    assert_eq!(with_own_separator, ["claude", "codex", "pi"]);
 }
 
 #[test]

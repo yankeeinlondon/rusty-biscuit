@@ -111,10 +111,11 @@ pub struct ReleaseAsset {
     pub download_count: Option<u64>,
 }
 
-/// A Git reference from `GET /repos/{owner}/{repo}/git/ref/tags/{tag}`.
+/// A Git reference from `GET /repos/{owner}/{repo}/git/ref/tags/{tag}` or
+/// `GET /repos/{owner}/{repo}/git/ref/heads/{branch}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitRef {
-    /// Full ref name (e.g., "refs/tags/v1.0.0").
+    /// Full ref name (e.g., "refs/tags/v1.0.0" or "refs/heads/main").
     #[serde(rename = "ref")]
     pub ref_name: String,
 
@@ -132,7 +133,7 @@ pub struct GitRef {
 /// Object pointed to by a Git reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct GitRefObject {
-    /// Object type: "commit" (lightweight tag) or "tag" (annotated tag).
+    /// Object type: "commit" (a branch or lightweight tag) or "tag" (annotated tag).
     #[serde(rename = "type")]
     pub object_type: String,
 
@@ -291,6 +292,27 @@ mod tests {
         let git_ref: GitRef = serde_json::from_str(json).unwrap();
         assert!(git_ref.object.is_annotated_tag());
         assert!(!git_ref.object.is_lightweight_tag());
+    }
+
+    #[test]
+    fn git_ref_branch_head() {
+        let json = r#"{
+            "ref": "refs/heads/feature/x",
+            "node_id": "REF_kwDOAAAB",
+            "url": "https://api.github.com/repos/octocat/Hello-World/git/refs/heads/feature/x",
+            "object": {
+                "type": "commit",
+                "sha": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+                "url": "https://api.github.com/repos/octocat/Hello-World/git/commits/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+            }
+        }"#;
+
+        let git_ref: GitRef = serde_json::from_str(json).unwrap();
+        assert_eq!(git_ref.ref_name, "refs/heads/feature/x");
+        assert_eq!(
+            git_ref.object.sha,
+            "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d"
+        );
     }
 
     #[test]

@@ -1,30 +1,57 @@
 ---
 source: worktree/cli/tests/list_table.rs
-expression: "labeled(vec![(\"missing local default, tracking tip, matching answer\",\nno_local_default(Some(&matched))),\n(\"missing local default, tracking tip, differing answer\",\nno_local_default(Some(&differs))),\n(\"missing local default, tracking tip, absent answer\",\nno_local_default(Some(&absent))),\n(\"missing local default, tracking tip, no answer\", no_local_default(None)),\n(\"missing tracking tip, usable present answer\",\nno_tracking_tip(Some(&matched))),\n(\"missing tracking tip, usable absent answer\",\nno_tracking_tip(Some(&absent))),\n(\"missing tracking tip, no answer\", no_tracking_tip(None)),\n(\"missing tracking tip, future-dated answer\", no_tracking_tip(Some(&future))),\n(\"failed comparison, differing observation\",\nno_local_default(Some(&differs))),])"
+expression: labeled(cases)
 ---
-## missing local default, tracking tip, matching answer
-origin/main  matched the remote when checked 2 min ago.
+## no comparison, tracking ref present / checked this run, no variance
+origin/main
 
-## missing local default, tracking tip, differing answer
-origin/main  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs.
+## no tracking ref / checked this run, no variance
+No local tracking ref  origin/main
 
-## missing local default, tracking tip, absent answer
-main  was absent on origin when checked 2 min ago.
+## no comparison, tracking ref present / variance; the fetch succeeded
+origin/main  (updated from origin just now)
 
-## missing local default, tracking tip, no answer
-Remote state has not been verified.
+## no tracking ref / variance; the fetch succeeded
+No local tracking ref  origin/main  (updated from origin just now)
 
-## missing tracking tip, usable present answer
-No local tracking ref  origin/main ; the remote branch was present when checked 2 min ago.
+## no comparison, tracking ref present / variance; the fetch failed
+origin/main  (origin differed when checked just now; fetch didn't finish within 60 s)
 
-## missing tracking tip, usable absent answer
-No local tracking ref  origin/main ; the remote branch was absent when checked 2 min ago.
+## no tracking ref / variance; the fetch failed
+No local tracking ref  origin/main  (origin differed when checked just now; fetch didn't finish within 60 s)
 
-## missing tracking tip, no answer
-No local tracking ref  origin/main ; remote state has not been verified.
+## no comparison, tracking ref present / still checking at 3 s
+origin/main  (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
 
-## missing tracking tip, future-dated answer
-No local tracking ref  origin/main ; remote state has not been verified.
+## no tracking ref / still checking at 3 s
+No local tracking ref  origin/main  (origin hasn't answered yet; still checking in the background; last checked with origin 2 h ago)
 
-## failed comparison, differing observation
-origin/main  differs from the remote head observed 2 min ago; run git fetch origin to update local tracking refs.
+## no comparison, tracking ref present / still pulling at 3 s
+origin/main  (origin differed when checked just now; pulling remote updates in the background)
+
+## no tracking ref / still pulling at 3 s
+No local tracking ref  origin/main  (origin differed when checked just now; pulling remote updates in the background)
+
+## no comparison, tracking ref present / check failed; an earlier answer exists
+origin/main  (couldn't check origin; last checked with origin 2 h ago)
+
+## no tracking ref / check failed; an earlier answer exists
+No local tracking ref  origin/main  (couldn't check origin; last checked with origin 2 h ago)
+
+## no comparison, tracking ref present / check failed; no earlier answer; the tracking ref has a reflog
+origin/main  (couldn't check origin; tracking ref last changed 3 h ago)
+
+## no tracking ref / check failed; no earlier answer; the tracking ref has a reflog
+No local tracking ref  origin/main  (couldn't check origin; tracking ref last changed 3 h ago)
+
+## no comparison, tracking ref present / check failed; nothing known
+origin/main  (couldn't check origin; never checked with origin)
+
+## no tracking ref / check failed; nothing known
+No local tracking ref  origin/main  (couldn't check origin; never checked with origin)
+
+## no comparison, tracking ref present / branch absent on origin, tracking ref still exists
+origin/main  (main was absent on origin when checked just now; origin/main is a local tracking ref)
+
+## no tracking ref / branch absent on origin, tracking ref still exists
+main  was absent on origin when checked just now

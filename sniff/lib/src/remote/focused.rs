@@ -33,6 +33,26 @@ const PAGE_SIZE: usize = 100;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// `RemoteForbidden` message for a 403 whose body names a missing permission
+/// or scope for the credentials sent.
+///
+/// `blocking::classify` keys `CredentialsInsufficient` on this exact text;
+/// every other 403 that is not rate limiting carries a different message.
+pub(crate) const INSUFFICIENT_CREDENTIALS_MESSAGE: &str =
+    "the credentials sent lack permission for the query";
+
+/// Lowercase 403 body fragments that establish a permission or scope denial
+/// for the credentials sent (GitHub "Resource not accessible by …" and "Must
+/// have … access", GitLab `insufficient_scope`, Gitea/Forgejo "required
+/// scope(s)", Bitbucket "privilege scopes").
+const INSUFFICIENT_PERMISSION_PHRASES: [&str; 5] = [
+    "not accessible by",
+    "scope",
+    "must have",
+    "permission",
+    "higher privileges",
+];
+
 /// Per-request total timeout for a client without a caller deadline.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -474,6 +494,55 @@ impl FocusedProviderClient {
         Ok(open)
     }
 
+    /// The head commit of `branch` in this client's repository, exactly as the
+    /// provider sent it.
+    ///
+    /// `branch` is sent as one percent-encoded path segment, so a `/`, `?`, or
+    /// `#` in it cannot reach another repository path or the query.
+    ///
+    /// ## Errors
+    ///
+    /// A 404 is an error (see [`NotFound`]): providers answer a missing
+    /// branch and a repository the caller may not see alike.
+    pub(crate) async fn branch_head(&self, branch: &str) -> Result<String, SniffError> {
+        if branch.is_empty() {
+            return Err(SniffError::InvalidRemoteQuery {
+                field: "branch",
+                message: "must not be empty".to_string(),
+            });
+        }
+        let base = repo_path(&self.remote);
+        let branch = path_segment(branch);
+        let (path, sha_field): (String, &[&str]) = match self.remote.api_flavor {
+            // The singular `ref` matches exactly; the plural `refs` prefix-
+            // matches and answers an array when `{branch}/…` branches exist.
+            ApiFlavor::GitHub => (
+                format!("repos/{base}/git/ref/heads/{branch}"),
+                &["object", "sha"],
+            ),
+            ApiFlavor::Gitea | ApiFlavor::Forgejo => {
+                (format!("repos/{base}/branches/{branch}"), &["commit", "id"])
+            }
+            ApiFlavor::GitLab => (
+                format!(
+                    "projects/{}/repository/branches/{branch}",
+                    encoded_project(&self.remote)
+                ),
+                &["commit", "id"],
+            ),
+            ApiFlavor::Bitbucket => (
+                format!("repositories/{base}/refs/branches/{branch}"),
+                &["target", "hash"],
+            ),
+            flavor => return Err(unsupported("branch head lookup", flavor)),
+        };
+        let page = self
+            .fetch_json(&path, &[], NotFound::Error)
+            .await?
+            .ok_or_else(|| malformed("missing branch"))?;
+        nested_string(&page.value, &[sha_field]).ok_or_else(|| malformed("missing branch head"))
+    }
+
     /// Raw rows of every page of this repository's PR list under `filters`,
     /// each page at the provider's largest size.
     ///
@@ -794,15 +863,8 @@ impl FocusedProviderClient {
             .timeout(timeout)
             .build()
             .map_err(|error| transport(&endpoint, error))?;
-        let (token, variable) = match self.credential_scope {
-            CredentialScope::Provider => {
-                let (token, variable) = credential(self.remote.api_flavor);
-                (token, variable.to_string())
-            }
-            CredentialScope::ProviderAndHost => {
-                crate::credentials::host_bound_provider_token(self.remote.api_flavor, remote_host)
-            }
-        };
+        let (credential, variable) = self.credential();
+        let token = credential.map(|(_, token)| token);
         let mut request = client
             .get(endpoint.clone())
             .header(reqwest::header::USER_AGENT, "sniff/focused-provider");
@@ -847,10 +909,7 @@ impl FocusedProviderClient {
                 provider: provider_name(self.remote.api_flavor),
                 message: "provider rejected credentials".to_string(),
             }),
-            403 => Err(SniffError::RemoteForbidden {
-                provider: provider_name(self.remote.api_flavor),
-                message: "provider denied the query".to_string(),
-            }),
+            403 => Err(self.forbidden(response, token.is_some()).await),
             429 => Err(SniffError::RateLimited {
                 provider: provider_name(self.remote.api_flavor),
                 retry_after: None,
@@ -865,6 +924,74 @@ impl FocusedProviderClient {
                 message: "provider query failed".to_string(),
             }),
         }
+    }
+
+    /// Splits a 403 into rate limiting (a spent `x-ratelimit-remaining` or a
+    /// rate-limit body, whether or not a token was sent), a denial the body
+    /// attributes to the credentials sent, and a denial that establishes
+    /// neither and may hide the resource.
+    async fn forbidden(&self, response: reqwest::Response, authenticated: bool) -> SniffError {
+        let provider = provider_name(self.remote.api_flavor);
+        let quota_spent = response
+            .headers()
+            .get("x-ratelimit-remaining")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.trim() == "0");
+        // An unreadable body establishes nothing, so it falls through to the
+        // ambiguous denial.
+        let body = response
+            .text()
+            .await
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if quota_spent || body.contains("rate limit") {
+            return SniffError::RateLimited {
+                provider,
+                retry_after: None,
+            };
+        }
+        let message = if authenticated
+            && INSUFFICIENT_PERMISSION_PHRASES
+                .iter()
+                .any(|phrase| body.contains(phrase))
+        {
+            INSUFFICIENT_CREDENTIALS_MESSAGE
+        } else {
+            "provider denied the query"
+        };
+        SniffError::RemoteForbidden {
+            provider,
+            message: message.to_string(),
+        }
+    }
+
+    /// The token this client sends as `(variable name, value)`, and the
+    /// variable to name when none is set.
+    ///
+    /// Read from the environment on every call, as each request does.
+    fn credential(&self) -> (Option<(String, String)>, String) {
+        match self.credential_scope {
+            CredentialScope::Provider => {
+                let (found, missing) = crate::credentials::provider_token(self.remote.api_flavor);
+                (
+                    found.map(|(name, token)| (name.to_string(), token)),
+                    missing.to_string(),
+                )
+            }
+            CredentialScope::ProviderAndHost => {
+                let (token, variable) = crate::credentials::host_bound_provider_token(
+                    self.remote.api_flavor,
+                    self.remote.host.as_deref().unwrap_or_default(),
+                );
+                (token.map(|token| (variable.clone(), token)), variable)
+            }
+        }
+    }
+
+    /// Name of the environment variable whose token this client would send
+    /// now, never its value; `None` when no candidate is set.
+    pub(crate) fn credential_key(&self) -> Option<String> {
+        self.credential().0.map(|(name, _)| name)
     }
 
     fn pr_exact_path(&self, id: &str) -> Result<String, SniffError> {
@@ -1996,9 +2123,6 @@ fn git_provider(flavor: ApiFlavor) -> GitProvider {
         ApiFlavor::Bitbucket => GitProvider::Bitbucket,
         _ => unreachable!("unsupported focused provider flavor"),
     }
-}
-fn credential(flavor: ApiFlavor) -> (Option<String>, &'static str) {
-    crate::credentials::provider_token(flavor)
 }
 fn unsupported(capability: &'static str, flavor: ApiFlavor) -> SniffError {
     SniffError::UnsupportedRemoteCapability {

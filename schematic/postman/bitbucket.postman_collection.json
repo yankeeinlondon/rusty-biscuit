@@ -446,6 +446,41 @@
           }
         },
         {
+          "name": "GetBranch",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repositories/:workspace/:repo_slug/refs/branches/:name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repositories",
+                ":workspace",
+                ":repo_slug",
+                "refs",
+                "branches",
+                ":name"
+              ],
+              "variable": [
+                {
+                  "key": "workspace",
+                  "value": "<workspace>"
+                },
+                {
+                  "key": "repo_slug",
+                  "value": "<repo_slug>"
+                },
+                {
+                  "key": "name",
+                  "value": "<name>"
+                }
+              ]
+            },
+            "description": "Get a single branch by name (target.hash is the branch head commit)"
+          }
+        },
+        {
           "name": "ListTags",
           "request": {
             "method": "GET",

@@ -225,6 +225,42 @@
           }
         },
         {
+          "name": "GetBranch",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/projects/:id/repository/branches/:branch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "projects",
+                ":id",
+                "repository",
+                "branches",
+                ":branch"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "<id>"
+                },
+                {
+                  "key": "branch",
+                  "value": "<branch>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "User-Agent",
+                "value": "schematic-gitlab-client"
+              }
+            ],
+            "description": "Get a single branch (commit.id is the branch head commit)"
+          }
+        },
+        {
           "name": "ListMergeRequests",
           "request": {
             "method": "GET",

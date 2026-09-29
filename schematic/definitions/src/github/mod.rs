@@ -13,6 +13,7 @@
 //! - **Repository Contents**: Raw file content with proper Accept headers
 //! - **Pull Requests**: List PRs with associated metadata and files
 //! - **Issues**: List issues, comments, and timeline events
+//! - **Branches**: A branch and its head commit
 //! - **Tags & Releases**: Distinguish lightweight vs annotated tags, link releases
 //!
 //! ## Authentication
@@ -33,6 +34,7 @@
 //! | Contents | `GetRepositoryContentRaw` |
 //! | Pull Requests | `ListPullRequests`, `ListPullRequestFiles` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueTimeline` |
+//! | Branches | `GetBranchReference` |
 //! | Tags/Releases | `ListTags`, `ListReleases`, `GetTagReference`, `GetAnnotatedTag` |
 //! | Actions | `ListWorkflowRuns` |
 //! | Organizations | `ListOrgRepos` |
@@ -114,6 +116,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// | ListIssueTimeline | GET | /repos/{owner}/{repo}/issues/{issue_number}/timeline | List timeline |
 /// | ListTags | GET | /repos/{owner}/{repo}/tags | List repository tags |
 /// | ListReleases | GET | /repos/{owner}/{repo}/releases | List releases |
+/// | GetBranchReference | GET | /repos/{owner}/{repo}/git/ref/heads/{branch} | Get branch reference |
 /// | GetTagReference | GET | /repos/{owner}/{repo}/git/ref/tags/{tag} | Get tag reference |
 /// | GetAnnotatedTag | GET | /repos/{owner}/{repo}/git/tags/{tag_sha} | Get annotated tag object |
 /// | ListWorkflowRuns | GET | /repos/{owner}/{repo}/actions/runs | List workflow runs |
@@ -129,7 +132,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 ///
 /// let api = define_github_api();
 /// assert_eq!(api.name, "GitHub");
-/// assert_eq!(api.endpoints.len(), 16);
+/// assert_eq!(api.endpoints.len(), 17);
 /// ```
 pub fn define_github_api() -> RestApi {
     RestApi {
@@ -383,6 +386,23 @@ pub fn define_github_api() -> RestApi {
                 params: None,
                 oauth_scopes: None,
             },
+            // =================================================================
+            // Branches
+            // =================================================================
+            // Singular `git/ref/`: the plural `git/refs/heads/{branch}` prefix-matches
+            // and returns an array when `{branch}/*` branches exist.
+            Endpoint {
+                id: "GetBranchReference".to_string(),
+                method: RestMethod::Get,
+                path: "/repos/{owner}/{repo}/git/ref/heads/{branch}".to_string(),
+                description: "Get branch reference (object.sha is the branch head commit)"
+                    .to_string(),
+                request: None,
+                response: ApiResponse::json_type("GitRef"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
             Endpoint {
                 id: "GetAnnotatedTag".to_string(),
                 method: RestMethod::Get,
@@ -605,9 +625,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_sixteen_endpoints() {
+    fn api_has_seventeen_endpoints() {
         let api = define_github_api();
-        assert_eq!(api.endpoints.len(), 16);
+        assert_eq!(api.endpoints.len(), 17);
     }
 
     #[test]
@@ -754,6 +774,29 @@ mod tests {
     }
 
     #[test]
+    fn get_branch_reference_endpoint() {
+        let api = define_github_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "GetBranchReference")
+            .expect("GetBranchReference endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(
+            endpoint.path,
+            "/repos/{owner}/{repo}/git/ref/heads/{branch}"
+        );
+        assert!(endpoint.request.is_none());
+        assert!(endpoint.oauth_scopes.is_none());
+        match &endpoint.response {
+            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "GitRef"),
+            _ => panic!("Expected JSON response"),
+        }
+        assert!(matches!(api.auth, AuthStrategy::BearerToken { .. }));
+    }
+
+    #[test]
     fn env_mapping_configured() {
         let api = define_github_api();
 
@@ -821,6 +864,7 @@ mod tests {
             "GetGitTreeRecursive",
             "GetIssue",
             "GetTagReference",
+            "GetBranchReference",
             "GetAnnotatedTag",
             "ListWorkflowRuns", // Returns WorkflowRunsResponse wrapper, not Vec
         ];

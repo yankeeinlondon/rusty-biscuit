@@ -636,6 +636,46 @@
           }
         },
         {
+          "name": "GetBranch",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/repos/:owner/:repo/branches/:branch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "repos",
+                ":owner",
+                ":repo",
+                "branches",
+                ":branch"
+              ],
+              "variable": [
+                {
+                  "key": "owner",
+                  "value": "<owner>"
+                },
+                {
+                  "key": "repo",
+                  "value": "<repo>"
+                },
+                {
+                  "key": "branch",
+                  "value": "<branch>"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "description": "Get a branch (commit.id is the branch head commit)"
+          }
+        },
+        {
           "name": "GetTagReference",
           "request": {
             "method": "GET",

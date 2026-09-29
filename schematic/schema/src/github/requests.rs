@@ -1106,6 +1106,65 @@ impl crate::shared::EndpointSpec for GetTagReferenceRequest {
     type Response = GitRef;
     const ENDPOINT_ID: &'static str = "GetTagReference";
 }
+/// Request for `GetBranchReference` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::github::GetBranchReferenceRequest;
+///
+/// let request = GetBranchReferenceRequest::new("owner_value", "repo_value", "branch_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetBranchReferenceRequest {
+    /// Path parameter: owner
+    pub owner: String,
+    /// Path parameter: repo
+    pub repo: String,
+    /// Path parameter: branch
+    pub branch: String,
+}
+impl GetBranchReferenceRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        branch: impl Into<String>,
+    ) -> Self {
+        Self {
+            owner: owner.into(),
+            repo: repo.into(),
+            branch: branch.into(),
+        }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - The request body as a `RequestBody`
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!(
+            "/repos/{}/{}/git/ref/heads/{}", urlencoding::encode(& self.owner
+            .to_string()), urlencoding::encode(& self.repo.to_string()),
+            urlencoding::encode(& self.branch.to_string())
+        );
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+    }
+}
+impl crate::shared::EndpointSpec for GetBranchReferenceRequest {
+    type Response = GitRef;
+    const ENDPOINT_ID: &'static str = "GetBranchReference";
+}
 /// Request for `GetAnnotatedTag` endpoint.
 ///
 /// ## Example
@@ -1476,6 +1535,8 @@ pub enum GitHubRequest {
     ListReleases(ListReleasesRequest),
     /// Get tag reference (check object.type: 'commit' vs 'tag')
     GetTagReference(GetTagReferenceRequest),
+    /// Get branch reference (object.sha is the branch head commit)
+    GetBranchReference(GetBranchReferenceRequest),
     /// Get annotated tag object details (message, tagger, verification)
     GetAnnotatedTag(GetAnnotatedTagRequest),
     /// List workflow runs for a repository
@@ -1507,6 +1568,7 @@ impl GitHubRequest {
             Self::ListTags(req) => req.into_parts(),
             Self::ListReleases(req) => req.into_parts(),
             Self::GetTagReference(req) => req.into_parts(),
+            Self::GetBranchReference(req) => req.into_parts(),
             Self::GetAnnotatedTag(req) => req.into_parts(),
             Self::ListWorkflowRuns(req) => req.into_parts(),
             Self::ListOrgRepos(req) => req.into_parts(),
@@ -1557,6 +1619,9 @@ impl GitHubRequest {
             Self::GetTagReference(_) => {
                 <GetTagReferenceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
+            Self::GetBranchReference(_) => {
+                <GetBranchReferenceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetAnnotatedTag(_) => {
                 <GetAnnotatedTagRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1588,6 +1653,7 @@ impl GitHubRequest {
             Self::ListTags(_) => crate::shared::ResponseKind::Json,
             Self::ListReleases(_) => crate::shared::ResponseKind::Json,
             Self::GetTagReference(_) => crate::shared::ResponseKind::Json,
+            Self::GetBranchReference(_) => crate::shared::ResponseKind::Json,
             Self::GetAnnotatedTag(_) => crate::shared::ResponseKind::Json,
             Self::ListWorkflowRuns(_) => crate::shared::ResponseKind::Json,
             Self::ListOrgRepos(_) => crate::shared::ResponseKind::Json,
@@ -1657,6 +1723,11 @@ impl From<ListReleasesRequest> for GitHubRequest {
 impl From<GetTagReferenceRequest> for GitHubRequest {
     fn from(req: GetTagReferenceRequest) -> Self {
         Self::GetTagReference(req)
+    }
+}
+impl From<GetBranchReferenceRequest> for GitHubRequest {
+    fn from(req: GetBranchReferenceRequest) -> Self {
+        Self::GetBranchReference(req)
     }
 }
 impl From<GetAnnotatedTagRequest> for GitHubRequest {

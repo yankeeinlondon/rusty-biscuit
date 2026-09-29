@@ -34,14 +34,15 @@ pub use git::{
     LocalBranchInfo, NamedDate, PathHistoryOptions, PathHistoryResult,
     RecentCommit, RecentCommitAuthor, RecentCommitFile, RecentCommitFileKind,
     RecentCommitFileTypes, RecentCommitPackages, RecentCommits, RecentCommitsOptions,
-    RecentCommitsProjection, RecentCommitsVerbosity, RemoteInfo, RepoStatus, RepositoryLink,
+    RecentCommitsProjection, RecentCommitsVerbosity, RemoteIdentity, RemoteInfo, RepoStatus,
+    RepositoryLink,
     Selection, commit_browser_url, commit_by_sha_at, commit_files_at, commit_links_at, commit_url,
     commits_for_branch_at,
     commits_for_path_at, detect_git, detect_git_with_request, detect_merge_conflicts,
     get_commit_by_sha, get_commit_files, get_commits_for_branch, get_commits_for_path,
     merge_conflicts_at,
     merge_conflicts_with_branch_at, parse_commit_message, preferred_remote_url,
-    remote_url, repo_root, repository_link,
+    remote_identity, remote_url, repo_root, repository_link,
 };
 pub use just::{JustRecipe, JustRecipeParam, JustfileInfo, detect_justfiles};
 pub use languages::{LanguageBreakdown, LanguageStats, detect_languages};

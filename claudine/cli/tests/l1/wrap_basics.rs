@@ -695,6 +695,31 @@ exit 1
     assert!(plain.contains("codex"));
 }
 
+/// The user's `--` is Claudine's boundary, not the provider's: the dry-run
+/// command of every provider carries the tail as options, without the `--`.
+#[test]
+fn wrapper_dry_run_forwards_the_tail_after_the_user_separator_without_it() {
+    let fixture = CliProcessFixture::named("wrap-basics-dry-run-separator");
+    fixture.seed_user_config();
+
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let assert = fixture
+            .command()
+            .args([provider.as_slug(), "--dry-run", "-i", "hello", "--", "--offline"])
+            .assert()
+            .success()
+            .stdout("");
+
+        let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+        let command = plain
+            .lines()
+            .find(|line| line.trim_start().starts_with("Command:"))
+            .unwrap_or_else(|| panic!("{provider:?}: no Command line in:\n{plain}"));
+        assert!(command.contains(" --offline"), "{provider:?}: {command}");
+        assert!(!command.contains(" -- "), "{provider:?}: {command}");
+    }
+}
+
 #[test]
 fn codex_dry_run_discovered_replace_system_prompt_uses_model_instructions_file() {
     let fixture = CliProcessFixture::named("wrap-basics-replace-delivery");

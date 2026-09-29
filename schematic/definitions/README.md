@@ -18,7 +18,7 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | Anthropic | `anthropic` | `define_anthropic_api()` | 4 | Anthropic Messages API for Claude AI and agent tool use |
 | Artificial Analysis Data | `artificial_analysis` | `define_artificial_analysis_data_api()` | 6 | Artificial Analysis free data API for LLM and media-model benchmarks |
 | Artificial Analysis CritPt | `artificial_analysis` | `define_artificial_analysis_critpt_api()` | 1 | Artificial Analysis CritPt benchmark evaluation API |
-| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 15 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
+| Bitbucket | `bitbucket` | `define_bitbucket_api()` | 16 | Bitbucket Cloud REST API for repos, PRs, issues, tags |
 | OpenAI | `openai` | `define_openai_api()` | 265 | Full OpenAI platform surface, imported from the vendored spec (see `specs/openai/`) |
 | HuggingFace Hub | `huggingface` | `define_huggingface_hub_api()` | 28+ | Hugging Face Hub API (models, datasets, spaces, repos) |
 | LM Studio | `lmstudio` | `define_lmstudio_api()` | 6 | LM Studio local inference API |
@@ -28,9 +28,9 @@ These definitions are consumed by `schematic-gen` to generate strongly-typed Rus
 | ElevenLabs WebSocket | `elevenlabs` | `define_elevenlabs_websocket_api()` | 2 | ElevenLabs TTS WebSocket streaming API |
 | EMQX Basic | `emqx` | `define_emqx_basic_api()` | 30+ | EMQX MQTT Broker REST API with Basic auth |
 | EMQX Bearer | `emqx` | `define_emqx_bearer_api()` | 30+ | EMQX MQTT Broker REST API with Bearer token auth |
-| GitHub | `github` | `define_github_api()` | 16 | GitHub REST API for repos, PRs, issues, releases |
-| GitLab | `gitlab` | `define_gitlab_api()` | 18 | GitLab REST API for repos, MRs, issues, releases |
-| Gitea | `gitea` | `define_gitea_api()` | 15 | Gitea REST API for self-hosted Git forge instances |
+| GitHub | `github` | `define_github_api()` | 17 | GitHub REST API for repos, PRs, issues, releases |
+| GitLab | `gitlab` | `define_gitlab_api()` | 19 | GitLab REST API for repos, MRs, issues, releases |
+| Gitea | `gitea` | `define_gitea_api()` | 16 | Gitea REST API for self-hosted Git forge instances |
 | Eversolo | `eversolo` | `define_eversolo_api()` | 24 | Eversolo DMP-A8 local HTTP control API |
 | Samsung Smart TV REST | `samsung_smart_tv` | `define_samsung_smart_tv_api()` | 4 | Samsung S95C-focused LAN API (Smart View) |
 | Samsung Smart TV Remote WS | `samsung_smart_tv::remote_ws` | `define_samsung_smart_tv_remote_ws_api()` | 1 | Samsung remote control WebSocket channel |
@@ -114,7 +114,7 @@ use schematic_definitions::github::define_github_api;
 
 let api = define_github_api();
 assert_eq!(api.name, "GitHub");
-assert_eq!(api.endpoints.len(), 16);
+assert_eq!(api.endpoints.len(), 17);
 ```
 
 ```rust
@@ -122,7 +122,7 @@ use schematic_definitions::gitea::define_gitea_api;
 
 let api = define_gitea_api();
 assert_eq!(api.name, "Gitea");
-assert_eq!(api.endpoints.len(), 15);
+assert_eq!(api.endpoints.len(), 16);
 ```
 
 ```rust
@@ -130,7 +130,7 @@ use schematic_definitions::gitlab::define_gitlab_api;
 
 let api = define_gitlab_api();
 assert_eq!(api.name, "GitLab");
-assert_eq!(api.endpoints.len(), 18);
+assert_eq!(api.endpoints.len(), 19);
 ```
 
 ```rust
@@ -138,7 +138,7 @@ use schematic_definitions::bitbucket::define_bitbucket_api;
 
 let api = define_bitbucket_api();
 assert_eq!(api.name, "Bitbucket");
-assert_eq!(api.endpoints.len(), 15);
+assert_eq!(api.endpoints.len(), 16);
 ```
 
 ## Bitbucket API
@@ -183,6 +183,7 @@ if paginated.has_next() {
 | GetIssue | GET | `/repositories/{workspace}/{repo_slug}/issues/{id}` | `Issue` |
 | ListIssueComments | GET | `/repositories/{workspace}/{repo_slug}/issues/{id}/comments` | `PaginatedResponse<IssueComment>` |
 | ListIssueChanges | GET | `/repositories/{workspace}/{repo_slug}/issues/{id}/changes` | `PaginatedResponse<IssueChange>` |
+| GetBranch | GET | `/repositories/{workspace}/{repo_slug}/refs/branches/{name}` | `Branch` (`target.hash`) |
 | ListTags | GET | `/repositories/{workspace}/{repo_slug}/refs/tags` | `PaginatedResponse<Tag>` |
 | GetTag | GET | `/repositories/{workspace}/{repo_slug}/refs/tags/{name}` | `Tag` |
 | ListDownloads | GET | `/repositories/{workspace}/{repo_slug}/downloads` | `PaginatedResponse<Download>` |
@@ -243,6 +244,7 @@ export GITLAB_PRIVATE_TOKEN="your_personal_access_token"
 | GetIssue | GET | `/projects/{id}/issues/{issue_iid}` | `Issue` |
 | ListIssueNotes | GET | `/projects/{id}/issues/{issue_iid}/notes` | `Vec<Note>` |
 | ListIssueParticipants | GET | `/projects/{id}/issues/{issue_iid}/participants` | `Vec<User>` |
+| GetBranch | GET | `/projects/{id}/repository/branches/{branch}` | `Branch` (`commit.id`) |
 | ListTags | GET | `/projects/{id}/repository/tags` | `Vec<Tag>` |
 | GetTag | GET | `/projects/{id}/repository/tags/{tag_name}` | `Tag` |
 | ListReleases | GET | `/projects/{id}/releases` | `Vec<Release>` |
@@ -289,6 +291,7 @@ The default base URL is a placeholder (`https://gitea.example.com/api/v1`). Conf
 | GetIssue | GET | `/repos/{owner}/{repo}/issues/{index}` | `IssueSummary` |
 | ListIssueComments | GET | `/repos/{owner}/{repo}/issues/{index}/comments` | `Vec<IssueComment>` |
 | ListIssueTimeline | GET | `/repos/{owner}/{repo}/issues/{index}/timeline` | `Vec<TimelineEvent>` |
+| GetBranch | GET | `/repos/{owner}/{repo}/branches/{branch}` | `Branch` (`commit.id`) |
 | ListTags | GET | `/repos/{owner}/{repo}/tags` | `Vec<RepoTag>` |
 | ListReleases | GET | `/repos/{owner}/{repo}/releases` | `Vec<Release>` |
 | GetTagReference | GET | `/repos/{owner}/{repo}/git/refs/{git_ref}` | `Vec<GitRef>` (array!) |

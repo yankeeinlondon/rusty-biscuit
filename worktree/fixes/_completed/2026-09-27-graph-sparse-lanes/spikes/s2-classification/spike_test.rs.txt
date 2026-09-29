@@ -1,0 +1,57 @@
+// Spike S2 test body. It was appended to worktree/cli/src/commands/git_graph/tests.rs
+// (which provides observed_sparse_lanes(), gather, input, mermaid, geometry_of, viewport),
+// run with: cargo nextest run -p worktree-cli --lib -E 'test(spike_s2)' --no-capture
+// and removed again. Its output is output-macos.txt.
+// SPIKE-S2 (temporary; removed once its findings are logged).
+#[test]
+#[serial_test::serial]
+fn spike_s2_observed_sparse_lanes_today() {
+    let repo = observed_sparse_lanes();
+    let _guard = DirGuard::enter(&repo.path);
+    let (graph, _) = gather(&input("main", &repo.branches(), repo.forks.clone()), true, false);
+    let graph = graph.expect("base view");
+    let short = |sha: &str| -> String {
+        let named = [
+            ("W1", repo.w1()),
+            ("M103", &repo.m103),
+            ("M104", &repo.m104),
+            ("B1", &repo.b1),
+            ("d2", &repo.d[2]),
+            ("d5", &repo.d[5]),
+            ("d12", &repo.d[12]),
+            ("d13", &repo.d[13]),
+        ];
+        named.iter().find(|(_, s)| s.as_str() == sha).map_or(sha[..7].to_string(), |(n, _)| n.to_string())
+    };
+    for line in &graph.lines {
+        eprintln!(
+            "S2 line {}: parent={:?} fork={:?} merged_into={:?} tip={:?} entries={:?}",
+            line.branch,
+            line.parent,
+            line.fork_sha.as_deref().map(short),
+            line.merged_into.as_deref().map(short),
+            line.tip_sha.as_deref().map(short),
+            line.entries.iter().map(|e| match e { LaneEntry::Commit(s) => short(s), LaneEntry::Elided(n) => format!("+{n}") }).collect::<Vec<_>>()
+        );
+    }
+    eprintln!("S2 default: {:?}", graph.default_entries.iter().map(|e| match e { LaneEntry::Commit(s) => short(s), LaneEntry::Elided(n) => format!("+{n}") }).collect::<Vec<_>>());
+    eprintln!("S2 incomplete={}", graph.incomplete);
+    let (history, read) = topology::History::read();
+    assert_eq!(read, Ok(()));
+    let tip = repo.sniff.last().unwrap();
+    let wt_tip = repo.wt_ux.last().unwrap();
+    eprintln!("S2 classify [wt-ux, main] = {:?}", history.classify(tip, &[wt_tip, &repo.m104]));
+    eprintln!("S2 classify [main] = {:?}", history.classify(tip, &[&repo.m104]));
+    eprintln!("S2 classify [wt-ux] = {:?}", history.classify(tip, &[wt_tip]));
+    let base = history.merge_base(&repo.d[13], tip).unwrap().unwrap();
+    eprintln!("S2 merge_base(M104^1, tip) = {} (W1? {})", short(&base), base == *repo.w1());
+    let text = mermaid(&graph);
+    eprintln!("S2 MERMAID-BEGIN\n{text}\nS2 MERMAID-END");
+    let planned = graph.to_git_graph(&PrListing::default(), None).with_theme(MermaidTheme::Default).plan(viewport(200, 60)).expect("plan");
+    let geometry = geometry_of(&planned.mermaid);
+    eprintln!(
+        "S2 plan 200x60: columns={} rows={} trimmed={} incomplete={} step={} natural_width={}",
+        planned.columns, planned.rows, planned.trimmed_commits, planned.incomplete, geometry.commit_step, geometry.width
+    );
+    eprintln!("S2 PLANNED-BEGIN\n{}\nS2 PLANNED-END", planned.mermaid);
+}

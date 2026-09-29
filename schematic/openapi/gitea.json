@@ -871,6 +871,62 @@
         }
       ]
     },
+    "/repos/{owner}/{repo}/branches/{branch}": {
+      "get": {
+        "summary": "Get a branch (commit.id is the branch head commit)",
+        "description": "Get a branch (commit.id is the branch head commit)",
+        "operationId": "GetBranch",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branch"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Branch"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "owner",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "branch",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
     "/repos/{owner}/{repo}/git/refs/{git_ref}": {
       "get": {
         "summary": "Get tag reference (returns array; check object.type: 'commit' vs 'tag')",
@@ -1651,6 +1707,47 @@
             }
           ]
         }
+      },
+      "Branch": {
+        "title": "Branch",
+        "description": "A branch from `GET /repos/{owner}/{repo}/branches/{branch}`.",
+        "type": "object",
+        "properties": {
+          "commit": {
+            "description": "Head commit of the branch."
+          },
+          "name": {
+            "description": "Branch name.",
+            "type": "string"
+          },
+          "protected": {
+            "description": "Whether the branch is protected.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "commit"
+        ]
+      },
+      "BranchCommit": {
+        "description": "Head commit of a branch, as embedded in [`Branch`].",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Commit SHA.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Commit message."
+          },
+          "timestamp": {
+            "description": "Commit timestamp."
+          }
+        },
+        "required": [
+          "id"
+        ]
       },
       "GitRef": {
         "title": "GitRef",

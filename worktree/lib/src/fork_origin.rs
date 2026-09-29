@@ -8,7 +8,7 @@
 //! with [`ForkOriginStore::prune`]; a record whose *parent* was deleted is
 //! kept, because the listing reports that parent as deleted.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -85,12 +85,11 @@ impl ForkOriginStore {
         self.records.is_empty()
     }
 
-    /// Removes the records of branches not in `live_branches` and returns how
-    /// many were removed.
-    pub fn prune(&mut self, live_branches: &HashSet<String>) -> usize {
+    /// Removes the records for which `exists(branch, record)` is false and
+    /// returns how many were removed.
+    pub fn prune(&mut self, exists: impl Fn(&str, &ForkOrigin) -> bool) -> usize {
         let before = self.records.len();
-        self.records
-            .retain(|branch, _| live_branches.contains(branch));
+        self.records.retain(|branch, origin| exists(branch, origin));
         before - self.records.len()
     }
 }
@@ -102,9 +101,10 @@ pub fn fork_origin_path(repo_root: &Path) -> Result<PathBuf, WorktreeError> {
 
 /// Adds or replaces the record for `branch` in the store at `path`.
 ///
-/// Read-modify-write without a lock: two concurrent `wt create` runs can lose
-/// one record (last rename wins), which only flattens that branch in the
-/// listing's tree.
+/// Read-modify-write without a lock: two concurrent writers (`wt create`
+/// runs, or one and a listing's prune) can lose one record in the instant
+/// between one's read and its rename (last rename wins), which only flattens
+/// that branch in the listing's tree.
 pub fn record(path: &Path, branch: &str, origin: ForkOrigin) -> Result<(), WorktreeError> {
     let mut store = ForkOriginStore::load_from(path);
     store.insert(branch, origin);
@@ -177,11 +177,11 @@ mod tests {
         store.insert("feat/dark-fixes", origin("feat/theme"));
         store.insert("spike/parser", origin("experiments"));
 
-        let live: HashSet<String> = ["feat/dark-fixes", "spike/parser", "main"]
+        let live: std::collections::HashSet<String> = ["feat/dark-fixes", "spike/parser", "main"]
             .into_iter()
             .map(String::from)
             .collect();
-        assert_eq!(store.prune(&live), 1);
+        assert_eq!(store.prune(|branch, _| live.contains(branch)), 1);
 
         assert!(store.get("feat/theme").is_none());
         // The parent `experiments` is gone, but the child's record stays so the
