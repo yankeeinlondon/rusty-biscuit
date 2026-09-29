@@ -179,6 +179,9 @@ test-browser:
 # cleanly when its provider/model is unavailable.
 #   - contract adapter against an enabled provider (claude/codex)
 #   - the OpenCode YOLO subagent external-directory regression (compose CLI)
+#   - a manual `claudine steer` routed to a real `claudine codex` run; the CLI
+#     half enables `daemon-tests` because that test boots a local Rendezvous
+#     daemon in-process
 #
 # Runs through `_test_real`, i.e. nextest, like every other tier in this area.
 # It used to shell out to `cargo test` — the only recipe here that did — which
@@ -193,7 +196,7 @@ test-real *args="":
     export CLAUDINE_CONTRACT_REAL=1
     rc=0
     just _test_real claudine-contract --features real-tests {{ args }} || rc=$?
-    just _test_real claudine-cli --features real-tests {{ args }} || rc=$?
+    just _test_real claudine-cli --features real-tests,daemon-tests {{ args }} || rc=$?
     exit $rc
 
 # Guard against typed errors collapsing to prose anywhere in lib/src, cli/src,

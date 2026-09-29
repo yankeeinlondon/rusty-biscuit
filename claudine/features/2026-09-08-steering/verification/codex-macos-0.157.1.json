@@ -1,0 +1,129 @@
+{
+  "schema": "claudine-steering-verification/1",
+  "provider": "codex",
+  "provider_version": "0.157.1",
+  "os": "macos",
+  "tested_on": "2026-09-28",
+  "profile_id": "managed-app-server",
+  "launch_mode": "non_interactive",
+  "origin": "claudine",
+  "harness": {
+    "adapter": {"id": "codex-app-server", "revision": 1},
+    "session": "claudine/cli/src/commands/wrap/exec/codex_app_server/mod.rs (production CodexAppServerSession)",
+    "executor": "claudine/cli/src/commands/wrap/exec/codex_app_server/executor.rs (production adapter through a real SteeringController)",
+    "tests": "claudine/cli/src/commands/wrap/exec/codex_app_server/tests.rs module real_codex_protocol (just test-real real_codex_protocol)",
+    "wrapper_tests": "claudine/cli/tests/real/real_codex_app_server.rs (just test-real real_codex_app_server)",
+    "model": "loopback scripted Responses-API model, claudine/cli/tests/common/codex_model.rs; request_max_retries=0, stream_max_retries=0",
+    "isolation": "disposable CODEX_HOME and working directory per run; OPENAI_API_KEY and CODEX_SQLITE_HOME removed; no user session contacted; stdio transport",
+    "exec_argv": "exec --json --skip-git-repo-check --sandbox danger-full-access <model -c overrides> --output-last-message <tmp> mapped to: app-server --listen stdio:// <model -c overrides>; thread/start {approvalPolicy: never, sandbox: danger-full-access, cwd}"
+  },
+  "records": [
+    {
+      "id": "codex-app-server-steer-tool-01571",
+      "test": "real_codex_protocol_steers_a_working_turn_at_the_tool_boundary",
+      "mechanism_id": "app-server-steer",
+      "session_state": "working",
+      "outcome": "passed",
+      "observations": [
+        "task turn runs exec_command `sleep 3`; turn/steer {threadId, expectedTurnId: <running turn>, clientUserMessageId: <request id>} sent 300 ms after the tool started",
+        "answer {turnId: <running turn>} before the model received the nonce; adapter outcome queued",
+        "the model's second request of the same turn carries the nonce and the function_call_output of the uncancelled tool",
+        "final message 'ACK STEERING_NONCE' written to --output-last-message; thread/read idle; stdin closed; Codex exited 0"
+      ]
+    },
+    {
+      "id": "codex-app-server-steer-generation-01571",
+      "test": "real_codex_protocol_steers_during_generation_at_the_end_of_the_response",
+      "mechanism_id": "app-server-steer",
+      "session_state": "working",
+      "outcome": "passed",
+      "observations": [
+        "model response held open for 3 s; automatic-origin steer sent 500 ms into generation with the 2 s automatic deadline",
+        "answer queued within the deadline while the response was still generating",
+        "the turn continued after the final-message response with the steer; final message 'ACK GENERATION_NONCE'"
+      ]
+    },
+    {
+      "id": "codex-app-server-steer-stale-01571",
+      "test": "real_codex_protocol_refuses_a_stale_turn_and_sends_nothing",
+      "mechanism_id": "app-server-steer",
+      "session_state": "working",
+      "outcome": "passed",
+      "observations": [
+        "turn/steer with an expectedTurnId other than the running turn is refused with JSON-RPC -32600 ('expected active turn id ... but found ...'); adapter outcome refused",
+        "the nonce never reached the model in the following 4 s"
+      ]
+    },
+    {
+      "id": "codex-app-server-steer-duplicate-01571",
+      "test": "real_codex_protocol_delivers_a_repeated_client_message_id_twice",
+      "mechanism_id": "app-server-steer",
+      "session_state": "working",
+      "outcome": "passed",
+      "expected_loss": true,
+      "observations": [
+        "two turn/steer requests with the same clientUserMessageId are both answered with the running turnId",
+        "the model's next request carries the nonce twice: no duplicate suppression, so a resend is never safe"
+      ]
+    },
+    {
+      "id": "codex-app-server-idle-01571",
+      "test": "real_codex_protocol_starts_an_idle_turn",
+      "mechanism_id": "app-server-turn-start",
+      "session_state": "idle",
+      "outcome": "passed",
+      "observations": [
+        "ready thread with no turn; thread/read reports idle; turn/start answered with an inProgress turn; adapter outcome accepted",
+        "exactly one turn in the bound thread; the model received the nonce; final message 'idle reply'; Codex exited 0 after settlement"
+      ]
+    },
+    {
+      "id": "codex-app-server-interrupt-01571",
+      "test": "real_codex_protocol_interrupts_with_consent_and_keeps_the_phases",
+      "mechanism_id": "app-server-interrupt-then-start",
+      "session_state": "working",
+      "outcome": "passed",
+      "observations": [
+        "consented turn/interrupt {threadId, turnId} during `sleep 20; touch <survivor>` answered {}; turn/completed status interrupted observed; cancellation established",
+        "replacement turn/start accepted; the model received the replacement nonce",
+        "the survivor file was absent 21 s later: the interrupted tool did not run to completion; Codex exited 0 after the replacement turn settled"
+      ]
+    },
+    {
+      "id": "codex-app-server-eof-01571",
+      "test": "real_codex_protocol_closing_stdin_mid_turn_abandons_it",
+      "mechanism_id": "app-server-turn-start",
+      "session_state": "working",
+      "outcome": "passed",
+      "expected_loss": true,
+      "observations": [
+        "stdin closed 300 ms into `sleep 5; touch <survivor>`: Codex exited 0 within 3 s",
+        "the survivor file never appeared and the model received no further request: the turn was abandoned behind a clean exit, so the owner closes stdin only after settlement"
+      ]
+    }
+  ],
+  "wrapper_level": [
+    {
+      "test": "real_codex_app_server_runs_a_task_like_exec",
+      "observations": [
+        "claudine codex -- --skip-git-repo-check <model -c overrides> <task>: both model requests carried originator 'claudine' (managed app-server), the final message reached stdout, exit 0, no fallback warning",
+        "the same task with --ignore-rules (no app-server equivalent) carried originator 'codex_exec' and produced the same rendered answer and exit code"
+      ]
+    },
+    {
+      "test": "real_codex_app_server_fails_a_failed_turn_like_exec",
+      "observations": ["a model answering HTTP 500 fails the managed run with the same exit code as the exec run"]
+    },
+    {
+      "test": "real_codex_app_server_leaves_an_untrusted_directory_to_exec",
+      "observations": ["outside a Git repository without --skip-git-repo-check the run stays on exec, which refuses it; no model request; no fallback warning"]
+    }
+  ],
+  "not_covered": [
+    "Linux, native Windows, and WSL2",
+    "cloud inference and real model timing",
+    "Unix-socket and WebSocket app-server transports",
+    "review, compaction, and subagent turns",
+    "MCP servers, approvals under a non-never policy, and extension-like plugins"
+  ]
+}

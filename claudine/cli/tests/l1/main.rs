@@ -17,6 +17,7 @@ mod authored_text_rendering;
 mod cfg_gate;
 mod characterization_error_routes;
 mod cli_process_fixture;
+mod codex_app_server;
 mod command_routing;
 mod completion_cli;
 mod completion_compose;
@@ -131,6 +132,7 @@ mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
+mod steer_cli;
 #[cfg(unix)]
 mod sequence_groups;
 // Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only

@@ -33,14 +33,20 @@ impl Rig {
     }
 
     fn run(&self, plan: &str) -> std::process::Output {
-        self.fixture
-            .command()
+        self.run_with(plan, &[])
+    }
+
+    fn run_with(&self, plan: &str, env: &[(&str, &str)]) -> std::process::Output {
+        let mut command = self.fixture.command();
+        command
             .args(["pi", TASK])
             .env("FAKE_PI_DIR", &self.dir)
             .env("FAKE_PI_PLAN", plan)
-            .timeout(Duration::from_secs(60))
-            .output()
-            .unwrap()
+            .timeout(Duration::from_secs(60));
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        command.output().unwrap()
     }
 
     fn argv(&self, launch: u32) -> Option<Vec<String>> {
@@ -157,4 +163,92 @@ fn an_unanswerable_ui_request_fails_the_run_as_input_required() {
     assert!(!output.status.success(), "{}", describe(&output));
     assert!(stderr.contains("waiting for `custom` input"), "{stderr}");
     assert!(!rig.command_kinds(1).iter().any(|kind| kind == "extension_ui_response"), "no answer is invented");
+}
+
+// ---------------------------------------------------------------------------
+// Automatic repetition help. The shipped policy blocks Pi's managed profile,
+// so help is unavailable: the run must say so once, send nothing, and still
+// stop on the unchanged repetition schedule.
+// ---------------------------------------------------------------------------
+
+const UNAVAILABLE_NOTICE: &str = "cannot send automatic steering to this session";
+
+/// Where the repetition stop is reported, at the default limit's exact count
+/// (so the stop's schedule is shown unchanged).
+fn repetition_stop(stderr: &str) -> Option<usize> {
+    stderr.find("runaway repetition detected (cycle length 1, 30 repeats)")
+}
+
+#[test]
+fn automatic_help_that_cannot_be_sent_warns_once_before_the_unchanged_repetition_stop() {
+    let rig = Rig::new("pi-rpc-auto-unavailable");
+    let output = rig.run("repeat");
+    let stderr = flat(&output.stderr);
+    assert!(!output.status.success(), "{}", describe(&output));
+    let notice = stderr.find(UNAVAILABLE_NOTICE).unwrap_or_else(|| panic!("no notice: {}", describe(&output)));
+    assert_eq!(stderr.matches(UNAVAILABLE_NOTICE).count(), 1, "deduplicated: {stderr}");
+    assert!(stderr.contains("keep enforcing the repetition limit of 30"), "{stderr}");
+    let stop = repetition_stop(&stderr[notice + UNAVAILABLE_NOTICE.len()..]);
+    assert!(stop.is_some(), "the repetition stop follows the notice: {stderr}");
+    assert_eq!(rig.command_kinds(1).iter().filter(|kind| *kind == "steer" || *kind == "prompt").count(), 1,
+        "only the task reached Pi; no automatic message was sent");
+    assert!(rig.argv(2).is_none(), "nothing was relaunched");
+    let echoed = text(&output.stdout).matches("I will try the same fix again.").count();
+    assert_eq!(echoed, 29, "the tripping line is suppressed, as before: {}", describe(&output));
+}
+
+#[test]
+fn automatic_help_turned_off_by_environment_prints_nothing_and_stops_the_same() {
+    for value in ["off", " FALSE ", "0", "no"] {
+        let rig = Rig::new("pi-rpc-auto-off");
+        let output = rig.run_with("repeat", &[("CLAUDINE_AUTO_STEER", value)]);
+        let stderr = flat(&output.stderr);
+        assert!(!output.status.success(), "{value:?}: {}", describe(&output));
+        assert!(!stderr.contains(UNAVAILABLE_NOTICE), "{value:?}: {stderr}");
+        assert!(repetition_stop(&stderr).is_some(), "{value:?}: the guard still stops the run: {stderr}");
+    }
+}
+
+#[test]
+fn automatic_help_turned_off_in_user_configuration_prints_nothing_and_stops_the_same() {
+    let rig = Rig::new("pi-rpc-auto-config-off");
+    crate::common::write(
+        &rig.fixture.home().join(".claudine/config.json"),
+        r#"{ "steering": { "automatic": { "enabled": false } } }"#,
+    );
+    let output = rig.run("repeat");
+    let stderr = flat(&output.stderr);
+    assert!(!output.status.success(), "{}", describe(&output));
+    assert!(!stderr.contains(UNAVAILABLE_NOTICE), "{stderr}");
+    assert!(repetition_stop(&stderr).is_some(), "{stderr}");
+
+    // The environment overrides the configured opt-out.
+    let rig_on = Rig::new("pi-rpc-auto-config-env-on");
+    crate::common::write(
+        &rig_on.fixture.home().join(".claudine/config.json"),
+        r#"{ "steering": { "automatic": { "enabled": false } } }"#,
+    );
+    let output = rig_on.run_with("repeat", &[("CLAUDINE_AUTO_STEER", "on")]);
+    assert!(flat(&output.stderr).contains(UNAVAILABLE_NOTICE), "{}", describe(&output));
+}
+
+#[test]
+fn a_malformed_auto_steer_value_fails_before_pi_is_launched() {
+    for value in ["", "maybe", "2"] {
+        let rig = Rig::new("pi-rpc-auto-malformed");
+        let output = rig.run_with("repeat", &[("CLAUDINE_AUTO_STEER", value)]);
+        let stderr = flat(&output.stderr);
+        assert!(!output.status.success(), "{value:?}: {}", describe(&output));
+        assert!(stderr.contains("CLAUDINE_AUTO_STEER"), "{value:?}: {stderr}");
+        assert!(rig.argv(1).is_none(), "{value:?}: Pi must not be launched");
+    }
+}
+
+#[test]
+fn a_malformed_configured_value_fails_before_pi_is_launched() {
+    let rig = Rig::new("pi-rpc-auto-config-null");
+    crate::common::write(&rig.fixture.home().join(".claudine/config.json"), r#"{ "steering": { "automatic": { "enabled": null } } }"#);
+    let output = rig.run("repeat");
+    assert!(!output.status.success(), "{}", describe(&output));
+    assert!(rig.argv(1).is_none(), "Pi must not be launched: {}", describe(&output));
 }

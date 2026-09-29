@@ -59,8 +59,20 @@ not makes no difference. Anything else in a date position is handled as follows:
 | A timestamp such as `2026-09-28T10:00:00Z` | Validation error; only dates are supported |
 | A number, `true`/`false`, a list, or a mapping | Validation error |
 
+Watch for YAML spellings that do not mean what they look like. `yes`, `on`,
+and `010` arrive as strings, so in a date position they are invalid dates;
+`True` is a boolean; `.inf` and `.nan` arrive as empty values, so they read as
+a missing baseline.
+
 Frontmatter that repeats a top-level key is also a validation error, because
 YAML tools disagree about which copy wins.
+
+The reader is strict about YAML, with one exception. Frontmatter indented with
+tabs, which YAML forbids but Darkmatter tolerates, is repaired in memory:
+`policy check` reports on the repaired text with a warning, and `policy renew`
+offers the repair as an edit of its own. Frontmatter that Darkmatter reads only
+by protecting unquoted `{{ }}` templates is rejected, and the message says so;
+quote the template to fix it.
 
 ### When a Date Takes Effect
 
@@ -80,9 +92,19 @@ timestamps are not.
 
 Policies live under the `content_policy` key by default (snake_case, like the
 repository's other frontmatter keys); a caller can choose a different key.
-Some early research notes used a `Duration(3mo)` rule. `Duration` is not a
-rule name and is reported as a validation error, so write `ValidFor(3mo)`
-instead. The existing notes are planned to be migrated.
+Some early research notes used a `Duration(3mo)` rule, some of them under an
+`update_policy:` key. `Duration` is not a rule name and is reported as a
+validation error, so write `ValidFor(3mo)` instead. `update_policy:` is not
+read at all: a document that has only that key is evaluated under the default
+policy. The existing notes are planned to be migrated to
+`content_policy: - ValidFor(...)`, with each `update_policy:` key removed. An
+entry that has no rule yet, such as a major-version check, is kept only as a
+YAML comment beside the migrated rule, so it is visibly not enforced:
+
+```yaml
+content_policy:
+  - ValidFor(1yr) # pending: MajorVersion(latest_version)
+```
 
 Relative policies need different evidence. A package rule needs the version
 used during research; a file rule needs a content fingerprint. A shared
@@ -101,8 +123,7 @@ content_policy:
 
 The property reference is required; `FileChanged(src/config.rs)` on its own is
 a validation error. Each watched file gets its own property, so two rules never
-overwrite each other's fingerprint. The CLI resolves the path relative to the
-document's directory; a library caller supplies the base directory.
+overwrite each other's fingerprint.
 
 A fingerprint is written `<scheme>:<hex>`. The scheme says how the file was
 hashed:
@@ -121,8 +142,49 @@ below), and it keeps whichever scheme the property already uses.
 | The file's fingerprint differs | Triggered |
 | The file is missing or was deleted | Triggered, reason "source removed" |
 | The file exists but cannot be read | Unknown |
+| The path names a directory | Unknown |
 | The fingerprint property is absent or empty | Unknown (missing baseline) |
 | The stored scheme is not recognized | Unknown; never proof of a change or of freshness |
+
+#### Which Files a Rule Can Watch
+
+A rule watches files that travel with the document. The path must resolve to a
+file inside a **boundary**:
+
+- in a Git repository, the repository root;
+- outside a repository, the directory the command was started from (the
+  document tree root), which stands in for the repository root.
+
+A relative path starts from the document's directory. A library caller
+evaluating a record with no document behind it passes that directory instead;
+the boundary is always discovered, never passed in.
+
+| Path | Accepted? |
+| --- | --- |
+| `src/config.rs`, `./config.rs` | Yes |
+| `../src/config.rs` | Yes, while it stays inside the boundary |
+| `&Cargo.toml` (from the repository root), `^README.md` (package, then package area, then repository root) | Yes; outside a repository both resolve from the document tree root |
+| `/etc/hosts`, `C:\x`, `src\config.rs` | No: absolute paths and backslashes mean different files on different machines |
+| `~/x`, `@x`, `%x`, `vault:x`, `{{HOME}}/x`, a URL | No: they depend on the machine or its environment |
+| `" src/config.rs"` (leading or trailing space) | No |
+| Any path that ends up outside the boundary | No |
+
+A rejected path is a validation error, and so is a path that escapes the
+boundary. Outside a repository there are no packages, so `^` falls back to the
+document tree root and names the same file as `&`. The boundary, and so the
+file a sigil names, depends on where you run the command: a rule in `~/writing/notes/doc.md` that
+watches `../drafts/x.md` is valid when checked from `~/writing` and invalid
+when checked from `~/writing/notes`. Inside a repository the answer is the
+same wherever you run it.
+
+A path cannot contain `,` or `)`, because those end a rule's argument. A path
+that contains ` #` or `: ` confuses YAML, which reads the first as a comment
+and the second as a key; quote the whole rule to use one:
+
+```yaml
+content_policy:
+  - "FileChanged(notes/a #1.md, @notes_fingerprint)"
+```
 
 ## Evaluate Without Renewing
 
@@ -175,13 +237,27 @@ If one property supplies both a renewable baseline and a nonrenewable deadline,
 the renewal must surface that conflict rather than silently move the deadline.
 
 Renewal is planned to edit only the bytes of the values it changes, so comments,
-quoting, key order, and the Markdown body survive untouched. That precision
-limits which YAML shapes it can edit. Renewal refuses, and writes nothing, when:
+quoting, key order, line endings, a byte-order mark, and the Markdown body
+survive untouched. The one exception is tab-indented frontmatter: the preview
+lists the tab repair as its own edit, and `--write` applies it along with the
+dates. An empty `last_updated:` is filled in as `last_updated: 2026-09-28`,
+and a trailing comment stays after the new value.
+
+That precision limits which YAML shapes renewal can edit. It refuses, and
+writes nothing, when:
 
 - a value it must change sits inside a one-line bracketed (flow-style) policy
-  list
+  list, or inside an entry written as `- {rule: …, action: …}`
 - a value it must change is a block scalar or spans several lines
 - a value it must change is a double-quoted string containing escape sequences
+- a value it must change carries a YAML anchor, alias, or tag, such as
+  `last_updated: &lu 2026-09-28`; changing an anchored value would silently
+  change every alias of it too
+- the frontmatter block has no closing `---` (a `...` closing line included),
+  or its fences are near misses such as `----`
+
+As a final check, renewal re-reads its result. If anything other than the
+values it meant to change came out different, it writes nothing.
 
 A bracketed list is fine when nothing inside it changes. Both of these renew
 the same way, because the only edit is the `last_updated` line:
@@ -194,8 +270,12 @@ content_policy:
 
 ```yaml
 last_updated: 2026-09-28
-content_policy: [ValidFor(3mo, @last_updated)]
+content_policy: ["ValidFor(3mo, @last_updated)"]
 ```
+
+The quotes in the second form are required. Without them the comma splits the
+rule, the second half starts with `@`, which YAML reserves, and the frontmatter
+does not parse at all.
 
 An inline date is different. In a block list renewal edits it in place; inside
 brackets it is refused:

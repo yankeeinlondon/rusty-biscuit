@@ -6,13 +6,20 @@ session. This page explains how those pieces fit together, how to check them,
 and how a mechanism is enabled.
 
 > **Status:** the typed facts, activation checks, eligibility rules, profile
-> blocks, managed control routing, and session discovery are implemented (see
-> [Steering Routing](steering-routing.md)). The first adapter, `pi-rpc`
-> revision 1, is implemented and reviewed ([Managed Pi RPC execution](pi-rpc.md)),
-> but its launch profile is **blocked** (see [Blocking a profile](#blocking-a-profile)),
-> and no grant exists. The `claudine steer` command, automatic repetition
-> warnings, and the other providers' adapters are **planned**. Every session
-> therefore reports steering as unavailable, each with a specific reason.
+> blocks, managed control routing, session discovery, the
+> [`claudine steer`](../cli/steer.md) command, and
+> [automatic repetition help](automatic-steering.md) are implemented (see
+> [Steering Routing](steering-routing.md)). Two adapters are implemented and
+> reviewed:
+>
+> - `codex-app-server` revision 1 ([Managed Codex app-server execution](codex-app-server.md))
+>   is **granted** for Claudine-managed non-interactive Codex runs on macOS at
+>   exactly Codex 0.157.1 — see [The shipped Codex grants](#the-shipped-codex-grants);
+> - `pi-rpc` revision 1 ([Managed Pi RPC execution](pi-rpc.md)) is **blocked**
+>   (see [Blocking a profile](#blocking-a-profile)).
+>
+> Every other session reports steering as unavailable, each with a specific
+> reason, in `claudine steer --list`.
 
 ## What you can do today
 
@@ -141,6 +148,12 @@ grants:
   required assertions;
 - no block names the grant's provider and profile.
 
+A case researched as `non_interrupting` can list an interruption mechanism as
+a manual fallback, but that mechanism cannot be granted on that case: a grant's
+mechanism must support the case the way the research says it does. This is
+also the runtime behavior — a selectable non-interrupting route is always
+preferred, so an interruption grant there could never be chosen.
+
 | Operation | Required assertions |
 | --- | --- |
 | `steer_active_turn`, `queue_follow_up` | `target_identity`, `acceptance_signal`, `conversation_delivery`, `running_work_preserved` |
@@ -190,6 +203,29 @@ mutation lock (see [Managed Pi RPC execution](pi-rpc.md#steering-adapter))
 cannot order a switch that an extension starts on its own, so no check before
 sending closes that window.
 
+### The shipped Codex grants
+
+The reviewed policy grants two Codex cases, both for the
+`managed-app-server` profile on macOS, `provider_version: "0.157.1"`,
+`launch_mode: non_interactive`, `origin: claudine`:
+
+| Mechanism | State | Verification records |
+| --- | --- | --- |
+| `app-server-steer` (`steer_active_turn`) | working | `codex-app-server-steer-tool-01571`, `codex-app-server-steer-stale-01571`, `codex-app-server-steer-generation-01571` |
+| `app-server-turn-start` (`start_idle_turn`) | idle | `codex-app-server-idle-01571` |
+
+The records come from the production session and adapter run against the
+installed Codex 0.157.1 with a scripted local model
+(`features/2026-09-08-steering/verification/codex-macos-0.157.1.json`). Codex's
+`turn/steer` names the running turn as `expectedTurnId` and refuses anything
+else, which is the target guard Pi lacks, so no block applies.
+
+A managed Codex run is steerable only when all of this holds; a different
+Codex version, Linux, native Windows, or an `exec`-only run lists as
+unavailable with the specific reason. The interrupt-then-start mechanism is
+implemented and verified (`codex-app-server-interrupt-01571`) but not granted,
+for the reason given under [Writing an activation grant](#writing-an-activation-grant).
+
 ## Typed verification records
 
 Research verification rows carry a stable `id` and typed `assertion_kinds`
@@ -216,6 +252,8 @@ native`) is not evidence for a Claudine-managed launch (`origin: claudine`).
 
 - [Provider Metadata](./provider-metadata.md) — the generator and its other
   artifacts
+- [Managed Codex app-server execution](./codex-app-server.md) — the
+  `codex-app-server` adapter and the launch it steers
 - [Managed Pi RPC execution](./pi-rpc.md) — the `pi-rpc` adapter and the
   launch it steers
 - [Non-Interactive Sessions](./non-interactive-sessions.md)

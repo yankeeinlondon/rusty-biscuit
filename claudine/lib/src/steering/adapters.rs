@@ -16,8 +16,12 @@ use super::vocabulary::AdapterRef;
 /// `commands/wrap/exec/pi_rpc/executor.rs`.
 pub const PI_RPC: AdapterRef = AdapterRef { id: "pi-rpc", revision: 1 };
 
+/// Codex's managed app-server adapter: `claudine-cli`
+/// `commands/wrap/exec/codex_app_server/executor.rs`.
+pub const CODEX_APP_SERVER: AdapterRef = AdapterRef { id: "codex-app-server", revision: 1 };
+
 /// Adapter revisions implemented in this build.
-pub const IMPLEMENTED_ADAPTERS: &[AdapterRef] = &[PI_RPC];
+pub const IMPLEMENTED_ADAPTERS: &[AdapterRef] = &[PI_RPC, CODEX_APP_SERVER];
 
 /// Whether `adapter` is both implemented and reviewed.
 pub fn is_usable(adapter: AdapterRef) -> bool {

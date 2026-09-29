@@ -4,8 +4,13 @@
 //! which serde handles through `#[serde(rename = "...")]` on each variant.
 //! The parser falls back to `Value`-based skipping for any event type that
 //! is not enumerated here.
+//!
+//! [`app_server`] reads the managed app-server protocol and projects its
+//! notifications onto these events.
 
 use serde::{Deserialize, Serialize};
+
+pub mod app_server;
 use serde_json::{Map, Value};
 
 /// Tagged enum over all Codex CLI stream event variants dispatched by the

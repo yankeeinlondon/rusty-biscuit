@@ -1,7 +1,8 @@
 //! Retained-stdin control sessions for the semantic spawn path.
 //!
 //! Most providers take their task as a one-shot stdin seed. A provider whose
-//! managed launch is a bidirectional protocol (Pi's `--mode rpc`) instead keeps
+//! managed launch is a bidirectional protocol (Pi's `--mode rpc`, Codex's
+//! `app-server`) instead keeps
 //! stdin open for the whole run: the task, steering commands, and answers to
 //! the provider's own requests all travel over it. A [`StdioControl`] owns
 //! that stdin, sees every stdout line before the semantic parser does, submits
@@ -60,11 +61,26 @@ pub(crate) struct FallbackLaunch {
 /// [`submit`](Self::submit) at most once after [`Readiness::Ready`], and
 /// [`finish`](Self::finish) once the child has exited.
 pub(crate) trait StdioControl: Send + Sync {
+    /// The provider argv this session's child runs, when it is not the argv
+    /// the session was built from. Codex's managed launch runs
+    /// `app-server` for an `exec` argv, and keeps the `exec` argv as its
+    /// [`fallback`](Self::fallback).
+    fn launch_args(&self) -> Option<Vec<String>> {
+        None
+    }
+
     /// Takes ownership of the child's stdin and starts the readiness check.
     fn open(&self, stdin: ChildStdin, child_pid: u32, channels: ControlChannels) -> std::io::Result<()>;
 
     /// Reacts to one stdout line.
     fn observe(&self, line: &str);
+
+    /// Whether `line` answers a command the session itself sent (readiness,
+    /// task, steering, settlement). Such a line is control traffic, not
+    /// agent progress, so it does not refresh the stream-silence clock.
+    fn is_control_reply(&self, _line: &str) -> bool {
+        false
+    }
 
     /// The current readiness; it leaves [`Readiness::Pending`] exactly once.
     fn readiness(&self) -> Readiness;

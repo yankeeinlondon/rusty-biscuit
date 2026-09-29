@@ -100,6 +100,7 @@ pub(crate) fn snapshot_to_info(snapshot: &ControllerSnapshot) -> ManagedTargetIn
         provider_pid: snapshot.provider_process.as_ref().map(|process| process.pid),
         provider_start: snapshot.provider_process.as_ref().map(|process| process.start().to_string()),
         observed_at_unix_ms: Utc::now().timestamp_millis(),
+        operation: snapshot.availability.operation.map(wire),
     }
 }
 
@@ -108,6 +109,22 @@ pub(crate) fn info_to_listing(info: ManagedTargetInfo) -> Result<SessionListing,
     let binding = info.binding.as_ref().ok_or(WireError::Missing { field: "binding" })?;
     let target = binding_from_wire(binding)?;
     let availability: SteeringAvailability = parse("availability", &info.availability)?;
+    // The operation is what a requester will send, so it must agree with
+    // the verdict: a selectable row without one could not be routed, and an
+    // unavailable row with one would contradict itself.
+    let operation = match (availability, info.operation.as_deref()) {
+        (SteeringAvailability::Unavailable, None) => None,
+        (SteeringAvailability::Unavailable, Some(_)) => {
+            return Err(WireError::Inconsistent { field: "operation", problem: "must be absent for an unavailable target" });
+        }
+        (_, None) => return Err(WireError::Missing { field: "operation" }),
+        (_, Some(text)) => match parse::<OperationIntent>("operation", text)? {
+            OperationIntent::Unknown => {
+                return Err(WireError::UnknownValue { field: "operation", value: text.to_string() });
+            }
+            operation => Some(operation),
+        },
+    };
     let provider_process = match (info.provider_pid, info.provider_start.as_deref()) {
         (Some(pid), Some(start)) => Some(ProcessStartIdentity::new(pid, start).map_err(identity("provider_start"))?),
         (None, None) => None,
@@ -129,12 +146,14 @@ pub(crate) fn info_to_listing(info: ManagedTargetInfo) -> Result<SessionListing,
         provider_version: info.provider_version,
         availability: AvailabilitySummary {
             availability,
+            operation,
             reason: info.reason,
             setup_requirements: info.setup_requirements,
         },
         observed_at: DateTime::<Utc>::from_timestamp_millis(info.observed_at_unix_ms)
             .ok_or(WireError::Inconsistent { field: "observed_at_unix_ms", problem: "is out of range" })?,
-        session_key: provider_process.zip(target.conversation),
+        session_key: provider_process.zip(target.conversation.clone()),
+        binding: Some(target),
     })
 }
 

@@ -1,7 +1,8 @@
 # Steering Fleet Research Run
 
 Date: 2026-09-08
-Status: Complete — passive research validated; live delivery unverified
+Status: Complete — passive research validated; live delivery verified only for
+Codex 0.157.1 on macOS (see [Implementation Outcome](#implementation-outcome-2026-09-28))
 
 The user authorized a full steering research refresh for all ten eligible
 providers in `claudine/docs/providers.yaml`, using `gpt-5.6-sol` with low
@@ -285,3 +286,34 @@ empty verification was inconsistent with retained test records and was corrected
 No schema revision or full fleet rerun is needed for these representable findings.
 Additional process descendants, broader interleavings, controller/host failure,
 restart, cloud inference, and native Linux/Windows remain explicit unknowns.
+
+## Implementation Outcome (2026-09-28)
+
+The research above fed an implementation that is complete for one provider.
+Final coverage, by provider:
+
+- **Codex — enabled.** A Claudine-managed non-interactive run over
+  `codex app-server` is steerable on **macOS at Codex 0.157.1** (profile
+  `managed-app-server`): steering the active turn and starting a turn when
+  idle. A corrective research pass on 0.157.1 (source reading plus disposable
+  tests) added seven verification records
+  ([`verification/codex-macos-0.157.1.json`](verification/codex-macos-0.157.1.json)).
+  Release checks through the production wrapper passed: a manual
+  `claudine steer --session` routed by a real local Rendezvous daemon, an
+  automatic warning followed by recovery, and continued repetition reaching the
+  unchanged stop. Linux and native Windows have no real-Codex run and no grant.
+- **Pi — implemented, blocked.** The managed RPC launch and adapter work
+  against real Pi, but the reviewed policy blocks `retained-rpc`: extensions
+  can switch the session without coordination (the switch fixture above).
+- **Claude Code — discovery only.** Sessions are listed from Claude's own
+  registry on macOS, Linux, and Windows; delivery stays unavailable because the
+  peer-socket reply framing and receipt timing are undocumented.
+- **OpenCode, Kilo, Gemini, Qwen, Goose, Kimi, Antigravity — not
+  implemented.** Each is listed with its reason; the per-provider next checks
+  are in the [uncertainty register](uncertainties.md#final-status-2026-09-28).
+  Goose is not installed on any test host; Kimi Code 2.x needs a research
+  refresh (major version).
+
+The cross-provider summary prompt for this topic
+(`claudine/docs/research/summary/steering.md`) was added to the existing
+summary workflow; its generation run has not been made yet.

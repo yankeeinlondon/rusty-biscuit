@@ -5,6 +5,54 @@ by a test extension. The model exposes the input it receives through allowlisted
 fixture markers. This tests Pi's actual command, queue, tool, extension, and event
 machinery without cloud inference or changes to existing sessions.
 
+## Codex 0.157.1 on macOS (Claudine-managed app-server)
+
+[Recorded result](codex-macos-0.157.1.json): the production Codex session and
+`codex-app-server` adapter (revision 1) against the installed Codex 0.157.1,
+with a disposable `CODEX_HOME` and a loopback scripted Responses-API model
+(`claudine/cli/tests/common/codex_model.rs`). Seven verification records back
+the reviewed grants for `app-server-steer` (working) and
+`app-server-turn-start` (idle); two of them document expected losses
+(duplicate `clientUserMessageId` delivery, stdin EOF mid-turn). Wrapper-level
+runs of `claudine codex` showed output and exit-code parity with `codex exec`
+and automatic repetition help followed by recovery.
+
+```sh
+just test-real real_codex_   # in claudine/, with `codex` on PATH
+```
+
+Linux and native Windows were covered only by the deterministic fake-Codex
+tests, not by real Codex.
+
+### Production-wrapper release checks (2026-09-28, macOS, Codex 0.157.1)
+
+Run through `just test-real real_codex_app_server::` (the CLI half now enables
+`daemon-tests`), every run with a disposable `CODEX_HOME` and the scripted
+loopback model:
+
+- **Manual send:** `manual_steer::real_codex_app_server_manual_steer_reaches_the_running_wrapper_once`
+  starts a real local Rendezvous daemon in the test process and a real
+  `claudine codex` run, then runs `claudine steer --list --json` and
+  `claudine steer --session <id> --json` as separate processes. The row is
+  listed `non_interrupting` / `steer_active_turn`; the receipt is `queued` via
+  `app-server-steer`; the model receives the original message (secret
+  included) exactly once and the run ends successfully; once the run ends it
+  is unlisted, and the same ID then returns `unavailable` and nothing reaches
+  the model. The steering audit keeps the message with the secret masked.
+- **Automatic warning, then recovery:**
+  `real_codex_app_server_automatic_help_lets_a_repeating_run_recover`.
+- **Continued repetition still stops at the unchanged limit:**
+  `real_codex_app_server_continued_repetition_still_stops_at_the_limit` (one
+  warning sent before `runaway repetition detected (cycle length 1, 30 repeats)`).
+
+Result: 6/6, plus `real_codex_protocol` 8/8, Pi (installed version not re-read) `real_pi_` 11/11 and the three
+ignored native Pi regressions 3/3.
+
+Real Codex on Linux and native Windows remains **unrun**: `just cross-check`
+does not forward the real tier's opt-in variable, so those hosts ran the
+fake-Codex and daemon-backed suites only (Linux 98/98, native Windows 98/98).
+No grant exists for them.
+
 ## Pi 0.84.4 on macOS
 
 [Recorded result](pi-macos-0.84.4.json): one combined opt-in test passed, producing

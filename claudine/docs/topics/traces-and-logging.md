@@ -46,10 +46,14 @@ until you delete them; there is no automatic retention.
 The owning execution's steering controller writes these records for every
 request it receives, including ones it refuses before delivery (busy, stale,
 duplicate). A requester routing through the local daemon writes none. See
-[Steering Routing](steering-routing.md).
+[Steering Routing](steering-routing.md). A send that
+[`claudine steer`](../cli/steer.md) refuses before routing it (an unknown or
+unavailable target, an interruption without consent, or a cancelled prompt)
+reaches no owner, so it leaves no audit record; the command's own output is
+the only report.
 
-> **Planned:** the `claudine steer` command and automatic warnings, the two
-> producers of requests.
+> **Planned:** automatic repetition warnings, the second producer of
+> requests. `claudine steer` is implemented.
 
 ### What a record holds
 

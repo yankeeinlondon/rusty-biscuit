@@ -16,7 +16,7 @@ use std::fmt;
 
 use super::vocabulary::{
     AccessStatus, ActivationGrant, AdapterRef, CaseSupport, ExecutionState, HostOs, LaunchMode,
-    LaunchOrigin, ProfileBlock, ProviderSteering, ReceiptStrength, ReceiptTiming, SteeringAvailability,
+    LaunchOrigin, OperationIntent, ProfileBlock, ProviderSteering, ReceiptStrength, ReceiptTiming, SteeringAvailability,
     SteeringMechanism,
 };
 use crate::provider_id::Provider;
@@ -121,6 +121,10 @@ pub struct ManualEligibility {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AvailabilitySummary {
     pub availability: SteeringAvailability,
+    /// The operation the preferred route performs; `None` exactly when
+    /// unavailable. A requester must send this operation: the owner refuses
+    /// any other, so a listed choice can never become a different action.
+    pub operation: Option<OperationIntent>,
     /// Why the session is unavailable, or what interruption would stop.
     /// `None` only for non-interrupting availability.
     pub reason: Option<String>,
@@ -131,7 +135,12 @@ pub struct AvailabilitySummary {
 impl AvailabilitySummary {
     /// An unavailable session with one plain reason.
     pub fn unavailable(reason: impl Into<String>) -> Self {
-        Self { availability: SteeringAvailability::Unavailable, reason: Some(reason.into()), setup_requirements: Vec::new() }
+        Self {
+            availability: SteeringAvailability::Unavailable,
+            operation: None,
+            reason: Some(reason.into()),
+            setup_requirements: Vec::new(),
+        }
     }
 }
 
@@ -158,7 +167,8 @@ impl ManualEligibility {
                 Some(self.blockers.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
             }
         };
-        AvailabilitySummary { availability: self.availability, reason, setup_requirements }
+        let operation = self.route.map(|route| route.mechanism.operation_intent);
+        AvailabilitySummary { availability: self.availability, operation, reason, setup_requirements }
     }
 }
 

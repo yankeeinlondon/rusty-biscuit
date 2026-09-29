@@ -136,7 +136,7 @@ impl WrapperProfile for PiWrapper {
         }
     }
 
-    fn stdio_control(&self, args: &[String]) -> Option<Arc<dyn StdioControl>> {
+    fn stdio_control(&self, args: &[String], _cwd: &Path) -> Option<Arc<dyn StdioControl>> {
         (option_value(args, MODE_FLAG).as_deref() == Some(RPC_INTERFACE))
             .then(|| Arc::new(PiRpcSession::new(json_fallback(args))) as Arc<dyn StdioControl>)
     }

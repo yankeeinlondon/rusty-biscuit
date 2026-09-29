@@ -624,13 +624,13 @@ pub(crate) trait WrapperProfile: Send + Sync {
         apply::apply_structured_stream(self.provider(), args)
     }
 
-    /// The retained-stdin control session a structured launch with `args`
-    /// needs, when those args select the provider's managed control
-    /// interface. The session then owns the child's stdin and submits the
-    /// prompt that would otherwise be seeded on it.
+    /// The retained-stdin control session a structured launch with `args`,
+    /// run in `cwd`, needs, when the provider's managed control interface can
+    /// carry that launch. The session then owns the child's stdin and submits
+    /// the prompt that would otherwise be seeded on it.
     ///
     /// Default: `None` (the prompt is an ordinary stdin seed).
-    fn stdio_control(&self, _args: &[String]) -> Option<std::sync::Arc<dyn StdioControl>> {
+    fn stdio_control(&self, _args: &[String], _cwd: &Path) -> Option<std::sync::Arc<dyn StdioControl>> {
         None
     }
 

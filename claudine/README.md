@@ -90,6 +90,28 @@ The immediate benefits of wrapped execution are:
 - **Compositional Flow Features**
     - We'll cover this in the next section
 
+### Steering a Running Session
+
+`claudine steer "message"` sends one message to one running agent session, to
+course-correct it without stopping it. It lists sessions and asks you to pick
+one (even when only one is available), or takes an exact ID from
+`claudine steer --list [--json]` with `--session <id>`. It never broadcasts,
+asks before interrupting a session, and reports only what the provider
+confirmed (exit 0 for accepted, queued, or delivered; 1 otherwise; 2 for usage
+errors; 130 when you cancel). Which sessions can receive a message is decided
+by reviewed provider evidence: today that is a non-interactive Codex run
+Claudine launched on macOS with Codex 0.157.1; every other session is listed
+with the reason it cannot be steered. Runs started by another `claudine`
+process are reached through the local Rendezvous daemon (`rendezvous-daemon`),
+so start it first. See [`claudine steer`](docs/cli/steer.md) for setup and a
+per-provider compatibility table.
+
+When a wrapped agent starts repeating itself, Claudine also tries to help on
+its own: halfway to the repetition stop it sends the agent a short "check your
+progress" message, or prints one notice when that session cannot receive it.
+The stop itself is unchanged. Turn this off with `CLAUDINE_AUTO_STEER=off` or
+`"steering": { "automatic": { "enabled": false } }` in user or repo config. See
+[Automatic Steering](docs/topics/automatic-steering.md).
 
 ### Composition
 
@@ -220,6 +242,12 @@ with Pi's documented cancellation and falls back to Pi's JSON stream only
 before the task is sent. See
 [Managed Pi RPC execution](./docs/topics/pi-rpc.md).
 
+Non-interactive Codex runs use Codex's app-server when every `codex exec`
+option maps exactly to it (same output, final answer, and exit code as
+`codex exec`), which lets the run be steered; any other run stays on
+`codex exec`. See
+[Managed Codex app-server execution](./docs/topics/codex-app-server.md).
+
 
 ## More Information
 
@@ -258,7 +286,9 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Pre-Flight Checks](./docs/topics/pre-flight-checks.md) and [Lifecycle](./docs/topics/flow-control/lifecycle.md) - Pre-flight shell audit/schema validation and the lifecycle stack (gating, verification, recovery)
 - [Policy Engine](./docs/topics/policy-engine.md) and [Protect Service](./docs/topics/protect-service.md) - Permissions and runtime safety
 - [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting, diagnostics, and steering audit records
+- [`claudine steer`](./docs/cli/steer.md) - Sending a message to a running session: selection, interruption consent, receipts, exit codes, and the JSON contract
 - [Steering Routing](./docs/topics/steering-routing.md) - Per-execution steering ownership, local routing through the Rendezvous daemon, and session discovery
+- [Automatic Steering](./docs/topics/automatic-steering.md) - Early repetition warnings sent to the looping agent, the three-opportunity cap, recovery, and `CLAUDINE_AUTO_STEER`
 - [Secret Recognition](./docs/topics/secret-recognition.md) - The shared credential recognizer behind scrubbing, webhook redaction, wrapper sanitization, and steering log masking
 - [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider
 - [Non-Interactive Sessions](./docs/topics/non-interactive-sessions.md) and [Mixing Events into Non-Interactive Sessions](./docs/topics/mixing-events-into-non-interactive-sessions.md)

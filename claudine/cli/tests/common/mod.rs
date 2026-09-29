@@ -145,6 +145,7 @@
 
 #![allow(dead_code)]
 
+pub(crate) mod codex_model;
 pub(crate) mod completion;
 pub(crate) mod drain_interrupt;
 pub(crate) mod host_tools;

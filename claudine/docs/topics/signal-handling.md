@@ -335,6 +335,30 @@ enforcement is now delegated uniformly to the watchdog ticker (see
 [Watchdog-driven SIGTERM](#watchdog-driven-sigterm)) for all three paths,
 so a configured `timeout` is always group-targeted and signal-aware.
 
+### Controlled launches (Pi RPC, Codex app-server)
+
+A provider Claudine drives over a control protocol on stdin — managed Pi RPC
+and the Codex app-server, which is what makes a run steerable — is spawned by
+the streaming path and has one extra phase before the loop above: a readiness
+pre-flight (`await_readiness` in
+[`exec/spawn/retained.rs`](../../cli/src/commands/wrap/exec/spawn/retained.rs)).
+
+- **Ctrl+C before the provider is ready** abandons the launch with
+  "interrupted before the provider was ready". The task was never submitted,
+  and the pre-submission fallback (`codex exec`, Pi's JSON mode) is **not**
+  tried: an interrupt is not a launch failure.
+- **After readiness** the child is in the unified wait loop like any other,
+  and Ctrl+C, the watchdogs, and the stop guards terminate its process group
+  exactly as described here.
+- **Stdin stays open until the run settles.** Closing it is not a gentle stop
+  for these providers: Codex's app-server exits `0` and abandons its running
+  turn. Only settlement (the turn ended and the provider reports itself idle)
+  closes stdin; every other ending is a group termination with its usual
+  label.
+
+A steering message never changes this: a steered turn ends, is interrupted,
+or times out on the same clocks and signals as an unsteered one.
+
 ### Per-child SIGINT escalation
 
 The wait loop installs its own `signal_hook` SIGINT handler around each

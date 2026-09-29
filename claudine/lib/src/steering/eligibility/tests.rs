@@ -268,30 +268,90 @@ fn unsupported_research_case_reports_its_reason() {
     assert_eq!(result.manual.blockers, [Blocker::CaseNotSupported { support: CaseSupport::Unknown, reason: "fixture" }]);
 }
 
-/// Passive corpus check over the shipped generated catalog: with no
-/// reviewed grants and no implemented adapters, no researched case of any
-/// provider is selectable, and each reports a specific blocker.
+/// Passive corpus check over the shipped generated catalog and reviewed
+/// policy: a researched case is selectable exactly when a reviewed grant
+/// names it, and only at the grant's exact version; every other case reports
+/// a specific blocker.
 #[test]
-fn shipped_catalog_activates_nothing_without_reviewed_grants() {
+fn shipped_catalog_activates_exactly_the_reviewed_grants() {
+    let grants = crate::steering::activation_grants();
     for provider in PROVIDERS_DISPLAY_ORDER {
         let facts = crate::steering::facts(provider);
         assert!(!facts.cases.is_empty(), "{provider:?} has no researched cases");
         for case in facts.cases {
-            let result = evaluate(&SessionFacts {
+            let granted: Vec<_> = grants
+                .iter()
+                .filter(|grant| {
+                    grant.provider == provider.as_slug()
+                        && grant.profile_id == case.profile_id
+                        && grant.os == case.os
+                        && grant.launch_mode == case.launch_mode
+                        && grant.origin == case.origin
+                        && grant.state == case.state
+                })
+                .collect();
+            let facts_at = |version| SessionFacts {
                 provider,
                 profile_id: case.profile_id,
                 os: case.os,
                 launch_mode: case.launch_mode,
                 origin: case.origin,
                 state: case.state,
-                provider_version: Some("0.84.4"),
-            });
-            assert_eq!(result.manual.availability, SteeringAvailability::Unavailable, "{provider:?} {case:?}");
-            assert!(!result.manual.blockers.is_empty(), "{provider:?} {case:?}");
-            assert!(matches!(result.automatic, AutomaticEligibility::Unavailable(_)));
+                provider_version: Some(version),
+            };
+            let Some(grant) = granted.first() else {
+                let result = evaluate(&facts_at("0.84.4"));
+                assert_eq!(result.manual.availability, SteeringAvailability::Unavailable, "{provider:?} {case:?}");
+                assert!(!result.manual.blockers.is_empty(), "{provider:?} {case:?}");
+                assert!(matches!(result.automatic, AutomaticEligibility::Unavailable(_)));
+                continue;
+            };
+            let result = evaluate(&facts_at(grant.provider_version));
+            let route = result.manual.route.expect("a granted case is selectable");
+            assert!(granted.iter().any(|grant| grant.mechanism_id == route.mechanism.id), "{route:?}");
+            let other = evaluate(&facts_at("0.0.1"));
+            assert_eq!(other.manual.availability, SteeringAvailability::Unavailable, "another version is never assumed");
         }
     }
-    assert!(crate::steering::activation_grants().is_empty());
+    let shipped: Vec<_> = grants.iter().map(|grant| (grant.provider, grant.mechanism_id, grant.os, grant.state)).collect();
+    assert_eq!(
+        shipped,
+        [
+            ("codex", "app-server-steer", HostOs::Macos, ExecutionState::Working),
+            ("codex", "app-server-turn-start", HostOs::Macos, ExecutionState::Idle),
+        ],
+        "the reviewed grants: Codex's managed app-server on macOS"
+    );
+}
+
+/// A managed Codex run on macOS at the verified version gets
+/// non-interrupting manual steering while working and an idle turn while
+/// idle; automatic help is offered only while working, over `turn/steer`,
+/// whose end-of-batch boundary can rescue a repeating turn.
+#[test]
+fn a_managed_codex_run_is_steerable_at_its_verified_version() {
+    let session = |state| SessionFacts {
+        provider: Provider::Codex,
+        profile_id: "managed-app-server",
+        os: HostOs::Macos,
+        launch_mode: LaunchMode::NonInteractive,
+        origin: LaunchOrigin::Claudine,
+        state,
+        provider_version: Some("0.157.1"),
+    };
+    let working = evaluate(&session(ExecutionState::Working));
+    assert_eq!(working.manual.availability, SteeringAvailability::NonInterrupting);
+    assert_eq!(working.manual.route.unwrap().mechanism.id, "app-server-steer");
+    assert!(matches!(working.automatic, AutomaticEligibility::Eligible(route) if route.mechanism.id == "app-server-steer"));
+
+    let idle = evaluate(&session(ExecutionState::Idle));
+    assert_eq!(idle.manual.availability, SteeringAvailability::NonInterrupting);
+    assert_eq!(idle.manual.route.unwrap().mechanism.id, "app-server-turn-start");
+    assert!(matches!(idle.automatic, AutomaticEligibility::Unavailable(_)), "an idle start is never automatic");
+
+    // Ordinary (unmanaged) Codex launches stay unavailable.
+    let ordinary = evaluate(&SessionFacts { profile_id: "ordinary-cli", ..session(ExecutionState::Working) });
+    assert_eq!(ordinary.manual.availability, SteeringAvailability::Unavailable);
 }
 
 /// The existing Pi verification records are evidence only: even the passing
@@ -361,6 +421,30 @@ fn shipped_policy_blocks_pi_managed_rpc_with_its_reason() {
     // The reviewed Pi adapter is implemented; the block, not a missing
     // adapter, is what refuses the profile.
     assert!(crate::steering::adapters::is_usable(crate::steering::adapters::PI_RPC));
+}
+
+/// The summary names the operation its route performs, so a requester
+/// sends exactly what was listed; an unavailable summary names none.
+#[test]
+fn the_summary_names_the_preferred_routes_operation() {
+    let grants = all_grants();
+    let summary = |state, grants: &[ActivationGrant]| evaluate_with(&session(state), &FACTS, grants, &implemented).manual.summary();
+
+    let working = summary(ExecutionState::Working, &grants);
+    assert_eq!((working.availability, working.operation), (SteeringAvailability::NonInterrupting, Some(O::SteerActiveTurn)));
+    let idle = summary(ExecutionState::Idle, &grants);
+    assert_eq!((idle.availability, idle.operation), (SteeringAvailability::NonInterrupting, Some(O::StartIdleTurn)));
+
+    let only_abort = [grant("abort", O::InterruptThenSubmit, ExecutionState::Working)];
+    let interrupting = summary(ExecutionState::Working, &only_abort);
+    assert_eq!(
+        (interrupting.availability, interrupting.operation),
+        (SteeringAvailability::InterruptionRequired, Some(O::InterruptThenSubmit))
+    );
+
+    let none = summary(ExecutionState::Working, &[]);
+    assert_eq!((none.availability, none.operation), (SteeringAvailability::Unavailable, None));
+    assert_eq!(AvailabilitySummary::unavailable("x").operation, None);
 }
 
 #[test]

@@ -317,6 +317,10 @@ pub(crate) fn run_child_stream_semantic(
     let first_semantic_at_clone = Arc::clone(&first_semantic_at);
     let first_raw_stdout_at_clone = Arc::clone(&first_raw_stdout_at);
     let stdout_byte_metrics = live_metrics.clone();
+    // Replies to the control session's own commands (a steering send, a
+    // state check) are not agent progress and must not hold off the
+    // stream-silence rule.
+    let control_replies = control.as_ref().map(|(session, _)| Arc::clone(session));
     // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
     // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
     let stream_capture_owned = StreamCapture::open(timeout_config.provider, captured_pid, started_at);
@@ -408,7 +412,8 @@ pub(crate) fn run_child_stream_semantic(
             // partially-buffered or post-completion-only providers (notably
             // OpenCode, which emits no `tool_start` / `task_started`) keep
             // the silence rule honest. Whitespace-only lines are ignored.
-            if let Ok(mut g) = stdout_byte_metrics.lock() {
+            let control_reply = control_replies.as_ref().is_some_and(|session| session.is_control_reply(&line));
+            if !control_reply && let Ok(mut g) = stdout_byte_metrics.lock() {
                 g.record_byte_activity(&line, line_at);
             }
 

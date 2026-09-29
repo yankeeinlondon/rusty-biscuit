@@ -397,10 +397,12 @@ async fn dispatch(
 
     // Commands that must work without config (handle is a hook callback,
     // completions is shell setup, __complete runs under a shell completion
-    // pipeline). Everything else requires config.
+    // pipeline, and steer must never change configuration or prompt a
+    // `--json` caller). Everything else requires config, and a missing one
+    // starts the interactive setup wizard.
     let needs_config = !matches!(
         command,
-        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_)
+        Commands::Handle(_) | Commands::Completions(_) | Commands::Complete(_) | Commands::Steer(_)
     );
 
     let perf_config_loading = if needs_config {
@@ -460,6 +462,7 @@ async fn dispatch(
         Commands::Sequence(args) => {
             return commands::sequence::run_sequence(args, cli.verbose, startup_timings);
         }
+        Commands::Steer(args) => return Ok(commands::steer::run(args).await),
         Commands::Budget(args) => commands::budget::run(args),
         Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),

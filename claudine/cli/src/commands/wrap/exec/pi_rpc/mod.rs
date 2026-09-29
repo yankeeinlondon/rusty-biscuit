@@ -213,6 +213,19 @@ impl StdioControl for PiRpcSession {
         self.inner.observe(line);
     }
 
+    /// Every RPC `response` answers a command this session wrote; Pi's own
+    /// activity arrives as events and extension requests.
+    fn is_control_reply(&self, line: &str) -> bool {
+        #[derive(serde::Deserialize)]
+        struct Kind<'a> {
+            #[serde(rename = "type", borrow)]
+            kind: Option<&'a str>,
+        }
+        // Cheap pre-check: most lines are streaming events.
+        line.contains("\"response\"")
+            && serde_json::from_str::<Kind<'_>>(line.trim()).is_ok_and(|record| record.kind == Some("response"))
+    }
+
     fn readiness(&self) -> Readiness {
         lock(&self.inner.state).readiness.clone()
     }

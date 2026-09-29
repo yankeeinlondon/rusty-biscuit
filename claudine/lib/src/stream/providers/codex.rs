@@ -21,12 +21,22 @@
 //! the text is preserved in the summary's `assistant_text` field and any
 //! consumer that needs the raw event can inspect the captured JSONL log
 //! directly.
+//!
+//! A managed app-server run (`codex app-server`) writes JSON-RPC instead.
+//! Its notifications are projected onto the same exec events
+//! ([`app_server::Projector`]); responses and server requests are the
+//! owner's control traffic and render nothing, except that a refusal of the
+//! task's own request ([`app_server::TASK_REQUEST_ID`]) fails the run, since
+//! no turn follows it. Because the app-server exits 0
+//! once its input closes, `finish` applies exec's exit rule itself: a failed
+//! turn, an unretried error, or a final interrupted turn exits 1.
 
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 
 use super::parser::SemanticStreamParser;
+use super::protocol::codex::app_server::{self, Message, Projected};
 use super::protocol::codex::{
     CodexAgentMessage, CodexErrorEnvelope, CodexEvent, CodexFileChange, CodexItem,
     CodexItemEnvelope, CodexPermissionItem, CodexPlanUpdate, CodexReasoning, CodexThreadMeta,
@@ -58,6 +68,11 @@ pub struct CodexSemanticStreamParser<S: SemanticEventSink> {
     /// Tool-item started snapshots keyed by id, merged into the matching
     /// `item.completed` payload so completion events carry the original input.
     tool_items: HashMap<String, CodexToolItemFields>,
+    /// Set once a managed app-server line arrives; projects its
+    /// notifications.
+    app_server: Option<app_server::Projector>,
+    /// The latest app-server turn ended interrupted and no turn followed.
+    interrupted: bool,
 }
 
 impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
@@ -81,6 +96,8 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
             raw_summary: None,
             assistant_text: String::new(),
             tool_items: HashMap::new(),
+            app_server: None,
+            interrupted: false,
         }
     }
 
@@ -220,20 +237,22 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
             let mut extra = self.base_extra(raw_kind);
             extra.insert("origin".into(), Value::from("agent_message"));
             self.sink.on_semantic_event(SemanticEvent::Reasoning {
-                text,
+                text: complete_line(text),
                 extra: Value::Object(extra),
             });
         }
     }
 
-    fn handle_reasoning_item(&mut self, r: &CodexReasoning, raw_kind: &str) {
+    /// `whole` is a completed item, whose text ends at a line boundary; a
+    /// started or updated item is a snapshot that may still grow.
+    fn handle_reasoning_item(&mut self, r: &CodexReasoning, raw_kind: &str, whole: bool) {
         if let Some(text) = r.text.clone().filter(|s| !s.is_empty()) {
             let mut extra = self.base_extra(raw_kind);
             if let Some(summary) = &r.summary {
                 extra.insert("summary".into(), summary.clone());
             }
             self.sink.on_semantic_event(SemanticEvent::Reasoning {
-                text,
+                text: if whole { complete_line(text) } else { text },
                 extra: Value::Object(extra),
             });
         }
@@ -356,7 +375,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
                 return;
             }
             CodexItem::Reasoning(r) => {
-                self.handle_reasoning_item(r, raw_kind);
+                self.handle_reasoning_item(r, raw_kind, false);
                 return;
             }
             CodexItem::FileChange(fc) => {
@@ -405,7 +424,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
                 return;
             }
             CodexItem::Reasoning(r) => {
-                self.handle_reasoning_item(r, raw_kind);
+                self.handle_reasoning_item(r, raw_kind, true);
                 return;
             }
             CodexItem::FileChange(fc) => {
@@ -474,7 +493,7 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
                 }
             }
             CodexItem::Reasoning(r) => {
-                self.handle_reasoning_item(&r, raw_kind);
+                self.handle_reasoning_item(&r, raw_kind, false);
             }
             _ => {}
         }
@@ -499,6 +518,94 @@ impl<S: SemanticEventSink> CodexSemanticStreamParser<S> {
     fn emit_malformed_warning(&mut self, err: &str) {
         super::common::emit_malformed_warning(&mut self.sink, Provider::Codex, self.line_num, err);
     }
+
+    fn handle_event(&mut self, event: CodexEvent) {
+        let raw_kind = event.type_str().to_string();
+        super::trace_parser_event(Provider::Codex, &raw_kind, self.line_num);
+        match event {
+            CodexEvent::ThreadCreated(meta) | CodexEvent::ThreadStarted(meta) => {
+                self.handle_thread_started(meta, &raw_kind);
+            }
+            CodexEvent::TurnStarted(_) => {
+                self.handle_turn_started(&raw_kind);
+            }
+            CodexEvent::TurnCompleted(tc) => {
+                self.handle_turn_completed(tc, &raw_kind);
+            }
+            CodexEvent::Error(err)
+            | CodexEvent::TurnError(err)
+            | CodexEvent::TurnFailed(err)
+            | CodexEvent::StreamError(err) => {
+                self.handle_error(err, &raw_kind);
+            }
+            CodexEvent::ItemStarted(env) => {
+                self.handle_item_started(env, &raw_kind);
+            }
+            CodexEvent::ItemCompleted(env) => {
+                self.handle_item_completed(env, &raw_kind);
+            }
+            CodexEvent::ItemUpdated(env) => {
+                self.handle_item_updated(env, &raw_kind);
+            }
+            CodexEvent::ItemToolUse(fields) | CodexEvent::ToolUse(fields) => {
+                self.emit_top_level_tool_use(fields, &raw_kind);
+            }
+            CodexEvent::ItemToolResult(fields) | CodexEvent::ToolResult(fields) => {
+                self.emit_top_level_tool_result(fields, &raw_kind);
+            }
+        }
+    }
+
+    /// Handles one managed app-server line; `false` when it is not JSON-RPC.
+    /// Notifications are projected onto the exec events above. Responses and
+    /// server requests are the owner's control traffic, not agent output.
+    fn feed_app_server_line(&mut self, line: &str) -> bool {
+        let message = match app_server::read_message(line) {
+            Ok(Message::Other) => return false,
+            Ok(message) => message,
+            // The owner decides what an unreadable control message means; the
+            // display has nothing to render for it.
+            Err(error) => {
+                tracing::debug!(
+                    target: "claudine::stream",
+                    line = self.line_num,
+                    error = &error as &dyn std::error::Error,
+                    "unreadable Codex app-server message"
+                );
+                return true;
+            }
+        };
+        let projector = self.app_server.get_or_insert_with(app_server::Projector::new);
+        let (method, params) = match message {
+            Message::Notification { method, params } => (method, params),
+            Message::Response(app_server::Response { id: Some(id), outcome: Err(failure) })
+                if id == app_server::TASK_REQUEST_ID =>
+            {
+                self.handle_error(
+                    CodexErrorEnvelope { message: Some(format!("Codex refused the task: {failure}")), ..Default::default() },
+                    "turn/start",
+                );
+                return true;
+            }
+            _ => return true,
+        };
+        for projected in projector.project(&method, &params) {
+            match projected {
+                Projected::Event(event) => {
+                    if matches!(*event, CodexEvent::TurnStarted(_)) {
+                        self.interrupted = false;
+                    }
+                    self.handle_event(*event);
+                }
+                Projected::Warning(message) => self.sink.on_semantic_event(SemanticEvent::Warning {
+                    message,
+                    extra: Value::Object(self.base_extra(&method)),
+                }),
+                Projected::Interrupted => self.interrupted = true,
+            }
+        }
+        true
+    }
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S> {
@@ -514,42 +621,8 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
         // event types that must be preserved as `ProviderExtension`, or for
         // `turn.completed` which needs the raw payload for `raw_summary`.
         match serde_json::from_str::<CodexEvent>(line) {
-            Ok(event) => {
-                let raw_kind = event.type_str().to_string();
-                super::trace_parser_event(Provider::Codex, &raw_kind, self.line_num);
-                match event {
-                    CodexEvent::ThreadCreated(meta) | CodexEvent::ThreadStarted(meta) => {
-                        self.handle_thread_started(meta, &raw_kind);
-                    }
-                    CodexEvent::TurnStarted(_) => {
-                        self.handle_turn_started(&raw_kind);
-                    }
-                    CodexEvent::TurnCompleted(tc) => {
-                        self.handle_turn_completed(tc, &raw_kind);
-                    }
-                    CodexEvent::Error(err)
-                    | CodexEvent::TurnError(err)
-                    | CodexEvent::TurnFailed(err)
-                    | CodexEvent::StreamError(err) => {
-                        self.handle_error(err, &raw_kind);
-                    }
-                    CodexEvent::ItemStarted(env) => {
-                        self.handle_item_started(env, &raw_kind);
-                    }
-                    CodexEvent::ItemCompleted(env) => {
-                        self.handle_item_completed(env, &raw_kind);
-                    }
-                    CodexEvent::ItemUpdated(env) => {
-                        self.handle_item_updated(env, &raw_kind);
-                    }
-                    CodexEvent::ItemToolUse(fields) | CodexEvent::ToolUse(fields) => {
-                        self.emit_top_level_tool_use(fields, &raw_kind);
-                    }
-                    CodexEvent::ItemToolResult(fields) | CodexEvent::ToolResult(fields) => {
-                        self.emit_top_level_tool_result(fields, &raw_kind);
-                    }
-                }
-            }
+            Ok(event) => self.handle_event(event),
+            Err(_) if self.feed_app_server_line(line) => {}
             Err(_) => {
                 let raw: Map<String, Value> = match serde_json::from_str(line) {
                     Ok(v) => v,
@@ -570,7 +643,19 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
         }
     }
 
-    fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
+    fn finish(mut self: Box<Self>, mut exit_code: i32) -> StreamExecutionSummary {
+        if self.app_server.is_some() {
+            if self.interrupted && !self.is_error {
+                self.is_error = true;
+                self.error_kind = Some("interrupted".to_string());
+                self.error_message = Some("the turn was interrupted and no turn replaced it".to_string());
+            }
+            // The app-server exits 0 once its input closes; exec exits 1
+            // when the run failed, was interrupted, or hit an unretried error.
+            if exit_code == 0 && self.is_error {
+                exit_code = 1;
+            }
+        }
         super::common::finish_summary(
             Provider::Codex,
             StreamExecutionSummary {
@@ -594,6 +679,18 @@ impl<S: SemanticEventSink> SemanticStreamParser for CodexSemanticStreamParser<S>
             },
         )
     }
+}
+
+/// A whole Codex item's text, ending at a line boundary. Codex delivers
+/// agent messages and reasoning as complete items rather than deltas, so the
+/// end of an item is the end of its last line: without the break, consecutive
+/// items would run together into one unfinished line for the thinking
+/// renderer and the repetition detector.
+fn complete_line(mut text: String) -> String {
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
 }
 
 /// Map a Codex error envelope onto a typed [`SemanticErrorKind`].

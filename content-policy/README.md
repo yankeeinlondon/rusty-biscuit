@@ -83,6 +83,11 @@ content_policy:
   - FileChanged(src/config.rs, @config_fingerprint)
 ```
 
+The path is relative to the document and must stay inside its repository, or,
+outside a repository, inside the directory the command runs from. Absolute and
+machine-specific paths are rejected, so a policy means the same thing on every
+machine.
+
 Content Policy is also planned to ship a schema for `content_policy` entries, so
 editors running DMLS (Darkmatter's language server) can complete rule names and
 flag a mistyped rule or action as you write.
@@ -187,4 +192,5 @@ The policy key, default policy, and default date property are set with
 an environment variable before the built-in value.
 
 See [Policy Evaluation and Renewal](docs/topics/policy-lifecycle.md) for the
-planned lifecycle, including a scripting example and renewal's limits.
+planned lifecycle, including a scripting example, which file paths a rule can
+watch, and renewal's limits.

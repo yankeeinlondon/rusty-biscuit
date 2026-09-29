@@ -72,6 +72,7 @@ fn groups() -> Vec<CommandGroup> {
                     "qwen",
                     "Wrap Qwen Code with Claudine preflight/env handling",
                 ),
+                cmd("steer", "Send a message to one running agent session"),
             ],
         },
         CommandGroup {

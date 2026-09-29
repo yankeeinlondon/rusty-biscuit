@@ -112,7 +112,9 @@ pub trait SteeringExecutor: Send + Sync {
     fn deliver(&self, request: SteeringRequest, route: Route, deadlines: DeliveryDeadlines) -> DeliveryFuture;
 }
 
-/// Facts about a managed execution that do not change while it runs.
+/// Facts about a managed execution that do not change while it runs. The
+/// provider version may be unknown at spawn and recorded once the managed
+/// launch reads it ([`SteeringController::set_provider_version`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionFacts {
     pub provider: Provider,
@@ -276,6 +278,13 @@ impl SteeringController {
         self.update(|snapshot| snapshot.provider_process = Some(process));
     }
 
+    /// Records the exact provider version a managed launch established from
+    /// the provider itself, before its task was submitted. Eligibility never
+    /// guesses one, so until this is called no version-bound grant applies.
+    pub fn set_provider_version(&self, version: String) {
+        self.update(|snapshot| snapshot.facts.provider_version = Some(version));
+    }
+
     /// Records the provider conversation. Any change — including the first
     /// report — starts a new generation, so a target listed under the old
     /// binding is rejected as stale rather than delivered to this one.
@@ -297,6 +306,18 @@ impl SteeringController {
             snapshot.availability = availability(eligibility, snapshot);
             *snapshot != before
         });
+    }
+
+    /// The route automatic help would use now, or why there is none. Automatic
+    /// help names this route's operation in its request; the worker checks
+    /// the route again before submitting.
+    pub fn automatic_route(&self) -> Result<Route, String> {
+        let snapshot = self.snapshot();
+        let facts = session_facts(&snapshot).ok_or_else(|| UNMAPPED_PROFILE_REASON.to_string())?;
+        match (self.shared.eligibility)(&facts).automatic {
+            AutomaticEligibility::Eligible(route) => Ok(route),
+            AutomaticEligibility::Unavailable(blocker) => Err(blocker.to_string()),
+        }
     }
 
     /// Stops accepting requests. Queued requests are answered as unavailable

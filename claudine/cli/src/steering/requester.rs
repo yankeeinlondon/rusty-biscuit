@@ -8,8 +8,6 @@
 //! may have reached the owner is unknown and is never retried. The owner
 //! writes the audit records; the requester writes none.
 
-#![cfg_attr(not(test), expect(dead_code, reason = "`claudine steer` is the production caller"))]
-
 use std::time::Duration;
 
 use claudine::provider::Provider;
