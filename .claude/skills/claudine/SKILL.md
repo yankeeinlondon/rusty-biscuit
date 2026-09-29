@@ -269,6 +269,7 @@ Wrapper behavior: `--mcp` launches with effective defaults; `--use id-or-alias[,
 - [PolicyEngine](policy-engine.md) — summary; full reference in [topics/policy-engine.md](topics/policy-engine.md)
 - [Validations and Handlers → Lifecycle Stacks](validations-and-handlers.md) — the retired validation/handler DSL and its lifecycle-stack replacement
 - [OpenCode Event Sources](opencode-event-sources.md) — Dual-Source Contract, stderr promotion table, watchdog interaction
+- [Research Contracts and Fleets](research-contracts.md) — the contract standard, the two gates, `just research`, the schema grammar's limits, and the traps found running fleets
 
 ### Claudine topic docs
 
@@ -361,7 +362,9 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   `_schema.yaml` plus named types in `_types.yaml`, shared types live in
   `claudine/docs/research/_types.yaml`, every property carries a description, and
   the fleet prompt validates the document in its `success` event and retries a
-  rejected document once. Not yet read by the generator.
+  rejected document once. Not yet read by the generator. Before writing or changing a
+  contract, a fleet prompt, or the `research` recipe, read
+  [Research Contracts and Fleets](research-contracts.md).
 - `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
   authored (every live topic directory carries a `_schema.yaml` sidecar as of
   2026-07-03, including `mcp/`, `acp/`, `hooks/`, `resume/`, `skills/`,
