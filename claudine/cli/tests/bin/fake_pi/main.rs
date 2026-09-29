@@ -20,7 +20,10 @@
 //!   and only then is the task's `prompt` answered;
 //! - `custom-ui`: the task sends an undocumented UI method and waits, its
 //!   `prompt` never answered;
-//! - `crash`: after the task, start a turn and exit 3.
+//! - `crash`: after the task, start a turn and exit 3;
+//! - `repeat`: after the task, start a turn that writes the same line
+//!   [`REPEATED_LINES`] times and then waits, so only the wrapper's repetition
+//!   stop ends it.
 //!
 //! Every RPC plan exits 0 once its stdin closes.
 
@@ -29,6 +32,9 @@ use std::io::{BufRead, Read, Write};
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
+
+/// Lines the `repeat` plan writes: past the default repetition stop of 30.
+const REPEATED_LINES: usize = 40;
 
 fn emit(value: Value) {
     let mut out = std::io::stdout().lock();
@@ -109,6 +115,16 @@ fn main() {
                         respond(true, None);
                         emit(json!({"type": "agent_start"}));
                         std::process::exit(3);
+                    }
+                    "repeat" => {
+                        respond(true, None);
+                        emit(json!({"type": "agent_start"}));
+                        emit(json!({"type": "turn_start"}));
+                        for _ in 0..REPEATED_LINES {
+                            emit(json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "I will try the same fix again.\n"}}));
+                        }
+                        // Stay in the turn; the wrapper's repetition stop ends the run.
+                        std::thread::sleep(std::time::Duration::from_secs(30));
                     }
                     _ => {
                         respond(true, None);
