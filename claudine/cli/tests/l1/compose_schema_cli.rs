@@ -2034,9 +2034,15 @@ fn compose_enforces_each_root_union_arm_match_before_provider_launch() {
         fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
         for (spec, accepted) in [("fixes/x/spec.md", true), ("features/x/spec.md", false)] {
             let _ = fs::remove_file(&count_path);
+            let supplied = fixture.cwd().join(spec);
             let output = fixture
                 .command()
-                .args(["compose", "--goose", "prompts/plan.md", &format!("spec={spec}")])
+                .args([
+                    "compose",
+                    "--goose",
+                    "prompts/plan.md",
+                    &format!("spec={}", supplied.display()),
+                ])
                 .env("COLUMNS", "1000")
                 .output()
                 .unwrap();
