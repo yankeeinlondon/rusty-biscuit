@@ -128,6 +128,12 @@ in render code).
   research; generation projects only the ordered semantic kinds, needles, and
   numeric codes needed at runtime. Retired `error_vocabulary` facts keys are a
   hard source collision rather than a fallback.
+- **Steering catalog** (`lib/src/steering/generated.rs`) — compiled from the
+  `steering` and `non-interactive-sessions` research plus the hand-reviewed
+  `docs/providers/steering-activation.yaml`. Research facts and reviewed
+  activation grants are emitted as separate tables; generation fails when a
+  grant does not match its research exactly. See
+  [Steering Activation](./steering-activation.md).
 - **Model catalog** (`unchained-ai/artifacts/models-catalog.json` + the vendored
   `families_generated.rs` slice) — model identity ground truth joined into
   `expected_offerings` (see `design/model-catalog-boundary.md`).
