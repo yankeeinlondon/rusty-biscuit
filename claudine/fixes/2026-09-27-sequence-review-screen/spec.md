@@ -9,14 +9,13 @@ review_iterations: 0
 implemented: false
 human_review: false
 message_to_agent: |-
-    Phase 1 is done: rulings R1-R11, the focus spike, and the scaffolded tests are all in implementation-log.md. Read its "Other findings" and "Scaffolded tests" sections before you start.
+    Phase 2 is done; both halves are implemented and `just test` / `just lint` pass in biscuit-tui and claudine. Read the "## Phase 2" section of implementation-log.md first.
 
-    - Remove every `#[ignore = "phase-2 scaffold: ..."]` (find them with `rg 'phase-2 scaffold' biscuit-tui claudine`). Also remove the module-level `cfg_attr(not(test), allow(dead_code, ...))` in claudine/cli/src/commands/wrap/sequence/review.rs once execute_sequence calls the functions there.
-    - The layout tests assume ruling R11: when static columns shrink, each gives up an equal share, and the leftmost columns keep the spare cells (preferred widths 10/10 in 13 cells become 7/6; 10/11 in 12 cells become 6/6).
-    - Focus spike: UNDERLINED is painted on blank cells, which confirms the cause of the stray rules. Separately, rendering into the same buffer never clears the old focus styling. Task 2.A4 needs both fixes: drop the blanket underline, and reset each cell rectangle's style before drawing it.
-    - The `130` cancel branch in execute_sequence is dead code. It matches `ErrorKind::Other` + "cancelled", but run_standalone returns ABORTED_KIND (Esc) or CANCELLED_KIND (Ctrl+C). The recommendation is to match those two kinds, the way steer/interact.rs does, and test it through the injected review callback. Record the choice in the log.
-    - Regenerate the dispatch inventory after your edits, because it records line numbers: `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` (run in claudine/).
-    - The host is often heavily loaded. If an untouched claudine lib shell test times out or leaks, rerun with NEXTEST_TEST_THREADS=6 before investigating.
+    - Phase 3 checks: the long-label saturation test is `very_long_static_values_saturate_instead_of_wrapping` (biscuit-tui table/tests.rs). The count-mismatch tests on the public result are `unexpected_row_count_is_rejected_before_merging` and `a_failed_review_is_an_error_not_a_cancellation` (claudine-cli sequence/review/tests.rs); both assert the `io::Error` kind `InvalidData`, and the typed `ReviewRowCountMismatch` is that error's source.
+    - Behavior decisions docs must describe (Phase 4): `Esc` and `Ctrl+C` on the review screen now exit 130 with no step started (the old 130 branch was dead). The agent-state pre-prompt message (`Invalid Agent:` etc.) prints only when the table actually opens. Shell pre-flight approval runs before the agent gate. Tier 3 (emergency) leaves cells unused when a static column is capped at its preferred width. Each InputTable cell rectangle is cleared before drawing, and focus is shown with the theme's `label_style` (bold by default), with no underline.
+    - Already corrected in code docs during Phase 2 (Doc 4.3 can verify rather than redo): `review_sequence`, `SequenceStepDraft` (its `resolved_provider` doc had drifted), `InputTableColumn::StaticText`, `CellState::StaticText`, `compute_column_widths`.
+    - The dispatch inventory records line numbers: if you touch claudine/cli/src again, run `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` in claudine/.
+    - The host is often heavily loaded. If an untouched claudine or claudine-gen test times out, rerun it alone or with NEXTEST_TEST_THREADS=6 before investigating.
 $schema:
     status: |-
         enum(

@@ -20,6 +20,22 @@ skills_files_updated_during_phase_1: []
 packages:
     - biscuit-tui
     - claudine-cli
+    - claudine
+source_files_during_phase_2:
+    - biscuit-tui/lib/src/components/input_table/table.rs
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+    - biscuit-tui/lib/src/components/input_table/column.rs
+    - biscuit-tui/lib/src/components/input_table/cell.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/src/commands/wrap/sequence/review.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+    - claudine/cli/src/commands/wrap/selection_ui.rs
+    - claudine/cli/tests/l1/wrap_sequence_composition.rs
+    - claudine/lib/src/composition/types.rs
+docs_updated_during_phase_2:
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Plan: sequence review screen
@@ -140,7 +156,7 @@ Two independent waves. They touch different packages and can run in parallel.
 
 ### Wave 1: biscuit-tui layout and focus (Half A)
 
-- [ ] **Task 2.A1: Content widths.** In `compute_column_widths`
+- [x] **Task 2.A1: Content widths.** In `compute_column_widths`
   (`biscuit-tui/lib/src/components/input_table/table.rs`), take the current
   `InputTableState` rows into account. For each `StaticText` column the
   preferred width is `max(width(schema text), width(value) for every row
@@ -150,7 +166,7 @@ Two independent waves. They touch different packages and can run in parallel.
   alone. Change the signature to receive the rows (or a precomputed per-column
   max) rather than only `columns`. Check the call sites
   (`grep compute_column_widths`).
-- [ ] **Task 2.A2: Allocation rules.** Rewrite the else-branch so it follows the
+- [x] **Task 2.A2: Allocation rules.** Rewrite the else-branch so it follows the
   four spec tiers in order, each covered by the Phase 1 tests:
     1. Everything fits: static columns get preferred widths; focusable columns
        share leftover left-to-right remainder as today; an all-static table may
@@ -166,14 +182,14 @@ Two independent waves. They touch different packages and can run in parallel.
   Include a property-style test that sums never exceed the available width for
   a range of widths and column mixes.
   *Depends on:* 2.A1.
-- [ ] **Task 2.A3: Ellipsis clipping.** In `draw_cell` for `StaticText`, clip to
+- [x] **Task 2.A3: Ellipsis clipping.** In `draw_cell` for `StaticText`, clip to
   the allocated width without mutating state: if the text fits, draw it;
   otherwise draw as many whole grapheme clusters as fit in `width - 1` cells
   followed by `…`. Width 1 draws only `…`; width 0 draws nothing. A cluster or
   wide char that would straddle the boundary is omitted. Rendering must never
   write outside `area`. (R1-R4.)
   *Depends on:* 2.A1 (can share the width helper); may proceed alongside 2.A2.
-- [ ] **Task 2.A4: Focus painting.** Using the spike result: in
+- [x] **Task 2.A4: Focus painting.** Using the spike result: in
   `paint_focus_background`, remove the blanket `Modifier::UNDERLINED` while
   keeping a visible focus cue (e.g. the theme's `label_style` patch only,
   or a non-underline modifier), preserve the `ChooseOne` widget's active-option
@@ -184,7 +200,7 @@ Two independent waves. They touch different packages and can run in parallel.
   editable cell type (e.g. `TextInput`) is covered. If the spike did not
   support the hypothesis, skip removal and record it as unresolved.
   *Depends on:* Phase 1 spike.
-- [ ] **Task 2.A5: Consumer expectations.** Run `just test` in `biscuit-tui` and
+- [x] **Task 2.A5: Consumer expectations.** Run `just test` in `biscuit-tui` and
   update only snapshots/expectations explained by content widths, narrow
   layouts, or the focus correction. Check the `question` CLI unit tests and
   `biscuit-tui/lib/tests/public_api_names.rs` (no new public width config
@@ -193,19 +209,19 @@ Two independent waves. They touch different packages and can run in parallel.
 
 ### Wave 1b: claudine-cli row mapping (Half B), parallel with Wave 1
 
-- [ ] **Task 2.B1: Baseline targets.** In
+- [x] **Task 2.B1: Baseline targets.** In
   `claudine/cli/src/commands/wrap/sequence/mod.rs`, extract the inline
   draft-to-target closure in the non-review branch into a named function that
   builds a `ResolvedExecutionTarget` from a draft plus
   `explicit_provider`/`list_one` (same provider and model reasons as today).
   Use it for both the bypass branch and the baseline vector. Keep one entry per
   original step in original order.
-- [ ] **Task 2.B2: Eligibility.** Add a small pure function classifying a
+- [x] **Task 2.B2: Eligibility.** Add a small pure function classifying a
   `SequenceStep` (or its `ExecutableField`) as review-eligible per the spec
   table; `None`, `prompt`, `task`, `group` are eligible; `shell`,
   `side_effect` are not. Unit-test all six kinds. It reads only the normalized
   step, never composes files or runs commands.
-- [ ] **Task 2.B3: Filter and merge.** Add pure functions: (a) select eligible
+- [x] **Task 2.B3: Filter and merge.** Add pure functions: (a) select eligible
   drafts preserving `step_index`; (b) merge submitted targets into the baseline
   vector by `step_index`, returning an error when
   `submitted.len() != eligible.len()` before touching the baseline. Never map
@@ -214,7 +230,7 @@ Two independent waves. They touch different packages and can run in parallel.
   all hidden; distinct submitted provider/model choices; hidden targets and
   reasons unchanged; full vector length.
   *Depends on:* 2.B1, 2.B2.
-- [ ] **Task 2.B4: Wire into review.** In the `needs_review` branch, filter
+- [x] **Task 2.B4: Wire into review.** In the `needs_review` branch, filter
   drafts, and if none remain return the baseline without calling the review
   function; otherwise call it with the eligible drafts and merge. Inject the
   review function (a closure or a small trait-free parameter) so unit tests can
@@ -222,7 +238,7 @@ Two independent waves. They touch different packages and can run in parallel.
   agent-message print, the `130` return on a cancelled error, and the
   no-TTY/explicit-provider/dry-run behavior unchanged.
   *Depends on:* 2.B3.
-- [ ] **Task 2.B5: Row labels.** In `selection_ui.rs::build_initial_rows`,
+- [x] **Task 2.B5: Row labels.** In `selection_ui.rs::build_initial_rows`,
   keep labels from the original one-based `step_index + 1` and name. Confirm
   the `Step` schema text no longer constrains labels (now handled by Wave 1).
   Update the docs on `review_sequence` and the draft type so they say only
@@ -230,7 +246,7 @@ Two independent waves. They touch different packages and can run in parallel.
   the drafts supplied (not necessarily one per step).
   Also fix the `if drafts.is_empty()` doc/behavior consistency.
   *Depends on:* 2.B4.
-- [ ] **Task 2.B6: Behavior tests.** Criterion 4 tests: empty table never opens
+- [x] **Task 2.B6: Behavior tests.** Criterion 4 tests: empty table never opens
   (fake review callback asserts not called); explicit-provider and no-TTY
   gates unchanged; dry-run never reaches the callback; cancellation returns
   `130` and no step starts. Do not invoke the real `run_standalone`, real
