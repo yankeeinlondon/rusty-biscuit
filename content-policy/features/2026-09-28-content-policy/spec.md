@@ -1,6 +1,6 @@
 ---
 area: content-policy
-status: draft-spec
+status: finalized-spec
 created: 2026-09-28
 owner: Ken Snyder <ken@ken.net>
 $schema:
@@ -27,8 +27,20 @@ reviewed: true
 reviewed_by: claude/opus
 reviewed_on: 2026-09-28
 review_iterations: 0
+review_note: the clarification process served as a review
+clarified: true
+clarified_by: claude/opus
+needs_rulings: false
+references:
+    spikes/frontmatter-reader/findings.md: >-
+        Repo-wide run of a strict frontmatter reader and byte-exact date editor against Darkmatter's parser and writer.
+        Source of the tab-repair, zero-indent-list, refuse-list, and legacy-migration requirements.
+    spikes/filechanged-paths/findings.md: >-
+        How Biscuit File's FileReference resolves each FileChanged path form against a base directory on each OS.
+        Source of the in-boundary path rules and the thin path-layer design.
 related:
     - 2026-09-16-content-policy-no-cache
+    - 2026-09-28-hash-writer-byte-fidelity
 depends-on:
     - 2026-09-28-recursive-schema-types
 ---
@@ -53,8 +65,12 @@ The current reader-facing description is in
 
 The owner settled these in a clarification session; rulings 6 to 10 came in a
 second batch the same day, rulings 11 to 18 in a third, rulings 19 to 22
-in a fourth, and rulings 23 and 24 closed the last two drafted details. Each is written
-into the body below, and its open question has been removed.
+in a fourth, and rulings 23 and 24 closed the last two drafted details.
+Rulings 25 to 30 followed two spikes run the same day, one on the frontmatter
+reader and byte-exact edits and one on `FileChanged` path resolution
+(`spikes/frontmatter-reader/findings.md` and
+`spikes/filechanged-paths/findings.md` beside this spec). Each ruling is
+written into the body below, and its open question has been removed.
 
 1. **Renewal edits files with span-targeted byte edits** built on Biscuit
    File's YAML helpers, with no spike first. It is the only approach that keeps
@@ -96,7 +112,7 @@ into the body below, and its open question has been removed.
 8. **content-policy owns one frontmatter reader for evaluation and renewal**,
    built on Biscuit File with only its `yaml` feature. One reader means the CLI
    and renewal can never disagree about what a document says. See
-   [Renewal file editing](#renewal-file-editing).
+   [Frontmatter reader](#frontmatter-reader).
 9. **content-policy ships a SimplifiedSchema for policies, and Darkmatter's base
    document schema references it**, so every Markdown document gets completion
    and checking through DMLS without a Rust dependency. See
@@ -164,6 +180,55 @@ into the body below, and its open question has been removed.
 24. **The CLI's environment variables are `CONTENT_POLICY_KEY`,
     `CONTENT_POLICY_DEFAULT`, and `CONTENT_POLICY_DATE_PROPERTY`.** The package
     prefix keeps them unambiguous and grouped. See [Configuration](#configuration).
+25. **Tab-indented frontmatter is repaired, not rejected: Biscuit File's YAML
+    repair engine gains a tab-indentation repair, and content-policy's reader
+    applies it in memory.** `policy check` evaluates the repaired text with a
+    warning; `policy renew` proposes the repair as a separate edit that
+    `--write` applies with the date edits. Every other fallback Darkmatter's
+    parser has is a named rejection. Eighteen dated research documents depend
+    on tabs, and one shared repair keeps `md clean` and content-policy from
+    drifting apart. See [Frontmatter reader](#frontmatter-reader).
+26. **The 17 `update_policy: - Duration(...)` documents are migrated to
+    `content_policy: - ValidFor(...)` in the same one-time pass as the six
+    `content_policy: Duration(...)` notes, and `update_policy` is not read.**
+    It extends ruling 4: a second, unread key holding the same intent would
+    leave those documents silently on the default policy. See
+    [Backwards compatibility](#backwards-compatibility).
+27. **Biscuit File's locator is fixed for zero-indent block lists, multi-line
+    scalars, and anchors, tags, and aliases on the target, as a prerequisite
+    task of this feature.** 199 repository documents write lists at zero
+    indent, and renewal cannot edit a rule date in them until the locator
+    finds it. See [Changes outside the new crates](#changes-outside-the-new-crates).
+28. **Darkmatter's `last_updated` writer defects are tracked by the scheduled
+    fix `2026-09-28-hash-writer-byte-fidelity`; content-policy's writer must not
+    reproduce them.** The writer is a reference only where it is correct, and
+    after that fix both produce the same bytes for the same edit. See
+    [Renewal file editing](#renewal-file-editing).
+29. **A `FileChanged` path must resolve to a file inside a boundary: the
+    repository root when the document is in a repository, otherwise the
+    directory where execution started.** Relative paths and Biscuit File's `&`
+    and `^` sigils are allowed; absolute, machine-dependent, and escaping paths
+    are validation errors. A document should watch files that travel with it,
+    and the boundary is discovered, so no caller input is needed. See
+    [Paths and the boundary](#paths-and-the-boundary).
+30. **A path containing `,` or `)` is unsupported (a validation error); a path
+    containing ` #` or `: ` is written by quoting the whole rule string.** Both
+    characters are the compact grammar's own delimiters, and quoting already
+    fixes the two YAML traps. See [Paths and the boundary](#paths-and-the-boundary).
+31. **`claudine/docs/research/acp/json-rpc.md` migrates to
+    `content_policy: - ValidFor(1yr)`, with its `MajorVersion(latest_version)`
+    kept only as a `# pending:` YAML comment, and its `update_policy` key is
+    removed.** No rule can evaluate `MajorVersion` yet, and a dead key would
+    look like live policy. See [Backwards compatibility](#backwards-compatibility).
+32. **Outside a repository, `&` and `^` both resolve against the document tree
+    root, and `^` falls back to it because there are no package levels.** The
+    tree root stands in for the repository root, so one path syntax works
+    everywhere, at the cost that results depend on the starting directory. See
+    [Paths and the boundary](#paths-and-the-boundary).
+33. **A `FileChanged` path that resolves outside the boundary is a validation
+    error, in a repository and outside one.** A document should only watch
+    files that travel with it; outside a repository the verdict can depend on
+    the starting directory. See [Paths and the boundary](#paths-and-the-boundary).
 
 ## Agreed Model
 
@@ -268,7 +333,9 @@ second phase.
 
 ### Changes outside the new crates
 
-1. **Migrate the `Duration(...)` notes** to `ValidFor(...)` (see
+1. **Migrate the `Duration(...)` and `update_policy` documents** to
+   `content_policy: - ValidFor(...)`, 23 files in one pass, removing every
+   `update_policy` key (see
    [Backwards compatibility](#backwards-compatibility)).
 2. **Make every `last_updated` stamp a UTC date.** Three call sites compute the
    stamp with `chrono::Local::now()`:
@@ -288,10 +355,27 @@ second phase.
 4. **Reference it from Darkmatter's base document schema**, with one line in
    whichever base schema file Darkmatter loads when this task runs (see
    [Editor schema](#editor-schema)).
+5. **Change Biscuit File** so the reader and renewal can rely on it. Each
+   change has its own tests in Biscuit File:
+
+   | Change | Where | Why |
+   | --- | --- | --- |
+   | Add a tab-indentation repair to the YAML repair engine | `analyze_yaml` in `biscuit-file/lib/src/yaml/analyze/`, the engine `md clean` uses through `darkmatter/cli/src/commands/clean/frontmatter_repair.rs` | The reader applies it to tab-indented frontmatter (see [Frontmatter reader](#frontmatter-reader)) |
+   | Locate zero-indent block lists under their key | `parent_path` in `biscuit-file/lib/src/yaml/analyze/scan.rs` | `content_policy:\n- X` is located at the root path `[Index(0)]`, because a parent must be strictly less indented. 199 repository documents use this style, including five of the six `Duration(...)` notes |
+   | Return `None` for a multi-line scalar | `locate_yaml_value` in `biscuit-file/lib/src/yaml/analyze/locate.rs` | It returns a first-line fragment, contrary to its module docs; a fragment edit could change the wrong bytes |
+   | Report an anchor, tag, or alias on the located value | `locate_yaml_value` | The span silently includes `&anchor` and `!!tag`, and can be an alias; renewal must refuse all three |
+   | Expose the containment check for relative paths | `validate_repository_containment` in `biscuit-file/lib/src/file_reference/resolve.rs` (crate-private); the public `validate_repository_candidate` covers only `&` and `^` | `FileChanged` relative paths must stay inside the boundary (see [Paths and the boundary](#paths-and-the-boundary)) |
+
+   The first four are prerequisites of phase 1's reader and renewal work; the
+   containment change is needed by phase 2.
 
 Only tasks 3 and 4 wait on `2026-09-28-recursive-schema-types`: task 4 needs
 `policy[]` over a union type, and task 3 needs it only for the `(required)`
 marker on `rule`. Everything else in both phases proceeds without it.
+
+Darkmatter's own `last_updated` writer is **not** changed here. Its byte-level
+defects are fixed by `2026-09-28-hash-writer-byte-fidelity` (see
+[Renewal file editing](#renewal-file-editing)).
 
 Package versions, symbols, URL/schema changes, explicit invalidation, model
 retirement, and file/program presence rules follow after their comparison
@@ -309,15 +393,49 @@ Outside this initial scope:
 - configurable action precedence
 - evaluating many documents in one CLI call (callers loop, or a later feature adds it)
 - adoption by Darkmatter, Claudine, or Research
+- frontmatter repairs other than tab indentation, such as Darkmatter's
+  `{{ }}` and `$(...)` expression protection
+- watching a file outside the boundary, or by an absolute or
+  machine-dependent path
+- fixing Darkmatter's `last_updated` writer (`2026-09-28-hash-writer-byte-fidelity`)
 
 ### Backwards compatibility
 
-Six hand-written notes in `biscuit-terminal/docs/research/terminal-multiplexing/`
-(`about.md`, `cmux.md`, `ghostty.md`, `tmux.md`, `wezterm.md`, `zellij.md`)
-already declare `content_policy:` with `Duration(3mo)`; `about.md` uses
-`Duration(12mo)`. All six have `last_updated`, so the shorthand's default date
-property resolves. This feature rewrites each `Duration(...)` entry as the
-equivalent `ValidFor(...)` entry.
+Twenty-three documents declare a `Duration(...)` rule today, under two keys:
+
+| Documents | Key | Entries |
+| --- | --- | --- |
+| 6 notes in `biscuit-terminal/docs/research/terminal-multiplexing/` (`about.md`, `cmux.md`, `ghostty.md`, `tmux.md`, `wezterm.md`, `zellij.md`) | `content_policy:` | `Duration(3mo)`; `about.md` uses `Duration(12mo)` |
+| 14 research documents in `.claude/skills/playa/audio-programming/` and `sniff/docs/research/audio-programming/` (seven each) | `update_policy:` | `Duration(6mo)`; eight of them indent the entry with a tab |
+| 3 research documents in `claudine/docs/research/acp/` | `update_policy:` | `Duration(6 mo)` twice, and `Duration(1 year)` beside `MajorVersion(latest_version)` in `json-rpc.md` |
+
+*(Decided 2026-09-28.)* One pass rewrites all 23. Each `Duration(...)` entry
+becomes the equivalent `ValidFor(...)` entry under `content_policy:`, with the
+duration normalized to the supported units (`Duration(6 mo)` becomes
+`ValidFor(6mo)`, `Duration(1 year)` becomes `ValidFor(1yr)`), and each
+`update_policy:` key is removed once its entries have moved. Migrated entries
+are indented with spaces. Every one of these documents has `last_updated`, so
+the shorthand's default date property resolves.
+
+*(Decided 2026-09-28.)* `MajorVersion(latest_version)` in
+`claudine/docs/research/acp/json-rpc.md` has no rule in this feature
+(`SemVerMajorChange` is a [later candidate](#later-policy-decisions)), and
+moving it under `content_policy` as a rule would make the whole document a
+validation error. It is kept as a YAML comment beside the migrated entry, so
+the intent survives without being evaluated, and the document's
+`update_policy` key is removed like every other one:
+
+```yaml
+content_policy:
+  - ValidFor(1yr) # pending: MajorVersion(latest_version)
+```
+
+No dead `update_policy` key is kept: an unread key that still looks like
+policy would mislead a reader into thinking it is enforced.
+
+`update_policy` is not read. A document that still carries only
+`update_policy:` is evaluated under the caller's default policy, like any
+document without a `content_policy` key.
 
 There is no `Duration` alias. After the migration, `Duration` is an unknown rule
 name and a validation error like any other. Nothing else needs migrating:
@@ -382,6 +500,11 @@ The four first-increment rules:
   shows the block-list form. Quoting each rule inside the brackets
   (`["ValidFor(3mo, 2026-09-28)"]`) also parses, but the block list is the form
   the message recommends, because renewal can edit it.
+  A reference does not reach that diagnostic:
+  `content_policy: [ValidFor(3mo, @last_updated)]` splits into an item that
+  starts with `@`, which YAML reserves, so the frontmatter itself fails to
+  parse and is reported as malformed. The quoted form,
+  `["ValidFor(3mo, @last_updated)"]`, parses and renews.
 - The default key is `content_policy`. A caller can configure another key, but
   no kebab-case `content-policy` alias is read.
 - An absent policy key, or a document with no frontmatter, uses the caller's
@@ -481,6 +604,7 @@ stored value's scheme, against the stored value:
 | Fingerprints differ | `triggered` |
 | The watched file is missing or deleted | `triggered`, reason "source removed" |
 | The watched file exists but cannot be read (permissions, I/O error) | `unknown`, reason names the read failure |
+| The path names a directory | `unknown`, reason says it is not a file |
 | The fingerprint property is absent or `null` | `unknown`, missing baseline |
 | The stored value's scheme is not recognized, such as `sha256:…` | `unknown`, incompatible fingerprint; never proof of change or freshness |
 
@@ -491,6 +615,98 @@ handled under [Evidence values](#evidence-values).
 A missing file triggers rather than reporting `unknown` because its absence was
 observed successfully; the content the document was based on is gone. A read
 failure observed nothing, so it cannot confirm either outcome.
+
+#### Paths and the boundary
+
+*(Decided 2026-09-28.)* A `FileChanged` path must resolve to a file **inside a
+boundary**, so a document only watches files that travel with it:
+
+- **In a repository**, the boundary is the repository root. It is always
+  detectable from the document's path, or from the caller's base directory
+  when there is no document, so the caller supplies nothing extra.
+- **Outside a repository**, the boundary is the document tree root: the
+  directory where execution started (the current working directory). It
+  stands in for the repository root, including for the `&` and `^` sigils.
+  This root is less stable, because it depends on where the caller started.
+
+A relative path is resolved from the **base directory**: the directory of the
+document for the CLI, or the directory a library caller passes for an evidence
+record with no document behind it.
+
+| Form | Example | Accepted? |
+| --- | --- | --- |
+| Implicit relative | `src/config.rs` | Yes, from the base directory only |
+| Explicit relative | `./config.rs`, `../src/config.rs` | Yes, while it stays inside the boundary |
+| Repository root (`&`) | `&Cargo.toml` | Yes; outside a repository it resolves from the document tree root |
+| Repository scoped (`^`) | `^README.md` (package, then package area, then repository root) | Yes; outside a repository it falls back to the document tree root |
+| Absolute path or drive letter | `/etc/hosts`, `C:\x`, `C:/x`, `C:x` | No |
+| Backslash separator | `src\config.rs` | No; write `/` on every OS |
+| Home, magic, or recursive search | `~/x`, `@x`, `%x` | No |
+| Vault, variable, or URL | `vault:x`, `{{HOME}}/x`, `https://…` | No |
+| Leading or trailing whitespace | `" src/config.rs"` | No |
+| Anything that resolves outside the boundary | `../../../elsewhere.rs` | No |
+
+Every rejected form is a validation error, not an `unknown` result. Absolute
+and machine-dependent forms mean different files on different hosts, and the
+Biscuit File spike showed several of them failing silently: on macOS or Linux
+`C:\x` probes a relative file of that name and would read as "source removed",
+and `a\b` names a different file on Windows than elsewhere.
+
+*(Decided 2026-09-28.)* Outside a repository, `&` and `^` both resolve against
+the document tree root, which stands in for the repository root. `^` has no
+package or package-area levels to search there, so it falls back to the tree
+root, and `^README.md` and `&README.md` name the same file. The known cost is
+that the file a sigil names depends on the directory the command started
+from.
+
+*(Decided 2026-09-28.)* Escaping the boundary is a validation error, in a
+repository and outside one, and the check is made against the boundary as
+discovered for the current run. Outside a repository the boundary is the
+starting directory, so the same document can be valid when checked from one
+directory and invalid from another; for example, a rule in `~/writing/notes/doc.md` that watches `../drafts/x.md` is
+valid for `policy check notes/doc.md` run from `~/writing`, and invalid for
+`policy check doc.md` run from `~/writing/notes`. That is the
+known cost of a dynamic root. Inside a repository the answer never depends on
+where the command runs.
+
+*(Decided 2026-09-28.)* A path containing `,` or `)` is unsupported and is a
+validation error, because both are delimiters of the compact rule grammar. Two
+other sequences are YAML traps rather than grammar ones: ` #` starts a YAML
+comment, which truncates an unquoted rule to `FileChanged(a`, and `: ` turns
+the list item into a mapping. Quoting the whole rule string avoids both:
+
+```yaml
+content_policy:
+  - "FileChanged(notes/a #1.md, @notes_fingerprint)"
+  - "FileChanged(logs/run: 2.txt, @log_fingerprint)"
+```
+
+**Resolution.** The phase-2 path layer is a thin wrapper around Biscuit File's
+`FileReference`, which the file-reference spike confirmed needs no new
+normalization code:
+
+1. Validate the authored form with `FileReference::class()` and the table
+   above.
+2. Build the context with `FileResolutionContext::from_snapshot(base, None,
+   HashMap::new())`: an absolute base directory, no home directory, and no
+   environment, so no process state is read. Add the discovered repository,
+   package, and package-area roots so `&` and `^` resolve; outside a
+   repository, add the document tree root as the repository root and no
+   package roots.
+3. Resolve an implicit relative path as `./<path>`. Biscuit File otherwise
+   retries a bare path at the repository root when it misses at the base,
+   which would watch a different file without saying so.
+4. Check that the candidate lies inside the boundary, lexically and, for an
+   existing target, after following symlinks. Biscuit File already does this
+   for `&` and `^`; relative paths need its containment check exposed (see
+   [Changes outside the new crates](#changes-outside-the-new-crates)).
+5. Call `resolve_detailed` and map its outcome: a missing file (a broken
+   symlink included) is `triggered`, "source removed"; a directory, an I/O
+   error, or a permission error is `unknown`.
+
+Paths are never canonicalized in reports. File-name case follows the host
+file system: it matches case-insensitively on macOS and Windows and not on
+Linux.
 
 ### Evidence values
 
@@ -514,6 +730,17 @@ baseline, or a `ValidUntil` deadline):
 | Other string, such as `Sept 28` | Validation error: invalid date |
 | Timestamp string, such as `2026-09-28T10:00:00Z` | Validation error: dates only. The time part is not silently dropped |
 | Number, boolean, list, or object | Validation error: wrong type |
+
+Some spellings that YAML 1.1 treats as booleans or octal numbers arrive
+differently through Biscuit File's YAML parser. The reader spike observed:
+
+| Authored | Arrives as | So in a date position |
+| --- | --- | --- |
+| `yes`, `on`, `y` | The strings `"yes"`, `"on"`, `"y"` | Validation error: invalid date |
+| `True` | The boolean `true` | Validation error: wrong type |
+| `010` | The string `"010"` | Validation error: invalid date |
+| `.inf`, `.nan` | `null` | Missing baseline: `unknown` |
+| `~`, `null` | `null` | Missing baseline: `unknown` |
 
 Treating `null` as missing matches SimplifiedSchema, where an optional property
 accepts `null`. A document can therefore carry `last_updated:` as a placeholder
@@ -587,7 +814,10 @@ value evaluation rejects would teach authors the wrong form.
 The `FileChanged` member ships with the `FileChanged` phase. It requires the
 `@<property>` argument, so the unsupported one-argument shorthand is flagged in
 the editor as well as by evaluation. The fingerprint property itself has an
-author-chosen name, so the schema does not type it.
+author-chosen name, so the schema does not type it. The excerpt's path pattern
+excludes only `,` and `)`; it still admits leading or trailing spaces, `\`,
+`@`, `~`, `%`, and `{{`. The final pattern should exclude what it can, and
+evaluation enforces the full [path rules](#paths-and-the-boundary) either way.
 
 The patterns and cross-references follow what `md schema validate`, built from
 this branch, accepts today. Experiments with that build found:
@@ -834,7 +1064,10 @@ sequenceDiagram
 - Preserve the Markdown body, unrelated frontmatter, and declaration form.
   "Preserve" means byte-for-byte outside the edited values, including comments
   and quoting. How this is achieved is described in
-  [Renewal file editing](#renewal-file-editing).
+  [Renewal file editing](#renewal-file-editing). There is one explicit,
+  visible exception: a document whose frontmatter is tab-indented also gets
+  the tab repair, listed in the preview as its own proposed edit (see
+  [Frontmatter reader](#frontmatter-reader)).
 - Detect intervening document edits before applying a prepared renewal. The
   plan records a **plan fingerprint**: an `xxh64` digest (via `biscuit-hash`)
   of the exact bytes it was planned from. Apply re-reads the file and refuses
@@ -857,8 +1090,10 @@ document's content:
 - **Darkmatter's `md hash`** bumps `last_updated` when the content hash changes
   (`apply_hash_save_text` in `darkmatter/lib/src/markdown/hash/write.rs`).
 - **Darkmatter's effect writes** re-hash a document that carries a `hash`
-  property when auto-rehash is on, through the same hash-save path, and so
+  property when auto-rehash is on, through the same hash-save decision, and so
   bump `last_updated` the same way (`darkmatter/lib/src/effects/verbs.rs`).
+  They write through `Markdown::apply_hash_save`, which re-serializes the
+  document, not through the byte-preserving writer `md hash` uses.
 - **Claudine's closure write-back** stamps `last_updated` on every write it
   makes (`CLOSURE_OWNED_PROPERTIES` in
   `claudine/lib/src/composition/closure.rs`, line 31).
@@ -879,7 +1114,7 @@ changes all three stamps to the UTC date (see
 [Changes outside the new crates](#changes-outside-the-new-crates) for the call
 sites).
 
-### Renewal file editing
+### Frontmatter reader
 
 *(Decided 2026-09-28.)* content-policy owns **one frontmatter reader**, used by
 both evaluation and renewal. The CLI always uses it. A library caller that
@@ -889,6 +1124,10 @@ and passes the map as the evidence record. The reader:
 - finds and parses the frontmatter block and produces the evidence record
   ([Evidence values](#evidence-values)) along with the source spans renewal
   needs;
+- parses the YAML without the block's final line terminator, as Darkmatter
+  does, so a clip-chomped block scalar (`description: >`) as the last key
+  reads the same in both (the reader spike found 42 records that differed
+  until it did this);
 - treats a duplicate top-level key as a validation error;
 - reports "no frontmatter" as a distinct result, so evaluation can apply the
   default policy and renewal can **create** a frontmatter block.
@@ -896,6 +1135,59 @@ and passes the map as the evidence record. The reader:
 It is built on Biscuit File with `default-features = false, features = ["yaml"]`.
 Biscuit File's default features pull in its PDF crates, which a policy check
 never needs.
+
+On the repository's 3,084 Markdown files that begin with `---`, the spike's
+strict reader and Darkmatter's parser agreed on every record, apart from 28
+files that Darkmatter reads only through one of its fallbacks. The reader
+handles those two groups differently.
+
+**Tab-indented frontmatter is repaired.** *(Decided 2026-09-28.)* Eighteen
+files need Darkmatter's tab normalization. All are research documents that
+carry `last_updated`, and eight also carry a tab-indented `update_policy`:
+six in `.claude/skills/lsp/`, four each in
+`.claude/skills/playa/audio-programming/` and
+`sniff/docs/research/audio-programming/`, two in
+`biscuit-visualized/docs/research/charting/`, and two Claudine planning
+documents. Rather than reject them, Biscuit File's YAML repair engine
+(`analyze_yaml`, the engine `md clean` uses) gains a tab-indentation repair,
+and the reader applies it in memory:
+
+- `policy check` evaluates the repaired text and reports a warning that names
+  the repair.
+- `policy renew` lists the tab repair as a separate proposed edit, and
+  `--write` applies it together with the date edits. This is an explicit,
+  visible exception to "only the edited values change".
+
+The repair replaces leading tabs with spaces, as Darkmatter's tab
+normalization already does, so every document reads the same through both.
+That includes a subtlety: inside a block scalar, tabs beyond the scalar's
+first indentation level also become spaces. With `<TAB>` marking a tab
+character:
+
+```text
+prompt: |-
+<TAB>Line one
+<TAB><TAB>Line two
+last_updated: 2026-02-27
+```
+
+reads as `prompt: "Line one\n  Line two"`. The second tab on the last line is
+content, not indentation, yet it becomes two spaces rather than staying a tab.
+
+The original does not parse at all, so there is no "original value" to
+preserve. The repair's value-equality gate therefore compares the repaired
+record with Darkmatter's tab-normalized interpretation of the same text.
+
+**Everything else is strict.** The other ten files need Darkmatter's
+expression protection: unquoted `{{ }}` templates that are not valid YAML.
+None needed `$(...)` protection. All ten are prompt files in `prompts/`, and
+none carries a date or a policy. The reader rejects such a document as
+malformed frontmatter, with a message that names the reason (an unquoted
+template expression) and the Darkmatter fallback that would have applied.
+Reproducing the fallback would copy about 250 lines of Darkmatter code that
+would drift, and renewal still could not edit those documents byte-exactly.
+
+### Renewal file editing
 
 Renewal is applied as span-targeted byte edits against the spans the reader
 found, using two Biscuit File YAML helpers:
@@ -905,7 +1197,14 @@ found, using two Biscuit File YAML helpers:
   and the result carries a `plain` flag that says whether the scalar is
   unquoted. It locates values only inside block mappings and block sequences.
   It returns `None` for anything inside a flow collection (such as
-  `content_policy: [ValidFor(3mo)]`) and for multi-line and block scalars.
+  `content_policy: [ValidFor(3mo)]`) and for block scalars. After the Biscuit
+  File changes this feature makes (see
+  [Changes outside the new crates](#changes-outside-the-new-crates)), it also
+  returns `None` for a multi-line scalar, reports an anchor, tag, or alias on
+  the value, and locates items of a zero-indent block list under their key.
+  Until the zero-indent fix, a rule date in a list written as
+  `content_policy:\n- ValidFor(…)` cannot be located; renewing `last_updated`
+  in such a document is unaffected.
 - [`apply_edit_set`](../../../biscuit-file/lib/src/yaml/analyze/edit_set.rs)
   applies non-overlapping byte-range edits, expressed as `YamlRepair` items,
   and leaves every other byte unchanged. An edit with an empty span is an
@@ -915,39 +1214,82 @@ Biscuit File has no dependency path to Darkmatter, even with all features
 enabled (checked with `cargo tree`), so the library may use it under the
 [dependency rule](#library-architecture).
 
-Darkmatter already has a byte-preserving frontmatter writer:
-`apply_hash_save_text` and its `rewrite_date_scalar` helper in
-`darkmatter/lib/src/markdown/hash/write.rs`. They edit `last_updated` in place,
-keep the document's newline style and every other byte, and create a minimal
-frontmatter block when a document has none. content-policy cannot call them,
-because the dependency rule forbids any path to Darkmatter. They are the
-**reference implementation**: the reader matches their behavior for the same
-edits, and their tests are a source of cases. (Darkmatter's general
-`fm_insert` followed by `as_string` re-serializes the whole block and drops
-comments and quoting, so it is not a model.)
-
 The helpers work on YAML source, not on a Markdown file, so content-policy
 itself must:
 
 1. Slice out the frontmatter block, locate values within it, and translate each
-   span into an offset in the whole file.
+   span into an offset in the whole file. `locate_yaml_value` runs on the raw
+   slice, so CRLF files need no offset translation.
 2. Find the date *inside* a compact rule string, such as the `2026-09-28` in
    `ValidFor(3mo, 2026-09-28)`, and narrow the edit to it. This is
    straightforward for plain and single-quoted scalars. A double-quoted scalar
    that contains escape sequences is refused, because source offsets no longer
    match the decoded text.
-3. Build the insertion that appends a missing top-level property, such as
-   `last_updated`, as one new line at the end of the frontmatter block, or,
-   for a document with no frontmatter, a new block at the top of the file.
+3. Fill a present property that has no value, such as `last_updated:`, by
+   inserting one space and the date after the colon; when a comment follows
+   (`last_updated:   # todo`), the date goes before the comment, which keeps
+   at least one space before `#`.
+4. Build the insertion that appends a missing top-level property, such as
+   `last_updated`, as one new line at the end of the frontmatter block. The
+   new line takes the line terminator of the line before it. A document with
+   no frontmatter gets a new block at the top of the file, after a UTF-8 BOM
+   when there is one, with the terminator the body uses.
 
-As a consequence, renewal refuses these shapes with a clear message that
-suggests rewriting the policy as a block list:
+Every date-only edit changes only the date bytes, under LF, CRLF, lone CR,
+and a BOM alike; the spike confirmed this for all twelve date-edit paths.
+
+**Relationship to Darkmatter's writer.** *(Decided 2026-09-28.)* Darkmatter
+already has a byte-preserving frontmatter writer: `apply_hash_save_text` and
+its `rewrite_date_scalar` helper in `darkmatter/lib/src/markdown/hash/write.rs`,
+used by `md hash` and Claudine's closure write-back. content-policy cannot call
+it, because the dependency rule forbids any path to Darkmatter. It is a
+reference implementation, and its tests are a source of cases, **only where it
+is correct**. The spike found 25 of 34 comparable outputs byte-identical. All
+but one of the other nine are Darkmatter defects, tracked by the scheduled fix
+`2026-09-28-hash-writer-byte-fidelity`, and content-policy's writer must not
+reproduce any of them. The same fix covers an anchored target, where both
+writers failed in the spike:
+
+| Input | Darkmatter writes today | content-policy writes |
+| --- | --- | --- |
+| `last_updated:` with no value | `last_updated:2026-09-28`, which does not parse | `last_updated: 2026-09-28` |
+| `last_updated:   # todo` | `last_updated:   2026-09-28# todo`, read as the value `"2026-09-28# todo"` | `last_updated: 2026-09-28   # todo` |
+| An LF line in a file that contains any CRLF | The line ends `\n\r\n` | The line keeps its `\n` |
+| Lines ending with a lone CR | The edited line ends CRLF | The line keeps its CR |
+| A BOM and no frontmatter | The new block before the BOM | The new block after the BOM |
+| An anchor on the target, `last_updated: &lu …`, aliased elsewhere | The anchor is deleted and the file no longer parses | Refused; nothing written |
+
+The remaining difference is a choice, not a defect: for a file with mixed line
+endings, Darkmatter uses one global newline style, while content-policy uses
+the terminator of the edited line, or of the line before an insertion. The
+fix decides which rule Darkmatter keeps. Once it lands, both writers produce
+identical bytes for the same `last_updated` edit; if it keeps the global rule,
+content-policy's insertions follow it so they still agree. (Darkmatter's
+general `fm_insert` followed by `as_string` re-serializes the whole block and
+drops comments and quoting, so it is not a model.)
+
+**Refused shapes.** Renewal refuses the following, writes nothing, and says
+why. The first three messages suggest rewriting the policy as a block list:
 
 - a value it must edit that sits inside a flow-style (one-line bracketed)
   policy list
 - a value it must edit that is a block scalar or multi-line scalar
 - a value it must edit that is a double-quoted string containing escape
   sequences
+- a value it must edit that carries an anchor, an alias, or a tag
+  (`&lu 2026-09-28`, `*base`, `!!str 2026-09-28`); editing an anchored value
+  would change every alias of it too
+- a value it must edit inside a policy entry written as a flow mapping,
+  `- {rule: …, action: …}`
+- a frontmatter block with no closing `---`, including one closed by `...`;
+  renewal never creates a second block in front of it
+- a near-miss fence such as `----`
+- a located span that does not decode to the value the reader parsed
+
+**Safety net.** After planning every edit, renewal re-reads the edited text
+and compares the new record with the old one. Anything other than the target
+values changing (the tab repair aside) means an edit went wrong, and nothing
+is written.
 
 *(Decided 2026-09-28.)* A flow-style policy list is refused only when a value to
 change sits inside the brackets. When every edit target is outside the list,
@@ -962,8 +1304,12 @@ content_policy:
 
 ```yaml
 last_updated: 2026-09-28
-content_policy: [ValidFor(3mo, @last_updated)]
+content_policy: ["ValidFor(3mo, @last_updated)"]
 ```
+
+The bracketed rule must be quoted: unquoted, the comma splits it and the
+second half starts with `@`, which YAML reserves, so the frontmatter does not
+parse (see [Defaults and references](#defaults-and-references)).
 
 Moving the date inside the rule changes the answer. The block-style form below
 renews by editing the date in place; the one-line bracketed form is refused,
@@ -980,8 +1326,8 @@ content_policy: ["ValidFor(3mo, 2026-09-28)"]   # refused
 
 A refusal writes nothing. Evaluation is unaffected: it still accepts a
 flow-style list, subject to the comma trap described in
-[Defaults and references](#defaults-and-references), which is why the refused
-example quotes its rule.
+[Defaults and references](#defaults-and-references), which is why both
+bracketed examples quote their rule.
 
 ## Library Architecture
 
@@ -1035,12 +1381,17 @@ A file's modification time is not a portable substitute for its content baseline
 Request credentials and runtime network policy belong to provider configuration.
 
 A `FileChanged` path is resolved relative to a **base directory** through
-Biscuit File's `FileReference`. An evidence record alone has no location (a
-cache manifest has no document directory), so the core evaluation API takes the
-base directory as an explicit input. The CLI sets it to the directory of the
-document being checked; a cache consumer supplies whatever directory its
-manifest's paths are relative to. The path is stored with `/` separators on
-every OS, so a policy written on Windows evaluates the same on macOS and Linux.
+Biscuit File's `FileReference`. For a document, the base directory is the
+document's directory. An evidence record alone has no location (a cache
+manifest has no document directory), so the core evaluation API also accepts
+the base directory as an input, which a cache consumer sets to whatever
+directory its manifest's paths are relative to. The **boundary** a path must
+stay inside is never an input: it is discovered from the base directory (the
+repository root containing it, else the current working directory; see
+[Paths and the boundary](#paths-and-the-boundary)). The path is stored with
+`/` separators on every OS, so a policy written on Windows evaluates the same
+on macOS and Linux. The bundled file adapter enables Biscuit File's
+`file-reference` feature; the default build does not.
 
 ## Later Policy Decisions
 
@@ -1090,8 +1441,12 @@ default and requires both `--json` and `--plain`.)*
   reported before the renewal.
 - Exit codes follow the repo standard. `0` means a report was produced, even one
   that reports `stale`, `expired`, or `unknown`. `1` covers invalid declarations,
-  unreadable files, and malformed frontmatter; the diagnostics go to stderr,
-  including in `--json` mode. `2` is a usage error, reported by clap.
+  unreadable files, and malformed frontmatter, including frontmatter that only
+  parses through Darkmatter's expression protection; the diagnostics go to
+  stderr, including in `--json` mode. `2` is a usage error, reported by clap.
+- Tab-indented frontmatter is not an error: the report is built from the
+  repaired text and carries a warning naming the tab repair (see
+  [Frontmatter reader](#frontmatter-reader)).
 
 `policy check --needs-action document.md` answers whether any rule has
 confirmed a need for action, including expiration. It prints `true` for
@@ -1124,6 +1479,8 @@ esac
 - `--write` applies the planned edits to the file.
 - The preview labels each first capture of a missing baseline "new baseline",
   distinct from a renewed value (see [Renewal rules](#renewal-rules)).
+- For tab-indented frontmatter, the preview lists the tab repair as its own
+  proposed edit, and `--write` applies it together with the date edits.
 - Output follows `check`: terminal-formatted by default, `--plain` removes
   styling, and `--json` prints the serialized plan as the only content on
   stdout.
@@ -1198,9 +1555,10 @@ design.
    between LF and CRLF; a `blake3` fingerprint changes. The one-argument
    `FileChanged(path)` form is a validation error. First capture writes a
    `blake3-lf:` value and renewal keeps an existing `blake3:` scheme. The
-   evidence-map API resolves `FileChanged` paths against an explicit base
-   directory, tested with a map that has no document behind it. This criterion
-   is required for the feature to be done.
+   evidence-map API resolves `FileChanged` paths against a caller-supplied base
+   directory, with the boundary discovered from it, tested with a map that has
+   no document behind it. This criterion is required for the feature to be
+   done.
 9. New crates follow repository package-area conventions and support macOS,
    Linux, native Windows, and WSL2. Implementation follows existing test recipes
    and maintains topic/dependency documentation and applicable skills.
@@ -1213,8 +1571,8 @@ design.
     Markdown document involved, and its dependency graph contains no path to
     Darkmatter.
 12. Applying a renewal leaves every byte outside the edited values unchanged,
-    including frontmatter comments. It refuses to write if the file changed
-    after the plan was made.
+    including frontmatter comments, except for a tab repair listed in the
+    preview. It refuses to write if the file changed after the plan was made.
 13. The package's `docs/` topic page and README are updated to match the
     decisions in this spec, in particular the CLI output and exit codes, the
     empty-list rule, and the always-present default policy.
@@ -1224,18 +1582,26 @@ design.
     rule string containing escape sequences. Each case has a test, and
     evaluation of the same documents still succeeds (flow-style lists
     included). A flow-style policy whose only edit target is outside the list,
-    such as `content_policy: [ValidFor(3mo, @last_updated)]`, renews
+    such as `content_policy: ["ValidFor(3mo, @last_updated)"]`, renews
     successfully, with a test.
 15. `policy check --needs-action` prints `true`, `false`, or `unknown` and exits
     `0` for each, with a test per answer; it exits `1` only for errors.
-16. The six `Duration(...)` notes under
-    `biscuit-terminal/docs/research/terminal-multiplexing/` are rewritten to
-    `ValidFor(...)` and evaluate without diagnostics. A `Duration(...)` entry is
-    a validation error for an unknown rule name.
-17. A flow-style policy whose rule contains a comma, such as
-    `content_policy: [ValidFor(3mo, 2026-09-28)]`, produces a validation
-    diagnostic that names the comma split and shows the block-list form. It
-    has a test.
+16. All 23 documents listed in
+    [Backwards compatibility](#backwards-compatibility), the six
+    `content_policy: - Duration(...)` notes and the 17 `update_policy:`
+    documents, declare their rules as `content_policy: - ValidFor(...)` and
+    evaluate without diagnostics, and none of them keeps an `update_policy:`
+    key; `json-rpc.md` holds `ValidFor(1yr)` with the
+    `# pending: MajorVersion(latest_version)` comment beside it. A
+    `Duration(...)` entry is a validation error for
+    an unknown rule name, and a document with only `update_policy:` is
+    evaluated under the default policy. Each has a test.
+17. A flow-style policy whose rule contains a comma and an inline date, such
+    as `content_policy: [ValidFor(3mo, 2026-09-28)]`, produces a validation
+    diagnostic that names the comma split and shows the block-list form. The
+    unquoted reference form, `content_policy: [ValidFor(3mo, @last_updated)]`,
+    is reported as malformed frontmatter, and its quoted form evaluates and
+    renews. Each has a test.
 18. A frontmatter block with a duplicate top-level key is a validation error,
     with a test for a duplicated `content_policy` and for a duplicated
     `last_updated`.
@@ -1272,6 +1638,43 @@ design.
 26. A reference to a dotted or nested path, such as `@review.last_checked`, is
     a validation error, even when the evidence record has a top-level key
     spelled `review.last_checked`. It has a test.
+27. Tab-indented frontmatter: Biscuit File's `analyze_yaml` proposes a
+    tab-indentation repair whose result matches Darkmatter's tab-normalized
+    record, including a block scalar with tabs beyond its first indentation
+    level. `policy check` on such a document reports a status and a warning
+    naming the repair; `policy renew` lists the repair as a separate edit, and
+    `--write` applies it with the date edits. A document that parses only
+    through Darkmatter's `{{ }}` protection is rejected with a message naming
+    that reason. Each has a test.
+28. The reader parses a block whose last key is a clip-chomped block scalar
+    (`description: >`) to the same record as Darkmatter's parser. It has a
+    test.
+29. Biscuit File's locator places a zero-indent block list item
+    (`content_policy:\n- X`) under its key, returns `None` for a multi-line
+    scalar, and reports an anchor, tag, or alias on the located value, each
+    with a Biscuit File test. Renewal then edits a rule date in place in a
+    zero-indent list, with a test.
+30. For each input in the Darkmatter comparison table under
+    [Renewal file editing](#renewal-file-editing), content-policy's writer
+    produces the stated bytes (or refuses the anchored target), with one
+    byte-exact test per case. An edit in a mixed line-ending file keeps each
+    untouched line's terminator.
+31. Renewal refuses, writes nothing, and names the reason for each remaining
+    refused shape: an anchor, alias, or tag on a value it must edit; a value
+    to edit inside a flow-mapping entry; an unterminated block, including one
+    closed by `...`; a `----` near-miss fence; and a located span that does
+    not decode to the parsed value. A test also shows the safety net: an edit
+    that would change any value other than its targets writes nothing.
+32. Each accepted and rejected `FileChanged` path form in
+    [Paths and the boundary](#paths-and-the-boundary) has a test, including
+    `../` inside and outside the boundary, `&` and `^` inside a repository and
+    outside one (where both resolve from the document tree root, and `^` falls
+    back to it), a path that escapes the boundary outside a repository, and a
+    bare path that exists only at the repository root (it
+    is not found, rather than silently resolved there). A path that names a
+    directory yields `unknown`.
+33. A `FileChanged` path containing `,` or `)` is a validation error, and a
+    quoted rule whose path contains ` #` evaluates correctly. Each has a test.
 
 ### Lifecycle example
 
