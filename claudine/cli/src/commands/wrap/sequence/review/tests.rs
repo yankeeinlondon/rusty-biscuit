@@ -1,14 +1,12 @@
-//! Review-row eligibility, baseline targets, and the row-to-step merge.
-//!
-//! Tests marked "phase-2 scaffold" exercise stubs; the change that implements
-//! them removes those `#[ignore]`s.
+//! Review-row eligibility, baseline targets, the row-to-step merge, and when
+//! the review screen opens.
 
 use std::cell::Cell;
 use std::path::PathBuf;
 
-use biscuit_tui::prelude::CANCELLED_KIND;
+use biscuit_tui::prelude::{ABORTED_KIND, CANCELLED_KIND};
 use claudine::composition::{
-    ExecutableField, ModelResolutionReason, ProviderPickerOption, ProviderPickerPlan,
+    AgentResolutionState, ExecutableField, ModelResolutionReason, ProviderPickerOption, ProviderPickerPlan,
     ProviderResolutionReason, ResolvedCompositionSource, ResolvedExecutionTarget, SequenceStep,
     SequenceStepDraft, StepExecutable, StepState, resolve_sequence_plan,
 };
@@ -123,7 +121,6 @@ fn baseline_for(steps: &[SequenceStep]) -> Vec<ResolvedExecutionTarget> {
 // -- Eligibility ------------------------------------------------------------
 
 #[test]
-#[ignore = "phase-2 scaffold: review eligibility"]
 fn eligibility_follows_the_outer_executable() {
     let cases = [
         (None, true),
@@ -143,7 +140,6 @@ fn eligibility_follows_the_outer_executable() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review eligibility"]
 fn shipped_review_loop_hides_exactly_its_stage_steps() {
     let path = PathBuf::from("prompts/review-loop.md");
     let source = ResolvedCompositionSource {
@@ -176,7 +172,6 @@ fn shipped_review_loop_hides_exactly_its_stage_steps() {
 // -- Baseline ---------------------------------------------------------------
 
 #[test]
-#[ignore = "phase-2 scaffold: baseline targets"]
 fn baseline_targets_match_the_review_bypassed_conversion() {
     let mut unresolved = draft(1, "unresolved");
     unresolved.resolved_provider = None;
@@ -208,7 +203,6 @@ fn baseline_targets_match_the_review_bypassed_conversion() {
 // -- Mapping ----------------------------------------------------------------
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn interleaved_steps_review_only_eligible_rows_and_merge_by_step_index() {
     let steps = steps(&[
         ("plan", Some(ExecutableField::Prompt)),
@@ -241,7 +235,6 @@ fn interleaved_steps_review_only_eligible_rows_and_merge_by_step_index() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn repeated_names_map_by_position_not_name() {
     let steps = steps(&[
         ("x", Some(ExecutableField::Prompt)),
@@ -260,7 +253,6 @@ fn repeated_names_map_by_position_not_name() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn hidden_first_and_last_steps_keep_their_baseline() {
     let steps = steps(&[
         ("stage", Some(ExecutableField::Shell)),
@@ -283,7 +275,6 @@ fn hidden_first_and_last_steps_keep_their_baseline() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn all_hidden_steps_never_open_the_review() {
     let steps = steps(&[
         ("stage", Some(ExecutableField::Shell)),
@@ -304,7 +295,6 @@ fn all_hidden_steps_never_open_the_review() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn unexpected_row_count_is_rejected_before_merging() {
     let steps = steps(&[
         ("a", Some(ExecutableField::Prompt)),
@@ -326,7 +316,6 @@ fn unexpected_row_count_is_rejected_before_merging() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn merge_rejects_a_count_mismatch_without_touching_the_baseline() {
     let steps = steps(&[("a", None), ("b", None)]);
     let baseline = baseline_for(&steps);
@@ -340,7 +329,6 @@ fn merge_rejects_a_count_mismatch_without_touching_the_baseline() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: review mapping"]
 fn review_cancellation_propagates_its_kind() {
     let steps = steps(&[("a", Some(ExecutableField::Prompt))]);
     let drafts = drafts_for(&steps);
@@ -350,4 +338,163 @@ fn review_cancellation_propagates_its_kind() {
     })
     .expect_err("cancellation is an error");
     assert_eq!(error.kind(), CANCELLED_KIND);
+}
+
+// -- Opening the review -----------------------------------------------------
+
+#[test]
+fn review_opens_only_for_a_prompting_state_on_a_terminal() {
+    let prompting = [
+        AgentResolutionState::NoAgent,
+        AgentResolutionState::SingleInvalid {
+            hint: "not-real".into(),
+        },
+        AgentResolutionState::SingleNotInstalled {
+            provider: Provider::Gemini,
+        },
+        AgentResolutionState::ListMultipleInstalled {
+            installed: vec![Provider::Claude, Provider::Codex],
+            not_installed: Vec::new(),
+            invalid: Vec::new(),
+        },
+        AgentResolutionState::ZeroInstalledList {
+            not_installed: vec![Provider::Gemini],
+            invalid: Vec::new(),
+        },
+    ];
+    for state in &prompting {
+        assert!(needs_review(true, Some(state)), "{state:?} on a terminal");
+        assert!(!needs_review(false, Some(state)), "{state:?} without a terminal");
+    }
+
+    let auto_selected = [
+        AgentResolutionState::Selected {
+            provider: Provider::Claude,
+        },
+        AgentResolutionState::ListOneInstalled {
+            selected: Provider::Codex,
+            not_installed: Vec::new(),
+            invalid: Vec::new(),
+        },
+    ];
+    for state in &auto_selected {
+        assert!(!needs_review(true, Some(state)), "{state:?}");
+    }
+
+    // An explicit `--<provider>` flag leaves no classified state.
+    assert!(!needs_review(true, None));
+}
+
+#[test]
+fn a_bypassed_review_never_calls_the_callback_and_keeps_the_baseline() {
+    let steps = steps(&[
+        ("plan", Some(ExecutableField::Prompt)),
+        ("stage", Some(ExecutableField::Shell)),
+    ]);
+    let drafts = drafts_for(&steps);
+    let called = Cell::new(false);
+
+    let targets = live_targets(
+        false,
+        &steps,
+        drafts.clone(),
+        ProviderResolutionReason::ExplicitFlag,
+        |_| {
+            called.set(true);
+            Ok(Vec::new())
+        },
+    )
+    .expect("no review, no error");
+
+    assert!(!called.get(), "a bypassed review opened the table");
+    assert_eq!(
+        targets,
+        Some(baseline_targets(&drafts, ProviderResolutionReason::ExplicitFlag))
+    );
+}
+
+#[test]
+fn a_shell_only_sequence_on_a_terminal_never_opens_the_review() {
+    let steps = steps(&[
+        ("stage", Some(ExecutableField::Shell)),
+        ("notify", Some(ExecutableField::SideEffect)),
+    ]);
+    let drafts = drafts_for(&steps);
+    let called = Cell::new(false);
+
+    let targets = live_targets(
+        true,
+        &steps,
+        drafts.clone(),
+        ProviderResolutionReason::FrontmatterSingle,
+        |_| {
+            called.set(true);
+            Ok(Vec::new())
+        },
+    )
+    .expect("no review, no error");
+
+    assert!(!called.get(), "an empty review table was opened");
+    let targets = targets.expect("not cancelled");
+    assert_eq!(targets.len(), 2);
+    assert_eq!(
+        targets,
+        baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle)
+    );
+}
+
+#[test]
+fn leaving_the_review_with_esc_or_ctrl_c_yields_no_targets() {
+    let steps = steps(&[
+        ("a", Some(ExecutableField::Prompt)),
+        ("stage", Some(ExecutableField::Shell)),
+    ]);
+    // `Esc` aborts and `Ctrl+C` cancels; both mean no step may start.
+    for (kind, message) in [(ABORTED_KIND, "cancelled"), (CANCELLED_KIND, "interrupted")] {
+        let outcome = live_targets(
+            true,
+            &steps,
+            drafts_for(&steps),
+            ProviderResolutionReason::FrontmatterSingle,
+            |_| Err(io::Error::new(kind, message)),
+        )
+        .expect("cancellation is not an error");
+        assert_eq!(outcome, None, "{kind:?}");
+    }
+}
+
+#[test]
+fn a_failed_review_is_an_error_not_a_cancellation() {
+    let steps = steps(&[("a", Some(ExecutableField::Prompt))]);
+    let error = live_targets(
+        true,
+        &steps,
+        drafts_for(&steps),
+        ProviderResolutionReason::FrontmatterSingle,
+        |_| Ok(Vec::new()),
+    )
+    .expect_err("a zero-row answer for one shown row must fail");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn a_submitted_review_returns_one_target_per_step() {
+    let steps = steps(&[
+        ("stage", Some(ExecutableField::Shell)),
+        ("plan", Some(ExecutableField::Prompt)),
+    ]);
+    let drafts = drafts_for(&steps);
+    let baseline = baseline_targets(&drafts, ProviderResolutionReason::FrontmatterSingle);
+
+    let targets = live_targets(
+        true,
+        &steps,
+        drafts,
+        ProviderResolutionReason::FrontmatterSingle,
+        |rows| Ok(rows.iter().map(|d| reviewed(d.step_index)).collect()),
+    )
+    .expect("review succeeds")
+    .expect("not cancelled");
+
+    assert_eq!(targets, vec![baseline[0].clone(), reviewed(1)]);
 }

@@ -46,9 +46,12 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 /// Present a multi-step review screen for sequence execution.
 ///
 /// Built on [`biscuit_tui::InputTable`] + [`biscuit_tui::run_standalone`].
-/// Each step becomes one row with three columns:
+/// Each supplied draft becomes one row; the caller passes only the steps
+/// offered for review, so shell and side-effect steps have no row. A row has
+/// three columns:
 ///
-/// 1. **Step label** (`StaticText`) — the step name, read-only.
+/// 1. **Step label** (`StaticText`) — the draft's original one-based step
+///    position and name, read-only.
 /// 2. **Provider** (`ChooseOne` or `StaticText`) — editable when not
 ///    locked by an explicit CLI flag; otherwise a read-only display of
 ///    the locked provider.
@@ -59,8 +62,9 @@ pub fn prompt_one_shot_provider(plan: ProviderPickerPlan) -> io::Result<Provider
 ///    read-only display of the locked model.
 ///
 /// On [`EventOutcome::Submitted`] (Ctrl+S), the typed row values are
-/// decoded into one [`ResolvedExecutionTarget`] per step.  On
-/// [`EventOutcome::Cancelled`] (Esc), an abort error is returned.
+/// decoded into one [`ResolvedExecutionTarget`] per draft, in draft order.
+/// On [`EventOutcome::Cancelled`] (Esc), an abort error is returned. Empty
+/// `drafts` return an empty vector without opening the table.
 ///
 /// ## Errors
 ///

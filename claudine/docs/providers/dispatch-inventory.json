@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1710,
-    "provider_refs": 1883,
+    "sites": 1715,
+    "provider_refs": 1889,
     "by_form": {
-      "direct-ref": 1650,
+      "direct-ref": 1655,
       "eq-comparison": 20,
       "match-provider": 8,
       "matches-macro": 13,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 60,
-      "reference": 1650
+      "reference": 1655
     }
   },
   "sites": [
@@ -5229,8 +5229,8 @@
       "exempt_candidate": true
     },
     {
-      "path": "claudine/cli/src/commands/wrap/sequence/mod.rs",
-      "line": 567,
+      "path": "claudine/cli/src/commands/wrap/sequence/review.rs",
+      "line": 42,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5240,7 +5240,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
-      "line": 63,
+      "line": 61,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5250,7 +5250,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
-      "line": 67,
+      "line": 65,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5260,11 +5260,21 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
-      "line": 77,
+      "line": 75,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
         "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
+      "line": 87,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Codex"
       ],
       "exempt_candidate": true
     },
@@ -5274,13 +5284,33 @@
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "Codex"
+        "Gemini"
       ],
       "exempt_candidate": true
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
-      "line": 91,
+      "line": 187,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
+      "line": 194,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
+      "line": 353,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5290,7 +5320,28 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
-      "line": 192,
+      "line": 356,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude",
+        "Codex"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
+      "line": 361,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Gemini"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
+      "line": 372,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -5300,11 +5351,11 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/review/tests.rs",
-      "line": 199,
+      "line": 375,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
-        "Claude"
+        "Codex"
       ],
       "exempt_candidate": true
     },

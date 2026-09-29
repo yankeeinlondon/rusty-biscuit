@@ -515,71 +515,43 @@ pub(crate) fn execute_sequence(
         // provider without prompting and must bypass the review screen, exactly
         // like direct compose's `resolve_live_target_with_tty` returns before
         // the picker for those states. Only prompting states reach the review
-        // UI, and only on a TTY. `shared_state` is `None` only when an explicit
-        // `--<provider>` flag is set, so `is_some_and` routes those — and the
-        // no-TTY case — into the deterministic `else` branch.
-        let needs_review = is_tty
-            && shared_state
-                .as_ref()
-                .is_some_and(|state| !is_auto_selectable_state(state));
-        let live_targets: Vec<claudine::composition::ResolvedExecutionTarget> = if needs_review {
-            // Emit the state-specific pre-prompt message before the review
-            // table renders, mirroring direct compose's
-            // `prompt_for_agent_state`: a styled `Invalid Agent:` line for
-            // a scalar invalid hint, the zero-installed-list breakdown for
-            // an all-uninstallable list. Auto-selectable and plain picker
-            // states never reach this arm (they take the `else` branch), so
-            // every state here returns a message or `None` for a plain
-            // picker. The message shares its source of truth with the
-            // dry-run table cell and the no-TTY abort body, so the three
-            // surfaces cannot drift. `shared_state` is always `Some` here
-            // because `needs_review` requires it.
-            if let Some(state) = shared_state.as_ref()
-                && let Some(markup) =
-                    super::composition::agent_prompt_message(state, &source.resolved_path)
-            {
-                log::message(&Prose::new(markup).render(&log::terminal()));
-            }
-            // TTY review screen. The --dry-run arm above returns before
-            // this point, so the dry-run seam never invokes a picker.
-            match super::selection_ui::review_sequence(drafts, &catalog) {
-                Ok(targets) => targets,
-                Err(e) => {
-                    if e.kind() == std::io::ErrorKind::Other && e.to_string().contains("cancelled")
-                    {
-                        return Ok(130); // Treat as interrupt
-                    }
-                    return Err(e.into());
-                }
-            }
+        // UI, and only on a TTY; an explicit `--<provider>` flag and the no-TTY
+        // case keep the deterministic baseline. Shell and side-effect steps get
+        // no row, so a sequence of only those never opens the table.
+        let provider_reason = if explicit_provider.is_some() {
+            claudine::composition::ProviderResolutionReason::ExplicitFlag
+        } else if matches!(
+            shared_state.as_ref(),
+            Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
+        ) {
+            claudine::composition::ProviderResolutionReason::FrontmatterList
         } else {
-            // Auto-selectable, explicit flag, or non-TTY: each step's
-            // provider was resolved deterministically onto the draft.
-            let list_one = matches!(
-                shared_state.as_ref(),
-                Some(claudine::composition::AgentResolutionState::ListOneInstalled { .. })
-            );
-            drafts
-                .into_iter()
-                .map(|draft| {
-                    let provider = draft
-                        .resolved_provider
-                        .unwrap_or(claudine::provider::Provider::Claude);
-                    let provider_reason = if explicit_provider.is_some() {
-                        claudine::composition::ProviderResolutionReason::ExplicitFlag
-                    } else if list_one {
-                        claudine::composition::ProviderResolutionReason::FrontmatterList
-                    } else {
-                        claudine::composition::ProviderResolutionReason::FrontmatterSingle
-                    };
-                    claudine::composition::ResolvedExecutionTarget {
-                        provider,
-                        provider_reason,
-                        model: draft.proposed_model,
-                        model_reason: draft.model_reason,
-                    }
-                })
-                .collect()
+            claudine::composition::ProviderResolutionReason::FrontmatterSingle
+        };
+        let live_targets = review::live_targets(
+            review::needs_review(is_tty, shared_state.as_ref()),
+            &plan.steps,
+            drafts,
+            provider_reason,
+            |eligible| {
+                // The state-specific pre-prompt message (a styled `Invalid
+                // Agent:` line, the zero-installed-list breakdown) shares its
+                // source of truth with the dry-run table cell and the no-TTY
+                // abort body, so the three surfaces cannot drift. A plain
+                // picker state has no message.
+                if let Some(state) = shared_state.as_ref()
+                    && let Some(markup) =
+                        super::composition::agent_prompt_message(state, &source.resolved_path)
+                {
+                    log::message(&Prose::new(markup).render(&log::terminal()));
+                }
+                // The --dry-run arm above returns before this point, so the
+                // dry-run seam never invokes a picker.
+                super::selection_ui::review_sequence(eligible, &catalog)
+            },
+        )?;
+        let Some(live_targets) = live_targets else {
+            return Ok(SEQUENCE_INTERRUPT_EXIT_CODE);
         };
         live_targets.into_iter().map(Some).collect()
     };
