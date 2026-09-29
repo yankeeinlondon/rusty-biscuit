@@ -165,6 +165,13 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 filter = 'package(claudine-cli) & test(/level2_/)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
+# Each native-provider interactive startup test boots a real agentic CLI and
+# waits for two real model turns; its own deadlines total 330s (180s first
+# turn, 120s second, 30s exit), which the default 30s ceiling cuts short.
+[[profile.default.overrides]]
+filter = 'binary_id(claudine-cli::real) & test(/^real_native_interactive_startup::/)'
+slow-timeout = { period = "60s", terminate-after = 6 }
+
 [profile.local-evidence]
 # Evidence needs Nextest's machine-readable report without CI's runner-specific
 # concurrency caps. Test selection and failure policy inherit from the local
