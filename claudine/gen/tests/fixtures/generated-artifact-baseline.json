@@ -2,11 +2,11 @@
   "algorithm": "xxh64",
   "seed": 0,
   "artifacts": [
-    { "path": "docs/providers/catalog.json", "hash": "14015590831747458428" },
+    { "path": "docs/providers/catalog.json", "hash": "11599365317308326791" },
     { "path": "lib/src/signals/generated.rs", "hash": "6641532667373100434" },
     { "path": "lib/src/model_catalog/families_generated.rs", "hash": "11704988274204864472" },
     { "path": "lib/src/stream/providers/vocabulary.rs", "hash": "537241315263662569" },
-    { "path": "lib/src/steering/generated.rs", "hash": "10005189633011121167" },
+    { "path": "lib/src/steering/generated.rs", "hash": "8549140604224936995" },
     { "path": "lib/src/provider/antigravity/data.rs", "hash": "12939088638076069542" },
     { "path": "lib/src/provider/claude/data.rs", "hash": "911876181393434815" },
     { "path": "lib/src/provider/codex/data.rs", "hash": "12727705138327263807" },

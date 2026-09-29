@@ -13011,7 +13011,8 @@
             "tool_approvals": "fail"
           },
           "changes": [
-            "2026-07-03: Refreshed Codex CLI non-interactive research from current OpenAI Codex manual, local codex-cli 0.142.5 help, and openai/codex source event types."
+            "2026-07-03: Refreshed Codex CLI non-interactive research from current OpenAI Codex manual, local codex-cli 0.142.5 help, and openai/codex source event types.",
+            "2026-09-28: Selected the managed app-server as the preferred structured interface with exec-json as its pre-submission fallback, from the rust-v0.157.1 exec source (exec is an in-process app-server client) and disposable 0.157.1 managed sessions; recorded exec's unattended-request answers and the stdin-EOF settlement hazard."
           ],
           "claudine_strategy": {
             "conflicting_flags": [
@@ -13439,13 +13440,15 @@
                 "turn/start",
                 "turn/steer",
                 "turn/interrupt",
-                "thread resume"
+                "thread resume",
+                "thread/read"
               ],
               "documented_exclusions": [],
               "evidence": [
+                "https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/exec/src/lib.rs",
                 "../steering/codex.md"
               ],
-              "feature_preservation": "unknown",
+              "feature_preservation": "evidenced_full",
               "id": "app-server",
               "input_contract": "JSON-RPC request lines on stdin.",
               "kind": "retained_subprocess",
@@ -13455,25 +13458,38 @@
                 "Retain exact thread and turn identities",
                 "Gate experimental methods by installed protocol capability"
               ],
-              "notes": "Proposed managed interface; this backfill does not claim Claudine activation or full feature parity.",
+              "notes": "Full preservation holds for the exec options with an exact app-server equivalent (global -c/--enable/--disable/--strict-config, --model, --sandbox, the bypass flag, --ephemeral, resume <id>, --output-last-message); any other exec option keeps the run on exec-json.",
               "observation_contract": "Correlated JSON-RPC responses and lifecycle notifications on stdout.",
-              "preserved_features": [],
+              "preserved_features": [
+                "skills",
+                "configuration",
+                "project context",
+                "MCP configuration",
+                "session persistence",
+                "custom prompts"
+              ],
               "unattended_obligations": [
                 "Track exact expectedTurnId",
                 "Do not retry ambiguous input",
-                "Observe matching turn completion"
+                "Observe matching turn completion",
+                "Keep stdin open until the turn settles",
+                "Answer server requests as exec does"
               ]
             }
           ],
           "execution_selection": {
-            "fallback": "",
-            "fallback_conditions": [],
-            "feature_parity": "App-server retains bidirectional control, but parity with ordinary CLI skills, configuration, templates, context, and MCP loading is not fully evidenced.",
-            "notes": "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed.",
-            "preferred": "exec-json",
-            "rationale": "It is the established one-shot wrapper interface; app-server is the richer managed candidate but readiness and feature parity remain unresolved.",
-            "readiness_check": "Require thread.started and a terminal turn.completed or turn.failed, plus process exit.",
-            "replay_policy": "Never replay after acceptance is ambiguous."
+            "fallback": "exec-json",
+            "fallback_conditions": [
+              "The app-server exits, refuses, or does not become ready before the task is submitted",
+              "Any exec option without an exact app-server equivalent (decided before launch)",
+              "A run exec itself refuses outside a Git repository"
+            ],
+            "feature_parity": "Evidenced for the mapped options by the exec client source and by disposable 0.157.1 managed sessions on macOS; unmapped options stay on exec-json.",
+            "notes": "2026-09-28 corrective pass (Claudine steering Phase 7): source reading of rust-v0.157.1 exec and disposable sessions against a scripted local model.",
+            "preferred": "app-server",
+            "rationale": "codex exec is an in-process app-server client (rust-v0.157.1 source), so the retained app-server runs the same core with exec's settings while adding exact-turn steering, idle turns, interruption, and thread state.",
+            "readiness_check": "initialize answers with a userAgent, initialized is sent, and thread/start (or thread/resume) answers with a thread id, before the task's turn/start.",
+            "replay_policy": "Never replay after acceptance is ambiguous; no fallback after the task's turn/start was written."
           },
           "gaps": [
             "No official, versioned JSON Schema for codex exec --json was found.",
@@ -13548,7 +13564,7 @@
             },
             {
               "command": "codex app-server --listen stdio://",
-              "notes": "Starts a long-running bidirectional protocol server. It is richer than exec JSONL but is not the recommended Claudine local job wrapper.",
+              "notes": "Starts a long-running bidirectional protocol server. codex exec is itself an in-process client of this server (rust-v0.157.1), so a managed client that maps every exec option exactly runs the same core; Claudine prefers it for structured runs.",
               "prompt_arg": "JSON-RPC request lines on stdin after initialize/initialized handshake",
               "stdin_support": true
             },
@@ -13573,7 +13589,7 @@
             "stdin": "prompt",
             "stdout": "structured_only"
           },
-          "last_updated": "2026-07-03",
+          "last_updated": "2026-09-28",
           "model": "default",
           "output_formats": [
             {
@@ -13651,8 +13667,8 @@
             "JSONL item ids are synthesized by the exec projector and are not necessarily raw app-server item ids.",
             "Without --json, stdout is intentionally only the final assistant message, which is good for pipes but poor for lifecycle supervision."
           ],
-          "reason": "Claudine should prefer codex exec --json and parse the current ThreadEvent/item.type JSONL contract; wrappers also need side-channel capture for metadata omitted from exec JSONL.",
-          "requires_claudine_update": true,
+          "reason": "Claudine runs structured Codex work over a managed app-server when every exec option maps exactly, projecting its notifications onto the exec JSONL events, and falls back to codex exec --json before submission otherwise.",
+          "requires_claudine_update": false,
           "schema_sources": [
             {
               "formal": false,
@@ -13718,10 +13734,10 @@
               "acceptance_signal": "successful turn/start response",
               "input_handling": "A correlated JSON-RPC response establishes request handling, while notifications establish later execution.",
               "interface": "app-server",
-              "notes": "Post-turn extension settlement beyond turn/completed is not established.",
+              "notes": "A steer accepted during a turn extends that same turn; an idle turn started by steering keeps the run open until it too completes.",
               "operation": "managed turn/start",
-              "process_lifecycle": "The app-server remains alive after turn settlement.",
-              "settled_signal": "matching turn/completed for the submitted turn",
+              "process_lifecycle": "The app-server remains alive after turn settlement and exits 0 when stdin closes; closing stdin during a turn abandons it (observed 0.157.1), so stdin closes only after settlement.",
+              "settled_signal": "matching turn/completed, then thread/read reporting the thread idle with no turn started since",
               "turn_scheduling": "turn/started identifies the scheduled turn.",
               "turn_terminal_signal": "matching turn/completed"
             }
@@ -14046,11 +14062,11 @@
             {
               "interface": "app-server",
               "notes": "Ordinary exec fails unavailable interactive requests rather than providing a general response channel.",
-              "observed_behavior": "The managed protocol can expose approval and user-input request state; exact eligible request families depend on protocol version.",
+              "observed_behavior": "The managed protocol sends server requests (command, file-change, and permission approval; request_user_input; MCP elicitation; dynamic tool calls; token refresh; attestation; current time). codex exec answers an MCP elicitation with a cancel action and every other request with JSON-RPC error -32000 (rust-v0.157.1).",
               "policy": "Never fabricate approval or human input.",
               "request": "tool approval, elicitation, or user-input request",
-              "required_response": "Answer only from explicit caller policy; otherwise cancel or fail with the unresolved request.",
-              "timeout_behavior": "Unknown from the retained evidence."
+              "required_response": "Answer as exec does: cancel an elicitation, refuse everything else; never approve. A request that cannot be read has no safe answer and fails the run as input_required.",
+              "timeout_behavior": "exec never leaves a request waiting; the managed client answers each at once."
             }
           ],
           "use_cases": [
