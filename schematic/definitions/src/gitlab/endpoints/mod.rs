@@ -1,3 +1,4 @@
+pub mod branches;
 pub mod issues;
 pub mod merge_requests;
 pub mod pipelines;

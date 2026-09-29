@@ -13,6 +13,7 @@
 //! - **Repository Contents**: Raw file content via `/raw/{filepath}`
 //! - **Pull Requests**: List PRs with associated metadata and files
 //! - **Issues**: List issues, comments, and timeline events
+//! - **Branches**: A branch and its head commit
 //! - **Tags & Releases**: Distinguish lightweight vs annotated tags, link releases
 //!
 //! ## Authentication
@@ -43,6 +44,7 @@
 //! | Contents | `GetRepositoryContentRaw` |
 //! | Pull Requests | `ListPullRequests`, `ListPullRequestFiles` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueTimeline` |
+//! | Branches | `GetBranch` |
 //! | Tags/Releases | `ListTags`, `ListReleases`, `GetTagReference`, `GetAnnotatedTag` |
 //! | Organizations | `ListOrgRepos` |
 
@@ -97,6 +99,7 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<Vec<RepoTag>>("Vec<RepoTag>")
         .register::<Release>("Release")
         .register::<Vec<Release>>("Vec<Release>")
+        .register::<Branch>("Branch")
         .register::<GitRef>("GitRef")
         .register::<Vec<GitRef>>("Vec<GitRef>")
         .register::<AnnotatedTagObject>("AnnotatedTagObject")
@@ -139,6 +142,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 /// | ListIssueTimeline | GET | /repos/{owner}/{repo}/issues/{index}/timeline | List timeline |
 /// | ListTags | GET | /repos/{owner}/{repo}/tags | List repository tags |
 /// | ListReleases | GET | /repos/{owner}/{repo}/releases | List releases |
+/// | GetBranch | GET | /repos/{owner}/{repo}/branches/{branch} | Get a branch and its head commit |
 /// | GetTagReference | GET | /repos/{owner}/{repo}/git/refs/{git_ref} | Get tag reference (returns array) |
 /// | GetAnnotatedTag | GET | /repos/{owner}/{repo}/git/tags/{sha} | Get annotated tag object |
 /// | ListOrgRepos | GET | /orgs/{org}/repos | List organization repositories |
@@ -150,7 +154,7 @@ pub fn openapi_registry() -> SchemaRegistry {
 ///
 /// let api = define_gitea_api();
 /// assert_eq!(api.name, "Gitea");
-/// assert_eq!(api.endpoints.len(), 15);
+/// assert_eq!(api.endpoints.len(), 16);
 /// ```
 pub fn define_gitea_api() -> RestApi {
     RestApi {
@@ -383,6 +387,20 @@ pub fn define_gitea_api() -> RestApi {
                 ),
                 oauth_scopes: None,
             },
+            // =================================================================
+            // Branches
+            // =================================================================
+            Endpoint {
+                id: "GetBranch".to_string(),
+                method: RestMethod::Get,
+                path: "/repos/{owner}/{repo}/branches/{branch}".to_string(),
+                description: "Get a branch (commit.id is the branch head commit)".to_string(),
+                request: None,
+                response: ApiResponse::json_type("Branch"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
             // Note: Gitea's /git/refs/{ref} returns an ARRAY, unlike GitHub's single object
             // Path uses {git_ref} instead of {ref} to avoid Rust keyword collision
             Endpoint {
@@ -452,7 +470,7 @@ mod tests {
         assert!(registry.get("Label").is_some());
         assert!(registry.get("RepoTag").is_some());
         assert!(registry.get("Release").is_some());
-        assert_eq!(registry.len(), 21);
+        assert_eq!(registry.len(), 22);
     }
 
     #[test]
@@ -524,9 +542,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_fifteen_endpoints() {
+    fn api_has_sixteen_endpoints() {
         let api = define_gitea_api();
-        assert_eq!(api.endpoints.len(), 15);
+        assert_eq!(api.endpoints.len(), 16);
     }
 
     #[test]
@@ -726,6 +744,26 @@ mod tests {
     }
 
     #[test]
+    fn get_branch_endpoint() {
+        let api = define_gitea_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "GetBranch")
+            .expect("GetBranch endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(endpoint.path, "/repos/{owner}/{repo}/branches/{branch}");
+        assert!(endpoint.request.is_none());
+        assert!(endpoint.oauth_scopes.is_none());
+        match &endpoint.response {
+            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "Branch"),
+            _ => panic!("Expected JSON response"),
+        }
+        assert!(matches!(api.auth, AuthStrategy::ApiKey { .. }));
+    }
+
+    #[test]
     fn all_endpoints_have_descriptions() {
         let api = define_gitea_api();
 
@@ -779,6 +817,7 @@ mod tests {
             "GetGitTree",
             "GetGitTreeRecursive",
             "GetIssue",
+            "GetBranch",
             "GetAnnotatedTag",
         ];
 

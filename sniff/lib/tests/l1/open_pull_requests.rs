@@ -9,12 +9,12 @@ use serde_json::{Value, json};
 use serial_test::serial;
 use sniff::filesystem::git::ApiFlavor;
 use sniff::remote::blocking::{PrSummary, PrUnavailable, open_pull_requests_with};
-use test_toolkit::EnvGuard;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, ResponseTemplate};
 
 use super::pr_for_branch::{
-    FLAVORS, Lifecycle, Provider, SHA, TARGET, list_body, pr, without_tokens,
+    FLAVORS, Lifecycle, Provider, SHA, TARGET, check_credential_cases, list_body, pr,
+    without_tokens,
 };
 
 const FORK: &str = "forker/project";
@@ -305,30 +305,8 @@ fn an_unseen_gitlab_fork_has_no_source_repository_but_the_list_answers() {
 
 #[test]
 #[serial]
-fn auth_failures_are_unavailable_not_empty_on_every_provider() {
-    let _tokens = without_tokens();
-    for flavor in FLAVORS {
-        for (status, token) in [(401, None), (401, Some("rejected")), (403, Some("scoped"))] {
-            let _token = token.map(|value| {
-                let variable = match flavor {
-                    ApiFlavor::GitHub => "GITHUB_TOKEN",
-                    ApiFlavor::GitLab => "GITLAB_TOKEN",
-                    ApiFlavor::Gitea => "GITEA_TOKEN",
-                    _ => "BITBUCKET_TOKEN",
-                };
-                EnvGuard::set_safe(variable, value)
-            });
-            let provider = Provider::start(flavor);
-            provider.serve_list_response(ResponseTemplate::new(status));
-
-            let result = provider.open();
-
-            assert!(
-                matches!(result, Err(PrUnavailable::Auth { .. })),
-                "{flavor:?} {status} token={token:?}: {result:?}"
-            );
-        }
-    }
+fn credentials_failures_are_unavailable_not_empty_on_every_provider() {
+    check_credential_cases(Provider::serve_list_response, Provider::open);
 }
 
 #[test]

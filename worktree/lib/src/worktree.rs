@@ -12,6 +12,7 @@ use crate::listing::{
 };
 use crate::git::{git_command, git_command_in, git_from, repo_info};
 use crate::include::{IncludeRules, copy::{self, RealCopyOps, SkipReason}};
+use crate::pull_requests::unix_now;
 use crate::util::dasherize;
 
 #[derive(Debug, Clone)]
@@ -210,6 +211,8 @@ pub struct WorktreeList {
     refs: RefTips,
     /// `for-each-ref` succeeded, so a branch missing from `refs` is deleted.
     refs_read: bool,
+    /// Unix seconds just before `refs` was read.
+    refs_read_at: u64,
     forks: ForkOriginStore,
     fork_file: Option<PathBuf>,
     cache_file: Option<PathBuf>,
@@ -243,6 +246,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
     let porcelain = git_command(&["worktree", "list", "--porcelain"])?;
     let entries = parse_worktree_list(&porcelain);
     let default_branch = default_branch()?;
+    let refs_read_at = unix_now();
     let refs = RefTips::read();
     let refs_read = refs.is_some();
     let main_path = entries.first().map(|entry| entry.path.clone());
@@ -263,6 +267,7 @@ pub fn parse_worktree_state() -> Result<WorktreeList, WorktreeError> {
         entries,
         refs: refs.unwrap_or_default(),
         refs_read,
+        refs_read_at,
         forks,
         fork_file,
         cache_file,
@@ -342,10 +347,22 @@ pub fn fill_worktree_statuses(list: &mut WorktreeList) -> Result<(), WorktreeErr
     }
     // Without a successful `for-each-ref` every branch would look deleted.
     if let (true, Some(path)) = (list.refs_read, list.fork_file.as_ref()) {
-        let live: HashSet<String> = list.refs.local.keys().cloned().collect();
-        if list.forks.prune(&live) > 0 {
-            let _ = list.forks.save_atomic(path);
+        // The file is pruned as it is now, not as loaded before the remote
+        // wait: a `wt create` may have added a record since. A record no
+        // older than the ref read may name a branch that read could not see,
+        // so only that rare record costs a git call.
+        let mut stored = ForkOriginStore::load_from(path);
+        let refs_read_at = list.refs_read_at;
+        let local = &list.refs.local;
+        let pruned = stored.prune(|branch, origin| {
+            local.contains_key(branch)
+                || (origin.created_at >= refs_read_at
+                    && git_command(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok())
+        });
+        if pruned > 0 {
+            let _ = stored.save_atomic(path);
         }
+        list.forks = stored;
     }
     if let Some(repo_root) = entries.iter().find(|entry| entry.is_main).map(|entry| &entry.path) {
         let live = entries.iter().filter_map(|entry| std::fs::canonicalize(&entry.path).ok()).collect();
@@ -410,12 +427,24 @@ impl WorktreeList {
         &self.entries
     }
 
-    /// Branch tips from the parse step; empty when `for-each-ref` failed.
+    /// Branch tips from the parse step, or from the last
+    /// [`WorktreeList::reread_refs`]; empty when `for-each-ref` failed.
     pub fn refs(&self) -> &RefTips {
         &self.refs
     }
 
-    /// Fork-origin records as loaded (pruned once statuses are filled).
+    /// Takes a new ref snapshot, for a caller that may have moved refs since
+    /// [`parse_worktree_state`] (`wt list`'s fetch and fast-forward), so the
+    /// statuses [`fill_worktree_statuses`] computes describe one state.
+    pub fn reread_refs(&mut self) {
+        self.refs_read_at = unix_now();
+        let refs = RefTips::read();
+        self.refs_read = refs.is_some();
+        self.refs = refs.unwrap_or_default();
+    }
+
+    /// Fork-origin records as loaded, replaced by the pruned file once
+    /// statuses are filled.
     pub fn fork_origins(&self) -> &ForkOriginStore {
         &self.forks
     }

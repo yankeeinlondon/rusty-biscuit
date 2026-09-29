@@ -4,7 +4,8 @@
 //! Of the local default branch and `origin/<default>`, the one that contains
 //! the other wins. When they have diverged, `origin/<default>` wins, because it
 //! is the copy everyone shares. Without a remote-tracking ref the local tip is
-//! used. `wt` never fetches, so `origin/<default>` is as of the last fetch.
+//! used. `origin/<default>` is as of the last fetch, whether `wt list`'s
+//! (which fetches only that ref, and only when `origin` differs) or the user's.
 
 use std::path::Path;
 

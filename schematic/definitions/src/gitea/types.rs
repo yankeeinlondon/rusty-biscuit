@@ -547,6 +547,39 @@ pub struct Release {
 }
 
 // =============================================================================
+// Branch Types
+// =============================================================================
+
+/// Head commit of a branch, as embedded in [`Branch`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BranchCommit {
+    /// Commit SHA.
+    pub id: String,
+
+    /// Commit message.
+    #[serde(default)]
+    pub message: Option<String>,
+
+    /// Commit timestamp.
+    #[serde(default)]
+    pub timestamp: Option<String>,
+}
+
+/// A branch from `GET /repos/{owner}/{repo}/branches/{branch}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Branch {
+    /// Branch name.
+    pub name: String,
+
+    /// Head commit of the branch.
+    pub commit: BranchCommit,
+
+    /// Whether the branch is protected.
+    #[serde(default)]
+    pub protected: Option<bool>,
+}
+
+// =============================================================================
 // Git Reference Types
 // =============================================================================
 
@@ -623,6 +656,25 @@ pub struct AnnotatedTagObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_deserialization() {
+        let json = r#"{
+            "name": "feature/x",
+            "commit": {
+                "id": "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+                "message": "Initial commit\n",
+                "url": "https://gitea.example.com/owner/repo/commit/7fd1a60b01f91b314f59955a4e4d4e80d8edf11d",
+                "timestamp": "2026-09-27T10:00:00Z"
+            },
+            "protected": false,
+            "user_can_push": true
+        }"#;
+
+        let branch: Branch = serde_json::from_str(json).unwrap();
+        assert_eq!(branch.name, "feature/x");
+        assert_eq!(branch.commit.id, "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d");
+    }
 
     #[test]
     fn user_summary_deserialization_with_login() {

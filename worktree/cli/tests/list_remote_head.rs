@@ -1,232 +1,163 @@
-//! The caption's remote observation against real git: a local bare `origin`,
-//! a `pusher` clone standing in for everyone else, and the listed clone with
-//! one linked worktree.
+//! `wt list`'s update flow against real git (spec acceptance 4): a local bare
+//! `origin`, a `pusher` clone standing in for everyone else, and the listed
+//! clone with one linked worktree.
 //!
-//! The live head is recorded by `wt internal-refresh <main>`, run here as a
-//! direct child and waited for, so each step's store is known before `wt
-//! list` reads it. `wt list` itself never asks `origin`: a fetch changes the
-//! comparison and leaves the stored observation (and its age) as it was.
+//! Every listing launches the worker and waits up to 3 s for its attempt, so
+//! a variance is fetched before the listing gathers its refs. Some tests run
+//! `wt internal-refresh <main>` as a direct child first, to know the store
+//! before a listing reads it. An [`UploadPackGate`] holds one `upload-pack`
+//! (the check's `ls-remote`, or the fetch) to prove the rows rendered while
+//! the worker is still working.
 
 mod perf_support;
+mod remote_fixture;
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use assert_cmd::cargo::cargo_bin;
-use perf_support::{isolated_cache_file, refresh_workers, wait_for_refresh_workers};
+use perf_support::{refresh_workers, wait_for_refresh_workers};
+use remote_fixture::{Fixture, UploadPackGate, WORKER_WAIT, assert_checked_now};
 use serial_test::serial;
-use worktree::pull_requests::{pr_lock_path, pr_store_path};
-use worktree::remote_head::{remote_head_lock_path, remote_head_store_path};
-
-/// How long a test waits for a detached worker before failing.
-const WORKER_WAIT: Duration = Duration::from_secs(20);
-
-struct Fixture {
-    root: tempfile::TempDir,
-    main: PathBuf,
-    linked: PathBuf,
-    pusher: PathBuf,
-    bare: PathBuf,
-}
-
-impl Fixture {
-    /// `origin` holds one commit on `main`, which the listed clone has
-    /// fetched: its `main` is in sync with `origin/main`.
-    fn new() -> Self {
-        let root = tempfile::tempdir().expect("create temp dir");
-        for dir in ["home", "cache"] {
-            fs::create_dir(root.path().join(dir)).expect("create dir");
-        }
-        fs::write(root.path().join("empty.gitconfig"), "").expect("write empty git config");
-        let bare = root.path().join("origin.git");
-        let main = root.path().join("main");
-        let pusher = root.path().join("pusher");
-        let linked = root.path().join("main-feature");
-        let fixture = Self { main, linked, pusher, bare, root };
-
-        fixture.git(fixture.root.path(), &["init", "--bare", "-b", "main", "origin.git"]);
-        fixture.git(fixture.root.path(), &["init", "-b", "main", "pusher"]);
-        fixture.git(&fixture.pusher, &["remote", "add", "origin", fixture.bare.to_str().unwrap()]);
-        fixture.commit_and_push("first");
-        fixture.git(fixture.root.path(), &["clone", fixture.bare.to_str().unwrap(), "main"]);
-        fixture.git(&fixture.main, &["worktree", "add", "-b", "feature", fixture.linked.to_str().unwrap()]);
-        fixture
-    }
-
-    /// Git with no user or system configuration and a fixed identity.
-    fn git(&self, dir: &Path, args: &[&str]) -> String {
-        let output = self.isolated(Command::new("git")).current_dir(dir).args(args).output().expect("git runs");
-        assert!(output.status.success(), "git {args:?} in {dir:?}: {output:?}");
-        String::from_utf8(output.stdout).expect("utf-8").trim().to_string()
-    }
-
-    fn isolated(&self, mut command: Command) -> Command {
-        command
-            .env("HOME", self.root.path().join("home"))
-            .env("XDG_CACHE_HOME", self.root.path().join("cache"))
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", self.root.path().join("empty.gitconfig"))
-            .env("GIT_AUTHOR_NAME", "Test User")
-            .env("GIT_AUTHOR_EMAIL", "test@example.com")
-            .env("GIT_COMMITTER_NAME", "Test User")
-            .env("GIT_COMMITTER_EMAIL", "test@example.com")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE");
-        command
-    }
-
-    /// Another clone advances `origin`'s `main` by one commit; returns it.
-    fn commit_and_push(&self, message: &str) -> String {
-        fs::write(self.pusher.join("file.txt"), format!("{message}\n")).expect("write");
-        self.git(&self.pusher, &["add", "."]);
-        self.git(&self.pusher, &["commit", "-m", message]);
-        self.git(&self.pusher, &["push", "origin", "main"]);
-        self.git(&self.pusher, &["rev-parse", "HEAD"])
-    }
-
-    fn wt(&self, dir: &Path) -> Command {
-        let mut command = self.isolated(Command::new(cargo_bin("wt")));
-        command.current_dir(dir).env("NO_COLOR", "1").env_remove("WT_SHELL_WRAPPER");
-        command
-    }
-
-    /// `wt list` from `dir`, with its stderr's whitespace collapsed (the
-    /// caption word-wraps) and the padding that follows a plain branch badge
-    /// dropped before punctuation.
-    fn list_from(&self, dir: &Path) -> String {
-        let output = self.wt(dir).arg("list").output().expect("wt list runs");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(output.status.success(), "wt list failed:\n{stderr}");
-        stderr.split_whitespace().collect::<Vec<_>>().join(" ").replace(" .", ".").replace(" ;", ";")
-    }
-
-    fn list(&self) -> String {
-        self.list_from(&self.main)
-    }
-
-    /// `wt internal-refresh <main>` as a direct child, waited for.
-    fn refresh(&self) {
-        let output: Output =
-            self.wt(&self.main).arg("internal-refresh").arg(&self.main).output().expect("the worker runs");
-        assert!(output.status.success() && output.stdout.is_empty() && output.stderr.is_empty(), "{output:?}");
-    }
-
-    fn head_store(&self) -> PathBuf {
-        self.cache_file(remote_head_store_path(&self.main).expect("remote-head store path"))
-    }
-
-    fn cache_file(&self, real: PathBuf) -> PathBuf {
-        isolated_cache_file(&self.root.path().join("home"), &self.root.path().join("cache"), &real)
-    }
-
-    fn stored_head(&self) -> serde_json::Value {
-        serde_json::from_slice(&fs::read(self.head_store()).expect("a stored live head")).expect("json")
-    }
-
-    /// Moves the stored answer's `checked_at` back by `seconds`, as if it had
-    /// been recorded that long ago; a refresh only asks once it is stale.
-    fn age_head(&self, seconds: u64) {
-        let mut stored = self.stored_head();
-        let checked_at = stored["checked_at"].as_u64().expect("checked_at");
-        stored["checked_at"] = (checked_at - seconds).into();
-        fs::write(self.head_store(), serde_json::to_vec(&stored).expect("json")).expect("write store");
-    }
-}
-
-impl Drop for Fixture {
-    /// On Windows the stores live in the real user cache, keyed by this
-    /// temporary repository; remove them with it.
-    fn drop(&mut self) {
-        let _ = wait_for_refresh_workers(&self.main, 0, WORKER_WAIT);
-        let pr_store = self.cache_file(pr_store_path(&self.main).expect("PR store path"));
-        let head_store = self.head_store();
-        for path in [pr_lock_path(&pr_store), pr_store, remote_head_lock_path(&head_store), head_store] {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
+use worktree::remote_head::{refresh_receipt_path, remote_head_lock_path};
 
 #[test]
 #[serial]
-fn a_push_elsewhere_reads_as_a_difference_until_the_fetch_then_as_behind_and_matched() {
+fn a_push_elsewhere_is_fetched_by_the_worker_and_then_reads_as_behind_and_checked() {
     let fixture = Fixture::new();
+    let local = fixture.git(&fixture.main, &["rev-parse", "main"]);
     let pushed = fixture.commit_and_push("second");
 
     fixture.refresh();
-    assert_eq!(fixture.stored_head()["sha"], pushed, "the worker recorded origin's live head");
-    let caption = fixture.list();
-    assert!(caption.contains("main is in sync with local tracking ref origin/main."), "{caption}");
-    assert!(
-        caption.contains(
-            "origin/main differs from the remote head observed less than 1 min ago; \
-             run git fetch origin to update local tracking refs."
-        ),
-        "{caption}"
-    );
 
-    // The answer is still fresh, so this list starts no worker either: the
-    // new sentence comes from the fetch alone.
-    fixture.git(&fixture.main, &["fetch", "origin"]);
-    let stored = fs::read(fixture.head_store()).expect("store");
+    // The check found the variance and fetched exactly the tracking ref.
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed);
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "main"]), local, "the local branch did not move");
+    assert!(!fixture.main.join(".git").join("FETCH_HEAD").exists(), "no FETCH_HEAD");
+    assert_eq!(fixture.stored_head()["sha"], pushed, "the fetched tip is the answer");
+    assert_eq!(fixture.stored_head()["source"], "fetch");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "fetched");
+
+    // The listing checks again and finds no variance.
     let caption = fixture.list();
-    assert!(caption.contains("main is 1 commit behind local tracking ref origin/main."), "{caption}");
-    assert!(caption.contains("origin/main matched the remote when checked less than 1 min ago."), "{caption}");
-    assert_eq!(fs::read(fixture.head_store()).expect("store"), stored, "listing asked origin nothing");
-    assert!(refresh_workers(&fixture.main).is_empty(), "a fresh answer starts no worker");
+    assert_checked_now(&caption, "main is 1 commit behind origin/main");
+    assert!(!caption.contains("tracking ref"), "{caption}");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "in-sync");
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "its worker finished");
 }
 
 #[test]
 #[serial]
-fn a_fetch_newer_than_the_observation_is_a_difference_never_a_move() {
+fn a_listing_fetches_a_variance_and_counts_from_the_fetched_tip() {
+    let fixture = Fixture::new();
+    let local = fixture.git(&fixture.main, &["rev-parse", "main"]);
+    let feature_ref = fixture.git(&fixture.main, &["rev-parse", "feature"]);
+    let pushed = fixture.commit_and_push("second");
+
+    let caption = fixture.list();
+
+    // Refs, counts, and caption all describe the state after the fetch.
+    assert!(caption.contains("main is 1 commit behind origin/main (updated from origin just now)"), "{caption}");
+    assert!(caption.contains("main is 1 commit behind origin/main; run wt --ff to fast-forward it."), "{caption}");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed);
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "main"]), local, "the local branch did not move");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "feature"]), feature_ref, "no other ref moved");
+    assert!(!fixture.main.join(".git").join("FETCH_HEAD").exists(), "no FETCH_HEAD");
+    assert!(!caption.contains("running this command again"), "nothing unfinished: {caption}");
+
+    // No variance now: checked, and nothing is fetched.
+    let refs = fixture.git(&fixture.main, &["for-each-ref"]);
+    let caption = fixture.list();
+    assert_checked_now(&caption, "main is 1 commit behind origin/main");
+    assert_eq!(fixture.git(&fixture.main, &["for-each-ref"]), refs, "no fetch without a variance");
+}
+
+#[test]
+#[serial]
+fn an_in_sync_check_fetches_nothing() {
+    let fixture = Fixture::new();
+    let refs = fixture.git(&fixture.main, &["for-each-ref"]);
+
+    fixture.refresh();
+
+    assert_eq!(fixture.git(&fixture.main, &["for-each-ref"]), refs, "no ref moved");
+    assert_eq!(fixture.stored_head()["source"], "git", "a local origin is checked by ls-remote");
+    let attempt = &fixture.stored_document()["attempt"];
+    assert_eq!(attempt["outcome"]["kind"], "in-sync");
+    assert_eq!(attempt["phase"]["kind"], "checking", "a local origin is no fallback");
+}
+
+#[test]
+#[serial]
+fn a_forced_worker_records_the_given_attempt_and_a_receipt_for_both_halves() {
+    const ID: &str = "00112233445566778899aabbccddeeff";
+    let fixture = Fixture::new();
+    let pushed = fixture.commit_and_push("second");
+    let receipt_path = fixture.cache_file(refresh_receipt_path(&fixture.main, ID).expect("receipt path"));
+
+    // Unforced: the attempt runs under the given id, and no receipt is written.
+    fixture.run_worker(&["--attempt", ID]);
+    assert_eq!(fixture.stored_document()["attempt"]["id"], ID);
+    assert!(!receipt_path.exists(), "only a forced run writes a receipt");
+
+    fixture.run_worker(&["--attempt", ID, "--force"]);
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(&receipt_path).expect("a receipt")).expect("json");
+    assert_eq!(receipt["attempt_id"], ID);
+    assert_eq!(receipt["branch"], "main");
+    assert_eq!(receipt["head"], "ok", "{receipt}");
+    // A local origin is no provider, so the PR half fails as `other`.
+    assert_eq!(receipt["prs"], serde_json::json!({ "kind": "failed", "failure": { "kind": "other" } }), "{receipt}");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed);
+    let _ = fs::remove_file(receipt_path);
+}
+
+#[test]
+#[serial]
+fn a_manual_fetch_before_the_listing_is_checked_and_never_reported_as_a_move() {
     let fixture = Fixture::new();
     fixture.refresh();
-    let observed = fixture.stored_head()["sha"].clone();
-    assert_eq!(observed, fixture.git(&fixture.main, &["rev-parse", "origin/main"]));
 
     fixture.commit_and_push("second");
     fixture.git(&fixture.main, &["fetch", "origin"]);
+    let pushed = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
     let caption = fixture.list();
 
-    assert!(caption.contains("main is 1 commit behind local tracking ref origin/main."), "{caption}");
-    assert!(caption.contains("origin/main differs from the remote head observed"), "{caption}");
-    for claim in ["moved", "advanced"] {
-        assert!(!caption.contains(claim), "the check predates the fetch; nothing {claim}: {caption}");
+    assert_checked_now(&caption, "main is 1 commit behind origin/main");
+    for claim in ["moved", "advanced", "differs"] {
+        assert!(!caption.contains(claim), "nothing {claim}: {caption}");
     }
-    assert_eq!(fixture.stored_head()["sha"], observed, "the older observation is kept as it was");
+    assert_eq!(fixture.stored_head()["sha"], pushed.as_str(), "this run's check replaced the answer");
 }
 
 #[test]
 #[serial]
-fn a_deleted_then_recreated_remote_branch_is_reported_absent_then_present() {
+fn a_deleted_then_recreated_remote_branch_is_reported_absent_then_fetched_back() {
     let fixture = Fixture::new();
     let tip = fixture.git(&fixture.bare, &["rev-parse", "main"]);
 
     fixture.git(&fixture.bare, &["update-ref", "-d", "refs/heads/main"]);
-    fixture.refresh();
-    assert_eq!(fixture.stored_head()["sha"], serde_json::Value::Null, "a verified absence");
     let caption = fixture.list();
-    assert!(caption.contains("main is in sync with local tracking ref origin/main."), "{caption}");
-    assert!(caption.contains("main was absent on origin when checked less than 1 min ago."), "{caption}");
+    assert_eq!(fixture.stored_head()["sha"], serde_json::Value::Null, "a verified absence");
+    assert!(
+        caption.contains(
+            "main is in sync with origin/main (main was absent on origin when checked just now; origin/main is a local tracking ref)"
+        ),
+        "{caption}"
+    );
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), tip, "absence deletes no ref");
 
     fixture.git(&fixture.main, &["fetch", "--prune", "origin"]);
     let caption = fixture.list();
-    assert!(
-        caption.contains("No local tracking ref origin/main; the remote branch was absent when checked"),
-        "{caption}"
-    );
+    assert!(caption.contains("main was absent on origin when checked just now"), "{caption}");
     assert!(!caption.contains("in sync with"), "no tracking ref, no comparison: {caption}");
 
+    // Recreated on origin: the listing sees it and fetches the tracking ref
+    // back.
     fixture.git(&fixture.bare, &["update-ref", "refs/heads/main", &tip]);
-    fixture.age_head(2 * 60);
-    fixture.refresh();
-    assert_eq!(fixture.stored_head()["sha"], tip.as_str(), "present again");
     let caption = fixture.list();
-    assert!(
-        caption.contains("No local tracking ref origin/main; the remote branch was present when checked"),
-        "{caption}"
-    );
+    assert_eq!(fixture.stored_head()["sha"], tip.as_str(), "present again");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), tip, "fetched back");
+    assert!(caption.contains("main is in sync with origin/main (updated from origin just now)"), "{caption}");
 }
 
 #[test]
@@ -237,17 +168,151 @@ fn the_main_checkout_and_a_linked_worktree_share_one_live_head_store() {
     // From the linked worktree, `wt list` launches the worker for the main
     // checkout, which records into the main checkout's store.
     let caption = fixture.list_from(&fixture.linked);
-    assert!(caption.contains("Remote state has not been verified."), "{caption}");
-    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "the worker finished");
+    assert_checked_now(&caption, "main is in sync with origin/main");
     let tip = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
     assert_eq!(fixture.stored_head()["sha"], tip.as_str(), "stored at the main checkout's path");
 
-    // Both read that one answer.
     for dir in [&fixture.main, &fixture.linked] {
         let caption = fixture.list_from(dir);
-        assert!(caption.contains("origin/main matched the remote when checked"), "{dir:?}: {caption}");
+        assert_checked_now(&caption, "main is in sync with origin/main");
     }
-    assert!(refresh_workers(&fixture.main).is_empty(), "a fresh answer starts no worker");
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "every worker finished");
+}
+
+#[test]
+#[serial]
+fn a_check_still_running_at_the_deadline_is_still_checking_and_the_next_run_shows_it() {
+    let fixture = Fixture::new();
+    fixture.refresh();
+    let gate = UploadPackGate::install(&fixture, 0);
+
+    let started = Instant::now();
+    let caption = fixture.list();
+    let elapsed = started.elapsed();
+
+    assert!(
+        caption.contains(
+            "main is in sync with origin/main (origin hasn't answered yet; still checking in the background; last checked with origin less than 1 min ago)"
+        ),
+        "the previous answer stays usable and dated: {caption}"
+    );
+    assert!(caption.contains("running this command again will provide updated metrics"), "the hint: {caption}");
+    assert!(elapsed < Duration::from_secs(5), "bounded by the 3 s wait: {elapsed:?}");
+    assert_eq!(fixture.stored_document()["attempt"]["phase"]["kind"], "checking");
+    assert!(fixture.stored_document()["attempt"]["outcome"].is_null(), "still running");
+
+    gate.release();
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "the worker finished");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "in-sync", "and published");
+    let caption = fixture.list();
+    assert_checked_now(&caption, "main is in sync with origin/main");
+    assert!(!caption.contains("running this command again"), "{caption}");
+}
+
+#[test]
+#[serial]
+fn a_fetch_still_running_at_the_deadline_is_still_pulling_and_publishes_after_the_listing() {
+    let fixture = Fixture::new();
+    let before = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
+    let pushed = fixture.commit_and_push("second");
+    let gate = UploadPackGate::install(&fixture, 1);
+
+    let caption = fixture.list();
+
+    // One coherent local snapshot: the tracking ref as it was, compared as
+    // such.
+    assert!(
+        caption.contains(
+            "main is in sync with local origin/main (origin differed when checked just now; pulling remote updates in the background)"
+        ),
+        "{caption}"
+    );
+    assert!(caption.contains("running this command again"), "{caption}");
+    assert!(!caption.contains("to fast-forward it"), "no suggestion before the fetch finished: {caption}");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), before);
+    assert_eq!(fixture.stored_head()["sha"], pushed.as_str(), "the check was published before the fetch");
+
+    gate.release();
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "the worker finished");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), pushed, "fetched after wt list exited");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "fetched");
+}
+
+#[test]
+#[serial]
+fn a_failed_check_still_suggests_fast_forwarding_to_the_local_tracking_ref() {
+    let fixture = Fixture::new();
+    fixture.commit_and_push("second");
+    fixture.git(&fixture.main, &["fetch", "origin"]);
+    let gate = UploadPackGate::failing(&fixture, 0);
+
+    let caption = fixture.list();
+
+    assert!(caption.contains("main is 1 commit behind origin/main (couldn't check origin;"), "the reason stays: {caption}");
+    assert!(caption.contains("main is 1 commit behind origin/main; run wt --ff to fast-forward it."), "{caption}");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "check-failed");
+    assert_eq!(gate.runs(), 1, "only the check ran");
+}
+
+#[test]
+#[serial]
+fn a_failed_fetch_still_suggests_fast_forwarding_to_the_local_tracking_ref() {
+    let fixture = Fixture::new();
+    fixture.commit_and_push("second");
+    fixture.git(&fixture.main, &["fetch", "origin"]);
+    let fetched = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
+    fixture.commit_and_push("third");
+    let gate = UploadPackGate::failing(&fixture, 1);
+
+    let caption = fixture.list();
+
+    assert!(
+        caption.contains("main is 1 commit behind local origin/main (origin differed when checked just now; fetch failed"),
+        "the reason stays: {caption}"
+    );
+    assert!(caption.contains("main is 1 commit behind origin/main; run wt --ff to fast-forward it."), "{caption}");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "fetch-failed");
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "origin/main"]), fetched, "the tracking ref did not move");
+    assert_eq!(gate.runs(), 2, "one check and one failed fetch");
+}
+
+#[test]
+#[serial]
+fn a_second_listing_adopts_the_running_attempt_and_asks_origin_nothing() {
+    let fixture = Fixture::new();
+    let gate = UploadPackGate::install(&fixture, 0);
+
+    let first = fixture.wt(&fixture.main).arg("list").spawn().expect("first wt list");
+    gate.wait_for_runs(1);
+    let caption = fixture.list();
+
+    assert!(caption.contains("still checking in the background"), "adopted, not failed: {caption}");
+    assert!(!caption.contains("couldn't check origin"), "the contender is no finished check: {caption}");
+    gate.release();
+    let first = first.wait_with_output().expect("first wt list finishes");
+    assert!(first.status.success());
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "every worker finished");
+    assert_eq!(gate.runs(), 1, "one check between the two listings");
+}
+
+#[test]
+#[serial]
+fn an_origin_that_cannot_be_read_keeps_the_previous_answer_dated() {
+    let fixture = Fixture::new();
+    fixture.refresh();
+    let answer = fixture.stored_head();
+    let moved = fixture.root.path().join("moved.git");
+    fs::rename(&fixture.bare, &moved).expect("move origin away");
+
+    let caption = fixture.list();
+
+    assert!(
+        caption.contains("main is in sync with origin/main (couldn't check origin; last checked with origin less than 1 min ago)"),
+        "{caption}"
+    );
+    assert_eq!(fixture.stored_head(), answer, "a failed check never replaces the answer");
+    assert_eq!(fixture.stored_document()["attempt"]["outcome"]["kind"], "check-failed");
+    fs::rename(&moved, &fixture.bare).expect("move origin back");
 }
 
 #[test]
@@ -260,10 +325,115 @@ fn without_an_origin_leftover_tracking_refs_show_no_caption_and_start_no_worker(
 
     let caption = fixture.list();
 
-    for text in ["tracking ref", "Remote state", "origin/main", "in sync"] {
+    for text in ["tracking ref", "checked", "origin/main", "in sync"] {
         assert!(!caption.contains(text), "{text:?} shown without an origin: {caption}");
     }
     assert!(refresh_workers(&fixture.main).is_empty(), "no worker");
     assert!(!remote_head_lock_path(&fixture.head_store()).exists(), "no worker ever took the live-head lock");
     assert!(!fixture.head_store().exists());
+}
+
+/// Runs `wt list` from `dir` through `script` in a 120×40 pseudo-terminal
+/// with `TERM_PROGRAM=ghostty`, the only way `wt` gathers and draws its graph
+/// (see `perf_graph_stages.rs`). Returns whether it succeeded and everything
+/// the terminal received.
+#[cfg(unix)]
+fn list_in_pty(fixture: &Fixture, dir: &std::path::Path) -> (bool, String) {
+    use std::process::{Command, Stdio};
+    let quote = |value: &str| format!("'{}'", value.replace('\'', r"'\''"));
+    let wt = fixture.wt(dir);
+    let inner = format!("stty cols 120 rows 40; exec {} list", quote(&wt.get_program().to_string_lossy()));
+    let mut command = Command::new("script");
+    if cfg!(target_os = "macos") {
+        command.args(["-q", "/dev/null", "/bin/sh", "-c", &inner]);
+    } else {
+        command.args(["-qec", &format!("/bin/sh -c {}", quote(&inner)), "/dev/null"]);
+    }
+    for (name, value) in wt.get_envs() {
+        match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
+    }
+    let output = command
+        .current_dir(dir)
+        .env("TERM_PROGRAM", "ghostty")
+        .env_remove("KITTY_WINDOW_ID")
+        .stdin(Stdio::null())
+        .output()
+        .expect("script runs");
+    (output.status.success(), String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Fresh PR and live-head answers for the fixture's `origin`, so the listing
+/// itself has no reason to ask.
+fn seed_fresh_answers(fixture: &Fixture, head: &str) {
+    use worktree::pull_requests::{PR_STORE_FORMAT_VERSION, origin_digest, origin_url, pr_store_path};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let digest = origin_digest(&origin_url(&fixture.main).expect("the fixture has an origin"));
+    let pr_store = fixture.cache_file(pr_store_path(&fixture.main).expect("PR store path"));
+    fs::create_dir_all(pr_store.parent().expect("store dir")).expect("create store dir");
+    let prs = serde_json::json!({
+        "format_version": PR_STORE_FORMAT_VERSION,
+        "origin_digest": digest,
+        "fetched_at": now,
+        "publication": worktree::remote_head::new_attempt_id().expect("a publication id"),
+        "writer": "refresh",
+        "source_repo": null,
+        "pull_requests": [],
+    });
+    fs::write(&pr_store, serde_json::to_vec(&prs).expect("json")).expect("write PR store");
+    let head_store = fixture.head_store();
+    let answer = serde_json::json!({
+        "format_version": 1,
+        "origin_digest": digest,
+        "branch": "main",
+        "sha": head,
+        "checked_at": now,
+    });
+    fs::write(&head_store, serde_json::to_vec(&answer).expect("json")).expect("write live-head store");
+}
+
+/// A shallow clone cannot establish how `feature` relates to `main`: the
+/// listing still succeeds with its table, the graph carries the
+/// incomplete-history notice, and nothing asks `origin` to fill the gap.
+///
+/// The listing's own worker checks `origin`'s live head whenever there is an
+/// `origin`, graph or not, so the proof is that a listing drawing the graph
+/// makes exactly as many `upload-pack` runs as one that draws none.
+#[cfg(unix)]
+#[test]
+#[serial]
+fn a_shallow_clone_lists_with_the_incomplete_history_notice_and_asks_origin_nothing() {
+    let fixture = Fixture::new();
+    fixture.git(&fixture.linked, &["commit", "--allow-empty", "-m", "feature work"]);
+    for message in ["second", "third", "fourth"] {
+        fixture.commit_and_push(message);
+    }
+    fixture.git(&fixture.main, &["fetch", "--depth", "2", "origin"]);
+    // Across the shallow boundary the histories look unrelated to `merge`.
+    fixture.git(&fixture.main, &["reset", "-q", "--hard", "origin/main"]);
+    assert_eq!(fixture.git(&fixture.main, &["rev-parse", "--is-shallow-repository"]), "true");
+    let head = fixture.git(&fixture.main, &["rev-parse", "origin/main"]);
+    seed_fresh_answers(&fixture, &head);
+    let gate = UploadPackGate::failing(&fixture, 0);
+
+    // Captured stderr: no graph is gathered.
+    let captured = fixture.wt(&fixture.main).arg("list").output().expect("wt list runs");
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "no worker left running");
+    assert!(captured.status.success(), "{captured:?}");
+    let without_graph = gate.runs();
+    assert!(without_graph <= 1, "at most the worker's one check, got {without_graph}");
+
+    let (success, transcript) = list_in_pty(&fixture, &fixture.main);
+    assert!(wait_for_refresh_workers(&fixture.main, 0, WORKER_WAIT).is_empty(), "no worker left running");
+
+    assert!(success, "wt list failed:\n{transcript}");
+    assert!(transcript.contains("feature"), "the table lists the worktree:\n{transcript}");
+    assert!(transcript.contains("\x1b_G"), "the graph was drawn:\n{transcript}");
+    assert!(transcript.contains("Some history is not shown"), "the notice is shown:\n{transcript}");
+    assert_eq!(gate.runs() - without_graph, without_graph, "drawing the graph adds no ls-remote or fetch");
 }

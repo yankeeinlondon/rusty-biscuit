@@ -134,8 +134,12 @@ credential scope, and typed malformed/missing/auth/rate-limit/capability/
 transport errors. Never collapse a focused provider error to an empty list.
 `remote::blocking::pull_request_for_branch` is its deadline-bound blocking
 entry point for "which PR came from this branch", and
-`remote::blocking::open_pull_requests` lists a repository's open PRs. A list
-404 in either is an error, not "no PR".
+`remote::blocking::open_pull_requests` lists a repository's open PRs, and
+`remote::blocking::branch_head` reads one branch's head commit. A 404 in any of
+them is an error, not "no PR" or "no branch". Credentials failures are split
+into `CredentialsRequired`, `CredentialsRejected`, `CredentialsInsufficient`,
+and `RateLimited { authenticated, key }`; `key` is a variable name, never a
+value. `credential_env` lists the variables those lookups read.
 
 Read [remote-and-repository.md](remote-and-repository.md) for topology,
 worktree, aggregate, and remote details.

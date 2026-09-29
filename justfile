@@ -171,7 +171,7 @@ install_darkmatter:
     @(cd darkmatter && just install)
 
 # install binaries from all areas that have an install target
-install:
+install *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     echo ""
@@ -183,7 +183,7 @@ install:
             if (cd "$area" && just --summary 2>/dev/null) | grep -qw "install"; then
                 echo
                 echo "Installing from $area..."
-                (cd "$area" && just install) || ( just _speak "The ${area} package failed during an attempt to install all packages!" && exit 1 )
+                (cd "$area" && just install {{ args }}) || ( just _speak "The ${area} package failed during an attempt to install all packages!" && exit 1 )
             else
                 if (cd "$area" && just --summary 2>/dev/null) | grep -qw "build"; then
                     echo

@@ -1015,6 +1015,65 @@ impl crate::shared::EndpointSpec for ListReleasesRequest {
     type Response = Vec<Release>;
     const ENDPOINT_ID: &'static str = "ListReleases";
 }
+/// Request for `GetBranch` endpoint.
+///
+/// ## Example
+///
+/// ```text
+/// use schematic_schema::gitea::GetBranchRequest;
+///
+/// let request = GetBranchRequest::new("owner_value", "repo_value", "branch_value")
+///;
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GetBranchRequest {
+    /// Path parameter: owner
+    pub owner: String,
+    /// Path parameter: repo
+    pub repo: String,
+    /// Path parameter: branch
+    pub branch: String,
+}
+impl GetBranchRequest {
+    /// Creates a new request with the required path parameters.
+    pub fn new(
+        owner: impl Into<String>,
+        repo: impl Into<String>,
+        branch: impl Into<String>,
+    ) -> Self {
+        Self {
+            owner: owner.into(),
+            repo: repo.into(),
+            branch: branch.into(),
+        }
+    }
+    /// Converts the request into (method, path, body, headers) parts.
+    ///
+    /// ## Returns
+    ///
+    /// A tuple of:
+    /// - HTTP method as a static string (e.g., "GET", "POST")
+    /// - Fully substituted path string with query parameters
+    /// - The request body as a `RequestBody`
+    /// - Endpoint-specific headers as key-value pairs
+    ///
+    /// ## Errors
+    ///
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
+    pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
+        let path = format!(
+            "/repos/{}/{}/branches/{}", urlencoding::encode(& self.owner.to_string()),
+            urlencoding::encode(& self.repo.to_string()), urlencoding::encode(& self
+            .branch.to_string())
+        );
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
+    }
+}
+impl crate::shared::EndpointSpec for GetBranchRequest {
+    type Response = Branch;
+    const ENDPOINT_ID: &'static str = "GetBranch";
+}
 /// Request for `GetTagReference` endpoint.
 ///
 /// ## Example
@@ -1273,6 +1332,8 @@ pub enum GiteaRequest {
     ListTags(ListTagsRequest),
     /// List releases (linked to tags via tag_name)
     ListReleases(ListReleasesRequest),
+    /// Get a branch (commit.id is the branch head commit)
+    GetBranch(GetBranchRequest),
     /// Get tag reference (returns array; check object.type: 'commit' vs 'tag')
     GetTagReference(GetTagReferenceRequest),
     /// Get annotated tag object details (message, tagger)
@@ -1303,6 +1364,7 @@ impl GiteaRequest {
             Self::ListIssueTimeline(req) => req.into_parts(),
             Self::ListTags(req) => req.into_parts(),
             Self::ListReleases(req) => req.into_parts(),
+            Self::GetBranch(req) => req.into_parts(),
             Self::GetTagReference(req) => req.into_parts(),
             Self::GetAnnotatedTag(req) => req.into_parts(),
             Self::ListOrgRepos(req) => req.into_parts(),
@@ -1350,6 +1412,9 @@ impl GiteaRequest {
             Self::ListReleases(_) => {
                 <ListReleasesRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
+            Self::GetBranch(_) => {
+                <GetBranchRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
             Self::GetTagReference(_) => {
                 <GetTagReferenceRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
@@ -1380,6 +1445,7 @@ impl GiteaRequest {
             Self::ListIssueTimeline(_) => crate::shared::ResponseKind::Json,
             Self::ListTags(_) => crate::shared::ResponseKind::Json,
             Self::ListReleases(_) => crate::shared::ResponseKind::Json,
+            Self::GetBranch(_) => crate::shared::ResponseKind::Json,
             Self::GetTagReference(_) => crate::shared::ResponseKind::Json,
             Self::GetAnnotatedTag(_) => crate::shared::ResponseKind::Json,
             Self::ListOrgRepos(_) => crate::shared::ResponseKind::Json,
@@ -1444,6 +1510,11 @@ impl From<ListTagsRequest> for GiteaRequest {
 impl From<ListReleasesRequest> for GiteaRequest {
     fn from(req: ListReleasesRequest) -> Self {
         Self::ListReleases(req)
+    }
+}
+impl From<GetBranchRequest> for GiteaRequest {
+    fn from(req: GetBranchRequest) -> Self {
+        Self::GetBranch(req)
     }
 }
 impl From<GetTagReferenceRequest> for GiteaRequest {

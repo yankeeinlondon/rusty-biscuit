@@ -24,6 +24,7 @@
 //! - `ListTags` - List repository tags
 //! - `ListReleases` - List releases (linked to tags via tag_name)
 //! - `GetTagReference` - Get tag reference (check object.type: 'commit' vs 'tag')
+//! - `GetBranchReference` - Get branch reference (object.sha is the branch head commit)
 //! - `GetAnnotatedTag` - Get annotated tag object details (message, tagger, verification)
 //! - `ListWorkflowRuns` - List workflow runs for a repository
 //! - `ListOrgRepos` - List repositories for an organization

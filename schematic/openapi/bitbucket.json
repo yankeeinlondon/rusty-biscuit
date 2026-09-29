@@ -619,6 +619,62 @@
         }
       ]
     },
+    "/repositories/{workspace}/{repo_slug}/refs/branches/{name}": {
+      "get": {
+        "summary": "Get a single branch by name (target.hash is the branch head commit)",
+        "description": "Get a single branch by name (target.hash is the branch head commit)",
+        "operationId": "GetBranch",
+        "responses": {
+          "200": {
+            "description": "Successful JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branch"
+                }
+              }
+            }
+          }
+        },
+        "x-schematic": {
+          "response": {
+            "Json": {
+              "module_path": null,
+              "type_name": "Branch"
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "workspace",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "repo_slug",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        },
+        {
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": "simple"
+        }
+      ]
+    },
     "/repositories/{workspace}/{repo_slug}/refs/tags": {
       "get": {
         "summary": "List repository tags",
@@ -1911,6 +1967,28 @@
             "description": "Linked user account (if any)."
           }
         }
+      },
+      "Branch": {
+        "title": "Branch",
+        "description": "A branch from `GET /repositories/{workspace}/{repo_slug}/refs/branches/{name}`.",
+        "type": "object",
+        "properties": {
+          "links": {
+            "description": "HATEOAS links.",
+            "type": "object"
+          },
+          "name": {
+            "description": "Branch name.",
+            "type": "string"
+          },
+          "target": {
+            "description": "Head commit of the branch."
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ]
       },
       "PaginatedResponse<Download>": {
         "title": "PaginatedResponse",

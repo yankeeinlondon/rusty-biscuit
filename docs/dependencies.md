@@ -224,7 +224,11 @@
   and `claudine-cli` uses it the same way for a typed Ctrl+C test.
   `sysinfo` 0.38 (development) finds the detached `wt internal-refresh`
   worker in `list_prs.rs` and reads its working directory on every OS;
-  `sniff` already builds the same version.
+  `sniff` already builds the same version. The workspace's own
+  `biscuit-visualized` (development, `image` feature, already built through
+  `biscuit-terminal`) gives the graph tests `MermaidDiagram::gitgraph_geometry`,
+  the laid-out graph the image is drawn from, so they can check merge parents
+  and tag bounds without reading pixels.
 - `claudine/contract` (`claudine-contract`) implements
   `biscuit_contract::inference::InferenceAdapter` over a Claudine
   non-interactive, tool-free agentic-CLI session. It is the one crate that

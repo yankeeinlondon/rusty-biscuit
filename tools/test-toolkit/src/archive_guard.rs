@@ -145,6 +145,14 @@ pub const SKIPPED_DIRS: &[(&str, &str)] = &[
         "fuzz",
         "fuzz targets run on nightly from the checkout that built them",
     ),
+    (
+        "features",
+        "feature specs; their spike crates are not workspace members and are never archived",
+    ),
+    (
+        "fixes",
+        "fix specs; their spike crates are not workspace members and are never archived",
+    ),
 ];
 
 /// The guard's own sources, excluded by exact repository-relative path.

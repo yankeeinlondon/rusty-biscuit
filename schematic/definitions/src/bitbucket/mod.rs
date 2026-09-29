@@ -13,6 +13,7 @@
 //! - **File content**: Raw file content with proper Accept headers
 //! - **Pull Requests**: List PRs with associated metadata and comments
 //! - **Issues**: List issues, comments, and change history
+//! - **Branches**: Retrieve a branch and its head commit
 //! - **Tags**: List and retrieve repository tags (lightweight and annotated)
 //! - **Downloads**: List and retrieve release artifacts
 //!
@@ -36,7 +37,7 @@
 //!     .with_pagelen(100);
 //! ```
 //!
-//! ## Endpoint Coverage (15 endpoints)
+//! ## Endpoint Coverage (16 endpoints)
 //!
 //! | Category | Endpoints |
 //! |----------|-----------|
@@ -44,6 +45,7 @@
 //! | Contents | `ListDirectoryContents`, `GetFileContentRaw` |
 //! | Pull Requests | `ListPullRequests`, `GetPullRequest`, `ListPullRequestComments` |
 //! | Issues | `ListIssues`, `GetIssue`, `ListIssueComments`, `ListIssueChanges` |
+//! | Branches | `GetBranch` |
 //! | Tags | `ListTags`, `GetTag` |
 //! | Downloads | `ListDownloads`, `GetDownload` |
 //! | Workspaces | `ListWorkspaceRepos` |
@@ -93,6 +95,7 @@ pub fn openapi_registry() -> SchemaRegistry {
         .register::<PaginatedResponse<IssueComment>>("PaginatedResponse<IssueComment>")
         .register::<PaginatedResponse<IssueChange>>("PaginatedResponse<IssueChange>")
         .register::<PaginatedResponse<Tag>>("PaginatedResponse<Tag>")
+        .register::<Branch>("Branch")
         .register::<Tag>("Tag")
         .register::<PaginatedResponse<Download>>("PaginatedResponse<Download>")
         .register::<PaginatedResponse<Repository>>("PaginatedResponse<Repository>")
@@ -122,6 +125,7 @@ fn bitbucket_pagination() -> EndpointParams {
 /// | GetIssue | GET | /repositories/{workspace}/{repo_slug}/issues/{id} | Get single issue |
 /// | ListIssueComments | GET | /repositories/{workspace}/{repo_slug}/issues/{id}/comments | List issue comments |
 /// | ListIssueChanges | GET | /repositories/{workspace}/{repo_slug}/issues/{id}/changes | List issue changes |
+/// | GetBranch | GET | /repositories/{workspace}/{repo_slug}/refs/branches/{name} | Get single branch |
 /// | ListTags | GET | /repositories/{workspace}/{repo_slug}/refs/tags | List repository tags |
 /// | GetTag | GET | /repositories/{workspace}/{repo_slug}/refs/tags/{name} | Get single tag |
 /// | ListDownloads | GET | /repositories/{workspace}/{repo_slug}/downloads | List downloads |
@@ -135,7 +139,7 @@ fn bitbucket_pagination() -> EndpointParams {
 ///
 /// let api = define_bitbucket_api();
 /// assert_eq!(api.name, "Bitbucket");
-/// assert_eq!(api.endpoints.len(), 15);
+/// assert_eq!(api.endpoints.len(), 16);
 /// ```
 pub fn define_bitbucket_api() -> RestApi {
     RestApi {
@@ -280,6 +284,21 @@ pub fn define_bitbucket_api() -> RestApi {
                 oauth_scopes: None,
             },
             // =================================================================
+            // Branches
+            // =================================================================
+            Endpoint {
+                id: "GetBranch".to_string(),
+                method: RestMethod::Get,
+                path: "/repositories/{workspace}/{repo_slug}/refs/branches/{name}".to_string(),
+                description: "Get a single branch by name (target.hash is the branch head commit)"
+                    .to_string(),
+                request: None,
+                response: ApiResponse::json_type("Branch"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+            // =================================================================
             // Tags
             // =================================================================
             Endpoint {
@@ -373,7 +392,7 @@ mod tests {
         assert!(registry.get("PullRequest").is_some());
         assert!(registry.get("Issue").is_some());
         assert!(registry.get("Tag").is_some());
-        assert_eq!(registry.len(), 13);
+        assert_eq!(registry.len(), 14);
     }
 
     #[test]
@@ -430,9 +449,9 @@ mod tests {
     }
 
     #[test]
-    fn api_has_fifteen_endpoints() {
+    fn api_has_sixteen_endpoints() {
         let api = define_bitbucket_api();
-        assert_eq!(api.endpoints.len(), 15);
+        assert_eq!(api.endpoints.len(), 16);
     }
 
     #[test]
@@ -589,6 +608,29 @@ mod tests {
     }
 
     #[test]
+    fn get_branch_endpoint() {
+        let api = define_bitbucket_api();
+        let endpoint = api
+            .endpoints
+            .iter()
+            .find(|e| e.id == "GetBranch")
+            .expect("GetBranch endpoint missing");
+
+        assert_eq!(endpoint.method, RestMethod::Get);
+        assert_eq!(
+            endpoint.path,
+            "/repositories/{workspace}/{repo_slug}/refs/branches/{name}"
+        );
+        assert!(endpoint.request.is_none());
+        assert!(endpoint.oauth_scopes.is_none());
+        match &endpoint.response {
+            ApiResponse::Json(schema) => assert_eq!(schema.type_name, "Branch"),
+            _ => panic!("Expected JSON response"),
+        }
+        assert!(matches!(api.auth, AuthStrategy::Basic));
+    }
+
+    #[test]
     fn download_endpoints() {
         let api = define_bitbucket_api();
 
@@ -704,6 +746,7 @@ mod tests {
             ("GetRepository", "Repository"),
             ("GetPullRequest", "PullRequest"),
             ("GetIssue", "Issue"),
+            ("GetBranch", "Branch"),
             ("GetTag", "Tag"),
         ];
 
