@@ -25,14 +25,25 @@ implemented_by: claude/opus
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phase 1 is implemented. Read claudine/features/2026-09-08-steering/implementation-log.md
-    and claudine/docs/topics/steering-activation.md before starting.
+    Phases 1-2 are implemented. Read claudine/features/2026-09-08-steering/implementation-log.md,
+    claudine/docs/topics/steering-activation.md, claudine/docs/topics/secret-recognition.md, and
+    the "Steering Audit Records" section of claudine/docs/topics/traces-and-logging.md first.
 
-    - Shared contracts now exist: `claudine::steering::{identity, contract, eligibility, adapters}`
+    - Shared contracts: `claudine::steering::{identity, contract, eligibility, adapters, audit}`
       over `claudine_catalog_types::steering` (re-exported as `claudine::steering::vocabulary`).
-      Phase 2 steering audit events should log `SteeringRequest`/`SteeringResult` fields; note
-      `SteeringMessage`'s `Debug` deliberately omits the text, and `as_str()` is for in-memory
-      delivery only.
+      `SteeringMessage`'s `Debug` omits the text; `as_str()` is for in-memory delivery only.
+    - Every send path (Phase 3 routing, Phase 5 CLI, Phase 6 automatic warnings) must go through
+      `steering::audit::audited_send(&SteeringAuditLog::default_location(), &request, &context,
+      |request| DeliveryReport { .. })`. It records the masked request, calls delivery exactly once,
+      and returns the delivery's own result; audit failures are returned as content-free
+      `AuditFailure`s and must never trigger a resend or fail the agent. Render/trace only the
+      returned `RedactedText` error/echo, never raw provider text. Record a late outcome with
+      `AuditedSend::late.record(..)`, never as a new send. No caller exists yet.
+    - `AuditContext.opportunity` (`OpportunityId`, new in `steering::identity`) is where Phase 6
+      puts the automatic warning opportunity; it is not on `SteeringRequest`. Move it there only
+      if Phase 6 needs the request itself to carry it.
+    - Any text that may contain secrets goes through `claudine::secrets` (`Redactor`,
+      `mask_secrets`, `is_sensitive_key_name`); do not add another pattern list.
     - The steering research contract is now revision 4 (verification rows have `id` and typed
       `assertion_kinds`; `expected_loss` records can never activate). Any new verification record
       must carry both.
@@ -48,8 +59,9 @@ message_to_agent: |-
     - `lib/src/steering/generated.rs` is exempt in cli/tests/l1/dispatch_inventory.rs; re-bless
       docs/providers/dispatch-inventory.json when Provider references change
       (`CLAUDINE_UPDATE_INVENTORY=1` needed approval in this environment).
-    - Skill files under .claude/skills/claudine/ could not be written in this session; the intended
-      edits are listed in the implementation log and still need applying.
+    - Skill files under .claude/skills/claudine/ could not be written in Phases 1 or 2; the intended
+      edits are listed in both phases' "Environment limitations" in the implementation log and
+      still need applying.
 ---
 # Steering Running Agent Sessions
 

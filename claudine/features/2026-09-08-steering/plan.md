@@ -52,10 +52,35 @@ docs_updated_during_phase_1:
 docs_created_during_phase_1:
   - claudine/docs/topics/steering-activation.md
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - claudine/lib/src/secrets/mod.rs
+  - claudine/lib/src/secrets/tests.rs
+  - claudine/lib/src/lib.rs
+  - claudine/lib/src/protect/scrub.rs
+  - claudine/lib/src/messaging/send.rs
+  - claudine/lib/src/reporting/jsonl.rs
+  - claudine/lib/src/reporting/mod.rs
+  - claudine/lib/src/reporting/paths.rs
+  - claudine/lib/src/dispatch/logging.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/audit.rs
+  - claudine/lib/src/steering/audit/tests.rs
+  - claudine/lib/src/steering/contract.rs
+  - claudine/lib/src/steering/identity.rs
+  - claudine/cli/src/commands/wrap/env/sanitize.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_2:
+  - claudine/README.md
+  - claudine/docs/topics/messaging.md
+  - claudine/docs/topics/traces-and-logging.md
+docs_created_during_phase_2:
+  - claudine/docs/topics/secret-recognition.md
+skills_files_updated_during_phase_2: []
 ---
 # Steering implementation plan
 
-Status: Phase 1 implemented (2026-09-28); Phases 2–8 not started.
+Status: Phases 1–2 implemented (2026-09-28); Phases 3–8 not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -175,21 +200,23 @@ local contract mapping; use bounded targeted research only where evidence is mis
 
 **Work**
 
-1. Introduce `claudine::secrets` for shared text-span and sensitive-key recognition.
+- [x] 1. Introduce `claudine::secrets` for shared text-span and sensitive-key recognition.
    Extract common recognition from [protect scrubbing](../../lib/src/protect/scrub.rs),
    [argument sanitization](../../cli/src/commands/wrap/env/sanitize.rs), and
    [webhook redaction](../../lib/src/messaging/send.rs) where their rules overlap.
    Keep each existing consumer's replacement and privacy policies unchanged.
-2. Implement steering's `****` replacement over merged UTF-8-safe secret spans.
+- [x] 2. Implement steering's `****` replacement over merged UTF-8-safe secret spans.
    Preserve ordinary prose, email addresses, and paths unless a recognized secret
    is present. The delivered message retains its original bytes.
-3. Add typed steering events to the existing local JSONL logging path: full
+- [x] 3. Add typed steering events to the existing local JSONL logging path: full
    redacted text, opportunity/request/target identities, mechanism/profile,
    timestamps, consent, receipt strength, and separate cancellation/replacement
    results. Redact errors and provider echoes before tracing or rendering.
-4. Correlate append-only late-result updates without treating them as new sends.
+- [x] 4. Correlate append-only late-result updates without treating them as new sends.
    Audit failures produce content-free diagnostics and never cause replay or
    terminate an otherwise valid agent execution. Keep existing retention policy.
+- [x] Validation: recognition fixtures, existing-consumer behavior, and injected
+   audit-write failure.
 
 **Validation:** Meaningful fixtures for token prose, assignments, auth headers,
 credential-bearing URLs, overlap, Unicode, multiline text, repeated masking,
@@ -482,7 +509,7 @@ permission question or a fabricated all-green result.
 | Phase | Status | Evidence |
 | --- | --- | --- |
 | Phase 1 | Implemented 2026-09-28 | Typed vocabulary, research revision 4, activation policy + checker, generated `lib/src/steering/generated.rs`, runtime eligibility; nothing activated. See implementation-log.md |
-| Phase 2 | Not started | Shared recognition sources identified |
+| Phase 2 | Implemented 2026-09-28 | `claudine::secrets` (one catalog + key-name recognizer; scrub, webhook, and wrapper sanitization migrated), `steering::audit` typed JSONL records under `~/.claudine/logs/steering/`; no live send path calls it yet. See implementation-log.md |
 | Phase 3 | Not started | Existing local IPC contract is the baseline |
 | Phase 4 | Not started | Seven scoped Pi research records; wrapper verification required |
 | Phase 5 | Not started | CLI contract resolved in spec |
@@ -503,3 +530,17 @@ permission question or a fabricated all-green result.
   vocabulary), not a `ProviderInfo` registry field.
 - **Remaining blockers:** none for Phase 2. No adapter is implemented and the
   activation policy is empty, so every case is unavailable by design.
+
+### Phase 2 progress (2026-09-28)
+
+- **Changed:** see this file's `*_during_phase_2` frontmatter; design decisions
+  and the requirement-to-test map are in
+  [implementation-log.md](implementation-log.md#phase-2).
+- **Checks:** `just test` (claudine area): 7803 passed, 9 skipped, 0 failed.
+  `just lint`: clean for all five crates.
+- **Departure:** recognition is shared, so scrubbing and wrapper sanitization
+  now recognize each other's sensitive key names and every catalog
+  credential-token prefix. Replacement tokens and privacy policies (email,
+  home path, `<redacted>`, `****`, env stripping) are unchanged.
+- **Remaining blockers:** none for Phase 3. `steering::audit::audited_send` is
+  the seam Phase 3 routing must call; no caller exists yet.
