@@ -12,6 +12,7 @@
 //! Design authority: `2026-09-08-steering`.
 
 pub mod adapters;
+pub mod audit;
 pub mod contract;
 pub mod eligibility;
 mod generated;

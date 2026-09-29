@@ -82,7 +82,7 @@ impl fmt::Debug for SteeringMessage {
 }
 
 /// Interactive consent to interrupt, bound to one target and operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InterruptionConsent {
     pub target: SteeringTargetId,
     pub operation: OperationIntent,

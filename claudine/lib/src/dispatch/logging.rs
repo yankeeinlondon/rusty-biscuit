@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -24,21 +23,7 @@ use super::wrapper_flags::{wrapper_interactive_flag, wrapper_yolo_flag};
 /// write_dispatch_event_to(&meta, Path::new("/tmp/test.jsonl")).unwrap();
 /// ```
 pub fn write_dispatch_event_to(meta: &EventMeta, path: &Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut line = serde_json::to_string(meta)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    line.push('\n');
-
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?
-        .write_all(line.as_bytes())?;
-
-    Ok(())
+    crate::reporting::jsonl::append_record(meta, path)
 }
 
 /// Write an [`EventMeta`] to the default daily-rotated JSONL log file.

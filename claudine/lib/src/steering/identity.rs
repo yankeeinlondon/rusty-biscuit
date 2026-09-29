@@ -92,6 +92,12 @@ uuid_id! {
     RequestId
 }
 
+uuid_id! {
+    /// Identity of one automatic warning opportunity. Every attempt made for
+    /// it, including unavailable and failed ones, carries the same ID.
+    OpportunityId
+}
+
 /// Monotonic counter of provider conversations within one managed execution.
 /// A conversation switch increments it and invalidates older targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
