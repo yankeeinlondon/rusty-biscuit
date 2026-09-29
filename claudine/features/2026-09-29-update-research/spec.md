@@ -32,7 +32,6 @@ packages:
     - claudine-gen
 related:
     - 2026-09-29-steering-pipeline
-    - 2026-09-29-research-contracts
     - 2026-09-27-sequence-improvements
     - 2026-09-18-edit-integration
     - 2026-09-08-steering
@@ -64,12 +63,14 @@ This revision reconciles it with decisions made since.
 | Replaced | A first full refresh under the current contracts | Topic by topic, each after its contract is narrowed ([Order](#order)) |
 | Replaced | Fingerprint of `_schema.yaml` | Fingerprint of every file a contract is made of |
 | Removed | The question of which researcher the first run uses | Decided |
+| Moved | A fix | A feature, since it narrows every contract and adds a topic |
 | Added | The contract standard and its two gates | |
 | Added | What the pilot proved and the defects it found | |
 | Added | The reasoning-level topic | |
 | Added | Work already done | |
 
-`2026-09-29-research-contracts` is folded into this document.
+An earlier draft, `2026-09-29-research-contracts`, held the contract standard.
+Its content is in this document, and the draft was deleted.
 
 ## Outcome
 
@@ -105,7 +106,7 @@ The run ends in the state "implementation complete, ready for review".
 | `signals` | 2026-07-06 | yes |
 | `agent-errors` | 2026-07-14 | yes |
 | `steering` | 2026-09-08 | yes |
-| `reasoning-level` | 2026-09-29, Claude Code only | not yet |
+| `reasoning-level` | 2026-09-29 | not yet |
 
 Providers ship weekly. On the development host on 2026-09-29, Gemini was at
 0.61.0 against a researched 0.51.0, Pi at 0.87.1 against 0.84.4, and Kimi at
@@ -196,10 +197,13 @@ current, report a limit without retrying, and need no one watching it.
 | Rosters and generator use `sequence:` | `docs/providers.yaml`, `docs/local-runners.yaml`, `gen/src` |
 | Types shared between contracts | `docs/research/_types.yaml` |
 | Reasoning-level contract, types, and fleet prompt | `docs/research/reasoning-level/` |
-| Reasoning-level research for eight providers, validated and stamped | `docs/research/reasoning-level/` |
-| What that fleet found, and what it showed about the contract | [reasoning-level-first-fleet.md](reasoning-level-first-fleet.md) |
-| Revision 2 of the reasoning-level contract, staged and not applied | [reasoning-level-revision-2.patch](reasoning-level-revision-2.patch) |
-| Prototypes of the description lint and the relations gate | [prototypes](prototypes/) |
+| Reasoning-level research for all ten providers, confirmed by both gates | `docs/research/reasoning-level/` |
+| What the research found, and what the runs showed about the contract and the process | [reasoning-level-findings.md](reasoning-level-findings.md) |
+| Revision 2 of the reasoning-level contract, applied | `docs/research/reasoning-level/` |
+| The relations gate for reasoning level, run by the fleet prompt | `docs/research/reasoning-level/_relations.py` |
+| Prototype of the description lint | [prototypes](prototypes/) |
+| `just research <topic>`: one command, three researchers, cover on a usage limit | `justfile` |
+| The three pre-roster files under `acp/` are deleted | `docs/research/acp/` |
 | Recipes name the `claudine` binary; every fleet prompt reports `err.msg` | `justfile`, `docs/research/*/_fleet.md` |
 | Draft of the narrowed steering prompt | `2026-09-29-steering-pipeline` |
 | Draft of the narrowed steering contract, with Codex and Pi filled in from shipped code | `2026-09-29-steering-pipeline` |
@@ -278,8 +282,10 @@ Three more rules hold for every fleet prompt:
 
 - It sets `fail_fast: false`, so one provider's rejected research does not
   stop the others.
-- It does not retry after a usage limit. It reports the limit and leaves the
-  provider unresearched.
+- It does not retry after a usage limit. It reports the limit, and another
+  researcher covers.
+- It reads only the documents its own run writes. Runs work in parallel, and
+  another run may be in the middle of writing one of the others.
 - It researches only the providers assigned to the agent it launches, and
   refuses a model outside the rotation. The document therefore records the
   researcher that wrote it.
@@ -323,11 +329,14 @@ flag as `thinking_effort` with three levels, where the provider has
 
 Research rotates over three researchers by position in the roster.
 
-| Agent | Model | Effort |
-| --- | --- | --- |
-| OpenCode | `zai-coding-plan/glm-5.3` | provider default |
-| Claude | `sonnet` | high |
-| Codex | `gpt-6-luna` | high |
+| Agent | Model | Effort for a topic that feeds code generation | Effort for any other topic |
+| --- | --- | --- | --- |
+| OpenCode | `zai-coding-plan/glm-5.3` | provider default | provider default |
+| Claude | `sonnet` | high | low |
+| Codex | `gpt-6-luna` | high | low |
+
+OpenCode stays at its provider default until research confirms which levels
+`glm-5.3` accepts.
 
 - The order is chosen so that no agent researches its own provider. The plan
   stage fails when an assignment would break that rule.
@@ -345,9 +354,10 @@ Two limits apply until Claudine changes:
 
 The reasoning-level topic produces the facts an effort setting needs.
 
-A researcher can run out. When OpenCode reached its usage limit, the two
-providers still assigned to it went unresearched, because the rotation names
-no substitute. Q9 asks what should happen.
+A researcher can run out. When a researcher reaches its usage limit, the
+others cover for it in rotation order, and none researches its own provider.
+A document records the researcher that wrote it, so a covered document names
+the researcher that covered.
 
 ## Design
 
@@ -388,7 +398,7 @@ mismatch fails `plan` with a message naming the file.
 
 ```yaml
 defaults:
-    max_age: 4wk
+    max_age: 6wk
     parallel: 3
 researchers:
     - agent: opencode
@@ -446,10 +456,12 @@ The fingerprints matter. During the pilot a contract changed without a
 revision change, and the document already written became invalid while still
 looking current.
 
-| Phase | Oracle |
-| --- | --- |
-| 1 | Age, `contract_checked`, and fingerprints the driver computes and stores in the document |
-| 2, after `2026-09-28-content-policy` ships | The document's own `content_policy` declaration, evaluated by that library |
+Fingerprints are not built twice. They arrive with
+`2026-09-28-content-policy`, as a document's own `content_policy`
+declaration evaluated by that library. Until then, a contract change is
+marked by changing `schema_revision`, and a document is current when it
+carries the contract's revision and the fleet's stamp and is younger than
+`max_age`.
 
 The answer is `true`, `false`, or `unknown`. `unknown` is treated as stale
 and reported as such.
@@ -545,7 +557,9 @@ shapes.
 | D1 | The driver is Rust, `claudine research`, entered through `just refresh-research` | Proposed |
 | D2 | Topics are registered in `docs/research/topics.yaml`, guarded in both directions against the topic directories | Proposed |
 | D3 | The driver alone decides freshness. No prompt holds a freshness window | Proposed |
+| D3a | Research may be six weeks old by default. The expectation is that four weeks proves right | Decided 2026-09-29 |
 | D4 | Research rotates over three researchers, and no agent researches its own provider | Decided 2026-09-29 |
+| D4a | Effort is high for a topic that feeds code generation and low for any other | Decided 2026-09-29 |
 | D5 | `claudine providers generate --yes` updates the pinned hashes | Proposed |
 | D6 | Every contract is narrowed to the standard | Decided 2026-09-29 |
 | D7 | Summaries are part of the refresh, run only when an input changed, and skippable | Proposed |
@@ -556,6 +570,9 @@ shapes.
 | D12 | A contract is a document schema plus named types, in nested notation | Decided 2026-09-29 |
 | D13 | The relations gate is one checker configured per topic | Proposed |
 | D14 | Reasoning level is a research topic | Decided 2026-09-29 |
+| D15 | When a researcher reaches its usage limit, the others cover for it in rotation order | Decided 2026-09-29 |
+| D16 | Freshness by fingerprint waits for `2026-09-28-content-policy` and is not built separately | Decided 2026-09-29 |
+| D17 | The pre-roster files under `acp/` are deleted | Decided and done 2026-09-29 |
 
 ## Acceptance criteria
 
@@ -592,25 +609,26 @@ shapes.
 
 | Phase | Deliverable | Gate |
 | --- | --- | --- |
-| 0 | Repairs: the recipe's `cargo run`, `err.msg` in every prompt, the three rosters outside Claudine. **Done 2026-09-29** | Every fleet composes and reports a failure reason |
-| 1 | Reasoning level: revision 2 of the contract, then a fleet run for all ten providers. **Eight researched under revision 1 on 2026-09-29; revision 2 is staged** | Criteria 1 to 3 for that topic |
+| 0 | Repairs: the recipe's `cargo run`, `err.msg` in every prompt, the three rosters outside Claudine, the pre-roster files under `acp/`. **Done 2026-09-29** | Every fleet composes and reports a failure reason |
+| 1 | Reasoning level: revision 2 of the contract, then a fleet run for all ten providers. **Done 2026-09-29: all ten providers confirmed under revision 2** | Criteria 1 to 3 for that topic |
 | 2 | Steering: narrowed contract live, relation rules, generator reads the new fields, fleet run | Criteria 1 to 3 for that topic |
 | 3 | Non-interactive sessions, the same way | Criteria 1 to 3 for that topic |
 | 4 | The driver: manifest, `plan`, `run`, `report`, the refresh record, the ledger, automated hashes | Criteria 4 to 9 |
 | 5 | The remaining topics through the driver, in the stated order; summaries; docs and skill | Criteria 1 to 3 for every topic; 10 to 12 |
-| 6 | Freshness through `content_policy` declarations | Blocked on `2026-09-28-content-policy` |
+| 6 | Freshness through `content_policy` declarations, including a fingerprint of every contract file | Blocked on `2026-09-28-content-policy` |
 
 ## Defects found outside this fix
 
 | Defect | Area |
 | --- | --- |
-| A lifecycle write to a file outside the repository is dropped without a message, along with every later action in that stack item, and the step reports success | Claudine |
+| A lifecycle write to a file outside the repository is dropped without a message, along with every later action in that stack item, and the step reports success. Research never writes outside the repository; a test did | Claudine |
 | `validate_schema()` called from a lifecycle event cannot resolve a relative `$schema` | Claudine or Darkmatter |
 | A `pattern(...)` that contains parentheses or a space does not parse; the documentation shows one | Darkmatter |
 | A multi-line inline object does not parse in a contract file; the documentation says it does | Darkmatter |
 | A file with `kind: schema` rejects a `$schema` key, so a contract and its types cannot share one file | Darkmatter |
 | A mapping nested directly in a contract is accepted; the documentation says it is an error | Darkmatter |
-| `biscuit-terminal/docs/research/terminal-multiplexing/_fleet.md` has frontmatter that does not parse: an unquoted value begins with `@` | biscuit-terminal |
+| `biscuit-terminal/docs/research/terminal-multiplexing/_fleet.md` had frontmatter that did not parse: an unquoted value began with `@`. Repaired with `md clean --save`. A sequence does not apply that repair when it loads a prompt | biscuit-terminal; Claudine |
+| `biscuit-terminal/docs/multiplexers.yaml` calls `dasherize(name)`, which is not a function | biscuit-terminal |
 | `biscuit-tui/docs/style-guide/_style-guide.md` has a `::block` that is never closed | biscuit-tui |
 
 ## Out of scope
@@ -621,21 +639,124 @@ shapes.
 - An effort setting in Claudine. This fix produces the research it needs.
 - A scheduler. Cadence is declared; something still has to run the command.
 - Rate-limit awareness across concurrent fleets.
-- Deleting the pre-roster files under `acp/`. The first refresh record lists
-  them so a follow-up can drop them.
 
 ## Open questions for the author
 
-| ID | Question |
+### Q1. Who runs a refresh: a Rust command or a recipe?
+
+`just research <topic>` exists today as a shell recipe of about 60 lines. It
+runs the three researchers, covers for one at its usage limit, and checks
+that every provider ends with a confirmed document.
+
+The driver in this spec does more: it reads every document's frontmatter to
+decide what is stale, compares each document with its previous version, and
+writes the refresh record.
+
+| Option | For | Against |
+| --- | --- | --- |
+| A Rust command, `claudine research` | It can reuse Claudine's frontmatter reader, be tested against a fixture tree, and run on Windows | More work before the first full refresh |
+| Keep growing the recipe | It exists and works | Reading 200 documents and comparing them with git history in shell is fragile, and has no tests |
+
+**Recommendation:** Rust, built after steering and non-interactive sessions
+are narrowed. The recipe carries the work until then.
+
+### Q2. What happens to the pinned hashes?
+
+`gen/tests/fixtures/generated-artifact-baseline.json` holds a hash of each of
+fifteen generated files, and a test fails when any file differs. It was
+written to prove that a refactor of the generator changed no output. That
+refactor is finished.
+
+Every refresh changes generated files on purpose, so this test fails after
+every refresh until the hashes are updated by hand. Other tests already check
+that the committed files are what the generator produces from the committed
+inputs.
+
+| Option | Consequence |
 | --- | --- |
-| Q1 | **Cadence.** Is `4wk` the right default? Should topics that feed code generation run tighter than summary-only topics? |
-| Q2 | **Driver.** Rust, as D1 proposes, or a longer recipe delivered sooner with weaker guards? |
-| Q3 | **Pinned hashes.** Update them automatically, as D5 proposes, or retire them now that regeneration is compared with the committed files? |
-| Q4 | **Operator prompt.** A `claudine:` namespace under `prompts/`, or the existing `research:` namespace? |
-| Q5 | **Summaries.** Every refresh, run only when an input changed, or on demand? |
-| Q6 | **Description lint.** A Darkmatter feature available to every contract in the monorepo, or a Claudine check? |
-| Q7 | **Cost.** At the pilot's pace a full refresh is about 15 hours three wide. Is high effort wanted for every topic, or only for topics that feed code generation? |
-| Q8 | **This spec's home.** It now narrows every contract and adds a topic. Does it stay a fix, or become a feature? |
-| Q9 | **A researcher that runs out.** When a researcher reaches its usage limit, do its providers wait for the limit to reset, or pass to the next researcher that is not the provider's own agent? |
-| Q10 | **Words a YAML reader treats as truth values.** Contracts use `yes`, `no`, and `off` as members of closed sets. Darkmatter and the generator read them as text; a YAML 1.1 reader does not. Keep them, or choose other words? |
-| Q11 | **Revision 2 and a second run.** Applying the staged patch makes the eight documents stale, and refreshing them costs a second fleet run. Apply it now, or fold it into the next refresh? |
+| Retire the test and the file | Nothing to update. The refresh record lists which generated files changed |
+| Update the hashes automatically during generation | The test always passes, so it no longer detects anything |
+
+**Recommendation:** retire it. Updating it automatically keeps a test that
+can never fail.
+
+### Q3. Where does the operator's prompt live?
+
+The operator's prompt is a command a person gives an agent to refresh
+research: it shows the plan, runs the refresh, reads the report, and proposes
+a decision for each finding. It is a convenience over `just refresh-research`.
+
+| Location | Examples there today | Consequence |
+| --- | --- | --- |
+| The repository's `prompts/` directory | `prompts/commit.md`, `prompts/clarify.md`; none uses a prefix | Versioned with the recipe it runs, and available to anyone who works in the repository |
+| The author's personal commands, under the `research:` prefix | `research:update`, `research:publish`, which turn research into skills | Available in every repository on one machine, and absent from every other |
+
+**Recommendation:** the repository, as `prompts/refresh-research.md`. The
+prompt depends on this repository's recipe and report.
+
+### Q4. Are the summaries part of a refresh?
+
+A summary is one document per topic that compares all providers, such as
+`docs/research/summary/hooks.md`. A copy is published into the Claudine
+skill, so an agent reading the skill learns how providers differ without
+opening ten research documents. Each summary is written by a model that reads
+the ten documents. All but two are dated 2026-07-03.
+
+With narrow contracts, much of a summary no longer needs a model. The tables
+in [reasoning-level-findings.md](reasoning-level-findings.md) are
+produced from frontmatter by a script.
+
+| Option | Consequence |
+| --- | --- |
+| Rewrite every summary on every refresh | Always current; costs a model run per topic |
+| Rewrite a summary only when a document it reads has changed | Current, at lower cost |
+| Generate the comparison tables from frontmatter, and ask a model only for the prose around them | Tables are exact and free; the prose is shorter |
+
+**Recommendation:** the third for a narrowed topic, and the second for a
+topic that is not yet narrowed.
+
+### Q5. Where does the description lint live?
+
+The lint checks that every property of a contract has a description that
+carries meaning. A prototype is in [prototypes](prototypes/).
+
+Contracts are written in Darkmatter's schema language, and Darkmatter's `md`
+command already validates documents against them. Other package areas write
+contracts too.
+
+| Option | Consequence |
+| --- | --- |
+| A Darkmatter command, such as `md schema lint` | Every contract in the monorepo can use it |
+| A Claudine check | Only research contracts are covered |
+
+**Recommendation:** Darkmatter. The rule is about contracts, and Claudine's
+are one case.
+
+### Q6. May a closed set contain a word that YAML reads as a truth value?
+
+A research document is YAML. The readers of a research document do not agree
+on what `yes`, `no`, `on`, and `off` mean when they are written without
+quotes.
+
+| Reader | Reads `warns: yes` as |
+| --- | --- |
+| Darkmatter, which validates documents | the text `yes` |
+| The generator | the text `yes` |
+| Python's YAML library, and other readers of YAML 1.1 | the truth value true |
+
+The relations gate is written in Python and met this on its first run. It
+now reads every value as text. Any other tool that reads a research document
+may make the same mistake without an error.
+
+Contracts use these words today. The reasoning-level contract has `yes` and
+`no` in two sets and `off` in one. The steering contract has `yes` and `no`
+in six.
+
+| Option | Consequence |
+| --- | --- |
+| Forbid these words in a closed set, and have the lint enforce it | Every reader agrees. Sets are renamed, for example `warns`, `silent`, `unknown` |
+| Keep them | Nothing changes now. Each new tool must know the hazard |
+
+**Recommendation:** forbid them. Apply the rule to the steering contract
+before its first fleet run, and to the reasoning-level contract at its next
+refresh, so that no document is researched again for this alone.
