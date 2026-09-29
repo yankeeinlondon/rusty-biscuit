@@ -5,6 +5,25 @@ by a test extension. The model exposes the input it receives through allowlisted
 fixture markers. This tests Pi's actual command, queue, tool, extension, and event
 machinery without cloud inference or changes to existing sessions.
 
+## Codex 0.157.1 on macOS (Claudine-managed app-server)
+
+[Recorded result](codex-macos-0.157.1.json): the production Codex session and
+`codex-app-server` adapter (revision 1) against the installed Codex 0.157.1,
+with a disposable `CODEX_HOME` and a loopback scripted Responses-API model
+(`claudine/cli/tests/common/codex_model.rs`). Seven verification records back
+the reviewed grants for `app-server-steer` (working) and
+`app-server-turn-start` (idle); two of them document expected losses
+(duplicate `clientUserMessageId` delivery, stdin EOF mid-turn). Wrapper-level
+runs of `claudine codex` showed output and exit-code parity with `codex exec`
+and automatic repetition help followed by recovery.
+
+```sh
+just test-real real_codex_   # in claudine/, with `codex` on PATH
+```
+
+Linux and native Windows were covered only by the deterministic fake-Codex
+tests, not by real Codex.
+
 ## Pi 0.84.4 on macOS
 
 [Recorded result](pi-macos-0.84.4.json): one combined opt-in test passed, producing
