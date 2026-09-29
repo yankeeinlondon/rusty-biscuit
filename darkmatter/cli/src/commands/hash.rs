@@ -48,7 +48,14 @@ pub fn run_hash(
             .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
         let (resolved, source, md) = load_markdown_text(input_path)?;
         let stored = parse_stored_hash(&md, &options)?;
-        return run_hash_save(&md, &source, &resolved, stored.as_ref(), &options);
+        return run_hash_save(
+            &md,
+            &source,
+            &resolved,
+            stored.as_ref(),
+            &options,
+            chrono::Utc::now(),
+        );
     }
 
     let md = load_markdown(input)?;
@@ -174,6 +181,7 @@ fn run_hash_save(
     resolved: &std::path::Path,
     stored: Option<&StoredHash>,
     options: &MdHashOptions,
+    now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
     let decision = md.plan_hash_save(stored, options)?;
 
@@ -185,7 +193,7 @@ fn run_hash_save(
         None => None,
     };
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today = darkmatter::markdown::hash::last_updated_stamp(now);
 
     if let Some(written) = darkmatter::markdown::hash::apply_hash_save_text(
         source, &decision, options, &today,
@@ -282,4 +290,39 @@ fn run_hash_directory(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_save_stamps_last_updated_with_the_utc_date() {
+        let instant: chrono::DateTime<chrono::Utc> = "2026-09-28T23:30:00Z".parse().unwrap();
+        let east_of_utc = chrono::FixedOffset::east_opt(10 * 3600).unwrap();
+        assert_eq!(
+            instant.with_timezone(&east_of_utc).date_naive().to_string(),
+            "2026-09-29"
+        );
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        // A stale stored hash of the same kind is a content change, which bumps
+        // `last_updated`.
+        std::fs::write(
+            &file,
+            "---\ntitle: T\nhash: 1111111111111111-2222222222222222\nlast_updated: 2020-01-01\n---\n# H\n\nBody.\n",
+        )
+        .unwrap();
+        let (resolved, source, md) = load_markdown_text(&file).unwrap();
+        let options = MdHashOptions::default();
+        let stored = parse_stored_hash(&md, &options).unwrap();
+
+        run_hash_save(&md, &source, &resolved, stored.as_ref(), &options, instant).unwrap();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            written.contains("last_updated: 2026-09-28\n"),
+            "expected the UTC date stamp in:\n{written}"
+        );
+    }
 }

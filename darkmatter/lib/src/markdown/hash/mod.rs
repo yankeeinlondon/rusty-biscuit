@@ -24,7 +24,7 @@ pub use compare::{ComparisonDetail, HashComparison, IgnorePolicyAdvisory};
 pub use compute::{ComputedHash, DetailedValue, FmHashPair, SectionTuple};
 pub use explain::HashExplanation;
 pub use kind::{KindRelation, MdHashKind, ParseMdHashKindError, select_kind};
-pub use options::{DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashOptions};
+pub use options::{DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashOptions, last_updated_stamp};
 pub use save::SaveDecision;
 pub use stored::{StoredHash, StoredHashValue};
 pub use write::{

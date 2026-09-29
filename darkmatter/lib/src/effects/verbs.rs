@@ -43,7 +43,7 @@ impl EffectEngine {
             let decision = md
                 .plan_hash_save(None, &opts)
                 .map_err(|e| EffectError::Markdown(e.to_string()))?;
-            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let today = crate::markdown::hash::last_updated_stamp(chrono::Utc::now());
             md.apply_hash_save(&decision, &opts, &today)
                 .unwrap_or_else(|| md.as_string())
         } else {

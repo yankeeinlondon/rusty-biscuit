@@ -130,7 +130,8 @@ the original body bytes, unchanged.
 - No stored hash → writes the first baseline and exits `0`.
 - No content change → leaves the file untouched and exits `0`.
 - Content change → updates the stored hash and sets `last_updated` to the
-  current local date (`YYYY-MM-DD`).
+  current UTC date (`YYYY-MM-DD`), so the stamp does not depend on the host's
+  time zone.
 - Ignore-policy-only change → rewrites `hash.ignored` and recomputes `value`
   under the new ignore-set **without** bumping `last_updated`.
 - Higher- or lower-resolution `--kind` → compares at the shared resolution
