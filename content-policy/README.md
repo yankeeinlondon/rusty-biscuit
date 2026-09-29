@@ -47,8 +47,9 @@ content_policy:
 
 Use the `rule` / `action` form when specifying a different action. The default
 frontmatter key is `content_policy`, in snake_case like the repository's other
-frontmatter keys, and the caller can configure a different one. The proposed
-default for an absent policy is `ValidFor(6mo)`; callers can replace it.
+frontmatter keys, and the caller can configure a different one. A document
+without a policy always gets a default policy: `ValidFor(6mo)` unless the
+caller replaces it. A caller can replace the default but not remove it.
 
 There are two baseline forms:
 
@@ -66,12 +67,22 @@ content_policy:
 The first stores the date inside the rule. The second references a frontmatter
 property using `@`. These forms keep the evidence with the document; a sidecar is
 not required. The proposed shorthand `ValidFor(3mo)` references a configurable
-default date property, initially `last_updated`.
+default date property, `last_updated` unless changed.
 
 Dates are enough for time policies. Other relative policies need evidence such
 as the package version used during research or a fingerprint of a source file.
-A structured rule form for this richer evidence is planned; its exact shape is
-still under review.
+A file rule keeps its fingerprint in a frontmatter property of its own, which
+the rule references:
+
+```yaml
+config_fingerprint: blake3-lf:9f2c41…e7
+content_policy:
+  - FileChanged(src/config.rs, @config_fingerprint)
+```
+
+Content Policy is also planned to ship a schema for `content_policy` entries, so
+editors running DMLS (Darkmatter's language server) can complete rule names and
+flag a mistyped rule or action as you write.
 
 ## Evaluation and Renewal
 
@@ -79,9 +90,13 @@ still under review.
 update.** Checking an old document for the first time must not grant it a new
 freshness interval.
 
-A missing baseline produces an unknown result. Recording the first baseline is
-an explicit assertion that the content is current. Later renewal updates the
+A missing baseline produces an unknown result. Recording the first baseline,
+which `policy renew` does for any baseline that is missing, is an explicit
+assertion that the content is current. Later renewal updates the
 baseline of renewable rules while preserving their settings, such as duration.
+Tools that already bump `last_updated` when they change content, such as
+Darkmatter's `md hash`, renew every rule that references `@last_updated`; the
+`policy renew` command is the explicit route and also handles inline dates.
 
 | Rule | Behavior | Renewal |
 | --- | --- | --- |
@@ -89,7 +104,7 @@ baseline of renewable rules while preserving their settings, such as duration.
 | `TimeSensitive` | Always triggers | No baseline to renew |
 | `ValidFor(duration, baseline)` | Triggers after the interval elapses | Replace the starting date |
 | `ValidUntil(date)` | Triggers at a fixed deadline | Nonrenewable; changing the deadline is a policy edit |
-| `FileChanged` | Compare current file content with recorded content | Replace the fingerprint |
+| `FileChanged(path, @property)` | Compare current file content with the fingerprint in `property` | Replace the fingerprint |
 | `SemVerMajorChange` / `SemVerMinorChange` | Compare a package's current release with its recorded version | Replace the version |
 | `SymbolChanged` | Compare selected symbol content with recorded content | Replace the fingerprint |
 | `UrlChanged` / `SchemaChanged` | Compare selected remote content with recorded content | Replace the comparison baseline |
@@ -163,6 +178,10 @@ policy renew document.md --write
 than `false` when freshness cannot be determined. Both commands exit `0` when
 they produce their output and `1` on an error, so scripts read the printed
 answer, not the exit code.
+
+The policy key, default policy, and default date property are set with
+`--key`, `--default-policy`, and `--date-property`, each of which falls back to
+an environment variable before the built-in value.
 
 See [Policy Evaluation and Renewal](docs/topics/policy-lifecycle.md) for the
 planned lifecycle, including a scripting example and renewal's limits.

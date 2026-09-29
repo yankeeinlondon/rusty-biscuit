@@ -29,6 +29,8 @@ reviewed_on: 2026-09-28
 review_iterations: 0
 related:
     - 2026-09-16-content-policy-no-cache
+depends-on:
+    - 2026-09-28-recursive-schema-types
 ---
 
 # Content Policy: Evaluation, Baselines, and Renewal
@@ -49,8 +51,9 @@ The current reader-facing description is in
 
 ## Decisions (2026-09-28 clarification)
 
-The owner settled these in a clarification session. Each is written into the
-body below, and its open question has been removed.
+The owner settled these in a clarification session; rulings 6 to 10 came in a
+second batch the same day, and rulings 11 to 18 in a third. Each is written
+into the body below, and its open question has been removed.
 
 1. **Renewal edits files with span-targeted byte edits** built on Biscuit
    File's YAML helpers, with no spike first. It is the only approach that keeps
@@ -78,6 +81,62 @@ body below, and its open question has been removed.
    yes/no flag is `--needs-action`, which prints `true`, `false`, or `unknown`
    and exits `0` whenever a report was produced. An exit-code answer would let
    a shell `if` read `unknown` as fresh. See [CLI Contract](#cli-contract).
+6. **The default date property stays `last_updated`, and any content edit that
+   advances it counts as renewal.** Darkmatter's `md hash` and Claudine's
+   closure write-back already stamp it on content change, and treating those
+   stamps as anything else would make every such document read as stale. This
+   feature also makes `md hash` stamp the UTC date, because a local date ahead
+   of UTC reads as a future baseline. See
+   [Other writers of the baseline](#other-writers-of-the-baseline).
+7. **Evidence values are `serde_json::Value`s keyed by property name, and dates
+   are `YYYY-MM-DD` strings.** It is the type Darkmatter's frontmatter map and
+   cache manifests already hold, so no consumer converts. A present `null`
+   counts as missing. See [Evidence values](#evidence-values).
+8. **content-policy owns one frontmatter reader for evaluation and renewal**,
+   built on Biscuit File with only its `yaml` feature. One reader means the CLI
+   and renewal can never disagree about what a document says. See
+   [Renewal file editing](#renewal-file-editing).
+9. **content-policy ships a SimplifiedSchema for policies, and Darkmatter's base
+   document schema references it**, so every Markdown document gets completion
+   and checking through DMLS without a Rust dependency. See
+   [Editor schema](#editor-schema).
+10. **Dates only.** Timestamps stay deferred, and the schema's suggestions are
+    date-only, so the editor never suggests a value evaluation rejects.
+11. **The UTC stamping fix covers all three writers that stamp `last_updated`
+    with the local date**: `md hash`, Darkmatter's auto-rehash on effect writes,
+    and Claudine's write-back. Any one of them left on the local date would
+    still produce a future baseline. See
+    [Changes outside the new crates](#changes-outside-the-new-crates).
+12. **`FileChanged` is declared as `FileChanged(<path>, @<property>)`**, and the
+    content fingerprint lives in its own top-level frontmatter property as
+    `<scheme>:<hex>`, with `blake3-lf` (CRLF normalized to LF) as the default
+    scheme. A compact string fits the editor schema, and a scheme prefix makes
+    the Windows line-ending choice explicit and recapturable. See
+    [`FileChanged` declaration](#filechanged-declaration).
+13. **Policy identity hashes rules and actions only; baseline values are
+    excluded**, so renewal never changes it. The earlier contract treats
+    baselines as evidence, not policy fields. See
+    [Report shape](#report-shape--proposed).
+14. **There is always a default policy.** The built-in default is
+    `ValidFor(6mo)`; callers may replace it but not remove it, and the
+    `no_policy` outcome is gone. A fail-closed consumer gets the same safety by
+    choosing `TimeSensitive` as its default. See
+    [Defaults and references](#defaults-and-references).
+15. **The CLI is configured by flags with environment-variable fallbacks**, and
+    no configuration file in this feature. Flags and variables cover every
+    setting without a new file format to design. See
+    [Configuration](#configuration).
+16. **`policy renew` initializes missing baselines without an extra flag**, and
+    its preview labels each one "new baseline". The preview and `--write` already
+    make first capture a visible, deliberate act. See
+    [Renewal rules](#renewal-rules--proposed).
+17. **Renewal accepts a flow-style policy list unless a value it must change
+    sits inside the brackets.** Refusing edits it can make safely would push
+    authors to rewrite valid policies for no gain. See
+    [Renewal file editing](#renewal-file-editing).
+18. **`renew` supports `--plain` and `--json`, and a policy with nothing
+    renewable prints "nothing to renew" and exits `0`.** It matches `check`, and
+    an empty renewal is not a failure. See [`policy renew`](#policy-renew).
 
 ## Agreed Model
 
@@ -89,8 +148,9 @@ body below, and its open question has been removed.
   order has no effect on the winner.
 - Baselines can be literal values inside a rule or references to frontmatter
   properties. `@` identifies a property reference.
-- Evaluation does not initialize or renew baselines. Recording an update is an
-  explicit operation after review or regeneration of the content.
+- Evaluation does not initialize or renew baselines. Recording an update
+  happens after review or regeneration of the content, through renewal or a
+  tool that stamps the baseline property on content change.
 - Renewability belongs to a rule type. `ValidFor` renews its starting date while
   retaining its duration. `ValidUntil` retains its deadline across content
   updates and stays triggered after expiration unless the policy is edited.
@@ -124,17 +184,17 @@ unqualified `ContentPolicy`.
 
 | Earlier requirement | How this spec meets it |
 | --- | --- |
-| Shared library is dependency-light, has no dependency cycle, and Darkmatter can consume it | Core crate never depends on Darkmatter. Domain integrations are opt-in features (see [Library Architecture](#library-architecture--proposed)) |
+| Shared library is dependency-light, has no dependency cycle, and Darkmatter can consume it | Core crate never depends on Darkmatter. Domain integrations are opt-in features (see [Library Architecture](#library-architecture)) |
 | Library holds **vocabulary only; no evaluators** | **Intentional departure**, explained below |
 | "Any predicate expires the content" | OR of triggers (agreed model) |
-| Empty policy has no meaning | An explicit empty list is a validation error (see [Defaults and references](#defaults-and-references--proposed)) |
-| Fail closed: an absent, unknown, malformed, or newer-version policy is never an optimistic hit | Unknown results never yield `fresh`. Invalid declarations produce no verdict. A caller that configures no default policy gets `no_policy`, not `fresh`. A newer policy version is a validation error |
+| Empty policy has no meaning | An explicit empty list is a validation error (see [Defaults and references](#defaults-and-references)) |
+| Fail closed: an absent, unknown, malformed, or newer-version policy is never an optimistic hit | Unknown results never yield `fresh`. Invalid declarations produce no verdict. An absent policy always falls back to the caller's default policy, which can be replaced but not removed; a fail-closed consumer, such as a cache, sets its default to `TimeSensitive`, so an undeclared artifact is always recomputed. A newer policy version is a validation error |
 | Versioned, serializable policy identity | Normalized policy carries a grammar version and a stable identity (see [Report shape](#report-shape--proposed)) |
 | Generation time and versions stored as **evidence**, not mutable policy fields | References resolve against an *evidence record*. For a Markdown document that record is the frontmatter; for a cache artifact it is the artifact manifest |
 | Deterministic under an injected clock | Evaluation time is an explicit input |
 | Calendar months/years define exact arithmetic and timezone | [Time Semantics](#time-semantics--proposed) |
 | Explicit stale action (recompute, warn, or fail) | Partly met. `refresh`/`archive`/`remove` describe what the *content* needs; warn-or-fail is left to the consumer. See [Open Question 3](#3-where-warn-or-fail-stale-behavior-lives) |
-| Minimum vocabulary: duration, explicit invalidation, source-content change, software/library version change, model retirement | Duration is in increment 1 and source-content change in increment 2; both are required for this feature. Explicit invalidation and model retirement are added to [Later Policy Decisions](#later-policy-decisions) |
+| Minimum vocabulary: duration, explicit invalidation, source-content change, software/library version change, model retirement | Time-based expiry (`ValidFor`, `ValidUntil`) is in increment 1 and source-content change (`FileChanged`) in increment 2; both are required for this feature. Explicit invalidation and model retirement are added to [Later Policy Decisions](#later-policy-decisions) |
 
 **Why evaluators now live in the shared library.** The earlier ruling kept
 evaluators out because evaluation looked domain-specific. This spec splits
@@ -162,14 +222,37 @@ delivered. They are planned as two phases of one implementation plan.
 The first increment delivers a complete lifecycle for `Evergreen`,
 `TimeSensitive`, `ValidFor`, and `ValidUntil`: declaration parsing, validation,
 references, evaluation, renewal planning and application, and CLI reporting.
-It also migrates the existing `Duration(...)` notes (see
-[Backwards compatibility](#backwards-compatibility)).
+It also makes the changes outside the new crates listed below.
 The second adds `FileChanged` to prove provider injection and persisted
-fingerprints. Two rulings are still needed before the second phase starts:
-line endings in fingerprints
-([Open Question 4](#4-line-endings-in-filechanged-fingerprints)) and the
-structured declaration shape as it applies to `FileChanged`
-([Open Question 5](#5-declaration-shape)).
+content fingerprints. Its declaration and fingerprint format are settled (see
+[`FileChanged` declaration](#filechanged-declaration)), so no ruling blocks the
+second phase.
+
+### Changes outside the new crates
+
+1. **Migrate the `Duration(...)` notes** to `ValidFor(...)` (see
+   [Backwards compatibility](#backwards-compatibility)).
+2. **Make every `last_updated` stamp a UTC date.** Three call sites compute the
+   stamp with `chrono::Local::now()`:
+
+   | Writer | Call site |
+   | --- | --- |
+   | Darkmatter `md hash` | `darkmatter/cli/src/commands/hash.rs`, line 188 |
+   | Darkmatter auto-rehash on effect write | `darkmatter/lib/src/effects/verbs.rs`, line 46 |
+   | Claudine write-back | `claudine/cli/src/commands/wrap/harness_orch/loop_control.rs`, line 2274 |
+
+   Between local midnight and UTC midnight east of Greenwich, that date is a
+   day ahead of UTC, and content-policy reads it as a future baseline:
+   `unknown`, not `fresh`. Each site switches to the UTC date and gains a test.
+   See [Other writers of the baseline](#other-writers-of-the-baseline).
+3. **Ship the editor schema**, `content-policy/schemas/content-policy.yaml`
+   (see [Editor schema](#editor-schema)).
+4. **Reference it from Darkmatter's base document schema**, with one line in
+   `darkmatter/schemas/partials/doc.yaml`.
+
+Only tasks 3 and 4 wait on `2026-09-28-recursive-schema-types`: task 4 needs
+`policy[]` over a union type, and task 3 needs it only for the `(required)`
+marker on `rule`. Everything else in both phases proceeds without it.
 
 Package versions, symbols, URL/schema changes, explicit invalidation, model
 retirement, and file/program presence rules follow after their comparison
@@ -209,7 +292,9 @@ no callers.
 | Rule | A condition that can trigger, such as an elapsed validity interval |
 | Policy entry | A rule plus its configured action |
 | Baseline | Evidence accepted when content was last updated or reviewed |
-| Evidence record | The property map that `@name` references resolve against: frontmatter for a Markdown document, or a manifest for a cache artifact |
+| Evidence record | The property map that `@name` references resolve against: frontmatter for a Markdown document, or a manifest for a cache artifact. Values are `serde_json::Value`s keyed by property name |
+| Plan fingerprint | An `xxh64` digest of the exact document bytes a renewal plan was built from, used only to detect edits between planning and applying |
+| Content fingerprint | A `<scheme>:<hex>` BLAKE3 digest of a watched file's content, stored in the frontmatter property a `FileChanged` rule references |
 | Observation | Current evidence used for a comparison |
 | Renewal | Explicitly replacing a renewable rule's baseline after a content update |
 | Effective action | Highest-priority action among confirmed triggered entries |
@@ -242,80 +327,240 @@ The four first-increment rules:
 | `ValidFor(duration[, baseline])` | When evaluation time reaches baseline + duration | Periodic review |
 | `ValidUntil(deadline)` | When evaluation time reaches the deadline | Fixed retirement or re-review date |
 
-### Defaults and references — proposed
+### Defaults and references
 
 - The policy value must be a YAML list. A single string such as
   `content_policy: ValidFor(3mo)` is a validation error whose message suggests
   the list form. One accepted shape keeps renewal edits and error messages
-  simple. Evaluation accepts any valid YAML list, including a flow-style list
-  such as `content_policy: [ValidFor(3mo)]`; renewal is narrower (see
-  [Renewal file editing](#renewal-file-editing)).
+  simple. Evaluation accepts a flow-style list such as
+  `content_policy: [ValidFor(3mo)]`, with the caveat below; renewal is narrower
+  (see [Renewal file editing](#renewal-file-editing)).
+- **The flow-list comma trap.** Inside YAML's inline `[...]` syntax a comma
+  separates items, so `content_policy: [ValidFor(3mo, 2026-09-28)]` is a list of
+  two broken strings, `ValidFor(3mo` and `2026-09-28)`. The YAML is valid, so
+  only the policy parser can catch it. When a flow-style policy yields an entry
+  with unbalanced parentheses, the validation diagnostic names the cause and
+  shows the block-list form. Quoting each rule inside the brackets
+  (`["ValidFor(3mo, 2026-09-28)"]`) also parses, but the block list is the form
+  the message recommends, because renewal can edit it.
 - The default key is `content_policy`. A caller can configure another key, but
   no kebab-case `content-policy` alias is read.
 - An absent policy key, or a document with no frontmatter, uses the caller's
-  default policy. The CLI default is `ValidFor(6mo)`. A library caller can
-  instead configure **no default**, and an absent policy then yields the
-  `no_policy` outcome instead of a verdict. A cache consumer needs this: under
-  the earlier contract, a missing policy must never read as fresh.
+  default policy. *(Decided 2026-09-28.)* There is always a default policy.
+  The library's built-in default is `ValidFor(6mo)`. A caller may replace it
+  with any policy but cannot remove it, so every valid document gets one of the
+  four statuses. A fail-closed consumer, such as a cache, sets its default to
+  `TimeSensitive`: under the earlier contract a missing policy must never read
+  as fresh, and `TimeSensitive` guarantees an undeclared artifact is always
+  recomputed.
 - An explicit empty list is a validation error. *(Changed in review: the draft
   treated it like an absent key.)* The earlier contract gives an empty policy
   no meaning. Research documents used an empty list to mean "evergreen", so
   silently reading it as "use the default" would invert what some authors
   intended. Use `Evergreen` to request no expiry. A malformed or null
-  declaration is also an error.
+  declaration (`content_policy:` with no value) is also an error. Only the
+  policy value is treated this way; a null *baseline* property is missing
+  evidence (see [Evidence values](#evidence-values)).
+- A frontmatter block with a duplicate top-level key is a validation error,
+  whichever key is duplicated. YAML parsers disagree about which occurrence
+  wins, so no answer drawn from such a block can be trusted.
 - `Evergreen` must be the only entry. Combined with any other rule it
   contradicts itself ("never expires" plus "expires when…"), so the combination
   is a validation error.
 - Rule and action names are case-sensitive: `ValidFor`, not `validfor`;
   `archive`, not `Archive`.
-- `ValidFor(3mo)` resolves the caller's default date property, initially
-  `last_updated`. That spelling is already the most common update-date key in
-  the repository's Markdown. The report says whether the effective rule was
-  defaulted or explicitly declared, and records where its baseline came from.
+- `ValidFor(3mo)` resolves the caller's default date property, `last_updated`.
+  That spelling is already the most common update-date key in the repository's
+  Markdown, and other tools already advance it on content change (see
+  [Other writers of the baseline](#other-writers-of-the-baseline)). The report
+  says whether the effective rule was defaulted or explicitly declared, and
+  records where its baseline came from.
 - Initially, `@name` selects one top-level property of the evidence record. No
   nested paths, recursive references, environment lookup, or cross-document
   lookup is implied. A referenced string is consumed as a typed value, not
   reparsed as an expression.
-- A missing property is unavailable evidence and yields `unknown`. Each of the
-  following is a validation error, and none causes a fallback to a different
-  baseline:
-  - a present value of the wrong type
-  - an invalid date
-  - a malformed reference
-  - a timestamp (such as `2026-09-28T10:00:00Z`) while timestamps are deferred.
-    The time part is not silently dropped.
+- A missing property is unavailable evidence and yields `unknown`. The typing
+  rules for present values, including when a value is a validation error, are
+  in [Evidence values](#evidence-values). No error causes a fallback to a
+  different baseline.
 - References occupy typed baseline and deadline positions. Elsewhere in the repo
   a leading `@` already means something else: Biscuit File and Darkmatter use
   it for "magic" paths, and Darkmatter schemas use it for `Name@file` imports.
-  Inside a policy argument, `@name` always means a property reference. A future
-  file selector must use a distinct, explicitly named argument (as the
-  structured `file:` key below does), not a bare `@` path.
+  Inside a policy argument, `@name` always means a property reference. A file
+  path is a plain positional argument, as in
+  `FileChanged(src/config.rs, @config_fingerprint)`, never a bare `@` path.
 
-A structured form is proposed for richer rules. For example, a file baseline
-needs the digest algorithm as well as the digest:
+### `FileChanged` declaration
+
+*(Decided 2026-09-28.)* A file rule is a compact string,
+`FileChanged(<path>, @<property>)`. The content fingerprint lives in its own
+top-level frontmatter property, which the rule references with `@`:
 
 ```yaml
+config_fingerprint: blake3-lf:9f2c41…e7
 content_policy:
-  - rule:
-      type: FileChanged
-      file: src/config.rs
-      baseline:
-        algorithm: blake3
-        digest: "<recorded digest>"
-    action: refresh
+  - FileChanged(src/config.rs, @config_fingerprint)
 ```
 
-The digest above is a placeholder, not valid stored evidence. Structured and
-compact forms must normalize to the same internal representation. The first
-increment need only accept the illustrated time-rule forms. The structured
-grammar for `FileChanged` must be settled before the second phase starts
-([Open Question 5](#5-declaration-shape)).
+The digest above is abbreviated, not valid stored evidence. The
+`{ rule, action }` form takes the same string, as in
+`rule: FileChanged(src/config.rs, @config_fingerprint)`. There is no structured
+rule object: every rule, time or file, is a compact string, which is what the
+[editor schema](#editor-schema) types.
 
-In the structured form, a reference must be quoted, as in
-`baseline: "@last_updated"`. YAML reserves `@` at the start of a plain value,
-so an unquoted `@last_updated` is a YAML syntax error before the policy parser
-ever sees it. The compact form avoids this because its string starts with the
-rule name.
+The property reference is required. The one-argument shorthand
+`FileChanged(src/config.rs)` is not supported and is a validation error. Unlike
+`ValidFor`'s default date property, a default fingerprint property would be
+shared by every `FileChanged` rule in the document, so two watched files would
+overwrite each other's fingerprint.
+
+A fingerprint value is a string of the form `<scheme>:<hex>`. Both schemes hash
+with BLAKE3 through `biscuit-hash`:
+
+| Scheme | Hashes | Use for |
+| --- | --- | --- |
+| `blake3-lf` (default) | The file's bytes after CRLF is normalized to LF | Text files. A Windows checkout with `core.autocrlf` produces the same fingerprint as macOS or Linux |
+| `blake3` | The raw bytes | Binary files, where CRLF is data, not a line ending |
+
+Renewal writes the fingerprint property, both when it first captures a
+fingerprint and when it renews one (see
+[Renewal rules](#renewal-rules--proposed)). A first capture uses `blake3-lf`;
+renewing an existing value keeps its scheme. An author who wants `blake3` for a
+binary file writes that scheme once, and renewal preserves it.
+
+Evaluation compares the watched file's current fingerprint, computed with the
+stored value's scheme, against the stored value:
+
+| Situation | Result |
+| --- | --- |
+| Fingerprints match | `not_triggered` |
+| Fingerprints differ | `triggered` |
+| The watched file is missing or deleted | `triggered`, reason "source removed" |
+| The watched file exists but cannot be read (permissions, I/O error) | `unknown`, reason names the read failure |
+| The fingerprint property is absent or `null` | `unknown`, missing baseline |
+| The stored value's scheme is not recognized, such as `sha256:…` | `unknown`, incompatible fingerprint; never proof of change or freshness |
+
+**Proposed:** a fingerprint value that is not a string, or a string without the
+`<scheme>:<hex>` shape, is a validation error, matching how a malformed date is
+handled under [Evidence values](#evidence-values).
+
+A missing file triggers rather than reporting `unknown` because its absence was
+observed successfully; the content the document was based on is gone. A read
+failure observed nothing, so it cannot confirm either outcome.
+
+### Evidence values
+
+*(Decided 2026-09-28.)* An evidence record maps property names to
+`serde_json::Value`s. That is what Darkmatter's frontmatter map already holds
+(`FrontmatterMap` is `IndexMap<String, serde_json::Value>`), and cache
+manifests are JSON, so neither consumer converts anything.
+
+A date is a JSON string that matches `YYYY-MM-DD` and names a real calendar
+date. YAML's quoted and unquoted dates are equivalent here: both
+`last_updated: 2026-09-28` and `last_updated: "2026-09-28"` arrive as the same
+string. For a value in a date position (an inline baseline, a referenced
+baseline, or a `ValidUntil` deadline):
+
+| Value | Result |
+| --- | --- |
+| Property absent | Missing baseline: `unknown` |
+| Present `null`, such as `last_updated:` with no value | Missing baseline: `unknown` |
+| String such as `2026-09-28` | A date |
+| String of the right shape that is not a calendar date, such as `2026-02-30` | Validation error: invalid date |
+| Other string, such as `Sept 28` | Validation error: invalid date |
+| Timestamp string, such as `2026-09-28T10:00:00Z` | Validation error: dates only. The time part is not silently dropped |
+| Number, boolean, list, or object | Validation error: wrong type |
+
+Treating `null` as missing matches SimplifiedSchema, where an optional property
+accepts `null`. A document can therefore carry `last_updated:` as a placeholder
+and still read as "no baseline yet" rather than as broken, and renewal may fill
+it in.
+
+### Editor schema
+
+*(Decided 2026-09-28.)* content-policy ships a SimplifiedSchema file,
+`content-policy/schemas/content-policy.yaml`, so editors that run DMLS
+(Darkmatter's language server) can complete and check policies. It is a
+`kind: schema` file that declares types only:
+
+| Type | Shape |
+| --- | --- |
+| `short_form` | A union of pattern-constrained strings, one member per compact rule form, each with a `->` description |
+| `long_form` | An object: `rule` (a `short_form`, required) and `action` (`enum(refresh, archive, remove)`, required) |
+| `policy` | A union of `short_form` and `long_form`: one list entry |
+
+Darkmatter's base document schema, `darkmatter/schemas/partials/doc.yaml`, gains
+one line beside `last_updated`:
+
+```yaml
+content_policy: policy[]@../../../content-policy/schemas/content-policy.yaml
+```
+
+That line is a data-file reference, not a Rust dependency, so the
+[dependency rule](#library-architecture) is untouched.
+
+An illustrative excerpt follows. The patterns are illustrative, not the final
+grammar; each is anchored with `^` and `$`.
+
+```yaml
+kind: schema
+types:
+  short_form:
+    - 'string(pattern(^Evergreen$); suggest(Evergreen, TimeSensitive, "ValidFor(3mo)", "ValidFor(3mo, @last_updated)", "ValidFor(3mo, 2026-09-28)", "ValidUntil(2027-01-01)")) -> Never triggers'
+    - 'string(pattern(^TimeSensitive$)) -> Always triggers'
+    - 'string(pattern(^ValidFor\x28[1-9][0-9]*[a-z]+\x29$)) -> Interval from the default date property'
+    - 'string(pattern(^ValidFor\x28[1-9][0-9]*[a-z]+\x2C\x20@[A-Za-z_][A-Za-z0-9_]*\x29$)) -> Interval from a property'
+    - 'string(pattern(^ValidFor\x28[1-9][0-9]*[a-z]+\x2C\x20[0-9]{4}-[0-9]{2}-[0-9]{2}\x29$)) -> Interval from an inline date'
+    - 'string(pattern(^ValidUntil\x28[0-9]{4}-[0-9]{2}-[0-9]{2}\x29$)) -> Fixed deadline'
+    - 'string(pattern(^FileChanged\x28[^\x2C\x29]+\x2C\x20@[A-Za-z_][A-Za-z0-9_]*\x29$)) -> Content change of a file, fingerprint held in a property'
+  long_form:
+    rule: "short_form(required)@./content-policy.yaml"
+    action: "enum(refresh, archive, remove; required)"
+  policy:
+    - "short_form@./content-policy.yaml"
+    - "long_form@./content-policy.yaml"
+```
+
+Every suggestion is date-only, like the grammar itself. A schema that suggests a
+value evaluation rejects would teach authors the wrong form.
+
+The `FileChanged` member ships with the `FileChanged` phase. It requires the
+`@<property>` argument, so the unsupported one-argument shorthand is flagged in
+the editor as well as by evaluation. The fingerprint property itself has an
+author-chosen name, so the schema does not type it.
+
+The patterns and cross-references follow what `md schema validate`, built from
+this branch, accepts today. Experiments with that build found:
+
+- **`policy[]` over a union-typed named type is rejected** ("cannot apply `[]`
+  / constraints to the union-typed named type"). `2026-09-28-recursive-schema-types`
+  lifts this (its design item 3), which is why this feature depends on it. Only
+  the schema tasks wait on it.
+- **`(required)` on a union-typed reference hits the same rejection**, so
+  `rule: "short_form(required)@…"` does not load today. Without `(required)`
+  the file loads and validates, and a `long_form` entry missing `action` is
+  flagged, but one missing `rule` is not. The dependency's item 3 names `[]`
+  only. If it does not also lift constraints, the schema omits `(required)`
+  on `rule` and evaluation alone enforces it.
+- **A type cannot name a sibling type in the same file by bare name**
+  (`unknown type short_form`). `short_form@./content-policy.yaml` works, and so
+  does the documented self-target `short_form@this`. The excerpt uses the file
+  path unless the dependency lifts the restriction.
+- **Pattern arguments cannot contain a literal `(`, `)`, `,`, or space**, even
+  escaped with a backslash or inside a character class, because the constraint
+  parser reads them as argument syntax. Regex groups such as `(d|mo)` fail for
+  the same reason. The excerpt writes them as `\x28`, `\x29`, `\x2C`, and
+  `\x20`, in single-quoted YAML so the backslashes reach the regex.
+- **A union-typed named type accepts at most one `suggest(...)` across all its
+  members** ("a property definition may contain at most one `suggest`
+  constraint"), so the suggestions cannot sit on each rule's member. The
+  excerpt puts them all on the first member.
+
+DMLS reaches this typing only when it resolves the base schema from
+`darkmatter/schemas/`. Today Darkmatter still embeds
+`darkmatter/docs/schemas/darkmatter.yaml` as its runtime baseline, and the move
+to the authored catalog is pending (see
+[Open Question 4](#4-how-the-base-schema-line-reaches-dmls)).
 
 ## Time Semantics — Proposed
 
@@ -375,8 +620,9 @@ explanations. Identical observation requests can share evidence within a run.
 | Highest triggered action is refresh | `stale` | `refresh` |
 | Highest triggered action is archive or remove | `expired` | `archive` or `remove` |
 
-A caller with no default policy that evaluates a document with no policy gets
-`no_policy` instead of one of these statuses.
+Every valid document gets one of these four statuses. A document with no policy
+is evaluated under the caller's default policy, which always exists (see
+[Defaults and references](#defaults-and-references)).
 
 Document status describes confirmed evidence. A separate action-resolution
 field says whether unknown entries could still change the effective action.
@@ -417,7 +663,22 @@ canonical serialization, prefixed with its algorithm, following the existing
 `xxh64:{hex}` convention in
 [messenger's research canonicalization](../../../messenger/lib/src/research/canonical.rs).
 A cache consumer stores the identity in its artifact manifest, so a changed
-policy invalidates artifacts produced under the old one. A serialized policy
+policy invalidates artifacts produced under the old one.
+
+*(Decided 2026-09-28.)* The identity covers **rules and actions only**. Baseline
+values are evidence, not policy fields, so they are excluded:
+
+| Part of the declaration | In the identity? |
+| --- | --- |
+| Rule names and actions | Yes |
+| Rule parameters: `ValidFor` durations, `ValidUntil` deadlines, `FileChanged` paths | Yes |
+| `@name` references | Yes, as the name, not the value it resolves to |
+| Inline baseline values, such as the date in `ValidFor(3mo, 2026-09-28)` | No, stripped before hashing |
+
+So `ValidFor(3mo, 2026-09-28)` and `ValidFor(3mo, 2026-12-29)` share an
+identity, while `ValidFor(3mo)` and `ValidFor(6mo)` do not. Renewal, and every
+tool that stamps `last_updated`, never changes a policy's identity. A consumer
+that needs the baseline itself records it separately. A serialized policy
 whose grammar version is newer than the library understands is a validation
 error, so it fails closed.
 
@@ -445,10 +706,16 @@ names are part of the public contract and are documented on the package's
 Evaluation never writes policy state. Repeated checks against the same evidence
 must not make a stale document fresh.
 
-Renewal is an explicit assertion that content has been updated or reviewed using
-the replacement evidence. A library operation should produce proposed document
-edits for the caller to persist. File persistence is a shared library helper;
-the CLI must not be the only consumer able to renew policies.
+Renewal is the content-policy operation that records an update: an explicit
+assertion that content has been updated or reviewed using the replacement
+evidence. It is not the only thing that can advance a baseline. A tool that
+stamps the baseline property when it changes content is recording a content
+update too, and content-policy treats that stamp exactly like one written by
+renewal (see [Other writers of the baseline](#other-writers-of-the-baseline)).
+
+A library operation should produce proposed document edits for the caller to
+persist. File persistence is a shared library helper; the CLI must not be the
+only consumer able to renew policies.
 
 ```mermaid
 sequenceDiagram
@@ -457,10 +724,10 @@ sequenceDiagram
     participant D as Document file
     C->>D: read bytes
     C->>L: plan renewal (document, update date, evidence)
-    L-->>C: plan: proposed edits + fingerprint of the bytes read
+    L-->>C: plan: proposed edits + plan fingerprint of the bytes read
     C->>C: preview (CLI default stops here)
     C->>L: apply plan
-    L->>D: re-read, compare fingerprint
+    L->>D: re-read, compare plan fingerprint
     alt unchanged
         L->>D: write edited bytes
     else changed since planning
@@ -489,8 +756,20 @@ sequenceDiagram
 - Consolidate identical writes to a shared property. Reject conflicting writes.
   If a proposed write also changes a nonrenewable rule's referenced deadline,
   report a conflict instead of silently extending that deadline.
-- Missing baseline targets can be initialized explicitly. Present malformed
-  values need correction; renewal is not a general repair operation.
+- For `FileChanged`, write a fresh content fingerprint to the referenced
+  property, keeping the stored value's scheme (see
+  [`FileChanged` declaration](#filechanged-declaration)). A watched file that is
+  missing or unreadable is unavailable evidence, so renewal writes nothing. A
+  stored value with an unrecognized scheme cannot be recomputed, so renewal
+  reports it for correction instead of guessing a scheme.
+- *(Decided 2026-09-28.)* Missing baseline targets, such as an absent or `null`
+  `last_updated` or fingerprint property, are initialized by plain renewal
+  with no extra flag. This is the **first capture** of a baseline. The preview
+  labels each one "new baseline", distinct from a renewed value, and nothing
+  is written without `--write`. A document with no frontmatter at all gets a
+  new frontmatter block holding the date property; this is how a document that
+  fell back to the default policy is renewed. Present malformed values need
+  correction; renewal is not a general repair operation.
 - Plan the entire requested renewal before writing. If required evidence is
   unavailable, return diagnostics without partially advancing baselines.
 - Preserve the Markdown body, unrelated frontmatter, and declaration form.
@@ -498,20 +777,69 @@ sequenceDiagram
   and quoting. How this is achieved is described in
   [Renewal file editing](#renewal-file-editing).
 - Detect intervening document edits before applying a prepared renewal. The
-  plan records an `xxh64` fingerprint (via `biscuit-hash`) of the exact bytes it
-  was planned from. Apply re-reads the file and refuses to write if the bytes
-  differ.
+  plan records a **plan fingerprint**: an `xxh64` digest (via `biscuit-hash`)
+  of the exact bytes it was planned from. Apply re-reads the file and refuses
+  to write if the bytes differ. The plan fingerprint is never stored in the
+  document.
 
-A fingerprint baseline must identify its comparison algorithm and scope.
-Changing the fingerprint scheme requires explicit recapture; incompatible
-fingerprints cannot be treated as proof of content changes or freshness.
-Content fingerprints are computed with `biscuit-hash` (BLAKE3). The monorepo
-does not hash directly with the `blake3` crate.
+A **content fingerprint**, the stored baseline of `FileChanged`, is a different
+thing: it is stored in the document, and its `<scheme>:` prefix identifies its
+comparison algorithm and scope. Changing the scheme requires explicit
+recapture; incompatible content fingerprints cannot be treated as proof of
+content changes or freshness. Content fingerprints are computed with
+`biscuit-hash` (BLAKE3). The monorepo does not hash directly with the `blake3`
+crate.
+
+### Other writers of the baseline
+
+*(Decided 2026-09-28.)* Existing tools advance `last_updated` when they change a
+document's content:
+
+- **Darkmatter's `md hash`** bumps `last_updated` when the content hash changes
+  (`apply_hash_save_text` in `darkmatter/lib/src/markdown/hash/write.rs`).
+- **Darkmatter's effect writes** re-hash a document that carries a `hash`
+  property when auto-rehash is on, through the same hash-save path, and so
+  bump `last_updated` the same way (`darkmatter/lib/src/effects/verbs.rs`).
+- **Claudine's closure write-back** stamps `last_updated` on every write it
+  makes (`CLOSURE_OWNED_PROPERTIES` in
+  `claudine/lib/src/composition/closure.rs`, line 31).
+
+Each one therefore renews every rule whose baseline is `@last_updated`,
+including the `ValidFor(3mo)` shorthand. That is the intended behavior: a
+content edit that moves `last_updated` is a content update. `policy renew`
+remains the explicit path, and the only one that also renews inline baselines
+and other baseline properties. None of these tools knows about content
+policies, and none needs to.
+
+Such a stamp must be a UTC date, because evaluation reads a baseline later than
+today's UTC date as inconsistent (`unknown`). All three writers currently stamp
+the host's local date with `chrono::Local::now()`. East of Greenwich, a document
+written shortly after local midnight gets tomorrow's UTC date, and
+content-policy reports it as `unknown` until UTC catches up. This feature
+changes all three stamps to the UTC date (see
+[Changes outside the new crates](#changes-outside-the-new-crates) for the call
+sites).
 
 ### Renewal file editing
 
-*(Decided 2026-09-28.)* The content-policy library applies renewal as
-span-targeted byte edits, using two Biscuit File YAML helpers:
+*(Decided 2026-09-28.)* content-policy owns **one frontmatter reader**, used by
+both evaluation and renewal. The CLI always uses it. A library caller that
+already holds a parsed map, such as Darkmatter with its `Frontmatter`, skips it
+and passes the map as the evidence record. The reader:
+
+- finds and parses the frontmatter block and produces the evidence record
+  ([Evidence values](#evidence-values)) along with the source spans renewal
+  needs;
+- treats a duplicate top-level key as a validation error;
+- reports "no frontmatter" as a distinct result, so evaluation can apply the
+  default policy and renewal can **create** a frontmatter block.
+
+It is built on Biscuit File with `default-features = false, features = ["yaml"]`.
+Biscuit File's default features pull in its PDF crates, which a policy check
+never needs.
+
+Renewal is applied as span-targeted byte edits against the spans the reader
+found, using two Biscuit File YAML helpers:
 
 - [`locate_yaml_value`](../../../biscuit-file/lib/src/yaml/analyze/locate.rs)
   finds a value's byte span in YAML source. The span **includes** any quotes,
@@ -526,10 +854,18 @@ span-targeted byte edits, using two Biscuit File YAML helpers:
 
 Biscuit File has no dependency path to Darkmatter, even with all features
 enabled (checked with `cargo tree`), so the library may use it under the
-[dependency rule](#library-architecture--proposed). Darkmatter's own
-frontmatter writer (`fm_insert` followed by `as_string`) was rejected: it
-re-serializes the whole YAML block and drops comments and quoting, and the
-dependency rule puts it out of the library's reach.
+[dependency rule](#library-architecture).
+
+Darkmatter already has a byte-preserving frontmatter writer:
+`apply_hash_save_text` and its `rewrite_date_scalar` helper in
+`darkmatter/lib/src/markdown/hash/write.rs`. They edit `last_updated` in place,
+keep the document's newline style and every other byte, and create a minimal
+frontmatter block when a document has none. content-policy cannot call them,
+because the dependency rule forbids any path to Darkmatter. They are the
+**reference implementation**: the reader matches their behavior for the same
+edits, and their tests are a source of cases. (Darkmatter's general
+`fm_insert` followed by `as_string` re-serializes the whole block and drops
+comments and quoting, so it is not a model.)
 
 The helpers work on YAML source, not on a Markdown file, so content-policy
 itself must:
@@ -542,20 +878,53 @@ itself must:
    that contains escape sequences is refused, because source offsets no longer
    match the decoded text.
 3. Build the insertion that appends a missing top-level property, such as
-   `last_updated`, as one new line at the end of the frontmatter block.
+   `last_updated`, as one new line at the end of the frontmatter block, or,
+   for a document with no frontmatter, a new block at the top of the file.
 
 As a consequence, renewal refuses these shapes with a clear message that
 suggests rewriting the policy as a block list:
 
-- a flow-style policy list, such as `content_policy: [ValidFor(3mo)]`
+- a value it must edit that sits inside a flow-style (one-line bracketed)
+  policy list
 - a value it must edit that is a block scalar or multi-line scalar
 - a value it must edit that is a double-quoted string containing escape
   sequences
 
-A refusal writes nothing. Evaluation is unaffected: it still accepts any valid
-YAML list shape.
+*(Decided 2026-09-28.)* A flow-style policy list is refused only when a value to
+change sits inside the brackets. When every edit target is outside the list,
+such as `last_updated:` or a fingerprint property, renewal proceeds. These two
+documents renew identically, because the only edit is the `last_updated` line:
 
-## Library Architecture — Proposed
+```yaml
+last_updated: 2026-09-28
+content_policy:
+  - ValidFor(3mo, @last_updated)
+```
+
+```yaml
+last_updated: 2026-09-28
+content_policy: [ValidFor(3mo, @last_updated)]
+```
+
+Moving the date inside the rule changes the answer. The block-style form below
+renews by editing the date in place; the one-line bracketed form is refused,
+because the date to change is inside the brackets:
+
+```yaml
+content_policy:
+  - ValidFor(3mo, 2026-09-28)          # renewed in place
+```
+
+```yaml
+content_policy: ["ValidFor(3mo, 2026-09-28)"]   # refused
+```
+
+A refusal writes nothing. Evaluation is unaffected: it still accepts a
+flow-style list, subject to the comma trap described in
+[Defaults and references](#defaults-and-references), which is why the refused
+example quotes its rule.
+
+## Library Architecture
 
 Use one library crate (`content-policy`, in `content-policy/lib`) with optional
 provider integration modules, and a separate CLI crate (`content-policy-cli`, in
@@ -576,12 +945,15 @@ library, including every optional feature, must never depend on Darkmatter or
 on anything that depends on Darkmatter. That rule has three consequences:
 
 - The core evaluates against an evidence record: a map of property names to
-  values. A Darkmatter consumer passes its already-parsed
+  `serde_json::Value`s. A Darkmatter consumer passes its already-parsed
   [`Frontmatter`](../../../darkmatter/lib/src/markdown/frontmatter.rs) map, and
   a cache consumer passes its manifest's evidence.
-- Default features stay near Serde-level: `serde`, `chrono`, and `biscuit-hash`.
-- The CLI crate is not a dependency of anything, so it may use Darkmatter to
-  load documents if that turns out to be the simplest route.
+- Default features stay near Serde-level: `serde`, `serde_json`, `chrono`,
+  `biscuit-hash`, and Biscuit File with only its `yaml` feature. Renewal and the
+  frontmatter reader live in the library, so these are not optional.
+- The CLI loads documents through the library's frontmatter reader, never
+  through Darkmatter, so the CLI and every library caller parse a document the
+  same way.
 
 Sniff, Biscuit File, and Tree Hugger do not depend on Darkmatter today, so the
 planned integrations meet this rule.
@@ -603,10 +975,13 @@ Tree Hugger's symbol identity alone is not a content-change fingerprint.
 A file's modification time is not a portable substitute for its content baseline.
 Request credentials and runtime network policy belong to provider configuration.
 
-A `FileChanged` path is resolved relative to the directory of the document that
-declares it, through Biscuit File's `FileReference`. It is stored with `/`
-separators on every OS, so a policy written on Windows evaluates the same on
-macOS and Linux.
+A `FileChanged` path is resolved relative to a **base directory** through
+Biscuit File's `FileReference`. An evidence record alone has no location (a
+cache manifest has no document directory), so the core evaluation API takes the
+base directory as an explicit input. The CLI sets it to the directory of the
+document being checked; a cache consumer supplies whatever directory its
+manifest's paths are relative to. The path is stored with `/` separators on
+every OS, so a policy written on Windows evaluates the same on macOS and Linux.
 
 ## Later Policy Decisions
 
@@ -616,7 +991,6 @@ These candidates retain the original idea without claiming settled semantics:
 | --- | --- |
 | `SemVerMajorChange` | Package identity, registry, baseline version, release channel; propose a strictly newer major release |
 | `SemVerMinorChange` | Propose a newer minor or major release; define prerelease and pre-1.0 behavior |
-| `FileChanged` | In scope as the second phase of this feature. Propose byte-content fingerprints; define missing/deleted file behavior. Line-ending handling and the structured declaration shape are rulings required before that phase ([Open Questions 4 and 5](#open-questions)) |
 | `SymbolChanged` | File plus qualified selector, ambiguity/deletion handling, signature/body/docs scope |
 | `UrlChanged` | Request identity, selected response content, normalization, conditional-response handling |
 | `SchemaChanged` | Structural changes versus compatibility-breaking changes; schema dialect and reference scope |
@@ -649,8 +1023,12 @@ default and requires both `--json` and `--plain`.)*
   summary line, then a `Table` of entries. `--plain` removes styling, and
   `--json` prints the serialized report as the only content on stdout.
 - `--at <YYYY-MM-DD>` sets the evaluation time to midnight UTC on that date.
-  Scripts and reviewers can then reproduce a past or future verdict without
-  changing the system clock.
+  Scripts and reviewers can then see a future verdict, or reproduce a past one,
+  without changing the system clock. A past verdict is reproducible only for
+  dates on or after the document's current baselines: evaluated before a
+  stored baseline, a `ValidFor` rule reads it as a future baseline and reports
+  `unknown`. Once a document has been renewed, `--at` cannot show what it
+  reported before the renewal.
 - Exit codes follow the repo standard. `0` means a report was produced, even one
   that reports `stale`, `expired`, or `unknown`. `1` covers invalid declarations,
   unreadable files, and malformed frontmatter; the diagnostics go to stderr,
@@ -685,24 +1063,59 @@ esac
   defaults to the current UTC date, and a future date is rejected (see
   [Renewal rules](#renewal-rules--proposed)).
 - `--write` applies the planned edits to the file.
-- Exit codes: `0` means a preview was produced or the edits were written. `1`
-  covers every error, including a refused YAML shape (see
-  [Renewal file editing](#renewal-file-editing)), a conflict because the file
-  changed after the plan was made, and missing required evidence; nothing is
-  written in any of these cases. `2` is a usage error.
-- **Proposed** beyond the ruling: `renew` accepts `--plain` and `--json` for its
-  preview, like `check`; a policy with no renewable entry is not an error, so
-  it exits `0` with a preview that proposes no edits.
+- The preview labels each first capture of a missing baseline "new baseline",
+  distinct from a renewed value (see [Renewal rules](#renewal-rules--proposed)).
+- Output follows `check`: terminal-formatted by default, `--plain` removes
+  styling, and `--json` prints the serialized plan as the only content on
+  stdout.
+- A policy with nothing renewable, such as `Evergreen`, `TimeSensitive`, or
+  only `ValidUntil` rules, prints a "nothing to renew" message and exits `0`.
+  It is not an error.
+- Exit codes: `0` means a preview was produced, the edits were written, or
+  there was nothing to renew. `1` covers every error, including a refused YAML
+  shape (see [Renewal file editing](#renewal-file-editing)), a conflict because
+  the file changed after the plan was made, and missing required evidence;
+  nothing is written in any of these cases. `2` is a usage error.
 
 The contract requires explicit invocation, previewable edits, and no automatic
 refresh/archive/remove execution.
+
+### Configuration
+
+*(Decided 2026-09-28.)* Both subcommands take three settings as flags, each
+with an environment-variable fallback. This feature adds no configuration file.
+
+| Flag | Environment variable (proposed name) | Built-in value |
+| --- | --- | --- |
+| `--key <name>` | `CONTENT_POLICY_KEY` | `content_policy` |
+| `--default-policy <policy>` | `CONTENT_POLICY_DEFAULT` | `ValidFor(6mo)` |
+| `--date-property <name>` | `CONTENT_POLICY_DATE_PROPERTY` | `last_updated` |
+
+Precedence is flag, then environment variable, then the built-in value. For
+example, a CI job that must never treat an undeclared document as fresh sets
+the default once for every call:
+
+```sh
+export CONTENT_POLICY_DEFAULT='TimeSensitive'
+policy check notes.md                                   # default: TimeSensitive
+policy check --default-policy 'ValidFor(1yr)' notes.md  # the flag wins
+```
+
+`--default-policy` takes a policy, never `none`: there is always a default
+policy (see [Defaults and references](#defaults-and-references)). How a
+multi-entry default is spelled on the command line is left to implementation
+design.
 
 ## Acceptance Criteria for Implementation
 
 1. Compact and action-bearing declarations normalize consistently; defaults and
    baseline sources are visible in reports.
-2. Inline and referenced dates evaluate equivalently. Missing dates produce
-   unknown results, and wrong-typed values produce validation diagnostics.
+2. Inline and referenced dates evaluate equivalently, and quoted and unquoted
+   YAML dates are equivalent. Each row of the
+   [Evidence values](#evidence-values) table has a test: an absent property and
+   a present `null` (`last_updated:` with no value) both yield `unknown` with a
+   missing-baseline reason; a non-calendar date, a timestamp, and each non-string
+   type yield their validation diagnostics.
 3. A fixed evaluation time makes time-policy results deterministic, including
    exact deadlines, month ends, leap years, and future baselines.
 4. Reordering entries does not change the effective action. All combinations of
@@ -711,18 +1124,29 @@ refresh/archive/remove execution.
    baseline, including on the first evaluation.
 6. Renewal changes only the intended baseline values, preserves policy settings,
    consolidates shared writes, and rejects conflicts or incomplete capture.
-7. The lifecycle example below passes through both library and CLI behavior
-   (`policy check`, `policy renew`, and `policy renew --write`).
+7. The lifecycle example below produces the stated result at every step,
+   through both the library and the CLI (`policy check --at`, `policy renew`,
+   and `policy renew --write`).
 8. The file increment demonstrates the same lifecycle with a fake provider and
-   a bundled file adapter, including read failures and incompatible fingerprints.
-   This criterion is required for the feature to be done.
+   a bundled file adapter. Each row of the
+   [`FileChanged` outcome table](#filechanged-declaration) has a test,
+   including a removed file (`triggered`, "source removed"), a read failure
+   (`unknown`), and an unrecognized scheme (`unknown`). A `blake3-lf`
+   fingerprint of a file is unchanged when the file's line endings switch
+   between LF and CRLF; a `blake3` fingerprint changes. The one-argument
+   `FileChanged(path)` form is a validation error. First capture writes a
+   `blake3-lf:` value and renewal keeps an existing `blake3:` scheme. The
+   evidence-map API resolves `FileChanged` paths against an explicit base
+   directory, tested with a map that has no document behind it. This criterion
+   is required for the feature to be done.
 9. New crates follow repository package-area conventions and support macOS,
    Linux, native Windows, and WSL2. Implementation follows existing test recipes
    and maintains topic/dependency documentation and applicable skills.
 10. Fail-closed cases each have a test and none yields `fresh`. They cover: an
     empty policy list, `Evergreen` combined with another rule, a single-string
-    policy value, an absent policy when the caller has no default (`no_policy`),
-    and a serialized policy with a newer grammar version.
+    policy value, and a serialized policy with a newer grammar version. An
+    absent policy under a caller default of `TimeSensitive` yields `stale`,
+    and the library API offers no way to remove the default policy.
 11. The core library can evaluate a policy against a plain evidence map, with no
     Markdown document involved, and its dependency graph contains no path to
     Darkmatter.
@@ -731,52 +1155,113 @@ refresh/archive/remove execution.
     after the plan was made.
 13. The package's `docs/` topic page and README are updated to match the
     decisions in this spec, in particular the CLI output and exit codes, the
-    empty-list rule, and the `no_policy` outcome.
+    empty-list rule, and the always-present default policy.
 14. Renewal refuses, writes nothing, and names the block-list form in its
-    message for each unsupported shape: a flow-style policy list, a block or
-    multi-line scalar it must edit, and a double-quoted rule string containing
-    escape sequences. Each case has a test, and evaluation of the same
-    documents still succeeds (flow-style lists included).
+    message for each unsupported shape: a value to edit inside a flow-style
+    policy list, a block or multi-line scalar it must edit, and a double-quoted
+    rule string containing escape sequences. Each case has a test, and
+    evaluation of the same documents still succeeds (flow-style lists
+    included). A flow-style policy whose only edit target is outside the list,
+    such as `content_policy: [ValidFor(3mo, @last_updated)]`, renews
+    successfully, with a test.
 15. `policy check --needs-action` prints `true`, `false`, or `unknown` and exits
     `0` for each, with a test per answer; it exits `1` only for errors.
 16. The six `Duration(...)` notes under
     `biscuit-terminal/docs/research/terminal-multiplexing/` are rewritten to
     `ValidFor(...)` and evaluate without diagnostics. A `Duration(...)` entry is
     a validation error for an unknown rule name.
+17. A flow-style policy whose rule contains a comma, such as
+    `content_policy: [ValidFor(3mo, 2026-09-28)]`, produces a validation
+    diagnostic that names the comma split and shows the block-list form. It
+    has a test.
+18. A frontmatter block with a duplicate top-level key is a validation error,
+    with a test for a duplicated `content_policy` and for a duplicated
+    `last_updated`.
+19. Renewing a document with no frontmatter (evaluated under the default
+    policy) creates a frontmatter block holding the date property and leaves
+    the body byte-for-byte unchanged. It has a test.
+20. All three writers that stamp `last_updated`, across Darkmatter and
+    Claudine (`md hash`, Darkmatter's auto-rehash on effect write, and
+    Claudine's write-back), stamp the UTC date. Each has a test with an
+    injected clock at a moment when the local date is ahead of UTC, showing the
+    UTC date is written.
+21. `content-policy/schemas/content-policy.yaml` loads with
+    `md schema validate`. A mixed list of compact and `{ rule, action }`
+    entries validates; an unknown rule string (such as `Duration(3mo)`) and an
+    unknown action (such as `delete`) are each flagged. Once
+    `2026-09-28-recursive-schema-types` lands, the `doc.yaml` line loads and
+    the same cases hold for a document with no `$schema` of its own.
+22. The library's default features are `serde`, `serde_json`, `chrono`,
+    `biscuit-hash`, and Biscuit File with only `yaml`; `cargo tree` for the
+    default build shows no PDF crate.
+23. A policy's identity is unchanged by renewal and by changing an inline
+    baseline value, and changes when a rule, action, duration, deadline, path,
+    or `@name` reference changes. Each case has a test.
+24. `--key`, `--default-policy`, and `--date-property` each resolve with
+    precedence flag, then environment variable, then built-in value, with a
+    test per level.
+25. `policy renew` labels a first capture "new baseline" in its preview and
+    writes nothing without `--write`; it accepts `--plain` and `--json`; a
+    policy with nothing renewable prints "nothing to renew" and exits `0`.
+    Each has a test.
 
 ### Lifecycle example
 
-A document is updated on September 28, 2026. It has `ValidFor(3mo, @last_updated)`
-with `refresh` and `ValidUntil(2027-01-01)` with `archive`. Under the proposed
-date semantics it is fresh before December 28, stale on December 28, and renewed
-when an explicit content update sets the baseline to December 29. On January 1,
-2027 it is expired with action `archive`. Further content updates do not move
-that deadline or clear expiration. Changing the retirement action to `remove`
-changes the winning action, while every triggered entry remains in the report.
+A document has `last_updated: 2026-09-28` and this policy:
+
+```yaml
+content_policy:
+  - rule: ValidFor(3mo, @last_updated)
+    action: refresh
+  - rule: ValidUntil(2027-01-01)
+    action: archive
+```
+
+`3mo` from September 28 is December 28. Under the proposed date semantics:
+
+| Step | Command | Expected result |
+| --- | --- | --- |
+| 1 | `policy check --at 2026-12-27` | `fresh`, no action |
+| 2 | `policy check --at 2026-12-28` | `stale`, action `refresh` (`ValidFor` triggered) |
+| 3 | `policy renew --on 2026-12-29 --write` | `last_updated` becomes `2026-12-29`; nothing else changes |
+| 4 | `policy check --at 2026-12-29` | `fresh`, no action (the new deadline is March 29, 2027) |
+| 5 | `policy check --at 2026-12-28` | `unknown`: the baseline is now in that date's future |
+| 6 | `policy check --at 2027-01-01` | `expired`, action `archive` (`ValidUntil` triggered, `ValidFor` not) |
+| 7 | `policy renew --on 2027-01-01 --write`, then check at `2027-01-01` | still `expired`, action `archive`: renewal does not move the deadline |
+| 8 | Change the second entry's action to `remove`, check at `2027-01-01` | `expired`, action `remove`; the report still lists both entries with their results |
+
+Each renewal step runs with the current date at or after its `--on` date,
+because renewal rejects a future update date; tests inject the clock rather
+than waiting for the calendar.
 
 ## Open Questions
 
 The review turned the draft's review questions into this list. Where it
 recommends an answer, it gives the options with their pros and cons. The
-2026-09-28 clarification settled the former questions on renewal file editing,
-`--is-stale` output, the renewal command shape, and scope (see
-[Decisions](#decisions-2026-09-28-clarification)); the remaining questions are
-renumbered.
+2026-09-28 clarifications settled the former questions on renewal file editing,
+`--is-stale` output, the renewal command shape, scope, the default date
+property, evidence typing, and the frontmatter reader (see
+[Decisions](#decisions-2026-09-28-clarification)). The third batch settled the
+questions on policy identity scope, CLI configuration, `no_policy` in the CLI,
+`renew` output formats, first capture in plain `renew`, renewing a flow-style
+policy, line endings in content fingerprints, and the `FileChanged` declaration
+shape. The remaining questions are renumbered.
 
-### 1. Defaults and references
+### 1. References and the empty list
 
-Approve `last_updated` as the default date property and top-level-only `@name`?
-Nested references can wait unless existing document metadata needs them. The
-empty-list rule has changed from the draft (it is now an error; see
-[Defaults and references](#defaults-and-references--proposed)). Confirm or
-reverse that change. The default policy key, `content_policy`, is already
-decided and is not part of this question.
+Approve top-level-only `@name`? Nested references can wait unless existing
+document metadata needs them. The empty-list rule has changed from the draft
+(it is now an error; see [Defaults and references](#defaults-and-references)).
+Confirm or reverse that change. The default policy key (`content_policy`) and
+the default date property (`last_updated`) are already decided and are not part
+of this question.
 
-### 2. Dates
+### 2. Date boundary
 
 Approve midnight UTC expiration, calendar month/year clamping, and the initial
 date-only duration grammar? In particular, should a named `ValidUntil` date
-instead remain valid through that entire day?
+instead remain valid through that entire day (expiring at the end of the day
+rather than its start)? Timestamps stay deferred either way.
 
 ### 3. Where "warn or fail" stale behavior lives
 
@@ -800,43 +1285,18 @@ needs (refresh, archive, remove), not how a cache should respond meanwhile.
 **Recommendation:** option 1, because the owner of the response is the consumer,
 not the document author.
 
-### 4. Line endings in `FileChanged` fingerprints
+### 4. How the base schema line reaches DMLS
 
-On Windows, Git's `core.autocrlf` can check out the same committed file with
-CRLF line endings. A raw-byte fingerprint recorded on macOS would then report a
-change on Windows that never happened. The repo requires every package to work
-on all four environments, so this must be settled before the file increment.
-**This ruling is required before the `FileChanged` phase starts**; it is not
-deferred.
-
-1. **Record a normalization in the fingerprint scheme (recommended).** For
-   example, `algorithm: blake3` with `normalize: lf`: CRLF is converted to LF
-   before hashing. The scheme field already required above makes the choice
-   explicit and recapturable.
-   - Pros: the same verdict on every OS; the scheme records the choice.
-   - Cons: a CRLF-only change is invisible, which is the intent for text but
-     wrong for binary files. Binary files can opt out with `normalize: none`.
-2. **Raw bytes only.**
-   - Pros: simplest; exact.
-   - Cons: false "changed" results on Windows checkouts.
-3. **Normalize only when the file decodes as UTF-8 text.**
-   - Pros: automatic.
-   - Cons: implicit behavior that differs by file content is hard to explain,
-     and the result can flip when a file gains a single non-UTF-8 byte.
-
-**Recommendation:** option 1, with `lf` as the default for `FileChanged`.
-
-### 5. Declaration shape
-
-Approve `{ rule, action }` with a string or structured rule, including the
-baseline object for fingerprint policies and quoted `"@name"` references in the
-structured form?
-
-The time-rule phase needs only the compact and `{ rule, action }` string
-forms already shown. **The structured grammar as it applies to `FileChanged`
-is a ruling required before the `FileChanged` phase starts**; it is not
-deferred.
+The [editor schema](#editor-schema) is added to
+`darkmatter/schemas/partials/doc.yaml`, part of Darkmatter's authored schema
+catalog. Darkmatter's runtime baseline is still the embedded
+`darkmatter/docs/schemas/darkmatter.yaml`, and the move to the authored catalog
+is pending. Until it lands, the new line types nothing in DMLS. When it lands,
+an embedded baseline that references a file in another package area has to
+resolve that path somehow. Is the line enough on its own, or does this feature
+also add the same reference to the embedded baseline, or wait for the
+migration?
 
 Questions 1 to 3 should be answered before implementation planning and public
-Rust API design. Questions 4 and 5 must be answered before the `FileChanged`
-phase starts.
+Rust API design. Question 4 must be answered before the schema tasks close. No
+open question blocks the `FileChanged` phase.
