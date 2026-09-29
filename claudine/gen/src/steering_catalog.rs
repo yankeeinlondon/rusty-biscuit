@@ -12,10 +12,11 @@
 //! - `docs/providers.yaml` owns the roster order listings sort by.
 //! - `docs/research/non-interactive-sessions/<slug>.md` owns execution
 //!   interfaces and the preferred/fallback selection.
-//! - [`ACTIVATION_POLICY`] owns reviewed adapter bindings and activation
-//!   grants. It is hand-reviewed policy, never derived from research: a new
-//!   passing verification record grants nothing until a reviewed grant names
-//!   it, and a grant is rejected unless research supports every part of it.
+//! - [`ACTIVATION_POLICY`] owns reviewed adapter bindings, activation grants,
+//!   and profile blocks. It is hand-reviewed policy, never derived from
+//!   research: a new passing verification record grants nothing until a
+//!   reviewed grant names it, a grant is rejected unless research supports
+//!   every part of it, and a blocked profile cannot be granted at all.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -96,7 +97,7 @@ where
         .ok_or_else(|| serde::de::Error::custom("expected a list, found null"))
 }
 
-/// The hand-reviewed activation policy. Both lists are required keys: an
+/// The hand-reviewed activation policy. Every list is a required key: an
 /// absent or null list is malformed, never an empty policy.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,6 +108,21 @@ pub struct ActivationPolicy {
     /// Exact activation grants.
     #[serde(deserialize_with = "non_null_list")]
     pub grants: Vec<PolicyGrant>,
+    /// Launch profiles reviewed and refused for steering.
+    #[serde(deserialize_with = "non_null_list")]
+    pub blocks: Vec<PolicyBlock>,
+}
+
+/// One reviewed refusal: a launch profile no grant may activate.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyBlock {
+    #[serde(deserialize_with = "strict_string")]
+    pub provider: String,
+    #[serde(deserialize_with = "strict_string")]
+    pub profile_id: String,
+    #[serde(deserialize_with = "strict_string")]
+    pub reason: String,
 }
 
 /// One reviewed adapter binding.
@@ -430,9 +446,26 @@ pub fn activation_errors(slug: &str, research: &ResearchSteering, policy: &Activ
         }
     }
 
+    let mut blocked = BTreeSet::new();
+    for (index, block) in policy.blocks.iter().enumerate().filter(|(_, block)| block.provider == slug) {
+        let label = format!("blocks[{index}] {slug}/{}", block.profile_id);
+        if !blocked.insert(block.profile_id.as_str()) {
+            errors.push(format!("{label}: profile is blocked more than once"));
+        }
+        if block.reason.trim().is_empty() {
+            errors.push(format!("{label}: a block must state its reason"));
+        }
+        if !research.cases.iter().any(|case| case.profile_id == block.profile_id) {
+            errors.push(format!("{label}: no researched case uses this profile"));
+        }
+    }
+
     let mut seen = BTreeSet::new();
     for (index, grant) in policy.grants.iter().enumerate().filter(|(_, grant)| grant.provider == slug) {
         let label = format!("grants[{index}] {slug}/{}", grant.mechanism_id);
+        if blocked.contains(grant.profile_id.as_str()) {
+            errors.push(format!("{label}: profile `{}` is blocked by the reviewed policy", grant.profile_id));
+        }
         let key = (
             &grant.mechanism_id, &grant.profile_id, grant.os, &grant.provider_version,
             grant.launch_mode, grant.origin, grant.session_state,
@@ -597,6 +630,11 @@ pub fn orphan_policy_errors(active: &[String], policy: &ActivationPolicy) -> Vec
     for (index, grant) in policy.grants.iter().enumerate() {
         if !active.contains(&grant.provider) {
             errors.push(format!("grants[{index}]: unknown provider `{}`", grant.provider));
+        }
+    }
+    for (index, block) in policy.blocks.iter().enumerate() {
+        if !active.contains(&block.provider) {
+            errors.push(format!("blocks[{index}]: unknown provider `{}`", block.provider));
         }
     }
     let mut ids = BTreeSet::new();
@@ -777,16 +815,17 @@ fn emit_file(
         out.push_str(&format!("//   docs/research/{RESEARCH_TOPIC}/{slug}.md (researched steering facts)\n"));
         out.push_str(&format!("//   docs/research/{EXECUTION_TOPIC}/{slug}.md (execution interfaces)\n"));
     }
-    out.push_str(&format!("//   {ACTIVATION_POLICY} (reviewed adapters and activation grants)\n"));
+    out.push_str(&format!("//   {ACTIVATION_POLICY} (reviewed adapters, activation grants, and profile blocks)\n"));
     out.push_str(
         "// Regenerate with `cargo run -p claudine-gen -- generate`; drift-check with\n\
          // `cargo run -p claudine-gen -- check` (the same code path as the drift test).\n\n\
          //! Generated steering facts and the reviewed activation policy.\n\
          //!\n\
-         //! [`provider_steering`] exposes researched facts. [`REVIEWED_ADAPTERS`] and\n\
-         //! [`ACTIVATION_GRANTS`] are the separately reviewed policy; a grant here has\n\
-         //! already passed the generator's exact applicability check, but runtime\n\
-         //! eligibility still requires its adapter to be implemented.\n\n\
+         //! [`provider_steering`] exposes researched facts. [`REVIEWED_ADAPTERS`],\n\
+         //! [`ACTIVATION_GRANTS`], and [`PROFILE_BLOCKS`] are the separately reviewed\n\
+         //! policy; a grant here has already passed the generator's exact\n\
+         //! applicability check, but runtime eligibility still requires its adapter\n\
+         //! to be implemented.\n\n\
          use claudine_catalog_types::steering::*;\n\n\
          use crate::provider_id::Provider;\n\n",
     );
@@ -846,7 +885,20 @@ fn emit_file(
         })
         .collect();
     out.push_str("/// Reviewed exact activation grants.\n");
-    out.push_str(&format!("pub(crate) static ACTIVATION_GRANTS: &[ActivationGrant] = {};\n", top_slice(grants)));
+    out.push_str(&format!("pub(crate) static ACTIVATION_GRANTS: &[ActivationGrant] = {};\n\n", top_slice(grants)));
+
+    let blocks: Vec<String> = policy
+        .blocks
+        .iter()
+        .map(|b| {
+            format!(
+                "    ProfileBlock {{ provider: {:?}, profile_id: {:?}, reason: {:?} }},\n",
+                b.provider, b.profile_id, b.reason
+            )
+        })
+        .collect();
+    out.push_str("/// Launch profiles the reviewed policy refuses to activate.\n");
+    out.push_str(&format!("pub(crate) static PROFILE_BLOCKS: &[ProfileBlock] = {};\n", top_slice(blocks)));
     Ok(out)
 }
 

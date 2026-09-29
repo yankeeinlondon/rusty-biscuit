@@ -295,12 +295,13 @@ fn shipped_catalog_activates_nothing_without_reviewed_grants() {
 }
 
 /// The existing Pi verification records are evidence only: even the passing
-/// active-steering fixture grants nothing without a reviewed grant.
+/// active-steering fixture grants nothing without a reviewed grant, and the
+/// shipped policy blocks the profile before a grant is even considered.
 #[test]
 fn pi_passing_fixture_records_are_not_activation_grants() {
     let pi = crate::steering::facts(Provider::Pi);
     let active = pi.verification.iter().find(|record| record.id == "pi-rpc-steer-active-0844").unwrap();
-    let result = evaluate(&SessionFacts {
+    let session = SessionFacts {
         provider: Provider::Pi,
         profile_id: active.profile_id,
         os: active.os,
@@ -308,11 +309,73 @@ fn pi_passing_fixture_records_are_not_activation_grants() {
         origin: active.origin,
         state: active.state,
         provider_version: Some(active.provider_version),
-    });
+    };
+    let result = evaluate(&session);
     assert_eq!(result.manual.availability, SteeringAvailability::Unavailable);
     assert!(
-        result.manual.blockers.iter().any(|blocker| matches!(blocker, Blocker::NotActivated { mechanism: "rpc-steer", setup: Some(_) })),
+        matches!(result.manual.blockers.as_slice(), [Blocker::ProfileBlocked { .. }]),
         "{:?}",
         result.manual.blockers
     );
+
+    let unblocked = evaluate_with(&session, pi, crate::steering::activation_grants(), &crate::steering::adapters::is_usable);
+    assert!(
+        unblocked.manual.blockers.iter().any(|blocker| matches!(blocker, Blocker::NotActivated { mechanism: "rpc-steer", setup: Some(_) })),
+        "{:?}",
+        unblocked.manual.blockers
+    );
+}
+
+/// The shipped policy blocks Pi's managed RPC profile on every OS, state,
+/// and version, including unknown ones, with the reviewed reason.
+#[test]
+fn shipped_policy_blocks_pi_managed_rpc_with_its_reason() {
+    let block = crate::steering::profile_blocks()
+        .iter()
+        .find(|block| block.provider == "pi" && block.profile_id == "retained-rpc")
+        .expect("the reviewed Pi block ships");
+    assert!(block.reason.contains("expected-session guard"), "{}", block.reason);
+    for os in [HostOs::Macos, HostOs::Linux, HostOs::Windows] {
+        for state in [ExecutionState::Working, ExecutionState::Idle, ExecutionState::Unknown] {
+            for version in [Some("0.84.4"), None] {
+                let result = evaluate(&SessionFacts {
+                    provider: Provider::Pi,
+                    profile_id: "retained-rpc",
+                    os,
+                    launch_mode: LaunchMode::NonInteractive,
+                    origin: LaunchOrigin::Claudine,
+                    state,
+                    provider_version: version,
+                });
+                assert_eq!(result.manual.blockers, [Blocker::ProfileBlocked { reason: block.reason }]);
+                let summary = result.manual.summary();
+                assert_eq!(summary.availability, SteeringAvailability::Unavailable);
+                assert_eq!(
+                    summary.reason.as_deref(),
+                    Some(format!("steering is blocked for this launch profile: {}", block.reason).as_str())
+                );
+                assert!(summary.setup_requirements.is_empty(), "setup cannot lift a reviewed block");
+            }
+        }
+    }
+    // The reviewed Pi adapter is implemented; the block, not a missing
+    // adapter, is what refuses the profile.
+    assert!(crate::steering::adapters::is_usable(crate::steering::adapters::PI_RPC));
+}
+
+#[test]
+fn a_profile_block_outranks_a_matching_grant_and_spares_other_profiles() {
+    let blocks = [ProfileBlock { provider: "pi", profile_id: "managed", reason: "reviewed refusal" }];
+    let grants = all_grants();
+    let blocked = evaluate_with_policy(&session(ExecutionState::Working), &FACTS, &Policy { grants: &grants, blocks: &blocks }, &implemented);
+    assert_eq!(blocked.manual.blockers, [Blocker::ProfileBlocked { reason: "reviewed refusal" }]);
+    assert_eq!(blocked.manual.route, None);
+    assert!(matches!(blocked.automatic, AutomaticEligibility::Unavailable(AutomaticBlocker::NoNonInterruptingRoute)));
+
+    let other_profile = [ProfileBlock { provider: "pi", profile_id: "elsewhere", reason: "x" }];
+    let open = evaluate_with_policy(&session(ExecutionState::Working), &FACTS, &Policy { grants: &grants, blocks: &other_profile }, &implemented);
+    assert_eq!(open.manual.availability, SteeringAvailability::NonInterrupting);
+    let other_provider = [ProfileBlock { provider: "codex", profile_id: "managed", reason: "x" }];
+    let open = evaluate_with_policy(&session(ExecutionState::Working), &FACTS, &Policy { grants: &grants, blocks: &other_provider }, &implemented);
+    assert_eq!(open.manual.availability, SteeringAvailability::NonInterrupting);
 }

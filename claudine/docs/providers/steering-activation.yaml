@@ -15,15 +15,13 @@
 #      semantics, early receipt timing, and access all agree, and the named
 #      verification records match that exact case, passed, document no
 #      expected loss, and together cover the operation's required assertions.
+#   4. `blocks` does not name the grant's profile. A block is a reviewed
+#      refusal with its reason; the generator rejects any grant for a blocked
+#      profile, and runtime eligibility reports the reason before anything
+#      else about that profile.
 #
-# Both keys are required; an empty list means "nothing reviewed". Quote
+# Every key is required; an empty list means "nothing reviewed". Quote
 # version numbers that YAML could read as numbers (for example "1.2").
-#
-# Adapter entry:
-#   - id: pi-rpc
-#     revision: 1
-#     provider: pi
-#     mechanism_ids: [rpc-steer]
 #
 # Grant entry:
 #   - provider: pi
@@ -37,5 +35,26 @@
 #     origin: claudine
 #     session_state: working
 #     verification_ids: [<verification id>]
-adapters: []
+adapters:
+  # `cli/src/commands/wrap/exec/pi_rpc/executor.rs`: steer while working,
+  # prompt while idle, and consented abort-then-prompt, each behind a fresh
+  # `get_state` taken under the owner's mutation lock.
+  - id: pi-rpc
+    revision: 1
+    provider: pi
+    mechanism_ids: [rpc-steer, rpc-idle-prompt, rpc-abort-submit]
 grants: []
+blocks:
+  # Pi's `steer` and `prompt` act on whatever session is current, with no
+  # expected-session guard. The switch-race record `pi-rpc-steer-switch-0844`
+  # shows an extension holding a switch while `get_state` still reports the
+  # old session: a steer sent then is acknowledged and lost. Claudine keeps
+  # extensions enabled, and its mutation lock cannot serialize a switch an
+  # extension starts on its own, so no targeting check before sending is
+  # effective for this profile.
+  - provider: pi
+    profile_id: retained-rpc
+    reason: >-
+      Pi offers no expected-session guard, and an enabled extension can switch
+      the session outside Claudine's control, so a message could be accepted
+      and then lost to the replaced session.

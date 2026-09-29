@@ -407,6 +407,16 @@ pub struct ActivationGrant {
     pub verification_ids: &'static [&'static str],
 }
 
+/// A launch profile the reviewed policy refuses to activate for steering,
+/// whatever its research or verification says, with the reviewed reason.
+/// A block and a grant for the same profile cannot coexist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ProfileBlock {
+    pub provider: &'static str,
+    pub profile_id: &'static str,
+    pub reason: &'static str,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

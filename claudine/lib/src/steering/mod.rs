@@ -9,7 +9,8 @@
 //!
 //! A case is selectable only when research, a reviewed exact activation
 //! grant, and an implemented adapter ([`adapters::IMPLEMENTED_ADAPTERS`]) all
-//! agree. Anything less leaves it unavailable with a specific [`eligibility::Blocker`].
+//! agree, and the reviewed policy does not block its launch profile. Anything
+//! less leaves it unavailable with a specific [`eligibility::Blocker`].
 //!
 //! Design authority: `2026-09-08-steering`.
 
@@ -25,7 +26,7 @@ pub mod identity;
 pub use claudine_catalog_types::steering as vocabulary;
 
 use crate::provider_id::Provider;
-use vocabulary::{ActivationGrant, AdapterRef, ProviderSteering};
+use vocabulary::{ActivationGrant, AdapterRef, ExecutionSelection, ProfileBlock, ProviderSteering};
 
 /// The OS this build runs on. WSL is Linux; native Windows is distinct.
 pub fn host_os() -> vocabulary::HostOs {
@@ -67,4 +68,15 @@ pub fn activation_grants() -> &'static [ActivationGrant] {
 /// Reviewed adapter revisions named by the activation policy.
 pub fn reviewed_adapters() -> &'static [AdapterRef] {
     generated::REVIEWED_ADAPTERS
+}
+
+/// Launch profiles the activation policy refuses, with their reasons.
+pub fn profile_blocks() -> &'static [ProfileBlock] {
+    generated::PROFILE_BLOCKS
+}
+
+/// The researched preferred and fallback execution interfaces for
+/// `provider`, when its research selects one.
+pub fn execution_selection(provider: Provider) -> Option<&'static ExecutionSelection> {
+    facts(provider).execution_selection.as_ref()
 }

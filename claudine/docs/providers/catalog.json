@@ -42196,11 +42196,7 @@
             {
               "cli_flag": "--mode",
               "companion_flags": [
-                "--no-approve",
-                "--no-extensions",
-                "--no-skills",
-                "--no-prompt-templates",
-                "--no-context-files"
+                "--no-approve"
               ],
               "format": "stream",
               "native_name": "json",

@@ -1,8 +1,9 @@
 //! Implemented steering adapter identifiers.
 //!
 //! An adapter is the hand-written protocol code that carries one provider's
-//! steering mechanism. Its identifier and revision appear here only when the
-//! implementation exists; the activation policy
+//! steering mechanism; it lives beside the managed launch that owns the
+//! provider's I/O (the CLI wrapper). Its identifier and revision appear here
+//! only when the implementation exists; the activation policy
 //! (`docs/providers/steering-activation.yaml`) separately records review.
 //! Runtime eligibility requires both, and the test below keeps the two sets
 //! equal so neither can grant activation alone. Bump an adapter's revision
@@ -11,8 +12,12 @@
 
 use super::vocabulary::AdapterRef;
 
+/// Pi's managed RPC adapter: `claudine-cli`
+/// `commands/wrap/exec/pi_rpc/executor.rs`.
+pub const PI_RPC: AdapterRef = AdapterRef { id: "pi-rpc", revision: 1 };
+
 /// Adapter revisions implemented in this build.
-pub const IMPLEMENTED_ADAPTERS: &[AdapterRef] = &[];
+pub const IMPLEMENTED_ADAPTERS: &[AdapterRef] = &[PI_RPC];
 
 /// Whether `adapter` is both implemented and reviewed.
 pub fn is_usable(adapter: AdapterRef) -> bool {

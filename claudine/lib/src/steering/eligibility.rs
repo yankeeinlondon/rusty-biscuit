@@ -1,11 +1,12 @@
 //! Deterministic steering eligibility for one concrete session.
 //!
 //! Eligibility is derived, never stored: a route exists only when the
-//! researched case supports it, the mechanism's operation fits the session
-//! state, its acknowledgment arrives before completion, access is available,
-//! a reviewed grant matches the exact provider version and case, and the
-//! grant's adapter revision is implemented. Every failed gate becomes a
-//! [`Blocker`] with an actionable reason.
+//! reviewed policy does not block the launch profile, the researched case
+//! supports it, the mechanism's operation fits the session state, its
+//! acknowledgment arrives before completion, access is available, a reviewed
+//! grant matches the exact provider version and case, and the grant's adapter
+//! revision is implemented. Every failed gate becomes a [`Blocker`] with an
+//! actionable reason.
 //!
 //! Automatic help additionally requires a non-interrupting route that can
 //! reach a turn which never ends ([`SteeringMechanism::rescues_active_loop`]);
@@ -15,7 +16,7 @@ use std::fmt;
 
 use super::vocabulary::{
     AccessStatus, ActivationGrant, AdapterRef, CaseSupport, ExecutionState, HostOs, LaunchMode,
-    LaunchOrigin, ProviderSteering, ReceiptStrength, ReceiptTiming, SteeringAvailability,
+    LaunchOrigin, ProfileBlock, ProviderSteering, ReceiptStrength, ReceiptTiming, SteeringAvailability,
     SteeringMechanism,
 };
 use crate::provider_id::Provider;
@@ -37,6 +38,8 @@ pub struct SessionFacts<'a> {
 /// One specific reason a mechanism or session cannot be steered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Blocker {
+    /// The reviewed policy refuses this launch profile, whatever else holds.
+    ProfileBlocked { reason: &'static str },
     StateUnknown,
     VersionUnknown,
     NoResearchCase,
@@ -55,6 +58,7 @@ pub enum Blocker {
 impl fmt::Display for Blocker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ProfileBlocked { reason } => write!(f, "steering is blocked for this launch profile: {reason}"),
             Self::StateUnknown => f.write_str("session state could not be established"),
             Self::VersionUnknown => f.write_str("provider version could not be established"),
             Self::NoResearchCase => f.write_str("no research covers this launch profile, OS, mode, origin, and state"),
@@ -200,22 +204,39 @@ pub struct Eligibility {
 /// Evaluates `session` against the generated facts, reviewed grants, and
 /// implemented adapters of this build.
 pub fn evaluate(session: &SessionFacts<'_>) -> Eligibility {
-    evaluate_with(
+    evaluate_with_policy(
         session,
         super::facts(session.provider),
-        super::activation_grants(),
+        &Policy { grants: super::activation_grants(), blocks: super::profile_blocks() },
         &|adapter| super::adapters::is_usable(adapter),
     )
 }
 
-/// [`evaluate`] over explicit inputs.
+/// The reviewed activation policy eligibility evaluates against.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Policy<'a> {
+    pub grants: &'a [ActivationGrant],
+    pub blocks: &'a [ProfileBlock],
+}
+
+/// [`evaluate`] over explicit facts and grants, with no profile blocks.
 pub fn evaluate_with(
     session: &SessionFacts<'_>,
     facts: &'static ProviderSteering,
     grants: &[ActivationGrant],
     adapter_usable: &dyn Fn(AdapterRef) -> bool,
 ) -> Eligibility {
-    let (routes, blockers) = routes(session, facts, grants, adapter_usable);
+    evaluate_with_policy(session, facts, &Policy { grants, blocks: &[] }, adapter_usable)
+}
+
+/// [`evaluate`] over explicit inputs.
+pub fn evaluate_with_policy(
+    session: &SessionFacts<'_>,
+    facts: &'static ProviderSteering,
+    policy: &Policy<'_>,
+    adapter_usable: &dyn Fn(AdapterRef) -> bool,
+) -> Eligibility {
+    let (routes, blockers) = routes(session, facts, policy, adapter_usable);
     let route = routes
         .iter()
         .find(|route| route.support == CaseSupport::NonInterrupting)
@@ -250,9 +271,19 @@ fn automatic(state: ExecutionState, routes: &[Route]) -> AutomaticEligibility {
 fn routes(
     session: &SessionFacts<'_>,
     facts: &'static ProviderSteering,
-    grants: &[ActivationGrant],
+    policy: &Policy<'_>,
     adapter_usable: &dyn Fn(AdapterRef) -> bool,
 ) -> (Vec<Route>, Vec<Blocker>) {
+    // A reviewed block does not depend on state or version, so it is the
+    // reason even when those are unknown.
+    if let Some(block) = policy
+        .blocks
+        .iter()
+        .find(|block| block.provider == session.provider.as_slug() && block.profile_id == session.profile_id)
+    {
+        return (Vec::new(), vec![Blocker::ProfileBlocked { reason: block.reason }]);
+    }
+    let grants = policy.grants;
     if session.state == ExecutionState::Unknown {
         return (Vec::new(), vec![Blocker::StateUnknown]);
     }

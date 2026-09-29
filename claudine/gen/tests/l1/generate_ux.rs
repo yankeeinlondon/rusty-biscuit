@@ -214,7 +214,7 @@ fn pi_grant(verification_id: &str) -> String {
         "{PI_ADAPTER}grants:\n  - provider: pi\n    mechanism_id: rpc-steer\n    operation: steer_active_turn\n    \
          adapter: {{ id: pi-rpc, revision: 1 }}\n    profile_id: retained-rpc\n    os: macos\n    \
          provider_version: \"0.84.4\"\n    launch_mode: non_interactive\n    origin: native\n    \
-         session_state: working\n    verification_ids: [{verification_id}]\n"
+         session_state: working\n    verification_ids: [{verification_id}]\nblocks: []\n"
     )
 }
 

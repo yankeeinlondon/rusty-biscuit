@@ -532,13 +532,13 @@ async fn an_unmapped_or_ungranted_launch_is_unavailable_with_a_reason() {
     assert_eq!(reply.result.outcome, SendOutcome::Unavailable);
     assert_eq!(reply.detail.unwrap().as_str(), UNMAPPED_PROFILE_REASON);
 
-    // The shipped catalog has no reviewed grants, so a researched Pi RPC
-    // launch reports its setup requirement instead of routing.
+    // The shipped policy blocks Pi's managed RPC profile, so a researched Pi
+    // RPC launch reports the reviewed reason instead of routing.
     let shipped = start_with(Some("retained-rpc"), Arc::new(crate::steering::eligibility::evaluate), FakeExecutor::scripted([]));
     let summary = shipped.controller.snapshot().availability;
     assert_eq!(summary.availability, SteeringAvailability::Unavailable);
-    assert!(summary.reason.unwrap().contains("no reviewed live verification"));
-    assert!(!summary.setup_requirements.is_empty());
+    assert!(summary.reason.unwrap().contains("steering is blocked for this launch profile"));
+    assert!(summary.setup_requirements.is_empty());
     assert_eq!(shipped.controller.submit(automatic(&shipped, 1)).await.result.outcome, SendOutcome::Unavailable);
     assert!(unmapped.executor.delivered().is_empty() && shipped.executor.delivered().is_empty());
 }

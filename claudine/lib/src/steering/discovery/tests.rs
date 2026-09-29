@@ -244,7 +244,9 @@ async fn at_most_four_providers_are_discovered_at_once() {
 async fn unknown_state_or_profile_is_listed_but_unavailable() {
     let unknown_state = NativeObservation { state: ExecutionState::Unknown, ..observation(process(1, "1"), "a", "/a") };
     let unknown_profile = NativeObservation { launch_profile: None, ..observation(process(2, "2"), "b", "/b") };
-    let report = run(None, vec![Native::ok(Provider::Pi, vec![unknown_state, unknown_profile])]).await.unwrap();
+    // Codex, because the shipped policy blocks Pi's `retained-rpc` profile,
+    // and a reviewed block is reported ahead of an unknown state.
+    let report = run(None, vec![Native::ok(Provider::Codex, vec![unknown_state, unknown_profile])]).await.unwrap();
     let reasons: Vec<Option<&str>> = report.sessions.iter().map(|row| row.availability.reason.as_deref()).collect();
     assert_eq!(
         reasons,

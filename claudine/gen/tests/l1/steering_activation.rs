@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use claudine_gen::steering_catalog::{
-    ActivationPolicy, PolicyAdapterRef, PolicyGrant, ReviewedAdapter, activation_errors,
+    ActivationPolicy, PolicyAdapterRef, PolicyBlock, PolicyGrant, ReviewedAdapter, activation_errors,
     load_research, orphan_policy_errors, parse_activation_policy, project_research,
 };
 use claudine_gen::GenError;
@@ -55,7 +55,11 @@ fn control_grant() -> PolicyGrant {
 
 fn errors_for(grant: PolicyGrant, adapters: Vec<ReviewedAdapter>) -> Vec<String> {
     let research = load_research(&area(), "pi").expect("real Pi research projects");
-    activation_errors("pi", &research, &ActivationPolicy { adapters, grants: vec![grant] })
+    activation_errors("pi", &research, &ActivationPolicy { adapters, grants: vec![grant], blocks: vec![] })
+}
+
+fn block(profile_id: &str, reason: &str) -> PolicyBlock {
+    PolicyBlock { provider: "pi".into(), profile_id: profile_id.into(), reason: reason.into() }
 }
 
 fn assert_rejected(grant: PolicyGrant, needle: &str) {
@@ -130,7 +134,8 @@ fn adapter_must_bind_the_mechanism_and_belong_to_the_provider() {
 #[test]
 fn duplicate_grants_and_orphan_providers_are_rejected() {
     let research = load_research(&area(), "pi").unwrap();
-    let policy = ActivationPolicy { adapters: vec![adapter()], grants: vec![control_grant(), control_grant()] };
+    let policy =
+        ActivationPolicy { adapters: vec![adapter()], grants: vec![control_grant(), control_grant()], blocks: vec![] };
     let errors = activation_errors("pi", &research, &policy);
     assert!(errors.iter().any(|e| e.contains("duplicate grant")), "{errors:#?}");
 
@@ -138,12 +143,39 @@ fn duplicate_grants_and_orphan_providers_are_rejected() {
     orphan.provider = "copilot".into();
     let mut orphan_adapter = adapter();
     orphan_adapter.provider = "copilot".into();
+    let mut orphan_block = block("retained-rpc", "reviewed");
+    orphan_block.provider = "copilot".into();
     let errors = orphan_policy_errors(
         &["pi".to_string()],
-        &ActivationPolicy { adapters: vec![orphan_adapter, adapter()], grants: vec![orphan] },
+        &ActivationPolicy { adapters: vec![orphan_adapter, adapter()], grants: vec![orphan], blocks: vec![orphan_block] },
     );
-    assert!(errors.iter().any(|e| e.contains("unknown provider `copilot`")), "{errors:#?}");
+    assert!(errors.iter().any(|e| e.contains("grants[0]: unknown provider `copilot`")), "{errors:#?}");
+    assert!(errors.iter().any(|e| e.contains("blocks[0]: unknown provider `copilot`")), "{errors:#?}");
     assert!(errors.iter().any(|e| e.contains("reviewed more than once")), "{errors:#?}");
+}
+
+/// A reviewed block wins over any grant for its profile, and must itself
+/// name a researched profile, once, with a reason.
+#[test]
+fn a_blocked_profile_cannot_be_granted_and_blocks_are_validated() {
+    let research = load_research(&area(), "pi").unwrap();
+    let with = |blocks: Vec<PolicyBlock>, grants: Vec<PolicyGrant>| {
+        activation_errors("pi", &research, &ActivationPolicy { adapters: vec![adapter()], grants, blocks })
+    };
+    // Control: a block alone over a researched profile is valid.
+    assert_eq!(with(vec![block("retained-rpc", "no session guard")], vec![]), Vec::<String>::new());
+    // The accepted control grant is refused once its profile is blocked.
+    let errors = with(vec![block("retained-rpc", "no session guard")], vec![control_grant()]);
+    assert_eq!(errors, ["grants[0] pi/rpc-steer: profile `retained-rpc` is blocked by the reviewed policy"]);
+    // A block over another profile leaves the grant alone.
+    assert_eq!(with(vec![block("ordinary-cli", "not managed")], vec![control_grant()]), Vec::<String>::new());
+
+    let errors = with(vec![block("retained-rpc", "a"), block("retained-rpc", "b")], vec![]);
+    assert!(errors.iter().any(|e| e.contains("blocked more than once")), "{errors:#?}");
+    let errors = with(vec![block("retained-rpc", "  ")], vec![]);
+    assert!(errors.iter().any(|e| e.contains("must state its reason")), "{errors:#?}");
+    let errors = with(vec![block("no-such-profile", "x")], vec![]);
+    assert!(errors.iter().any(|e| e.contains("no researched case uses this profile")), "{errors:#?}");
 }
 
 #[test]
@@ -257,6 +289,10 @@ grants:
     origin: native
     session_state: working
     verification_ids: [pi-rpc-steer-active-0844]
+blocks:
+  - provider: pi
+    profile_id: ordinary-cli
+    reason: Ordinary launches expose no steering channel.
 ";
 
 fn parse(text: &str) -> Result<ActivationPolicy, GenError> {
@@ -264,21 +300,40 @@ fn parse(text: &str) -> Result<ActivationPolicy, GenError> {
 }
 
 /// Input-robustness matrix for the policy file. Load-bearing fields: the
-/// `adapters` and `grants` lists, and each grant's `verification_ids`,
-/// `provider_version`, and adapter `revision`. One edit per row.
+/// `adapters`, `grants`, and `blocks` lists, each grant's `verification_ids`,
+/// `provider_version`, and adapter `revision`, and each block's `profile_id`
+/// and `reason`. One edit per row.
 #[test]
 fn policy_parser_walks_the_input_robustness_matrix() {
     let control = parse(CONTROL_POLICY).expect("control policy parses");
     assert_eq!(control.grants.len(), 1);
     assert_eq!(control.grants[0].verification_ids, ["pi-rpc-steer-active-0844"]);
+    assert_eq!(control.blocks, [PolicyBlock {
+        provider: "pi".into(),
+        profile_id: "ordinary-cli".into(),
+        reason: "Ordinary launches expose no steering channel.".into(),
+    }]);
 
+    let blocks_section = "blocks:\n  - provider: pi\n    profile_id: ordinary-cli\n    reason: Ordinary launches expose no steering channel.\n";
     let rejected: &[(&str, String)] = &[
-        ("absent grants", CONTROL_POLICY.split("grants:").next().unwrap().to_string()),
+        ("absent grants", CONTROL_POLICY.split("grants:").next().unwrap().to_string() + blocks_section),
         ("absent adapters", CONTROL_POLICY.replace("adapters:\n  - id: pi-rpc\n    revision: 1\n    provider: pi\n    mechanism_ids: [rpc-steer]\n", "")),
-        ("null grants", "adapters: []\ngrants: null\n".into()),
-        ("null grants (empty value)", "adapters: []\ngrants:\n".into()),
-        ("grants wrong type", "adapters: []\ngrants: 123\n".into()),
-        ("grants every element wrong type", "adapters: []\ngrants: [123]\n".into()),
+        ("absent blocks", CONTROL_POLICY.replace(blocks_section, "")),
+        ("null grants", "adapters: []\ngrants: null\nblocks: []\n".into()),
+        ("null grants (empty value)", "adapters: []\ngrants:\nblocks: []\n".into()),
+        ("grants wrong type", "adapters: []\ngrants: 123\nblocks: []\n".into()),
+        ("grants every element wrong type", "adapters: []\ngrants: [123]\nblocks: []\n".into()),
+        ("null blocks", "adapters: []\ngrants: []\nblocks: null\n".into()),
+        ("null blocks (empty value)", "adapters: []\ngrants: []\nblocks:\n".into()),
+        ("blocks wrong type", "adapters: []\ngrants: []\nblocks: {}\n".into()),
+        ("blocks one element wrong type", CONTROL_POLICY.replace(blocks_section, &format!("{blocks_section}  - 7\n"))),
+        ("blocks every element wrong type", "adapters: []\ngrants: []\nblocks: [7]\n".into()),
+        ("block reason absent", CONTROL_POLICY.replace("    reason: Ordinary launches expose no steering channel.\n", "")),
+        ("block reason null", CONTROL_POLICY.replace("reason: Ordinary launches expose no steering channel.", "reason: null")),
+        ("block reason as number", CONTROL_POLICY.replace("reason: Ordinary launches expose no steering channel.", "reason: 7")),
+        ("block profile_id as list", CONTROL_POLICY.replace("profile_id: ordinary-cli", "profile_id: [ordinary-cli]")),
+        ("block duplicate key", CONTROL_POLICY.replace("    profile_id: ordinary-cli\n", "    profile_id: ordinary-cli\n    profile_id: retained-rpc\n")),
+        ("block unknown key", CONTROL_POLICY.replace("    profile_id: ordinary-cli\n", "    profile_id: ordinary-cli\n    until: 2027-01-01\n")),
         ("verification_ids one element wrong type", CONTROL_POLICY.replace("[pi-rpc-steer-active-0844]", "[pi-rpc-steer-active-0844, 7]")),
         ("verification_ids null", CONTROL_POLICY.replace("[pi-rpc-steer-active-0844]", "null")),
         ("provider_version as number", CONTROL_POLICY.replace("\"0.84.4\"", "0.84")),
@@ -287,7 +342,7 @@ fn policy_parser_walks_the_input_robustness_matrix() {
         ("unknown enum member", CONTROL_POLICY.replace("os: macos", "os: wsl")),
         ("unknown key", CONTROL_POLICY.replace("    os: macos\n", "    os: macos\n    trusted: true\n")),
         ("duplicate key", CONTROL_POLICY.replace("    os: macos\n", "    os: macos\n    os: linux\n")),
-        ("trailing document", format!("{CONTROL_POLICY}---\nadapters: []\ngrants: []\n")),
+        ("trailing document", format!("{CONTROL_POLICY}---\nadapters: []\ngrants: []\nblocks: []\n")),
         ("trailing garbage", format!("{CONTROL_POLICY}]]] not yaml")),
     ];
     for (label, text) in rejected {
@@ -300,10 +355,14 @@ fn policy_parser_walks_the_input_robustness_matrix() {
 
     // Empty lists are the defined "nothing reviewed" policy, distinct from
     // absence; an empty verification list parses but can never activate.
-    let empty = parse("adapters: []\ngrants: []\n").unwrap();
-    assert!(empty.adapters.is_empty() && empty.grants.is_empty());
-    let unverified = parse(&CONTROL_POLICY.replace("[pi-rpc-steer-active-0844]", "[]")).unwrap();
+    let empty = parse("adapters: []\ngrants: []\nblocks: []\n").unwrap();
+    assert!(empty.adapters.is_empty() && empty.grants.is_empty() && empty.blocks.is_empty());
+    // An empty reason parses; activation refuses it.
+    let unexplained = parse(&CONTROL_POLICY.replace("reason: Ordinary launches expose no steering channel.", "reason: \"\"")).unwrap();
     let research = load_research(&area(), "pi").unwrap();
+    let errors = activation_errors("pi", &research, &unexplained);
+    assert!(errors.iter().any(|e| e.contains("must state its reason")), "{errors:#?}");
+    let unverified = parse(&CONTROL_POLICY.replace("[pi-rpc-steer-active-0844]", "[]")).unwrap();
     let errors = activation_errors("pi", &research, &unverified);
     assert!(errors.iter().any(|e| e.contains("names no verification record")), "{errors:#?}");
 }

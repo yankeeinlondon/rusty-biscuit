@@ -22,16 +22,17 @@
 //   docs/research/non-interactive-sessions/pi.md (execution interfaces)
 //   docs/research/steering/antigravity.md (researched steering facts)
 //   docs/research/non-interactive-sessions/antigravity.md (execution interfaces)
-//   docs/providers/steering-activation.yaml (reviewed adapters and activation grants)
+//   docs/providers/steering-activation.yaml (reviewed adapters, activation grants, and profile blocks)
 // Regenerate with `cargo run -p claudine-gen -- generate`; drift-check with
 // `cargo run -p claudine-gen -- check` (the same code path as the drift test).
 
 //! Generated steering facts and the reviewed activation policy.
 //!
-//! [`provider_steering`] exposes researched facts. [`REVIEWED_ADAPTERS`] and
-//! [`ACTIVATION_GRANTS`] are the separately reviewed policy; a grant here has
-//! already passed the generator's exact applicability check, but runtime
-//! eligibility still requires its adapter to be implemented.
+//! [`provider_steering`] exposes researched facts. [`REVIEWED_ADAPTERS`],
+//! [`ACTIVATION_GRANTS`], and [`PROFILE_BLOCKS`] are the separately reviewed
+//! policy; a grant here has already passed the generator's exact
+//! applicability check, but runtime eligibility still requires its adapter
+//! to be implemented.
 
 use claudine_catalog_types::steering::*;
 
@@ -1411,7 +1412,14 @@ pub(crate) fn provider_steering(provider: Provider) -> &'static ProviderSteering
 pub(crate) static ROSTER_ORDER: &[Provider] = &[Provider::Claude, Provider::Codex, Provider::Gemini, Provider::Goose, Provider::KimiCode, Provider::OpenCode, Provider::QwenCode, Provider::Pi, Provider::Kilo, Provider::Antigravity];
 
 /// Reviewed adapter implementations named by the activation policy.
-pub(crate) static REVIEWED_ADAPTERS: &[AdapterRef] = &[];
+pub(crate) static REVIEWED_ADAPTERS: &[AdapterRef] = &[
+    AdapterRef { id: "pi-rpc", revision: 1 },
+];
 
 /// Reviewed exact activation grants.
 pub(crate) static ACTIVATION_GRANTS: &[ActivationGrant] = &[];
+
+/// Launch profiles the reviewed policy refuses to activate.
+pub(crate) static PROFILE_BLOCKS: &[ProfileBlock] = &[
+    ProfileBlock { provider: "pi", profile_id: "retained-rpc", reason: "Pi offers no expected-session guard, and an enabled extension can switch the session outside Claudine's control, so a message could be accepted and then lost to the replaced session." },
+];
