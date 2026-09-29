@@ -206,6 +206,8 @@ current, report a limit without retrying, and need no one watching it.
 | The three pre-roster files under `acp/` are deleted | `docs/research/acp/` |
 | Recipes name the `claudine` binary; every fleet prompt reports `err.msg` | `justfile`, `docs/research/*/_fleet.md` |
 | Draft of the narrowed steering prompt | `2026-09-29-steering-pipeline` |
+| The plan that carries out the remaining phases | [plan.md](plan.md) |
+| What any agent needs to know to write a contract or run a fleet | `.claude/skills/claudine/research-contracts.md` |
 | Draft of the narrowed steering contract, with Codex and Pi filled in from shipped code | `2026-09-29-steering-pipeline` |
 
 ## The contract standard
@@ -333,15 +335,19 @@ Research rotates over three researchers by position in the roster.
 | --- | --- | --- | --- |
 | OpenCode | `zai-coding-plan/glm-5.3` | provider default | provider default |
 | Claude | `sonnet` | high | low |
-| Codex | `gpt-6-luna` | high | low |
+| Codex | `gpt-6.1-sol` | medium | low |
+
+Codex used `gpt-6-luna` at high effort for the reasoning-level research of
+2026-09-29. A contract keeps a model that has left the rotation for as long
+as a document it wrote remains.
 
 OpenCode stays at its provider default until research confirms which levels
 `glm-5.3` accepts.
 
 - The order is chosen so that no agent researches its own provider. The plan
   stage fails when an assignment would break that rule.
-- A contract accepts only these agents and models. A document that records
-  `default` is rejected.
+- A contract accepts only the agents and models of the rotation, present and
+  past. A document that records `default` is rejected.
 - The document records what the agent reports at run time, and the refresh
   record states the resolved model.
 
@@ -382,9 +388,53 @@ flowchart LR
 | **summaries** | Re-runs a summary only when a document it reads is newer than the summary, then publishes. Skippable. | no |
 | **report** | Writes the refresh record. | yes |
 
-The driver is `claudine research {plan,run,report}` in `claudine-cli`,
-wrapped by `just refresh-research`. It runs `claudine sequence` and
-`claudine-gen` as the existing `providers` subcommands do.
+The driver is a set of Claudine prompts, entered through
+`just refresh-research`. Research is already run by prompts, and the refresh
+uses the same means: sequences, lifecycle events, and the expression engine.
+A Rust command is not built.
+
+Claudine cannot carry the whole refresh yet. Improvements to sequences and
+lifecycle events are under way in `2026-09-27-sequence-improvements` and
+related work. Until they land, `just research <topic>` carries the research
+stage, and the other stages are run by hand.
+
+#### What a prompt-driven refresh needs from Claudine
+
+Each row is something the refresh must do. "Verified" means it was exercised
+in the reasoning-level runs of 2026-09-29.
+
+| The refresh must | Claudine today | Basis |
+| --- | --- | --- |
+| Run one prompt over a roster | Yes | Verified |
+| Validate a document and reject it | Yes, in `success` | Verified |
+| Retry once and show the researcher what was rejected | Yes | Verified |
+| Skip a provider that is current | Yes, in `initialize` | Verified |
+| Write a stamp into a document | Yes, inside the repository | Verified |
+| Read a value from another document's frontmatter | Yes, `frontmatter(file, key)` | Verified |
+| Choose the researcher for each provider | No. One agent is planned before any step exists | Verified; described in `2026-09-27-sequence-improvements` |
+| Set reasoning effort | No. It is passed on the command line, in each agent's spelling | Verified |
+| Run several researchers at once over one roster | No. Three runs are started by a recipe | Verified |
+| Cover for a researcher at its usage limit | No. The recipe starts the covering runs | Verified |
+| Read only the documents a run owns | By a guard the prompt author must write | Verified, after a run failed without it |
+| Report a plan without acting | No. A dry run composes prompts and fires no lifecycle event, so it cannot say which providers would be skipped | Verified |
+| List every topic and check each is registered | Not examined. `find_files` exists | Documentation only |
+| Compare a document with its previous version | Not examined. A lifecycle event can run `git show` | Documentation only |
+| Write the refresh record | Not examined. Lifecycle events can write and append to files | Documentation only |
+| Run the gates, the generator, and the tests as steps | Not examined. A sequence step can be a shell task | Documentation only |
+| Be tested without a model | No. A prompt's lifecycle events fire only around a real launch | Verified |
+| Survive interruption and resume | Partly. A confirmed document is skipped; a budget ledger exists for sequences | Skipping verified; ledger from documentation |
+
+The rows answered "No" are what a Rust command would have supplied. Each is a
+requirement on the sequence and lifecycle work, and the first step of Phase 4
+is to examine that work against this table.
+
+Two of them deserve emphasis:
+
+- **Testing without a model.** Every defect the pilot found was invisible to
+  a dry run. A way to fire lifecycle events against a stand-in agent would
+  let a prompt be tested as code is.
+- **A plan that does not act.** The operator needs to see what would run, and
+  for how long, before spending a researcher's allowance.
 
 ### The topic manifest
 
@@ -407,8 +457,8 @@ researchers:
       model: sonnet
       effort: high
     - agent: codex
-      model: gpt-6-luna
-      effort: high
+      model: gpt-6.1-sol
+      effort: medium
 topics:
     - name: reasoning-level
       roster: providers.yaml
@@ -546,18 +596,18 @@ flowchart LR
 A topic is refreshed as soon as its contract is narrowed. No topic is
 refreshed under its current contract.
 
-Steps 1 to 3 proceed by hand, as the pilot did. The driver is built after
+Steps 1 to 3 proceed with `just research <topic>`. The driver is built after
 them, when the manifest, the rotation, and the relation rules have settled
-shapes.
+shapes and Claudine can carry it.
 
 ## Decisions (proposed; to be ratified)
 
 | ID | Decision | State |
 | --- | --- | --- |
-| D1 | The driver is Rust, `claudine research`, entered through `just refresh-research` | Proposed |
+| D1 | The driver is a set of Claudine prompts, entered through `just refresh-research`. No Rust command is built | Decided 2026-09-29 |
 | D2 | Topics are registered in `docs/research/topics.yaml`, guarded in both directions against the topic directories | Proposed |
 | D3 | The driver alone decides freshness. No prompt holds a freshness window | Proposed |
-| D3a | Research may be six weeks old by default. The expectation is that four weeks proves right | Decided 2026-09-29 |
+| D3a | Research may be 6 weeks old by default | Decided 2026-09-29 |
 | D4 | Research rotates over three researchers, and no agent researches its own provider | Decided 2026-09-29 |
 | D4a | Effort is high for a topic that feeds code generation and low for any other | Decided 2026-09-29 |
 | D5 | `claudine providers generate --yes` updates the pinned hashes | Proposed |
@@ -613,7 +663,7 @@ shapes.
 | 1 | Reasoning level: revision 2 of the contract, then a fleet run for all ten providers. **Done 2026-09-29: all ten providers confirmed under revision 2** | Criteria 1 to 3 for that topic |
 | 2 | Steering: narrowed contract live, relation rules, generator reads the new fields, fleet run | Criteria 1 to 3 for that topic |
 | 3 | Non-interactive sessions, the same way | Criteria 1 to 3 for that topic |
-| 4 | The driver: manifest, `plan`, `run`, `report`, the refresh record, the ledger, automated hashes | Criteria 4 to 9 |
+| 4 | The driver, as prompts: first examine the sequence and lifecycle improvements against the table of needs, then the manifest, the plan, the run, the refresh record, and the ledger | Criteria 4 to 9. Waits for the sequence and lifecycle improvements |
 | 5 | The remaining topics through the driver, in the stated order; summaries; docs and skill | Criteria 1 to 3 for every topic; 10 to 12 |
 | 6 | Freshness through `content_policy` declarations, including a fingerprint of every contract file | Blocked on `2026-09-28-content-policy` |
 
@@ -642,25 +692,7 @@ shapes.
 
 ## Open questions for the author
 
-### Q1. Who runs a refresh: a Rust command or a recipe?
-
-`just research <topic>` exists today as a shell recipe of about 60 lines. It
-runs the three researchers, covers for one at its usage limit, and checks
-that every provider ends with a confirmed document.
-
-The driver in this spec does more: it reads every document's frontmatter to
-decide what is stale, compares each document with its previous version, and
-writes the refresh record.
-
-| Option | For | Against |
-| --- | --- | --- |
-| A Rust command, `claudine research` | It can reuse Claudine's frontmatter reader, be tested against a fixture tree, and run on Windows | More work before the first full refresh |
-| Keep growing the recipe | It exists and works | Reading 200 documents and comparing them with git history in shell is fragile, and has no tests |
-
-**Recommendation:** Rust, built after steering and non-interactive sessions
-are narrowed. The recipe carries the work until then.
-
-### Q2. What happens to the pinned hashes?
+### Q1. What happens to the pinned hashes?
 
 `gen/tests/fixtures/generated-artifact-baseline.json` holds a hash of each of
 fifteen generated files, and a test fails when any file differs. It was
@@ -680,7 +712,7 @@ inputs.
 **Recommendation:** retire it. Updating it automatically keeps a test that
 can never fail.
 
-### Q3. Where does the operator's prompt live?
+### Q2. Where does the operator's prompt live?
 
 The operator's prompt is a command a person gives an agent to refresh
 research: it shows the plan, runs the refresh, reads the report, and proposes
@@ -694,7 +726,7 @@ a decision for each finding. It is a convenience over `just refresh-research`.
 **Recommendation:** the repository, as `prompts/refresh-research.md`. The
 prompt depends on this repository's recipe and report.
 
-### Q4. Are the summaries part of a refresh?
+### Q3. Are the summaries part of a refresh?
 
 A summary is one document per topic that compares all providers, such as
 `docs/research/summary/hooks.md`. A copy is published into the Claudine
@@ -715,7 +747,7 @@ produced from frontmatter by a script.
 **Recommendation:** the third for a narrowed topic, and the second for a
 topic that is not yet narrowed.
 
-### Q5. Where does the description lint live?
+### Q4. Where does the description lint live?
 
 The lint checks that every property of a contract has a description that
 carries meaning. A prototype is in [prototypes](prototypes/).
@@ -732,7 +764,7 @@ contracts too.
 **Recommendation:** Darkmatter. The rule is about contracts, and Claudine's
 are one case.
 
-### Q6. May a closed set contain a word that YAML reads as a truth value?
+### Q5. May a closed set contain a word that YAML reads as a truth value?
 
 A research document is YAML. The readers of a research document do not agree
 on what `yes`, `no`, `on`, and `off` mean when they are written without

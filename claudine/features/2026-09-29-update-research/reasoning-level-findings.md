@@ -131,6 +131,6 @@ appears in the second run.
 | A run could launch one agent while the document recorded another | Fixed: a run researches only the providers assigned to the agent it launches, and refuses a model outside the rotation |
 | The relations gate was not part of the fleet | Fixed: the fleet prompt runs it after the shape gate |
 | A description containing a colon followed by a space makes the contract unreadable | Open: the lint should reject it |
-| `yes`, `no`, and `off` are truth values to a YAML 1.1 reader | Open: Q6 of the spec |
+| `yes`, `no`, and `off` are truth values to a YAML 1.1 reader | Open: Q5 of the spec |
 | A run failed on a step it was going to skip, because another run was rewriting the document it tried to read | Fixed: a run reads only the documents it writes |
 | A researcher at its usage limit left its providers unresearched | Fixed: the others cover in rotation order |
