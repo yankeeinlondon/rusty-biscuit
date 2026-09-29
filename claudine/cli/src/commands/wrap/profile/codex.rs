@@ -9,7 +9,20 @@ use color_eyre::eyre::{Result, bail, eyre};
 use std::path::{Path, PathBuf};
 
 use super::{PromptDelivery, WrapperProfile, has_flag};
+use crate::commands::wrap::exec::codex_app_server::CodexAppServerSession;
+use crate::commands::wrap::exec::control::StdioControl;
 use std::io::Write;
+use std::sync::Arc;
+
+/// Research execution-interface id (`docs/research/non-interactive-sessions/codex.md`)
+/// of the managed launch the wrapper implements.
+const APP_SERVER_INTERFACE: &str = "app-server";
+
+/// Whether the research selects the managed app-server for structured runs.
+fn app_server_selected() -> bool {
+    claudine::steering::execution_selection(Provider::Codex)
+        .is_some_and(|selection| selection.preferred == APP_SERVER_INTERFACE)
+}
 
 pub(crate) struct CodexWrapper;
 
@@ -162,6 +175,23 @@ impl WrapperProfile for CodexWrapper {
                 index: insert_at,
                 args: vec![prompt.to_string()],
             })
+        }
+    }
+
+    /// A structured `exec` run is carried by a managed app-server when the
+    /// research selects it and every `exec` option has an exact equivalent
+    /// (see `exec::codex_app_server::launch`); otherwise it stays on `exec`,
+    /// which cannot be steered.
+    fn stdio_control(&self, args: &[String], cwd: &Path) -> Option<Arc<dyn StdioControl>> {
+        if !app_server_selected() {
+            return None;
+        }
+        match CodexAppServerSession::for_exec_args(args, cwd) {
+            Ok(session) => Some(Arc::new(session)),
+            Err(reason) => {
+                tracing::info!(target: "claudine::wrap", %reason, "this Codex run stays on `codex exec` and cannot be steered");
+                None
+            }
         }
     }
 

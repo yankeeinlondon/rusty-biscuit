@@ -136,7 +136,7 @@ pub(crate) fn execute_harness_attempt(
     // A structured launch whose argv selects the provider's managed control
     // interface is driven over retained stdin (Pi RPC).
     let control = (use_structured && launch.wire_prompt.is_none())
-        .then(|| profile.stdio_control(&launch.args))
+        .then(|| profile.stdio_control(&launch.args, child_cwd))
         .flatten();
     // Steering ownership for the same child: an in-memory control route,
     // separate from replicated presence and its opt-out. Dropped with it.

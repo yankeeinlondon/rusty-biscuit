@@ -65,6 +65,8 @@ pub(super) fn spawn_retained(
     task: &str,
     child_spawned: &mut bool,
 ) -> Result<Preflight> {
+    let launch_args = control.launch_args();
+    let args = launch_args.as_deref().unwrap_or(args);
     let mut command = setup::base_command(binary, args, env, cwd);
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     setup::isolate_into_process_group(&mut command);

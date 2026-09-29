@@ -112,7 +112,9 @@ pub trait SteeringExecutor: Send + Sync {
     fn deliver(&self, request: SteeringRequest, route: Route, deadlines: DeliveryDeadlines) -> DeliveryFuture;
 }
 
-/// Facts about a managed execution that do not change while it runs.
+/// Facts about a managed execution that do not change while it runs. The
+/// provider version may be unknown at spawn and recorded once the managed
+/// launch reads it ([`SteeringController::set_provider_version`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionFacts {
     pub provider: Provider,
@@ -274,6 +276,13 @@ impl SteeringController {
     /// Records the provider child's process identity.
     pub fn set_provider_process(&self, process: ProcessStartIdentity) {
         self.update(|snapshot| snapshot.provider_process = Some(process));
+    }
+
+    /// Records the exact provider version a managed launch established from
+    /// the provider itself, before its task was submitted. Eligibility never
+    /// guesses one, so until this is called no version-bound grant applies.
+    pub fn set_provider_version(&self, version: String) {
+        self.update(|snapshot| snapshot.facts.provider_version = Some(version));
     }
 
     /// Records the provider conversation. Any change — including the first

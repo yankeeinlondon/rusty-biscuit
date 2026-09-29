@@ -38,7 +38,7 @@ fn a_structured_run_launches_rpc_and_keeps_resources_and_trust() {
 #[test]
 fn an_rpc_launch_gets_a_control_session_with_the_equivalent_json_fallback() {
     let args = structured(&["--model", "fixture"]);
-    let control = pi().stdio_control(&args).expect("RPC argv is driven over retained stdin");
+    let control = pi().stdio_control(&args, std::path::Path::new(".")).expect("RPC argv is driven over retained stdin");
     assert_eq!(control.steering_profile(), Some("retained-rpc"));
     assert!(control.steering_executor().is_some());
     let fallback = control.fallback().expect("the research names a JSON fallback");
@@ -46,8 +46,8 @@ fn an_rpc_launch_gets_a_control_session_with_the_equivalent_json_fallback() {
     assert!(fallback.warning.contains("cannot be steered"), "{}", fallback.warning);
 
     // The JSON launch itself, and interactive argv, take no control session.
-    assert!(pi().stdio_control(&fallback.args).is_none());
-    assert!(pi().stdio_control(&strings(&["--", "hello"])).is_none());
+    assert!(pi().stdio_control(&fallback.args, std::path::Path::new(".")).is_none());
+    assert!(pi().stdio_control(&strings(&["--", "hello"]), std::path::Path::new(".")).is_none());
 }
 
 #[test]

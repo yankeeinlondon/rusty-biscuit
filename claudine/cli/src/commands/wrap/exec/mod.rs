@@ -11,6 +11,7 @@ use color_eyre::eyre::Result;
 
 pub(crate) mod control;
 pub(crate) mod exit;
+pub(crate) mod codex_app_server;
 pub(crate) mod pi_rpc;
 pub(crate) mod spawn;
 pub(crate) mod stream_capture;

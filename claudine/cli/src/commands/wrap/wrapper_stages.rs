@@ -679,7 +679,7 @@ pub(crate) fn run_execution_stage(
         let status_reporter = session_presence.status_reporter();
         // A launch whose argv selects the provider's managed control
         // interface is driven over retained stdin (Pi RPC).
-        let control = wire_prompt.is_none().then(|| profile.stdio_control(child_args)).flatten();
+        let control = wire_prompt.is_none().then(|| profile.stdio_control(child_args, child_cwd)).flatten();
         // Steering ownership for the same child; see `crate::steering::owner`.
         let steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
             provider,
