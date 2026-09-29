@@ -219,12 +219,6 @@
       "provenance": "regression",
       "note": "A trailing comment makes the lexeme extent ambiguous, so the reserved-indicator repair must decline rather than swallow the comment into the string.",
       "source": "title: @foo # comment\n"
-    },
-    {
-      "name": "regression/tab-indentation-is-unrepairable",
-      "provenance": "regression",
-      "note": "YAML forbids tabs as indentation. Converting them means guessing the intended width, so this stays report-only.",
-      "source": "parent:\n\tchild: value\n"
     }
   ],
 
@@ -321,6 +315,13 @@
       "note": "A repair span adjacent to multi-byte UTF-8 must not split a codepoint. If span arithmetic is ever done in chars instead of bytes, this is the case that catches it.",
       "source": "title: @日本語\nnote: 日本語のテキスト\n",
       "expected": "title: \"@日本語\"\nnote: 日本語のテキスト\n"
+    },
+    {
+      "name": "regression/tab-indentation-is-repaired",
+      "provenance": "regression",
+      "note": "YAML forbids tabs as indentation. Each indentation tab becomes two spaces, the width Darkmatter already reads tab-indented frontmatter with, so the repair guesses nothing Darkmatter did not.",
+      "source": "parent:\n\tchild: value\n",
+      "expected": "parent:\n  child: value\n"
     }
   ]
 }

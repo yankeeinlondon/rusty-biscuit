@@ -355,7 +355,19 @@ impl SourceMap {
     /// less-indented content lines, recording mapping keys and sequence
     /// indices. Returns `None` when an ancestor key is not a plain scalar or
     /// the nesting is not representable.
+    ///
+    /// A block-sequence entry may sit at the same indentation as the mapping
+    /// key that owns it (`key:\n- item`); such an entry is parented by that
+    /// key rather than by the next less-indented line.
     fn parent_path(&self, source: &str, line: usize, indent: usize) -> Option<Vec<PathSegment>> {
+        if self.entries[line].dash.is_some()
+            && let Some(key_line) = self.indentless_sequence_key(line)
+        {
+            let key = &self.entries[key_line].mapping.as_ref()?.key;
+            let mut path = self.parent_path(source, key_line, indent)?;
+            path.push(PathSegment::Key(plain_key_text(source, key)?));
+            return Some(path);
+        }
         if indent == 0 {
             return Some(Vec::new());
         }
@@ -390,6 +402,35 @@ impl SourceMap {
             return None;
         }
         Some(path)
+    }
+
+    /// The line of the empty-valued mapping key that owns the sequence entry
+    /// on `line` when that sequence is written at the key's own indentation.
+    ///
+    /// Walks upward past deeper lines and same-indent sibling entries; the
+    /// first other line at or below `line`'s indentation decides. `None`
+    /// means the entry belongs to an ordinary (indented or root) sequence.
+    fn indentless_sequence_key(&self, line: usize) -> Option<usize> {
+        let indent = self.lines[line].indent;
+        for candidate in (0..line).rev() {
+            let candidate_line = &self.lines[candidate];
+            if candidate_line.kind != LineKind::Content || candidate_line.indent > indent {
+                continue;
+            }
+            if candidate_line.indent < indent {
+                return None;
+            }
+            let candidate_entry = &self.entries[candidate];
+            if candidate_entry.dash.is_some() {
+                continue;
+            }
+            return candidate_entry
+                .mapping
+                .as_ref()
+                .filter(|mapping| mapping.value.is_none())
+                .map(|_| candidate);
+        }
+        None
     }
 
     /// Every block-mapping key occurrence with its lexical scope path, in
