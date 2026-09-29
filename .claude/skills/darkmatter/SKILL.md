@@ -208,7 +208,10 @@ The binary is `md`. Major command families include:
 
 - `md compose`, `clean`, `read`, `toc`, and `delta` for document processing.
 - `md schema validate|detect|about` for schema workflows.
-- `md hash` for Markdown-aware frontmatter/body hashes.
+- `md hash` for Markdown-aware frontmatter/body hashes. `md hash --save`
+  bumps `last_updated` to the current **UTC** date when the content hash
+  changes (`hash::last_updated_stamp`), which renews every content policy
+  whose baseline is `@last_updated`; see the `content-policy` skill.
 - `md frontmatter get|set|rm` for structured frontmatter changes.
 - `md code-block` for direct terminal, HTML, or Markdown code rendering.
 - `md graph` and reference commands for document/reference inspection.

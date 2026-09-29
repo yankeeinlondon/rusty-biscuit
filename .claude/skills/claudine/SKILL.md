@@ -183,7 +183,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Command | Description |
 |---------|-------------|
 | `claudine compose <file> [key=value ...]` | Compose a Markdown file and send the result as a prompt (no file mutation) |
-| `claudine inline-compose <file> [key=value ...]` | Launch the agent **on the document itself** using frontmatter `prompt`; the agent writes the body and any requested frontmatter, Claudine restores `prompt`/`hash`/`last_updated`, updates `last_updated`, and stamps a Darkmatter `Simple` `hash:` |
+| `claudine inline-compose <file> [key=value ...]` | Launch the agent **on the document itself** using frontmatter `prompt`; the agent writes the body and any requested frontmatter, Claudine restores `prompt`/`hash`/`last_updated`, updates `last_updated` to the UTC date (renewing `@last_updated` content policies; see the `content-policy` skill), and stamps a Darkmatter `Simple` `hash:` |
 | `claudine sequence <file> [key=value ...]` | Run an ordered list of steps — static preflight over the whole task graph, then just-in-time composition at each step's turn; tasks, groups (serial/parallel), and the `outputs` accumulator |
 | `claudine budget init\|show\|suspend\|resume\|grant <ledger>` | Create and operate a persisted run budget; `sequence --budget-ledger <ledger>` enforces it across every launch, retry, restart, and crash (exit `76` exhausted, `77` blocked) — [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
 

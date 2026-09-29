@@ -279,17 +279,17 @@ For example, a stale three-month rule can renew when `last_updated` is explicitl
 advanced after review. Merely running the evaluator again leaves it stale.
 
 `policy renew` is not the only thing that advances `last_updated`. Darkmatter's
-`md hash` bumps it when a document's content hash changes, Darkmatter's effect
-writes do the same when they re-hash a document, and Claudine stamps it
-whenever it writes a document back. Each of those is a content update, so it
-renews every rule whose baseline is `@last_updated`, including the
-`ValidFor(3mo)` shorthand. Only `policy renew` also updates inline dates such as
+`md hash --save` bumps it when a document's content hash changes, and Claudine
+stamps it whenever it writes a document back. Each of those is a content
+update, so it renews every rule whose baseline is `@last_updated`, including
+the `ValidFor(3mo)` shorthand. Only `policy renew` also updates inline dates such as
 `ValidFor(3mo, 2026-09-28)`.
 
 A baseline dated later than today's UTC date reads as inconsistent and produces
 `unknown`. That is why every stamp is a UTC date: a local date written just after
-midnight east of Greenwich would be a day ahead. All three of those writers
-stamp the UTC date for this reason.
+midnight east of Greenwich would be a day ahead. Both of those writers stamp
+the UTC date for this reason. Darkmatter's effect writes re-hash a document
+without changing `last_updated`, so they renew nothing.
 
 Renewal also records a baseline that is missing, such as an absent or empty
 `last_updated` or fingerprint property. This first capture needs no extra
