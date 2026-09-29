@@ -12,9 +12,9 @@ question, answered by [Steering Activation](steering-activation.md).
 > `retained-rpc` profile with the `pi-rpc` executor ([Managed Pi RPC
 > execution](pi-rpc.md)). The reviewed policy blocks that profile, so it lists
 > as unavailable with the block's reason. Every other wrapped launch maps to no
-> profile and lists as unavailable for that reason. The `claudine steer`
-> command, automatic repetition warnings, and the other adapters are
-> **planned**.
+> profile and lists as unavailable for that reason. The
+> [`claudine steer`](../cli/steer.md) command is the production requester.
+> Automatic repetition warnings and the other adapters are **planned**.
 
 ## The three roles
 
@@ -22,7 +22,7 @@ question, answered by [Steering Activation](steering-activation.md).
 | --- | --- | --- |
 | **Owner** | The `claudine` wrapper running the agent (`cli/src/steering/owner.rs`) | One steering controller per provider child. It alone submits steering to the provider, one request at a time, through the provider's adapter when its launch has one. |
 | **Router** | The local Rendezvous daemon (`rendezvous-daemon`, `steering.rs`) | Holds live owner registrations in memory and carries one request to one owner and its reply back. |
-| **Requester** | Any other local `claudine` process (`cli/src/steering/requester.rs`) | Lists managed targets and routes a request to one of them. |
+| **Requester** | Any other local `claudine` process (`cli/src/steering/requester.rs`); in practice [`claudine steer`](../cli/steer.md) | Lists managed targets and routes a request to one of them. |
 
 ```mermaid
 sequenceDiagram
@@ -92,6 +92,13 @@ The deadline covers queue wait as well as submission:
   from a mechanism that only confirms acceptance) is lowered to what it can.
 - Changed availability is reported, not worked around: a request for
   non-interrupting delivery never turns into an interruption.
+- A request names the **operation** it wants (`steer_active_turn`,
+  `start_idle_turn`, `interrupt_then_submit`, …). The owner submits only when
+  its current route performs exactly that operation; otherwise it answers
+  `unavailable` ("the requested `x` operation is no longer available; this
+  session now offers `y`"). A requester therefore sends the operation the
+  listing row named, and a session that went idle, or started needing
+  interruption, since it was listed is never steered with a different action.
 
 Every request, including refusals, is audited by the owner (see
 [Traces and Logging](traces-and-logging.md#steering-audit-records)).
@@ -148,7 +155,12 @@ Nothing fails the wrapped agent task:
 `claudine::steering::discovery` merges two kinds of source into one listing:
 
 - **Managed** — the daemon's live registrations. Each row carries its owner's
-  own availability verdict.
+  own availability verdict and the operation its route performs, and keeps
+  (in memory, not in JSON) the binding it was listed under, which is what a
+  requester routes with as `expected`. A registration whose `operation` does
+  not agree with its availability (missing while selectable, present while
+  unavailable, or not an operation name) is reported as a discovery error,
+  never listed with a guessed operation.
 - **Native** — provider-specific discoverers for researched discovery methods
   (`discovery` records in `docs/research/steering/<slug>.md`, projected into the
   generated catalog). None is implemented yet; each researched native method
@@ -191,11 +203,16 @@ A row serializes as:
   "launch_profile": "retained-rpc",
   "provider_version": null,
   "availability": "unavailable",
+  "operation": null,
   "reason": "steering is blocked for this launch profile: Pi offers no expected-session guard, and an enabled extension can switch the session outside Claudine's control, so a message could be accepted and then lost to the replaced session.",
   "setup_requirements": [],
   "observed_at": "2026-09-28T17:02:11Z"
 }
 ```
+
+`operation` is `null` exactly when `availability` is `unavailable`. The full
+listing document `claudine steer --list --json` prints wraps these rows; see
+[`claudine steer`](../cli/steer.md#json).
 
 ## Testing
 
@@ -208,6 +225,10 @@ A row serializes as:
   `rendezvous/client/tests/steering_round_trip.rs`.
 - Owner link and requester: `cli/src/steering/tests.rs`. The daemon-backed
   cases need the CLI's `daemon-tests` feature (enabled in CI).
+- The `claudine steer` command: `cli/src/commands/steer/tests.rs` (fake
+  service, scripted picker and consent, off-screen rendering, and
+  daemon-backed end-to-end cases) and `cli/tests/l1/steer_cli.rs` (the shipped
+  binary: exit codes, stdout/stderr, no configuration written).
 - The Pi adapter: see [Managed Pi RPC execution — Testing](pi-rpc.md#testing).
 - L1 spawn fixtures point `RENDEZVOUS_ENDPOINT` at a private endpoint nothing
   listens on, so a wrapped test execution never registers with a developer's

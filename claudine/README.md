@@ -90,6 +90,17 @@ The immediate benefits of wrapped execution are:
 - **Compositional Flow Features**
     - We'll cover this in the next section
 
+### Steering a Running Session
+
+`claudine steer "message"` sends one message to one running agent session, to
+course-correct it without stopping it. It lists sessions and asks you to pick
+one (even when only one is available), or takes an exact ID from
+`claudine steer --list [--json]` with `--session <id>`. It never broadcasts,
+asks before interrupting a session, and reports only what the provider
+confirmed (exit 0 for accepted, queued, or delivered; 1 otherwise; 2 for usage
+errors; 130 when you cancel). Which sessions can receive a message is decided
+by reviewed provider evidence; today every session is listed with the reason it
+cannot be steered yet. See [`claudine steer`](docs/cli/steer.md).
 
 ### Composition
 
@@ -258,6 +269,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Pre-Flight Checks](./docs/topics/pre-flight-checks.md) and [Lifecycle](./docs/topics/flow-control/lifecycle.md) - Pre-flight shell audit/schema validation and the lifecycle stack (gating, verification, recovery)
 - [Policy Engine](./docs/topics/policy-engine.md) and [Protect Service](./docs/topics/protect-service.md) - Permissions and runtime safety
 - [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting, diagnostics, and steering audit records
+- [`claudine steer`](./docs/cli/steer.md) - Sending a message to a running session: selection, interruption consent, receipts, exit codes, and the JSON contract
 - [Steering Routing](./docs/topics/steering-routing.md) - Per-execution steering ownership, local routing through the Rendezvous daemon, and session discovery
 - [Secret Recognition](./docs/topics/secret-recognition.md) - The shared credential recognizer behind scrubbing, webhook redaction, wrapper sanitization, and steering log masking
 - [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider

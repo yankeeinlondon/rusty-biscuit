@@ -10,9 +10,10 @@ and how a mechanism is enabled.
 > [Steering Routing](steering-routing.md)). The first adapter, `pi-rpc`
 > revision 1, is implemented and reviewed ([Managed Pi RPC execution](pi-rpc.md)),
 > but its launch profile is **blocked** (see [Blocking a profile](#blocking-a-profile)),
-> and no grant exists. The `claudine steer` command, automatic repetition
-> warnings, and the other providers' adapters are **planned**. Every session
-> therefore reports steering as unavailable, each with a specific reason.
+> and no grant exists. The [`claudine steer`](../cli/steer.md) command is
+> implemented; automatic repetition warnings and the other providers' adapters
+> are **planned**. Every session therefore reports steering as unavailable,
+> each with a specific reason, in `claudine steer --list`.
 
 ## What you can do today
 
