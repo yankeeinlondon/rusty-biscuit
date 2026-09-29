@@ -36,6 +36,30 @@ docs_updated_during_phase_3:
     - content-policy/docs/dependencies.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - Cargo.lock
+    - content-policy/cli/Cargo.toml
+    - content-policy/cli/src/main.rs
+    - content-policy/cli/src/args.rs
+    - content-policy/cli/src/commands.rs
+    - content-policy/cli/src/output.rs
+    - content-policy/cli/tests/common/mod.rs
+    - content-policy/cli/tests/check.rs
+    - content-policy/cli/tests/renew.rs
+    - content-policy/cli/tests/lifecycle.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/tests/renewal.rs
+    - content-policy/schemas/content-policy.yaml
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+docs_updated_during_phase_4:
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - content-policy
     - content-policy-cli
@@ -570,3 +594,187 @@ that bear on them:
 - `README.md`: status line and a paragraph on the renewal library API.
 - `docs/dependencies.md` (area): `xx_hash` also names the plan fingerprint;
   the std-only atomic write; `tempfile` as a dev-dependency.
+
+## Phase 4
+
+### 4.1 `policy check` and 4.2 `policy renew` (`content-policy/cli`)
+
+- Module layout per the `cli` skill: `args.rs` (clap derive), `commands.rs`
+  (read the file, call the library, return text or an error message),
+  `output.rs` (terminal rendering), `main.rs` (dynamic completions through
+  `clap_complete::CompleteEnv`, dispatch, exit codes). No policy logic lives
+  in the CLI.
+- **Precedence** comes from clap itself: each setting is an `Option` with
+  `env = "CONTENT_POLICY_*"`, and `None` falls through to
+  `PolicyOptions::default()`. `--default-policy` parses through
+  `Policy::from_text` (R5) as a clap value parser, so an empty or invalid value
+  from the flag *or* the environment variable is a usage error (exit `2`).
+  Verified that clap treats an empty `CONTENT_POLICY_DEFAULT=` as a value, not
+  as absent, so R5's "empty is a usage error" holds for the variable too.
+  `--key` and `--date-property` reject an empty string the same way.
+- Dates (`--at`, `--on`, hidden `--today`) must be exactly `YYYY-MM-DD`;
+  chrono's `%m` alone accepts `2026-9-1`. `--at` is 00:00 UTC of the date;
+  without it `check` evaluates at `Utc::now()`.
+- Exit codes: `0` for a produced report or plan (`stale`/`expired`/`unknown`
+  included, "nothing to renew" included), `1` for any library or I/O error, `2`
+  from clap. Errors are human-readable text on stderr in every mode, `--json`
+  included, prefixed `error:`; stdout is then empty.
+- `--needs-action`: `Stale | Expired` → `true`, `Fresh` → `false`,
+  `Unknown` → `unknown`. A confirmed trigger alongside an unknown entry has
+  status `stale`/`expired`, so it prints `true` as the spec requires. It
+  conflicts with `--json`; `--plain` is accepted and changes nothing.
+- Output: `--json` is `Report::to_json` / the new `RenewalPlan::to_json`.
+  Default output is a `Prose` summary line plus a `Table`. `--plain` forces
+  `ColorDepth::None` **and** strips ANSI after rendering: a colorless terminal
+  still receives bold/dim/italic SGR, and `--plain` promises no styling.
+  Styled output honors `FORCE_COLOR`/`CLICOLOR_FORCE` as `biscuit-terminal`'s
+  own CLI does.
+- **Table layout finding:** the first design (`#`, Rule, Action, Result,
+  Date, Due, Reason) could not render at 80 columns ("Table could not be
+  rendered in 80 columns"). The `Reason` column was dropped from the terminal
+  table (the `Result` cell already names an unknown reason, such as
+  `unknown (missing baseline)`; the JSON keeps `reason`), a long header
+  (`Baseline / deadline`) overflowed its wrapped column so it became `Date`,
+  and `Due`/`From`/`To` are non-wrapping so dates are not split at a hyphen.
+- Reader warnings (tab repair) print below the table as part of the report
+  (R13), never on stderr.
+- `renew`: `RenewalContext::new(--today or Utc::now().date_naive())`, `.on()`
+  when `--on` is given. With `--write`, `apply_renewal(path, &plan)` re-reads,
+  checks the fingerprint, and writes atomically. The preview labels
+  `new baseline`, lists the tab repair after the table as its own item, and
+  says `written` instead of the preview hint after `--write`.
+- Shell completions: dynamic (`COMPLETE=zsh policy`), the repository
+  convention; not in the plan, added because the `cli` skill requires them.
+
+### 4.3 Editor schema (subagent)
+
+- `content-policy/schemas/content-policy.yaml` (`kind: schema`):
+  `short_form` (seven members: `Evergreen`, `TimeSensitive`, three `ValidFor`
+  forms, `ValidUntil(date)`, and `ValidUntil(@name)`, which the grammar
+  accepts), `long_form` (`rule` without `(required)` per R1; `action` an
+  enum, required), `policy` (union). Sibling references use
+  `@./content-policy.yaml`. One `suggest(...)` on the first member, date-only.
+  No `FileChanged` member.
+- **Finding:** a pattern argument accepts top-level `|` alternation, so each
+  `ValidFor` form restricts its unit exactly with one anchored branch per unit
+  (`d`, `wk`, `mo`, `yr`); groups are still impossible. `\x20*` around each
+  argument matches the grammar, which trims spaces around arguments. Dates are
+  checked for shape only.
+- **Finding for the dependency spec (`2026-09-28-recursive-schema-types`):**
+  `(required)` on the union-typed `rule` reference is *rejected* when
+  `long_form@…` is referenced directly, but *silently dropped* when referenced
+  through `policy@…` (a `{action: refresh}` entry validates). The spec only
+  describes the first behavior.
+- **Finding for users (documented on the topic page):** `policy[]` is still
+  rejected, so today the schema can only be applied per entry, through an
+  inline `$schema` map naming each property; and a document whose `$schema` is
+  the file itself validates nothing (the file declares types only).
+- Test: `darkmatter::l1` module `content_policy_editor_schema` (6 tests)
+  runs `DarkmatterSchemas::validate` (the library validator `md schema
+  validate` and DMLS use) against a temp document: a mixed list of every
+  compact form plus `{rule, action}` entries validates; `Duration(3mo)`,
+  `action: delete`, a long form without `action`, and six off-grammar compact
+  rules (`3w`, `0mo`, `3MO`, `@a.b`, leading space, `evergreen`) are each
+  flagged at their path; a long form without `rule` is *not* flagged
+  (asserted, with a comment: evaluation enforces it). The module is declared
+  in `darkmatter/lib/tests/l1/main.rs` (darkmatter uses `autotests = false`).
+- Verified by hand with `md schema validate` from this tree, including the
+  docs page's inline-`$schema` example (valid; `action: delete` flagged at
+  `second/action`).
+
+### 4.4 Lifecycle through the CLI
+
+- `cli/tests/lifecycle.rs::the_lifecycle_example_through_the_cli`: all eight
+  steps through the `policy` binary in a temp directory, `--at` for checks and
+  hidden `--today` for renewals. Step 3 and step 7 assert byte-exact file
+  content; step 5 asserts `inconsistent_baseline`; step 8 edits the action and
+  asserts `remove` with both entries listed.
+
+### 4.5 Documentation
+
+- Topic page: status line (time rules built end to end; `FileChanged` and the
+  base-schema line planned); "Check and Renew from the CLI" rewritten in the
+  present tense with real `--plain` output for `check` and `renew`, an exit
+  code table, stderr-in-JSON-mode, the `--needs-action` rules, a Mermaid
+  flowchart of the renew flow, the configuration table, and the R5 flow-list
+  spelling of `--default-policy`; "Get Help in the Editor" now describes the
+  shipped schema, what it does and does not check, how to use it today, and
+  keeps the base-schema line **planned**. The plan-fields table now states
+  that `policy renew --json` prints it and the names are stable. Every example
+  output on the page was captured from the binary.
+- README: no longer "planned"; the empty-list rule (AC 13) was missing and is
+  added; CLI section gains exit code `2`, stderr under `--json`, `--at`/`--on`.
+- `content-policy/docs/dependencies.md` and root `docs/dependencies.md`: the
+  CLI's new crates (`clap` `env`, `clap_complete`, `biscuit-terminal`,
+  `chrono`, and dev-only `biscuit-test-harness`, `serde_json`, `tempfile`).
+- The spec is not named anywhere under `docs/`.
+
+### Library changes
+
+- `RenewalPlan::to_json()` (mirrors `Report::to_json`).
+- Plan JSON field names frozen by `renewal::plan_json_field_names_are_frozen`:
+  a tab-indented document with an inline, a referenced, and a first-capture
+  baseline, asserted as exact JSON including every edit span. Changes are in
+  entry order.
+- `diagnostic.rs` module doc: "public contract once the CLI ships them" →
+  the CLI prints them, so they are public contract (drift fixed).
+
+### 4.6 Test-input declaration
+
+- The CLI's migrated-documents test reuses the library's list through
+  `#[path = "../../lib/tests/common/mod.rs"] mod migrated;` declared in
+  `cli/tests/check.rs` itself. First placing it in the CLI's shared `common`
+  module scheduled all three CLI binaries; moving it narrowed the cell.
+- Confirmed with the planner on a synthetic one-file change
+  (`python3 scripts/ci/affected_scope.py --plan-out … sniff/docs/research/audio-programming/linux.md`),
+  because `just ci-local --plan` against `HEAD` is masked by this branch's own
+  source changes (it already runs full L1). Result: exactly two cells,
+  `content-policy/ubuntu-latest/L1` with
+  `binary_id(content-policy::evaluation) | binary_id(content-policy::renewal)`,
+  and `content-policy-cli/ubuntu-latest/L1` with
+  `binary_id(content-policy-cli::check)`. No lint, no other OS.
+- The schema file: the subagent's test read it through a module-level
+  `const … = include_str!(…)`, which the index treats as a helper and so
+  scheduled the whole `darkmatter::l1` binary (~1,000 tests). The
+  `include_str!` now sits in each test's call, and a change to
+  `content-policy/schemas/content-policy.yaml` schedules exactly the six
+  `content_policy_editor_schema::*` tests on ubuntu.
+
+### Tests, placement, and gates
+
+- New CLI integration binaries (per-file discovery, no `autotests = false`):
+  `check` (24 tests), `renew` (9), `lifecycle` (1), sharing
+  `cli/tests/common/mod.rs` (`Workspace`: temp cwd, scrubbed
+  `CONTENT_POLICY_*`, `FORCE_COLOR`, `CLICOLOR_FORCE`, `COMPLETE`, fixed
+  `NO_COLOR=1` and `COLUMNS=100`; binary via `biscuit_test_harness::bin_exe!`).
+  One unit test in `args.rs`. No tier markers.
+- Mutation check: mapping `Status::Unknown` to `"false"` in `--needs-action`
+  turned `needs_action_prints_unknown_when_nothing_is_confirmed_and_evidence_is_missing`
+  red; restored.
+- `just test` in `content-policy/`: 123 passed. `just lint`: clean, including
+  `deps-check` for default and `--all-features`. `just check-tier-coverage
+  content-policy`: nothing stranded. `darkmatter` schema tests: 6 passed;
+  the subagent ran `just lint` in `darkmatter/` clean before the `include_str!`
+  move, and `cargo clippy -p darkmatter --test l1 -- -D warnings` is clean
+  after it.
+- `just cross-check content-policy-cli --os windows` (native Windows): 35
+  passed. The CLI's OS-sensitive surface is process spawning, file writes
+  through `apply_renewal`, and UTF-8 box glyphs on a pipe; Linux and WSL2 are
+  left to CI's pull-request Linux leg and the nightly WSL2 leg, since the
+  library's rename-based write already has Linux evidence from Phase 3.
+- No skipped or pre-existing failures in the `content-policy` scope.
+
+### Requirement → test map
+
+| Requirement | Test(s) |
+| --- | --- |
+| AC 7 (CLI) | `lifecycle::the_lifecycle_example_through_the_cli` |
+| AC 13 docs | README and topic page (review item, not a test) |
+| AC 15 `--needs-action` | `check::needs_action_prints_true_for_a_confirmed_trigger`, `…_false_for_a_fresh_document`, `…_unknown_when_nothing_is_confirmed_and_evidence_is_missing`, `…_true_when_a_trigger_is_known_but_another_entry_is_unknown`, `needs_action_exits_one_only_for_errors` |
+| AC 21 (first half) | `darkmatter::l1 content_policy_editor_schema::*` (6) |
+| AC 24 precedence (3 settings × 3 levels) | `check::key_built_in_value_is_content_policy`, `key_environment_variable_overrides_the_built_in_value`, `key_flag_overrides_the_environment_variable`, the same three for `default_policy_*` and `date_property_*`; `an_invalid_default_policy_environment_variable_is_a_usage_error`; `renew::renew_reads_the_shared_configuration` |
+| AC 25 `renew` | `renew::the_preview_labels_a_first_capture_new_baseline_and_writes_nothing`, `write_applies_the_plan`, `json_output_is_the_plan_alone`, `nothing_to_renew_is_not_an_error` (Evergreen, TimeSensitive, ValidUntil; `--plain` and `--json`) |
+| AC 27 (CLI half) | `check::tab_indented_frontmatter_reports_a_status_and_a_warning`, `renew::the_tab_repair_is_listed_separately_and_applied_with_write`, `check::unreadable_files_and_malformed_frontmatter_exit_one` (`{{ }}` message) |
+| Exit codes / streams | `check::json_output_is_the_report_alone`, `plain_output_has_a_summary_and_an_entry_table_without_escapes`, `default_output_is_styled_when_color_is_available`, `a_stale_expired_or_unknown_report_still_exits_zero`, `invalid_declarations_exit_one_with_diagnostics_on_stderr_even_in_json_mode`, `unreadable_files_and_malformed_frontmatter_exit_one`, `usage_errors_exit_two`; `renew::refusals_conflicts_and_bad_evidence_exit_one_and_write_nothing`, `a_future_update_date_is_rejected`, `the_today_option_is_hidden_from_help` |
+| Checkpoint: 23 migrated documents | `check::the_migrated_repository_documents_check_without_diagnostics` |
+| Plan JSON contract | `renewal::plan_json_field_names_are_frozen` |

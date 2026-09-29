@@ -40,6 +40,30 @@ docs_updated_during_phase_3:
     - content-policy/docs/dependencies.md
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+    - Cargo.lock
+    - content-policy/cli/Cargo.toml
+    - content-policy/cli/src/main.rs
+    - content-policy/cli/src/args.rs
+    - content-policy/cli/src/commands.rs
+    - content-policy/cli/src/output.rs
+    - content-policy/cli/tests/common/mod.rs
+    - content-policy/cli/tests/check.rs
+    - content-policy/cli/tests/renew.rs
+    - content-policy/cli/tests/lifecycle.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/tests/renewal.rs
+    - content-policy/schemas/content-policy.yaml
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+docs_updated_during_phase_4:
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+    - docs/dependencies.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4: []
 packages:
     - content-policy
     - content-policy-cli
@@ -586,7 +610,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 8 (parallel)
 
-- [ ] **4.1 `policy check`** (AC 15, 24; CLI half of AC 7 and 27)
+- [x] **4.1 `policy check`** (AC 15, 24; CLI half of AC 7 and 27)
     - Use clap subcommands.
     - `--at`, `--key`, `--default-policy` (R5), `--date-property`, and
       `--needs-action`.
@@ -602,12 +626,12 @@ Phase 2 and on tasks 1.2 and 1.3.
     - `--needs-action` prints `true`, `false`, or `unknown` and exits `0`. Add
       one test per answer.
     - Load the `cli` and `biscuit-terminal` skills first.
-- [ ] **4.2 `policy renew`** (AC 25 CLI half; CLI half of AC 7)
+- [x] **4.2 `policy renew`** (AC 25 CLI half; CLI half of AC 7)
     - `--on`, `--write`, the hidden `--today` (R6), and `--plain`/`--json`.
     - The preview labels "new baseline" and lists the tab repair separately.
       "nothing to renew" exits `0`.
     - Exit `1` for refusals, conflicts, and missing evidence, writing nothing.
-- [ ] **4.3 Editor schema file** (AC 21, first half)
+- [x] **4.3 Editor schema file** (AC 21, first half)
     - Add `content-policy/schemas/content-policy.yaml` (`kind: schema`) with
       `short_form`, `long_form`, and `policy`, following the spec excerpt.
     - Sibling references use `@./content-policy.yaml` (or `@this`).
@@ -623,12 +647,12 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 9
 
-- [ ] **4.4 Lifecycle end-to-end through the CLI** (AC 7)
+- [x] **4.4 Lifecycle end-to-end through the CLI** (AC 7)
     - One test drives the eight lifecycle steps through the `policy` binary,
       on a temp copy, with `--at` and the hidden `--today`.
     - Assert the result of each step. For step 3, assert byte-exact file
       content.
-- [ ] **4.5 Increment 1 documentation** (AC 13)
+- [x] **4.5 Increment 1 documentation** (AC 13)
     - Update `content-policy/docs/topics/policy-lifecycle.md` and
       `content-policy/README.md` to describe the shipped time rules:
         - the CLI output, exit codes, and configuration precedence;
@@ -642,7 +666,7 @@ Phase 2 and on tasks 1.2 and 1.3.
       diagram for the renew flow. No `docs/` page may name this spec.
     - Update `docs/dependencies.md` for any crate added since 1.1 (for example
       `clap` or `biscuit-terminal` in the CLI).
-- [ ] **4.6 Test-input declaration**
+- [x] **4.6 Test-input declaration**
     - AC 16's test evaluates the 23 migrated repository documents. Spell those
       reads in the forms the `rust-testing` skill lists, so CI schedules the
       narrowed cell described in `docs/cicd/test-inputs.md`.
@@ -650,9 +674,9 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Phase 4 checkpoint (increment 1 complete)
 
-- [ ] `just test` and `just lint` pass in `content-policy/`.
-- [ ] Every AC except 8, 32, 33, and the second half of AC 21 is covered.
-- [ ] `policy check` over the 23 migrated documents reports no diagnostics.
+- [x] `just test` and `just lint` pass in `content-policy/`.
+- [x] Every AC except 8, 32, 33, and the second half of AC 21 is covered.
+- [x] `policy check` over the 23 migrated documents reports no diagnostics.
 
 ## Phase 5 — `FileChanged` (Increment 2)
 
