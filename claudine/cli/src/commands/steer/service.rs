@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use claudine::secrets::RedactedText;
 use claudine::steering::contract::{SendOutcome, SteeringRequest, SteeringResult};
-use claudine::steering::discovery::{DiscoveryFailed, DiscoveryReport, ManagedSource, SessionListing};
+use claudine::steering::discovery::{DiscoveryFailed, DiscoveryReport, ManagedSource, NativeDiscoverer, SessionListing};
+use claudine::steering::native::claude_registry;
 use claudine::steering::identity::SteeringTargetId;
 
 use crate::steering::requester;
@@ -33,10 +34,28 @@ pub(crate) trait SteeringService {
     async fn deliver(&self, row: &SessionListing, request: &SteeringRequest) -> Delivery;
 }
 
-/// Managed sessions through the local Rendezvous daemon. This build has no
-/// native discoverer, so natively launched sessions are not listed and a
-/// native target cannot be delivered to.
+/// Managed sessions through the local Rendezvous daemon, plus natively
+/// launched Claude Code sessions from Claude's own session registry. This
+/// build has no native delivery adapter, so a native target is listed with
+/// its reason but cannot be delivered to.
 pub(crate) struct LocalService;
+
+/// The native discoverers this build implements.
+fn native_discoverers() -> Vec<Arc<dyn NativeDiscoverer>> {
+    let config_dir = std::env::var("CLAUDE_CONFIG_DIR").ok();
+    let registry = claude_registry::registry_dir(config_dir.as_deref(), biscuit_file::home_dir().as_deref());
+    registry
+        .and_then(|dir| {
+            claude_registry::ClaudeRegistryDiscoverer::for_host(
+                dir,
+                claudine::steering::host_os(),
+                crate::cli_utils::process_start,
+            )
+        })
+        .map(|discoverer| Arc::new(discoverer) as Arc<dyn NativeDiscoverer>)
+        .into_iter()
+        .collect()
+}
 
 /// Why a native target cannot be delivered to by this build.
 pub(crate) const NATIVE_DELIVERY_UNIMPLEMENTED: &str =
@@ -49,7 +68,7 @@ pub(crate) const MISSING_BINDING: &str =
 impl SteeringService for LocalService {
     async fn discover(&self) -> Result<DiscoveryReport, DiscoveryFailed> {
         let managed: Arc<dyn ManagedSource> = Arc::new(requester::DaemonManagedSource);
-        claudine::steering::discovery::discover(Some(managed), &[]).await
+        claudine::steering::discovery::discover(Some(managed), &native_discoverers()).await
     }
 
     async fn deliver(&self, row: &SessionListing, request: &SteeringRequest) -> Delivery {

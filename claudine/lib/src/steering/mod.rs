@@ -5,7 +5,8 @@
 //! ([`contract`]), and evidence-gated eligibility ([`eligibility`]) — over the
 //! generated research facts and reviewed activation policy, plus the
 //! execution-owned [`controller`] that serializes delivery and the
-//! [`discovery`] aggregator that lists steerable sessions. [`automatic`]
+//! [`discovery`] aggregator that lists steerable sessions, fed by the
+//! [`native`] discoverers of providers' own session records. [`automatic`]
 //! holds the setting, opportunity budget, and message for automatic
 //! repetition help.
 //!
@@ -25,6 +26,7 @@ pub mod discovery;
 pub mod eligibility;
 mod generated;
 pub mod identity;
+pub mod native;
 
 pub use claudine_catalog_types::steering as vocabulary;
 
