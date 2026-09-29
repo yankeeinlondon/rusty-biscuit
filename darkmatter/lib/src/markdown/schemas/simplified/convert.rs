@@ -13,11 +13,10 @@
 //!   `default(...)` that disagrees across arms is a hard conversion error.
 //! - **`x-darkmatter-*` extensions** include the URL-scheme validator and the
 //!   grammar-backed semantic meta-type keywords. `file(match(...))` is
-//!   suggestion metadata (completion reads the patterns from the
-//!   simplified-schema atom) and is **not** emitted, except in a root union
-//!   whose arms disagree on a property's globs: there each arm's globs lower
-//!   to `x-darkmatter-match` on its file fragment and rule the arm out for an
-//!   existing file outside them (see [`crate::markdown::schemas::file_match`]).
+//!   suggestion metadata in a single schema. In a root union each simplified
+//!   arm's declared globs lower to `x-darkmatter-match` on its file fragment
+//!   and rule that arm out for an existing file outside them (see
+//!   [`crate::markdown::schemas::file_match`]).
 //! - **`file` existence posture** is carried by the emitted `format`: bare
 //!   `file` lowers to the lazy `darkmatter-file-reference` (syntax-only),
 //!   `file(eager)` lowers to the eager `darkmatter-file` (resolve + exists).
@@ -37,7 +36,7 @@ use super::types::{
 };
 use crate::markdown::compose::expression::parse_condition;
 use crate::markdown::schemas::errors::SchemaError;
-use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, contested_match_patterns};
+use crate::markdown::schemas::file_match::{DARKMATTER_MATCH_KEYWORD, file_match_patterns};
 use crate::markdown::schemas::format::{
     DARKMATTER_DATETIME_FORMAT, DARKMATTER_EXPRESSION_FORMAT, DARKMATTER_FILE_FORMAT,
     DARKMATTER_FILE_REFERENCE_FORMAT, DARKMATTER_JSON_FORMAT, DARKMATTER_SCHEMA_KEYWORD,
@@ -103,7 +102,9 @@ fn union_to_root_schema(arms: &[SchemaArm]) -> Result<Map<String, Value>, Schema
     for (idx, arm) in arms.iter().enumerate() {
         match arm {
             SchemaArm::Inline(shape) => {
-                any_of.push(Value::Object(shape_to_object_schema(shape)?));
+                let mut arm_json = Value::Object(shape_to_object_schema(shape)?);
+                attach_root_union_match(&mut arm_json, shape);
+                any_of.push(arm_json);
             }
             SchemaArm::FileRef(path) => {
                 return Err(SchemaError::Convert {
@@ -116,29 +117,20 @@ fn union_to_root_schema(arms: &[SchemaArm]) -> Result<Map<String, Value>, Schema
             }
         }
     }
-    attach_contested_match(&mut any_of, arms);
     let mut obj = Map::new();
     obj.insert("anyOf".into(), Value::Array(any_of));
     Ok(obj)
 }
 
-/// Emits each glob an arm contests with a sibling arm
-/// ([`contested_match_patterns`]) onto that arm's file fragments, so an
-/// existing file outside it rules the arm out. Every other `match` stays
-/// suggestion metadata.
-///
-/// `any_of` holds the converted arms in the order of `arms`. Root unions are
-/// converted here and, arm by arm, by the schema resolver, which calls this
-/// once it has every arm.
-pub(crate) fn attach_contested_match(any_of: &mut [Value], arms: &[SchemaArm]) {
-    for (idx, arm_schema) in any_of.iter_mut().enumerate() {
-        let Some(Value::Object(properties)) = arm_schema.get_mut("properties") else {
-            continue;
-        };
-        for (name, fragment) in properties.iter_mut() {
-            if let Some(patterns) = contested_match_patterns(arms, idx, name) {
-                attach_match_keyword(fragment, patterns);
-            }
+/// Emits a root-union arm's declared file globs onto its converted fragments.
+/// Called for each simplified arm even when other arms use raw JSON Schema.
+pub(crate) fn attach_root_union_match(arm_schema: &mut Value, shape: &SchemaShape) {
+    let Some(Value::Object(properties)) = arm_schema.get_mut("properties") else {
+        return;
+    };
+    for (name, fragment) in properties.iter_mut() {
+        if let Some(patterns) = shape.properties.get(name).and_then(file_match_patterns) {
+            attach_match_keyword(fragment, patterns);
         }
     }
 }
@@ -997,9 +989,8 @@ fn file_fragment(name: &str, constraints: &[Constraint]) -> Result<Value, Schema
             | Constraint::Example(_) => {}
             // Consumed above to pick the format; nothing further to emit.
             Constraint::Eager => {}
-            // `match(...)` shapes completion candidates via the
-            // simplified-schema atom. Only a root union that contests the glob
-            // emits it (`attach_contested_match`), as it needs the other arms.
+            // Root-union conversion emits `match(...)` after this atom has
+            // been converted; a single schema uses it for completion only.
             Constraint::Match(_) => {}
             other => return Err(invalid_constraint(name, "file", other)),
         }
@@ -1357,7 +1348,7 @@ mod tests {
         // Bare `file` is lazy: it lowers to `darkmatter-file-reference`. An
         // optional `file` field wraps that fragment in an `anyOf` with an
         // empty-string arm (Decision A); the file shape lives in the third
-        // arm. Outside a contested root union `match(...)` is not emitted
+        // arm. Outside a root union `match(...)` is not emitted
         // (completion reads it from the simplified-schema atom).
         let v = optional_atom_value("file(match('*.md', '!_*.md'))");
         let file_arm = &v["anyOf"][2];

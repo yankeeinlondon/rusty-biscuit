@@ -419,7 +419,7 @@ pub(super) fn collect_root_union_problems_with_anchors(
         per_arm.push(problems);
     }
     // Closest-matching arm: the one with the fewest problems. Ties broken by
-    // arm order (stable: smaller index wins). An arm whose contested `match`
+    // arm order (stable: smaller index wins). An arm whose `match`
     // glob rejected the file is ruled out, so it is reported only when every
     // arm was.
     per_arm
@@ -526,7 +526,7 @@ fn build_problems(
     vec![build_problem(err, positions, arm_index, anchors)]
 }
 
-/// A contested `match` glob rejected the file; see [`super::file_match`].
+/// A root-union arm's `match` glob rejected the file; see [`super::file_match`].
 fn is_match_keyword_error(err: &jsonschema::ValidationError<'_>) -> bool {
     err.schema_path().as_str().ends_with(super::file_match::DARKMATTER_MATCH_KEYWORD)
 }

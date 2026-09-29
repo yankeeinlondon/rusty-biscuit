@@ -20,7 +20,7 @@
 //!   `darkmatter-file-reference` lazy) plus URL-scheme and passive semantic
 //!   meta-type keyword validators.
 //! - [`file_match`] — `file(match(...))` globs: completion candidates, and an
-//!   arm constraint where root-union arms disagree on them.
+//!   constraint on each declaring root-union arm.
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`rewrite`] — eager-`file` value normalization: rewrites a present
 //!   `file(eager)`-typed value to its document-relative resolved path after

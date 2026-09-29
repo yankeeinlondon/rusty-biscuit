@@ -33,7 +33,7 @@
 //! only the string) and the `x-darkmatter-*` semantic validators are custom
 //! `Keyword` implementations. `match(...)` is suggestion metadata carried on
 //! the SimplifiedSchema atom (`Constraint::Match` → completion); it is
-//! validated only where a root union contests it, through the
+//! validated for each declaring root-union arm, through the
 //! `x-darkmatter-match` keyword in [`super::file_match`].
 //!
 //! ## Examples

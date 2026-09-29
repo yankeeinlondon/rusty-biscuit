@@ -2000,3 +2000,52 @@ fn compose_contested_file_match_selects_and_rejects_union_arms() {
     assert!(stderr.contains("severity"), "the fix arm applies; stderr:\n{stderr}");
     assert!(!stderr.contains("match(**/"), "the feature arm is ruled out; stderr:\n{stderr}");
 }
+
+#[cfg(unix)]
+#[test]
+fn compose_enforces_each_root_union_arm_match_before_provider_launch() {
+    let (fixture, count_path, _events) = caller_file_fixture("compose-every-arm-match");
+    for tree in ["features", "fixes"] {
+        let spec = fixture.cwd().join(tree).join("x/spec.md");
+        fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        fs::write(&spec, "---\ntitle: X\n---\nSpec body.\n").unwrap();
+    }
+    let prompts = fixture.cwd().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(
+        prompts.join("raw.json"),
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"kind":{"const":"other"}},"required":["kind"]}"#,
+    )
+    .unwrap();
+    for (name, schema) in [
+        (
+            "identical",
+            "$schema:\n  - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n  - kind: 'literal(other)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\nkind: fix\n",
+        ),
+        (
+            "one-declaration",
+            "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n  - kind: 'literal(fix)'\nkind: feature\n",
+        ),
+        (
+            "mixed-schema",
+            "$schema:\n  - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n  - ./raw.json\nkind: fix\n",
+        ),
+    ] {
+        fs::write(prompts.join("plan.md"), format!("---\n{schema}---\nSpec: {{{{spec}}}}\n")).unwrap();
+        for (spec, accepted) in [("fixes/x/spec.md", true), ("features/x/spec.md", false)] {
+            let _ = fs::remove_file(&count_path);
+            let output = fixture
+                .command()
+                .args(["compose", "--goose", "prompts/plan.md", &format!("spec={spec}")])
+                .env("COLUMNS", "1000")
+                .output()
+                .unwrap();
+            let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+            assert_eq!(count_path.exists(), accepted, "{name}, {spec}: {stderr}");
+            assert_eq!(output.status.success(), accepted, "{name}, {spec}: {stderr}");
+            if !accepted {
+                assert!(stderr.contains("match(**/fixes/**/spec.md)"), "{name}, {spec}: {stderr}");
+            }
+        }
+    }
+}

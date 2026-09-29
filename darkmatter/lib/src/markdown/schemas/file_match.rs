@@ -1,12 +1,11 @@
-//! `file(match(...))` globs: completion candidates everywhere, an arm
-//! constraint where a root union's arms disagree on them.
+//! `file(match(...))` globs: completion candidates everywhere, and a
+//! constraint on each declaring arm of a root union.
 //!
 //! On a single schema `match` only suggests files: completion and choosers
-//! walk it, and validation ignores it. In a root union, a glob that the arms
-//! declaring the same property do not share is what tells those arms apart, so
-//! conversion emits it as [`DARKMATTER_MATCH_KEYWORD`] on that arm's file
-//! fragment ([`contested_match_patterns`]). An existing file outside the glob
-//! then rules the arm out, in arm selection and in the final verdict alike.
+//! walk it, and validation ignores it. In a root union, conversion emits each
+//! declared glob as [`DARKMATTER_MATCH_KEYWORD`] on its arm's file fragment.
+//! An existing file outside the glob then rules that arm out, in arm selection
+//! and in the final verdict alike.
 //!
 //! A value is judged only when it names an existing file. A missing file is
 //! the existence check's verdict (`file(eager)`), or a lazy output that does
@@ -131,55 +130,17 @@ fn portable(path: &Path) -> String {
         .join("/")
 }
 
-/// The globs root-union arm `arm_index` enforces on top-level `property`.
-///
-/// `Some` only for a union of two or more arms in which the property is
-/// declared by at least two arms that do not all carry the same `match`
-/// globs, and this arm declares it as a `file`/`file[]` with a `match`. A
-/// property no other arm declares, or one every declaring arm matches
-/// identically, keeps suggestion-only semantics: its glob cannot tell arms
-/// apart.
+/// The globs a simplified root-union arm enforces on top-level `property`.
+/// A single schema does not use this arm-level constraint.
 #[must_use]
-pub fn contested_match_patterns<'a>(
-    arms: &'a [SchemaArm],
-    arm_index: usize,
-    property: &str,
-) -> Option<&'a [String]> {
-    if arms.len() < 2 {
+pub fn root_union_match_patterns<'a>(arm: &'a SchemaArm, property: &str) -> Option<&'a [String]> {
+    let SchemaArm::Inline(shape) = arm else {
         return None;
-    }
-    let declarations: Vec<(usize, Option<&[String]>)> = arms
-        .iter()
-        .enumerate()
-        .filter_map(|(index, arm)| match arm {
-            SchemaArm::Inline(shape) => shape
-                .properties
-                .get(property)
-                .map(|definition| (index, file_match_patterns(definition))),
-            SchemaArm::FileRef(_) => None,
-        })
-        .collect();
-    if declarations.len() < 2 {
-        return None;
-    }
-    let normalized = |patterns: Option<&[String]>| {
-        patterns.map(|patterns| {
-            let mut sorted = patterns.to_vec();
-            sorted.sort();
-            sorted
-        })
     };
-    let first = normalized(declarations[0].1);
-    if declarations.iter().all(|(_, patterns)| normalized(*patterns) == first) {
-        return None;
-    }
-    declarations
-        .into_iter()
-        .find(|(index, _)| *index == arm_index)
-        .and_then(|(_, patterns)| patterns)
+    shape.properties.get(property).and_then(file_match_patterns)
 }
 
-fn file_match_patterns(definition: &PropertyDef) -> Option<&[String]> {
+pub(crate) fn file_match_patterns(definition: &PropertyDef) -> Option<&[String]> {
     let PropertyDef::Single(atom) = definition else {
         return None;
     };
@@ -192,7 +153,7 @@ fn file_match_patterns(definition: &PropertyDef) -> Option<&[String]> {
     })
 }
 
-/// Whether a caller's file value satisfies an arm's contested globs, resolved
+/// Whether a caller's file value satisfies an arm's globs, resolved
 /// from the caller's own `origin`.
 ///
 /// The same judgment the [`DARKMATTER_MATCH_KEYWORD`] validator makes: a value
@@ -331,26 +292,27 @@ mod tests {
     }
 
     #[test]
-    fn only_globs_the_declaring_arms_dispute_are_contested() {
+    fn every_declared_root_union_glob_constrains_its_arm() {
         let arms = union(
             "- {kind: 'literal(feature)', spec: 'file(eager;match(**/features/**/spec.md))', plan: 'file(match(**/*plan*.md))', solo: 'file(match(*.md))'}\n\
              - {kind: 'literal(fix)', spec: 'file(eager;match(**/fixes/**/spec.md))', plan: 'file(match(**/*plan*.md))'}\n",
         );
         assert_eq!(
-            contested_match_patterns(&arms, 0, "spec"),
+            root_union_match_patterns(&arms[0], "spec"),
             Some(&["**/features/**/spec.md".to_string()][..])
         );
         assert_eq!(
-            contested_match_patterns(&arms, 1, "spec"),
+            root_union_match_patterns(&arms[1], "spec"),
             Some(&["**/fixes/**/spec.md".to_string()][..])
         );
-        assert_eq!(contested_match_patterns(&arms, 0, "plan"), None, "identical globs");
-        assert_eq!(contested_match_patterns(&arms, 0, "solo"), None, "one declaring arm");
-        assert_eq!(contested_match_patterns(&arms, 0, "kind"), None, "not a file");
+        assert_eq!(root_union_match_patterns(&arms[0], "plan"), Some(&["**/*plan*.md".to_string()][..]));
+        assert_eq!(root_union_match_patterns(&arms[0], "solo"), Some(&["*.md".to_string()][..]));
+        assert_eq!(root_union_match_patterns(&arms[1], "solo"), None);
+        assert_eq!(root_union_match_patterns(&arms[0], "kind"), None);
     }
 
     #[test]
-    fn conversion_emits_only_contested_globs() {
+    fn conversion_emits_every_root_union_glob() {
         let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
             "- {spec: 'file(eager;match(**/features/**/spec.md))', plan: 'file(match(*.md))[]'}\n\
              - {spec: 'file(eager;match(**/fixes/**/spec.md))', plan: 'file(match(*.md))[]'}\n",
@@ -364,7 +326,7 @@ mod tests {
             .and_then(|arms| arms.iter().find(|arm| arm.get("format").is_some()))
             .unwrap_or(spec);
         assert_eq!(file_arm[DARKMATTER_MATCH_KEYWORD], serde_json::json!(["**/fixes/**/spec.md"]));
-        assert!(!json.to_string().contains("*.md\"]"), "uncontested glob emitted: {json}");
+        assert_eq!(json["anyOf"][0]["properties"]["plan"]["items"][DARKMATTER_MATCH_KEYWORD], serde_json::json!(["*.md"]));
         let single: serde_yaml_ng::Value =
             serde_yaml_ng::from_str("{spec: 'file(eager;match(**/fixes/**/spec.md))'}").unwrap();
         let single =
@@ -373,13 +335,13 @@ mod tests {
     }
 
     #[test]
-    fn a_glob_against_an_unglobbed_declaration_is_contested() {
+    fn a_glob_against_an_unglobbed_declaration_constrains_its_arm() {
         let arms = union(
             "- {spec: 'file(match(**/fixes/**/spec.md))'}\n\
              - {spec: 'string'}\n",
         );
-        assert!(contested_match_patterns(&arms, 0, "spec").is_some());
-        assert_eq!(contested_match_patterns(&arms, 1, "spec"), None);
+        assert!(root_union_match_patterns(&arms[0], "spec").is_some());
+        assert_eq!(root_union_match_patterns(&arms[1], "spec"), None);
     }
 
     #[test]

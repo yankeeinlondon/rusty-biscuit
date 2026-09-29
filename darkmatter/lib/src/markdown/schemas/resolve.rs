@@ -244,6 +244,9 @@ fn resolve_root_union(
                     schema_roots,
                     request_context,
                 )?);
+                if let SimplifiedSchema::Single(shape) = &arm_schema {
+                    super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
+                }
                 if let SimplifiedSchema::Single(shape) = &arm_schema
                     && let Some(arms) = all_simplified_arms.as_mut()
                 {
@@ -268,6 +271,10 @@ fn resolve_root_union(
                 // If this arm itself came from a SimplifiedSchema file, preserve
                 // it in the simplified projection only when it is a single
                 // shape (root unions of unions are not modelled in v1).
+                let mut arm_json = resolved.json_schema;
+                if let Some(SimplifiedSchema::Single(shape)) = &resolved.simplified {
+                    super::simplified::convert::attach_root_union_match(&mut arm_json, shape);
+                }
                 match (&resolved.simplified, all_simplified_arms.as_mut()) {
                     (Some(SimplifiedSchema::Single(shape)), Some(arms)) => {
                         arms.push(SchemaArm::Inline(shape.clone()));
@@ -276,7 +283,7 @@ fn resolve_root_union(
                         all_simplified_arms = None;
                     }
                 }
-                any_of.push(strip_schema_uri(resolved.json_schema));
+                any_of.push(strip_schema_uri(arm_json));
             }
             other => {
                 return Err(SchemaError::FrontmatterShape {
@@ -287,9 +294,6 @@ fn resolve_root_union(
                 });
             }
         }
-    }
-    if let Some(arms) = &all_simplified_arms {
-        super::simplified::convert::attach_contested_match(&mut any_of, arms);
     }
     let mut root = Map::new();
     root.insert(
@@ -824,6 +828,7 @@ fn resolve_standalone_root_union(
                     schema_roots,
                     request_context,
                 )?);
+                super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
                 simplified_arms.push(SchemaArm::Inline(shape));
                 any_of.push(strip_schema_uri(arm_json));
             }
@@ -839,19 +844,18 @@ fn resolve_standalone_root_union(
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
                 advisories.extend(resolved.advisories.iter().cloned());
+                let mut arm_json = resolved.json_schema;
                 if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
+                    super::simplified::convert::attach_root_union_match(&mut arm_json, &shape);
                     simplified_arms.push(SchemaArm::Inline(shape));
                 } else {
                     all_simplified = false;
                 }
-                any_of.push(strip_schema_uri(resolved.json_schema));
+                any_of.push(strip_schema_uri(arm_json));
             }
         }
     }
 
-    if all_simplified {
-        super::simplified::convert::attach_contested_match(&mut any_of, &simplified_arms);
-    }
     let mut root = Map::new();
     root.insert(
         "$schema".into(),

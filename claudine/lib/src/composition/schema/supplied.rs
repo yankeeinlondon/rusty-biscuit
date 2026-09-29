@@ -2,7 +2,7 @@
 
 use biscuit_file::{FileReference, FileResolutionContext};
 use darkmatter::markdown::compose::CallerInputRecords;
-use darkmatter::markdown::schemas::file_match::{contested_match_patterns, file_match_admits};
+use darkmatter::markdown::schemas::file_match::{file_match_admits, root_union_match_patterns};
 use darkmatter::markdown::schemas::{
     Constraint, DarkmatterSchemas, EffectiveSchema, PropertyAtom, PropertyDef, SchemaArm,
     SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr, ValidationProblem,
@@ -310,16 +310,16 @@ fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> Str
 /// as opposed to a parse or resolution error that a glob walk cannot rescue.
 pub(super) const NO_MATCH: &str = "no existing file matched reference";
 
-/// Whether every existing caller file this arm declares falls inside the
-/// `match` glob the arm contests with its siblings.
+/// Whether every existing caller file this arm declares falls inside its
+/// `match` glob.
 ///
 /// Each arm is validated alone below, where Darkmatter cannot tell which of
 /// its globs discriminate, so the arm-level rule is applied here through the
 /// same judgment Darkmatter's validator makes: a value naming no existing file
 /// (a partial the chooser will complete) never rules an arm out.
-fn admits_contested_files(arms: &[SchemaArm], index: usize, records: &CallerInputRecords) -> bool {
+fn admits_arm_files(arm: &SchemaArm, records: &CallerInputRecords) -> bool {
     records.iter().all(|(name, record)| {
-        let Some(patterns) = contested_match_patterns(arms, index, name) else {
+        let Some(patterns) = root_union_match_patterns(arm, name) else {
             return true;
         };
         let values: Vec<&str> = match record.raw() {
@@ -338,8 +338,8 @@ fn admits_contested_files(arms: &[SchemaArm], index: usize, records: &CallerInpu
 /// Decide which arms a caller's file inputs are judged against.
 ///
 /// A root union needs a unique applicable arm before its file metadata has
-/// meaning. An existing caller file outside a glob the arm contests rules it
-/// out ([`admits_contested_files`]). Two relaxations apply when judging each
+/// meaning. An existing caller file outside the arm's glob rules it out
+/// ([`admits_arm_files`]). Two relaxations apply when judging each
 /// arm. Existence is relaxed
 /// only for caller-owned files, because initialization still owns that verdict.
 /// A problem on a value that still needs composition (`{{…}}`/`$(…)`) is
@@ -371,7 +371,7 @@ fn supplied_file_arms<'a>(
     schema_source.frontmatter_mut().as_map_mut().shift_remove("$schema");
     let mut shapes = Vec::with_capacity(arms.len());
     let mut applicable = Vec::new();
-    for (index, arm) in arms.iter().enumerate() {
+    for arm in arms {
         let SchemaArm::Inline(shape) = arm else {
             return None;
         };
@@ -399,7 +399,7 @@ fn supplied_file_arms<'a>(
             .with_baseline(SimplifiedSchema::Single(relaxed))
             .ok()?;
         let projected = schemas.effective_for(&schema_source).ok()??;
-        if !admits_contested_files(arms, index, records) {
+        if !admits_arm_files(arm, records) {
             continue;
         }
         let report = projected.validate(&candidate);

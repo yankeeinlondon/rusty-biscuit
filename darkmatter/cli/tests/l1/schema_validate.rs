@@ -862,3 +862,54 @@ fn schema_validate_contested_file_match_selects_and_rejects_union_arms() {
     assert!(stdout.contains("severity"), "{stdout}");
     assert!(!stdout.contains("match("), "the feature arm is ruled out: {stdout}");
 }
+
+#[test]
+fn schema_validate_enforces_each_root_union_arm_match() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    for tree in ["features", "fixes"] {
+        std::fs::create_dir_all(tmp.join(tree).join("x")).unwrap();
+        write_file(&tmp.join(tree).join("x"), "spec.md", "# Spec\n");
+    }
+    write_file(
+        tmp,
+        "raw.json",
+        r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"kind":{"const":"other"}},"required":["kind"]}"#,
+    );
+    for (name, schema, matching, outside) in [
+        (
+            "identical",
+            "$schema:\n  - kind: 'literal(fix)'\n    spec: 'file(required; eager; match(**/fixes/**/spec.md))'\n  - kind: 'literal(other)'\n    spec: 'file(required; eager; match(**/fixes/**/spec.md))'\nkind: fix\n",
+            "fixes/x/spec.md",
+            "features/x/spec.md",
+        ),
+        (
+            "one-declaration",
+            "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required; eager; match(**/fixes/**/spec.md))'\n  - kind: 'literal(fix)'\nkind: feature\n",
+            "fixes/x/spec.md",
+            "features/x/spec.md",
+        ),
+        (
+            "mixed-schema",
+            "$schema:\n  - kind: 'literal(fix)'\n    spec: 'file(required; eager; match(**/fixes/**/spec.md))'\n  - ./raw.json\nkind: fix\n",
+            "fixes/x/spec.md",
+            "features/x/spec.md",
+        ),
+    ] {
+        let doc = write_file(tmp, &format!("{name}.md"), &format!("---\n{schema}---\nBody\n"));
+        for (spec, accepted) in [(matching, true), (outside, false)] {
+            let output = process
+                .command()
+                .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+                .arg(&doc)
+                .arg(format!("spec={spec}"))
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(output.status.success(), accepted, "{name}, {spec}: {stdout}");
+            if !accepted {
+                assert!(stdout.contains("match(**/fixes/**/spec.md)"), "{name}, {spec}: {stdout}");
+            }
+        }
+    }
+}
