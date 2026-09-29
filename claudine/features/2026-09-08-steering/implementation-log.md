@@ -229,6 +229,48 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5:
   - claudine/docs/cli/steer.md
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - claudine/lib/src/runaway/detector.rs
+  - claudine/lib/src/runaway/detector/tests.rs
+  - claudine/lib/src/runaway/detector/tests/warnings.rs
+  - claudine/lib/src/runaway/mod.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/automatic.rs
+  - claudine/lib/src/steering/automatic/tests.rs
+  - claudine/lib/src/steering/controller.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/config/claudine_config/tests.rs
+  - claudine/lib/src/config/merge.rs
+  - claudine/lib/src/dispatch/runner/speak.rs
+  - claudine/lib/src/dispatch/runner/tests.rs
+  - claudine/cli/src/steering/mod.rs
+  - claudine/cli/src/steering/automatic.rs
+  - claudine/cli/src/steering/automatic/tests.rs
+  - claudine/cli/src/steering/owner.rs
+  - claudine/cli/src/commands/steer/mod.rs
+  - claudine/cli/src/commands/steer/render.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/cli/src/commands/wrap/runaway_guard.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/automatic_help.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/mod.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/tests/bin/fake_pi/main.rs
+  - claudine/cli/tests/l1/pi_managed_rpc.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_6:
+  - claudine/README.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/docs/topics/steering-routing.md
+docs_created_during_phase_6:
+  - claudine/docs/topics/automatic-steering.md
+skills_files_updated_during_phase_6: []
 ---
 # Implementation Log for 2026-09-08-steering (8 phases)
 
@@ -1227,3 +1269,218 @@ biscuit-tui's `run_standalone`, already used on all three OSes; transport is
 the Phase 3 requester. The OS-sensitive paths (daemon routing over named pipes,
 the binary's no-daemon failure and exit codes) passed natively on Windows and
 on Linux via `just cross-check`.
+
+## Phase 6
+
+Automatic repetition warnings, 2026-09-28. Implemented; every real session
+still reports automatic help as unavailable because no activation grant exists
+(Pi's `retained-rpc` stays blocked), so delivery is proven with fixture
+eligibility and the production path shows the bounded "cannot send" notice.
+
+### Design decisions
+
+- **Detector signals are a separate channel on the same pass.**
+  `ContentDetector::observe`/`observe_flush` return a `ContentObservation {
+  trip, signals }`; `feed`/`flush` are now `observe(..).trip`, so every existing
+  caller and test is unchanged. `detect_cycle` now returns the active cycle's
+  `(L, full_cycles)` and `process_line` decides the trip with the identical
+  `full_cycles >= max_repeats` test, so the trip schedule is byte-for-byte the
+  old one (proved by `feed_only_trip_line` comparisons in every schedule test).
+  A chunk that trips returns no signals: this single rule gives "hard stop
+  wins within a chunk" and "no warning opportunity is created by a prevented
+  warning".
+- **Episode state lives in the detector, beside (not inside) the evidence.**
+  `Episode::{Armed, Warned { cycle_len, recovered }}` is written only by the
+  signal path and never read by the trip decision. Warning at
+  `warning_threshold(limit) = limit/2 + limit%2` (no overflow; `None` for 0/1).
+  A limit of 2 also never warns in practice: detection seeds two cycles, which
+  already trips — pinned by a test. Recovery: a line with no recognized cycle
+  at the tail advances `recovered` only when nonblank; any recognized cycle
+  (including a new block) resets it; the warned `cycle_len` is frozen until
+  `recovered >= max(8, 2L)`. `reset_turn` does not touch it.
+- **"Detected repetition" is the detector's own recognition** (two identical
+  halves at the tail). Consequence worth knowing: two consecutive identical
+  lines (e.g. two `}` lines) reset recovery. That errs toward fewer warnings,
+  never toward a changed stop.
+- **Opportunity budget and setting are library types**
+  (`claudine::steering::automatic`): `OpportunityBudget` (3,
+  `OPPORTUNITIES_PER_EXECUTION`), `HELPER_MESSAGE` (spec text verbatim),
+  `parse_auto_steer`, `resolve_enabled(env, repo, user)` returning
+  `ConfigValidation` errors, and the `SteeringConfig`/`AutomaticSteeringConfig`
+  serde types used by both `ClaudineConfig` and `RepoOverrideConfig`.
+  `enabled` uses a present-only deserializer (absent → `None`, `null` →
+  error); `steering`/`automatic` are non-`Option` structs with `default`, so an
+  explicit `null` section is a type error rather than "absent".
+- **Resolution happens with the guard config, before launch.**
+  `resolve_guard_inputs` already loads the user and repo files at the right
+  moment for both structured paths, fails closed, and runs per harness attempt;
+  it now also resolves `automatic_steering` from `CLAUDINE_AUTO_STEER` + those
+  files. A malformed value therefore fails every structured launch before the
+  provider starts (L1-proven: no `argv-1.json`).
+- **Runtime: `cli/src/steering/automatic.rs::AutomaticHelp`**, owned by the
+  live sink (`None` when turned off, so off means no work, no notices, no
+  opportunities). On a warning it claims an opportunity, asks the controller
+  for `automatic_route()` (new, read-only), and either spawns
+  `controller.submit(Submission { origin: Automatic, expected: None,
+  opportunity })` on the runtime or prints the unavailable notice. The stream
+  reader never waits: the controller already enforces the 2 s automatic
+  deadline, one-automatic-in-flight (`Busy`), and never-retry.
+- **Notices** go through `stderr_notices` (a `Status` line: Info for a
+  confirmed send, Warning otherwise), deduplicated by text per execution;
+  confirmed sends carry "`n` of 3" so they are distinct. The outcome wording
+  reuses `commands::steer::render::outcome_word` (made `pub(crate)`).
+- **Hard stop during delivery.** `fire_content_trip` sends the trip first and
+  then calls `AutomaticHelp::hard_stop`, which refuses later warnings, aborts
+  the reply task (so no notice follows the stop), and shuts the controller
+  down (its worker aborts the in-flight executor future and answers queued
+  requests `unavailable`). A content trip is terminal for the execution, so
+  stopping manual steering with it is correct.
+- **Per-execution allowance.** `AutomaticHelp` is created per sink, and a sink
+  is created per harness attempt (`harness_orch/attempt.rs`) and per direct
+  wrapper run (`wrapper_exec.rs`, now given the owner's controller by
+  `wrapper_stages.rs`). Retry/resume attempts therefore get fresh budgets;
+  turns share one.
+- **Control traffic no longer refreshes the silence clock (defect fixed).**
+  Before this phase, every stdout line — including Pi RPC `response` lines to
+  Claudine's own `steer`/`get_state`/`prompt` commands — refreshed
+  `last_byte_at`, so a steering send postponed a `step_timeout` silence kill.
+  New `StdioControl::is_control_reply` (default `false`; Pi: `type ==
+  "response"`, with a cheap substring pre-check); the semantic reader skips
+  `record_byte_activity` for those lines. The lines still reach the parser
+  (readiness/session identity depend on them).
+- **Helper message** = spec text + "(Observed: the same line N times in a
+  row.)" / "…the same K-line block…". Counts only; output is never echoed.
+- **No audit record for a routeless opportunity.** It is not submitted, so the
+  controller never sees it; it produces the notice and a `tracing::info!`.
+  Submitted automatic requests are audited with their opportunity ID as in
+  Phase 2. Documented in `automatic-steering.md`.
+
+### Defects found and fixed during the phase
+
+- Steering control replies refreshed the stream-silence clock (above).
+
+### Known gap recorded (not fixed; loader-wide)
+
+- **Duplicate keys in Claudine config files are last-wins.** Both loaders
+  parse JSON5 into a `serde_json::Value` (`parse_json5_to_value`), which keeps
+  the last duplicate before serde sees the struct, so serde's duplicate-field
+  rejection never fires — for every config key, not just this one. Fixing it
+  means a duplicate-rejecting parse in `biscuit-file`'s `Json5` (or a pre-scan
+  in the loader) and would start rejecting existing user files; that is a
+  cross-package behavior change outside Phase 6. The matrix pins the current
+  outcome (`duplicate key` → last value) so a stricter parser shows up as a
+  deliberate test change, and the topic doc states it.
+
+### Requirement-to-test mapping
+
+| Requirement | Tests |
+| --- | --- |
+| Warn at ceil(limit/2); no overflow; none for limit 1 (and 2) | lib `runaway::detector::tests::warnings::threshold_is_half_the_stop_limit_rounded_up_and_absent_below_two`, `odd_small_limit_warns_at_three_of_five`, `a_limit_of_one_or_two_has_no_warning_opportunity` |
+| Single-line and multi-line cycles warn before the unchanged stop | `default_limit_warns_at_fifteen_single_line_repeats_and_still_stops_at_thirty`, `six_line_block_warns_at_fifteen_cycles_before_the_unchanged_stop` (both compare against a `feed`-only detector) |
+| Same chunk crosses warning and stop → only the stop (repetition and volume) | `one_chunk_crossing_warning_and_stop_returns_only_the_stop`, `a_volume_stop_in_the_warning_chunk_also_suppresses_the_warning`; sink `automatic_help::a_chunk_that_crosses_warning_and_stop_only_stops` |
+| Split chunks / trailing partial line | `a_line_split_across_chunks_warns_when_it_completes`, `flush_reports_a_warning_on_a_trailing_partial_line` |
+| One warning per episode | `one_episode_warns_once_even_as_it_continues` |
+| Recovery `max(8, 2L)`; blanks don't advance; repetition (new block) resets; frozen L | `recovery_needs_at_least_eight_lines_or_twice_the_cycle`, `recovery_takes_eight_nonblank_unrepeated_lines_and_blank_lines_do_not_count`, `detected_repetition_resets_recovery_including_a_new_block`, `a_multiline_block_freezes_its_length_for_recovery` |
+| Brief wording change is not recovery; stop keeps schedule | `a_brief_wording_change_is_not_recovery_and_the_stop_keeps_its_schedule` |
+| Turn boundaries neither advance nor reset | `turn_boundaries_neither_advance_nor_reset_recovery` |
+| New episode must reach its own threshold; second stop unchanged | `after_recovery_a_new_episode_must_reach_its_own_threshold`, `recovery_and_a_second_warning_leave_the_second_stop_on_its_schedule` |
+| Disabled repetition → no opportunities | `disabled_repetition_detection_produces_no_signals` |
+| Three opportunities; no refund; distinct IDs; new execution fresh | lib `steering::automatic::tests::three_opportunities_per_execution_each_distinct`; CLI `steering::automatic::tests::three_warnings_send_three_helper_messages_then_nothing` |
+| Unavailable/failed/busy attempts consume opportunities; notice deduplicated | CLI `an_unavailable_route_prints_one_notice_and_spends_every_opportunity`, `a_warning_while_one_is_in_flight_is_busy_and_still_spends_its_opportunity`, `without_an_owner_every_warning_is_unavailable` |
+| Slow/unanswered send never blocks; unknown after 2 s; never retried | `a_send_never_blocks_and_an_unanswered_one_is_reported_unconfirmed` |
+| Termination during delivery wins; nothing after the stop | `a_hard_stop_abandons_the_send_in_flight_and_refuses_later_warnings`; sink `a_stop_during_delivery_abandons_the_warning` |
+| Delivery is non-interrupting, automatic origin, helper text | `three_warnings_send_three_helper_messages_then_nothing`, `the_helper_message_carries_counts_and_never_output`; lib `the_helper_message_is_the_specified_suspicion_and_fits_a_steering_message` |
+| Delivery before the stop; acknowledged help is not recovery | sink `the_warning_is_delivered_before_the_stop_and_the_stop_keeps_its_schedule` |
+| Opt-out → no sends, no notices, stop unchanged | sink `with_help_off_nothing_is_sent_or_noticed_and_the_stop_keeps_its_schedule`; L1 `pi_managed_rpc::automatic_help_turned_off_by_environment_prints_nothing_and_stops_the_same`, `automatic_help_turned_off_in_user_configuration_prints_nothing_and_stops_the_same` |
+| Env parsing (trimmed, case-insensitive, 4 pairs); empty/malformed/non-Unicode errors | lib `every_documented_env_spelling_parses_trimmed_and_case_insensitive`, `empty_and_malformed_env_values_are_configuration_errors`, `a_non_unicode_env_value_is_a_configuration_error` (Unix) |
+| Precedence env > repo > user > on; absent repo keeps user opt-out | lib `precedence_is_env_then_repo_then_user_then_on`, `a_repo_file_merged_by_the_user_loader_overrides_only_what_it_sets`; L1 env-over-config case |
+| Config errors before launch (env and file) | L1 `a_malformed_auto_steer_value_fails_before_pi_is_launched`, `a_malformed_configured_value_fails_before_pi_is_launched` |
+| Persisted value round-trips; unset is omitted | lib `a_saved_config_round_trips_the_setting_and_omits_it_when_unset` |
+| End-to-end through the real wrapper + shipped policy: one notice, then the unchanged stop at 30, nothing sent to the provider | L1 `automatic_help_that_cannot_be_sent_warns_once_before_the_unchanged_repetition_stop` (fake Pi `repeat` plan) |
+| Steering control replies are not agent progress | CLI `pi_rpc::tests::only_responses_to_the_sessions_own_commands_are_control_replies` |
+| Existing expression/volume/repetition/timeout regressions | all pre-existing `runaway::*`, `content_guard::*`, `runaway_guard::*`, timeout and signal suites unchanged and passing in `just test` |
+
+### Input robustness matrix (`steering.automatic.enabled`)
+
+One test per file kind walks every cell from a control file through the real
+loader (`load_repo_override_config`, `load_claudine_config`):
+`steering::automatic::tests::{repo_file_matrix, user_file_matrix}`.
+
+| Shape | Cell | Outcome (user and repo) |
+| --- | --- | --- |
+| control | `enabled: false` / `true` | `Some(false)` / `Some(true)` |
+| absent | key omitted; `automatic: {}`; `steering: {}`; no `steering` | `None` (inherit) |
+| explicit null | `enabled: null`; `automatic: null`; `steering: null` | error |
+| wrong type, whole field | `"false"`, `0`, `[false]`; `automatic: false`; `steering: false` | error |
+| wrong type, one/every element | n/a (scalar) | — |
+| empty | `{}` sections | `None` (inherit), distinct from `null` |
+| unknown key | beside `enabled`; beside `automatic` | error (`deny_unknown_fields`) |
+| duplicate key | `enabled` twice | **last wins** (known loader-wide gap, pinned) |
+| trailing content | valid document + `false` | error |
+
+The environment field's matrix (absent → inherit; empty/whitespace → error;
+each spelling; malformed; non-Unicode) is in
+`every_documented_env_spelling…`, `empty_and_malformed…`,
+`a_non_unicode…`, and `precedence…`. Smell check: the only `#[serde(default)]`
+on the load-bearing field pairs with the present-only deserializer; no
+`unwrap_or_default`/`.ok()` on its parse.
+
+### Checks run
+
+- `cargo nextest run -p claudine --lib runaway`: 101/101 (21 new).
+- `cargo nextest run -p claudine --lib steering::automatic config::`: 387/387.
+- `cargo nextest run -p claudine-cli --bin claudine automatic control_replies
+  runaway_guard content_guard`: 44/44.
+- `cargo nextest run -p claudine-cli --features test-fixtures --test l1
+  pi_managed_rpc`: 11/11 (5 new).
+- Dispatch inventory re-blessed with the Phase 1–5 workaround (bless branch
+  forced for one run and reverted; `dispatch_inventory.rs` unchanged): 3 new
+  reference-class `Provider::Pi` sites, all in test files.
+- `just lint` (claudine area): clean for all five crates (one
+  `type_complexity` fix in a test).
+- `just test --no-fail-fast` (claudine area), before the re-bless: 7977
+  passed, 2 failed, 9 skipped — the inventory (then re-blessed) and the
+  pre-existing `compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch`
+  (darkmatter union work, see Phase 5). **Final run after the re-bless: 7978
+  passed, 1 failed (that same pre-existing test), 9 skipped.**
+- `just cross-check claudine-cli --features test-fixtures automatic
+  pi_managed_rpc control_replies content_guard runaway_guard`: native Windows
+  56/56, Linux 56/56. `just cross-check claudine --os windows runaway
+  steering::automatic config::`: pass.
+- `just check-tier-coverage`: not rerun — no tier markers were added; every new
+  test is L1 in an existing declared target (`claudine` lib, `claudine` bin,
+  `l1` binary under `test-fixtures`, which CI enables).
+
+### Environment limitations encountered
+
+- GitNexus `impact` was not permitted; callers were found by text search:
+  `ContentDetector::feed` (sink, wiring tests, detector tests — signature
+  unchanged), `ResolvedGuardInputs` (attempt.rs, wrapper_exec.rs, tests),
+  `run_structured_stream_session` (one caller, `wrapper_stages.rs`),
+  `ClaudineConfig`/`RepoOverrideConfig` struct literals (7 sites, all updated),
+  `StdioControl` (one implementor, Pi).
+- Shell heredocs, `perl -i`, and env-prefixed commands needed approval; edits
+  were made with the editor tool, and the inventory was blessed as above.
+- Writes under `.claude/skills/claudine/` were denied again. Intended skill
+  update (not applied), in addition to the Phase 1–5 items: add a row to the
+  SKILL.md "Wrapper & composition subsystems" table — "Automatic steering:
+  `ContentDetector::observe` adds nonterminal `RepetitionSignal`s (warning at
+  ceil(limit/2), recovery after `max(8, 2L)` nonblank unrepeated lines) without
+  changing any trip; a tripping chunk carries no signals. The live sink hands
+  them to `cli/src/steering/automatic.rs::AutomaticHelp`, which spends one of 3
+  opportunities per execution and submits to the execution's own controller in
+  the background, or prints one deduplicated 'cannot send' notice; a trip calls
+  `hard_stop` (controller shut down). Off via `CLAUDINE_AUTO_STEER` > repo >
+  user `steering.automatic.enabled` (resolved in `resolve_guard_inputs`;
+  malformed = pre-launch error). Control replies
+  (`StdioControl::is_control_reply`) never refresh the silence clock. Reference:
+  `topics/automatic-steering.md`."
+
+### Cross-OS assessment
+
+No new `#[cfg]` branches in production code. The OS-sensitive pieces are the
+fake-Pi e2e (the wrapper must terminate a provider that is sleeping mid-turn:
+process group on Unix, Job Object on Windows) and the reader-thread change;
+both passed natively on Windows and on Linux. The non-Unicode env test is
+Unix-only because building an invalid `OsStr` is platform-specific; the
+parser's non-Unicode branch is the same code on Windows.

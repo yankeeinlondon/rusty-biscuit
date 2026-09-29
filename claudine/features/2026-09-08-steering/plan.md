@@ -228,11 +228,53 @@ docs_updated_during_phase_5:
 docs_created_during_phase_5:
   - claudine/docs/cli/steer.md
 skills_files_updated_during_phase_5: []
+source_files_during_phase_6:
+  - claudine/lib/src/runaway/detector.rs
+  - claudine/lib/src/runaway/detector/tests.rs
+  - claudine/lib/src/runaway/detector/tests/warnings.rs
+  - claudine/lib/src/runaway/mod.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/automatic.rs
+  - claudine/lib/src/steering/automatic/tests.rs
+  - claudine/lib/src/steering/controller.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/config/claudine_config/tests.rs
+  - claudine/lib/src/config/merge.rs
+  - claudine/lib/src/dispatch/runner/speak.rs
+  - claudine/lib/src/dispatch/runner/tests.rs
+  - claudine/cli/src/steering/mod.rs
+  - claudine/cli/src/steering/automatic.rs
+  - claudine/cli/src/steering/automatic/tests.rs
+  - claudine/cli/src/steering/owner.rs
+  - claudine/cli/src/commands/steer/mod.rs
+  - claudine/cli/src/commands/steer/render.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/cli/src/commands/wrap/runaway_guard.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/automatic_help.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/mod.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/tests/bin/fake_pi/main.rs
+  - claudine/cli/tests/l1/pi_managed_rpc.rs
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_6:
+  - claudine/README.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/docs/topics/steering-routing.md
+docs_created_during_phase_6:
+  - claudine/docs/topics/automatic-steering.md
+skills_files_updated_during_phase_6: []
 ---
 # Steering implementation plan
 
-Status: Phases 1–5 implemented (2026-09-28; Pi steering blocked by a reviewed
-policy block, so no session is selectable yet); Phases 6–8 not started.
+Status: Phases 1–6 implemented (2026-09-28; Pi steering blocked by a reviewed
+policy block, so no session is selectable yet); Phases 7–8 not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -528,28 +570,30 @@ CLI tests inconclusive or justify hiding unsupported rows.
 
 **Work**
 
-1. Extend [ContentDetector](../../lib/src/runaway/detector.rs) with separate pure
+- [x] 1. Extend [ContentDetector](../../lib/src/runaway/detector.rs) with separate pure
    warning/recovery observations while preserving its terminal trip behavior.
    Warn at ceiling-half the stop limit only when repetition is established and
    before termination. A limit of one has no warning opportunity.
-2. Implement recovery as `max(8, 2 * previous_cycle_length)` nonblank normalized
+- [x] 2. Implement recovery as `max(8, 2 * previous_cycle_length)` nonblank normalized
    semantic-output lines without detected repetition. Freeze that cycle length
    until recovery; blank lines do not advance, detected repetition resets, and
    turn boundaries/acknowledgments/silence do not reset or advance recovery.
-3. Track three opportunities per agent execution, including unavailable and failed
+- [x] 3. Track three opportunities per agent execution, including unavailable and failed
    attempts. No same-episode retry/refund. After recovery a new episode must reach
    its own warning threshold. Retry/resume executions have distinct budgets even
    when conversation history is reused; ordinary turns retain their allowance.
-4. Resolve `steering.automatic.enabled` and `CLAUDINE_AUTO_STEER` with explicit-value
+- [x] 4. Resolve `steering.automatic.enabled` and `CLAUDINE_AUTO_STEER` with explicit-value
    inheritance and the specified parsing/errors. Opt-out removes automatic help
    and unavailable notices, preserving guards and manual steering.
-5. Wire observations through the existing live semantic sink to the producing
+- [x] 5. Wire observations through the existing live semantic sink to the producing
    execution's controller. Deliver the spec's helper text using only eligible
    non-interrupting operations. Do not attach monitoring to discovered native
    sessions or invent early warnings for capture-only paths.
-6. Enforce hard-stop priority within a chunk and during delivery, bounded work,
+- [x] 6. Enforce hard-stop priority within a chunk and during delivery, bounded work,
    unavailable-notice deduplication, and unchanged timeout clocks. Do not count
    steering control traffic as semantic progress or clear repetition evidence.
+- [x] Validation: deterministic detector/runtime fixtures and preserved
+   regressions, as listed below.
 
 **Validation:** Deterministic detector/runtime fixtures for odd/small limits,
 split chunks, same-chunk warning/stop, single/multiline cycles, new repeated
@@ -672,7 +716,7 @@ permission question or a fabricated all-green result.
 | Phase 3 | Implemented 2026-09-28 | `steering::controller` (bounded, serialized, audited owner queue), `steering::discovery` aggregator over generated discovery records, in-memory Rendezvous `SteeringControl`/`ListManagedTargets`/`RouteSteering`, wrapper owner link; every managed session registers as unavailable until Phase 4 maps a profile. See implementation-log.md |
 | Phase 4 | Implemented 2026-09-28; Pi steering blocked | Managed Pi RPC execution (`exec/control.rs`, `exec/pi_rpc/`) with pre-submission JSON fallback, unattended-request policy, settlement, Unix tool reaping; `pi-rpc` adapter reviewed and implemented; `retained-rpc` blocked by the new policy `blocks` list. Real Pi 0.87.1 (macOS) and fake-Pi (macOS/Linux/Windows) verified. See implementation-log.md |
 | Phase 5 | Implemented 2026-09-28 | `claudine steer` (`cli/src/commands/steer/`): list/JSON, explicit and picked sends, interactive consent, revalidation, receipts, exit codes; listings now carry the route's operation and the owner binding. Verified with fake service, scripted input, off-screen rendering, and a real daemon (macOS, Linux, native Windows). See implementation-log.md |
-| Phase 6 | Not started | Warning, recovery, and cap decisions resolved in spec |
+| Phase 6 | Implemented 2026-09-28 | Detector early-warning/recovery signals (`ContentDetector::observe`), `claudine::steering::automatic` (setting, precedence, 3-opportunity budget, helper message), `AutomaticHelp` in the live sink sending to the execution's own controller, hard-stop priority, deduplicated notices, and steering replies excluded from the silence clock. No real session is eligible yet, so the production path shows the unavailable notice; delivery is proven with fixture eligibility. See implementation-log.md |
 | Phase 7 | Not started | Full-roster passive research available |
 | Phase 8 | Not started | No new implementation validation claimed by this plan |
 
@@ -764,3 +808,25 @@ permission question or a fabricated all-green result.
   with fixture eligibility against a real daemon, not against a real provider.
 - **Remaining blockers:** none for Phase 6. Native discovery and delivery are
   Phase 7 (`SteeringService` is the seam).
+
+### Phase 6 progress (2026-09-28)
+
+- **Changed:** see this file's `*_during_phase_6` frontmatter; design
+  decisions, the requirement-to-test map, and the input-robustness matrix are
+  in [implementation-log.md](implementation-log.md#phase-6).
+- **Checks:** `just test --no-fail-fast` (claudine area): 7978 passed, 9
+  skipped, 1 failed — the pre-existing darkmatter union test recorded in
+  Phase 5. `just lint`: clean. `just cross-check` (new and affected tests):
+  native Windows 56/56, Linux 56/56; claudine lib suites pass on Windows.
+- **Departures:** automatic help reads its setting inside the existing guard
+  resolution (same files, same pre-launch point); steering control replies no
+  longer refresh the stream-silence clock (a defect found while checking
+  "unchanged timeout clocks"); the helper message appends observed counts.
+- **Status:** implemented. With the shipped policy every session prints the
+  bounded "cannot send automatic steering" notice and stops on the unchanged
+  schedule (L1-proven through the real wrapper); a confirmed automatic
+  delivery is proven only with fixture eligibility.
+- **Known gap:** duplicate keys in Claudine config files are last-wins for
+  every key (JSON5 → `Value` loader); pinned by the matrix, not fixed here.
+- **Remaining blockers:** none for Phase 7. Phase 8's "automatic warning
+  followed by recovery" end-to-end needs a provider with an automatic grant.
