@@ -1,3 +1,3 @@
 ---
-sequence: @biscuit-terminal/docs/multiplexers.yaml
+sequence: "@biscuit-terminal/docs/multiplexers.yaml"
 ---
