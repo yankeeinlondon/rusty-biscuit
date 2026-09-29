@@ -646,20 +646,37 @@ failing step so the user can fix the entire sequence in one edit pass.
 1. Detects installed providers and builds snapshot
 2. Loads selection config and model catalog
 3. For each step: resolves provider (explicit flag or non-TTY chain), resolves model
-4. Builds `SequenceStepDraft` for each step with provider plan and model info
+4. Builds a `SequenceStepDraft` for every step, including shell and side-effect steps, carrying the step's index in the whole sequence
 
 **Phase 1c: Review or validate:**
 
 - **If failures exist**: returns `SequenceSelectionFailed` aggregate error
-- **TTY + no explicit provider**: shows review screen via `biscuit-tui::InputTable` where user can edit per-step provider and model; `Ctrl+S` confirms, `Esc` aborts
-- **Non-TTY**: converts drafts directly to `ResolvedExecutionTarget` array
+- **Every path** first converts each draft to a baseline `ResolvedExecutionTarget` (the provider and model reasons included), one per step in step order
+- **Explicit provider, or an auto-selected agent**: the baseline is the result; no review screen
+- **Non-TTY and a provider choice is required**: the run aborts before any step starts, even if no step would have a review row
+- **TTY and a provider choice is required**: only review-eligible drafts go to the review screen (`biscuit-tui::InputTable`). Eligibility comes from the step's outer executable alone:
+
+    | Outer executable | Review row |
+    |------------------|------------|
+    | `prompt`, `task`, `group`, none (body step) | Yes |
+    | `shell`, `side_effect` | No |
+
+    - Rows are labeled with the original one-based step position and name (`3 review`), so hidden steps leave gaps
+    - `Ctrl+S` returns one target per row; each is written back into the baseline at its draft's step index, never by row number or name. Hidden steps keep their baseline target and reasons
+    - A review that returns a different number of targets than rows is an error, not a cancellation, and nothing is merged
+    - `Esc` or Ctrl+C exits `130` before any step starts
+    - When no draft is eligible, the screen does not open, the state's pre-prompt message (`Invalid Agent:` etc.) is not printed, and the baseline is used
+
+For example, a `prompt`, `shell`, `prompt` sequence shows rows `1` and `3`;
+a choice on row `3` changes the third target and leaves the second target and
+its reasons untouched.
 
 **Affected by:**
 
 | Input                          | Impact                                                     |
 |--------------------------------|------------------------------------------------------------|
-| `--provider` / `--claude` etc. | Locks the provider cell for every step in the review table |
-| `--model`                      | Locks the model cell for every step in the review table    |
+| `--provider` / `--claude` etc. | Bypasses the review screen; every step uses the flag's provider |
+| `--model`                      | Locks the model cell for every row in the review table     |
 | Per-step frontmatter `agent`   | Influences default provider for that step                  |
 | Per-step frontmatter `model`   | Influences default model for that step                     |
 
