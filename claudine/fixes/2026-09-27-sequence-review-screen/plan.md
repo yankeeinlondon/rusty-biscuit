@@ -36,6 +36,12 @@ docs_updated_during_phase_2:
     - claudine/docs/providers/dispatch-inventory.json
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Plan: sequence review screen
@@ -266,9 +272,9 @@ count and the width arithmetic, both covered by R6 and Task 2.A1/2.A2 tests
 (overflow saturation and count mismatch). Nothing to schedule beyond
 verifying those tests exist.
 
-- [ ] Confirm a test with an extremely long label (near `u16::MAX` width) does
+- [x] Confirm a test with an extremely long label (near `u16::MAX` width) does
   not overflow or panic in width calculation.
-- [ ] Confirm the count-mismatch test asserts on the public result (an error),
+- [x] Confirm the count-mismatch test asserts on the public result (an error),
   not on an internal helper's return shape.
 
 ## Phase 4: Documentation and comments

@@ -35,6 +35,12 @@ docs_updated_during_phase_2:
     - claudine/docs/providers/dispatch-inventory.json
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - biscuit-tui/lib/src/components/input_table/table/tests.rs
+    - claudine/cli/src/commands/wrap/sequence/review/tests.rs
+docs_updated_during_phase_3: []
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 ---
 
 # Implementation Log for 2026-09-27-sequence-review-screen (5 phases)
@@ -425,3 +431,64 @@ Plus the nine Phase 1 scaffolds for criteria 1 and 2, now active.
 - Skills: nothing in `.claude/skills/claudine/` or `.claude/skills/biscuit-tui/`
   describes the review screen, column sizing, or focus underline, so no skill
   edits were needed this phase (Doc 4.4 revisits this).
+
+## Phase 3
+
+Input robustness. The plan rules the Input Robustness Matrix not applicable
+(no parser, manifest, or config reader is added), so this phase audits the
+two input surfaces the fix does add: width arithmetic on arbitrarily long
+static labels, and the submitted-row count.
+
+### Audit of existing coverage
+
+- **Width.** `very_long_static_values_saturate_instead_of_wrapping` (Phase 2)
+  asserts the private helpers only (`preferred_column_widths`,
+  `compute_column_widths`) at one width (80) with one saturated column. It
+  does not render, does not probe the `u16::MAX` boundary itself, never puts
+  two saturated static columns side by side (their preferred sum exceeds
+  `u16`, which is what the `u64` sums in `compute_column_widths` guard), and
+  never allocates across a `u16::MAX`-wide area.
+- **Count mismatch.** `unexpected_row_count_is_rejected_before_merging`
+  asserts through `review_targets`, but production (`sequence/mod.rs`) calls
+  `live_targets`, which maps the cancel/abort kinds to `Ok(None)` (exit 130).
+  `a_failed_review_is_an_error_not_a_cancellation` reaches `live_targets` but
+  covers only a short answer, no hidden steps, and checks only the kind.
+
+### Tests added
+
+Test files only; no production code changed in this phase.
+
+| Test | Asserts |
+| ---- | ------- |
+| `a_label_at_the_u16_boundary_saturates_its_preferred_width` (biscuit-tui `input_table/table/tests.rs`) | label widths 65 534, 65 535, 65 536 give preferred widths 65 534, `u16::MAX`, `u16::MAX` |
+| `saturated_static_columns_render_clipped_at_every_width_without_overflow` (same file) | two static columns both saturated at `u16::MAX` (ASCII 65 534–70 000 and 32 768 two-cell `界` clusters) plus a text column: at widths 0, 1, 2, 3, 26, 80, 200, `u16::MAX - 1`, `u16::MAX` the widths never sum past the area and rendering does not panic; at 80 the layout is `[30, 30, 20]` with `…` clipping and no split wide cluster; at `u16::MAX` the sum is exact and the text column keeps 20; at 1 the row is `…`; `Ctrl+S` returns every full label |
+| `a_wrong_row_count_with_hidden_steps_fails_the_run_instead_of_cancelling_or_truncating` (claudine-cli `sequence/review/tests.rs`) | through `live_targets`, the seam `sequence/mod.rs` calls: with shell and side-effect steps hidden (two rows shown), answers of 0, 1, 3, 4 (the full step count) and 5 rows are each an `Err` of kind `InvalidData`, never `Ok(None)` (exit 130) and never a merged vector, and the error's typed source is `ReviewRowCountMismatch { expected: 2, found }` |
+
+### Mutation checks
+
+Each new test was checked against a deliberate regression, then the source was
+restored (`git diff` on the production file empty afterward):
+
+- `preferred_column_widths` using `widest as u16` instead of saturating: both
+  biscuit-tui tests fail.
+- `merge_reviewed_targets` using `<` instead of `!=`: the claudine-cli test
+  fails with the truncated four-entry merge as its `expect_err` payload.
+
+### Input Robustness Matrix
+
+Not applicable, as the plan ruled: the fix reads no file format or
+configuration. The two inputs it does take, label text and the submitted row
+count, have no absent/null/wrong-type shapes. Their boundary and mismatch
+cases are the tests above.
+
+### Gates (Phase 3)
+
+- `biscuit-tui`: `just test` gives 1012 passed, 7 skipped (includes the
+  `question` CLI unit tests). `just lint` exits 0.
+- `claudine`: `just test` gives 8051 passed, 9 skipped, no failures or
+  timeouts. `just lint` exits 0.
+- No `cargo fmt` was run. No pre-existing failures were seen.
+- Portability: both new tests are pure, with no `cfg`, paths, processes, or
+  terminals, so no cross-host run was needed.
+- Skills: nothing changed that `.claude/skills/claudine/` or
+  `.claude/skills/biscuit-tui/` describes.
