@@ -84,6 +84,29 @@ service Rendezvous {
     // own plus the synced replica of every mesh peer's. This is the
     // dashboard's NOW-view read path.
     rpc ListActiveSessions(ListActiveSessionsRequest) returns (ListActiveSessionsResponse);
+
+    // --- Steering control (local only, in memory) -------------------------
+    //
+    // None of these touch a register, the session log, or the mesh:
+    // registrations and message payloads live in daemon memory for exactly
+    // as long as the owner's stream is open, and are never persisted,
+    // replicated, or retried.
+
+    // An execution owner (the Claudine wrapper) opens this stream, sends
+    // `register` first, then `update` on binding/state changes and `reply`
+    // for each delivery. The daemon answers `accepted`, then streams
+    // `delivery` frames. Closing the stream removes the registration and
+    // resolves every unanswered delivery as unknown.
+    rpc SteeringControl(stream SteeringControlUp) returns (stream SteeringControlDown);
+
+    // Enumerate the live managed targets registered on THIS daemon.
+    rpc ListManagedTargets(ListManagedTargetsRequest) returns (ListManagedTargetsResponse);
+
+    // Route one steering request to the owner of `expected.execution_id`
+    // and wait (bounded by `deadline_ms`) for the owner's reply. The daemon
+    // never retries, never redirects to another target, and never reports a
+    // receipt the owner did not.
+    rpc RouteSteering(RouteSteeringRequest) returns (RouteSteeringResponse);
 }
 
 message PingRequest {
@@ -589,4 +612,134 @@ message SyncFrame {
         SyncEnd end = 5;
         SyncError error = 6;
     }
+}
+
+// ---------------------------------------------------------------------
+// Steering control. Claudine-specific values (provider, state, operation,
+// outcome) travel as their Claudine wire strings; the daemon routes them
+// without interpreting provider protocols.
+// ---------------------------------------------------------------------
+
+// The exact binding a managed target was selected under. A request whose
+// binding no longer matches the owner's current one is stale.
+message TargetBinding {
+    // Canonical lowercase UUID of the managed execution.
+    string execution_id = 1;
+    uint32 wrapper_pid = 2;
+    // Opaque process-start marker; PID plus marker survives PID reuse.
+    string wrapper_start = 3;
+    // Provider conversation generation within the execution.
+    uint64 generation = 4;
+    // Provider conversation ID, when the provider has reported one.
+    optional string conversation = 5;
+}
+
+// One live managed target as its owner describes it.
+message ManagedTargetInfo {
+    TargetBinding binding = 1;
+    // Provider slug.
+    string provider = 2;
+    // Working directory, portable form.
+    optional string cwd = 3;
+    optional string name = 4;
+    // `working`, `idle`, or `unknown`.
+    string state = 5;
+    optional string launch_profile = 6;
+    optional string provider_version = 7;
+    // The owner's manual availability verdict:
+    // `non_interrupting`, `interruption_required`, or `unavailable`.
+    string availability = 8;
+    optional string reason = 9;
+    repeated string setup_requirements = 10;
+    // The provider child's own process identity, when spawned. Lets a
+    // native observation of the same process be merged with this target.
+    optional uint32 provider_pid = 11;
+    optional string provider_start = 12;
+    // When the owner last described this target.
+    int64 observed_at_unix_ms = 13;
+}
+
+// One steering request handed to an owner.
+message SteeringDelivery {
+    // Canonical lowercase UUID; unique per request, never reused.
+    string request_id = 1;
+    TargetBinding expected = 2;
+    // `manual` or `automatic`.
+    string origin = 3;
+    // Operation intent wire string (e.g. `steer_active_turn`).
+    string operation = 4;
+    // Original message text, for in-memory delivery only.
+    string message = 5;
+    // Operation the requester explicitly consented to interrupt for, bound
+    // to `expected`; absent without consent.
+    optional string consented_operation = 6;
+}
+
+// The owner's answer for one delivery.
+message SteeringReply {
+    string request_id = 1;
+    // Send-outcome wire string (e.g. `accepted`, `busy`, `unknown`).
+    string outcome = 2;
+    optional string mechanism = 3;
+    // Present only for interrupt-then-submit.
+    optional string cancellation = 4;
+    optional string replacement = 5;
+    // Redacted explanation.
+    optional string detail = 6;
+}
+
+message SteeringControlUp {
+    oneof kind {
+        ManagedTargetInfo register = 1;
+        ManagedTargetInfo update = 2;
+        SteeringReply reply = 3;
+    }
+}
+
+message ControlAccepted {}
+
+message SteeringControlDown {
+    oneof kind {
+        ControlAccepted accepted = 1;
+        SteeringDelivery delivery = 2;
+    }
+}
+
+message ListManagedTargetsRequest {}
+
+message ListManagedTargetsResponse {
+    repeated ManagedTargetInfo targets = 1;
+}
+
+message RouteSteeringRequest {
+    SteeringDelivery delivery = 1;
+    // How long the caller waits for the owner's reply; 1..=30000.
+    uint32 deadline_ms = 2;
+}
+
+// What routing established. Only `OWNER_REPLIED` carries the owner's
+// result; every other value means the owner reported nothing.
+enum RouteOutcome {
+    ROUTE_OUTCOME_UNSPECIFIED = 0;
+    // The owner answered; see `reply`.
+    ROUTE_OUTCOME_OWNER_REPLIED = 1;
+    // No live owner is registered for the execution. Nothing was sent.
+    ROUTE_OUTCOME_NO_OWNER = 2;
+    // The owner's binding differs from `expected`. Nothing was sent.
+    ROUTE_OUTCOME_STALE_TARGET = 3;
+    // The request ID was already routed. Nothing was sent.
+    ROUTE_OUTCOME_DUPLICATE_REQUEST = 4;
+    // The owner's delivery channel is full. Nothing was sent.
+    ROUTE_OUTCOME_BUSY = 5;
+    // The request reached the owner but no reply arrived: the owner
+    // disconnected or the deadline passed. It may have been submitted.
+    ROUTE_OUTCOME_UNKNOWN = 6;
+}
+
+message RouteSteeringResponse {
+    RouteOutcome outcome = 1;
+    // Present only for `ROUTE_OUTCOME_OWNER_REPLIED`.
+    SteeringReply reply = 2;
+    // Content-free explanation of a non-reply outcome.
+    string detail = 3;
 }

@@ -27,6 +27,7 @@ pub mod report;
 pub mod scaffold;
 pub mod schema_compat;
 pub mod signals;
+pub mod steering_catalog;
 pub mod steering_check;
 pub mod vocabulary;
 
@@ -60,4 +61,9 @@ pub use vocabulary::{
     VocabularySource, build_vocabulary, check_vocabulary, load_error_vocabulary, vocabulary_path,
 };
 pub use signals::{SIGNAL_SLUGS, build_signals, check_signals, signals_path};
+pub use steering_catalog::{
+    ACTIVATION_POLICY, ActivationPolicy, activation_errors, orphan_policy_errors, activation_policy_path,
+    build_steering_catalog, check_steering_catalog, load_activation_policy, load_research,
+    parse_activation_policy, project_research, steering_catalog_path,
+};
 pub use steering_check::{SteeringValidation, check_fleet as check_steering_fleet, check_provider as check_steering};

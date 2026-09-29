@@ -9,7 +9,9 @@ use claudine::stream::parser::SemanticStreamParser;
 use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 
+pub(crate) mod control;
 pub(crate) mod exit;
+pub(crate) mod pi_rpc;
 pub(crate) mod spawn;
 pub(crate) mod stream_capture;
 #[cfg(test)]

@@ -6,6 +6,8 @@ human_review_items:
     - |-
       **Kimi cannot start an interactive session with a first message. What should `claudine kimi --edit -i` promise?**
 
+      **DECISION:** KIMI is not working until we update the research and get caught up to latest version. This WILL work but we are dependent on this research -> gen task. This should not prevent this spec from being marked as production ready.
+
       The spec promises that every provider opens an interactive session with the edited text as the first message. Kimi Code's own docs say its only prompt option (`--prompt`) runs one prompt and exits. It has no positional message and no option that seeds an interactive session, and an open upstream feature request asks for exactly that. So today `claudine kimi "hello" -i` quietly runs a one-shot session instead of an interactive one. This must be decided before Phase 3 finishes, because Kimi's row in the new all-provider test must encode whichever answer you pick. Phase 2 does not depend on it.
 
       - **A. Exclude Kimi from the all-provider promise, and have `claudine kimi … -i` with a prompt fail clearly before launch** (for example "Kimi cannot start an interactive session with an initial prompt; drop `-i` or start `kimi` without a prompt").
@@ -19,22 +21,17 @@ human_review_items:
         Cons: it adds a second, Kimi-only launch path, which the spec explicitly forbids. It is also fragile (`--continue` picks "the most recent session", which is unsafe if two runs overlap) and splits one conversation across two processes.
 
       **Recommendation: A.** It is the only option that is both truthful and inside the spec's rule against new delivery paths. When Kimi ships an initial-prompt option, the refusal is replaced by that option.
+
+      *Still open after Phase 5 (2026-09-28).* The docs now describe today's behavior honestly (Kimi runs one turn and exits), so choosing B needs no further doc change; A or C needs a code change plus a docs update.
     - |-
-      **Pi may crash on long first messages passed on the command line. Should Pi's fix wait for a live check?**
+      **The Claudine agent skill was not updated, because the agent was not allowed to write to it. Please apply the prepared text, or let an agent do it.**
 
-      The only way to give Pi a first message and keep its interactive screen is on the command line (`pi -- "<message>"`). Sending it through standard input makes Pi switch to one-shot mode. A report on Pi's issue tracker (#9200, versions 0.83.0 and 0.85.1) says Pi is killed immediately, with no output, when one command-line message is about 1 KB or longer. Upstream closed the report without investigating it. Edited prompts are often longer than 1 KB. This session could not run Pi to check, because running provider programs was not permitted. This should be settled before Phase 3's Pi repair, because it decides what that repair looks like.
+      The skill is the reference other agents read. Until it is updated, it does not mention `--edit` in the wrapper flag table, has no timeline entry for this fix, and misses one testing-rule note. This should be done before the fix is closed, so the next agent working on the wrapper sees the new behavior.
 
-      - **A. Check it live first.** Run `pi -- "<about 2 KB of text>"` once in a terminal on this Mac (Pi 0.87.1). If it works, go ahead with the command-line fix and its normal size guard.
-        Pros: a quick test that settles the question.
-        Cons: needs a person, or a session that is allowed to run `pi`.
-      - **B. Go ahead with the command-line fix now, with the normal size guard (768 KB).**
-        Pros: no delay.
-        Cons: if the report is right, most edited prompts would crash Pi's interactive mode.
-      - **C. Pass the prompt as a temporary file (Pi's `@file` syntax) instead.**
-        Pros: avoids the command-line length problem entirely.
-        Cons: it is a new delivery mechanism, which the plan's rules exclude. It needs temporary-file handling inside the Pi profile, and it has not been confirmed that `@file` content is submitted as the first message in interactive mode.
+      - **A. Apply the three prepared edits by hand.** The exact text is in `implementation-log.md` under "Phase 5 → Skill edits not made" (and the `SKILL.md` sentence under "Phase 4 → Skill update not made"). Pros: a few minutes of copy-and-paste. Cons: manual.
+      - **B. Run a short agent session that is allowed to write under `.claude/skills/claudine/`.** Pros: no manual work. Cons: one more session.
 
-      **Recommendation: A**, falling back to C only if the crash reproduces. A single 2 KB test decides the question, and the plan's Phase 4 real Pi test should include a prompt of that size in any case.
+      **Recommendation: A.** The text is final and short; a new session adds nothing.
 message_to_agent: |-
   Phase 1 (rulings and spikes) is done. Read `spike-interactive-startup.md` in this directory before Phase 3. Phase 2 (wrapper validation) does not depend on any of the open items below and can proceed as planned.
 
@@ -50,11 +47,33 @@ message_to_agent: |-
   7. New seam: `wrapper_stages::reject_interactive_timeouts(args, interactive_requested)` runs at the end of Stage 2, before the editor. `validate_timeout_constraints` is now `(args, non_interactive_requested)` and holds only the post-edit "can only be used in non-interactive mode" rules. Do not re-add interactive checks there.
   8. `claudine/cli/tests/l1/wrap_basics.rs` has a local `write_marker_executable` helper (sh or `.cmd` stub that only creates a marker file) plus `marker_editor_path`. Reuse them for the Phase 5 drift test `getting_started_edit_interactive_form_is_accepted`. Any `codex --edit …` L1 test now needs a `codex` stub on the fixture PATH, because binary resolution (Stage 1) runs before the editor.
   9. Phase 5: the `--edit` help line changed to "Draft the initial prompt in an external editor; combine with -i for an interactive session". `claudine/docs/getting-started/index.md` still quotes the old sentence ("Open the prompt in an external editor before launching the provider"); update it in the getting-started task.
+
+  Phase 3 (interactive delivery repairs and fleet test) is done except for the Kimi and Pi rulings; see the implementation log's `## Phase 3`.
+
+  10. Interactive shapes now: Goose `run --text <p> --interactive` (with `run` inserted at argv index 0 when absent; `--text=<p>` for a `-` prefix), Kilo `--prompt <p>` / `--prompt=<p>`, Antigravity `--prompt-interactive <p>` / `=<p>`, Pi `-- <p>` (a leading `@` gets a leading space: `-- " @…"`). Non-interactive shapes are unchanged. Kimi is untouched (N2 unruled).
+  11. Pi's code landed before #9200 was settled, because this session also could not run `pi` or `tmux`. The plan's Pi task is deliberately unticked. Phase 4's `real_pi_interactive_startup.rs` must include a prompt of about 2 KB and a prompt starting with `@`, confirm that `initialMessages` auto-submits, and record the outcome. If the crash reproduces, change only the interactive branch of `profile/pi.rs`.
+  12. Phase 4 L2: the fleet test lives in `profile/tests/positional.rs` (`every_provider_delivers_an_interactive_startup_prompt`, table keyed by `Provider::as_slug()`). For the L2 Pi stub case, expect argv `-- <prompt>` and no stdin seed.
+  13. `claudine/docs/providers/dispatch-inventory.json` must match `cli/src` byte for byte. Any new `Provider::X` in `cli/src` or `lib/src`, including `#[cfg(test)]` files under `src/`, needs a regeneration: `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` in `claudine/`. Phase 3's session could not set that variable, so it hand-edited 12 `direct-ref` records. The byte-compare test passes. Integration tests under `cli/tests/` are not scanned.
+  14. Commit `57968bb03` was made by a separate process during Phase 3. It contains the Phase 3 source changes. Its message wrongly says "Phase 2" and claims the whole fleet is covered, which is not true while Kimi and Pi are open. Correct it at review time if the history is rewritten.
+
+  Phase 4 (terminal-backed coverage) is done; see the implementation log's `## Phase 4`. Only the Kimi ruling (N2) remains open for the author.
+
+  15. Pi is settled. `real_pi_interactive_startup.rs` passed on Pi 0.87.1 for the direct, edited, ~2 KB, and `@`-prefixed prompts: each first turn was submitted and the TUI took a second turn. #9200 did not reproduce, so the Pi human-review item was removed and the plan's Pi task is ticked. A negative control showed the leading-space `@` rule is required. Phase 5's Pi research note can state `-- <message>` as live-verified on 0.87.1 (0.84.3 minimum per the changelog).
+  16. File a second `_unscheduled` fix next to N6's: a user `--` after the positional is forwarded to the provider verbatim. `claudine pi "hello" -i -- --offline` launches `pi -- --offline -- hello`, so the provider reads the "opaque" arguments as positionals, and profiles that append their own `--` (Pi interactive, Codex/Kilo for `-`-prefixed prompts) emit two separators. Observed live in Phase 4. Not fixed (Rule 3).
+  17. Docs: `prompt empty; aborted` and `opening <editor> for prompt...` are `log::info`, printed only with `RUST_LOG` or `--debug info` (not `-v`). By default an empty buffer exits 0 silently. Do not document the message as always shown.
+  18. The skill write to `.claude/skills/claudine/SKILL.md` was refused by Phase 4's permissions. The log's "Skill update not made" section holds the sentence to add (the spawn-site guard now exempts `real_` files that build an emulator session). Apply it with Phase 5's skill edits.
+  19. Pre-existing, not from this fix: `cargo clippy -p claudine-cli --tests --features terminal-tests -- -D warnings` fails on `needless_lifetimes` in `level2_dry_run_metadata_capture.rs:283`. `just lint` does not enable that feature, so it stays hidden. Mention it rather than fix it.
+
+  Phase 5 (docs, drift, closure) is done; see the implementation log's `## Phase 5`. This was the last phase.
+
+  20. `implemented` is `true` because the Phase 5 instructions require it, but `status` stays `human-in-the-loop`: Kimi (N2) is still unruled, and the skill edits under `.claude/skills/claudine/` were refused by the session's permissions (exact text in the log). Plan tasks left unticked for those reasons: Kimi resolution, Reference docs (the `cli-reference.md` part), Skill snapshots, and the fleet and docs/skills Definition-of-Done items.
+  21. Three `_unscheduled` fixes were filed as `<name>/spec.md`: `wrapper-trailing-flags-leak` (N6), `wrapper-user-separator-forwarded` (user `--` forwarded), and `goose-dash-prefixed-one-shot-prompt` (one-shot `run -t -…`).
+  22. If Kimi is ruled A or C, update `claudine/docs/getting-started/index.md` (its Kimi bullet), the Kimi row of the fleet test, and the prepared `cli-reference.md` text together.
 reviewed: true
 reviewed_by: codex/gpt-6-sol
 reviewed_on: 2026-09-28
-review_iterations: 0
-implemented: false
+review_iterations: 3
+implemented: true
 area: claudine
 packages:
     - claudine-cli

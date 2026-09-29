@@ -190,10 +190,9 @@ fn edit_and_interactive_after_a_seed_prompt_are_both_lifted() {
     let args = try_parse_wrapper_args(&["review this repository", "--edit", "-i"]).unwrap();
     assert!(!args.edit && !args.interactive);
     let mut passthrough = args.passthrough;
-    let boundary = passthrough.len();
 
     let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut passthrough, boundary).unwrap();
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut passthrough, None).unwrap();
 
     assert!(extracted.edit);
     assert!(extracted.interactive);
@@ -266,7 +265,8 @@ fn extract_wrapper_flags_respects_double_dash_in_passthrough() {
     //
     // clap collects the tail verbatim because `trailing_var_arg` began
     // capturing at `prompt`, so the passthrough literally contains `--`.
-    // Anything at or after that `--` must be opaque to Claudine.
+    // Anything after that `--` must be opaque to Claudine, and the `--`
+    // itself is Claudine's boundary, so it is not forwarded.
     let mut args = vec![
         "prompt".to_string(),
         "--".to_string(),
@@ -274,11 +274,13 @@ fn extract_wrapper_flags_respects_double_dash_in_passthrough() {
         "-y".to_string(),
     ];
 
-    let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+    let extracted =
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(1)))
+            .unwrap();
 
     assert!(!extracted.silent);
     assert!(!extracted.yolo);
-    assert_eq!(args, vec!["prompt", "--", "--silent", "-y"]);
+    assert_eq!(args, vec!["prompt", "--silent", "-y"]);
 }
 
 #[test]
@@ -297,9 +299,7 @@ fn extract_wrapper_flags_respects_double_dash_consumed_by_clap() {
         "prompt".to_string(),
         "--silent".to_string(),
     ];
-    let boundary = find_passthrough_dash_boundary_with_raw(&args, &raw).unwrap();
-    let extracted =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary).unwrap();
+    let extracted = extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
 
     assert!(!extracted.silent);
     assert_eq!(args, vec!["prompt", "--silent"]);
@@ -314,20 +314,55 @@ fn extract_wrapper_flags_extracts_before_dash_but_not_after() {
     // so it can collide with an agent-owned flag without being stolen.
     let mut args = vec!["prompt".to_string(), "--".to_string(), "--yolo".to_string()];
 
-    let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+    let extracted =
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(1)))
+            .unwrap();
 
     assert!(!extracted.yolo);
-    assert_eq!(args, vec!["prompt", "--", "--yolo"]);
+    assert_eq!(args, vec!["prompt", "--yolo"]);
 }
 
 #[test]
 fn extract_wrapper_flags_extracts_edit_before_dash_but_not_after() {
+    // User typed: claudine codex prompt -- --edit
     let mut args = vec!["prompt".to_string(), "--".to_string(), "--edit".to_string()];
+    let raw = string_args(&["claudine", "codex", "prompt", "--", "--edit"]);
 
-    let extracted = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap();
+    let extracted = extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
 
-    assert!(!extracted.edit);
-    assert_eq!(args, vec!["prompt", "--", "--edit"]);
+    assert!(!extracted.edit, "a provider --edit after -- must not enable Claudine's editor");
+    assert_eq!(args, vec!["prompt", "--edit"]);
+}
+
+#[test]
+fn extract_wrapper_flags_consumes_only_the_user_separator() {
+    // User typed: claudine pi -i hello -- --offline -- "- item"
+    //
+    // The first `--` is Claudine's boundary and is dropped; the second belongs
+    // to the provider and is forwarded with the rest of the tail.
+    let mut args = string_args(&["hello", "--", "--offline", "--", "- item"]);
+    let raw = string_args(&[
+        "claudine", "pi", "-i", "hello", "--", "--offline", "--", "- item",
+    ]);
+
+    let extracted = extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
+
+    assert!(!extracted.interactive);
+    assert_eq!(args, vec!["hello", "--offline", "--", "- item"]);
+}
+
+#[test]
+fn extract_wrapper_flags_keeps_a_provider_separator_after_a_consumed_one() {
+    // User typed: claudine pi -- hello -- --offline
+    //
+    // clap consumed the first `--`, so the literal one in the passthrough is
+    // the provider's own separator and must survive.
+    let mut args = string_args(&["hello", "--", "--offline"]);
+    let raw = string_args(&["claudine", "pi", "--", "hello", "--", "--offline"]);
+
+    extract_wrapper_flags_from_passthrough_with_raw(&mut args, &raw).unwrap();
+
+    assert_eq!(args, vec!["hello", "--", "--offline"]);
 }
 
 #[test]
@@ -343,7 +378,7 @@ fn find_passthrough_dash_boundary_detects_literal_separator() {
 
     assert_eq!(
         find_passthrough_dash_boundary_with_raw(&passthrough, &raw),
-        Some(1)
+        Some(DashBoundary::Literal(1))
     );
 }
 
@@ -360,7 +395,7 @@ fn find_passthrough_dash_boundary_uses_raw_tail_when_clap_strips_dash() {
 
     assert_eq!(
         find_passthrough_dash_boundary_with_raw(&passthrough, &raw),
-        Some(0)
+        Some(DashBoundary::Consumed(0))
     );
 }
 
@@ -382,10 +417,8 @@ fn find_passthrough_dash_boundary_returns_none_without_dash() {
 #[test]
 fn extract_wrapper_flags_errors_on_dangling_operation_flag() {
     let mut args = vec!["prompt".to_string(), "--operation".to_string()];
-    let boundary = args.len();
 
-    let err =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary).unwrap_err();
+    let err = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap_err();
     let message = err.to_string();
     assert!(
         message.contains("--operation"),
@@ -400,10 +433,8 @@ fn extract_wrapper_flags_errors_on_dangling_operation_flag() {
 #[test]
 fn extract_wrapper_flags_errors_on_dangling_op_alias() {
     let mut args = vec!["prompt".to_string(), "--op".to_string()];
-    let boundary = args.len();
 
-    let err =
-        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary).unwrap_err();
+    let err = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap_err();
     let message = err.to_string();
     assert!(
         message.contains("--op"),
@@ -423,7 +454,9 @@ fn extract_wrapper_flags_errors_when_operation_value_is_dash_separator() {
         "prompt".to_string(),
     ];
 
-    let err = extract_wrapper_flags_from_passthrough_with_boundary(&mut args, 1).unwrap_err();
+    let err =
+        extract_wrapper_flags_from_passthrough_with_boundary(&mut args, Some(DashBoundary::Literal(1)))
+            .unwrap_err();
     let message = err.to_string();
     assert!(
         message.contains("--operation"),
@@ -464,12 +497,10 @@ mod proptests {
             }
 
             // Shuffle manually or just accept order for now
-            // Pass a boundary equal to args.len() so std::env::args() is
-            // not consulted inside the proptest runner.
-            let boundary = args.len();
+            // Pass no boundary so std::env::args() is not consulted inside
+            // the proptest runner.
             let extracted =
-                extract_wrapper_flags_from_passthrough_with_boundary(&mut args, boundary)
-                    .unwrap();
+                extract_wrapper_flags_from_passthrough_with_boundary(&mut args, None).unwrap();
 
             // All 'others' should still be there
             assert_eq!(args.len(), others.len());

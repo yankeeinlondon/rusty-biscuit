@@ -26,6 +26,10 @@ exit 0
             "--format",
             "json",
             "--yolo",
+            // The first `--` ends Claudine's flags and is not forwarded; the
+            // second ends the provider's options, so the dash-prefixed
+            // argument after it is the prompt rather than an option.
+            "--",
             "--",
             "- my bullet prompt",
         ])

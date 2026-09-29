@@ -216,6 +216,18 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 )
             );
 
+            let steering = claudine_gen::check_steering_catalog(&area)?;
+            drifted |= !matches!(steering, CheckOutcome::Clean);
+            print!(
+                "{}",
+                report::artifact_check(
+                    term,
+                    "steering generated.rs",
+                    "(research and activation policy match the committed tables)",
+                    &steering,
+                )
+            );
+
             let agentic_clis = claudine_gen::check_agentic_clis(&area)?;
             drifted |= !matches!(agentic_clis, CheckOutcome::Clean);
             print!(
@@ -390,6 +402,7 @@ fn run_generate(
     let families = claudine_gen::build_families(area, &generations)?;
     let vocabulary = claudine_gen::build_vocabulary(area)?;
     let agentic_clis = claudine_gen::build_agentic_clis(area)?;
+    let steering_catalog = claudine_gen::build_steering_catalog(area)?;
     print!(
         "{}",
         report::families_count(term, claudine_gen::compiled_family_keys(&generations).len())
@@ -421,6 +434,7 @@ fn run_generate(
             families: &families,
             vocabulary: &vocabulary,
             agentic_clis: &agentic_clis,
+            steering: &steering_catalog,
         },
         &mut decide,
     )?;

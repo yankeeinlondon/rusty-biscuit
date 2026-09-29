@@ -1095,8 +1095,11 @@ Kilo also documents `{env:VARIABLE_NAME}` interpolation inside config files. Ope
 - Shell quoting matters for JSON-ish values such as `debug agent --params '{path:"README.md"}'`.
 - Local runs initialized config/data/log/telemetry files even for help/debug commands; wrappers should use isolated `HOME`/XDG directories when probing.
 
+- Interactive startup prompt: `kilo --prompt "<prompt>"` starts the TUI with that prompt as the first turn. Do not pass the prompt positionally to the TUI: its usage is `kilo [project]`, so a positional is read as a project directory. Use the attached form `--prompt=<prompt>` for a prompt starting with `-` (the OpenCode/yargs pattern). One-shot runs keep `kilo run -- <prompt>`. Evidence tier: help output and the OpenCode lineage; not yet verified against a live TUI.
+
 ## Changelog
 
+- 2026-09-28: Added the interactive startup-prompt form (`--prompt`) and the `kilo [project]` positional caveat.
 - 2026-07-03: Updated upstream latest to npm `7.4.1` and recorded local installed `7.3.45`.
 - 2026-07-03: Reworked frontmatter to satisfy `_schema.yaml` with explicit macOS/Linux/Windows records instead of `os: all`.
 - 2026-07-03: Added local evidence for binary aliases, npm launcher signal/tree-sitter behavior, noisy help stderr, XDG config/data paths, DB/log side effects, and machine-introspection commands.

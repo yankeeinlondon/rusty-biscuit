@@ -1,0 +1,60 @@
+# Reviewed steering activation policy. Hand-owned; never generated.
+#
+# Research (`docs/research/steering/<slug>.md`) records what providers do and
+# what disposable tests established. This file records what Claudine has
+# reviewed and implemented. A steering case becomes selectable only when all
+# of these hold:
+#
+#   1. `adapters` lists a reviewed adapter (id + revision) that binds the
+#      mechanism, and the library's `IMPLEMENTED_ADAPTERS` contains the same
+#      id + revision.
+#   2. `grants` names the exact provider, mechanism, operation, adapter
+#      revision, profile, OS, provider version, launch mode, origin, and
+#      session state.
+#   3. `claudine-gen` accepts the grant: the researched case, operation
+#      semantics, early receipt timing, and access all agree, and the named
+#      verification records match that exact case, passed, document no
+#      expected loss, and together cover the operation's required assertions.
+#   4. `blocks` does not name the grant's profile. A block is a reviewed
+#      refusal with its reason; the generator rejects any grant for a blocked
+#      profile, and runtime eligibility reports the reason before anything
+#      else about that profile.
+#
+# Every key is required; an empty list means "nothing reviewed". Quote
+# version numbers that YAML could read as numbers (for example "1.2").
+#
+# Grant entry:
+#   - provider: pi
+#     mechanism_id: rpc-steer
+#     operation: steer_active_turn
+#     adapter: { id: pi-rpc, revision: 1 }
+#     profile_id: retained-rpc
+#     os: macos
+#     provider_version: "0.84.4"
+#     launch_mode: non_interactive
+#     origin: claudine
+#     session_state: working
+#     verification_ids: [<verification id>]
+adapters:
+  # `cli/src/commands/wrap/exec/pi_rpc/executor.rs`: steer while working,
+  # prompt while idle, and consented abort-then-prompt, each behind a fresh
+  # `get_state` taken under the owner's mutation lock.
+  - id: pi-rpc
+    revision: 1
+    provider: pi
+    mechanism_ids: [rpc-steer, rpc-idle-prompt, rpc-abort-submit]
+grants: []
+blocks:
+  # Pi's `steer` and `prompt` act on whatever session is current, with no
+  # expected-session guard. The switch-race record `pi-rpc-steer-switch-0844`
+  # shows an extension holding a switch while `get_state` still reports the
+  # old session: a steer sent then is acknowledged and lost. Claudine keeps
+  # extensions enabled, and its mutation lock cannot serialize a switch an
+  # extension starts on its own, so no targeting check before sending is
+  # effective for this profile.
+  - provider: pi
+    profile_id: retained-rpc
+    reason: >-
+      Pi offers no expected-session guard, and an enabled extension can switch
+      the session outside Claudine's control, so a message could be accepted
+      and then lost to the replaced session.

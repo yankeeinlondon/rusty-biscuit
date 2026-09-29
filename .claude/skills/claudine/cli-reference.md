@@ -477,6 +477,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 |------|-------------|
 | `-y, --yolo` | Translate to provider-specific auto-approval mode (OpenCode: non-interactive only — pushes `--dangerously-skip-permissions` **and** merges a session-wide `permission` block into `OPENCODE_CONFIG_CONTENT` so subagents are also auto-approved; warn-only/ignored in OpenCode interactive sessions) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
+| `--edit` | Draft the initial prompt in an external editor (`$EDITOR`, then `$VISUAL`, then an installed editor), optionally seeded by a positional prompt; combine with `-i` for an interactive session. Needs a terminal for the editor whatever the session mode (otherwise `--edit requires an interactive terminal`); an empty buffer exits 0 without launching the provider. `-i` with `--timeout`/`--step-timeout` is rejected before the editor opens |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
@@ -495,7 +496,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
 | `--perf` | Print a reconciling performance tree to stderr after the run (see [`--perf`](#--perf)) |
-| `-- ...` | Force all remaining args to passthrough unchanged |
+| `-- ...` | End Claudine flags: the remaining args are never read as Claudine flags (a provider `--edit` there does not open the editor) and reach the provider as its options; the `--` itself is not forwarded |
 
 ### Wrapper Behavior
 
@@ -503,7 +504,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
   command using the profile's executable name without resolving it on `PATH`;
   the provider need not be installed. Live runs still validate the executable
   before launch.
-- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
+- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt. A non-empty `--edit` result is treated exactly like a prompt string: plain `--edit` runs non-interactively, `--edit -i` opens an interactive session whose first user turn is the edited text. Each profile delivers an interactive startup prompt through the provider's native surface (for example Goose `run --text <p> --interactive`, Kilo `--prompt`, Antigravity `--prompt-interactive`, Pi `-- <p>`, Pi 0.84.3 or later). Kimi Code is the exception today: its interactive startup prompt goes through `--prompt`, which runs one turn and exits, for both a typed and an edited first message; a fix is pending updated Kimi research.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine parses the stream live, reconstructs clean assistant text for stdout, and emits metadata summaries to stderr.
 - **Stderr summaries**: session-start info (session ID, model), completion summary (duration, tokens, cost, tool calls), and verbose details (tools used, turns, stop reason).

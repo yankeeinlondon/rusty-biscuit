@@ -243,7 +243,7 @@ pub(crate) fn record_child(pid: u32) {
     let Some(invocation) = CURRENT_INVOCATION.with(Cell::get) else {
         return;
     };
-    let start = process_start(pid);
+    let start = crate::cli_utils::process_start(pid);
     let mut live = lock(&run.live);
     live.ledger.record_child(invocation, pid, start, Utc::now());
     live.persist_or_warn();
@@ -282,20 +282,6 @@ pub(crate) fn stopped_by_exhaustion() -> bool {
     active().is_some_and(|run| run.exhaustion_noted())
 }
 
-/// Start time (seconds since the Unix epoch) of a live process.
-fn process_start(pid: u32) -> Option<u64> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-
-    let pid = Pid::from_u32(pid);
-    let mut system = System::new();
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
-    system.process(pid).map(sysinfo::Process::start_time)
-}
-
 /// Terminate every in-flight launch a dead runner left behind, signaling a
 /// PID only when its start time still matches the recorded one.
 fn terminate_orphans(ledger: &Ledger) -> OrphanOutcome {
@@ -312,7 +298,7 @@ fn terminate_orphans(ledger: &Ledger) -> OrphanOutcome {
         .map(|entry| match (entry.pid, entry.process_start) {
             (None, _) => OrphanOutcome::NoneRecorded,
             (Some(_), None) => OrphanOutcome::IdentityMismatch,
-            (Some(pid), Some(recorded)) => match process_start(pid) {
+            (Some(pid), Some(recorded)) => match crate::cli_utils::process_start(pid) {
                 None => OrphanOutcome::NotRunning,
                 Some(actual) if actual != recorded => OrphanOutcome::IdentityMismatch,
                 Some(_) => match kill_tree(pid) {

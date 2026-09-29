@@ -173,6 +173,15 @@ pub enum GenError {
     #[error("provider `{slug}` error-vocabulary generation failed: {message}")]
     VocabularyGenInvalid { slug: String, message: String },
 
+    #[error("steering activation policy `{path}` is malformed: {message}")]
+    SteeringPolicyInvalid { path: PathBuf, message: String },
+
+    #[error("provider `{slug}` steering research cannot be projected: {message}")]
+    SteeringResearchInvalid { slug: String, message: String },
+
+    #[error("steering activation policy fails applicability:\n{errors}")]
+    SteeringActivationInvalid { errors: String },
+
     #[error("roster `{path}` cannot produce the `has_agentic_cli` name table: {message}")]
     AgenticCliRosterInvalid { path: PathBuf, message: String },
 

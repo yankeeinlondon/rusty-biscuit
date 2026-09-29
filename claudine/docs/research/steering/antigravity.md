@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: antigravity
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -227,6 +227,7 @@ gaps:
     detail: The idle-only retained mechanism cannot currently be claimed to help a generation loop that never reaches a tool boundary; active-input drain behavior is unknown.
     next_check: Measure whether input is read and acknowledged during uninterrupted generation without canceling it; otherwise report no non-interrupting loop relief.
 changes:
+  - "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
   - Initial Antigravity steering report using schema revision 2.
   - Refreshed prior 1.1.0 resume and non-interactive findings against installed 1.1.27 help, state layout, and release notes.
   - Added the 1.1.15 retained stream-json input profile while keeping ordinary-session steering and active-turn behavior unknown.

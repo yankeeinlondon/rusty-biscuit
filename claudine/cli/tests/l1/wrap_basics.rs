@@ -185,6 +185,44 @@ fn wrapper_rejects_interactive_timeouts_before_the_editor_opens() {
     }
 }
 
+/// The getting-started page advertises `claudine codex --edit -i` as the
+/// interactive editor form. The wrapper must accept it: without a terminal the
+/// only refusal is the editor's terminal requirement, never a flag conflict.
+#[test]
+fn getting_started_edit_interactive_form_is_accepted() {
+    const GETTING_STARTED: &str = include_str!("../../../docs/getting-started/index.md");
+    assert!(
+        GETTING_STARTED.contains("`claudine codex --edit -i`"),
+        "docs/getting-started/index.md must advertise `claudine codex --edit -i`"
+    );
+
+    let fixture = CliProcessFixture::named("wrap-basics-getting-started-edit-interactive");
+    fixture.seed_user_config();
+    let provider_marker = fixture.cwd().join("provider-ran");
+    let editor_marker = fixture.cwd().join("editor-ran");
+    write_marker_executable(fixture.bin_dir(), "codex", &provider_marker);
+    write_marker_executable(fixture.bin_dir(), "fake-editor", &editor_marker);
+
+    let assert = fixture
+        .command()
+        .env("EDITOR", marker_editor_path(fixture.bin_dir()))
+        .args(["codex", "--edit", "-i"])
+        .assert()
+        .failure()
+        .stderr(contains("--edit requires an interactive terminal"));
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        !stderr.contains("cannot be used with"),
+        "the advertised form must not report a flag conflict; stderr was: {stderr}"
+    );
+    assert!(!editor_marker.exists(), "the editor must not open without a terminal");
+    assert!(
+        !provider_marker.exists(),
+        "the provider must not launch without a terminal"
+    );
+}
+
 /// A direct prompt with `-i` still selects an interactive launch: Codex
 /// receives the prompt without the non-interactive `exec` entrypoint.
 #[cfg(unix)]
@@ -655,6 +693,31 @@ exit 1
     assert!(plain.contains("DRY RUN"));
     assert!(plain.contains("Command:"));
     assert!(plain.contains("codex"));
+}
+
+/// The user's `--` is Claudine's boundary, not the provider's: the dry-run
+/// command of every provider carries the tail as options, without the `--`.
+#[test]
+fn wrapper_dry_run_forwards_the_tail_after_the_user_separator_without_it() {
+    let fixture = CliProcessFixture::named("wrap-basics-dry-run-separator");
+    fixture.seed_user_config();
+
+    for provider in claudine::provider::PROVIDERS_DISPLAY_ORDER {
+        let assert = fixture
+            .command()
+            .args([provider.as_slug(), "--dry-run", "-i", "hello", "--", "--offline"])
+            .assert()
+            .success()
+            .stdout("");
+
+        let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+        let command = plain
+            .lines()
+            .find(|line| line.trim_start().starts_with("Command:"))
+            .unwrap_or_else(|| panic!("{provider:?}: no Command line in:\n{plain}"));
+        assert!(command.contains(" --offline"), "{provider:?}: {command}");
+        assert!(!command.contains(" -- "), "{provider:?}: {command}");
+    }
 }
 
 #[test]

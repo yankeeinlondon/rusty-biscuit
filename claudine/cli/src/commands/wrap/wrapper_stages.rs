@@ -677,6 +677,16 @@ pub(crate) fn run_execution_stage(
             &env_plan.env,
         );
         let status_reporter = session_presence.status_reporter();
+        // A launch whose argv selects the provider's managed control
+        // interface is driven over retained stdin (Pi RPC).
+        let control = wire_prompt.is_none().then(|| profile.stdio_control(child_args)).flatten();
+        // Steering ownership for the same child; see `crate::steering::owner`.
+        let _steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
+            provider,
+            !effective_non_interactive,
+            child_cwd,
+            control.as_ref(),
+        );
         wrapper_exec::run_structured_stream_session(
             args,
             provider,
@@ -698,6 +708,7 @@ pub(crate) fn run_execution_stage(
             wrapper_span,
             perf_collector,
             status_reporter,
+            control,
         )
     } else {
         let _session_presence = session_report::SessionPresence::started(

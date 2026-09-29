@@ -1,11 +1,17 @@
-//! Typed event models for Pi's `--mode json` NDJSON stream.
+//! Typed event models for Pi's `--mode json` and `--mode rpc` NDJSON stdout.
 //!
 //! Pi is a bespoke (non-fork) provider: it emits one JSON object per line with a
 //! top-level `type` discriminator and a nested `assistantMessageEvent.type`
 //! discriminator on `message_update`. Unlike a typed error enum, Pi normalizes
 //! provider failures into assistant messages (`stopReason: "error"` plus a
 //! free-text `errorMessage`), so the parser classifies from message text rather
-//! than a structured category. The terminal event is `agent_end`.
+//! than a structured category. `agent_end` ends one agent pass; `agent_settled`
+//! follows once retries, compaction, and queued continuation are exhausted.
+//!
+//! RPC mode interleaves the same events with command `response` records,
+//! `extension_ui_request` holds, and `extension_error` reports. Their display
+//! models are lenient like the rest of this module; the managed RPC owner reads
+//! the load-bearing fields through the strict [`rpc`] readers instead.
 //!
 //! Lifecycle events that carry no user-visible payload (`turn_start`,
 //! `turn_end`, `message_start`, `agent_start`, `tool_execution_update`, the
@@ -16,6 +22,8 @@
 
 use serde::Deserialize;
 use serde_json::Value;
+
+pub mod rpc;
 
 /// Tagged enum over the Pi `--mode json` stream events the parser handles.
 ///
@@ -46,6 +54,14 @@ pub enum PiEvent {
     TurnEnd(PiIgnore),
     #[serde(rename = "agent_end")]
     AgentEnd(PiAgentEnd),
+    #[serde(rename = "agent_settled")]
+    AgentSettled(PiIgnore),
+    #[serde(rename = "response")]
+    Response(PiResponse),
+    #[serde(rename = "extension_ui_request")]
+    ExtensionUiRequest(PiExtensionUiRequest),
+    #[serde(rename = "extension_error")]
+    ExtensionError(PiExtensionError),
     #[serde(rename = "auto_retry_start")]
     AutoRetryStart(PiAutoRetryStart),
     #[serde(rename = "auto_retry_end")]
@@ -79,6 +95,10 @@ impl PiEvent {
             PiEvent::ToolExecutionEnd(_) => "tool_execution_end",
             PiEvent::TurnEnd(_) => "turn_end",
             PiEvent::AgentEnd(_) => "agent_end",
+            PiEvent::AgentSettled(_) => "agent_settled",
+            PiEvent::Response(_) => "response",
+            PiEvent::ExtensionUiRequest(_) => "extension_ui_request",
+            PiEvent::ExtensionError(_) => "extension_error",
             PiEvent::AutoRetryStart(_) => "auto_retry_start",
             PiEvent::AutoRetryEnd(_) => "auto_retry_end",
             PiEvent::CompactionStart(_) => "compaction_start",
@@ -231,6 +251,46 @@ pub struct PiAutoRetryEnd {
 pub struct PiCompactionEnd {
     #[serde(default, rename = "errorMessage")]
     pub error_message: Option<String>,
+}
+
+/// RPC `response`: the answer to one command, correlated by its `id`.
+#[derive(Debug, Default, Deserialize)]
+pub struct PiResponse {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub data: Option<Value>,
+}
+
+/// RPC `extension_ui_request`: an extension asking the client for input or
+/// showing it something. See [`rpc::UiMethodKind`] for which methods hold.
+#[derive(Debug, Default, Deserialize)]
+pub struct PiExtensionUiRequest {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub method: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default, rename = "notifyType")]
+    pub notify_type: Option<String>,
+}
+
+/// RPC `extension_error`: an extension handler failed.
+#[derive(Debug, Default, Deserialize)]
+pub struct PiExtensionError {
+    #[serde(default)]
+    pub event: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// A recognized-but-ignored lifecycle event. Deserializes from any JSON object

@@ -11,5 +11,10 @@ mod common;
 
 mod real_inline_write_grant;
 #[cfg(unix)]
+mod real_native_interactive_startup;
+#[cfg(unix)]
 mod real_opencode_yolo_subagent;
+#[cfg(unix)]
+mod real_pi_interactive_startup;
+mod real_pi_managed_rpc;
 mod real_pi_steering;

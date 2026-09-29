@@ -101,13 +101,7 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
             selector: OutputFormatSelector::FlagValue {
                 flag: "--mode",
             },
-            companion_flags: &[
-                "--no-approve",
-                "--no-extensions",
-                "--no-skills",
-                "--no-prompt-templates",
-                "--no-context-files",
-            ],
+            companion_flags: &["--no-approve"],
         },
     ],
     entrypoints: &[

@@ -4,7 +4,8 @@
 //! (whose generated `data.rs` references these types directly) and the
 //! `claudine-gen` generator (which introspects them for
 //! schema↔catalog compatibility checks without linking the library).
-//! It must stay a leaf: serde + strum + chrono (types only, no clock).
+//! It must stay a leaf: serde + strum + chrono (types and pure rules shared by
+//! generator and library, no clock or I/O).
 //!
 //! Design authority: `claudine/features/2026-07-02-provider-metadata/`
 //! (`design/catalog-generation.md` F1, `design/signal-detection.md` shared
@@ -21,6 +22,7 @@ mod provider_overlay;
 mod resume_support;
 mod signal;
 mod signal_table;
+pub mod steering;
 mod vocab;
 
 pub use acp_server_mode::AcpServerMode;

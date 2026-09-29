@@ -1,5 +1,6 @@
 pub mod error;
 pub mod ingest;
+pub mod jsonl;
 pub mod metrics;
 pub mod paths;
 pub mod queries;

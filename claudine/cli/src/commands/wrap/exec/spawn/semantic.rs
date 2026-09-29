@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,11 +23,13 @@ use claudine::stream::summary::StreamExecutionSummary;
 use color_eyre::eyre::Result;
 use tracing::{Span, info_span};
 
+use super::super::control::StdioControl;
 use super::super::stream_capture::StreamCapture;
 use super::super::subagent_watchdog::WatchdogState;
 use super::super::termination::{
     WatchdogTermination, apply_early_termination_to_summary, early_termination_guard_context,
-    early_termination_message, wait_with_signal_and_early_termination, wait_with_signal_handling,
+    early_termination_message, wait_with_signal_early_termination_and_completion,
+    wait_with_signal_handling,
 };
 use super::super::timeouts::TimeoutConfig;
 use super::super::watchdog::{
@@ -38,6 +40,7 @@ use super::super::{
     SemanticParserBuilder, join_with_timeout_or, kill_process_group, new_assistant_stream_inset,
     resolve_first_response, stop_timing_ticker,
 };
+use super::retained::{LineSource, Preflight, spawn_retained};
 use super::setup;
 use crate::commands::wrap::section::SectionTracker;
 use crate::commands::wrap::stream_io::StreamOutput;
@@ -53,13 +56,6 @@ use crate::commands::wrap::stream_io::StreamOutput;
 /// through the builder callback so it can run inside the parser thread.
 /// Reasoning rendering is owned entirely by `LiveSemanticSink`.
 ///
-/// `signal_hub` is the run's shared signal fan-in: the caller creates it
-/// (and typically also hands a clone to the OpenCode stderr bridge via
-/// `build_structured_plumbing`); this function feeds it stdout JSON lines
-/// plus the post-wait termination mirror, then drains it into
-/// `ProcessResult.signals`.
-///
-/// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
 /// Drain the assistant renderer's final frames to whichever stdout path is live.
 ///
 /// The framed path also flushes its held partial line: the stream is over, so a
@@ -90,6 +86,55 @@ fn drain_close(
         }
     }
 }
+
+/// Merges two early-termination receivers into one for the wait loop.
+fn merge_early(
+    first: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
+    second: Option<std::sync::mpsc::Receiver<EarlyTermination>>,
+) -> Option<std::sync::mpsc::Receiver<EarlyTermination>> {
+    match (first, second) {
+        (Some(first), Some(second)) => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            for source in [first, second] {
+                let tx = tx.clone();
+                thread::spawn(move || {
+                    for termination in source {
+                        if tx.send(termination).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            Some(rx)
+        }
+        (first, second) => first.or(second),
+    }
+}
+
+/// Spawn a provider child process with structured semantic stream parsing.
+///
+/// This is the Phase 3.4 replacement for [`run_child_stream`]. The
+/// difference is the stdout loop: instead of switching on a returned
+/// [`SemanticEvent`]s, the parser drives a [`SemanticEventSink`] that the
+/// caller has already wired up for status rendering, dispatch, metrics,
+/// and JSONL logging. This function's only rendering responsibility is
+/// wiring the terminal-local `AssistantStream` instance to the sink
+/// through the builder callback so it can run inside the parser thread.
+/// Reasoning rendering is owned entirely by `LiveSemanticSink`.
+///
+/// `signal_hub` is the run's shared signal fan-in: the caller creates it
+/// (and typically also hands a clone to the OpenCode stderr bridge via
+/// `build_structured_plumbing`); this function feeds it stdout JSON lines
+/// plus the post-wait termination mirror, then drains it into
+/// `ProcessResult.signals`.
+///
+/// `control`, when given with a `stdin_seed`, keeps the child's stdin for a
+/// retained-stdin control session: the seed becomes the task the session
+/// submits once the child is ready, instead of raw stdin bytes. A child that
+/// is not ready before submission is replaced by the session's fallback
+/// launch, which runs through this same function with the seed on stdin.
+///
+/// [`SemanticEventSink`]: claudine::stream::semantic::SemanticEventSink
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_child_stream_semantic(
     binary: &Path,
@@ -115,30 +160,95 @@ pub(crate) fn run_child_stream_semantic(
     // stdout. `None` writes the stream undecorated, as every non-sequence run
     // does.
     task_frame_writer: Option<claudine::render::TaskFrameWriter>,
+    control: Option<Arc<dyn StdioControl>>,
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     setup::debug_assert_child_env(env);
 
-    let needs_stdin_pipe = stdin_seed.is_some();
     let started_at = Instant::now();
     let started_at_wall = chrono::Local::now();
 
-    let mut command = setup::base_command(binary, args, env, cwd);
-    command
-        .stdin(if needs_stdin_pipe {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    setup::isolate_into_process_group(&mut command);
-
-    let mut child = command.spawn()?;
+    // A control session needs a task to submit; without one the child runs
+    // exactly as an ordinary structured stream would.
+    let control = control.zip(stdin_seed);
+    #[cfg(unix)]
+    let mut descendant_watch = None;
+    let (mut child, stdout_source, stderr_source, control_receivers): (Child, LineSource, LineSource, _) =
+        match &control {
+            Some((session, task)) => {
+                match spawn_retained(binary, args, env, cwd, session, task, child_spawned)? {
+                    Preflight::Ready(ready) => {
+                        let ready = *ready;
+                        #[cfg(unix)]
+                        {
+                            descendant_watch = Some(ready.descendants);
+                        }
+                        (ready.child, ready.stdout, ready.stderr, Some((ready.early, ready.completion)))
+                    }
+                    Preflight::NotReady { reason, stderr } => {
+                        let term = crate::log::terminal();
+                        for line in &stderr {
+                            stream_output.emit_stderr_line(line);
+                        }
+                        let fallback = session
+                            .fallback()
+                            .filter(|_| !crate::output::user_interrupt_observed());
+                        let Some(fallback) = fallback else {
+                            return Err(color_eyre::eyre::eyre!(
+                                "the provider did not become ready over its control protocol ({reason}); \
+                                 the task was not submitted"
+                            ));
+                        };
+                        let warning = format!("{reason}. {}", fallback.warning);
+                        stream_output.emit_stderr_line(&Status::new(&warning).state(StatusState::Warning).render(&term));
+                        return run_child_stream_semantic(
+                            binary,
+                            &fallback.args,
+                            env,
+                            cwd,
+                            timeout_config,
+                            stderr_noise_prefixes,
+                            suppress_stderr_on_success,
+                            show_timing_output,
+                            stdin_seed,
+                            build_parser,
+                            child_spawned,
+                            live_metrics,
+                            stream_output,
+                            stderr_bridge,
+                            prompt_timing,
+                            watchdog_state,
+                            section_tracker,
+                            content_early_rx,
+                            signal_hub,
+                            task_frame_writer,
+                            None,
+                        );
+                    }
+                }
+            }
+            None => {
+                let mut command = setup::base_command(binary, args, env, cwd);
+                command
+                    .stdin(if stdin_seed.is_some() { Stdio::piped() } else { Stdio::null() })
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                setup::isolate_into_process_group(&mut command);
+                let mut child = command.spawn()?;
+                *child_spawned = true;
+                crate::budget::record_child(child.id());
+                Span::current().record("child_pid", tracing::field::display(child.id()));
+                let stdout = child
+                    .stdout
+                    .take()
+                    .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
+                let stderr = child
+                    .stderr
+                    .take()
+                    .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
+                (child, Box::new(BufReader::new(stdout).lines()), Box::new(BufReader::new(stderr).lines()), None)
+            }
+        };
     let captured_pid = child.id();
-    *child_spawned = true;
-    crate::budget::record_child(captured_pid);
-    Span::current().record("child_pid", tracing::field::display(captured_pid));
 
     // Terminal-local renderer for OutputText (stdout markdown). Wrapped
     // in Arc<Mutex<_>> so the builder closures can retain independent
@@ -202,10 +312,6 @@ pub(crate) fn run_child_stream_semantic(
     let first_stderr_at = Arc::new(std::sync::Mutex::new(None));
 
     // Spawn reader threads BEFORE writing stdin (see run_child deadlock note).
-    let stdout_pipe = child
-        .stdout
-        .take()
-        .expect("child stdout must be piped: Stdio::piped() was set on the child Command above");
     let stream_span = Span::current();
     let stdout_renderer = text_renderer.clone();
     let first_semantic_at_clone = Arc::clone(&first_semantic_at);
@@ -213,7 +319,7 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_byte_metrics = live_metrics.clone();
     // Opt-in raw NDJSON capture for post-mortem analysis. Activated by
     // `CLAUDINE_RAW_STREAM_DIR`; `None` (and zero overhead) otherwise.
-    let stream_capture_owned = StreamCapture::open(timeout_config.provider, child.id(), started_at);
+    let stream_capture_owned = StreamCapture::open(timeout_config.provider, captured_pid, started_at);
     // Signal detection (Phase E4/E5): the run's shared hub observes every
     // stdout JSON line, independent of the semantic parser. Other producers
     // (the OpenCode stderr bridge, the post-wait termination synthesis
@@ -229,7 +335,6 @@ pub(crate) fn run_child_stream_semantic(
     let stdout_handle = thread::spawn(move || {
         let _stream_guard = stream_span.enter();
         let _parse_span = info_span!("stream_parse").entered();
-        let reader = BufReader::new(stdout_pipe);
         let mut out = stdout_output.stdout_writer();
 
         let text_renderer = stdout_renderer;
@@ -277,7 +382,7 @@ pub(crate) fn run_child_stream_semantic(
             build_parser(output_cb, reasoning_cb, Some(captured_pid));
         let mut stream_capture = stream_capture_owned;
 
-        for line in reader.lines() {
+        for line in stdout_source {
             let Ok(line) = line else { break };
 
             let line_at = Instant::now();
@@ -333,10 +438,6 @@ pub(crate) fn run_child_stream_semantic(
         parser
     });
 
-    let pipe = child
-        .stderr
-        .take()
-        .expect("child stderr must be piped: Stdio::piped() was set on the child Command above");
     let prefixes: Vec<String> = stderr_noise_prefixes
         .iter()
         .map(|s| s.to_string())
@@ -358,16 +459,16 @@ pub(crate) fn run_child_stream_semantic(
     // every other provider the detector's dedicated receiver arrives here.
     // The two are mutually exclusive by construction, so picking whichever
     // is `Some` gives the wait loop the one receiver to poll.
-    let early_terminate_rx = bridge_early_rx.or(content_early_rx);
+    let (control_early_rx, completion_rx) = control_receivers.unzip();
+    let early_terminate_rx = merge_early(bridge_early_rx.or(content_early_rx), control_early_rx);
     let has_bridge = bridge_for_thread.is_some();
     let capture_always = has_bridge;
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_byte_metrics = live_metrics.clone();
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
-        let reader = BufReader::new(pipe);
         let mut captured = String::new();
-        for line in reader.lines() {
+        for line in stderr_source {
             let Ok(line) = line else { break };
 
             // Refresh the byte heartbeat for every non-empty stderr line,
@@ -423,7 +524,11 @@ pub(crate) fn run_child_stream_semantic(
         captured
     });
 
-    if let Some(seed) = stdin_seed {
+    // A controlled child already has its task; its stdin stays with the
+    // session.
+    if control.is_none()
+        && let Some(seed) = stdin_seed
+    {
         // BrokenPipe is benign: child closed stdin or exited before we
         // finished writing the seed. See `run_child` for the same rationale.
         setup::write_stdin_seed(&mut child, seed)?;
@@ -452,7 +557,7 @@ pub(crate) fn run_child_stream_semantic(
     // stderr early-terminate bridge is active. The watchdog is the sole
     // source of timeout-driven termination; the wait loop only consumes
     // signals from channels.
-    let needs_advanced_wait = early_terminate_rx.is_some() || watchdog_enabled;
+    let needs_advanced_wait = early_terminate_rx.is_some() || watchdog_enabled || completion_rx.is_some();
     let (exit_code, termination, early_termination) = if needs_advanced_wait {
         // Synthesize a disconnected receiver when no stderr bridge is
         // installed so the wait loop can still receive watchdog signals.
@@ -468,11 +573,12 @@ pub(crate) fn run_child_stream_semantic(
         // Structured streaming is always a non-interactive run (it requires
         // `effective_non_interactive`), so the compressed SIGTERM-first
         // ladder (F5) applies: no human is mid-session to react to a SIGINT.
-        wait_with_signal_and_early_termination(
+        wait_with_signal_early_termination_and_completion(
             &mut child,
             true,
             rx,
             wd_rx,
+            completion_rx,
             timeout_config.kill_grace,
             false,
         )?
@@ -480,6 +586,11 @@ pub(crate) fn run_child_stream_semantic(
         let (code, term) = wait_with_signal_handling(&mut child, true)?;
         (code, term, None)
     };
+    // The child is gone: nothing more can be written to it, and anything
+    // waiting on its answers must stop waiting.
+    if let Some((session, _)) = &control {
+        session.finish();
+    }
 
     // Surface the early-termination message as a styled `Warning` line on
     // stderr so the user sees an immediate reason for the kill (the summary
@@ -498,6 +609,20 @@ pub(crate) fn run_child_stream_semantic(
     }
 
     kill_process_group(&mut child);
+    // A controlled provider's tools may live outside its process group; a
+    // survivor is reported separately from the run's own outcome.
+    #[cfg(unix)]
+    if let Some(watch) = descendant_watch {
+        let survivors = watch.reap(timeout_config.kill_grace);
+        if survivors > 0 {
+            let noun = if survivors == 1 { "process" } else { "processes" };
+            let message = format!(
+                "{survivors} tool {noun} started by the provider outlived it; Claudine terminated {}",
+                if survivors == 1 { "it" } else { "them" }
+            );
+            stream_output.emit_stderr_line(&Status::new(&message).state(StatusState::Warning).render(&termination_term));
+        }
+    }
     stop_timing_ticker(flush_ticker);
     stop_timing_ticker(timing_monitor);
     stop_timing_ticker(watchdog_ticker);

@@ -349,7 +349,9 @@ pub enum SignalEvent {
     SessionTainted {
         cause: String,
     },
-    /// Reserved (no emitter until the durable-HITL/resume-round-2 work).
+    /// A provider waits for human input no managed run can answer. Emitted
+    /// by the wrapper's `input_required` termination (the Pi RPC owner
+    /// today); a durable human-in-the-loop resume is still future work.
     HumanInputRequested {
         prompt: Option<String>,
     },

@@ -18,6 +18,7 @@ mod output;
 mod perf;
 mod provider_values;
 mod shutdown;
+mod steering;
 mod table_utils;
 mod telemetry;
 

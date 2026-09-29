@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 3
+schema_revision: 4
 provider: opencode
 created: '2026-09-08'
 last_updated: '2026-09-08'
@@ -2456,6 +2456,7 @@ gaps:
   next_check: Implement correlated message/SSE/status observation and keep delivery
     outcome unknown on timeout or disconnect; do not retry without proven idempotency.
 changes:
+- "Migrated to schema revision 4 on 2026-09-28: verification rows gained stable ids and typed assertion kinds; no provider facts changed."
 - Refreshed the OpenCode passive pilot from steering schema revision 1 to revision
   2.
 - Split ordinary TUI, ordinary one-shot run, exposed TUI HTTP, and retained serve/run-attach

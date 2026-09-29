@@ -1,0 +1,10 @@
+[package]
+name = "filechanged-paths-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+biscuit-file = { path = "../../../../../biscuit-file/lib", default-features = false, features = ["file-reference"] }

@@ -181,8 +181,11 @@ memory_files:
 output_formats:
 # Pi's non-interactive shapes are selected by `--mode text|json|rpc` (or `-p`).
 # `--mode json` is a streaming NDJSON event stream (one object per line) -> the
-# Stream format. `--mode rpc` is a bidirectional protocol, not a plain output
-# format, so it is intentionally omitted (no OutputFormat variant covers it).
+# Stream format. `--mode rpc` is a bidirectional control protocol, not an
+# output format, so it is not an OutputFormat record: the research execution
+# selection (docs/research/non-interactive-sessions/pi.md, generated into
+# lib/src/steering/generated.rs) prefers it, and the Pi wrapper profile
+# launches it by rewriting this record's selector value (`--mode rpc`).
 - cli_flag: null
   companion_flags: []
   format: text
@@ -190,19 +193,15 @@ output_formats:
   selector:
     kind: default
   stdin_supported: true
-# Headless determinism set (research non-interactive-sessions/pi.md): these
-# companion flags lock down the run so composed output is reproducible —
-# `--no-approve` (no project-trust prompt), `--no-extensions`/`--no-skills`/
-# `--no-prompt-templates` (no ambient behavior injection), `--no-context-files`
-# (Claudine owns the prompt; no AGENTS.md/CLAUDE.md discovery). Applied before
-# the `--mode json` selector by the shared structured-stream path.
+# `--no-approve` skips the non-interactive project-trust decision (Pi ignores
+# untrusted project resources for the run). Trust is a separate policy choice
+# from resource loading: extensions, skills, prompt templates, and context
+# files stay enabled, so no `--no-extensions`/`--no-skills`/
+# `--no-prompt-templates`/`--no-context-files` flag is injected. Applied before
+# the `--mode` selector by the shared structured-stream path.
 - cli_flag: --mode
   companion_flags:
   - --no-approve
-  - --no-extensions
-  - --no-skills
-  - --no-prompt-templates
-  - --no-context-files
   format: stream
   native_name: json
   selector:

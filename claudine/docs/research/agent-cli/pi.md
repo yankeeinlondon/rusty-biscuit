@@ -856,8 +856,19 @@ Package install/update commands can invoke npm/git/ssh and mutate user or projec
 
 Windows bash execution requires a bash-compatible shell. Docs say Pi checks a custom `shellPath`, Git Bash, and then `bash.exe` on `PATH`.
 
+### Interactive startup prompt
+
+A startup prompt for an **interactive** session must go on argv as a positional message after `--`: `pi -- "<prompt>"`. The message reaches the TUI as its first user turn and the session stays open for more turns. Constraints:
+
+- `--` as end-of-options needs **Pi 0.84.3 or later** (changelog `[0.84.3]`, #7269: "supporting `--` as an end-of-options delimiter"). Earlier releases, including the 0.80.3 recorded above, reject it with `Unknown option: --`.
+- A piped stdin always forces print mode (`main.ts` `resolveAppMode` plus the piped-stdin override), so stdin cannot seed an interactive session. Stdin remains the right channel for one-shot runs.
+- After `--`, a token starting with `@` is still read as a file argument, not a message. A wrapper that needs a literal leading `@` must change the first character (Claudine prepends a space).
+
+Verified live on Pi 0.87.1 (2026-09-28) with a plain prompt, a multiline prompt whose first line is `- item`, a ~2 KB prompt, and a prompt starting with `@`. Upstream issue #9200 (SIGKILL for positional messages of about 993 bytes on 0.83.0 and 0.85.1) did not reproduce at 2 KB on 0.87.1.
+
 ## Changelog
 
+- 2026-09-28: Recorded the interactive startup-prompt form (`-- <message>`), its 0.84.3 floor, the stdin-forces-print-mode rule, and the `@` caveat; live-verified on 0.87.1.
 - 2026-07-03: Verified latest upstream package as `@earendil-works/pi-coding-agent@0.80.3`; recorded that the host-installed binary is the older `@mariozechner/pi-coding-agent@0.73.1` namespace.
 - 2026-07-03: Reworked frontmatter to use separate macOS, Linux, and Windows records for binaries, install methods, and config files.
 - 2026-07-03: Added `pi update --all`, package-command trust flags, current Pi-owned runtime variables, and help-output truncation caveat.

@@ -136,6 +136,34 @@ fn redact_sensitive_args_is_case_insensitive_and_alias_aware() {
     );
 }
 
+/// Bare-argument recognition uses the shared credential-token prefixes, so
+/// every GitHub and Slack token kind is masked, not only `ghp_`/`xox[bp]-`.
+#[test]
+fn redact_sensitive_args_masks_every_shared_credential_prefix() {
+    let args: Vec<String> = ["ghs_abc", "github_pat_abc", "xoxa-abc", "gho_abc", "skip-this", "ghost"]
+        .iter()
+        .map(|arg| arg.to_string())
+        .collect();
+    assert_eq!(
+        redact_sensitive_args(&args),
+        vec!["****", "****", "****", "****", "skip-this", "ghost"]
+    );
+}
+
+/// The environment sanitizer shares the payload scrubber's key-name
+/// recognizer, so an `AUTHORIZATION` or `*_APIKEY` variable is stripped too.
+#[test]
+fn sanitize_process_env_strips_shared_sensitive_key_names() {
+    let baseline = claudine::invocation_context::EnvBaseline::from_entries([
+        ("AUTHORIZATION", "Basic abc"),
+        ("OPENAI_APIKEY", "sk-x"),
+        ("PATH", "/usr/bin"),
+    ]);
+    let (kept, removed, _, _) = sanitize_process_env(&baseline, &HashSet::new(), &HashSet::new());
+    assert_eq!(removed, vec!["AUTHORIZATION", "OPENAI_APIKEY"]);
+    assert!(kept.contains_key(&OsString::from("PATH")));
+}
+
 #[test]
 fn redact_sensitive_args_preserves_non_secret_args() {
     let args = vec![
