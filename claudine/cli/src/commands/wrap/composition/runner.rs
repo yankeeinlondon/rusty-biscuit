@@ -486,6 +486,10 @@ pub(super) fn run_composition_body(
             is_inline,
             mcp_enabled: request.mcp || !request.mcp_use.is_empty(),
             fallback_provider_reason: target.provider_reason,
+            fallback_model: crate::commands::wrap::harness_orch::planned_fallback_model(
+                target,
+                request.sequence,
+            ),
             dispatch_context,
             launch_plan_inputs: launch_plan_inputs.clone(),
             env_lookup: claudine::composition::ambient_env_lookup,

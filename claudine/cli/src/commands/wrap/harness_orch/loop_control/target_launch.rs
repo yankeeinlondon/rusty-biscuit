@@ -38,7 +38,7 @@
 //! renegotiate that a document can move: provider (frontmatter `agent:` under
 //! explicit-CLI precedence), the profile and binary that provider selects, the
 //! resume protocol that profile supports, model (frontmatter `model:` under
-//! explicit `--model`), interactivity (frontmatter `interactive:`), the
+//! explicit `--model`, over the invocation's planned model), interactivity (frontmatter `interactive:`), the
 //! permission mode `--yolo` actually achieves in that mode for that provider,
 //! the structured-output mode the pair implies, and the MCP tag set the
 //! refreshed document composed. It is the input both sides of the R8
@@ -206,6 +206,16 @@ pub(crate) struct LaunchRebuildIntent {
     /// frontmatter `agent:`), because the rebuild cannot re-derive
     /// picker/favorite provenance from the document alone.
     pub(crate) fallback_provider_reason: ProviderResolutionReason,
+    /// The planned model and its reason, used when neither `--model` nor the
+    /// document's own `model:` names one and the rebuild keeps
+    /// [`Self::fallback_provider`] — the model counterpart of that field.
+    ///
+    /// A sequence step carries its planned target's model here (a review-screen
+    /// choice, or the model planned from the sequence document), which the
+    /// launched document cannot re-derive. It must never hold a model the
+    /// launched document's own frontmatter chose: that one is re-derived from
+    /// each refreshed read, so a retry after `model:` is removed drops it.
+    pub(crate) fallback_model: Option<(String, ModelResolutionReason)>,
     /// The invocation's composition dispatch context. An unchanged document
     /// keeps it verbatim; a rebuild that moved a facet overwrites its
     /// provider/model selection entries from the refreshed facets. Empty for
@@ -354,8 +364,7 @@ pub(crate) fn rebuild_launch_identity(
         Vec::new()
     };
 
-    let (model, model_reason) =
-        resolve_launch_model(provider, cli_model, repo_root, document, intent.env_lookup);
+    let (model, model_reason) = resolve_launch_model(intent, provider, cli_model, repo_root, document);
 
     // The single re-entrant rebuild. `--yolo` is a request; whether it *applies*
     // is the profile's decision in this mode, and the plan is what makes it —
@@ -587,19 +596,34 @@ pub(super) struct TargetLaunchRebuild {
     pub(super) prepared_context: darkmatter::markdown::compose::ComposeContext,
 }
 
-/// Resolve the model the refreshed document launches with, under R6 precedence:
-/// explicit `--model` beats the document's own `model:`, through the same
-/// shared resolver a direct invocation uses (no refresh, no repeat warning).
+/// Resolve the model the refreshed document launches with, under R6 precedence,
+/// mirroring [`select_rebuilt_provider`]: explicit `--model`, then the
+/// document's own `model:` (with the environment between them, as the shared
+/// resolver a direct invocation uses orders it), then the planned
+/// [`LaunchRebuildIntent::fallback_model`], then the resolver's environment and
+/// provider-default steps. No refresh and no repeat warning.
+///
+/// The planned model applies only while the rebuild keeps the planned
+/// provider, the rule [`resolve_binary_for`] applies to the binary: a document
+/// whose `agent:` moved the provider gets that provider's own resolution.
 ///
 /// One answer serves both the launch plan's argv and the `MODEL` environment, so
 /// the two cannot describe different models.
 fn resolve_launch_model(
+    intent: &LaunchRebuildIntent,
     provider: Provider,
     cli_model: Option<&str>,
     repo_root: Option<&Path>,
     document: &MaterializedHarnessPrompt,
-    env_lookup: fn(&str) -> Option<String>,
 ) -> (Option<String>, ModelResolutionReason) {
+    if cli_model.is_none()
+        && document.selection_hints.model.is_none()
+        && provider == intent.fallback_provider
+        && let Some((model, reason)) = &intent.fallback_model
+    {
+        return (Some(model.clone()), reason.clone());
+    }
+    let env_lookup = intent.env_lookup;
     let selection_config =
         crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
     let catalog = match &selection_config {
@@ -614,6 +638,33 @@ fn resolve_launch_model(
         crate::commands::wrap::composition::ModelResolveMode::REBUILD,
         env_lookup,
     )
+}
+
+/// The [`LaunchRebuildIntent::fallback_model`] for a composition launching
+/// under `target`.
+///
+/// A sequence step's target was planned before the step ran — from the review
+/// screen, or from the sequence document rather than the document the step
+/// launches — so its model is carried whatever its reason. Outside a sequence
+/// the target was resolved from the launched document itself, so a model its
+/// frontmatter chose is left to each refreshed read; a model from `--model`
+/// or the environment is carried, which the rebuild would re-derive
+/// identically anyway.
+pub(crate) fn planned_fallback_model(
+    target: &claudine::composition::ResolvedExecutionTarget,
+    sequence: bool,
+) -> Option<(String, ModelResolutionReason)> {
+    let from_launched_document = matches!(
+        target.model_reason,
+        ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::FrontmatterList
+    );
+    if !sequence && from_launched_document {
+        return None;
+    }
+    target
+        .model
+        .clone()
+        .map(|model| (model, target.model_reason.clone()))
 }
 
 /// Project a resolved provider/model/yolo triple into the `AGENT`/`MODEL`/`YOLO`

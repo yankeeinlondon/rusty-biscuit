@@ -132,7 +132,7 @@ use coordinator::{ActiveDocumentCoordinator, BootstrapStage};
 use error_routing::*;
 use lifecycle_events::*;
 use proxy::*;
-pub(crate) use target_launch::LaunchRebuildIntent;
+pub(crate) use target_launch::{LaunchRebuildIntent, planned_fallback_model};
 use target_launch::{RebuiltLaunchIdentity, rebuild_launch_identity, rebuild_target_launch};
 #[allow(unused_imports)] // entirely dead_code until the rendezvous backend lands
 use requeue::*;

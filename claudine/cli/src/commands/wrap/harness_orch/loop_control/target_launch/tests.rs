@@ -185,6 +185,7 @@ fn intent() -> LaunchRebuildIntent {
         is_inline: false,
         mcp_enabled: true,
         fallback_provider_reason: ProviderResolutionReason::FavoriteAgent,
+        fallback_model: None,
         dispatch_context: invocation_dispatch_context(),
         launch_plan_inputs: plan_inputs(),
         env_lookup: no_ambient_env,
@@ -1529,4 +1530,137 @@ fn a_direct_run_records_no_write_posture() {
             .unwrap();
 
     assert!(rebuilt.write_posture.is_none());
+}
+
+/// The fixture intent with a planned model for its Goose fallback provider, as
+/// a sequence step's reviewed target supplies it.
+fn intent_with_planned_model(model: &str) -> LaunchRebuildIntent {
+    let mut intent = intent();
+    intent.fallback_model = Some((model.to_string(), ModelResolutionReason::SequenceReview));
+    intent
+}
+
+/// [`super::resolve_launch_model`] with an ambient `MODEL` scrubbed.
+fn launch_model(
+    intent: &LaunchRebuildIntent,
+    provider: Provider,
+    cli_model: Option<&str>,
+    document: &MaterializedHarnessPrompt,
+) -> (Option<String>, ModelResolutionReason) {
+    let _no_model = without_ambient_model();
+    super::resolve_launch_model(intent, provider, cli_model, None, document)
+}
+
+/// A document that names no model launches the planned model, with the
+/// planned reason, while the rebuild keeps the planned provider.
+#[test]
+fn a_document_without_a_model_launches_the_planned_model() {
+    let intent = intent_with_planned_model("planned-model");
+    assert_eq!(
+        launch_model(&intent, Provider::Goose, None, &target_with_model(None)),
+        (Some("planned-model".to_string()), ModelResolutionReason::SequenceReview),
+    );
+
+    let rebuilt =
+        rebuild_launch_identity(&intent, None, None, &target_with_model(None), None).unwrap();
+    assert_eq!(value_of(&rebuilt.env_overrides, "MODEL"), Some("planned-model"));
+}
+
+/// `--model` outranks the planned model.
+#[test]
+fn an_explicit_cli_model_outranks_the_planned_model() {
+    let intent = intent_with_planned_model("planned-model");
+    assert_eq!(
+        launch_model(&intent, Provider::Goose, Some("cli-model"), &target_with_model(None)),
+        (Some("cli-model".to_string()), ModelResolutionReason::ExplicitCli),
+    );
+}
+
+/// The launched document's own `model:` outranks the planned model.
+#[test]
+fn the_documents_own_model_outranks_the_planned_model() {
+    let intent = intent_with_planned_model("planned-model");
+    assert_eq!(
+        launch_model(&intent, Provider::Goose, None, &target_with_model(Some("document-model"))),
+        (Some("document-model".to_string()), ModelResolutionReason::FrontmatterSingle),
+    );
+}
+
+/// A document whose `agent:` moves the provider gets that provider's own
+/// resolution: the planned model belongs to the planned provider.
+#[test]
+fn the_planned_model_is_ignored_when_the_document_moves_the_provider() {
+    let intent = intent_with_planned_model("planned-model");
+    let moved = with_hints(EffectiveSelectionHints {
+        agent: Some(AgentHint::Single(Provider::Gemini)),
+        ..EffectiveSelectionHints::default()
+    });
+    let rebuilt = rebuild_launch_identity(&intent, None, None, &moved, None).unwrap();
+    assert_eq!(rebuilt.provider, Provider::Gemini);
+    assert_eq!(value_of(&rebuilt.env_overrides, "MODEL"), None);
+    assert_eq!(
+        launch_model(&intent, Provider::Gemini, None, &moved),
+        (None, ModelResolutionReason::ProviderDefault),
+    );
+}
+
+/// An unchanged run whose invocation launched the planned model rebuilds the
+/// recorded plan verbatim: no model facet moved, so neither the argv nor the
+/// session-compatibility key it feeds can differ from the invocation's.
+#[test]
+fn an_unchanged_run_with_a_planned_model_keeps_the_recorded_plan() {
+    let mut intent = intent_with_opening_model("planned-model");
+    intent.fallback_model =
+        Some(("planned-model".to_string(), ModelResolutionReason::SequenceReview));
+    let rebuilt =
+        rebuild_launch_identity(&intent, None, None, &target_with_model(None), None).unwrap();
+
+    assert_eq!(rebuilt.args, vec![RECORDED_ARGV.to_string()], "the plan must not replay");
+    assert_eq!(rebuilt.dispatch_context, intent.dispatch_context);
+    assert_eq!(value_of(&rebuilt.env_overrides, "MODEL"), Some("planned-model"));
+
+    // Without the planned model the same run replays and drops it.
+    let dropped = rebuild_launch_identity(
+        &intent_with_opening_model("planned-model"),
+        None,
+        None,
+        &target_with_model(None),
+        None,
+    )
+    .unwrap();
+    assert_ne!(dropped.args, vec![RECORDED_ARGV.to_string()]);
+}
+
+/// A sequence step carries its planned model whatever the reason; outside a
+/// sequence a model the launched document's frontmatter chose is left to
+/// each refreshed read.
+#[test]
+fn planned_fallback_model_carries_what_the_document_cannot_re_derive() {
+    let target = |model: Option<&str>, model_reason: ModelResolutionReason| {
+        claudine::composition::ResolvedExecutionTarget {
+            provider: Provider::Goose,
+            provider_reason: ProviderResolutionReason::FrontmatterSingle,
+            model: model.map(str::to_string),
+            model_reason,
+        }
+    };
+    let reviewed = target(Some("m"), ModelResolutionReason::SequenceReview);
+    let from_frontmatter = target(Some("m"), ModelResolutionReason::FrontmatterSingle);
+    let from_env = target(Some("m"), ModelResolutionReason::GenericEnv);
+    let none = target(None, ModelResolutionReason::ProviderDefault);
+
+    assert_eq!(
+        planned_fallback_model(&reviewed, true),
+        Some(("m".to_string(), ModelResolutionReason::SequenceReview))
+    );
+    assert_eq!(
+        planned_fallback_model(&from_frontmatter, true),
+        Some(("m".to_string(), ModelResolutionReason::FrontmatterSingle))
+    );
+    assert_eq!(planned_fallback_model(&from_frontmatter, false), None);
+    assert_eq!(
+        planned_fallback_model(&from_env, false),
+        Some(("m".to_string(), ModelResolutionReason::GenericEnv))
+    );
+    assert_eq!(planned_fallback_model(&none, true), None);
 }
