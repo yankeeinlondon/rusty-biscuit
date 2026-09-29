@@ -44,6 +44,7 @@ pub(crate) fn run_structured_stream_session(
     wrapper_span: &tracing::Span,
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     status_reporter: super::session_report::StatusReporter,
+    control: Option<std::sync::Arc<dyn exec::control::StdioControl>>,
 ) -> Result<(i32, Option<String>)> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig {
@@ -162,6 +163,7 @@ pub(crate) fn run_structured_stream_session(
             signal_hub,
             // Direct wrapper path: no sequence task owns this stream.
             None,
+            control,
         )?
     };
     let mut summary = stream_result.data;

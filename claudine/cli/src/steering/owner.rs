@@ -31,6 +31,7 @@ use rendezvous_core::{SteeringControlDown, SteeringControlUp, SteeringDelivery, 
 use tokio::sync::mpsc;
 
 use super::{DaemonAccessError, wire};
+use crate::commands::wrap::exec::control::StdioControl;
 
 /// Bound on one connection or registration attempt.
 pub(crate) const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -42,9 +43,9 @@ const RETRY_BACKOFF: [Duration; 4] =
 /// Frames buffered toward the daemon: updates plus replies.
 const UPSTREAM_CAPACITY: usize = 64;
 
-/// The production executor until a provider adapter exists. Eligibility
-/// already blocks every route without a reviewed adapter; this answers the
-/// same way if a route is ever selected without one.
+/// The executor for a launch no provider adapter carries. Eligibility already
+/// blocks every route without a reviewed adapter; this answers the same way
+/// if a route is ever selected without one.
 struct NoAdapter;
 
 impl SteeringExecutor for NoAdapter {
@@ -66,12 +67,24 @@ pub(crate) struct ExecutionSteering {
 
 impl ExecutionSteering {
     /// Starts steering ownership for a wrapped `provider` child working in
-    /// `cwd`. No launch profile is mapped yet, so the execution registers
-    /// as unavailable with that reason until a provider adapter maps one.
-    pub(crate) fn for_wrapped_child(provider: claudine::provider::Provider, interactive: bool, cwd: &std::path::Path) -> Option<Self> {
-        Self::start(ExecutionFacts {
+    /// `cwd`. A launch driven by a control session that carries steering runs
+    /// under that session's researched profile and adapter, and the session
+    /// reports the provider's state, conversation, and process to the
+    /// controller. Any other launch maps to no profile, so it registers as
+    /// unavailable with that reason.
+    ///
+    /// The provider version is not established here, and eligibility checks
+    /// the reviewed policy's profile blocks before the version.
+    pub(crate) fn for_wrapped_child(
+        provider: claudine::provider::Provider,
+        interactive: bool,
+        cwd: &std::path::Path,
+        control: Option<&Arc<dyn StdioControl>>,
+    ) -> Option<Self> {
+        let steering = control.and_then(|control| Some((control, control.steering_profile()?, control.steering_executor()?)));
+        let facts = ExecutionFacts {
             provider,
-            profile_id: None,
+            profile_id: steering.as_ref().map(|(_, profile, _)| (*profile).to_string()),
             os: claudine::steering::host_os(),
             launch_mode: if interactive {
                 claudine::steering::vocabulary::LaunchMode::Interactive
@@ -81,13 +94,19 @@ impl ExecutionSteering {
             provider_version: None,
             cwd: Some(biscuit_file::to_portable_string(cwd)),
             name: None,
-        })
+        };
+        let executor = steering.as_ref().map_or_else(|| Arc::new(NoAdapter) as Arc<dyn SteeringExecutor>, |(_, _, executor)| Arc::clone(executor));
+        let owner = Self::start(facts, executor)?;
+        if let Some((control, _, _)) = steering {
+            control.bind_controller(owner.controller.clone());
+        }
+        Some(owner)
     }
 
     /// Starts steering ownership for a child described by `facts`. `None`
     /// when no Tokio runtime is running or the wrapper's own process start
     /// cannot be read: without it the target would rest on a bare PID.
-    pub(crate) fn start(facts: ExecutionFacts) -> Option<Self> {
+    pub(crate) fn start(facts: ExecutionFacts, executor: Arc<dyn SteeringExecutor>) -> Option<Self> {
         tokio::runtime::Handle::try_current().ok()?;
         let pid = std::process::id();
         let Some(start) = crate::cli_utils::process_start(pid) else {
@@ -95,7 +114,7 @@ impl ExecutionSteering {
             return None;
         };
         let wrapper = ProcessStartIdentity::new(pid, start.to_string()).ok()?;
-        Some(Self::start_with(ControllerConfig::new(wrapper, facts), Arc::new(NoAdapter)))
+        Some(Self::start_with(ControllerConfig::new(wrapper, facts), executor))
     }
 
     /// [`Self::start`] with an explicit configuration and executor.

@@ -332,7 +332,7 @@ async fn without_a_daemon_the_link_gives_up_after_bounded_attempts() {
 async fn a_wrapped_child_registers_as_unavailable_until_its_profile_is_mapped() {
     let tmp = tempfile::tempdir().unwrap();
     point_endpoint_at(&private_endpoint(tmp.path(), "absent"));
-    let steering = ExecutionSteering::for_wrapped_child(Provider::Codex, false, tmp.path()).expect("wrapper identity");
+    let steering = ExecutionSteering::for_wrapped_child(Provider::Codex, false, tmp.path(), None).expect("wrapper identity");
     let snapshot = steering.controller().snapshot();
     assert_eq!(snapshot.availability.availability, SteeringAvailability::Unavailable);
     assert_eq!(snapshot.availability.reason.as_deref(), Some(UNMAPPED_PROFILE_REASON));

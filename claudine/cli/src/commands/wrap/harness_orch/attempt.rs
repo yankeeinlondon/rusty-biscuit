@@ -133,12 +133,18 @@ pub(crate) fn execute_harness_attempt(
         env_context,
         &launch.env,
     );
+    // A structured launch whose argv selects the provider's managed control
+    // interface is driven over retained stdin (Pi RPC).
+    let control = (use_structured && launch.wire_prompt.is_none())
+        .then(|| profile.stdio_control(&launch.args))
+        .flatten();
     // Steering ownership for the same child: an in-memory control route,
     // separate from replicated presence and its opt-out. Dropped with it.
     let _steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
         provider,
         !effective_non_interactive,
         child_cwd,
+        control.as_ref(),
     );
 
     let (
@@ -251,6 +257,7 @@ pub(crate) fn execute_harness_attempt(
                 content_early_rx,
                 signal_hub,
                 task_frame_writer,
+                control,
             )?
         };
         let api_duration_ms = stream_result.data.duration_ms;
