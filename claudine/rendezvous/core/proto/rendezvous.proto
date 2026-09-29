@@ -657,6 +657,10 @@ message ManagedTargetInfo {
     optional string provider_start = 12;
     // When the owner last described this target.
     int64 observed_at_unix_ms = 13;
+    // Operation intent wire string the owner's current route performs
+    // (e.g. `steer_active_turn`); present exactly when `availability` is
+    // not `unavailable`. A requester routes this operation and no other.
+    optional string operation = 14;
 }
 
 // One steering request handed to an owner.

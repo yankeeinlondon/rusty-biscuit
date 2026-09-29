@@ -42,4 +42,4 @@ pub(crate) fn render_chain(context: &str, cause: &(dyn Error + 'static)) -> Stri
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

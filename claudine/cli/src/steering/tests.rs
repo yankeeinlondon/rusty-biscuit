@@ -117,7 +117,7 @@ fn manual_request(target: &ManagedTarget) -> SteeringRequest {
 
 /// Points this test process's endpoint resolution at `endpoint`. nextest
 /// runs each test in its own process, so this cannot race another test.
-fn point_endpoint_at(endpoint: &LocalEndpoint) {
+pub(crate) fn point_endpoint_at(endpoint: &LocalEndpoint) {
     // SAFETY: see above — this process is this test's alone.
     unsafe { std::env::set_var(ENDPOINT_ENV_VAR, endpoint_env_value(endpoint)) };
 }
@@ -150,6 +150,7 @@ fn control_info() -> ManagedTargetInfo {
         provider_pid: Some(77),
         provider_start: Some("700".into()),
         observed_at_unix_ms: 1_760_000_000_000,
+        operation: Some("interrupt_then_submit".into()),
     }
 }
 
@@ -160,6 +161,12 @@ fn registration_matrix_reads_every_field_strictly() {
     assert_eq!(listing.provider, Provider::KimiCode);
     assert_eq!(listing.state, ExecutionState::Idle);
     assert_eq!(listing.availability.availability, SteeringAvailability::InterruptionRequired);
+    assert_eq!(listing.availability.operation, Some(OperationIntent::InterruptThenSubmit));
+    assert_eq!(
+        listing.binding.as_ref().map(|binding| (binding.generation.0, binding.conversation.as_deref())),
+        Some((2, Some("conversation:with:colons"))),
+        "the owner binding is kept for routing"
+    );
     assert_eq!(listing.availability.setup_requirements, ["start with --rpc"]);
     assert_eq!(
         listing.session_key,
@@ -181,6 +188,11 @@ fn registration_matrix_reads_every_field_strictly() {
         ("provider pid without start", Box::new(|i| i.provider_start = None)),
         ("provider start without pid", Box::new(|i| i.provider_pid = None)),
         ("observed time out of range", Box::new(|i| i.observed_at_unix_ms = i64::MAX)),
+        ("operation absent while selectable", Box::new(|i| i.operation = None)),
+        ("operation empty", Box::new(|i| i.operation = Some(String::new()))),
+        ("operation unknown value", Box::new(|i| i.operation = Some("shout".into()))),
+        ("operation explicitly unknown", Box::new(|i| i.operation = Some("unknown".into()))),
+        ("operation on an unavailable row", Box::new(|i| i.availability = "unavailable".into())),
     ];
     for (cell, edit) in cells {
         let mut info = control_info();
@@ -191,6 +203,9 @@ fn registration_matrix_reads_every_field_strictly() {
     let sparse = ManagedTargetInfo { provider_pid: None, provider_start: None, cwd: None, ..control_info() };
     let listing = wire::info_to_listing(sparse).unwrap();
     assert_eq!((listing.cwd, listing.session_key), (None, None));
+    // An unavailable row reads only without an operation.
+    let unavailable = ManagedTargetInfo { availability: "unavailable".into(), operation: None, ..control_info() };
+    assert_eq!(wire::info_to_listing(unavailable).unwrap().availability.operation, None);
 }
 
 fn control_delivery() -> SteeringDelivery {
@@ -346,11 +361,11 @@ async fn a_wrapped_child_registers_as_unavailable_until_its_profile_is_mapped() 
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "daemon-tests")]
-mod with_daemon {
+pub(crate) mod with_daemon {
     use super::*;
     use claudine::steering::discovery::{ManagedSource, ObservationSource, SessionListing};
 
-    async fn boot(tmp: &tempfile::TempDir, endpoint: &LocalEndpoint) -> rendezvous_daemon::server::ServerHandle {
+    pub(crate) async fn boot(tmp: &tempfile::TempDir, endpoint: &LocalEndpoint) -> rendezvous_daemon::server::ServerHandle {
         let mut config = rendezvous_daemon::server::DaemonConfig::with_data_dir(tmp.path().join("data")).with_in_memory_projection();
         config.networking = None;
         let handle = rendezvous_daemon::local_transport::spawn_local_server(endpoint.clone(), config).expect("spawn daemon");
@@ -363,7 +378,7 @@ mod with_daemon {
     }
 
     /// Waits until the daemon lists a managed row satisfying `ready`.
-    async fn listed(ready: impl Fn(&SessionListing) -> bool) -> SessionListing {
+    pub(crate) async fn listed(ready: impl Fn(&SessionListing) -> bool) -> SessionListing {
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         loop {
             if let Ok(listing) = requester::DaemonManagedSource.list().await
