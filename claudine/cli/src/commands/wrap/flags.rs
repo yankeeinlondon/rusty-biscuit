@@ -12,10 +12,12 @@ use color_eyre::eyre::{Result, eyre};
 /// keeping clap as the primary parser while the passthrough extractor serves as
 /// a fallback for flags that land after `trailing_var_arg` has started capturing.
 ///
-/// The extractor honours the POSIX `--` convention: anything on or after the
-/// first `--` separator is treated as opaque agent arguments and is never
-/// rewritten by Claudine, even when it collides with a Claudine flag name. See
-/// `find_passthrough_dash_boundary` for the detection strategy.
+/// The extractor honors the POSIX `--` convention: anything after the first
+/// `--` separator is opaque to Claudine and is never read as a wrapper flag,
+/// even when it collides with a Claudine flag name. The separator is
+/// Claudine's own boundary and is not forwarded, so the arguments after it
+/// reach the provider as provider options. See
+/// `find_passthrough_dash_boundary_with_raw` for the detection strategy.
 ///
 /// Unknown flags (belonging to the underlying agent) flow into `passthrough`
 /// thanks to `ignore_errors(true)` on wrapper subcommands (see `parse_cli`).
@@ -278,50 +280,84 @@ pub(crate) fn print_wrapper_help(provider: Provider) {
     );
 }
 
-/// Locate the POSIX `--` separator in the wrapper passthrough vector.
-///
-/// Returns the index of the first `--` that delimits agent-only arguments.
-/// Two cases are handled:
-///
-/// 1. The `--` literal is present in the passthrough vector itself (clap
-///    preserves it when it appears after the first positional, thanks to
-///    `trailing_var_arg`). The boundary is at that index.
-/// 2. The `--` was consumed by clap as a separator (it appeared before any
-///    positional argument) and is therefore absent from the passthrough. We
-///    fall back to the raw process arguments: count the tokens that followed
-///    `--` in the original command line and mark the corresponding tail of
-///    the passthrough as protected.
-///
-/// Returns `None` when no `--` was provided on the command line at all.
-fn find_passthrough_dash_boundary(passthrough: &[String]) -> Option<usize> {
-    let raw: Vec<String> = std::env::args().collect();
-    find_passthrough_dash_boundary_with_raw(passthrough, &raw)
+/// Where the user's `--` separator put Claudine's argument boundary in the
+/// wrapper passthrough vector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DashBoundary {
+    /// clap kept the `--` token (it followed the first positional, so
+    /// `trailing_var_arg` captured it verbatim) at this index.
+    Literal(usize),
+    /// clap consumed the `--` (it preceded every positional); the protected
+    /// tail starts at this index and no separator token remains.
+    Consumed(usize),
 }
 
+impl DashBoundary {
+    fn protected_from(self) -> usize {
+        match self {
+            Self::Literal(index) | Self::Consumed(index) => index,
+        }
+    }
+}
+
+/// Locate the user's first `--` relative to the passthrough vector.
+///
+/// The raw process arguments decide which `--` is Claudine's: the tokens
+/// after the first raw `--` are the passthrough's tail, so a later `--`
+/// inside that tail stays the provider's own separator. When the raw
+/// arguments do not end the passthrough (a caller that did not come from the
+/// process command line), the first literal `--` in the passthrough is used.
 fn find_passthrough_dash_boundary_with_raw(
     passthrough: &[String],
     raw_args: &[String],
-) -> Option<usize> {
-    if let Some(pos) = passthrough.iter().position(|arg| arg == "--") {
-        return Some(pos);
+) -> Option<DashBoundary> {
+    if let Some(raw_pos) = raw_args.iter().position(|arg| arg == "--") {
+        let raw_tail = &raw_args[raw_pos + 1..];
+        if passthrough.ends_with(raw_tail) {
+            let index = passthrough.len() - raw_tail.len();
+            return Some(if index > 0 && passthrough[index - 1] == "--" {
+                DashBoundary::Literal(index - 1)
+            } else {
+                DashBoundary::Consumed(index)
+            });
+        }
     }
-
-    let raw_pos = raw_args.iter().position(|arg| arg == "--")?;
-    let tail_count = raw_args.len() - raw_pos - 1;
-    Some(passthrough.len().saturating_sub(tail_count))
+    passthrough
+        .iter()
+        .position(|arg| arg == "--")
+        .map(DashBoundary::Literal)
 }
 
+/// Recover wrapper flags that landed in the passthrough and consume the
+/// user's `--` separator.
+///
+/// The first `--` is Claudine's boundary, not the provider's: arguments after
+/// it are never read as wrapper flags, and the separator token itself is
+/// removed so those arguments reach the provider as the options they were
+/// written as, ahead of any separator the provider profile adds before a
+/// prompt.
 pub(crate) fn extract_wrapper_flags_from_passthrough(
     args: &mut Vec<String>,
 ) -> Result<ExtractedWrapperFlags> {
-    let boundary = find_passthrough_dash_boundary(args).unwrap_or(args.len());
+    let raw: Vec<String> = std::env::args().collect();
+    extract_wrapper_flags_from_passthrough_with_raw(args, &raw)
+}
+
+/// [`extract_wrapper_flags_from_passthrough`] against explicit raw process
+/// arguments (`argv[0]` included).
+pub(crate) fn extract_wrapper_flags_from_passthrough_with_raw(
+    args: &mut Vec<String>,
+    raw_args: &[String],
+) -> Result<ExtractedWrapperFlags> {
+    let boundary = find_passthrough_dash_boundary_with_raw(args, raw_args);
     extract_wrapper_flags_from_passthrough_with_boundary(args, boundary)
 }
 
 fn extract_wrapper_flags_from_passthrough_with_boundary(
     args: &mut Vec<String>,
-    boundary: usize,
+    dash_boundary: Option<DashBoundary>,
 ) -> Result<ExtractedWrapperFlags> {
+    let boundary = dash_boundary.map_or(args.len(), DashBoundary::protected_from);
     let boundary = boundary.min(args.len());
     let mut extracted = ExtractedWrapperFlags::default();
     let mut skip_next = false;
@@ -395,6 +431,11 @@ fn extract_wrapper_flags_from_passthrough_with_boundary(
         }
     }
 
+    // The separator sits past every removed index, so dropping it first
+    // leaves those indices valid.
+    if let Some(DashBoundary::Literal(index)) = dash_boundary {
+        args.remove(index);
+    }
     // Remove in reverse order to preserve indices.
     for i in remove_indices.into_iter().rev() {
         args.remove(i);
