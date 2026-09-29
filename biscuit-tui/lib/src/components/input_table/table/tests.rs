@@ -600,7 +600,7 @@ fn static_text_columns_stay_at_natural_width_with_leftover() {
             config: TextInputConfig::default(),
         },
     ];
-    let widths = compute_column_widths(&columns, 60);
+    let widths = compute_column_widths(&columns, &[], 60);
     assert_eq!(
         widths[0], 5,
         "StaticText should get exactly its natural unicode width"
@@ -632,7 +632,7 @@ fn static_text_does_not_shrink_below_natural_in_overflow() {
             config: TextInputConfig::default(),
         },
     ];
-    let widths = compute_column_widths(&columns, 10);
+    let widths = compute_column_widths(&columns, &[], 10);
     assert_eq!(
         widths[0], 5,
         "StaticText in overflow should get min(base, preferred)"
@@ -652,7 +652,7 @@ fn all_static_text_columns_use_preferred_widths() {
             text: "Beta".into(),
         },
     ];
-    let widths = compute_column_widths(&columns, 40);
+    let widths = compute_column_widths(&columns, &[], 40);
     assert_eq!(widths[0], 5, "Alpha is 5 chars wide");
     assert_eq!(widths[1], 4, "Beta is 4 chars wide");
 }
@@ -674,7 +674,7 @@ fn render_static_text_stays_tight() {
     let mut buf = Buffer::empty(area);
     InputTable.render(area, &mut buf, &mut state);
 
-    let widths = compute_column_widths(state.columns(), area.width);
+    let widths = compute_column_widths(state.columns(), state.rows(), area.width);
     assert_eq!(widths[0], 5, "StaticText 'Label' is 5 chars");
 
     let static_end = widths[0] as usize;
@@ -917,9 +917,6 @@ fn new_still_panics_on_cell_type_mismatch() {
 // These tests observe layout through the rendered buffer so they hold across
 // changes to the private width helper's signature.
 
-// Tests ignored as "phase-2 scaffold" describe layout the renderer does not
-// implement yet; the change that implements it removes those `#[ignore]`s.
-
 fn static_column(id: &str, text: &str) -> InputTableColumn {
     InputTableColumn::StaticText {
         id: id.into(),
@@ -986,7 +983,6 @@ fn column_of(buf: &Buffer, y: u16, symbol: &str) -> Option<u16> {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn static_column_shows_full_label_at_80_columns() {
     let mut state = step_table(&["1 implement", "12 review-5"]);
     let buf = render_into(&mut state, 80, 4);
@@ -997,7 +993,6 @@ fn static_column_shows_full_label_at_80_columns() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn static_column_width_includes_off_screen_rows_and_survives_scrolling() {
     let labels = ["1 a", "2 b", "3 c", "4 d", "5 e", "6 the-longest-label"];
     let mut state = step_table(&labels);
@@ -1019,7 +1014,6 @@ fn static_column_width_includes_off_screen_rows_and_survives_scrolling() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn resizing_down_clips_with_ellipsis_and_resizing_up_restores() {
     let mut state = step_table(&["12 review-5"]);
 
@@ -1035,7 +1029,6 @@ fn resizing_down_clips_with_ellipsis_and_resizing_up_restores() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn multiple_static_columns_share_the_reduction_left_to_right() {
     let columns = vec![
         static_column("a", "A"),
@@ -1059,7 +1052,6 @@ fn multiple_static_columns_share_the_reduction_left_to_right() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn emergency_allocation_divides_width_evenly_and_caps_static_columns() {
     let mut state = step_table(&["12 review-5"]);
 
@@ -1071,7 +1063,6 @@ fn emergency_allocation_divides_width_evenly_and_caps_static_columns() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn one_cell_static_column_shows_only_the_ellipsis() {
     let mut state = step_table(&["12 review-5"]);
     let buf = render_into(&mut state, 3, 1);
@@ -1098,7 +1089,6 @@ fn zero_cell_static_column_draws_nothing() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn wide_characters_are_omitted_whole_and_never_cross_the_column() {
     let columns = vec![static_column("step", "Step"), text_column("t")];
     let row = Row::new(vec![
@@ -1123,7 +1113,6 @@ fn wide_characters_are_omitted_whole_and_never_cross_the_column() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn grapheme_clusters_are_never_split_by_clipping() {
     use unicode_segmentation::UnicodeSegmentation;
 
@@ -1169,7 +1158,6 @@ fn grapheme_clusters_are_never_split_by_clipping() {
 }
 
 #[test]
-#[ignore = "phase-2 scaffold: content-based static widths"]
 fn all_static_table_sizes_to_content_and_shrinks_left_to_right() {
     let columns = vec![static_column("a", "A"), static_column("b", "B")];
     let row = Row::new(vec![
@@ -1199,4 +1187,265 @@ fn clipping_is_display_only_and_submission_returns_full_text() {
         Some(&CellValue::StaticText("12 review-5".into()))
     );
     assert_eq!(state.rows_typed()[0], state.value()[0]);
+}
+
+// -- Width allocation invariants ------------------------------------------
+
+fn switch_column(id: &str) -> InputTableColumn {
+    InputTableColumn::BooleanSwitch {
+        id: id.into(),
+        config: BooleanSwitchConfig::default(),
+    }
+}
+
+fn choice_column(id: &str, labels: &[&str]) -> InputTableColumn {
+    let options = labels
+        .iter()
+        .map(|label| ChoiceOption::new(label.to_lowercase(), *label, label.to_lowercase()))
+        .collect();
+    InputTableColumn::ChooseOne(ChoiceInput::new(id, id).with_options(options))
+}
+
+/// Column mixes paired with rows that widen their static columns.
+fn allocation_fixtures() -> Vec<InputTableState> {
+    let labelled = |columns: Vec<InputTableColumn>, labels: &[&str]| {
+        let mut state = InputTableState::with_blank_rows(columns, labels.len());
+        for (row, label) in labels.iter().enumerate() {
+            state.set_cell_initial(row, 0, label);
+        }
+        state
+    };
+    vec![
+        labelled(
+            vec![
+                static_column("step", "Step"),
+                choice_column("provider", &["Claude", "Codex"]),
+                choice_column("model", &["opus"]),
+            ],
+            &["1 implement", "22 the-final-review-step"],
+        ),
+        labelled(
+            vec![static_column("a", "A"), static_column("b", "Bee"), text_column("t")],
+            &["abcdefghij"],
+        ),
+        labelled(
+            vec![static_column("a", "Alpha"), static_column("b", "Beta")],
+            &["a-much-longer-label"],
+        ),
+        labelled(
+            vec![
+                static_column("s", "S"),
+                switch_column("on"),
+                static_column("n", "Name"),
+                InputTableColumn::TextAreaInput {
+                    id: "notes".into(),
+                    config: TextAreaInputConfig {
+                        preferred_width: 30,
+                        ..TextAreaInputConfig::default()
+                    },
+                },
+            ],
+            &["wide 日本語 label"],
+        ),
+        InputTableState::with_blank_rows(vec![text_column("only")], 1),
+    ]
+}
+
+#[test]
+fn column_widths_never_exceed_the_available_width_and_follow_the_tiers() {
+    for state in allocation_fixtures() {
+        let columns = state.columns();
+        let preferred = preferred_column_widths(columns, state.rows());
+        let is_static: Vec<bool> = columns.iter().map(|c| !c.is_focusable()).collect();
+        let sum_of = |widths: &[u16]| widths.iter().map(|&w| u32::from(w)).sum::<u32>();
+        let budgets: u32 = preferred
+            .iter()
+            .zip(&is_static)
+            .filter(|(_, s)| !**s)
+            .map(|(&w, _)| u32::from(w))
+            .sum();
+        let static_floor = 3 * is_static.iter().filter(|s| **s).count() as u32;
+        let has_focusable = is_static.contains(&false);
+
+        for total in 0..=200u16 {
+            let widths = compute_column_widths(columns, state.rows(), total);
+            let context = format!("{:?} at {total}: {widths:?}", preferred);
+            let sum = sum_of(&widths);
+            assert_eq!(widths.len(), columns.len(), "{context}");
+            assert!(sum <= u32::from(total), "{context}");
+            for (i, &w) in widths.iter().enumerate() {
+                if is_static[i] {
+                    assert!(w <= preferred[i], "static column {i} over preferred: {context}");
+                }
+            }
+
+            if sum_of(&preferred) <= u32::from(total) {
+                for (i, &w) in widths.iter().enumerate() {
+                    if is_static[i] {
+                        assert_eq!(w, preferred[i], "{context}");
+                    } else {
+                        assert!(w >= preferred[i], "{context}");
+                    }
+                }
+                if has_focusable {
+                    assert_eq!(sum, u32::from(total), "leftover not shared: {context}");
+                }
+            } else if static_floor + budgets <= u32::from(total) {
+                assert_eq!(sum, u32::from(total), "{context}");
+                for (i, &w) in widths.iter().enumerate() {
+                    if is_static[i] {
+                        assert!(w >= 3, "static column {i} under the floor: {context}");
+                    } else {
+                        assert_eq!(w, preferred[i], "focusable kept extras: {context}");
+                    }
+                }
+            } else {
+                let even_ceiling = u32::from(total).div_ceil(columns.len() as u32);
+                assert!(
+                    widths.iter().all(|&w| u32::from(w) <= even_ceiling),
+                    "emergency tier is not an even split: {context}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_static_column_at_the_floor_passes_its_share_to_the_others() {
+    let columns = vec![static_column("a", "Abcd"), static_column("b", "B"), text_column("t")];
+    let row = Row::new(vec![
+        RowCell::new("a", CellValue::StaticText("abcd".into())),
+        RowCell::new("b", CellValue::StaticText("b".repeat(20))),
+        RowCell::new("t", CellValue::Text(String::new())),
+    ]);
+    let state = InputTableState::new(columns, vec![row]);
+
+    // Preferred 4 + 20 + 20 into 34: a reduction of 10. The first column can
+    // give up only one cell, so the second gives up the other nine.
+    let widths = compute_column_widths(state.columns(), state.rows(), 34);
+    assert_eq!(widths, vec![3, 11, 20]);
+}
+
+#[test]
+fn very_long_static_values_saturate_instead_of_wrapping() {
+    let columns = vec![static_column("a", "A"), text_column("t")];
+    let row = Row::new(vec![
+        RowCell::new("a", CellValue::StaticText("x".repeat(70_000))),
+        RowCell::new("t", CellValue::Text(String::new())),
+    ]);
+    let state = InputTableState::new(columns, vec![row]);
+
+    assert_eq!(preferred_column_widths(state.columns(), state.rows())[0], u16::MAX);
+    assert_eq!(compute_column_widths(state.columns(), state.rows(), 80), vec![60, 20]);
+}
+
+// -- Focus styling ----------------------------------------------------------
+
+/// The review-screen shape: a `Step` label and provider and model choices.
+fn review_table(rows: usize) -> InputTableState {
+    let columns = vec![
+        static_column("step", "Step"),
+        choice_column("provider", &["Claude", "Codex", "Gemini"]),
+        choice_column("model", &["(default)", "opus"]),
+    ];
+    let mut state = InputTableState::with_blank_rows(columns, rows);
+    for row in 0..rows {
+        state.set_cell_initial(row, 0, &format!("{} step", row + 1));
+    }
+    state
+}
+
+/// Rows of `buf` whose text contains `needle`, top to bottom.
+fn lines_containing(buf: &Buffer, needle: &str) -> Vec<u16> {
+    (0..buf.area.height)
+        .filter(|&y| row_text(buf, y).contains(needle))
+        .collect()
+}
+
+fn underlined_cells(buf: &Buffer) -> Vec<(u16, u16)> {
+    buf.area
+        .positions()
+        .filter(|p| buf[*p].modifier.contains(Modifier::UNDERLINED))
+        .map(|p| (p.x, p.y))
+        .collect()
+}
+
+#[test]
+fn focused_choice_cell_draws_no_underline_on_blank_cells() {
+    let mut state = review_table(3);
+    assert_eq!(state.focus(), (0, 1));
+    let buf = render_into(&mut state, 80, 16);
+
+    // The padding right of `Codex` in the focused cell is blank.
+    let codex_y = lines_containing(&buf, "Codex")[0];
+    let blank_x = column_of(&buf, codex_y, "x").expect("Codex drawn") + 1;
+    assert_eq!(buf[(blank_x, codex_y)].symbol(), " ");
+    assert!(!buf[(blank_x, codex_y)].modifier.contains(Modifier::UNDERLINED));
+    assert_eq!(underlined_cells(&buf), vec![], "the default theme underlines nothing");
+}
+
+#[test]
+fn focused_choice_cell_stays_distinguishable_and_keeps_the_active_option_style() {
+    let mut state = review_table(3);
+    let buf = render_into(&mut state, 80, 16);
+
+    let codex_rows = lines_containing(&buf, "Codex");
+    let (focused_y, unfocused_y) = (codex_rows[0], *codex_rows.last().unwrap());
+    let x = column_of(&buf, focused_y, "C").expect("Codex drawn");
+    assert_ne!(
+        buf[(x, focused_y)].style(),
+        buf[(x, unfocused_y)].style(),
+        "the focused cell looks the same as an unfocused one"
+    );
+
+    // The active option of an unfocused choice keeps the widget's own styling.
+    let claude_y = *lines_containing(&buf, "Claude").last().unwrap();
+    let claude_x = column_of(&buf, claude_y, "C").expect("Claude drawn");
+    assert!(buf[(claude_x, claude_y)].modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn moving_focus_clears_the_old_focus_styling_in_the_same_buffer() {
+    let mut state = review_table(3);
+    let area = Rect::new(0, 0, 80, 16);
+    let mut reused = Buffer::empty(area);
+    InputTable.render(area, &mut reused, &mut state);
+
+    InputTable.handle_event(&mut state, KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
+    assert_eq!(state.focus(), (1, 1));
+    InputTable.render(area, &mut reused, &mut state);
+
+    let fresh = render_into(&mut state, 80, 16);
+    assert_eq!(reused, fresh, "the earlier focus left styling behind");
+
+    let codex_rows = lines_containing(&reused, "Codex");
+    let x = column_of(&reused, codex_rows[0], "C").expect("Codex drawn");
+    assert_eq!(
+        reused[(x, codex_rows[0])].style(),
+        reused[(x, codex_rows[2])].style(),
+        "the first row still looks focused"
+    );
+}
+
+#[test]
+fn focused_text_input_cell_has_no_underline_and_clears_when_focus_moves() {
+    let mut state = step_table(&["1 implement", "2 review"]);
+    assert_eq!(state.focus(), (0, 1));
+    let area = Rect::new(0, 0, 60, 2);
+    let mut reused = Buffer::empty(area);
+    InputTable.render(area, &mut reused, &mut state);
+
+    assert_eq!(underlined_cells(&reused), vec![]);
+    let x = column_of(&reused, 0, "X").expect("provider drawn");
+    assert_ne!(
+        reused[(x, 0)].style(),
+        reused[(x, 1)].style(),
+        "the focused text cell looks the same as an unfocused one"
+    );
+
+    InputTable.handle_event(&mut state, press(KeyCode::Down));
+    assert_eq!(state.focus(), (1, 1));
+    InputTable.render(area, &mut reused, &mut state);
+    assert_eq!(reused, render_into(&mut state, 60, 2));
+    assert_eq!(underlined_cells(&reused), vec![]);
 }
