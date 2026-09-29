@@ -329,7 +329,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-hash/lib/Cargo.toml` - Hashing library (xxHash, BLAKE3, Argon2id)
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
 - `content-policy/lib/Cargo.toml` - Content policy evaluation and renewal for Markdown frontmatter (serde, serde_json, chrono, biscuit-hash, biscuit-file with only `yaml`)
-- `content-policy/cli/Cargo.toml` - Content policy CLI (`policy`) (clap)
+- `content-policy/cli/Cargo.toml` - Content policy CLI (`policy`) (clap, clap_complete, biscuit-terminal, chrono)
 - `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
 - `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)

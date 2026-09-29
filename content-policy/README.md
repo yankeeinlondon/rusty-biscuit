@@ -1,15 +1,15 @@
 # Content Policy
 
-Content Policy is a planned Rust library and CLI for declaring when Markdown
+Content Policy is a Rust library and CLI (`policy`) for declaring when Markdown
 content needs to be refreshed, archived, or removed. Policies live in the
 document's frontmatter and are evaluated against dates or observations of files,
 packages, symbols, programs, and web resources.
 
-**Status: in progress.** The library reads frontmatter, evaluates the four
-time and constant rules (`Evergreen`, `TimeSensitive`, `ValidFor`,
-`ValidUntil`), and plans and applies their renewal. The `policy` CLI, the
-editor schema, and `FileChanged` are planned; examples of those show the
-planned interface.
+**Status: in progress.** The four time and constant rules (`Evergreen`,
+`TimeSensitive`, `ValidFor`, `ValidUntil`) work end to end: the library
+evaluates and renews them, the `policy` CLI checks and renews documents, and an
+editor schema ships for DMLS. `FileChanged` and the other observation rules are
+planned; examples of those show the planned interface.
 
 ## A Document's Lifecycle
 
@@ -91,9 +91,11 @@ outside a repository, inside the directory the command runs from. Absolute and
 machine-specific paths are rejected, so a policy means the same thing on every
 machine.
 
-Content Policy is also planned to ship a schema for `content_policy` entries, so
-editors running DMLS (Darkmatter's language server) can complete rule names and
-flag a mistyped rule or action as you write.
+Content Policy ships a schema for `content_policy` entries,
+[`schemas/content-policy.yaml`](schemas/content-policy.yaml), so editors running
+DMLS (Darkmatter's language server) can suggest rule forms and flag a mistyped
+rule or action as you write. Applying it to every document through Darkmatter's
+base schema is planned.
 
 ## Evaluation and Renewal
 
@@ -120,8 +122,8 @@ Darkmatter's `md hash`, renew every rule that references `@last_updated`; the
 | `SymbolChanged` | Compare selected symbol content with recorded content | Replace the fingerprint |
 | `UrlChanged` / `SchemaChanged` | Compare selected remote content with recorded content | Replace the comparison baseline |
 
-The initial implementation is planned in two phases: the four time/constant
-rules, then `FileChanged`. Package, symbol, and remote policies are later
+The four time/constant rules are built; `FileChanged` is the next increment.
+Package, symbol, and remote policies are later
 extensions. File creation/removal and program installation/removal are also
 candidates; their state-versus-transition semantics need review.
 
@@ -172,9 +174,9 @@ library applies the policy. Time rules can evaluate without external providers.
 The initial architecture uses one library with optional integration modules.
 Exact Rust types and signatures will follow implementation design.
 
-## CLI Direction
+## CLI
 
-The planned CLI is `policy`:
+The CLI is `policy`:
 
 ```sh
 # Report with policies, results, reasons, and the effective action
@@ -192,13 +194,17 @@ policy renew document.md --write
 
 `--needs-action` includes expired documents, and it prints `unknown` rather
 than `false` when freshness cannot be determined. Both commands exit `0` when
-they produce their output and `1` on an error, so scripts read the printed
-answer, not the exit code.
+they produce their output (a `stale` report included), `1` on an error, with
+the diagnostics on stderr even under `--json`, and `2` on a usage error, so
+scripts read the printed answer, not the exit code. `--at <YYYY-MM-DD>`
+evaluates as of a chosen date, and `policy renew --on <YYYY-MM-DD>` records an
+earlier update date.
 
 The policy key, default policy, and default date property are set with
 `--key`, `--default-policy`, and `--date-property`, each of which falls back to
 an environment variable before the built-in value.
 
 See [Policy Evaluation and Renewal](docs/topics/policy-lifecycle.md) for the
-planned lifecycle, including a scripting example, which file paths a rule can
-watch, and renewal's limits.
+lifecycle, the CLI's output and exit codes, the JSON report and plan fields,
+which YAML shapes renewal refuses, and which file paths a planned `FileChanged`
+rule can watch.

@@ -36,4 +36,15 @@ Development only, never shipped and not seen by `just deps-check`:
 | Crate | Why |
 | --- | --- |
 | `content-policy` with `file-adapter` | The CLI evaluates `FileChanged` rules against files on disk |
-| `clap` (`derive`, `wrap_help`) | Argument parsing, as in the repository's other CLIs |
+| `clap` (`derive`, `env`, `wrap_help`) | Argument parsing, as in the repository's other CLIs; `env` gives each setting its `CONTENT_POLICY_*` fallback |
+| `clap_complete` (`unstable-dynamic`) | Dynamic shell completions (`COMPLETE=<shell> policy`), the repository's CLI convention |
+| `biscuit-terminal` | The styled report and renewal preview: a `Prose` summary line and a `Table` of entries |
+| `chrono` (`std`, `clock`, `now`) | `--at`, `--on`, and today's UTC date |
+
+Development only:
+
+| Crate | Why |
+| --- | --- |
+| `biscuit-test-harness` | `bin_exe!` locates the `policy` binary when tests run from a CI archive |
+| `serde_json` | The tests parse `--json` output |
+| `tempfile` | Each test runs `policy` in its own temporary directory |

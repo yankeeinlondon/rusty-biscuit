@@ -1,9 +1,10 @@
 # Policy Evaluation and Renewal
 
-**Status: in progress.** The library's frontmatter reader, evaluation of
-`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil`, and renewal of
-those rules (planning and applying the edits) are built. The `policy` CLI, the
-editor schema, and `FileChanged` are **planned**; the sections on them
+**Status: in progress.** The time and constant rules (`Evergreen`,
+`TimeSensitive`, `ValidFor`, and `ValidUntil`) are built end to end: the
+library's frontmatter reader, evaluation, renewal, the `policy` CLI, and the
+editor schema. `FileChanged` and the reference to the editor schema from
+Darkmatter's base document schema are **planned**; the sections on them
 describe the agreed design.
 
 Use content policies to tell an application when a Markdown document needs a
@@ -371,7 +372,8 @@ sequenceDiagram
     end
 ```
 
-A plan holds:
+A plan holds these fields. `policy renew --json` prints the plan in this
+shape, and the names are stable:
 
 | Field | Meaning |
 | --- | --- |
@@ -526,7 +528,7 @@ than the library's is an error, never a policy.
 
 ## Check and Renew from the CLI
 
-The planned `policy` command has two subcommands:
+The `policy` command has two subcommands:
 
 ```sh
 policy check notes.md                  # report (add --plain or --json)
@@ -535,16 +537,67 @@ policy renew notes.md                  # preview the renewal edits
 policy renew notes.md --write          # apply them
 ```
 
-`--at` shows what a check will report on a later date, or what it reported on an
+Each takes one document path, and the report labels the document with the path
+exactly as you typed it.
+
+### Read the Check Output
+
+By default `policy check` prints a one-line summary and a table of entries,
+styled for the terminal. `--plain` prints the same text with no colors or other
+styling, and `--json` prints the [report](#read-a-report) and nothing else:
+
+```text
+$ policy check --plain --at 2026-12-28 notes.md
+notes.md: stale, action refresh (declared policy, evaluated 2026-12-28 00:00 UTC)
+┌───┬─────────────────────┬─────────┬───────────┬─────────────────┬────────────┐
+│ # │ Rule                │ Action  │ Result    │ Date            │ Due        │
+├───┼─────────────────────┼─────────┼───────────┼─────────────────┼────────────┤
+│ 1 │ ValidFor(3mo,       │ refresh │ triggered │ 2026-09-28      │ 2026-12-28 │
+│   │ @last_updated)      │         │           │ (@last_updated) │            │
+│ 2 │ ValidUntil(2027-01- │ archive │ not       │ 2027-01-01      │ 2027-01-01 │
+│   │ 01)                 │         │ triggered │ (inline)        │            │
+└───┴─────────────────────┴─────────┴───────────┴─────────────────┴────────────┘
+```
+
+The summary names the status, the winning action, and whether the policy was
+declared or is the default. When an unknown entry could still raise the action,
+it says so. The `Date` column shows where each baseline or deadline came from,
+and an unknown result names its reason, such as `unknown (missing baseline)`.
+Reader warnings, such as the notice that tab-indented frontmatter was repaired
+in memory, print below the table as part of the report, not on stderr.
+
+`--at <YYYY-MM-DD>` evaluates at 00:00 UTC on that date instead of now. It
+shows what a check will report on a later date, or what it reported on an
 earlier one, as long as that date is not before any baseline the document now
 holds. Before a baseline, the rule has no valid starting point and reports
 `unknown`, so after a renewal `--at` cannot reproduce the verdicts from before
 it.
 
+### Exit Codes
+
+| Exit | `policy check` | `policy renew` |
+| --- | --- | --- |
+| `0` | A report was produced, whatever its status: `stale`, `expired`, and `unknown` included | A preview was printed, the edits were written, or there was nothing to renew |
+| `1` | An invalid declaration, an unreadable file, or malformed frontmatter | Any error; nothing is written |
+| `2` | A usage error, such as an unknown flag or a date not in `YYYY-MM-DD` form | The same |
+
+Errors go to stderr as text, in `--json` mode too, so stdout holds either the
+whole report or nothing. An invalid declaration lists every invalid entry:
+
+```text
+$ policy check --json notes.md
+error: notes.md: invalid content policy
+  entry 1: unknown rule `Duration`; write `ValidFor` instead, such as `ValidFor(3mo)`
+  entry 2 action: unknown action `delete`; expected `refresh`, `archive`, or `remove` (case-sensitive)
+```
+
+### Ask Whether a Document Needs Action
+
 `policy check --needs-action` answers "does this document need action?" by
-printing `true` (stale or expired), `false` (fresh), or `unknown` (not every
-rule could be evaluated). It exits `0` for all three answers; `1` means an
-error such as an invalid declaration or unreadable file, and `2` a usage error.
+printing `true` (stale or expired), `false` (fresh), or `unknown` (no trigger
+is confirmed and not every rule could be evaluated). A confirmed trigger prints
+`true` even when another entry is unknown. It exits `0` for all three answers;
+`1` means an error, and `2` a usage error. It cannot be combined with `--json`.
 The answer is printed rather than signaled by exit code because a shell `if`
 treats any non-zero exit as false and would quietly read `unknown` as fresh.
 Compare the text instead:
@@ -558,13 +611,42 @@ case "$(policy check --needs-action notes.md)" in
 esac
 ```
 
-`policy renew` changes nothing unless `--write` is given. `--on <date>` sets
-the update date, which defaults to today (UTC). Like `check`, it accepts
-`--plain` and `--json`. A policy with nothing to renew, such as `Evergreen` or
-a lone `ValidUntil`, prints "nothing to renew" and exits `0`. Otherwise it
-exits `0` when a preview is produced or the edits are written, and `1` on any
-error: an unsupported YAML shape, a file that changed between planning and
-writing, or missing evidence.
+### Renew from the Command Line
+
+```mermaid
+flowchart TD
+    R[policy renew notes.md] --> P{Plan every baseline edit}
+    P -->|refused shape, conflict, invalid<br/>or future --on| E[Error on stderr, exit 1<br/>nothing written]
+    P -->|no renewable rule| N[Print nothing to renew, exit 0]
+    P -->|plan| W{--write?}
+    W -->|no| V[Print the preview, exit 0]
+    W -->|yes| A{File unchanged since planning<br/>and safety net passes?}
+    A -->|no| E
+    A -->|yes| S[Write, print the plan, exit 0]
+```
+
+`policy renew` changes nothing unless `--write` is given. `--on <YYYY-MM-DD>`
+sets the update date, which defaults to today's UTC date and cannot be in the
+future. The preview lists one row per baseline, labels a first capture "new
+baseline", and lists a tab repair as its own item:
+
+```text
+$ policy renew --plain notes.md
+notes.md: renewal on 2026-10-01 (preview; pass --write to apply)
+┌──────────────┬─────────┬──────────────┬────────┬────────────┐
+│ Baseline     │ Entries │ Change       │ From   │ To         │
+├──────────────┼─────────┼──────────────┼────────┼────────────┤
+│ last_updated │ 1       │ new baseline │ (none) │ 2026-10-01 │
+└──────────────┴─────────┴──────────────┴────────┴────────────┘
+tab repair: 1 frontmatter line(s) indented with tabs, which YAML forbids, are re-indented with two spaces per tab
+```
+
+With `--write` the same output says `written`. `--json` prints the
+[plan](#renew-from-a-library) instead, with or without `--write`. A policy with
+nothing to renew, such as `Evergreen`, `TimeSensitive`, or a lone `ValidUntil`,
+prints "nothing to renew" and exits `0`.
+
+### Configure the Key, Default Policy, and Date Property
 
 Both subcommands take three settings. Each flag falls back to an environment
 variable, then to a built-in value:
@@ -581,16 +663,61 @@ policy check notes.md                                   # default: TimeSensitive
 policy check --default-policy 'ValidFor(1yr)' notes.md  # the flag wins
 ```
 
-`--default-policy` always takes a policy; there is no way to turn the default
-off. There is no configuration file.
+A default policy is one compact rule, whose action is `refresh`, or, when the
+value starts with `[`, a YAML flow list of entries in either form:
+
+```sh
+policy check --default-policy \
+  '["ValidFor(3mo)", {rule: "ValidUntil(2027-01-01)", action: archive}]' notes.md
+```
+
+The list follows the same rules as a declaration, including the comma trap:
+quote any rule that contains a comma. `--default-policy` always takes a policy;
+there is no way to turn the default off. An empty or invalid value, from the
+flag or the environment variable, is a usage error (exit `2`), as is an empty
+key or date property. There is no configuration file.
 
 ## Get Help in the Editor
 
-Content Policy is planned to ship a schema describing `content_policy` entries,
-and Darkmatter's base document schema is planned to reference it. Editors that
-run DMLS (Darkmatter's language server) can then suggest rule forms (dates
-only) and flag an unknown rule or action, such as `Duration(3mo)` or
-`action: delete`, before the document is ever checked.
+Content Policy ships an editor schema,
+[`content-policy/schemas/content-policy.yaml`](../../schemas/content-policy.yaml),
+for editors that run DMLS (Darkmatter's language server). It declares three
+types:
+
+| Type | Accepts |
+| --- | --- |
+| `short_form` | One compact rule: `Evergreen`, `TimeSensitive`, `ValidFor(<duration>)`, `ValidFor(<duration>, @name)`, `ValidFor(<duration>, YYYY-MM-DD)`, `ValidUntil(YYYY-MM-DD)`, or `ValidUntil(@name)` |
+| `long_form` | A `{rule, action}` entry, where `action` is `refresh`, `archive`, or `remove` |
+| `policy` | One list entry in either form |
+
+With it, the editor suggests rule forms (dates only) and flags an unknown rule
+or action, such as `Duration(3mo)`, `ValidFor(3w)`, or `action: delete`,
+before the document is ever checked. The schema is a convenience; evaluation
+is the authority and checks more. The schema checks a date's shape but not
+whether the day exists (`2026-02-30` passes), and it does not flag a
+`{rule, action}` entry that is missing `rule`, which evaluation reports.
+
+Today a schema cannot type a whole list of `policy` entries, so the schema
+applies to one entry per property. A document can use it through an inline
+`$schema` map that names each property, for example while writing or testing a
+policy:
+
+```yaml
+---
+$schema:
+  first: "policy@./content-policy.yaml"
+  second: "policy@./content-policy.yaml"
+first: ValidFor(3mo)
+second: {rule: "ValidUntil(2027-01-01)", action: archive}
+---
+```
+
+Setting a document's `$schema` to the file itself validates nothing, because
+the file declares types and no properties.
+
+Darkmatter's base document schema is **planned** to type `content_policy` as a
+list of `policy` entries, so that every Markdown document gets these checks
+with no `$schema` of its own.
 
 ## Library Ownership
 
@@ -615,5 +742,5 @@ values are not part of it: `ValidFor(3mo, 2026-09-28)` and
 name, not a date. Rule parameters such as durations, deadlines, and file paths
 do count. Renewal therefore never changes a policy's identity.
 
-The first implementation is planned in two phases: time and constant rules,
-then file content changes.
+Time and constant rules are built; file content changes (`FileChanged`) are
+the next increment.
