@@ -1449,6 +1449,485 @@ mod tests {
         }
     }
 
+    // Byte-fidelity coverage. An `#[ignore = "red until phase 2 ..."]` test
+    // pins behavior the writer does not have yet; phase 2 of
+    // `2026-09-28-hash-writer-byte-fidelity` removes each gate as it lands the
+    // fix. Confirm they fail for the expected reason with:
+    //
+    //     cargo nextest run -p darkmatter --lib --run-ignored only textual_save
+
+    const CANONICAL_HASH: &str = "aaaa000000000000-bbbb000000000000";
+    const TODAY: &str = "2026-09-28";
+
+    fn save_canonical(source: &str, bump: bool) -> MarkdownResult<Option<String>> {
+        apply_hash_save_text(
+            source,
+            &textual_decision(simple_stored(CANONICAL_HASH), bump),
+            &MdHashOptions::default(),
+            TODAY,
+        )
+    }
+
+    fn saved_canonical(source: &str, bump: bool) -> String {
+        let written = save_canonical(source, bump)
+            .unwrap_or_else(|error| panic!("save of {source:?} failed: {error}"))
+            .expect("a decision with a new stored hash always writes");
+        assert_fidelity(source, &written, bump);
+        written
+    }
+
+    /// The body of `document`: the bytes after a frontmatter block, or the
+    /// whole text after a leading BOM when there is no block.
+    fn body_of(document: &str) -> &str {
+        match extract_frontmatter_block(document).unwrap() {
+            Some(extraction) => &document[extraction.body_span],
+            None => document.strip_prefix('\u{feff}').unwrap_or(document),
+        }
+    }
+
+    /// Re-parses both documents and asserts the output differs from the input
+    /// only at the managed `hash` and, when `bumped`, `last_updated`; that the
+    /// body bytes are identical; and that a leading BOM stays first.
+    fn assert_fidelity(input: &str, output: &str, bumped: bool) {
+        let before = parse_text_frontmatter(input)
+            .unwrap_or_else(|error| panic!("input {input:?} did not parse: {error}"));
+        let after = parse_text_frontmatter(output)
+            .unwrap_or_else(|error| panic!("output {output:?} did not parse: {error}"));
+        assert!(after.yaml_span.is_some(), "output has no frontmatter: {output:?}");
+        assert!(
+            after.values.contains_key("hash"),
+            "output lost the managed hash: {output:?}"
+        );
+        if bumped {
+            assert_eq!(
+                after.values.get(LAST_UPDATED_KEY),
+                Some(&serde_json::json!(TODAY)),
+                "output did not bump `last_updated`: {output:?}"
+            );
+        }
+
+        let unmanaged = |values: &FrontmatterMap| {
+            let mut values = values.clone();
+            values.shift_remove("hash");
+            if bumped {
+                values.shift_remove(LAST_UPDATED_KEY);
+            }
+            values
+        };
+        assert_eq!(
+            unmanaged(&after.values),
+            unmanaged(&before.values),
+            "an unmanaged property changed.\ninput:  {input:?}\noutput: {output:?}"
+        );
+        assert_eq!(body_of(output), body_of(input), "body bytes changed: {output:?}");
+        assert_eq!(
+            output.starts_with('\u{feff}'),
+            input.starts_with('\u{feff}'),
+            "a leading BOM moved: {output:?}"
+        );
+    }
+
+    /// Asserts the writer refuses `input` with `FrontmatterTextEdit`, leaving
+    /// the caller's text untouched, and returns the refusal reason.
+    fn assert_refused(input: &str, decision: &SaveDecision) -> String {
+        let caller_owned = input.to_string();
+        let before = caller_owned.clone();
+        let error = apply_hash_save_text(
+            &caller_owned,
+            decision,
+            &MdHashOptions::default(),
+            TODAY,
+        )
+        .map(|written| panic!("expected a refusal for {input:?}, got {written:?}"))
+        .unwrap_err();
+        assert_eq!(caller_owned, before, "the caller's input changed");
+        match error {
+            MarkdownError::FrontmatterTextEdit { reason } => reason,
+            other => panic!("expected FrontmatterTextEdit for {input:?}, got {other:?}"),
+        }
+    }
+
+    fn assert_refused_canonical(input: &str, bump: bool) -> String {
+        assert_refused(
+            input,
+            &textual_decision(simple_stored(CANONICAL_HASH), bump),
+        )
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: empty date value"]
+    fn textual_save_case1_empty_date_gets_one_space() {
+        let source = "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated:\ntitle: x\n---\n";
+        assert_eq!(
+            saved_canonical(source, true),
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: 2026-09-28\ntitle: x\n---\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: empty date value"]
+    fn textual_save_case1_empty_date_gets_one_space_crlf() {
+        let source = "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated:\r\n---\r\n";
+        assert_eq!(
+            saved_canonical(source, true),
+            "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated: 2026-09-28\r\n---\r\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: empty date value"]
+    fn textual_save_case2_empty_date_keeps_comment_spacing() {
+        let source = "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated:   # todo\n---\n";
+        assert_eq!(
+            saved_canonical(source, true),
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: 2026-09-28   # todo\n---\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
+    fn textual_save_case3_lf_date_line_in_crlf_file_keeps_lf() {
+        let source = "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated: 2026-01-01\n---\r\nBody\r\n";
+        assert_eq!(
+            saved_canonical(source, true),
+            "---\r\nhash: aaaa000000000000-bbbb000000000000\r\nlast_updated: 2026-09-28\n---\r\nBody\r\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
+    fn textual_save_case4_lone_cr_terminators_survive() {
+        let source = "---\rhash: aaaa000000000000-bbbb000000000000\rlast_updated: 2026-01-01\r---\rBody\r";
+        assert_eq!(
+            saved_canonical(source, true),
+            "---\rhash: aaaa000000000000-bbbb000000000000\rlast_updated: 2026-09-28\r---\rBody\r"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: BOM stays first"]
+    fn textual_save_case5_bom_stays_before_new_block() {
+        let source = "\u{feff}# Title\n\nBody\n";
+        assert_eq!(
+            saved_canonical(source, true),
+            "\u{feff}---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: 2026-09-28\n---\n# Title\n\nBody\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: node-property refusal"]
+    fn textual_save_case6_refuses_anchored_date() {
+        let reason = assert_refused_canonical(
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: &lu 2026-01-01\nreviewed: *lu\n---\n",
+            true,
+        );
+        assert!(reason.contains(LAST_UPDATED_KEY), "{reason}");
+        assert!(reason.contains("anchor"), "{reason}");
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: node-property refusal"]
+    fn textual_save_refuses_aliased_tagged_and_bare_anchored_dates() {
+        for (source, property) in [
+            (
+                "---\nd: &d 2026-01-01\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: *d\n---\nBody\n",
+                "alias",
+            ),
+            (
+                "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: !!str 2026-01-01\n---\nBody\n",
+                "tag",
+            ),
+            (
+                "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: &a\n---\nBody\n",
+                "anchor",
+            ),
+        ] {
+            let reason = assert_refused_canonical(source, true);
+            assert!(reason.contains(LAST_UPDATED_KEY), "{source:?}: {reason}");
+            assert!(reason.contains(property), "{source:?}: {reason}");
+        }
+    }
+
+    #[test]
+    fn textual_save_without_bump_ignores_date_node_properties() {
+        // Only a date bump inspects `last_updated`; a hash-only save leaves an
+        // anchored date and its alias untouched.
+        let source = "---\nhash: old\nlast_updated: &lu 2026-01-01\nreviewed: *lu\n---\nBody\n";
+        assert_eq!(
+            saved_canonical(source, false),
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: &lu 2026-01-01\nreviewed: *lu\n---\nBody\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
+    fn textual_save_inserted_date_inherits_preceding_terminator_in_mixed_file() {
+        // An LF line before the insertion point in an otherwise CRLF file.
+        assert_eq!(
+            saved_canonical(
+                "---\r\nhash: aaaa000000000000-bbbb000000000000\r\ntitle: x\n---\r\nBody\r\n",
+                true
+            ),
+            "---\r\nhash: aaaa000000000000-bbbb000000000000\r\ntitle: x\nlast_updated: 2026-09-28\n---\r\nBody\r\n"
+        );
+        // A CRLF line before the insertion point in an otherwise LF file; the
+        // LF `hash` line keeps its LF.
+        assert_eq!(
+            saved_canonical(
+                "---\nhash: aaaa000000000000-bbbb000000000000\ntitle: x\r\n---\nBody\n",
+                true
+            ),
+            "---\nhash: aaaa000000000000-bbbb000000000000\ntitle: x\r\nlast_updated: 2026-09-28\r\n---\nBody\n"
+        );
+        // Empty frontmatter: the inserted `hash` takes the opening delimiter's
+        // terminator.
+        assert_eq!(
+            saved_canonical("---\n---\r\nBody\r\n", false),
+            "---\nhash: aaaa000000000000-bbbb000000000000\n---\r\nBody\r\n"
+        );
+    }
+
+    fn body_kind_stored() -> crate::markdown::hash::StoredHash {
+        crate::markdown::hash::StoredHash {
+            kind: MdHashKind::Body,
+            value: crate::markdown::hash::StoredHashValue::Flat("1111111111111111".to_string()),
+            ignored: Vec::new(),
+        }
+    }
+
+    fn saved_body_kind(source: &str) -> String {
+        let written = apply_hash_save_text(
+            source,
+            &textual_decision(body_kind_stored(), false),
+            &MdHashOptions::default(),
+            TODAY,
+        )
+        .unwrap()
+        .unwrap();
+        assert_fidelity(source, &written, false);
+        written
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
+    fn textual_save_hash_only_multi_line_node_keeps_each_line_terminator() {
+        // Same line count: line i keeps original line i's terminator.
+        assert_eq!(
+            saved_body_kind(
+                "---\nhash:\r\n  kind: structured\n  value: old\r\ntitle: x\r\n---\nBody\n"
+            ),
+            "---\nhash:\r\n  kind: body\n  value: '1111111111111111'\r\ntitle: x\r\n---\nBody\n"
+        );
+        // Longer replacement: extra lines take the previous replacement line's
+        // terminator.
+        assert_eq!(
+            saved_body_kind("---\ntitle: x\nhash: old\r\n---\nBody\n"),
+            "---\ntitle: x\nhash:\r\n  kind: body\r\n  value: '1111111111111111'\r\n---\nBody\n"
+        );
+        // Shorter replacement: comment lines inside the replaced range count
+        // as original lines.
+        assert_eq!(
+            saved_body_kind(
+                "---\nhash:\n  kind: structured\r\n  # managed\n  value: old\r\ntitle: x\r\n---\nBody\n"
+            ),
+            "---\nhash:\n  kind: body\r\n  value: '1111111111111111'\ntitle: x\r\n---\nBody\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
+    fn textual_save_lone_cr_hash_only_replacement() {
+        assert_eq!(
+            saved_canonical("---\rtitle: x\rhash: old\r---\rBody\r", false),
+            "---\rtitle: x\rhash: aaaa000000000000-bbbb000000000000\r---\rBody\r"
+        );
+        assert_eq!(
+            saved_body_kind("---\rtitle: x\rhash: old\r---\rBody\r"),
+            "---\rtitle: x\rhash:\r  kind: body\r  value: '1111111111111111'\r---\rBody\r"
+        );
+    }
+
+    #[test]
+    fn textual_save_keeps_bom_before_existing_frontmatter() {
+        assert_eq!(
+            saved_canonical(
+                "\u{feff}---\nhash: old\nlast_updated: 2026-01-01\n---\nBody\n",
+                true
+            ),
+            "\u{feff}---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: 2026-09-28\n---\nBody\n"
+        );
+    }
+
+    #[test]
+    fn textual_save_body_without_final_terminator_stays_unterminated() {
+        assert_eq!(
+            saved_canonical("---\nhash: old\n---\nBody", true),
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: 2026-09-28\n---\nBody"
+        );
+        // No frontmatter and no terminator anywhere: the new block uses LF.
+        assert_eq!(
+            saved_canonical("Body", true),
+            "---\nhash: aaaa000000000000-bbbb000000000000\nlast_updated: 2026-09-28\n---\nBody"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: per-line terminators"]
+    fn textual_save_new_block_uses_first_body_terminator() {
+        assert_eq!(
+            saved_canonical("# T\rBody\r", true),
+            "---\rhash: aaaa000000000000-bbbb000000000000\rlast_updated: 2026-09-28\r---\r# T\rBody\r"
+        );
+        assert_eq!(
+            saved_canonical("# T\nBody\r\n", false),
+            "---\nhash: aaaa000000000000-bbbb000000000000\n---\n# T\nBody\r\n"
+        );
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: output validation"]
+    fn textual_save_refuses_hash_replacement_that_orphans_an_alias() {
+        assert_refused_canonical("---\nhash: &h old\nother: *h\n---\nBody\n", false);
+    }
+
+    #[test]
+    #[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: robustness matrix"]
+    fn textual_save_last_updated_robustness_matrix() {
+        const CONTROL: &str = concat!(
+            "---\n",
+            "title: Kept # c\n",
+            "reviewed: &r 2026-01-01\n",
+            "hash: aaaa000000000000-bbbb000000000000\n",
+            "last_updated: 2026-01-01\n",
+            "author: A\n",
+            "---\n",
+            "Body\n",
+        );
+        const DATE_LINE: &str = "last_updated: 2026-01-01\n";
+        const HASH_LINE: &str = "hash: aaaa000000000000-bbbb000000000000\n";
+
+        const BUMPED_LINE: &str = "last_updated: 2026-09-28\n";
+
+        enum Outcome {
+            /// The written document is `CONTROL` with its date line replaced
+            /// by this line (a hash row's hash is rewritten to the control's
+            /// canonical line).
+            Date(&'static str),
+            /// The written document is the edited source with this one
+            /// further edit.
+            Written { from: &'static str, to: &'static str },
+            Refused,
+        }
+        use Outcome::{Date, Refused, Written};
+
+        let rows: [(&str, &str, &str, Outcome); 25] = [
+            ("control", DATE_LINE, DATE_LINE, Date(BUMPED_LINE)),
+            (
+                "absent",
+                DATE_LINE,
+                "",
+                Written {
+                    from: "author: A\n",
+                    to: "author: A\nlast_updated: 2026-09-28\n",
+                },
+            ),
+            ("empty", DATE_LINE, "last_updated:\n", Date(BUMPED_LINE)),
+            (
+                "empty with comment",
+                DATE_LINE,
+                "last_updated:   # todo\n",
+                Date("last_updated: 2026-09-28   # todo\n"),
+            ),
+            (
+                "empty with single-space comment",
+                DATE_LINE,
+                "last_updated: # todo\n",
+                Date("last_updated: 2026-09-28 # todo\n"),
+            ),
+            ("spelled null ~", DATE_LINE, "last_updated: ~\n", Date(BUMPED_LINE)),
+            (
+                "spelled null keeps leading whitespace",
+                DATE_LINE,
+                "last_updated:   null\n",
+                Date("last_updated:   2026-09-28\n"),
+            ),
+            (
+                "empty double-quoted string",
+                DATE_LINE,
+                "last_updated: \"\"\n",
+                Date("last_updated: \"2026-09-28\"\n"),
+            ),
+            (
+                "empty single-quoted string",
+                DATE_LINE,
+                "last_updated: ''\n",
+                Date("last_updated: '2026-09-28'\n"),
+            ),
+            ("block collection", DATE_LINE, "last_updated:\n  - a\n", Refused),
+            ("flow sequence", DATE_LINE, "last_updated: [a]\n", Refused),
+            ("flow mapping", DATE_LINE, "last_updated: {a: 1}\n", Refused),
+            ("anchor", DATE_LINE, "last_updated: &lu 2026-01-01\n", Refused),
+            ("alias", DATE_LINE, "last_updated: *r\n", Refused),
+            ("tag", DATE_LINE, "last_updated: !!str 2026-01-01\n", Refused),
+            ("bare anchor", DATE_LINE, "last_updated: &lu\n", Refused),
+            (
+                "duplicate key",
+                DATE_LINE,
+                "last_updated: 2026-01-01\n'last_updated': 2026-02-02\n",
+                Refused,
+            ),
+            ("invalid YAML", DATE_LINE, "last_updated: [unclosed\n", Refused),
+            (
+                "hash absent",
+                HASH_LINE,
+                "",
+                Written {
+                    from: "last_updated: 2026-01-01\nauthor: A\n",
+                    to: "last_updated: 2026-09-28\nauthor: A\nhash: aaaa000000000000-bbbb000000000000\n",
+                },
+            ),
+            ("hash empty", HASH_LINE, "hash:\n", Date(BUMPED_LINE)),
+            ("hash block collection", HASH_LINE, "hash:\n  - a\n", Date(BUMPED_LINE)),
+            ("hash flow collection", HASH_LINE, "hash: [a]\n", Date(BUMPED_LINE)),
+            ("hash alias", HASH_LINE, "hash: *r\n", Date(BUMPED_LINE)),
+            ("hash duplicate key", HASH_LINE, "hash: x\n'hash': y\n", Refused),
+            (
+                "hash edit orphans an alias",
+                HASH_LINE,
+                "hash: &h aaaa000000000000-bbbb000000000000\nmirror: *h\n",
+                Refused,
+            ),
+        ];
+
+        for (name, from, to, outcome) in rows {
+            let source = CONTROL.replacen(from, to, 1);
+            assert!(
+                name == "control" || source != CONTROL,
+                "{name}: the edit did not change the fixture"
+            );
+            match outcome {
+                Written { from, to } => {
+                    let written = save_canonical(&source, true)
+                        .unwrap_or_else(|error| panic!("{name}: refused: {error}"))
+                        .unwrap();
+                    let expected = source.replacen(from, to, 1);
+                    assert_eq!(written, expected, "{name}");
+                    assert_fidelity(&source, &written, true);
+                }
+                Date(date_line) => {
+                    let written = save_canonical(&source, true)
+                        .unwrap_or_else(|error| panic!("{name}: refused: {error}"))
+                        .unwrap();
+                    assert_eq!(written, CONTROL.replacen(DATE_LINE, date_line, 1), "{name}");
+                    assert_fidelity(&source, &written, true);
+                }
+                Refused => {
+                    assert_refused_canonical(&source, true);
+                }
+            }
+        }
+    }
+
     /// Test helper: a stored hash computed from a document at a kind.
     struct StoredFromDoc;
     impl StoredFromDoc {

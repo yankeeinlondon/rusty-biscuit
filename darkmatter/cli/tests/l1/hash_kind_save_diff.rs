@@ -329,6 +329,36 @@ fn test_hash_save_failure_does_not_modify_flow_mapping() {
 }
 
 #[test]
+#[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: node-property refusal"]
+fn test_hash_save_refuses_anchored_last_updated_without_writing() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-refuses-anchored-last-updated-without-writing",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    // The stale stored hash makes the save bump `last_updated`.
+    let source = concat!(
+        "---\n",
+        "hash: aaaa111111111111-bbbb222222222222\n",
+        "last_updated: &lu 2026-01-01\n",
+        "reviewed: *lu\n",
+        "---\n",
+        "Changed body.\n"
+    );
+    std::fs::write(&file, source).unwrap();
+
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("last_updated"));
+    assert_eq!(std::fs::read(&file).unwrap(), source.as_bytes());
+}
+
+#[test]
 fn test_hash_save_honors_quoted_custom_property() {
     let fixture = CliProcessFixture::named(
         "hash-kind-save-diff-test-hash-save-honors-quoted-custom-property",
