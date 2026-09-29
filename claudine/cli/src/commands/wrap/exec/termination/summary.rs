@@ -93,6 +93,12 @@ pub(crate) fn apply_early_termination_to_summary(
                 context,
             ));
         }
+        EarlyTermination::InputRequired { message } => {
+            summary.exit_code = 1;
+            summary.is_error = true;
+            summary.error_kind = Some("input_required".into());
+            summary.error_message = Some(message.clone());
+        }
     }
 }
 
@@ -146,6 +152,7 @@ pub(crate) fn early_termination_guard_context(
         EarlyTermination::RateLimit { .. }
         | EarlyTermination::Timeout { .. }
         | EarlyTermination::StepTimeout { .. }
-        | EarlyTermination::RepeatedStreamError { .. } => None,
+        | EarlyTermination::RepeatedStreamError { .. }
+        | EarlyTermination::InputRequired { .. } => None,
     }
 }

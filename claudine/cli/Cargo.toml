@@ -20,6 +20,13 @@ name = "claudine-fake-goose"
 path = "tests/bin/fake_goose/main.rs"
 required-features = ["test-fixtures"]
 
+# Test-only fake `pi` speaking Pi's RPC protocol, driven by
+# `tests/l1/pi_managed_rpc.rs`; gated like `claudine-fake-goose`.
+[[bin]]
+name = "claudine-fake-pi"
+path = "tests/bin/fake_pi/main.rs"
+required-features = ["test-fixtures"]
+
 [features]
 # Keep the bundled DuckDB build out of the ordinary local test graph. CI and
 # the explicit daemon-test recipe enable this feature on every supported OS.
