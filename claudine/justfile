@@ -375,6 +375,83 @@ run-fleet-research agent="codex":
     if ((${#failed[@]})); then echo "✗ fleets with failures: ${failed[*]}" >&2; exit 1; fi
     echo "✓ all topic fleets completed"
 
+# Until a sequence can choose an agent per step and Claudine can set reasoning
+# effort from a prompt, each researcher is a separate run that names its agent,
+# model, and effort. The prompt researches only the providers assigned to the
+# agent a run launches. When a researcher reaches its usage limit, the others
+# cover for it in rotation order; none researches its own provider. Extra
+# arguments reach every run: `only=<slug>` researches one provider.
+#
+# Research one topic across its roster, one run per researcher in the rotation
+research topic *args="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    prompt="docs/research/{{topic}}/_fleet.md"
+    [[ -f "$prompt" ]] || { echo "✗ no fleet prompt at $prompt" >&2; exit 2; }
+    cargo build -q -p claudine-cli --bin claudine || exit 1
+    logs="$(git rev-parse --show-toplevel)/.claudine/tmp/research-runs/{{topic}}/$(date +%Y-%m-%dT%H%M%S)"
+    mkdir -p "$logs"
+    echo "▶ researching {{topic}}; logs in $logs"
+    rotation=(opencode claude codex)
+    # run <agent> <log name> [setter...]
+    run() {
+        local agent="$1" log="$2" model
+        shift 2
+        local effort=()
+        case "$agent" in
+            opencode) model="zai-coding-plan/glm-5.3" ;;
+            claude) model="sonnet"; effort=(-- --effort high) ;;
+            codex) model="gpt-6-luna"; effort=(-- -c model_reasoning_effort=high) ;;
+        esac
+        cargo run -q -p claudine-cli --bin claudine -- sequence "$prompt" -y "--$agent" --model "$model" \
+            {{args}} "$@" ${effort[@]+"${effort[@]}"} > "$logs/$log.log" 2>&1
+    }
+    plain() { sed $'s/\x1b\\[[0-9;]*m//g' "$logs/$1.log"; }
+    capped() { plain "$1" | grep -q "has reached a usage limit"; }
+    report() {
+        plain "$1" \
+            | grep -E "satisfies its contract|does not satisfy|breaks a relation|research for .* failed|has reached a usage limit|lifecycle retry|step [0-9]+/[0-9]+ failed" \
+            | sed "s/^/  [$1] /" | cut -c1-170
+    }
+    pids=()
+    for agent in "${rotation[@]}"; do
+        ( run "$agent" "$agent" ) &
+        pids+=("$!")
+    done
+    for i in 0 1 2; do
+        wait "${pids[$i]}" || true
+        report "${rotation[$i]}"
+    done
+    for i in 0 1 2; do
+        limited="${rotation[$i]}"
+        capped "$limited" || continue
+        for offset in 1 2; do
+            cover="${rotation[$(((i + offset) % 3))]}"
+            if capped "$cover"; then continue; fi
+            echo "▶ $limited reached its usage limit; $cover covers for it"
+            run "$cover" "$cover-covering-$limited" "covering=$limited" || true
+            report "$cover-covering-$limited"
+        done
+    done
+    # A document counts when it carries the contract's current revision and
+    # the stamp the fleet writes after both gates pass.
+    revision=$(grep -oE "schema_revision: literal\([0-9]+" "docs/research/{{topic}}/_schema.yaml" | grep -oE "[0-9]+$")
+    roster="$(git rev-parse --show-toplevel)/$(grep -m1 -oE '^sequence: "@[^"]+' "$prompt" | sed 's/^sequence: "@//')"
+    only=$(printf '%s\n' {{args}} | sed -n 's/^only=//p' | head -1)
+    if [[ -n "$only" ]]; then expected="$only.md"; else expected=$(sed -n 's/^ *file: *//p' "$roster"); fi
+    unconfirmed=""
+    for file in $expected; do
+        doc="docs/research/{{topic}}/$file"
+        if ! grep -q "^schema_revision: $revision\$" "$doc" 2>/dev/null || ! grep -q "^contract_checked: " "$doc" 2>/dev/null; then
+            unconfirmed+="${file%.md} "
+        fi
+    done
+    if [[ -n "$unconfirmed" ]]; then
+        echo "✗ {{topic}}: not researched and confirmed: $unconfirmed(logs in $logs)" >&2
+        exit 1
+    fi
+    echo "✓ {{topic}}: every provider is researched and confirmed"
+
 # generate model enumeration using the unchained-ai codebase
 generate-models:
     #!/usr/bin/env bash
