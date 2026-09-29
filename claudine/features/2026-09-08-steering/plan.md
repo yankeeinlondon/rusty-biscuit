@@ -130,10 +130,76 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3:
   - claudine/docs/topics/steering-routing.md
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/docs/providers/facts/pi.yaml
+  - claudine/docs/providers/catalog.json
+  - claudine/docs/providers/steering-activation.yaml
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/catalog-types/src/steering.rs
+  - claudine/catalog-types/src/signal.rs
+  - claudine/gen/src/steering_catalog.rs
+  - claudine/gen/tests/l1/steering_activation.rs
+  - claudine/gen/tests/l1/generate_ux.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/lib/src/provider/pi/data.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/adapters.rs
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/lib/src/steering/controller/tests.rs
+  - claudine/lib/src/steering/discovery/tests.rs
+  - claudine/lib/src/stream/protocol/pi.rs
+  - claudine/lib/src/stream/protocol/pi/rpc.rs
+  - claudine/lib/src/stream/protocol/pi/rpc/tests.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/pi/tests.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/mod.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/mod.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/commands.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/executor.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/descendants.rs
+  - claudine/cli/src/commands/wrap/exec/termination/message.rs
+  - claudine/cli/src/commands/wrap/exec/termination/reasons.rs
+  - claudine/cli/src/commands/wrap/exec/termination/summary.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/pi.rs
+  - claudine/cli/src/commands/wrap/profile/tests/pi_managed.rs
+  - claudine/cli/src/commands/wrap/resume.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/steering/owner.rs
+  - claudine/cli/src/steering/tests.rs
+  - claudine/cli/tests/bin/fake_pi/main.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/pi_managed_rpc.rs
+  - claudine/cli/tests/real/main.rs
+  - claudine/cli/tests/real/real_pi_managed_rpc.rs
+  - claudine/cli/tests/real/real_pi_steering.rs
+  - claudine/cli/tests/fixtures/steering/pi-probe.ts
+  - claudine/cli/tests/fixtures/steering/pi-bash-cleanup-probe.ts
+docs_updated_during_phase_4:
+  - claudine/README.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/timeouts.md
+docs_created_during_phase_4:
+  - claudine/docs/topics/pi-rpc.md
+skills_files_updated_during_phase_4: []
 ---
 # Steering implementation plan
 
-Status: Phases 1–3 implemented (2026-09-28); Phases 4–8 not started.
+Status: Phases 1–4 implemented (2026-09-28; Pi steering blocked by a reviewed
+policy block); Phases 5–8 not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -338,32 +404,34 @@ for native Windows evidence.
 
 **Work**
 
-1. Implement Pi's retained RPC profile in the wrapper and hand-written provider
+- [x] 1. Implement Pi's retained RPC profile in the wrapper and hand-written provider
    behavior, using the generated execution-interface selection. Reconcile
    [Pi facts](../../docs/providers/facts/pi.yaml), overrides, generated data,
    [launch profile](../../cli/src/commands/wrap/profile/pi.rs), and stream parsing.
    RPC is a control interface with structured events, not merely an output flag.
-2. Preserve extensions, skills, templates, context, MCP, model, sandbox, and
+- [x] 2. Preserve extensions, skills, templates, context, MCP, model, sandbox, and
    permission settings. Remove automatically injected resource-disabling flags
    from the selected managed profile. Do not conflate Pi resource trust with tool
    or extension approval and do not broaden existing permission policy.
-3. Implement initial prompt, active steering, idle prompt, state/identity checks,
+- [x] 3. Implement initial prompt, active steering, idle prompt, state/identity checks,
    acceptance correlation, and manual abort-then-submit. Preserve pending queues;
    clearing is not part of the default interruption workflow. Verify cancellation
    before revalidating and sending replacement; report partial outcomes honestly.
-4. Handle unattended requests as specified: existing policy, informational
+- [x] 4. Handle unattended requests as specified: existing policy, informational
    responses, documented deny/cancel, or `input_required` failure. Never fabricate
    approval or silently disable the requesting extension.
-5. Preserve existing semantic output, usage/error reporting, cancellation,
+- [x] 5. Preserve existing semantic output, usage/error reporting, cancellation,
    watchdogs, and execution results. Wait for `agent_settled` before one-shot
    shutdown. Keep stdin open through settlement and retain ownership sufficient
    to clean up tools after provider failure.
-6. Integrate effective session-change guards. The existing gated-switch test is
+- [x] 6. Integrate effective session-change guards. The existing gated-switch test is
    a demonstrated counterexample to snapshot-only safety. If configured extensions
    can bypass ownership coordination, keep that profile unavailable for steering;
    preserve its resources and record the specific blocker.
-7. Apply pre-submission fallback policy to a verified feature-preserving alternate
+- [x] 7. Apply pre-submission fallback policy to a verified feature-preserving alternate
    interface. No fallback or initial-task replay after ambiguous submission.
+- [x] Validation: wrapper-level real Pi tests and deterministic fake-RPC wrapper
+   tests, as listed below.
 
 **Validation:** Extend [real Pi tests](../../cli/tests/real_pi_steering.rs) through
 Claudine's actual wrapper, not only direct Pi children. Cover all existing fixture
@@ -567,7 +635,7 @@ permission question or a fabricated all-green result.
 | Phase 1 | Implemented 2026-09-28 | Typed vocabulary, research revision 4, activation policy + checker, generated `lib/src/steering/generated.rs`, runtime eligibility; nothing activated. See implementation-log.md |
 | Phase 2 | Implemented 2026-09-28 | `claudine::secrets` (one catalog + key-name recognizer; scrub, webhook, and wrapper sanitization migrated), `steering::audit` typed JSONL records under `~/.claudine/logs/steering/`; no live send path calls it yet. See implementation-log.md |
 | Phase 3 | Implemented 2026-09-28 | `steering::controller` (bounded, serialized, audited owner queue), `steering::discovery` aggregator over generated discovery records, in-memory Rendezvous `SteeringControl`/`ListManagedTargets`/`RouteSteering`, wrapper owner link; every managed session registers as unavailable until Phase 4 maps a profile. See implementation-log.md |
-| Phase 4 | Not started | Seven scoped Pi research records; wrapper verification required |
+| Phase 4 | Implemented 2026-09-28; Pi steering blocked | Managed Pi RPC execution (`exec/control.rs`, `exec/pi_rpc/`) with pre-submission JSON fallback, unattended-request policy, settlement, Unix tool reaping; `pi-rpc` adapter reviewed and implemented; `retained-rpc` blocked by the new policy `blocks` list. Real Pi 0.87.1 (macOS) and fake-Pi (macOS/Linux/Windows) verified. See implementation-log.md |
 | Phase 5 | Not started | CLI contract resolved in spec |
 | Phase 6 | Not started | Warning, recovery, and cap decisions resolved in spec |
 | Phase 7 | Not started | Full-roster passive research available |
@@ -617,3 +685,25 @@ permission question or a fabricated all-green result.
 - **Remaining blockers:** none for Phase 4. Every wrapped execution registers
   with `profile_id: None`, so it is listed as unavailable until Phase 4 maps
   the Pi RPC launch to `retained-rpc` and supplies an executor.
+
+### Phase 4 progress (2026-09-28)
+
+- **Changed:** see this file's `*_during_phase_4` frontmatter; protocol facts,
+  design decisions, the requirement-to-test map, and the input-robustness
+  matrix are in [implementation-log.md](implementation-log.md#phase-4).
+- **Checks:** `just test` (claudine area): 7888 passed, 9 skipped, 0 failed.
+  `just lint`: clean. Real tier against Pi 0.87.1 on macOS: 11/11 plus the 3
+  native regressions. `just cross-check claudine-cli` (affected tests):
+  Linux 598/598, native Windows 414/414.
+- **Departures:** the reviewed activation policy gained a required `blocks`
+  list, used to block Pi's `retained-rpc` profile with its specific reason
+  (plan item 6); resume now carries Pi's `--mode` and trust flag; tool
+  processes a controlled provider starts outside its group are reaped on Unix.
+- **Status:** implemented; Pi steering blocked. The managed launch and the
+  `pi-rpc` adapter work against real Pi, but no grant is possible while
+  extensions can switch the session unguarded. Real-Pi evidence exists for
+  macOS only; the wrapper does not establish the provider version.
+- **Remaining blockers:** none for Phase 5, which can use fake adapters (the
+  plan's stated fallback when a guard is unproven). An operational real
+  delivery (Phase 8's exit) needs either an effective Pi session guard or
+  another provider's adapter.

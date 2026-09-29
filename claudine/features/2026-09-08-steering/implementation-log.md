@@ -131,6 +131,71 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3:
   - claudine/docs/topics/steering-routing.md
 skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - claudine/docs/providers/facts/pi.yaml
+  - claudine/docs/providers/catalog.json
+  - claudine/docs/providers/steering-activation.yaml
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/catalog-types/src/steering.rs
+  - claudine/catalog-types/src/signal.rs
+  - claudine/gen/src/steering_catalog.rs
+  - claudine/gen/tests/l1/steering_activation.rs
+  - claudine/gen/tests/l1/generate_ux.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/lib/src/provider/pi/data.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/adapters.rs
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/lib/src/steering/controller/tests.rs
+  - claudine/lib/src/steering/discovery/tests.rs
+  - claudine/lib/src/stream/protocol/pi.rs
+  - claudine/lib/src/stream/protocol/pi/rpc.rs
+  - claudine/lib/src/stream/protocol/pi/rpc/tests.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/pi/tests.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/mod.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/mod.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/commands.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/executor.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/descendants.rs
+  - claudine/cli/src/commands/wrap/exec/termination/message.rs
+  - claudine/cli/src/commands/wrap/exec/termination/reasons.rs
+  - claudine/cli/src/commands/wrap/exec/termination/summary.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/pi.rs
+  - claudine/cli/src/commands/wrap/profile/tests/pi_managed.rs
+  - claudine/cli/src/commands/wrap/resume.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/src/steering/owner.rs
+  - claudine/cli/src/steering/tests.rs
+  - claudine/cli/tests/bin/fake_pi/main.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/pi_managed_rpc.rs
+  - claudine/cli/tests/real/main.rs
+  - claudine/cli/tests/real/real_pi_managed_rpc.rs
+  - claudine/cli/tests/real/real_pi_steering.rs
+  - claudine/cli/tests/fixtures/steering/pi-probe.ts
+  - claudine/cli/tests/fixtures/steering/pi-bash-cleanup-probe.ts
+docs_updated_during_phase_4:
+  - claudine/README.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/timeouts.md
+docs_created_during_phase_4:
+  - claudine/docs/topics/pi-rpc.md
+skills_files_updated_during_phase_4: []
 ---
 # Implementation Log for 2026-09-08-steering (8 phases)
 
@@ -642,3 +707,278 @@ expression, so both arms compile everywhere. Transport-sensitive behavior (the
 first bidirectional-streaming RPC over the local endpoint, and shutdown with an
 open stream) was verified on native Windows named pipes and Linux sockets via
 `just cross-check`.
+
+## Phase 4
+
+Started and completed 2026-09-28 on macOS. Status: **implemented; Pi steering
+blocked by a reviewed policy block** (every Phase 4 plan item checked). The
+managed RPC execution, the `pi-rpc` adapter, and wrapper integration are
+implemented and verified against the installed Pi (0.87.1, macOS) and a
+deterministic fake Pi (macOS, Linux, native Windows). No steering is activated.
+
+### Protocol facts established before designing (installed Pi 0.87.1)
+
+A throwaway real-Pi exploration test (removed before the phase ended)
+established what the research left open:
+
+- `prompt`'s `response` precedes `agent_start` in the same tick, so a
+  `get_state` sent after the response sees `isStreaming: true` if a turn began.
+- An extension-handled prompt gets a success response and **no**
+  `agent_start`/`agent_settled`; its response arrives only after any dialog it
+  opened resolves.
+- `steer` while idle succeeds and strands the text (`pendingMessageCount: 1`)
+  until a later prompt drains it. A fresh state check before `steer` is
+  therefore required, under the mutation lock.
+- `extension_ui_response {cancelled: true}` resolves a `confirm` as `false`;
+  `notify` is a fire-and-forget UI request.
+- Unknown commands fail with `success: false`; stdin EOF exits 0 in < 1 s.
+- `get_state` carries `pendingMessageCount`.
+- **Pi 0.87.1 moved the system prompt into a `role: "system"` message with
+  sections**; `context.systemPrompt` is empty. The shared probe fixture's
+  context detection was updated to look in both places. Context files load
+  under `--no-approve`, `--approve`, and neither, from the agent directory and
+  the project root.
+
+### Design decisions
+
+- **A retained-stdin control seam in the one semantic spawn path.**
+  `exec/control.rs` defines `StdioControl`; `run_child_stream_semantic` takes an
+  optional session. With one, `spawn/retained.rs` spawns the child with
+  forwarding reader threads that hand every stdout line to the session before
+  passing it on, waits for readiness, and only then submits the task. The
+  semantic reader consumes the forwarded lines, so pre-ready lines reach the
+  parser in order. Watchdogs, rendering, signals, content guards, and
+  termination are the shared ones (the Kimi wire session, by contrast, dropped
+  several of them). Rejected alternative: a separate `run_pi_rpc_session`,
+  which would have duplicated ~600 lines.
+- **The prompt stays a `PromptDelivery::Stdin` seed.** Under RPC the session
+  submits that seed as the `prompt` command, so no new launch-plan field was
+  threaded through the harness, sequence, and composition paths, and the JSON
+  fallback writes the same seed to stdin.
+- **Interface selection comes from the generated catalog.**
+  `claudine::steering::execution_selection(Pi)` (`preferred: rpc`,
+  `fallback: json`) drives the Pi profile's `apply_structured_stream`
+  override: the catalog companion flags plus `--mode rpc`, with the
+  entrypoint's `-p` removed (in RPC mode Pi would read stdin as the prompt).
+  `stdio_control(args)` returns a `PiRpcSession` exactly when argv selects RPC.
+- **Facts reconciled.** `docs/providers/facts/pi.yaml` drops `--no-extensions`,
+  `--no-skills`, `--no-prompt-templates`, and `--no-context-files` (the user
+  correction in the spec) and keeps `--no-approve` (trust is a separate policy
+  the spec forbids changing). Regenerated `catalog.json` and
+  `lib/src/provider/pi/data.rs`.
+- **Settlement.** The session closes stdin only after a `get_state` taken
+  under the mutation lock shows no turn, no compaction, and nothing queued,
+  and no `agent_start` arrived while it was asked. Triggers: `agent_settled`
+  and the task's `prompt` acceptance (for extension-handled tasks). A refused
+  task closes at once. Queued input at settlement is reported undelivered and
+  never resent. If Pi lingers 5 s after EOF, the completion channel ends the
+  run as completed.
+- **Unattended requests.** Dialog methods get Pi's documented cancellation;
+  notices get nothing; an undocumented method or an unreadable UI request fails
+  the run as the new `EarlyTermination::InputRequired` (`error_kind =
+  "input_required"`, `ProcessTermination::Aborted`, signal
+  `HumanInputRequested`). After `input_required`, the session never closes
+  gracefully, so a clean exit cannot hide the failure (found by an L1 race; see
+  below).
+- **Fallback.** Only before submission: readiness refused, unreadable, child
+  exit, broken stdin, or 30 s of silence. The child is reaped, its stderr is
+  shown, a warning lists the lost capabilities, and the same function reruns
+  with the JSON argv (`-p --mode json`) and the seed on stdin. A user
+  interrupt never falls back. After submission there is no fallback or retry.
+- **Tool cleanup (real finding).** Pi's `bash` tool gives its commands their
+  own process groups. Killing Pi mid-tool left the tool running past the
+  wrapper, which the spec calls a cleanup failure. `spawn/descendants.rs`
+  (Unix) records descendants by 250 ms scans (pid + start time, threads
+  excluded) and at teardown terminates survivors that are still the same
+  process, then reports them separately. Windows relies on the existing Job
+  Object. Limit: a process that starts and escapes between two scans is not
+  seen.
+- **Resume.** `append_resume_passthrough_args` now carries `--mode <value>` and
+  `--approve`/`--no-approve`. Before this, a resumed Pi run lost `--mode json`,
+  so Pi read the piped follow-up as a plain-text print run: a pre-existing
+  defect fixed in passing.
+- **Strict readers for load-bearing fields.** `claudine::stream::protocol::pi::rpc`
+  reads `response.id/command/success`, `get_state.sessionId/isStreaming/
+  isCompacting/pendingMessageCount`, and `extension_ui_request.id/method`
+  strictly (absent, null, and wrong-typed are errors). The display parser stays
+  lenient. `UiMethodKind` is the single classification the parser and the
+  owner share.
+- **Parser.** RPC `response` for `get_state` produces `SessionStart` only when
+  the session id changes (RPC has no `session` header); a refused `prompt`
+  records an error; UI requests and `extension_error` become warnings or info;
+  `agent_settled` is recognized and silent.
+- **The adapter (`pi-rpc` revision 1).** `steer` (working), `prompt` (idle,
+  quiescent), and consented `abort` → poll until not streaming → re-check the
+  session → `prompt`. Every delivery holds the mutation lock from its fresh
+  `get_state` to its last answer. A changed session id updates the controller
+  (new generation) and sends nothing. Outcomes: a steer answer is `queued`, a
+  prompt answer `accepted`; `Refused` is Pi's own refusal; `unknown` is "sent,
+  no readable answer" (timeout, exit, unreadable) and is never resent;
+  `unavailable` is "never written". Queues are never cleared. A closing run
+  refuses new steering. Typed `RpcError` carries causes as `#[source]` and is
+  rendered once through `crate::steering::render_chain`, as the
+  error-transport guard requires.
+- **Owner wiring.** `ExecutionSteering::for_wrapped_child` takes the control
+  session; a steering-capable session supplies the profile (`retained-rpc`)
+  and executor, and is bound to the controller so it reports state (working on
+  `agent_start`, idle on settlement), conversation, and the provider's process
+  identity. Provider version stays unestablished (see limitations).
+- **Explicit block (plan item 6).** The switch-race record
+  `pi-rpc-steer-switch-0844` (re-run against 0.87.1 with the same expected
+  loss) shows `get_state`-then-`steer` is unsafe when an extension switches
+  sessions; the lock cannot order a switch it does not start, and extensions
+  must stay enabled. The reviewed policy therefore gained a required `blocks`
+  list (`{provider, profile_id, reason}`), validated by `claudine-gen` (the
+  profile must be researched, the reason non-empty, no duplicates, and no grant
+  for a blocked profile), emitted as `PROFILE_BLOCKS`, and checked first by
+  eligibility (`Blocker::ProfileBlocked`, before state/version). Without it
+  the listing would have said "requires setup: Owned RPC child…", implying
+  more setup could help. **Departure:** the plan did not name a policy-schema
+  change; it was needed to record the specific blocker the plan requires.
+  `pi-rpc` is registered as reviewed and implemented; no grant exists.
+
+### Defects found and fixed during the phase
+
+- Tool processes survived a killed Pi (see Tool cleanup).
+- Linux-only (via `just cross-check`): the pre-readiness teardown signalled the
+  process group while its exited leader was an unreaped zombie. Linux counts it
+  as a member, so each fallback waited the full 10 s kill grace. Fixed by
+  reaping the leader first.
+- Linux-only: sysinfo lists threads as processes whose parent is their owner,
+  so the descendant watch recorded (and could signal) threads. Fixed with
+  `thread_kind()`; the unit test that rooted a watch at the test process now
+  roots it at a spawned child.
+- L1 race: with a fake Pi that answered `prompt` before raising its UI
+  request, the quiescence check closed stdin and a clean exit hid the
+  `input_required` failure. The session now never closes gracefully after
+  `input_required`, and the fake matches real Pi's ordering.
+- Test fixture: the probe model re-issued its tool batch forever without an
+  intervening steer; it now calls the batch once per task (compatible with the
+  native steering tests, which pass).
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) |
+| --- | --- |
+| RPC launch selected from research; argv has `--mode rpc`, `--no-approve`, no `-p`, no resource-disabling flags | CLI `profile::tests::pi_managed::*` (4); L1 `pi_managed_rpc::a_task_runs_over_rpc_and_the_settled_run_ends` (argv recorded by the fake) |
+| Readiness before submission; task is one `prompt` with original bytes | broker `readiness_needs_a_state_answer_naming_a_session`, `the_task_is_one_prompt_with_the_original_text`; L1 `a_task_runs_over_rpc…` (commands recorded) |
+| Resources preserved (extension, skill, template, context) with real Pi | real `real_pi_managed_rpc_runs_a_task_to_settlement_with_resources_enabled` |
+| Settlement: close only after `agent_settled` + quiescent state; `agent_end` alone never closes; new turn, streaming, compaction keep it open; queued input reported, never resent; extension-handled task ends; refused task ends | broker `a_settled_quiescent_run_closes_stdin_once`, `work_after_settling_keeps_the_run_open`, `a_new_turn_during_the_check_keeps_the_run_open`, `queued_input_at_settlement_is_reported_undelivered_and_the_run_ends`, `an_extension_handled_task_ends_without_a_turn_and_a_refused_one_at_once`, `a_task_that_starts_a_turn_is_not_closed_by_its_acceptance`; real `…_keeps_stdin_open_through_a_tool_batch`, `…_cancels_extension_dialogs_and_ends_handled_tasks` |
+| Unattended: dialogs cancelled (never approved), notices unanswered, unknown method → `input_required` failure, never a graceful close after it | broker `dialogs_are_cancelled_notices_ignored_and_unknown_methods_end_the_run`, `an_input_required_run_is_never_ended_gracefully`; L1 `an_extension_dialog_is_cancelled_never_approved`, `an_unanswerable_ui_request_fails_the_run_as_input_required`; real `…_cancels_extension_dialogs…` (`ui-confirm-result` = `false`) |
+| Fallback only before submission, with warning and stderr; none after submission | L1 `a_refused_readiness_check_falls_back_to_the_json_stream_before_submission`, `a_child_that_exits_before_it_is_ready_falls_back_with_its_stderr_shown`, `a_crash_after_submission_fails_the_run_and_is_never_replayed` |
+| Provider crash fails the run and leaves no tool | real `…_provider_crash_fails_the_run_and_leaves_no_tool`; `spawn::descendants::tests::*` (3) |
+| Steering: fresh state check; steer while working → queued; idle prompt → accepted; changed session → nothing sent, new generation; not working → nothing sent; refused / silent / exited → refused / unknown / unknown, never resent; settled run refuses | broker `a_working_session_is_steered_after_a_fresh_state_check`, `nothing_is_sent_when_the_fresh_state_disagrees`, `refusals_and_silence_are_reported_as_established`, `an_unanswered_steer_is_unknown_and_never_resent`, `a_settled_run_refuses_new_steering`, `an_idle_session_takes_a_prompt`; real `real_pi_protocol_steers_a_working_turn_then_settles_and_closes`, `real_pi_protocol_starts_an_idle_turn_with_a_prompt` |
+| Consented interruption: abort, wait, revalidate, submit; phases separate; queues never cleared | broker `consented_interruption_aborts_waits_revalidates_then_submits`, `interruption_phases_stay_separate_when_one_fails`; real `real_pi_protocol_interrupts_with_consent_and_keeps_the_phases` |
+| Mutations never interleave with settlement | broker `a_delivery_and_the_settlement_decision_never_interleave` |
+| Owner maps the profile, binds the target, reports state | broker `readiness_binds_the_target_and_turns_bump_state` |
+| Explicit Pi block; blocks validated; grant on blocked profile rejected; block outranks grant | lib `eligibility::tests::shipped_policy_blocks_pi_managed_rpc_with_its_reason`, `a_profile_block_outranks_a_matching_grant_and_spares_other_profiles`, `pi_passing_fixture_records_are_not_activation_grants`; controller `an_unmapped_or_ungranted_launch_is_unavailable_with_a_reason`; gen `a_blocked_profile_cannot_be_granted_and_blocks_are_validated`, `committed_policy_is_valid`, `drift::*` |
+| Parser handles RPC records | lib `stream::providers::pi::tests::rpc_transcript_reads_like_a_json_mode_run`, `repeated_state_reports_only_announce_a_changed_session`, `a_refused_prompt_fails_the_run_and_other_refusals_do_not`, `extension_ui_requests_are_reported_by_kind` |
+| Resume keeps `--mode` and trust | CLI `resume::tests::passthrough_carries_pi_mode_and_trust` |
+| Existing native Pi regressions (steering contract, abort/EOF, switch/crash) | real `real_pi_steering::*` (3), re-run against 0.87.1: pass |
+| Ordinary wrapper output/error parity | full L1 suite unchanged; real interactive startup tests (4) pass |
+
+### Input robustness matrix
+
+**Pi RPC records (JSON line → `claudine::stream::protocol::pi::rpc`).** One
+test per record walks the matrix from a real Pi 0.87.1 record with one edit per
+cell; the control row reads to its positive result. Arrays are not load-bearing
+here, so the per-element rows do not apply.
+
+| Shape | response `id` / `command` | response `success` | `get_state` `sessionId` | `isStreaming` / `isCompacting` | `pendingMessageCount` | UI `id` / `method` |
+| --- | --- | --- | --- | --- | --- | --- |
+| absent | error | error | error | error | error | error → `input_required` |
+| explicit null | error | error | error | error | error | error → `input_required` |
+| wrong type | error | error (`"true"`) | error (`12`) | error (`"false"`, `0`) | error (`-1`, `1.5`) | error (`["confirm"]`) |
+| empty | `""` reads; correlates nothing | n/a | error (identifies nothing) | n/a | n/a | empty method → `Unsupported` |
+| duplicate key | last wins (JSON permits; Pi never repeats) | last wins | last wins | last wins | last wins | last wins |
+| trailing content | not a record (`Other`); the command stays unanswered, never read as accepted | same | same | same | same | same |
+
+A refusal without `error` text is still a refusal (`success` decides). A
+malformed `get_state` answer fails readiness (fallback) or the delivery's state
+check (nothing sent). A malformed answer to a sent command resolves as
+`unknown`.
+
+**Activation policy `blocks` (YAML → generator).** Walked in
+`policy_parser_walks_the_input_robustness_matrix` with the rows added to the
+Phase 1 matrix: absent, null, `null` value, wrong type (`{}`), one element
+wrong, every element wrong → error; empty `[]` = nothing blocked; `reason`
+absent, null, or a number → error; `reason: ""` parses and activation rejects
+it; `profile_id` as a list → error; duplicate key and unknown key → error. The
+generator's grep-for smells: none (strict deserializers, no `serde(default)` on
+policy fields).
+
+### Checks run
+
+- `cargo nextest run -p claudine --lib` (Pi protocol, parser, steering): 95/95
+  after the block; the full lib suite runs inside `just test`.
+- `cargo nextest run -p claudine-gen -p claudine-catalog-types`: 224/224.
+  `claudine-gen check`: clean. Byte pins: `catalog.json` 4992177613331685818 →
+  14015590831747458428, `steering/generated.rs` 9856002447674120557 →
+  10005189633011121167, `pi/data.rs` 2889607625502041169 →
+  11409995824083696371.
+- CLI broker + descendants + fake-Pi L1 tests: 10/10 stress iterations passed.
+- Real tier (`just test-real real_pi_`, Pi 0.87.1, macOS): 11/11 (4 managed
+  wrapper, 3 adapter protocol, 4 interactive startup); `real_pi_steering`
+  native regressions 3/3 (`cargo nextest --run-ignored all`).
+- `just lint` (claudine area): clean for all five crates after the
+  error-transport fix (the first run flagged 9 string collapses; replaced by
+  typed `RpcError` + `render_chain`). `cargo clippy --all-targets` with
+  `real-tests,test-fixtures,daemon-tests`: clean.
+- `just test` (claudine area): first run failed only the dispatch-inventory
+  guard (9 new reference-class `Provider::` sites, no dispatch conditionals);
+  re-blessed with the Phase 1–3 workaround (bless branch forced for one run and
+  reverted; `dispatch_inventory.rs` is unchanged from `HEAD`). One run hit the
+  known load-sensitive `an_early_wait_error_still_reaps_the_whole_tree`
+  LEAK-FAIL (passes in isolation in 0.055 s; pre-existing, untouched).
+  **Final: 7888 passed, 9 skipped, 0 failed.**
+- CLI daemon-backed steering tests (`daemon-tests`): 12/12.
+- `just check-tier-coverage claudine`: nothing stranded.
+- `just cross-check claudine-cli` (affected tests, `test-fixtures`): Linux
+  598/598 (after the two Linux fixes above), native Windows 414/414.
+
+### Environment limitations encountered
+
+- `pi --version` and env-prefixed commands (`CLAUDINE_PI_BINARY=…`,
+  `CLAUDINE_UPDATE_INVENTORY=1 …`) required approval. Real tests resolved Pi
+  from `PATH` instead; the native `real_pi_steering` tests now fall back to
+  `pi` on `PATH` when `CLAUDINE_PI_BINARY` is unset (a missing binary still
+  fails the test).
+- Reading Pi's installed source was outside the allowed directories; protocol
+  facts came from the research reports and the exploration test.
+- Writes under `.claude/skills/claudine/` were denied again. Intended skill
+  updates (not applied), in addition to the Phase 1–3 items: add Library Module
+  Map rows for `secrets` and `steering` (including profile blocks); add a
+  wrapper-subsystem row "Managed Pi RPC | non-interactive Pi runs `--mode rpc`
+  through a retained-stdin `StdioControl` (`exec/control.rs`,
+  `exec/pi_rpc/`); readiness → one `prompt` → settle on `agent_settled` +
+  quiescent `get_state` → close stdin; dialogs cancelled, unknown UI →
+  `input_required`; JSON fallback only before submission; Unix descendant reap
+  | `topics/pi-rpc.md`"; and note in `cli-reference.md` that non-interactive
+  `claudine pi` no longer disables Pi resources.
+- Unrelated working-tree changes outside `claudine/` were not touched.
+
+### Known gaps and limitations (not blockers for Phase 5)
+
+- **Pi steering is blocked** by the reviewed policy (above). Lifting it needs
+  an effective session guard; see the message to the next agent.
+- **Real-Pi evidence is macOS only** (0.87.1). Linux and native Windows were
+  covered by the deterministic fake Pi through `just cross-check`, not by real
+  Pi. The research records remain 0.84.4/native; no claudine-origin
+  verification records were added, because the blocked profile cannot use
+  them.
+- **Provider version is not established** by the wrapper
+  (`ExecutionFacts.provider_version: None`). A grant would require it; while
+  every mapped profile is blocked it is not consulted.
+- **Descendant reaping is scan-based** (250 ms); a tool that starts and escapes
+  between scans is missed. It also terminates background processes a Pi tool
+  left behind on a normal exit, matching the process-group semantics other
+  providers already get.
+
+### Cross-OS assessment
+
+New `#[cfg]` splits: `spawn/descendants.rs` is Unix-only (Windows uses the Job
+Object); `kill_process_group` is a no-op on Windows; the real crash test is
+`#[cfg(unix)]`. Everything else is portable Rust over stdio. The changed shared
+semantic spawn path (line sources, seed gating, merged early-termination and
+completion channels) and the fake-Pi wrapper tests passed natively on Linux and
+Windows, which is where the two OS-specific defects surfaced and were fixed.
