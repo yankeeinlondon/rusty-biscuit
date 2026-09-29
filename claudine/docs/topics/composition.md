@@ -867,7 +867,7 @@ $schema:
 
 `spec=cli` lists matching specs from both trees. The pick is a literal path, and the arms' globs then settle which arm applies: picking `fixes/…/spec.md` rules the `feature` arm out, so only the `fix` arm's requirements and types apply. The pick resolves from the launch directory, because both arms declare `spec` as an eager `file` (see [Caller File Provenance and Materialization](#caller-file-provenance-and-materialization)). If any contending arm types the property differently (a `string`, a lazy `file`, `file[]` against `file`) or does not declare it, the pass stays out and the full verdict decides.
 
-A glob decides between arms only where the arms disagree about it. In a root union whose arms declare the same property with different `match(...)` globs, an **existing** file outside an arm's glob rules that arm out, whether you typed the path, picked it in the chooser, or the document authored it. A single schema's glob, or one no other arm contests, still only suggests candidates:
+In a root union, an **existing** file outside a simplified arm's declared `match(...)` glob rules that arm out, whether you typed the path, picked it in the chooser, or the document authored it. The rule also applies when another arm declares the same glob, does not declare the property, or uses raw JSON Schema. A single schema's glob still only suggests candidates:
 
 | Schema and input | Result |
 |---|---|

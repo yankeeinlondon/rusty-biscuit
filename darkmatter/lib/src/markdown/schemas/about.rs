@@ -79,7 +79,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         keyword: "file",
         description: "A path-like file reference. Lazy by default (syntax-only); add `eager` to require the file to exist. Use `match(...)` to suggest accepted paths.",
         accepted_constraints: "eager, match(glob, ...), default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file-reference\" } (lazy); `file(eager)` emits `format: darkmatter-file` (eager existence check). `match(...)` is not emitted, except as `x-darkmatter-match` on a root-union arm whose glob other arms dispute.",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file-reference\" } (lazy); `file(eager)` emits `format: darkmatter-file` (eager existence check). In a root union each simplified arm's `match(...)` emits `x-darkmatter-match`.",
     },
     SchemaTypeDescriptor {
         keyword: "enum",
@@ -254,8 +254,8 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         form: "match(glob, ...)",
         target_types: "file",
         argument_arity: "1+",
-        description: "Glob patterns that shape file path suggestions (completion). Patterns starting with `!` exclude. Validated only in a root union whose arms declare the property with different globs: an existing file outside an arm's glob rules that arm out.",
-        json_schema_effect: "none on a single schema; `x-darkmatter-match` on each arm of a root union that contests the glob",
+        description: "Glob patterns that shape file path suggestions (completion). Patterns starting with `!` exclude. In a root union, an existing file outside a simplified arm's declared glob rules that arm out; in a single schema the glob only suggests.",
+        json_schema_effect: "none on a single schema; `x-darkmatter-match` on each declaring simplified arm of a root union",
     },
     // ── url ────────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
