@@ -162,4 +162,5 @@ fn help_documents_the_forms_without_a_consent_bypass() {
     for bypass in ["--yes", "--force", "--interrupt"] {
         assert!(!help.contains(bypass), "no `{bypass}` bypass flag:\n{stdout}");
     }
+    assert!(help.contains("Rendezvous daemon (`rendezvous-daemon`)"), "the routing prerequisite is named:\n{stdout}");
 }

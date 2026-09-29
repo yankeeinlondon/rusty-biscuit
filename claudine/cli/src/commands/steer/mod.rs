@@ -54,6 +54,9 @@ pub(crate) const EXIT_CANCELLED: i32 = 130;
 
 /// Arguments for `claudine steer`.
 #[derive(Debug, Args)]
+#[command(after_help = "Runs started by another `claudine` process are reached through the local \
+Rendezvous daemon (`rendezvous-daemon`); without it they are not listed and cannot be steered. \
+Which sessions accept a message is shown in `--list`. Guide: claudine/docs/cli/steer.md")]
 pub struct SteerArgs {
     /// The message, delivered byte for byte. Put `--` before a message that
     /// starts with `-`.
