@@ -288,6 +288,9 @@ fn resolve_root_union(
             }
         }
     }
+    if let Some(arms) = &all_simplified_arms {
+        super::simplified::convert::attach_contested_match(&mut any_of, arms);
+    }
     let mut root = Map::new();
     root.insert(
         "$schema".into(),
@@ -846,6 +849,9 @@ fn resolve_standalone_root_union(
         }
     }
 
+    if all_simplified {
+        super::simplified::convert::attach_contested_match(&mut any_of, &simplified_arms);
+    }
     let mut root = Map::new();
     root.insert(
         "$schema".into(),

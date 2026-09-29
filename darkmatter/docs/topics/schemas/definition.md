@@ -495,9 +495,44 @@ document directory only. This is the same order `$schema` file references and th
 path (`file_exists`/`frontmatter`) use. No ambient current working directory is read
 once the resolution context is captured.
 
-`match(globs)` is **suggestion metadata only** — it shapes path completion (which
-candidates a tool offers) but never rejects a value. An existing file that matches no
+`match(globs)` shapes path completion: it decides which candidates a tool offers.
+On its own it never rejects a value, so an existing file that matches no
 configured glob still validates.
+
+The exception is a root union whose arms **disagree** about a property's globs.
+There the glob is what tells the arms apart, so it becomes part of each arm's
+contract: an existing file outside an arm's glob rules that arm out.
+
+```yaml
+$schema:
+    - kind: "literal(feature)"
+      spec: "file(required; eager; match(**/features/**/spec.md))"
+    - kind: "literal(fix)"
+      spec: "file(required; eager; match(**/fixes/**/spec.md))"
+      severity: "string(required)"
+```
+
+| Frontmatter | Result |
+|---|---|
+| `spec: fixes/x/spec.md` | the `feature` arm is ruled out; the `fix` arm applies and asks for `severity` |
+| `spec: features/x/spec.md` | the `feature` arm applies |
+| `kind: fix`, `spec: features/x/spec.md` | invalid: the only arm `kind` allows rejects the path |
+
+The rules:
+
+- The glob is enforced only when the union has two or more arms, at least two
+  of them declare the property, and those declarations do not all carry the same
+  globs. A property only one arm declares, or one every arm globs identically,
+  keeps suggestion-only semantics.
+- Only an **existing** file is judged. A value that names no file yet (a lazy
+  output path, a partial a chooser is about to complete, a value still holding
+  `{{ … }}` or `$(…)`) never rules an arm out; existence is `eager`'s job.
+- The path is compared in portable `/` spelling, relative to the launch
+  directory, which is where completion walks the glob; a file outside it is
+  compared relative to the document's directory, then the repository root.
+  What completion offers, the arm accepts.
+- Document-authored and caller-supplied values follow the same rule, each
+  resolved from its own origin. In a `file[]`, every item must match.
 
 When a schema arm selects `file(eager)`, validation probes the candidate plan and
 materializes the winning **absolute native path**. A lazy `file` value materializes
@@ -532,7 +567,8 @@ $schema:
 `file[](eager)` applies eager timing to the array property itself and leaves the
 items lazy. Neither placement makes the property required — declare `required`
 independently, and prefer `file[](required; eager)` when the array must be
-present and eagerly validated. `match(...)` still applies per item.
+present and eagerly validated. `match(...)` still applies per item, both to
+completion and, in a contested root union, to the arm's verdict.
 
 ### URLs
 
@@ -1432,7 +1468,7 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 ### Validator Cache
 
-`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory and launch-area fallback, and is bounded by an LRU policy. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. A hit also requires the request's whole file-resolution context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
 
 ## Shell-Completion Integration
 

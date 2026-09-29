@@ -14,6 +14,7 @@ mod schema_validation_integration {
     }
 
     use super::*;
+    use crate::markdown::schemas::{ValidationProblem, ValidationProblemCode};
 
     #[test]
     fn schema_validation_fails_fast_before_shell_expansion() {
@@ -1579,8 +1580,11 @@ mod schema_validation_integration {
         );
     }
 
+    /// Two arms apply, so none is committed, but both read `spec` as the same
+    /// kind of file: the value resolves from the launch area whichever wins,
+    /// never from the prompt's directory.
     #[test]
-    fn ambiguous_root_union_does_not_guess_a_file_arm() {
+    fn ambiguous_root_union_with_agreeing_file_arms_resolves_from_the_launch_area() {
         let repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(repo.path().join(".git")).unwrap();
         let launch = repo.path().join("area");
@@ -1610,11 +1614,201 @@ mod schema_validation_integration {
             serde_json::json!({ "spec": "spec.md" }),
             [],
         );
+        let spec = launch.join("spec.md");
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!("spec.md"),
+            serde_json::json!(native(&spec)),
         );
-        assert_eq!(composed.content().trim(), "spec.md");
+        assert_eq!(composed.content().trim(), biscuit_file::to_portable_string(&spec));
+    }
+
+    /// The two-tree union of ruling D1. `kind` is an optional discriminator
+    /// and only the `fix` arm requires `severity`, so the verdict shows which
+    /// arm a path selected.
+    const CONTESTED_UNION: &str = "$schema:\n  - kind: literal(feature)\n    spec: file(required; eager; match(**/features/**/spec.md))\n  - kind: literal(fix)\n    spec: file(required; eager; match(**/fixes/**/spec.md))\n    severity: string(required)\n";
+
+    /// A repository whose launch area holds `features/x/spec.md` and
+    /// `fixes/x/spec.md`, with the prompt in a separate `prompts/` directory.
+    struct TwoTrees {
+        repo: tempfile::TempDir,
+        launch: std::path::PathBuf,
+        prompt: std::path::PathBuf,
+    }
+
+    impl TwoTrees {
+        fn new(frontmatter: &str) -> Self {
+            let repo = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+            let launch = repo.path().join("area");
+            for tree in ["features", "fixes"] {
+                let dir = launch.join(tree).join("x");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("spec.md"), "# Spec\n").unwrap();
+            }
+            let prompt = repo.path().join("prompts/contested.md");
+            std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+            std::fs::write(&prompt, format!("---\n{frontmatter}---\n{{{{ spec }}}}\n")).unwrap();
+            Self { repo, launch, prompt }
+        }
+
+        fn compose(&self, overrides: serde_json::Value) -> Result<Markdown, MarkdownError> {
+            let context = biscuit_file::FileResolutionContext::new(&self.launch)
+                .with_repository_root(self.repo.path())
+                .with_source_path(&self.prompt);
+            Markdown::try_from(self.prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&self.prompt)
+                        .with_file_resolution_context(context)
+                        .with_file_ref_fallback_dir(&self.launch)
+                        .with_set_overrides(overrides)
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .map(|(composed, _)| composed)
+        }
+    }
+
+    fn rejected_problems(result: Result<Markdown, MarkdownError>) -> Vec<ValidationProblem> {
+        match result {
+            Err(MarkdownError::SchemaValidationFailed { problems, .. }) => problems,
+            Err(other) => panic!("expected a schema verdict, got {other:?}"),
+            Ok(composed) => panic!("expected a rejection, composed {:?}", composed.content()),
+        }
+    }
+
+    #[test]
+    fn single_schema_match_only_suggests_files() {
+        let fixture = TwoTrees::new(
+            "$schema:\n  spec: file(required; eager; match(**/fixes/**/spec.md))\n",
+        );
+        for spec in ["fixes/x/spec.md", "features/x/spec.md"] {
+            fixture
+                .compose(serde_json::json!({ "spec": spec }))
+                .unwrap_or_else(|error| panic!("{spec} was rejected: {error:?}"));
+        }
+    }
+
+    #[test]
+    fn settled_union_arm_rejects_an_existing_file_outside_its_match() {
+        let fixture = TwoTrees::new(CONTESTED_UNION);
+        let composed = fixture
+            .compose(serde_json::json!({
+                "kind": "fix", "severity": "high", "spec": "fixes/x/spec.md",
+            }))
+            .unwrap();
+        assert_eq!(
+            composed.content().trim(),
+            biscuit_file::to_portable_string(&fixture.launch.join("fixes/x/spec.md")),
+        );
+
+        let problems = rejected_problems(fixture.compose(serde_json::json!({
+            "kind": "fix", "severity": "high", "spec": "features/x/spec.md",
+        })));
+        assert!(
+            problems.iter().any(|problem| problem.path == "/spec"
+                && problem.message.contains("match(**/fixes/**/spec.md)")),
+            "expected the fix arm's glob to reject the path: {problems:?}",
+        );
+    }
+
+    #[test]
+    fn undecided_union_selects_the_arm_whose_match_admits_the_file() {
+        let fixture = TwoTrees::new(CONTESTED_UNION);
+        // The feature arm would accept this instance; only its glob rules it
+        // out, leaving the fix arm and its `severity` requirement.
+        let problems =
+            rejected_problems(fixture.compose(serde_json::json!({ "spec": "fixes/x/spec.md" })));
+        assert_eq!(
+            problems
+                .iter()
+                .map(|problem| (problem.property.as_deref(), problem.code))
+                .collect::<Vec<_>>(),
+            vec![(Some("severity"), ValidationProblemCode::MissingRequired)],
+        );
+        fixture
+            .compose(serde_json::json!({ "spec": "fixes/x/spec.md", "severity": "high" }))
+            .unwrap();
+        fixture
+            .compose(serde_json::json!({ "spec": "features/x/spec.md" }))
+            .unwrap();
+    }
+
+    /// An optional file is wrapped in a `null` alternative; the glob that
+    /// rules its arm out must not also cost the value its caller origin.
+    #[test]
+    fn optional_contested_file_is_rejected_by_its_glob_from_the_callers_origin() {
+        let fixture = TwoTrees::new(
+            "$schema:\n  - kind: literal(feature; required)\n    spec: file(eager; match(**/features/**/spec.md))\n  - kind: literal(fix; required)\n    spec: file(eager; match(**/fixes/**/spec.md))\n",
+        );
+        fixture
+            .compose(serde_json::json!({ "kind": "fix", "spec": "fixes/x/spec.md" }))
+            .unwrap();
+        let problems = rejected_problems(
+            fixture.compose(serde_json::json!({ "kind": "fix", "spec": "features/x/spec.md" })),
+        );
+        assert!(
+            problems.iter().any(|problem| problem.message.contains("match(**/fixes/**/spec.md)")),
+            "{problems:?}",
+        );
+        assert!(
+            problems.iter().all(|problem| !problem.message.contains("no existing file")),
+            "{problems:?}",
+        );
+    }
+
+    /// Arm-specific coercion follows the arm the glob selects: `count` is a
+    /// number only under the `fix` arm.
+    #[test]
+    fn contested_glob_decides_which_arm_coerces_siblings() {
+        let fixture = TwoTrees::new(
+            "$schema:\n  - spec: file(required; eager; match(**/features/**/spec.md))\n    count: string\n  - spec: file(required; eager; match(**/fixes/**/spec.md))\n    count: number\n",
+        );
+        for (tree, expected) in [("fixes", true), ("features", false)] {
+            let composed = fixture
+                .compose(serde_json::json!({ "spec": format!("{tree}/x/spec.md"), "count": 5 }))
+                .unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("count").map(serde_json::Value::is_number),
+                Some(expected),
+                "{tree}: {:?}",
+                composed.frontmatter().as_map().get("count"),
+            );
+        }
+    }
+
+    #[test]
+    fn document_authored_file_selects_its_arm_by_match_too() {
+        let authored = |spec: &str| {
+            TwoTrees::new(&format!("{CONTESTED_UNION}spec: {spec}\n"))
+                .compose(serde_json::json!({}))
+        };
+        authored("../area/features/x/spec.md").unwrap();
+        let problems = rejected_problems(authored("../area/fixes/x/spec.md"));
+        assert!(
+            problems.iter().all(|problem| problem.property.as_deref() == Some("severity")),
+            "{problems:?}",
+        );
+    }
+
+    #[test]
+    fn every_element_of_a_contested_file_array_must_match_its_arm() {
+        let fixture = TwoTrees::new(
+            "$schema:\n  - kind: literal(feature)\n    specs: file(required; eager; match(**/features/**/spec.md))[]\n  - kind: literal(fix; required)\n    specs: file(required; eager; match(**/fixes/**/spec.md))[]\nspec: none\n",
+        );
+        fixture
+            .compose(serde_json::json!({ "kind": "fix", "specs": ["fixes/x/spec.md"] }))
+            .unwrap();
+        let problems = rejected_problems(fixture.compose(serde_json::json!({
+            "kind": "fix", "specs": ["fixes/x/spec.md", "features/x/spec.md"],
+        })));
+        assert!(
+            problems.iter().any(|problem| problem.path == "/specs/1"),
+            "{problems:?}",
+        );
     }
 
     #[test]

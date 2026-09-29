@@ -31,9 +31,10 @@
 //!
 //! `darkmatter-file` / `darkmatter-file-reference` are `Format`s (they see
 //! only the string) and the `x-darkmatter-*` semantic validators are custom
-//! `Keyword` implementations. `match(...)` is **not** a validation keyword: it is suggestion
-//! metadata carried on the SimplifiedSchema atom (`Constraint::Match` →
-//! completion), never lowered into the compiled JSON Schema.
+//! `Keyword` implementations. `match(...)` is suggestion metadata carried on
+//! the SimplifiedSchema atom (`Constraint::Match` → completion); it is
+//! validated only where a root union contests it, through the
+//! `x-darkmatter-match` keyword in [`super::file_match`].
 //!
 //! ## Examples
 //!
@@ -377,7 +378,7 @@ pub(crate) fn resolve_file_reference(
     resolve_file_reference_in_context(value, base_dir, fallback, None)
 }
 
-fn resolve_file_reference_in_context(
+pub(crate) fn resolve_file_reference_in_context(
     value: &str,
     base_dir: Option<&Path>,
     _fallback: Option<&Path>,

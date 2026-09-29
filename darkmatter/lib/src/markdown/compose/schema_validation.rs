@@ -399,7 +399,8 @@ pub(crate) fn run_with_registry(
     // composition-independent gate passed, so it is safe to rewrite present
     // document-authored eager-`file` values to resolved repo-relative paths.
     // Caller-originated overrides are restored as absolute native paths so
-    // later consumers retain their launch-area provenance. The rewrite shares
+    // later consumers retain their launch-area provenance; one the projection
+    // left unclassified is never rewritten. The rewrite shares
     // the same instance-construction loop as coercion, so `$schema` and
     // `options.exclude_keys` stay outside the write-back; pending keys are
     // skipped the same way.
@@ -409,16 +410,19 @@ pub(crate) fn run_with_registry(
         if outcome.changed
             && let serde_json::Value::Object(rewritten) = outcome.value
         {
+            let records = caller_input_records(options);
             let fm_map = markdown.frontmatter_mut().as_map_mut();
             for (key, value) in rewritten {
                 if composition_pending.contains(&key) {
                     continue;
                 }
-                let value = projection
-                    .native
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or(value);
+                let value = match projection.native.get(&key) {
+                    Some(native) => native.clone(),
+                    // A caller value the projection could not classify keeps its
+                    // raw form: the rewrite would re-anchor it on the document.
+                    None if records.contains_key(&key) => continue,
+                    None => value,
+                };
                 fm_map.insert(key, value);
             }
         }
@@ -819,8 +823,10 @@ fn select_file_mode(
             let applicable: Vec<_> = arms
                 .iter()
                 .filter(|arm| {
+                    // Which file mode applies is independent of a contested
+                    // `match`: an arm that glob rules out is still a file arm.
                     crate::markdown::schemas::validate::build_validator_in_context(
-                        arm,
+                        &without_match_keyword(arm),
                         Some(context.base_dir()),
                         None,
                         Some(context),
@@ -837,6 +843,27 @@ fn select_file_mode(
     None
 }
 
+fn without_match_keyword(schema: &serde_json::Value) -> serde_json::Value {
+    match schema {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .filter(|(key, _)| {
+                key.as_str() != crate::markdown::schemas::file_match::DARKMATTER_MATCH_KEYWORD
+            })
+            .map(|(key, value)| (key.clone(), without_match_keyword(value)))
+            .collect(),
+        serde_json::Value::Array(items) => items.iter().map(without_match_keyword).collect(),
+        other => other.clone(),
+    }
+}
+
+/// The schema fragments each top-level property is projected through.
+///
+/// A root `anyOf`/`oneOf` contributes the one arm that applies. When no single
+/// arm applies (several fit, or none does), it contributes only the caller
+/// file properties its contending arms agree on
+/// ([`caller_file_fragments_shared_by`]). Returns `None` only when an `allOf`
+/// arm cannot apply.
 fn collect_applicable_root_schema_fragments<'a>(
     schema: &'a serde_json::Value,
     instance: &serde_json::Value,
@@ -885,7 +912,7 @@ fn collect_applicable_root_schema_fragments<'a>(
         let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) else {
             continue;
         };
-        let candidates: Vec<_> = arms
+        let judged: Vec<_> = arms
             .iter()
             .filter_map(|arm| {
                 let fragments = collect_applicable_root_schema_fragments(
@@ -903,29 +930,31 @@ fn collect_applicable_root_schema_fragments<'a>(
                     composition_pending,
                     &fragments,
                 );
-                (applicability != RootArmApplicability::None)
-                    .then_some((applicability, fragments))
+                Some((applicability, fragments))
             })
             .collect();
-        let exact: Vec<_> = candidates
-            .iter()
-            .filter(|(applicability, _)| *applicability == RootArmApplicability::Exact)
-            .collect();
-        let selected_arm = match exact.as_slice() {
-            [(_, fragments)] => fragments,
-            [] => {
-                let pending: Vec<_> = candidates
-                    .iter()
-                    .filter(|(applicability, _)| {
-                        *applicability == RootArmApplicability::Pending
-                    })
-                    .collect();
-                let [(_, fragments)] = pending.as_slice() else {
-                    return None;
-                };
-                fragments
+        let with = |wanted: RootArmApplicability| -> Vec<_> {
+            judged
+                .iter()
+                .filter(|(applicability, _)| *applicability == wanted)
+                .map(|(_, fragments)| fragments)
+                .collect()
+        };
+        let exact = with(RootArmApplicability::Exact);
+        let pending = with(RootArmApplicability::Pending);
+        let contending = match (exact.len(), pending.len()) {
+            (1, _) | (0, 1) => exact.into_iter().chain(pending).take(1).collect(),
+            (0, 0) => judged.iter().map(|(_, fragments)| fragments).collect(),
+            (0, _) => pending,
+            _ => exact,
+        };
+        let undecided;
+        let selected_arm = match contending.as_slice() {
+            [fragments] => *fragments,
+            arms => {
+                undecided = caller_file_fragments_shared_by(arms, records);
+                &undecided
             }
-            _ => return None,
         };
         for (key, fragments) in selected_arm.iter() {
             selected
@@ -936,6 +965,44 @@ fn collect_applicable_root_schema_fragments<'a>(
     }
 
     Some(selected)
+}
+
+/// The caller-record properties whose file mode every contending arm agrees
+/// on, for a root union that could not commit to one arm.
+///
+/// A caller's file value resolves from the caller's origin whichever arm
+/// finally applies, so an undecided union must not drop that origin and leave
+/// the value to be judged from the document's directory. A property qualifies
+/// only when every contending arm declares it with exactly one file fragment of
+/// the same mode; an arm that omits it or types it otherwise would read the
+/// projected absolute path as a different value. The first arm's fragments
+/// stand for all of them, since the mode alone decides how the value resolves.
+fn caller_file_fragments_shared_by<'a>(
+    arms: &[&HashMap<String, Vec<&'a serde_json::Value>>],
+    records: &crate::markdown::compose::CallerInputRecords,
+) -> HashMap<String, Vec<&'a serde_json::Value>> {
+    let Some((first, rest)) = arms.split_first() else {
+        return HashMap::new();
+    };
+    let arm_mode = |fragments: &HashMap<String, Vec<&serde_json::Value>>,
+                    key: &str,
+                    record: &crate::markdown::compose::CallerInputRecord| {
+        let modes: Vec<_> = fragments
+            .get(key)?
+            .iter()
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .collect();
+        (modes.len() == 1).then(|| modes[0])
+    };
+    records
+        .iter()
+        .filter_map(|(key, record)| {
+            let mode = arm_mode(first, key, record)?;
+            rest.iter()
+                .all(|arm| arm_mode(arm, key, record) == Some(mode))
+                .then(|| (key.clone(), first[key].clone()))
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2835,6 +2902,65 @@ mod tests {
         assert_eq!(
             label_result.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("spec.md")),
+        );
+    }
+
+    /// Two arms both accept the caller's path, so no single arm is committed;
+    /// the value still resolves from the launch area, not the document's
+    /// directory, whichever arm finally applies.
+    #[test]
+    fn undecided_root_union_resolves_a_caller_file_from_the_launch_area() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        let resolved = launch_dir.join("fixes").join("x").join("spec.md");
+        std::fs::create_dir_all(resolved.parent().unwrap()).unwrap();
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = dir.path().join("prompts/prompt.md");
+        let schema = "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required;eager;match(**/features/**/spec.md))'\n  - kind: 'literal(fix)'\n    spec: 'file(required;eager;match(**/fixes/**/spec.md))'\n";
+
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "fixes/x/spec.md" }));
+        let (composed, _) = md_with_schema_and_source(schema, &doc_path)
+            .compose_with(options)
+            .unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(resolved.to_string_lossy())),
+        );
+    }
+
+    /// Arms that disagree on whether the property is a file leave the caller's
+    /// value unprojected, and the eager-file rewrite does not re-anchor it on
+    /// the document's repository either.
+    #[test]
+    fn undecided_root_union_leaves_a_caller_value_whose_file_mode_is_disputed_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        let resolved = repo.join("fixes/x/spec.md");
+        std::fs::create_dir_all(resolved.parent().unwrap()).unwrap();
+        std::fs::write(&resolved, "# Spec\n").unwrap();
+        let doc_path = repo.join("prompts/prompt.md");
+        let schema = "$schema:\n  - spec: 'file(required;eager)'\n  - spec: 'string(required)'\n";
+        let absolute = resolved.to_string_lossy().into_owned();
+
+        let context = biscuit_file::FileResolutionContext::new(&repo)
+            .with_repository_root(&repo)
+            .with_source_path(&doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_resolution_context(context)
+            .with_file_ref_fallback_dir(&repo)
+            .with_set_overrides(serde_json::json!({ "spec": absolute }));
+        let (composed, _) = md_with_schema_and_source(schema, &doc_path)
+            .compose_with(options)
+            .unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(absolute)),
+            "a caller value is never rewritten to the repository-relative `fixes/x/spec.md`",
         );
     }
 

@@ -805,3 +805,60 @@ fn schema_validate_path_with_equals_disambiguated_by_dot_slash() {
         .assert()
         .success();
 }
+
+/// Every row of the contested-`match` table through `md schema validate`.
+///
+/// Only the `fix` arm requires `severity`, so a missing `severity` failing a
+/// `fixes/…` path proves the `feature` arm was ruled out by its glob.
+#[test]
+fn schema_validate_contested_file_match_selects_and_rejects_union_arms() {
+    let process = CliProcessFixture::new();
+    let tmp = process.cwd();
+    for tree in ["features", "fixes"] {
+        std::fs::create_dir_all(tmp.join(tree).join("x")).unwrap();
+        write_file(&tmp.join(tree).join("x"), "spec.md", "# Spec\n");
+    }
+    let single = write_file(
+        tmp,
+        "single.md",
+        "---\n$schema:\n  spec: 'file(required; eager; match(**/fixes/**/spec.md))'\n---\nBody\n",
+    );
+    let union = "$schema:\n  - kind: 'literal(feature)'\n    spec: 'file(required; eager; match(**/features/**/spec.md))'\n  - kind: 'literal(fix)'\n    spec: 'file(required; eager; match(**/fixes/**/spec.md))'\n    severity: 'string(required)'\n";
+    let settled = write_file(
+        tmp,
+        "settled.md",
+        &format!("---\n{union}kind: fix\nseverity: high\n---\nBody\n"),
+    );
+    let undecided = write_file(tmp, "undecided.md", &format!("---\n{union}---\nBody\n"));
+
+    let validate = |doc: &Path, spec: &str| {
+        let output = process
+            .command()
+            .args(["schema", "validate", "--no-trigger-schemas", "--format", "json"])
+            .arg(doc)
+            .arg(format!("spec={spec}"))
+            .output()
+            .unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+
+    for (doc, spec) in [
+        (&single, "fixes/x/spec.md"),
+        (&single, "features/x/spec.md"),
+        (&settled, "fixes/x/spec.md"),
+        (&undecided, "features/x/spec.md"),
+    ] {
+        let (code, stdout) = validate(doc, spec);
+        assert_eq!(code, Some(0), "{} with {spec}: {stdout}", doc.display());
+        assert!(stdout.contains("\"valid\":true"), "{stdout}");
+    }
+
+    let (code, stdout) = validate(&settled, "features/x/spec.md");
+    assert_eq!(code, Some(1), "{stdout}");
+    assert!(stdout.contains("match(**/fixes/**/spec.md)"), "{stdout}");
+
+    let (code, stdout) = validate(&undecided, "fixes/x/spec.md");
+    assert_eq!(code, Some(1), "{stdout}");
+    assert!(stdout.contains("severity"), "{stdout}");
+    assert!(!stdout.contains("match("), "the feature arm is ruled out: {stdout}");
+}

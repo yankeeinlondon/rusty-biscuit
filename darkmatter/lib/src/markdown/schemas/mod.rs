@@ -18,8 +18,9 @@
 //! - [`simplified`] — YAML-shape layer over `serde_yaml_ng::Value`.
 //! - [`format`] — custom format validators (`darkmatter-file` eager,
 //!   `darkmatter-file-reference` lazy) plus URL-scheme and passive semantic
-//!   meta-type keyword validators. (`match(...)` is suggestion metadata only —
-//!   never a validation keyword.)
+//!   meta-type keyword validators.
+//! - [`file_match`] — `file(match(...))` globs: completion candidates, and an
+//!   arm constraint where root-union arms disagree on them.
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`rewrite`] — eager-`file` value normalization: rewrites a present
 //!   `file(eager)`-typed value to its document-relative resolved path after
@@ -58,6 +59,7 @@ pub mod detect;
 pub mod discriminant;
 pub mod errors;
 pub mod example;
+pub mod file_match;
 pub mod format;
 mod frontmatter_shape;
 mod phase;
