@@ -46,6 +46,55 @@ claudine steer --session <id> -- "--dry-run first, please"
 There are no `send`/`list` subcommands and no flag that skips interruption
 consent.
 
+## Before you start
+
+`claudine steer` runs in a different process from the session it steers, so
+the two meet through the local Rendezvous daemon. Install and start it once
+per user; nothing else needs configuring:
+
+```sh
+cd claudine/rendezvous && just install   # installs `rendezvous-daemon` (and a test client)
+rendezvous-daemon                        # listens on this user's local socket / named pipe
+```
+
+Then start the run you want to steer from a normal shell, and steer it from
+another:
+
+```sh
+# terminal 1 (a Git repository, or add --skip-git-repo-check)
+claudine codex "fix the flaky test"
+
+# terminal 2
+claudine steer --list
+claudine steer --session managed:<id> "The flake is in the fixture, not the test."
+```
+
+A wrapper that starts before the daemon keeps retrying for about 15 seconds,
+then runs unregistered: it finishes its task normally, and its own automatic
+warning still works, but it cannot be listed or steered from another process.
+If the daemon restarts while a run is registered, the run registers again
+(retrying the same way) and nothing it was sent is replayed; the run itself is
+never affected.
+
+## Provider compatibility
+
+What each provider supports today. "Listed" means the session appears in
+`claudine steer --list`; only rows marked **steerable** can be sent to.
+
+| Provider | Found by | Steerable | What stands in the way |
+| --- | --- | --- | --- |
+| Codex | runs Claudine started (`claudine codex`, `compose`, `sequence`) | **yes** on macOS with Codex **0.157.1**, for non-interactive runs Claudine carries over Codex's app-server: joins the running turn, or starts a turn when idle | Any other Codex version, Linux, and Windows are listed as unavailable until a real run is verified there. A run that keeps an option the app-server has no equivalent for stays on `codex exec` and is unavailable |
+| Pi | runs Claudine started | no (reviewed block) | Pi extensions can switch the session without coordination, so a message could reach the wrong conversation |
+| Claude Code | Claude's own session registry (sessions you started yourself), and runs Claudine started | no | The reply format of Claude's session socket is undocumented, so a delivery can never be confirmed |
+| OpenCode, Kilo, Gemini, Qwen, Goose, Kimi, Antigravity | runs Claudine started | no | No steering adapter yet; each row says why |
+
+Sessions of other providers that Claudine did not start are not listed: the
+only way to find them is by process, and a process alone cannot name the
+conversation to send to. The listing reports each such gap in
+`coverage_gaps`. A new provider version never becomes steerable
+automatically: [Steering Activation](../topics/steering-activation.md)
+explains the evidence a grant needs.
+
 ## What happens when you send
 
 ```mermaid

@@ -101,7 +101,10 @@ confirmed (exit 0 for accepted, queued, or delivered; 1 otherwise; 2 for usage
 errors; 130 when you cancel). Which sessions can receive a message is decided
 by reviewed provider evidence: today that is a non-interactive Codex run
 Claudine launched on macOS with Codex 0.157.1; every other session is listed
-with the reason it cannot be steered. See [`claudine steer`](docs/cli/steer.md).
+with the reason it cannot be steered. Runs started by another `claudine`
+process are reached through the local Rendezvous daemon (`rendezvous-daemon`),
+so start it first. See [`claudine steer`](docs/cli/steer.md) for setup and a
+per-provider compatibility table.
 
 When a wrapped agent starts repeating itself, Claudine also tries to help on
 its own: halfway to the repetition stop it sends the agent a short "check your
