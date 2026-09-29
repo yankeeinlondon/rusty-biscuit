@@ -131,6 +131,7 @@ mod sequence_cli;
 #[cfg(windows)]
 mod sequence_ctrl_c_windows;
 mod sequence_errors_cli;
+mod steer_cli;
 #[cfg(unix)]
 mod sequence_groups;
 // Reads the `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` seam, which only

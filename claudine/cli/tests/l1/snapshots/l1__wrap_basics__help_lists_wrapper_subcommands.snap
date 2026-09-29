@@ -25,6 +25,7 @@ Wrapped Execution:
   kimi              Wrap Kimi Code with Claudine preflight/env handling
   opencode          Wrap OpenCode with Claudine preflight/env handling
   qwen              Wrap Qwen Code with Claudine preflight/env handling
+  steer             Send a message to one running agent session
 
 Composition:
   compose           Compose a Markdown document and send as prompt
