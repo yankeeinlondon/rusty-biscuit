@@ -135,7 +135,7 @@ test-contract *args="":
 
 # Replay signal evidence fixtures through the production detection engine (requires this checkout)
 signals-check:
-    @cargo run -q -p claudine-cli -- signals check
+    @cargo run -q -p claudine-cli --bin claudine -- signals check
 
 # Generator suite + signal fixture replay (the corpus ↔ generated-tables CI gate)
 test-gen *args="":
@@ -344,7 +344,7 @@ check-windows:
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":
-    @cargo run -p claudine-cli {{ args }}
+    @cargo run -p claudine-cli --bin claudine {{ args }}
 
 # Incrementally source topic research with the given provider, 3 topics in parallel
 run-fleet-research agent="codex":
@@ -365,7 +365,7 @@ run-fleet-research agent="codex":
         echo "▶ batch: ${batch[*]} (--{{agent}})"
         pids=()
         for t in "${batch[@]}"; do
-            cargo run -q -p claudine-cli -- sequence "docs/research/$t/_fleet.md" -y --{{agent}} &
+            cargo run -q -p claudine-cli --bin claudine -- sequence "docs/research/$t/_fleet.md" -y --{{agent}} &
             pids+=("$!:$t")
         done
         for entry in "${pids[@]}"; do
