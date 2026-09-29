@@ -133,6 +133,13 @@ mid-flush) also refreshes the clock. A child that is truly stuck
 producing zero bytes still allows `step_timeout` to fire normally; the
 byte heartbeat does not mask genuine hangs.
 
+One kind of line is excluded: on a launch driven by a control session
+(Pi's `--mode rpc`), a reply to a command Claudine itself sent — the
+readiness check, the task, a steering message, a settlement check — is
+control traffic, not agent progress, so it does not refresh
+`last_byte_at`. Sending a steering message therefore never postpones a
+silence kill.
+
 ### Stuck-aware suppression
 
 The in-flight gate is **not** an absolute suppression. The ticker
@@ -493,6 +500,13 @@ spam is just the `L = 1` case. Volume is counted **per turn** on the
 streaming path (reset on `TurnComplete`) and **per run** on the
 capture path; the capture path gets *only* the volume cap plus Ctrl+C,
 not exit-expression or repetition detection.
+
+Halfway to the repetition stop (15 of 30 by default, rounded up), the
+streaming path also raises a **nonterminal early warning**, which
+[automatic steering](automatic-steering.md) turns into a message to the
+agent or a one-line notice. The warning never moves the stop: a run that
+keeps repeating is still stopped at exactly the configured count, and a
+chunk that crosses both counts only stops.
 
 ### Aborted, not timed out
 

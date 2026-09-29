@@ -102,6 +102,13 @@ errors; 130 when you cancel). Which sessions can receive a message is decided
 by reviewed provider evidence; today every session is listed with the reason it
 cannot be steered yet. See [`claudine steer`](docs/cli/steer.md).
 
+When a wrapped agent starts repeating itself, Claudine also tries to help on
+its own: halfway to the repetition stop it sends the agent a short "check your
+progress" message, or prints one notice when that session cannot receive it.
+The stop itself is unchanged. Turn this off with `CLAUDINE_AUTO_STEER=off` or
+`"steering": { "automatic": { "enabled": false } }` in user or repo config. See
+[Automatic Steering](docs/topics/automatic-steering.md).
+
 ### Composition
 
 Claudine's composition features let you use Markdown as a dynamic template for agentic CLI sessions, leveraging [Darkmatter](../darkmatter/README.md)'s composition pipeline (transclusion, interpolation, conditionals, shell commands).
@@ -271,6 +278,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting, diagnostics, and steering audit records
 - [`claudine steer`](./docs/cli/steer.md) - Sending a message to a running session: selection, interruption consent, receipts, exit codes, and the JSON contract
 - [Steering Routing](./docs/topics/steering-routing.md) - Per-execution steering ownership, local routing through the Rendezvous daemon, and session discovery
+- [Automatic Steering](./docs/topics/automatic-steering.md) - Early repetition warnings sent to the looping agent, the three-opportunity cap, recovery, and `CLAUDINE_AUTO_STEER`
 - [Secret Recognition](./docs/topics/secret-recognition.md) - The shared credential recognizer behind scrubbing, webhook redaction, wrapper sanitization, and steering log masking
 - [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider
 - [Non-Interactive Sessions](./docs/topics/non-interactive-sessions.md) and [Mixing Events into Non-Interactive Sessions](./docs/topics/mixing-events-into-non-interactive-sessions.md)

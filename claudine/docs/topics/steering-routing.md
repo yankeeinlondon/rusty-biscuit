@@ -14,7 +14,8 @@ question, answered by [Steering Activation](steering-activation.md).
 > as unavailable with the block's reason. Every other wrapped launch maps to no
 > profile and lists as unavailable for that reason. The
 > [`claudine steer`](../cli/steer.md) command is the production requester.
-> Automatic repetition warnings and the other adapters are **planned**.
+> [Automatic repetition help](automatic-steering.md) submits to the owner's
+> controller directly. The other provider adapters are **planned**.
 
 ## The three roles
 
@@ -103,8 +104,12 @@ The deadline covers queue wait as well as submission:
 Every request, including refusals, is audited by the owner (see
 [Traces and Logging](traces-and-logging.md#steering-audit-records)).
 
-The controller needs no daemon. Automatic help raised inside the owner calls it
-directly, so it keeps working when Rendezvous is not running.
+The controller needs no daemon. [Automatic help](automatic-steering.md) raised
+inside the owner calls it directly, so it keeps working when Rendezvous is not
+running. When a content guard stops the run, automatic help stops the
+controller: queued requests are answered `unavailable` and a submission in
+progress is abandoned as `unknown`, so nothing reaches the provider after the
+decision to terminate it.
 
 ### Where the profile and adapter come from
 
