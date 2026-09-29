@@ -51,7 +51,9 @@ Use the `rule` / `action` form when specifying a different action. The default
 frontmatter key is `content_policy`, in snake_case like the repository's other
 frontmatter keys, and the caller can configure a different one. A document
 without a policy always gets a default policy: `ValidFor(6mo)` unless the
-caller replaces it. A caller can replace the default but not remove it.
+caller replaces it. A caller can replace the default but not remove it. An empty
+list, `content_policy: []`, is an error rather than "no policy"; a document that
+should never expire declares `Evergreen`.
 
 There are two baseline forms:
 
