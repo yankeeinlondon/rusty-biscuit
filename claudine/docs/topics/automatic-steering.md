@@ -9,10 +9,12 @@ STDERR, and how to turn it off.
 Automatic steering never replaces the guard. A run that keeps repeating is
 still stopped at exactly the same point as before.
 
-> **Status:** implemented. No provider is enabled for delivery yet (Pi's
-> managed profile is blocked by the reviewed activation policy; see
-> [Steering Activation](steering-activation.md)), so today every warning
-> produces the "cannot send" notice described below.
+> **Status:** implemented. Delivery is enabled for Claudine-managed Codex
+> runs on macOS at Codex 0.157.1 ([Managed Codex app-server execution](codex-app-server.md)):
+> the warning is sent over `turn/steer` and reaches the model at its next tool
+> boundary. Every other session (other providers, versions, and platforms; Pi's
+> managed profile is blocked) produces the "cannot send" notice described
+> below. See [Steering Activation](steering-activation.md).
 
 ## What happens, step by step
 

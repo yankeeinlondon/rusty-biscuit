@@ -134,8 +134,9 @@ producing zero bytes still allows `step_timeout` to fire normally; the
 byte heartbeat does not mask genuine hangs.
 
 One kind of line is excluded: on a launch driven by a control session
-(Pi's `--mode rpc`), a reply to a command Claudine itself sent — the
-readiness check, the task, a steering message, a settlement check — is
+(Pi's `--mode rpc`, Codex's `app-server`), a reply to a command Claudine
+itself sent — the readiness check, the task, a steering message, a
+settlement check — is
 control traffic, not agent progress, so it does not refresh
 `last_byte_at`. Sending a steering message therefore never postpones a
 silence kill.
@@ -531,9 +532,11 @@ a lifecycle `failure`/`finalize` stack can branch on the `err` global
 `input_required` is not a content guard, but it ends the run the same way: a
 managed provider is waiting for human input that no one can give and that has
 no documented safe answer (for example, a Pi extension UI request whose method
-Pi does not document). Claudine never invents an answer, so the run is failed
-rather than left waiting; a retry would reach the same request. See
-[Managed Pi RPC execution](pi-rpc.md#unattended-requests).
+Pi does not document, or a Codex app-server request Claudine cannot read).
+Claudine never invents an answer, so the run is failed rather than left
+waiting; a retry would reach the same request. See
+[Managed Pi RPC execution](pi-rpc.md#unattended-requests) and
+[Managed Codex app-server execution](codex-app-server.md#unattended-requests).
 
 `repeated_stream_error` is an OpenCode-specific stderr backstop: consecutive
 `message="stream error"` records crossing `MAX_CONSECUTIVE_STREAM_ERRORS` (5)

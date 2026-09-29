@@ -15,11 +15,13 @@ target, and never interrupts a session without asking you first.
 > **What works today.** The command, listing, selection, consent, and receipts
 > are implemented. Which sessions can actually receive a message depends on
 > reviewed provider evidence
-> ([Steering Activation](../topics/steering-activation.md)), and currently
-> none can: a managed Pi RPC run is listed with a reviewed block, and every
-> other wrapped run is listed as not mapped to a steering launch profile.
-> Sessions started outside Claudine are not listed yet. Every row still
-> appears, with its reason.
+> ([Steering Activation](../topics/steering-activation.md)). Today that is a
+> non-interactive Codex run Claudine launched through Codex's app-server on
+> macOS with Codex 0.157.1
+> ([Managed Codex app-server execution](../topics/codex-app-server.md)): while
+> it works the message joins the running turn; while it is idle it starts a
+> turn. A managed Pi RPC run is listed with a reviewed block, and every other
+> run is listed with its own reason.
 
 ## Usage
 
@@ -123,8 +125,10 @@ install anything, or edit provider settings.
   ID. Sessions are deduplicated only when their identities prove they are the
   same session.
 - If a discovery source fails, the other sources' rows are still listed and
-  the failure is a warning on stderr. If every source fails (for example, the
-  local Rendezvous daemon is not running), the command fails.
+  the failure is a warning on stderr. For example, with no local Rendezvous
+  daemon running, managed sessions are missing but native Claude Code
+  sessions are still listed. Only when every source fails does the command
+  fail.
 
 ## Receipts
 
@@ -187,6 +191,14 @@ Status messages and warnings go to stderr, so stdout holds only the document.
 - `discovery_errors` lists sources that failed (secret-masked);
   `coverage_gaps` lists researched ways to find sessions that this build
   cannot run yet, so sessions they would find are missing.
+- Sessions started outside Claudine are listed where this build can find
+  them: today, Claude Code sessions from Claude's own session registry
+  ([Steering Routing — Native Claude Code sessions](../topics/steering-routing.md#native-claude-code-sessions)).
+  They appear with `origins: ["native"]` and, for now, as unavailable with
+  the reason.
+- Without a local Rendezvous daemon, managed sessions cannot be listed; the
+  listing still succeeds with the native sessions it found and a
+  `discovery_errors` entry for the `managed` source.
 
 `claudine steer --session <id> --json "<message>"`:
 

@@ -99,8 +99,9 @@ one (even when only one is available), or takes an exact ID from
 asks before interrupting a session, and reports only what the provider
 confirmed (exit 0 for accepted, queued, or delivered; 1 otherwise; 2 for usage
 errors; 130 when you cancel). Which sessions can receive a message is decided
-by reviewed provider evidence; today every session is listed with the reason it
-cannot be steered yet. See [`claudine steer`](docs/cli/steer.md).
+by reviewed provider evidence: today that is a non-interactive Codex run
+Claudine launched on macOS with Codex 0.157.1; every other session is listed
+with the reason it cannot be steered. See [`claudine steer`](docs/cli/steer.md).
 
 When a wrapped agent starts repeating itself, Claudine also tries to help on
 its own: halfway to the repetition stop it sends the agent a short "check your
@@ -237,6 +238,12 @@ templates, and context files left enabled; Claudine answers extension dialogs
 with Pi's documented cancellation and falls back to Pi's JSON stream only
 before the task is sent. See
 [Managed Pi RPC execution](./docs/topics/pi-rpc.md).
+
+Non-interactive Codex runs use Codex's app-server when every `codex exec`
+option maps exactly to it (same output, final answer, and exit code as
+`codex exec`), which lets the run be steered; any other run stays on
+`codex exec`. See
+[Managed Codex app-server execution](./docs/topics/codex-app-server.md).
 
 
 ## More Information

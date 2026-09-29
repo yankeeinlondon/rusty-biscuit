@@ -7,15 +7,23 @@ reaches that owner, how steerable sessions are listed, and what every failure
 looks like. Whether a given session *can* be steered at all is a separate
 question, answered by [Steering Activation](steering-activation.md).
 
-> **Status:** ownership, local routing, and discovery are implemented, as is the
-> first provider adapter: a managed Pi RPC launch registers under the
-> `retained-rpc` profile with the `pi-rpc` executor ([Managed Pi RPC
-> execution](pi-rpc.md)). The reviewed policy blocks that profile, so it lists
-> as unavailable with the block's reason. Every other wrapped launch maps to no
-> profile and lists as unavailable for that reason. The
-> [`claudine steer`](../cli/steer.md) command is the production requester.
-> [Automatic repetition help](automatic-steering.md) submits to the owner's
-> controller directly. The other provider adapters are **planned**.
+> **Status:** ownership, local routing, and discovery are implemented, with
+> two provider adapters:
+>
+> - a managed Codex app-server launch registers under the `managed-app-server`
+>   profile with the `codex-app-server` executor
+>   ([Managed Codex app-server execution](codex-app-server.md)) and records the
+>   Codex version it read at start-up; on macOS at Codex 0.157.1 it lists as
+>   steerable;
+> - a managed Pi RPC launch registers under the `retained-rpc` profile with the
+>   `pi-rpc` executor ([Managed Pi RPC execution](pi-rpc.md)); the reviewed
+>   policy blocks that profile, so it lists as unavailable with the block's
+>   reason.
+>
+> Every other wrapped launch maps to no profile and lists as unavailable for
+> that reason. The [`claudine steer`](../cli/steer.md) command is the
+> production requester. [Automatic repetition help](automatic-steering.md)
+> submits to the owner's controller directly.
 
 ## The three roles
 
@@ -113,16 +121,18 @@ decision to terminate it.
 
 ### Where the profile and adapter come from
 
-A wrapped launch driven by a retained-stdin control session (today, Pi's
-`--mode rpc`) registers under the research profile that session names and
-submits through the session's adapter. The session also keeps the controller
-current: the provider's state (`working` on each turn start, `idle` on
-settlement), its conversation (each change starts a new generation), and its
-process identity. Every other launch registers with no profile, which lists
-as unavailable with "this launch is not mapped to a researched steering launch
-profile". The provider version is not established by the wrapper yet, and it
-is not needed while every mapped profile is blocked, because a block is checked
-before the version.
+A wrapped launch driven by a retained-stdin control session (today, Codex's
+`app-server` and Pi's `--mode rpc`) registers under the research profile that
+session names and submits through the session's adapter. The session also
+keeps the controller current: the provider's state (`working` on each turn
+start, `idle` when the turn completes or the run settles), its conversation
+(each change starts a new generation), its process identity, and — when the
+provider reports one before the task starts, as Codex's `initialize` does —
+its exact version (`SteeringController::set_provider_version`). A grant
+applies only at that exact version; a session whose version is unknown is
+never guessed steerable. Every other launch registers with no profile, which
+lists as unavailable with "this launch is not mapped to a researched steering
+launch profile".
 
 ## What the router guarantees
 
@@ -168,8 +178,52 @@ Nothing fails the wrapped agent task:
   never listed with a guessed operation.
 - **Native** — provider-specific discoverers for researched discovery methods
   (`discovery` records in `docs/research/steering/<slug>.md`, projected into the
-  generated catalog). None is implemented yet; each researched native method
-  on this OS is reported as a coverage gap rather than an error.
+  generated catalog), under `claudine::steering::native`. Every researched
+  native method this build does not run is reported as a coverage gap rather
+  than an error.
+
+### Native Claude Code sessions
+
+Claude Code writes one record per running process to
+`$CLAUDE_CONFIG_DIR/sessions/<pid>.json` (default `~/.claude/sessions/`). The
+Claude registry discoverer reads those files — it never opens a socket, reads
+a credential, or asks the session anything — and lists a record only when it
+names a live session:
+
+- its process is running, and started no later than the record's `startedAt`
+  (a record left behind by an exited session whose PID was reused names a
+  newer process, and is dropped);
+- `pid`, `sessionId`, `startedAt`, `kind`, and `entrypoint` are present and
+  well-typed (a damaged file is skipped with a trace, and never hides the
+  others).
+
+The row's ID is `native:claude:<pid>:<process start>:<sessionId>`, its state
+comes from the record's `status` (`busy` → working, `idle` → idle, anything
+else → unknown), and a terminal session (`kind: interactive`,
+`entrypoint: cli`) maps to the researched `ordinary-interactive` profile.
+SDK and print-mode sessions (`entrypoint: sdk-*`) are listed without a
+profile, because the registry does not say whether they are one-shot or
+retained. Claude Code's peer-messaging delivery is researched but not
+implemented or verified, so every native Claude row is listed as unavailable
+with the specific reason.
+
+A native row in `claudine steer --list --json` (abridged):
+
+```json
+{
+  "id": "native:claude:4242:1790657970:3f1c9b1e-7a2d-4e53-9b8e-0c1d2e3f4a5b",
+  "provider": "claude",
+  "name": "fix the parser",
+  "cwd": "/work/project",
+  "state": "working",
+  "origins": ["native"],
+  "launch_profile": "ordinary-interactive",
+  "provider_version": "2.1.284",
+  "availability": "unavailable",
+  "operation": null,
+  "reason": "`peer-unix-active` has no reviewed live verification for this provider version and launch profile; …"
+}
+```
 
 ```rust
 let managed: Arc<dyn ManagedSource> = Arc::new(DaemonManagedSource);
@@ -224,6 +278,10 @@ listing document `claudine steer --list --json` prints wraps these rows; see
 - Controller: `lib/src/steering/controller/tests.rs` (fake executor, paused
   clock for deadlines).
 - Aggregator: `lib/src/steering/discovery/tests.rs`.
+- Claude Code registry discovery: `lib/src/steering/native/claude_registry/tests.rs`
+  (record robustness matrix, PID-reuse rejection, state and profile mapping,
+  directory scan) and `cli/tests/l1/steer_cli.rs` (a live and a stale record
+  through the shipped binary).
 - Router: `rendezvous/daemon/src/steering/tests.rs`; end to end over the real
   local endpoint, including shutdown with a connected owner and the check that
   no message text reaches the daemon's data directory:
@@ -234,6 +292,7 @@ listing document `claudine steer --list --json` prints wraps these rows; see
   service, scripted picker and consent, off-screen rendering, and
   daemon-backed end-to-end cases) and `cli/tests/l1/steer_cli.rs` (the shipped
   binary: exit codes, stdout/stderr, no configuration written).
+- The Codex adapter: see [Managed Codex app-server execution — Testing](codex-app-server.md#testing).
 - The Pi adapter: see [Managed Pi RPC execution — Testing](pi-rpc.md#testing).
 - L1 spawn fixtures point `RENDEZVOUS_ENDPOINT` at a private endpoint nothing
   listens on, so a wrapped test execution never registers with a developer's
