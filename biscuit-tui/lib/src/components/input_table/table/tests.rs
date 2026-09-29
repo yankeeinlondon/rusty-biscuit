@@ -1339,6 +1339,98 @@ fn very_long_static_values_saturate_instead_of_wrapping() {
     assert_eq!(compute_column_widths(state.columns(), state.rows(), 80), vec![60, 20]);
 }
 
+#[test]
+fn a_label_at_the_u16_boundary_saturates_its_preferred_width() {
+    for (label_width, preferred) in [(65_534, 65_534), (65_535, u16::MAX), (65_536, u16::MAX)] {
+        let columns = vec![static_column("a", "A"), text_column("t")];
+        let row = Row::new(vec![
+            RowCell::new("a", CellValue::StaticText("x".repeat(label_width))),
+            RowCell::new("t", CellValue::Text(String::new())),
+        ]);
+        let state = InputTableState::new(columns, vec![row]);
+        assert_eq!(
+            preferred_column_widths(state.columns(), state.rows())[0],
+            preferred,
+            "label of width {label_width}"
+        );
+    }
+}
+
+/// Two static columns whose preferred widths both saturate at `u16::MAX`, so
+/// their sum exceeds `u16`: ASCII labels either side of the boundary in
+/// column `a`, and a two-cell grapheme label of width 65 536 in column `b`.
+fn saturated_table() -> (InputTableState, Vec<(String, String)>) {
+    let labels: Vec<(String, String)> = vec![
+        ("x".repeat(65_534), "界".repeat(32_768)),
+        ("x".repeat(65_535), "b".into()),
+        ("x".repeat(65_536), "b".into()),
+        ("x".repeat(70_000), "b".into()),
+    ];
+    let columns = vec![static_column("a", "A"), static_column("b", "B"), text_column("t")];
+    let rows = labels
+        .iter()
+        .map(|(a, b)| {
+            Row::new(vec![
+                RowCell::new("a", CellValue::StaticText(a.clone())),
+                RowCell::new("b", CellValue::StaticText(b.clone())),
+                RowCell::new("t", CellValue::Text("X".into())),
+            ])
+        })
+        .collect();
+    (InputTableState::new(columns, rows), labels)
+}
+
+#[test]
+fn saturated_static_columns_render_clipped_at_every_width_without_overflow() {
+    let (mut state, labels) = saturated_table();
+    assert_eq!(
+        preferred_column_widths(state.columns(), state.rows()),
+        vec![u16::MAX, u16::MAX, 20]
+    );
+
+    for width in [0, 1, 2, 3, 26, 80, 200, u16::MAX - 1, u16::MAX] {
+        let widths = compute_column_widths(state.columns(), state.rows(), width);
+        let sum: u32 = widths.iter().map(|w| u32::from(*w)).sum();
+        assert!(sum <= u32::from(width), "{widths:?} exceeds {width}");
+        render_into(&mut state, width, 4);
+    }
+
+    // Tier 2 at 80: the text column keeps its budget, the static columns
+    // split the rest and clip with an ellipsis.
+    assert_eq!(compute_column_widths(state.columns(), state.rows(), 80), vec![30, 30, 20]);
+    let buf = render_into(&mut state, 80, 4);
+    assert_eq!(visible_text(&buf, 0, 0, 30), format!("{}…", "x".repeat(29)));
+    // Fourteen two-cell clusters fill 28 cells; the fifteenth would straddle
+    // the ellipsis cell, so it is dropped rather than split.
+    assert!(
+        visible_text(&buf, 0, 30, 60).starts_with(&format!("{}…", "界".repeat(14))),
+        "{:?}",
+        visible_text(&buf, 0, 30, 60)
+    );
+    for y in 0..4 {
+        assert_eq!(column_of(&buf, y, "X"), Some(60), "row {y}");
+    }
+
+    // The widest area a terminal can report: the sum is exact and the text
+    // column still gets its budget.
+    let widths = compute_column_widths(state.columns(), state.rows(), u16::MAX);
+    assert_eq!(widths.iter().map(|w| u32::from(*w)).sum::<u32>(), u32::from(u16::MAX));
+    assert_eq!(widths[2], 20);
+    let buf = render_into(&mut state, u16::MAX, 4);
+    assert_eq!(column_of(&buf, 3, "X"), Some(u16::MAX - 20));
+
+    // One cell: the first static column shows only the ellipsis.
+    let buf = render_into(&mut state, 1, 4);
+    assert_eq!(row_text(&buf, 0), "…");
+
+    let outcome = InputTable.handle_event(&mut state, ctrl(KeyCode::Char('s')));
+    assert_eq!(outcome, EventOutcome::Submitted);
+    for (row, (a, b)) in labels.iter().enumerate() {
+        assert_eq!(state.value()[row].get("a"), Some(&CellValue::StaticText(a.clone())));
+        assert_eq!(state.value()[row].get("b"), Some(&CellValue::StaticText(b.clone())));
+    }
+}
+
 // -- Focus styling ----------------------------------------------------------
 
 /// The review-screen shape: a `Step` label and provider and model choices.
