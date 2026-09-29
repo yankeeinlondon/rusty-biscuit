@@ -129,8 +129,9 @@ listener.apply_route_env(&mut command);
 A Level 3 test presses a real key: the event starts where a physical keypress
 starts, before the terminal. Most of Claudine's L3 tests do that on the user's
 own desktop, so they raise a window and need `just test-l3`'s attended-run
-confirmation. On Linux, `level3_drain_ctrl_c.rs` does it on a display of its
-own instead, and never touches the user's desktop:
+confirmation. On Linux, `level3_drain_ctrl_c.rs` and
+`level3_sequence_review_screen_keys.rs` do it on a display of their own
+instead, and never touch the user's desktop:
 
 ```mermaid
 flowchart LR
@@ -152,6 +153,11 @@ assert_second_press_during_the_drain_exits_130(&mut harness, DrainCommand::Compo
 });
 ```
 
+- `press_ctrl` presses a Ctrl+letter chord and `press_escape` presses
+  Escape. The sequence review screen's test presses `Ctrl+S`, `Esc`, and
+  `Ctrl+C` this way and checks what each one started: the fixture's fake
+  providers record every launch, and its `shell` and `side_effect` steps
+  write a file, so a cancelled screen leaves both empty.
 - The host needs `Xvfb` and `kitty` on `PATH` (Debian and Ubuntu packages
   `xvfb` and `kitty`). Without them the tests skip. No window manager is
   needed.

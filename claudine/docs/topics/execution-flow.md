@@ -671,6 +671,17 @@ For example, a `prompt`, `shell`, `prompt` sequence shows rows `1` and `3`;
 a choice on row `3` changes the third target and leaves the second target and
 its reasons untouched.
 
+Each step's target is the plan its launch falls back to. When the step's
+launch identity is rebuilt from the document it runs (every attempt, retry,
+resume, and proxy adoption), the provider is the explicit flag, then the
+document's `agent`, then the planned provider; the model is `--model`, then
+the document's `model` (behind the environment's model variables, as in
+[Model Resolution](#model-resolution)), then the planned model, used only
+while the rebuild keeps the planned provider. Outside a sequence the planned
+model is the invocation's own, except that a model the launched document's
+frontmatter chose is re-read from each refreshed document, so a retry after
+`model:` is removed launches without it.
+
 **Affected by:**
 
 | Input                          | Impact                                                     |

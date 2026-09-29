@@ -121,6 +121,24 @@ document's own `agent` and `model`:
 from the step's `params`, and a caller setter overrides both. The planned
 target is only the fallback for a step whose document names no agent.
 
+The model follows the same order: `--model` first, then the step document's
+own `model`, then the planned model. The planned model is used only while
+the step runs on the planned provider; a step whose document moves it to
+another provider gets that provider's own default. A `MODEL` or
+provider-specific model variable in the environment outranks a document's
+`model`, as it does for `compose`, but not the planned model, which already
+started from it.
+
+```yaml
+agent: claude
+model: claude-opus-4-8              # the planned model
+sequence:
+    - name: draft
+      prompt: "@prompts/draft.md"   # names no model: runs claude-opus-4-8
+    - name: polish
+      prompt: "@prompts/polish.md"  # declares model: sonnet, so it runs sonnet
+```
+
 ```yaml
 agent: claude                  # plans the run; also runs body steps
 sequence:
@@ -137,14 +155,16 @@ That split has some surprising effects:
   error), even when every step names its own provider. Give the sequence
   document an `agent` of its own to avoid this.
 - **A review-screen choice is ignored** for a step whose document names an
-  agent. It takes effect only for steps that name none.
+  agent. It takes effect only for steps that name none. A model choice is
+  likewise ignored for a step whose document names a model.
 - **An `agent=` setter overrides every step**, because caller setters outrank
   `params` and the prompt's frontmatter.
 - **The step's status line reports the planned target**, not the provider
   that launched, so a step that ran on Codex can print
   `succeeded (via Claude)`. The same goes for `{{ env.AGENT }}` and
-  `{{ env.MODEL }}` inside the composed prompt. The provider's own process
-  gets the correct `AGENT` and `MODEL`.
+  `{{ env.MODEL }}` inside the composed prompt, which differ from the launch
+  only when the step's document names its own agent or model. The provider's
+  own process gets the correct `AGENT` and `MODEL`.
 - **A step naming a provider that isn't installed fails at its turn**, after
   earlier steps have already run.
 
