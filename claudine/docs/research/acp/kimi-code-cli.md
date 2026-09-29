@@ -10,8 +10,8 @@ prompt: |-
     4. Show how the Rust client we've created can use things like `mpsc` channels to send Kimi's streaming text to a desktop desktop app framework like Tauri or iced
 
 last_updated: 2026-02-21
-update_policy:
-    - Duration(6 mo)
+content_policy:
+  - ValidFor(6mo)
 ---
 
 ## Kimi Code's JSON-RPC API

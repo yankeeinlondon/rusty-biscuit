@@ -20,8 +20,8 @@ prompt: |-
     Your research content should be added to the body of this document along with ensuring that the Frontmatter properties above are updated while preserving all other markdown properties.
 
 last_updated: 2026-02-22
-update_policy:
-    - Duration(6 mo)
+content_policy:
+  - ValidFor(6mo)
 ---
 
 ## Gemini CLI ACP deep dive

@@ -20,9 +20,8 @@ prompt: |-
 
 last_updated: 2026-02-21
 latest_version: "2.0"
-update_policy:
-    - MajorVersion(latest_version)
-    - Duration(1 year)
+content_policy:
+  - ValidFor(1yr) # pending: MajorVersion(latest_version)
 ---
 
 # JSON-RPC Protocol Overview
