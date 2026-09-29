@@ -9,8 +9,8 @@ $schema:
     created: date(required) -> Date this document was first written; kept unchanged on refresh
     last_updated: date(required) -> Date of the research run that produced this version
     agent: enum(codex,claude,opencode; required) -> Agentic CLI that performed the research; it must be the one the fleet assigned to this provider
-    model: enum(gpt-6-luna,sonnet,zai-coding-plan/glm-5.3; required) -> Model that performed the research, as the agent reports it at run time; a default or unnamed model is rejected
-    reasoning_effort: enum(high,provider_default; required) -> Reasoning effort the research ran with; provider_default only where the fleet assigns none
+    model: enum(gpt-6.1-sol,sonnet,zai-coding-plan/glm-5.3; required) -> Model that performed the research, as the agent reports it at run time; a default or unnamed model is rejected
+    reasoning_effort: enum(low,medium,high,provider_default; required) -> Reasoning effort the research ran with; provider_default only where the fleet assigns none
     versions_examined: version[](required)@./_types.yaml -> Provider versions whose documentation, source, or behavior was examined
     evidence: evidence[](required)@./_types.yaml -> Every source a claim in this document rests on
     interface_inventory: interface[](required)@./_types.yaml -> Every control interface that was considered, including the ones ruled out

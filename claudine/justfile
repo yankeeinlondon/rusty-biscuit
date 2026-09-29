@@ -401,7 +401,7 @@ research topic *args="":
         case "$agent" in
             opencode) model="zai-coding-plan/glm-5.3" ;;
             claude) model="sonnet"; effort=(-- --effort high) ;;
-            codex) model="gpt-6-luna"; effort=(-- -c model_reasoning_effort=high) ;;
+            codex) model="gpt-6.1-sol"; effort=(-- -c model_reasoning_effort=medium) ;;
         esac
         cargo run -q -p claudine-cli --bin claudine -- sequence "$prompt" -y "--$agent" --model "$model" \
             {{args}} "$@" ${effort[@]+"${effort[@]}"} > "$logs/$log.log" 2>&1

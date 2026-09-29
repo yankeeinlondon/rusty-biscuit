@@ -5,8 +5,8 @@ topic: Steering
 # Research rotates over three agents by roster position. The order is chosen
 # so that no agent researches its own provider.
 agent: "{{ state.index % 3 == 1 ? 'opencode' : (state.index % 3 == 2 ? 'claude' : 'codex') }}"
-model: "{{ state.index % 3 == 1 ? 'zai-coding-plan/glm-5.3' : (state.index % 3 == 2 ? 'sonnet' : 'gpt-6-luna') }}"
-effort: "{{ state.index % 3 == 1 ? 'provider_default' : 'high' }}"
+model: "{{ state.index % 3 == 1 ? 'zai-coding-plan/glm-5.3' : (state.index % 3 == 2 ? 'sonnet' : 'gpt-6.1-sol') }}"
+effort: "{{ state.index % 3 == 1 ? 'provider_default' : (state.index % 3 == 2 ? 'high' : 'medium') }}"
 # A sequence plans one agent before any step exists, and Claudine cannot yet
 # set reasoning effort from a prompt. So the fleet runs once per agent, each
 # run naming its agent, model, and effort. A run researches only the providers
@@ -14,7 +14,7 @@ effort: "{{ state.index % 3 == 1 ? 'provider_default' : 'high' }}"
 #
 #   claudine sequence _fleet.md -y --opencode --model zai-coding-plan/glm-5.3
 #   claudine sequence _fleet.md -y --claude --model sonnet -- --effort high
-#   claudine sequence _fleet.md -y --codex --model gpt-6-luna -- -c model_reasoning_effort=high
+#   claudine sequence _fleet.md -y --codex --model gpt-6.1-sol -- -c model_reasoning_effort=medium
 # `only=<slug>` on the command line researches one provider, for a pilot or a repair.
 only: all
 # One provider's rejected research must not stop the others.
