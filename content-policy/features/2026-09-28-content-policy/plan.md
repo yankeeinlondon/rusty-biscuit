@@ -25,6 +25,21 @@ docs_updated_during_phase_2:
     - content-policy/docs/topics/policy-lifecycle.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - Cargo.lock
+    - content-policy/lib/Cargo.toml
+    - content-policy/lib/src/lib.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/tests/common/mod.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/renewal.rs
+docs_updated_during_phase_3:
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - content-policy
     - content-policy-cli
@@ -503,7 +518,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 6 (parallel)
 
-- [ ] **3.1 Renewal planner** (AC 6, 19, 25 library half)
+- [x] **3.1 Renewal planner** (AC 6, 19, 25 library half)
     - Renewal covers **every** renewable entry.
     - The update date defaults to today's UTC date from an injected clock, and
       a future date is rejected.
@@ -520,7 +535,7 @@ Phase 2 and on tasks 1.2 and 1.3.
       and no partial plan.
     - The plan carries an `xxh64` plan fingerprint of the bytes it was read
       from, via `biscuit-hash`.
-- [ ] **3.2 Span-targeted editor** (AC 12, 14, 29 renewal half, 30, 31)
+- [x] **3.2 Span-targeted editor** (AC 12, 14, 29 renewal half, 30, 31)
     - Translate spans from the frontmatter slice into whole-file offsets.
     - Narrow the edit to the date inside a plain or single-quoted rule string.
     - Fill `last_updated:` → `last_updated: 2026-09-28`, and write
@@ -547,7 +562,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 7
 
-- [ ] **3.3 Apply and safety net** (AC 12, 31)
+- [x] **3.3 Apply and safety net** (AC 12, 31)
     - `apply` re-reads the file, compares the plan fingerprint, and on a
       mismatch returns a conflict and writes nothing.
     - Before writing, re-parse the edited text. If anything other than the
@@ -561,9 +576,9 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Phase 3 checkpoint
 
-- [ ] `just test` passes. Through the library, with an injected clock, all
+- [x] `just test` passes. Through the library, with an injected clock, all
   eight lifecycle steps give the stated results.
-- [ ] Renewal of each migrated document from 1.5 in a temp copy is byte-exact
+- [x] Renewal of each migrated document from 1.5 in a temp copy is byte-exact
   apart from `last_updated`, and apart from the listed tab repair for the eight
   tab-indented documents.
 

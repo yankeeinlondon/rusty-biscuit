@@ -21,6 +21,21 @@ docs_updated_during_phase_2:
     - content-policy/docs/topics/policy-lifecycle.md
 docs_created_during_phase_2: []
 skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - Cargo.lock
+    - content-policy/lib/Cargo.toml
+    - content-policy/lib/src/lib.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/tests/common/mod.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/renewal.rs
+docs_updated_during_phase_3:
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
 packages:
     - content-policy
     - content-policy-cli
@@ -404,3 +419,154 @@ that bear on them:
   "are planned to be migrated" and that the three `last_updated` writers
   "currently stamp the local date"; both were done in Phase 1 and now read as
   done.
+
+## Phase 3
+
+### 3.1 Renewal planner (`lib/src/renew.rs`)
+
+- Public API: `plan_renewal(bytes, &RenewalContext) -> Result<RenewalPlan,
+  RenewalError>`; `RenewalContext::new(today)` takes the current UTC date as
+  an injected value (`RenewalContext::now()` reads the system clock), `.on(date)`
+  sets the update date, plus `with_options` / `with_document`. A future update
+  date is `RenewalError::FutureDate`.
+- Planning validates by running `evaluate_record` at 00:00 UTC of the update
+  date, so a malformed declaration or a present non-date baseline is
+  `RenewalError::Invalid` with the evaluator's own diagnostics (renewal never
+  repairs). Duplicate keys reuse the evaluator's diagnostic through a new
+  shared `evaluate::duplicate_key_invalid` (extracted, no behavior change).
+- Every `ValidFor` entry yields a write: inline → `BaselineTarget::Inline
+  {entry}`, `@name` → `Property {name}`, shorthand → the configured date
+  property. Writes to one target consolidate into one `BaselineChange` listing
+  every entry. Differing values for one property are a `DifferentWrites`
+  conflict (unreachable with time rules, which all write the update date;
+  unit-tested on the private `consolidate` so Phase 5's fingerprint writes
+  inherit it). A renewed property that a `ValidUntil(@name)` also reads is a
+  `MovesDeadline` conflict.
+- `ChangeKind`: `renewed`, `new_baseline` (absent or `null`), and
+  `unchanged` (already the update date; no byte edit). `nothing_to_renew()`
+  is an empty `changes` list; such a plan lists no tab repair and applies to
+  the same bytes.
+- Everything is planned before any edit: all refusals and conflicts are
+  collected, and any one means no plan.
+- The plan carries `fingerprint` (`xxh64:` + 16 hex via
+  `biscuit_hash::xx_hash_bytes`, public helper `plan_fingerprint`) and the
+  evaluated `PolicySummary`. It derives `Serialize` for Phase 4's `--json`;
+  field names are **not frozen yet**.
+- **Decision (spec silent):** a caller's default policy with an inline
+  baseline, such as `ValidFor(3mo, 2026-01-01)`, cannot be renewed because the
+  date is not in the document; it is refused as `not_in_document`.
+
+### 3.2 Span-targeted editor
+
+- Values are located with `locate_yaml_value` / `locate_yaml_key` on the
+  frontmatter slice. For tab-indented frontmatter the locator runs on the
+  **repaired** YAML (valid YAML), and offsets map back to the document through
+  the repair (`Yaml::to_document`); targets never fall inside the leading
+  whitespace the repair rewrites. Unit test:
+  `renew::tests::located_offsets_map_back_through_the_tab_repair`.
+- Inline dates: the rule string is located (compact item, or `Key("rule")`
+  of a long-form item), unquoted (plain, `'…'`, or `"…"` without `\`), checked
+  against the parsed rule text, and the edit narrows to the baseline date.
+- Null fill: `~`/`null` spans are replaced; an empty value gets ` <date>`
+  right after the colon, so `last_updated:   # todo` becomes
+  `last_updated: 2026-09-28   # todo`.
+- Missing properties: one insertion holding every new line, at the end of the
+  block with the preceding line's terminator (the fence's for an empty block);
+  no frontmatter → a new block after any BOM with the body's first terminator
+  (LF when there is none).
+- **Departure from the spec (logged, not in the spec):** when the block ends
+  with a clip- or keep-chomped block scalar (`note: |`, `note: >+`), a line
+  appended after it changes that scalar's value (`"text"` → `"text\n"`),
+  because the reader parses without the final terminator (AC 28). The safety
+  net caught it on the first run. The spike counted 42 repository files ending
+  this way, so refusing them was a poor outcome; the new property is inserted
+  **in front of that last top-level entry** instead. Strip-chomped (`|-`)
+  scalars append at the end as usual. Documented on the topic page.
+- Refusals (`RefusalReason`): `flow_list` (the policy value after the key
+  starts with `[`), `multi_line_value`, `escaped_string`,
+  `anchor_alias_or_tag` (on the value, or on the policy list itself),
+  `flow_mapping` (`- {rule: …}` when the rule must change), `unterminated_block`,
+  `near_miss_fence`, `span_mismatch`, `not_locatable`, `not_in_document`. The
+  first three messages show the block-list form with the entry's rule.
+- **Biscuit File finding (not fixed here):** `locate_yaml_value` returns the
+  header `>-` as a one-line value for a block-scalar *sequence item*
+  (`- >-\n    ValidFor(…)`), although its module docs say block scalars yield
+  `None`. Renewal treats any located value that is a block scalar header as
+  `multi_line_value`. A Biscuit File fix is a candidate follow-up; it would not
+  change renewal's behavior.
+- Edits are applied with `apply_edit_set`; rejected (overlapping or
+  out-of-range) edits trip the safety net.
+
+### 3.3 Apply and safety net
+
+- `RenewalPlan::apply_to(bytes)` refuses bytes whose fingerprint differs
+  (`ModifiedSincePlan`), applies `edits` + `tab_repair`, and verifies the
+  result: it must read without a repair, keep every byte before and after the
+  frontmatter block, and read as exactly the original record with the planned
+  values written (for inline targets, the rule string with its date replaced).
+  Otherwise `SafetyNet` names the keys that would change. `plan_renewal` runs
+  the same check, so a preview never shows an edit that apply would refuse.
+- `apply_renewal(path, &plan)` is the shared file helper: it re-reads the
+  file, calls `apply_to`, and writes only when bytes change.
+- Atomic write: no helper exists in Biscuit File (checked), and `tempfile`
+  would be a new runtime dependency against AC 22, so the write is std-only:
+  a sibling `create_new` temporary file, `sync_all`, the original's
+  permissions, then `rename`; the temporary is removed on failure. A symlinked
+  document is written through to its target, so the link survives.
+
+### Tests, placement, and gates
+
+- New integration binary `lib/tests/renewal.rs` (22 tests, L1, no tier
+  marker; the library keeps Cargo's per-file discovery), plus 7 unit tests in
+  `renew::tests` (one `#[cfg(unix)]`: the symlink write-through).
+- The 23 migrated documents moved from a local array in
+  `tests/evaluation.rs` to `tests/common/mod.rs` (`MIGRATED_DOCUMENTS`, still
+  `include_bytes!`), used by `evaluation` and `renewal`. Per
+  `docs/cicd/test-inputs.md`, a path in a shared helper schedules every L1 test
+  in each binary that includes it; only these two binaries include it, and
+  both need the documents.
+- Smell grep over `renew.rs`: `unwrap_or_default()` on the record when there
+  is no frontmatter (no frontmatter *is* an empty record by definition), and
+  `.ok()?` in `inline_date`, whose `None` becomes a `span_mismatch` refusal.
+  Both justified; no `#[serde(default)]`.
+- `just test` in `content-policy/`: 87 passed. `just lint` (clippy
+  `--all-targets -D warnings` for both crates, plus `deps-check` for default
+  and `--all-features`): clean. `just check-tier-coverage content-policy`:
+  nothing stranded.
+- `just cross-check content-policy --os windows` (native Windows): 86 passed
+  (the Unix-only symlink test is not compiled there). `--os linux`: pass. WSL2
+  was not run; the new OS-sensitive code is the rename-based write, which
+  Linux and native Windows cover.
+- No skipped or pre-existing failures in the `content-policy` scope.
+
+### Requirement → test map
+
+| Requirement | Test(s) |
+| --- | --- |
+| AC 6 only targets change, settings kept, shared writes consolidated, conflicts and incomplete capture rejected | `renewal::every_renewable_entry_is_renewed_and_nothing_else_changes`, `renewing_a_referenced_deadline_is_a_conflict`, `one_refused_target_means_no_partial_plan`, `a_present_malformed_baseline_is_an_error`, `renew::tests::identical_writes_consolidate_and_different_ones_conflict` |
+| AC 7 (library, all eight steps, injected clock) | `renewal::lifecycle_steps_through_the_library` (on a temp file through `apply_renewal`; step 3 and 7 byte-exact) |
+| AC 12 bytes outside values unchanged; changed file refused | `darkmatter_comparison_table`, `spike_matrix_accepted_shapes`, `apply_writes_the_planned_bytes_and_refuses_a_changed_file` |
+| AC 14 flow list / multi-line / escapes refused naming the block list; evaluation still succeeds; flow list with outside target renews | `refused_shapes_name_their_reason`, `flow_lists_renew_only_outside_the_brackets` |
+| AC 17 quoted flow reference renews; unquoted is malformed | `spike_matrix_accepted_shapes` ("quoted flow-list reference"), `invalid_declarations_and_duplicate_keys_are_errors` |
+| AC 19 no frontmatter → new block, body unchanged | `a_document_without_frontmatter_gets_a_new_block` |
+| AC 23 identity unchanged by renewal | `renewal_keeps_the_policy_identity` |
+| AC 25 (library half) new baseline label, nothing to renew | `missing_and_null_targets_are_new_baselines`, `policies_without_a_renewable_entry_have_nothing_to_renew`, `a_plan_with_nothing_to_renew_writes_nothing` |
+| AC 27 (renewal half) tab repair listed and applied | `tab_indented_frontmatter_lists_and_applies_the_repair`, `migrated_documents_renew_byte_exactly` (8 tab-repaired) |
+| AC 29 (renewal half) zero-indent list edited in place | `spike_matrix_accepted_shapes` ("zero-indent list", "zero-indent long form") |
+| AC 30 Darkmatter table + mixed line endings | `darkmatter_comparison_table`, `mixed_line_endings_are_kept_per_line` |
+| AC 31 anchor/alias/tag, flow mapping, unterminated, `...`, `----`, span mismatch, safety net | `refused_shapes_name_their_reason`, `renew::tests::a_span_that_does_not_decode_to_the_parsed_value_is_refused`, `the_safety_net_refuses_a_corrupted_edit` |
+| Update date rules | `the_update_date_defaults_to_today_and_rejects_the_future`, `a_baseline_already_at_the_update_date_is_unchanged` |
+| Plan fingerprint | `the_plan_fingerprints_the_bytes_it_read` |
+| Checkpoint: migrated documents | `migrated_documents_renew_byte_exactly` (temp copies; only `last_updated` and tab-indented lines differ; each re-evaluates `fresh` with no warning) |
+
+### Docs
+
+- `docs/topics/policy-lifecycle.md`: status line (renewal built); "Renewal
+  is planned to edit" → present tense; new paragraphs on where a missing
+  property goes (including the trailing block-scalar rule, with an example),
+  the update date, `unchanged`, and malformed baselines; a new "Renew from a
+  Library" section with a Rust example, a plan/apply sequence diagram, and the
+  plan's fields. The `policy renew` CLI text stays **planned**.
+- `README.md`: status line and a paragraph on the renewal library API.
+- `docs/dependencies.md` (area): `xx_hash` also names the plan fingerprint;
+  the std-only atomic write; `tempfile` as a dev-dependency.
