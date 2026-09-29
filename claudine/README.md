@@ -214,6 +214,12 @@ and checks every reviewed activation grant against that research; it does not
 send messages or establish live steering support. See
 [Steering Activation](./docs/topics/steering-activation.md).
 
+Non-interactive Pi runs use Pi's RPC mode with extensions, skills, prompt
+templates, and context files left enabled; Claudine answers extension dialogs
+with Pi's documented cancellation and falls back to Pi's JSON stream only
+before the task is sent. See
+[Managed Pi RPC execution](./docs/topics/pi-rpc.md).
+
 
 ## More Information
 

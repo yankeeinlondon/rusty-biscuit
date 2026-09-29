@@ -5,12 +5,14 @@ been researched, live-tested, reviewed, and implemented for that exact kind of
 session. This page explains how those pieces fit together, how to check them,
 and how a mechanism is enabled.
 
-> **Status:** the typed facts, activation checks, and eligibility rules below
-> are implemented, as are managed control routing and session discovery (see
-> [Steering Routing](steering-routing.md)). The `claudine steer` command,
-> automatic repetition warnings, and every provider adapter are **planned**.
-> Until an adapter ships, every session reports steering as unavailable, each
-> with a specific reason.
+> **Status:** the typed facts, activation checks, eligibility rules, profile
+> blocks, managed control routing, and session discovery are implemented (see
+> [Steering Routing](steering-routing.md)). The first adapter, `pi-rpc`
+> revision 1, is implemented and reviewed ([Managed Pi RPC execution](pi-rpc.md)),
+> but its launch profile is **blocked** (see [Blocking a profile](#blocking-a-profile)),
+> and no grant exists. The `claudine steer` command, automatic repetition
+> warnings, and the other providers' adapters are **planned**. Every session
+> therefore reports steering as unavailable, each with a specific reason.
 
 ## What you can do today
 
@@ -42,11 +44,12 @@ pi: steering research has 2 error(s)
 | --- | --- | --- |
 | `docs/research/steering/<slug>.md` | research fleet | Discovery methods, mechanisms, capability cases, access, receipts, and live verification records with typed assertions |
 | `docs/research/non-interactive-sessions/<slug>.md` | research fleet | Execution interfaces and the preferred/fallback selection |
-| `docs/providers/steering-activation.yaml` | human review | Reviewed adapter revisions and exact activation grants |
+| `docs/providers/steering-activation.yaml` | human review | Reviewed adapter revisions, exact activation grants, and blocked launch profiles |
 
 Research describes what a provider does. The policy file records what Claudine
-has reviewed. A passing test in research grants nothing on its own, and a grant
-is rejected unless research supports every part of it.
+has reviewed. A passing test in research grants nothing on its own, a grant is
+rejected unless research supports every part of it, and a blocked profile can
+never be granted.
 
 The generator joins all three into `lib/src/steering/generated.rs`. The
 library adds the fourth, code-owned input: `IMPLEMENTED_ADAPTERS` in
@@ -57,8 +60,10 @@ list, so neither can enable an adapter without the other.
 
 ```mermaid
 flowchart TD
-    S[Observed session: provider, version, OS,<br/>launch profile, mode, origin, state] --> K{State and version known?}
-    K -- no --> U[Unavailable]
+    S[Observed session: provider, version, OS,<br/>launch profile, mode, origin, state] --> B{Launch profile blocked<br/>by the reviewed policy?}
+    B -- yes --> U[Unavailable]
+    B -- no --> K{State and version known?}
+    K -- no --> U
     K -- yes --> C{Researched case supports<br/>steering?}
     C -- no --> U
     C -- yes --> M{Mechanism operation fits the state<br/>and acknowledges early?}
@@ -75,7 +80,9 @@ flowchart TD
 Every "no" becomes a reason the user sees, such as
 `` `rpc-steer` has no reviewed live verification for this provider version and
 launch profile; it also requires setup: Owned RPC child, retained pipes, fresh
-get_state. ``
+get_state. `` A block is reported first and alone, because it does not depend
+on state or version: `steering is blocked for this launch profile: Pi offers
+no expected-session guard, …`.
 
 ### Manual and automatic eligibility differ
 
@@ -103,7 +110,8 @@ adapters:
   - id: pi-rpc
     revision: 1
     provider: pi
-    mechanism_ids: [rpc-steer]
+    mechanism_ids: [rpc-steer, rpc-idle-prompt, rpc-abort-submit]
+blocks: []
 grants:
   - provider: pi
     mechanism_id: rpc-steer
@@ -130,7 +138,8 @@ grants:
 - the adapter id and revision are reviewed and bind the mechanism;
 - each named verification record matches every dimension of the grant, passed,
   and is not an expected-loss record, and together they cover the operation's
-  required assertions.
+  required assertions;
+- no block names the grant's provider and profile.
 
 | Operation | Required assertions |
 | --- | --- |
@@ -138,14 +147,48 @@ grants:
 | `start_idle_turn` | `target_identity`, `acceptance_signal`, `conversation_delivery` |
 | `interrupt_then_submit` | `target_identity`, `acceptance_signal`, `cancellation_established`, `conversation_delivery` |
 
-The policy parser is strict. Both lists must be present (an empty `[]` means
-"nothing reviewed", but a missing or null list is an error), unknown keys and
-duplicate keys are errors, and string fields must be YAML strings: write
+The policy parser is strict. All three lists must be present (an empty `[]`
+means "nothing reviewed", but a missing or null list is an error), unknown keys
+and duplicate keys are errors, and string fields must be YAML strings: write
 `provider_version: "1.2"`, not `provider_version: 1.2`.
 
 Bump an adapter's revision whenever its protocol behavior changes. Existing
 grants then stop applying until someone re-reviews them against the new
 revision.
+
+## Blocking a profile
+
+A block is a reviewed refusal: "whatever the research and tests say, do not
+steer sessions launched with this profile". Use one when the evidence shows a
+profile cannot be targeted safely, so the listing states that reason instead of
+suggesting that more setup or verification would help.
+
+```yaml
+blocks:
+  - provider: pi
+    profile_id: retained-rpc
+    reason: >-
+      Pi offers no expected-session guard, and an enabled extension can switch
+      the session outside Claudine's control, so a message could be accepted
+      and then lost to the replaced session.
+```
+
+`claudine-gen` rejects a block that names a profile no researched case uses, a
+profile blocked twice, or an empty reason, and rejects every grant for a
+blocked profile. Lifting a block is a policy edit that must come with the new
+evidence that answers its reason.
+
+### The shipped Pi block
+
+Pi's managed RPC launch (`retained-rpc`) is blocked on every OS. Pi's `steer`
+and `prompt` act on whichever session is current and accept no expected
+session. The research record `pi-rpc-steer-switch-0844`, re-run against Pi
+0.87.1 with the same result, shows an extension holding a session switch while
+`get_state` still reports the old session: a steer sent at that moment is
+acknowledged and then lost. Claudine keeps extensions enabled, and its own
+mutation lock (see [Managed Pi RPC execution](pi-rpc.md#steering-adapter))
+cannot order a switch that an extension starts on its own, so no check before
+sending closes that window.
 
 ## Typed verification records
 
@@ -173,4 +216,6 @@ native`) is not evidence for a Claudine-managed launch (`origin: claudine`).
 
 - [Provider Metadata](./provider-metadata.md) — the generator and its other
   artifacts
+- [Managed Pi RPC execution](./pi-rpc.md) — the `pi-rpc` adapter and the
+  launch it steers
 - [Non-Interactive Sessions](./non-interactive-sessions.md)

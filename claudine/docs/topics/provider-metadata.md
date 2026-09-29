@@ -130,9 +130,12 @@ in render code).
   hard source collision rather than a fallback.
 - **Steering catalog** (`lib/src/steering/generated.rs`) — compiled from the
   `steering` and `non-interactive-sessions` research plus the hand-reviewed
-  `docs/providers/steering-activation.yaml`. Research facts and reviewed
-  activation grants are emitted as separate tables; generation fails when a
-  grant does not match its research exactly. See
+  `docs/providers/steering-activation.yaml`. Research facts, reviewed
+  adapters, activation grants, and blocked launch profiles are emitted as
+  separate tables; generation fails when a grant does not match its research
+  exactly or names a blocked profile. The research execution selection it
+  carries also chooses a provider's structured launch interface (Pi's RPC
+  mode; see [Managed Pi RPC execution](./pi-rpc.md)). See
   [Steering Activation](./steering-activation.md).
 - **Model catalog** (`unchained-ai/artifacts/models-catalog.json` + the vendored
   `families_generated.rs` slice) — model identity ground truth joined into

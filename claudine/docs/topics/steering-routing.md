@@ -7,16 +7,20 @@ reaches that owner, how steerable sessions are listed, and what every failure
 looks like. Whether a given session *can* be steered at all is a separate
 question, answered by [Steering Activation](steering-activation.md).
 
-> **Status:** ownership, local routing, and discovery are implemented. The
-> `claudine steer` command that drives them, automatic repetition warnings, and
-> every provider adapter are **planned**. Until an adapter ships, every managed
-> session registers and lists as unavailable, with its reason.
+> **Status:** ownership, local routing, and discovery are implemented, as is the
+> first provider adapter: a managed Pi RPC launch registers under the
+> `retained-rpc` profile with the `pi-rpc` executor ([Managed Pi RPC
+> execution](pi-rpc.md)). The reviewed policy blocks that profile, so it lists
+> as unavailable with the block's reason. Every other wrapped launch maps to no
+> profile and lists as unavailable for that reason. The `claudine steer`
+> command, automatic repetition warnings, and the other adapters are
+> **planned**.
 
 ## The three roles
 
 | Role | Where it lives | What it does |
 | --- | --- | --- |
-| **Owner** | The `claudine` wrapper running the agent (`cli/src/steering/owner.rs`) | One steering controller per provider child. It alone submits steering to the provider, one request at a time. |
+| **Owner** | The `claudine` wrapper running the agent (`cli/src/steering/owner.rs`) | One steering controller per provider child. It alone submits steering to the provider, one request at a time, through the provider's adapter when its launch has one. |
 | **Router** | The local Rendezvous daemon (`rendezvous-daemon`, `steering.rs`) | Holds live owner registrations in memory and carries one request to one owner and its reply back. |
 | **Requester** | Any other local `claudine` process (`cli/src/steering/requester.rs`) | Lists managed targets and routes a request to one of them. |
 
@@ -95,6 +99,19 @@ Every request, including refusals, is audited by the owner (see
 The controller needs no daemon. Automatic help raised inside the owner calls it
 directly, so it keeps working when Rendezvous is not running.
 
+### Where the profile and adapter come from
+
+A wrapped launch driven by a retained-stdin control session (today, Pi's
+`--mode rpc`) registers under the research profile that session names and
+submits through the session's adapter. The session also keeps the controller
+current: the provider's state (`working` on each turn start, `idle` on
+settlement), its conversation (each change starts a new generation), and its
+process identity. Every other launch registers with no profile, which lists
+as unavailable with "this launch is not mapped to a researched steering launch
+profile". The provider version is not established by the wrapper yet, and it
+is not needed while every mapped profile is blocked, because a block is checked
+before the version.
+
 ## What the router guarantees
 
 The daemon adds three RPCs to its local gRPC service (see
@@ -171,10 +188,10 @@ A row serializes as:
   "cwd": "/work/project",
   "state": "working",
   "origins": ["managed"],
-  "launch_profile": null,
+  "launch_profile": "retained-rpc",
   "provider_version": null,
   "availability": "unavailable",
-  "reason": "this launch is not mapped to a researched steering launch profile, so no steering route can be verified",
+  "reason": "steering is blocked for this launch profile: Pi offers no expected-session guard, and an enabled extension can switch the session outside Claudine's control, so a message could be accepted and then lost to the replaced session.",
   "setup_requirements": [],
   "observed_at": "2026-09-28T17:02:11Z"
 }
@@ -191,6 +208,7 @@ A row serializes as:
   `rendezvous/client/tests/steering_round_trip.rs`.
 - Owner link and requester: `cli/src/steering/tests.rs`. The daemon-backed
   cases need the CLI's `daemon-tests` feature (enabled in CI).
+- The Pi adapter: see [Managed Pi RPC execution — Testing](pi-rpc.md#testing).
 - L1 spawn fixtures point `RENDEZVOUS_ENDPOINT` at a private endpoint nothing
   listens on, so a wrapped test execution never registers with a developer's
   own daemon.
