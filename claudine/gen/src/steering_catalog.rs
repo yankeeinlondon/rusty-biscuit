@@ -7,8 +7,9 @@
 //!
 //! ## Source ownership
 //!
-//! - `docs/research/steering/<slug>.md` owns mechanisms, cases, access,
-//!   receipts, and live verification (with typed assertions).
+//! - `docs/research/steering/<slug>.md` owns discovery methods, mechanisms,
+//!   cases, access, receipts, and live verification (with typed assertions).
+//! - `docs/providers.yaml` owns the roster order listings sort by.
 //! - `docs/research/non-interactive-sessions/<slug>.md` owns execution
 //!   interfaces and the preferred/fallback selection.
 //! - [`ACTIVATION_POLICY`] owns reviewed adapter bindings and activation
@@ -21,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use claudine_catalog_types::steering::{
     AccessStatus, AssertionKind, CaseSupport, ConversationEffect, DeliveryBoundary, DeliveryState,
-    ExecutionInterfaceKind, ExecutionState, GuaranteeLevel, HostOs, LaunchMode, LaunchOrigin,
+    DiscoveryMethod, ExecutionInterfaceKind, ExecutionState, GuaranteeLevel, HostOs, LaunchMode, LaunchOrigin,
     OperationIntent, ReceiptTiming, SteeringTransport, VerificationOutcome,
 };
 use serde::Deserialize;
@@ -179,6 +180,7 @@ pub fn load_activation_policy(area: &Path) -> Result<ActivationPolicy, GenError>
 /// the runtime and the activation checker consume.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResearchSteering {
+    pub discovery: Vec<Discovery>,
     pub mechanisms: Vec<Mechanism>,
     pub cases: Vec<Case>,
     pub access: Vec<Access>,
@@ -214,6 +216,16 @@ pub struct Case {
     pub support: CaseSupport,
     pub mechanism_ids: Vec<String>,
     pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Discovery {
+    pub id: String,
+    pub profile_id: String,
+    pub os: HostOs,
+    pub origin: LaunchOrigin,
+    pub method: DiscoveryMethod,
+    pub prerequisites: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -355,6 +367,7 @@ pub fn project_research(slug: &str, steering: &Value, execution: &Value) -> Resu
 
     let selection: RawSelection = required(slug, execution, "execution_selection")?;
     Ok(ResearchSteering {
+        discovery: required(slug, steering, "discovery")?,
         mechanisms,
         cases: required(slug, steering, "cases")?,
         access: required(slug, steering, "access_findings")?,
@@ -616,7 +629,7 @@ pub fn build_steering_catalog(area: &Path) -> Result<String, GenError> {
     if !errors.is_empty() {
         return Err(GenError::SteeringActivationInvalid { errors: errors.join("\n") });
     }
-    emit_file(&providers, &policy)
+    emit_file(&providers, &active, &policy)
 }
 
 /// Byte-compares [`build_steering_catalog`] with the committed file.
@@ -664,6 +677,17 @@ fn struct_slice(items: Vec<String>) -> String {
 
 fn emit_provider(slug: &str, research: &ResearchSteering) -> Result<String, GenError> {
     let name = format!("{}_STEERING", slug.to_ascii_uppercase());
+    let discovery = research.discovery.iter().map(|d| {
+        format!(
+            "        SteeringDiscovery {{ id: {:?}, profile_id: {:?}, os: {}, origin: {}, method: {}, prerequisites: {} }},\n",
+            d.id,
+            d.profile_id,
+            variant("HostOs", d.os),
+            variant("LaunchOrigin", d.origin),
+            variant("DiscoveryMethod", d.method),
+            strs(&d.prerequisites),
+        )
+    });
     let mechanisms = research.mechanisms.iter().map(|m| {
         format!(
             "        SteeringMechanism {{\n            id: {:?},\n            transport: {},\n            request_format: {:?},\n            operation_intent: {},\n            conversation_effect: {},\n            delivery_boundary: {},\n            receipt_timing: {},\n            receipts: ReceiptGuarantees {{\n                request_acceptance: {},\n                persistence: {},\n                scheduling: {},\n                conversation_delivery: {},\n            }},\n            delivery_states: {},\n        }},\n",
@@ -731,7 +755,8 @@ fn emit_provider(slug: &str, research: &ResearchSteering) -> Result<String, GenE
         None => "None".into(),
     };
     Ok(format!(
-        "static {name}: ProviderSteering = ProviderSteering {{\n    mechanisms: {},\n    cases: {},\n    access: {},\n    verification: {},\n    execution_interfaces: {},\n    execution_selection: Some(ExecutionSelection {{ preferred: {:?}, fallback: {fallback} }}),\n}};\n",
+        "static {name}: ProviderSteering = ProviderSteering {{\n    discovery: {},\n    mechanisms: {},\n    cases: {},\n    access: {},\n    verification: {},\n    execution_interfaces: {},\n    execution_selection: Some(ExecutionSelection {{ preferred: {:?}, fallback: {fallback} }}),\n}};\n",
+        struct_slice(discovery.collect()),
         struct_slice(mechanisms.collect()),
         struct_slice(cases.collect()),
         struct_slice(access.collect()),
@@ -741,8 +766,13 @@ fn emit_provider(slug: &str, research: &ResearchSteering) -> Result<String, GenE
     ))
 }
 
-fn emit_file(providers: &[(&str, ResearchSteering)], policy: &ActivationPolicy) -> Result<String, GenError> {
+fn emit_file(
+    providers: &[(&str, ResearchSteering)],
+    roster: &[String],
+    policy: &ActivationPolicy,
+) -> Result<String, GenError> {
     let mut out = String::from("// GENERATED by claudine-gen — DO NOT EDIT BY HAND.\n//\n// Inputs:\n");
+    out.push_str("//   docs/providers.yaml (roster order)\n");
     for (slug, _) in providers {
         out.push_str(&format!("//   docs/research/{RESEARCH_TOPIC}/{slug}.md (researched steering facts)\n"));
         out.push_str(&format!("//   docs/research/{EXECUTION_TOPIC}/{slug}.md (execution interfaces)\n"));
@@ -773,6 +803,17 @@ fn emit_file(providers: &[(&str, ResearchSteering)], policy: &ActivationPolicy) 
         ));
     }
     out.push_str("    }\n}\n\n");
+
+    // Roster entries not yet wired as a `Provider` variant are skipped; they
+    // have no sessions to order.
+    let wired: BTreeSet<&str> = providers.iter().map(|(slug, _)| *slug).collect();
+    let ordered: Vec<String> = roster
+        .iter()
+        .filter(|slug| wired.contains(slug.as_str()))
+        .map(|slug| Ok(format!("Provider::{}", provider_variant(slug)?)))
+        .collect::<Result<_, GenError>>()?;
+    out.push_str("/// Wired providers in `docs/providers.yaml` roster order.\n");
+    out.push_str(&format!("pub(crate) static ROSTER_ORDER: &[Provider] = &[{}];\n\n", ordered.join(", ")));
 
     let mut adapters: Vec<_> = policy.adapters.iter().collect();
     adapters.sort_by(|a, b| (&a.id, a.revision).cmp(&(&b.id, b.revision)));

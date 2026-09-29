@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::identity::{RequestId, SteeringTargetId};
 use super::vocabulary::{OperationIntent, ReceiptStrength};
@@ -17,7 +17,7 @@ use super::vocabulary::{OperationIntent, ReceiptStrength};
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 
 /// Who asked for the steering message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SteeringOrigin {
     /// `claudine steer`.
@@ -114,7 +114,7 @@ impl SteeringRequest {
 }
 
 /// Provider-established result of one submission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SendOutcome {
     Accepted,
@@ -124,7 +124,8 @@ pub enum SendOutcome {
     /// Held by provider inbound policy; undelivered until policy changes.
     Held,
     Unavailable,
-    /// The owner's bounded request queue was full.
+    /// The owner could not take the request: its bounded queue was full, or
+    /// the request expired before submission. Nothing was submitted.
     Busy,
     /// Cancellation succeeded but the replacement was not confirmed.
     PartialInterruption,
@@ -152,10 +153,25 @@ impl SendOutcome {
     pub fn is_confirmed(self) -> bool {
         self.receipt() > ReceiptStrength::Unknown
     }
+
+    /// This outcome, lowered so its receipt does not exceed `ceiling` (the
+    /// strongest receipt the delivering mechanism can establish). A report
+    /// stronger than the mechanism can prove is never passed on.
+    pub fn capped_at(self, ceiling: ReceiptStrength) -> Self {
+        if self.receipt() <= ceiling {
+            return self;
+        }
+        match ceiling {
+            ReceiptStrength::Delivered => Self::Delivered,
+            ReceiptStrength::Queued => Self::Queued,
+            ReceiptStrength::Accepted => Self::Accepted,
+            ReceiptStrength::Unknown => Self::Unknown,
+        }
+    }
 }
 
 /// Whether consented cancellation took effect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CancellationOutcome {
     Established,
@@ -165,7 +181,7 @@ pub enum CancellationOutcome {
 }
 
 /// Separate outcomes of an interrupt-then-submit operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InterruptionOutcome {
     pub cancellation: CancellationOutcome,
     /// `None` when replacement was not submitted because cancellation was

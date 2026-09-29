@@ -9,7 +9,8 @@
 //! Auditing never decides delivery. [`audited_send`] calls the delivery
 //! closure exactly once whether or not a record can be written, returns the
 //! delivery's own result, and reports write failures as content-free
-//! [`AuditFailure`]s. A result that arrives after the request returned is an
+//! [`AuditFailure`]s; an awaited delivery uses its two halves,
+//! [`PendingAudit`]. A result that arrives after the request returned is an
 //! append-only `late_result` record correlated by request ID
 //! ([`LateResultRecorder`]); it can never become another send.
 //!
@@ -189,22 +190,43 @@ pub fn audited_send(
     context: &AuditContext,
     deliver: impl FnOnce(&SteeringRequest) -> DeliveryReport,
 ) -> AuditedSend {
-    let redactor = Redactor::for_message(request.message.as_str());
-    let mut audit_failures = Vec::new();
-    log.append_reporting(&request_record(request, context, &redactor), &mut audit_failures);
-
+    let pending = PendingAudit::begin(log, request, context);
     let report = deliver(request);
+    pending.finish(log, &report)
+}
 
-    let entry = result_entry(&report, &redactor);
-    let (error, provider_echo) = (entry.error.clone(), entry.provider_echo.clone());
-    log.append_reporting(&record(request.id, AuditEntry::Result(entry)), &mut audit_failures);
+/// The two halves of [`audited_send`] for a delivery that is awaited rather
+/// than called: [`PendingAudit::begin`] records the request, and
+/// [`PendingAudit::finish`] records the one result. Being consumed by
+/// `finish`, it cannot record a second result as a new send.
+#[derive(Debug)]
+pub struct PendingAudit {
+    request_id: RequestId,
+    redactor: Redactor,
+    audit_failures: Vec<AuditFailure>,
+}
 
-    AuditedSend {
-        result: report.result,
-        error,
-        provider_echo,
-        audit_failures,
-        late: LateResultRecorder { request_id: request.id, redactor },
+impl PendingAudit {
+    /// Writes the masked `request` record.
+    pub fn begin(log: &SteeringAuditLog, request: &SteeringRequest, context: &AuditContext) -> Self {
+        let redactor = Redactor::for_message(request.message.as_str());
+        let mut audit_failures = Vec::new();
+        log.append_reporting(&request_record(request, context, &redactor), &mut audit_failures);
+        Self { request_id: request.id, redactor, audit_failures }
+    }
+
+    /// Writes the `result` record for `report` and returns it redacted.
+    pub fn finish(mut self, log: &SteeringAuditLog, report: &DeliveryReport) -> AuditedSend {
+        let entry = result_entry(report, &self.redactor);
+        let (error, provider_echo) = (entry.error.clone(), entry.provider_echo.clone());
+        log.append_reporting(&record(self.request_id, AuditEntry::Result(entry)), &mut self.audit_failures);
+        AuditedSend {
+            result: report.result.clone(),
+            error,
+            provider_echo,
+            audit_failures: self.audit_failures,
+            late: LateResultRecorder { request_id: self.request_id, redactor: self.redactor },
+        }
     }
 }
 

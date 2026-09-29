@@ -176,6 +176,15 @@ wire_enum! {
 }
 
 wire_enum! {
+    /// How a researched discovery method finds sessions. `ClaudineRegistration`
+    /// is the wrapper's own control registration; every other method is
+    /// native discovery that needs a provider-specific implementation.
+    pub enum DiscoveryMethod {
+        ProviderRegistry, ProviderApi, ProcessInspection, ClaudineRegistration, Other,
+    }
+}
+
+wire_enum! {
     /// Kind of execution interface in the non-interactive topic.
     pub enum ExecutionInterfaceKind {
         OneShotCli, RetainedSubprocess, LocalServer, NetworkServer, Sdk, AttachResume, Other,
@@ -310,6 +319,18 @@ pub struct SteeringCase {
     pub reason: &'static str,
 }
 
+/// One researched way to discover sessions of a profile on an OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SteeringDiscovery {
+    pub id: &'static str,
+    pub profile_id: &'static str,
+    pub os: HostOs,
+    pub origin: LaunchOrigin,
+    pub method: DiscoveryMethod,
+    /// Researched prerequisites before this method can be relied on.
+    pub prerequisites: &'static [&'static str],
+}
+
 /// Researched access to one mechanism for a profile and OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SteeringAccess {
@@ -352,6 +373,7 @@ pub struct ExecutionSelection {
 /// Every researched steering fact for one provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ProviderSteering {
+    pub discovery: &'static [SteeringDiscovery],
     pub mechanisms: &'static [SteeringMechanism],
     pub cases: &'static [SteeringCase],
     pub access: &'static [SteeringAccess],

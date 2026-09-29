@@ -6,7 +6,8 @@ session. This page explains how those pieces fit together, how to check them,
 and how a mechanism is enabled.
 
 > **Status:** the typed facts, activation checks, and eligibility rules below
-> are implemented. The `claudine steer` command, managed control routing,
+> are implemented, as are managed control routing and session discovery (see
+> [Steering Routing](steering-routing.md)). The `claudine steer` command,
 > automatic repetition warnings, and every provider adapter are **planned**.
 > Until an adapter ships, every session reports steering as unavailable, each
 > with a specific reason.
@@ -39,7 +40,7 @@ pi: steering research has 2 error(s)
 
 | Input | Owner | What it says |
 | --- | --- | --- |
-| `docs/research/steering/<slug>.md` | research fleet | Mechanisms, capability cases, access, receipts, and live verification records with typed assertions |
+| `docs/research/steering/<slug>.md` | research fleet | Discovery methods, mechanisms, capability cases, access, receipts, and live verification records with typed assertions |
 | `docs/research/non-interactive-sessions/<slug>.md` | research fleet | Execution interfaces and the preferred/fallback selection |
 | `docs/providers/steering-activation.yaml` | human review | Reviewed adapter revisions and exact activation grants |
 

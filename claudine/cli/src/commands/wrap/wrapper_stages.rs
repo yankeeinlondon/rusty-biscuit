@@ -677,6 +677,12 @@ pub(crate) fn run_execution_stage(
             &env_plan.env,
         );
         let status_reporter = session_presence.status_reporter();
+        // Steering ownership for the same child; see `crate::steering::owner`.
+        let _steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
+            provider,
+            !effective_non_interactive,
+            child_cwd,
+        );
         wrapper_exec::run_structured_stream_session(
             args,
             provider,

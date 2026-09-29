@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 use serde::{Serialize, Serializer};
 
-use crate::provider_id::{PROVIDERS_DISPLAY_ORDER, Provider};
+use crate::provider_id::Provider;
 
 /// Why a target or identifier string was rejected.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -57,6 +57,11 @@ macro_rules! uuid_id {
             /// Wraps a 128-bit value (for example a random v4 UUID).
             pub const fn from_u128(value: u128) -> Self {
                 Self(value)
+            }
+
+            /// A fresh random (v4) identifier.
+            pub fn random() -> Self {
+                Self(uuid::Uuid::new_v4().as_u128())
             }
         }
 
@@ -171,11 +176,8 @@ impl FromStr for SteeringTargetId {
         let pid = next()?;
         let start = next()?;
         let conversation = next()?;
-        let provider = PROVIDERS_DISPLAY_ORDER
-            .iter()
-            .copied()
-            .find(|provider| provider.as_slug() == slug)
-            .ok_or_else(|| IdentityError::UnknownProvider(slug.to_string()))?;
+        let provider =
+            super::provider_by_slug(slug).ok_or_else(|| IdentityError::UnknownProvider(slug.to_string()))?;
         let pid = pid
             .parse::<u32>()
             .ok()

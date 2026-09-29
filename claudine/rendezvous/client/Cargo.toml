@@ -30,6 +30,8 @@ thiserror = "2.0"
 rendezvous-daemon = { path = "../daemon" }
 rendezvous-core = { path = "../core", features = ["test-support"] }
 tempfile = "3"
+# An owner's outbound `SteeringControl` request stream in the round-trip test.
+tokio-stream = "0.1"
 
 # Declared rather than defaulted (2026-09-07-faster-claudine-tests, Phase 6).
 # CI runs L1 with no features. The integration targets spawn a real daemon over

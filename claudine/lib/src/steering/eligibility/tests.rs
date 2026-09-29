@@ -44,6 +44,7 @@ const fn access(mechanism_id: &'static str, status: AccessStatus) -> SteeringAcc
 }
 
 static FACTS: ProviderSteering = ProviderSteering {
+    discovery: &[],
     mechanisms: &[
         mechanism("steer", O::SteerActiveTurn, E::PreserveRunningTurn, B::EndOfToolBatch, ReceiptTiming::Early),
         mechanism("follow", O::QueueFollowUp, E::PreserveRunningTurn, B::NextTurn, ReceiptTiming::Early),

@@ -27,6 +27,7 @@ use crate::peers::PeerRegistry;
 use crate::projection::Projection;
 use crate::register::RegisterStore;
 use crate::session_log::SessionLogManager;
+use crate::steering::SteeringRouter;
 use crate::storage::Storage;
 use crate::sync::{SyncError, SyncService};
 
@@ -42,6 +43,8 @@ pub struct RendezvousService {
     registers: RegisterStore,
     peers: Option<PeerRegistry>,
     quic_local_addr: Option<SocketAddr>,
+    /// Live steering registrations; in memory only, never replicated.
+    steering: SteeringRouter,
 }
 
 impl std::fmt::Debug for RendezvousService {
@@ -81,7 +84,15 @@ impl RendezvousService {
             registers,
             peers: None,
             quic_local_addr: None,
+            steering: SteeringRouter::default(),
         }
+    }
+
+    /// A handle to the in-memory steering registrations, for closing them
+    /// when the server shuts down.
+    #[must_use]
+    pub fn steering_router(&self) -> SteeringRouter {
+        self.steering.clone()
     }
 
     /// Attach the Phase-4 peer registry plus the QUIC endpoint's
@@ -97,8 +108,15 @@ impl RendezvousService {
     }
 }
 
+/// The owner-facing half of a `SteeringControl` stream.
+type SteeringControlStream = std::pin::Pin<
+    Box<dyn tokio_stream::Stream<Item = Result<rendezvous_core::SteeringControlDown, Status>> + Send + 'static>,
+>;
+
 #[tonic::async_trait]
 impl Rendezvous for RendezvousService {
+    type SteeringControlStream = SteeringControlStream;
+
     async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         let nonce = request.into_inner().nonce;
         tracing::debug!(nonce = %nonce, "ping received");
@@ -553,6 +571,73 @@ impl Rendezvous for RendezvousService {
         Ok(Response::new(rendezvous_core::ListActiveSessionsResponse {
             hosts,
         }))
+    }
+
+    async fn steering_control(
+        &self,
+        request: Request<tonic::Streaming<rendezvous_core::SteeringControlUp>>,
+    ) -> Result<Response<Self::SteeringControlStream>, Status> {
+        use rendezvous_core::{SteeringControlDown, steering_control_down, steering_control_up::Kind};
+
+        let mut upstream = request.into_inner();
+        let first = upstream
+            .message()
+            .await?
+            .ok_or_else(|| Status::invalid_argument("control stream closed before `register`"))?;
+        let Some(Kind::Register(info)) = first.kind else {
+            return Err(Status::invalid_argument("the first control frame must be `register`"));
+        };
+        let (deliveries, frames) = tokio::sync::mpsc::channel(crate::steering::OWNER_CHANNEL_CAPACITY + 1);
+        let accepted = SteeringControlDown { kind: Some(steering_control_down::Kind::Accepted(rendezvous_core::ControlAccepted {})) };
+        deliveries
+            .try_send(Ok(accepted))
+            .map_err(|_| Status::internal("control stream closed during registration"))?;
+        let registration = self.steering.register(info, deliveries)?;
+
+        // The stream task owns the registration: when the owner's upstream
+        // ends or fails, the registration goes with it.
+        let router = self.steering.clone();
+        tokio::spawn(async move {
+            loop {
+                let message = tokio::select! {
+                    biased;
+                    () = router.closed() => break,
+                    message = upstream.message() => message,
+                };
+                match message {
+                    Ok(Some(frame)) => match frame.kind {
+                        Some(Kind::Update(info)) => {
+                            if let Err(error) = router.update(&registration, info) {
+                                tracing::warn!(%error, "steering owner sent an invalid update; closing its registration");
+                                break;
+                            }
+                        }
+                        Some(Kind::Reply(reply)) => router.complete(&registration, reply),
+                        Some(Kind::Register(_)) | None => {
+                            tracing::warn!("unexpected steering control frame; closing its registration");
+                            break;
+                        }
+                    },
+                    Ok(None) | Err(_) => break,
+                }
+            }
+            router.unregister(&registration);
+        });
+        Ok(Response::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(frames))))
+    }
+
+    async fn list_managed_targets(
+        &self,
+        _request: Request<rendezvous_core::ListManagedTargetsRequest>,
+    ) -> Result<Response<rendezvous_core::ListManagedTargetsResponse>, Status> {
+        Ok(Response::new(rendezvous_core::ListManagedTargetsResponse { targets: self.steering.list() }))
+    }
+
+    async fn route_steering(
+        &self,
+        request: Request<rendezvous_core::RouteSteeringRequest>,
+    ) -> Result<Response<rendezvous_core::RouteSteeringResponse>, Status> {
+        self.steering.route(request.into_inner()).await.map(Response::new)
     }
 }
 

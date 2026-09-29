@@ -43,9 +43,13 @@ keeps these records out of `claudine logs` ingestion, which reads only the
 files directly under `~/.claudine/logs/`. Files are append-only and are kept
 until you delete them; there is no automatic retention.
 
-> **Planned:** the library API (`claudine::steering::audit`) writes these
-> records today. The routing and CLI paths that call it arrive with the
-> `claudine steer` command and automatic warnings.
+The owning execution's steering controller writes these records for every
+request it receives, including ones it refuses before delivery (busy, stale,
+duplicate). A requester routing through the local daemon writes none. See
+[Steering Routing](steering-routing.md).
+
+> **Planned:** the `claudine steer` command and automatic warnings, the two
+> producers of requests.
 
 ### What a record holds
 

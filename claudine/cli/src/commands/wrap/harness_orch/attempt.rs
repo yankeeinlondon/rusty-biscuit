@@ -133,6 +133,13 @@ pub(crate) fn execute_harness_attempt(
         env_context,
         &launch.env,
     );
+    // Steering ownership for the same child: an in-memory control route,
+    // separate from replicated presence and its opt-out. Dropped with it.
+    let _steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
+        provider,
+        !effective_non_interactive,
+        child_cwd,
+    );
 
     let (
         exit_code,

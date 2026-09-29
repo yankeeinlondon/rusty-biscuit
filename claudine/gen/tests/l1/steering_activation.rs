@@ -187,6 +187,58 @@ fn malformed_research_references_refuse_projection() {
     assert!(project_research("pi", &bad_state, &execution).is_err());
 }
 
+/// Walks the input-robustness matrix for the projected `discovery` field and
+/// its load-bearing members (`method`, `origin`, `os`, `prerequisites`), one
+/// edit per cell on the real Pi research. Duplicate IDs are the relational
+/// checker's cell (`steering_check::id_map`), which gates generation.
+#[test]
+fn discovery_projection_walks_the_input_robustness_matrix() {
+    use serde_json::{Value, json};
+    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/steering/pi.md")).unwrap();
+    let execution =
+        claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/non-interactive-sessions/pi.md")).unwrap();
+
+    // Control: every researched record projects with its typed method.
+    let control = project_research("pi", &steering, &execution).expect("control projects");
+    assert_eq!(control.discovery.len(), steering["discovery"].as_array().unwrap().len());
+    let rpc = control.discovery.iter().find(|d| d.id == "rpc-macos-native").unwrap();
+    assert_eq!(rpc.method, claudine_catalog_types::steering::DiscoveryMethod::ProviderApi);
+    assert_eq!(rpc.prerequisites, vec!["owned RPC child".to_string()]);
+
+    let edit = |mutate: &dyn Fn(&mut Value)| {
+        let mut document = steering.clone();
+        mutate(&mut document);
+        project_research("pi", &document, &execution)
+    };
+    type Cell = (&'static str, Box<dyn Fn(&mut Value)>);
+    let rejected: Vec<Cell> = vec![
+        ("absent", Box::new(|d| drop(d.as_object_mut().unwrap().remove("discovery")))),
+        ("explicit null", Box::new(|d| d["discovery"] = Value::Null)),
+        ("wrong type, whole field", Box::new(|d| d["discovery"] = json!(123))),
+        ("wrong type, one element", Box::new(|d| d["discovery"].as_array_mut().unwrap().push(json!(123)))),
+        ("wrong type, every element", Box::new(|d| d["discovery"] = json!([123]))),
+        ("method not in vocabulary", Box::new(|d| d["discovery"][0]["method"] = json!("guess"))),
+        ("method null", Box::new(|d| d["discovery"][0]["method"] = Value::Null)),
+        ("origin wrong type", Box::new(|d| d["discovery"][0]["origin"] = json!(1))),
+        ("os absent", Box::new(|d| drop(d["discovery"][0].as_object_mut().unwrap().remove("os")))),
+        ("prerequisites null", Box::new(|d| d["discovery"][0]["prerequisites"] = Value::Null)),
+        ("prerequisites one wrong element", Box::new(|d| d["discovery"][0]["prerequisites"] = json!(["ok", 7]))),
+        ("prerequisites every wrong element", Box::new(|d| d["discovery"][0]["prerequisites"] = json!([7]))),
+    ];
+    for (cell, mutate) in &rejected {
+        assert!(
+            matches!(edit(mutate.as_ref()), Err(GenError::SteeringResearchInvalid { .. })),
+            "{cell} must be rejected, never read as empty or absent"
+        );
+    }
+
+    // Empty is distinct from absent: no researched discovery, not an error.
+    let empty = edit(&|d| d["discovery"] = json!([])).expect("empty list projects");
+    assert!(empty.discovery.is_empty());
+    let empty_prerequisites = edit(&|d| d["discovery"][0]["prerequisites"] = json!([])).unwrap();
+    assert!(empty_prerequisites.discovery[0].prerequisites.is_empty());
+}
+
 const CONTROL_POLICY: &str = "\
 adapters:
   - id: pi-rpc

@@ -469,6 +469,44 @@ Sniff discovers the principal, core models the endpoint, the daemon enforces
 server-side ownership, and the client connects. That split is the contract; the
 filenames are not.
 
+## 15. Steering Control
+
+Steering adds three RPCs that ride this same endpoint, and therefore the same
+same-user boundary (socket directory mode on Unix, pipe DACL plus
+`reject_remote_clients` on Windows). Nothing about them is exposed to the mesh.
+
+| RPC | Caller | Purpose |
+|---|---|---|
+| `SteeringControl` (bidirectional stream) | A Claudine wrapper that owns an agent execution | Register the execution, publish binding/state updates, receive deliveries, send replies |
+| `ListManagedTargets` | Any local client | Enumerate live registrations on this daemon |
+| `RouteSteering` | Any local client | Hand one request to its owner and wait (≤ `MAX_ROUTE_DEADLINE_MS`, 30 s) for the reply |
+
+Rules the daemon keeps (`rendezvous-daemon`'s `steering.rs`):
+
+- **Memory only.** Registrations and message payloads live in daemon memory,
+  for as long as the owner's stream and the delivery last. They never enter a
+  register, the session log, a durable queue, or a sync frame. An end-to-end
+  test scans the data directory for a routed message and asserts it is absent.
+- **One live owner per execution.** A second registration for the same
+  execution is `ALREADY_EXISTS`; an update cannot change the execution or its
+  wrapper process, and the conversation generation only moves forward.
+- **Exact routing.** A request carries the binding it was selected under; a
+  mismatch is `STALE_TARGET`, never delivery to the current conversation. A
+  request ID is routed once (`DUPLICATE_REQUEST` afterwards).
+- **Bounded.** Each owner's delivery channel holds 16 frames; beyond that the
+  answer is `BUSY` and nothing is sent.
+- **Honest.** The daemon passes the owner's reply through unchanged. A request
+  that reached an owner but got no reply — the owner disconnected, or the
+  deadline passed — is `UNKNOWN`, because it may have been submitted. Nothing
+  is retried or replayed after a reconnection.
+- **Shutdown does not wait on owners.** A control stream lasts an owner's whole
+  execution, so the shutdown signal closes the router: every owner stream ends,
+  the per-stream reader stops (so an owner that never closes its side cannot
+  hold the connection open), and new registrations are refused.
+
+See [Steering Routing](../topics/steering-routing.md) for the owner and
+requester sides.
+
 ## See Also
 
 - [`design.md`](design.md) — overall Rendezvous architecture

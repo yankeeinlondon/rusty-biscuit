@@ -252,6 +252,7 @@ See [`./docs/topics/`](./docs/topics/) for the full topic index. Key topics incl
 - [Pre-Flight Checks](./docs/topics/pre-flight-checks.md) and [Lifecycle](./docs/topics/flow-control/lifecycle.md) - Pre-flight shell audit/schema validation and the lifecycle stack (gating, verification, recovery)
 - [Policy Engine](./docs/topics/policy-engine.md) and [Protect Service](./docs/topics/protect-service.md) - Permissions and runtime safety
 - [Log Reporting](./docs/topics/log-reporting.md) and [Traces and Logging](./docs/topics/traces-and-logging.md) - JSONL-to-SQLite reporting, diagnostics, and steering audit records
+- [Steering Routing](./docs/topics/steering-routing.md) - Per-execution steering ownership, local routing through the Rendezvous daemon, and session discovery
 - [Secret Recognition](./docs/topics/secret-recognition.md) - The shared credential recognizer behind scrubbing, webhook redaction, wrapper sanitization, and steering log masking
 - [Wrapped Execution Switches](./docs/topics/wrapped-execution-switches.md) - CLI switch translation per provider
 - [Non-Interactive Sessions](./docs/topics/non-interactive-sessions.md) and [Mixing Events into Non-Interactive Sessions](./docs/topics/mixing-events-into-non-interactive-sessions.md)

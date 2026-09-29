@@ -113,6 +113,51 @@ pub struct ManualEligibility {
     pub blockers: Vec<Blocker>,
 }
 
+/// The listing-facing summary of one session's manual availability.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AvailabilitySummary {
+    pub availability: SteeringAvailability,
+    /// Why the session is unavailable, or what interruption would stop.
+    /// `None` only for non-interrupting availability.
+    pub reason: Option<String>,
+    /// Separate setup that could enable steering, deduplicated.
+    pub setup_requirements: Vec<String>,
+}
+
+impl AvailabilitySummary {
+    /// An unavailable session with one plain reason.
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self { availability: SteeringAvailability::Unavailable, reason: Some(reason.into()), setup_requirements: Vec::new() }
+    }
+}
+
+impl ManualEligibility {
+    /// Summarizes availability, its reason, and any setup requirements.
+    pub fn summary(&self) -> AvailabilitySummary {
+        let mut setup_requirements: Vec<String> = Vec::new();
+        for blocker in &self.blockers {
+            if let Blocker::NotActivated { setup: Some(setup), .. } = blocker
+                && !setup_requirements.iter().any(|known| known == setup)
+            {
+                setup_requirements.push((*setup).to_string());
+            }
+        }
+        let reason = match self.availability {
+            SteeringAvailability::NonInterrupting => None,
+            SteeringAvailability::InterruptionRequired => {
+                Some("delivery requires interrupting the running turn first".to_string())
+            }
+            SteeringAvailability::Unavailable if self.blockers.is_empty() => {
+                Some("no verified steering route exists for this session".to_string())
+            }
+            SteeringAvailability::Unavailable => {
+                Some(self.blockers.iter().map(ToString::to_string).collect::<Vec<_>>().join("; "))
+            }
+        };
+        AvailabilitySummary { availability: self.availability, reason, setup_requirements }
+    }
+}
+
 /// Why automatic help cannot reach this session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AutomaticBlocker {
