@@ -1,0 +1,29 @@
+# content-policy editor schema (SimplifiedSchema, `kind: schema`).
+#
+# Types for a document's `content_policy` list, so editors running DMLS can
+# complete and check policies. Evaluation by the content-policy library is the
+# authority; this schema only flags what it can express:
+#
+# - Pattern arguments cannot hold a literal `(`, `)`, `,`, or space, so those
+#   are written `\x28`, `\x29`, `\x2C`, and `\x20`. Regex groups cannot be
+#   written either, so each duration form is a top-level alternation with one
+#   anchored branch per unit (`d`, `wk`, `mo`, `yr`).
+# - Dates are checked for shape only; evaluation rejects impossible dates.
+# - `rule` on `long_form` is not `(required)`: a union-typed reference cannot
+#   take constraints today, so evaluation alone reports a missing `rule`.
+kind: schema
+types:
+  short_form:
+    - 'string(pattern(^Evergreen$); suggest(Evergreen, TimeSensitive, "ValidFor(3mo)", "ValidFor(3mo, @last_updated)", "ValidFor(3mo, 2026-09-28)", "ValidUntil(2027-01-01)")) -> Never triggers'
+    - 'string(pattern(^TimeSensitive$)) -> Always triggers'
+    - 'string(pattern(^ValidFor\x28\x20*[1-9][0-9]*d\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*wk\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*mo\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*yr\x20*\x29$)) -> Interval from the default date property'
+    - 'string(pattern(^ValidFor\x28\x20*[1-9][0-9]*d\x20*\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*wk\x20*\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*mo\x20*\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*yr\x20*\x2C\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$)) -> Interval from a property'
+    - 'string(pattern(^ValidFor\x28\x20*[1-9][0-9]*d\x20*\x2C\x20*[0-9]{4}-[0-9]{2}-[0-9]{2}\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*wk\x20*\x2C\x20*[0-9]{4}-[0-9]{2}-[0-9]{2}\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*mo\x20*\x2C\x20*[0-9]{4}-[0-9]{2}-[0-9]{2}\x20*\x29$|^ValidFor\x28\x20*[1-9][0-9]*yr\x20*\x2C\x20*[0-9]{4}-[0-9]{2}-[0-9]{2}\x20*\x29$)) -> Interval from an inline date'
+    - 'string(pattern(^ValidUntil\x28\x20*[0-9]{4}-[0-9]{2}-[0-9]{2}\x20*\x29$)) -> Fixed deadline'
+    - 'string(pattern(^ValidUntil\x28\x20*@[A-Za-z_][A-Za-z0-9_-]*\x20*\x29$)) -> Deadline held in a property'
+  long_form:
+    rule: "short_form@./content-policy.yaml"
+    action: "enum(refresh, archive, remove; required)"
+  policy:
+    - "short_form@./content-policy.yaml"
+    - "long_form@./content-policy.yaml"

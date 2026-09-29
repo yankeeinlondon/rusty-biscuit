@@ -1,7 +1,7 @@
 //! Validation diagnostics and reader warnings.
 //!
-//! Field names and code spellings serialize into the JSON report and are
-//! public contract once the CLI ships them.
+//! Field names and code spellings serialize into the JSON report, which
+//! `policy check --json` prints, so they are public contract.
 
 use std::fmt;
 

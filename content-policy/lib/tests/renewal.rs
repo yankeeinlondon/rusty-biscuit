@@ -731,3 +731,58 @@ fn migrated_documents_renew_byte_exactly() {
     }
     assert_eq!(tab_repaired, 8);
 }
+
+// --- Public JSON shape (`policy renew --json`) ------------------------------
+
+#[test]
+fn plan_json_field_names_are_frozen() {
+    let source = "---\nreviewed: 2026-01-01\ncontent_policy:\n\t- ValidFor(3mo, 2026-06-01)\n\t- ValidFor(1yr, @reviewed)\n\t- ValidFor(6mo)\n---\n";
+    let plan = plan_at(source, &context(TODAY).with_document("notes.md"));
+    let json: serde_json::Value = serde_json::from_str(&plan.to_json()).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "document": "notes.md",
+            "update_date": "2026-09-28",
+            "fingerprint": plan_fingerprint(source.as_bytes()),
+            "policy": {
+                "source": "declared",
+                "grammar_version": 1,
+                "identity": plan.policy.identity,
+            },
+            "changes": [
+                {
+                    "target": { "kind": "inline", "entry": 0 },
+                    "entries": [0],
+                    "kind": "renewed",
+                    "previous": "2026-06-01",
+                    "value": "2026-09-28",
+                },
+                {
+                    "target": { "kind": "property", "name": "reviewed" },
+                    "entries": [1],
+                    "kind": "renewed",
+                    "previous": "2026-01-01",
+                    "value": "2026-09-28",
+                },
+                {
+                    "target": { "kind": "property", "name": "last_updated" },
+                    "entries": [2],
+                    "kind": "new_baseline",
+                    "previous": null,
+                    "value": "2026-09-28",
+                },
+            ],
+            "edits": [
+                { "span": { "start": 14, "end": 24 }, "replacement": "2026-09-28" },
+                { "span": { "start": 58, "end": 68 }, "replacement": "2026-09-28" },
+                { "span": { "start": 115, "end": 115 }, "replacement": "last_updated: 2026-09-28\n" },
+            ],
+            "tab_repair": [
+                { "span": { "start": 41, "end": 42 }, "replacement": "  " },
+                { "span": { "start": 70, "end": 71 }, "replacement": "  " },
+                { "span": { "start": 98, "end": 99 }, "replacement": "  " },
+            ],
+        })
+    );
+}

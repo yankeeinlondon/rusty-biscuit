@@ -2592,8 +2592,14 @@ dependencies = [
 name = "content-policy-cli"
 version = "0.1.0"
 dependencies = [
+ "biscuit-terminal",
+ "biscuit-test-harness",
+ "chrono",
  "clap 4.6.1",
+ "clap_complete",
  "content-policy",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

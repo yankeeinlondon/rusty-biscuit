@@ -34,6 +34,7 @@ mod blockquote_list_spacing;
 mod clean_counters;
 mod compose_phase6;
 mod compose_reuse_phase5;
+mod content_policy_editor_schema;
 mod cutover_reference;
 mod debug_test;
 #[cfg(windows)]

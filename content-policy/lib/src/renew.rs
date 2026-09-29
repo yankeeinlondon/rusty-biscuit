@@ -547,6 +547,13 @@ impl RenewalPlan {
         self.changes.is_empty()
     }
 
+    /// Serializes the plan as pretty-printed JSON, the `policy renew --json`
+    /// output; its field names are public contract.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("plans always serialize")
+    }
+
     /// Returns the renewed document for `bytes`, which must be the bytes the
     /// plan was made from.
     ///
