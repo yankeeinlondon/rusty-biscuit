@@ -195,11 +195,44 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4:
   - claudine/docs/topics/pi-rpc.md
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/discovery.rs
+  - claudine/lib/src/steering/discovery/tests.rs
+  - claudine/rendezvous/core/proto/rendezvous.proto
+  - claudine/cli/src/args.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/telemetry.rs
+  - claudine/cli/src/commands/mod.rs
+  - claudine/cli/src/commands/help.rs
+  - claudine/cli/src/commands/steer/mod.rs
+  - claudine/cli/src/commands/steer/service.rs
+  - claudine/cli/src/commands/steer/interact.rs
+  - claudine/cli/src/commands/steer/render.rs
+  - claudine/cli/src/commands/steer/tests.rs
+  - claudine/cli/src/completion/root_menu.rs
+  - claudine/cli/src/steering/mod.rs
+  - claudine/cli/src/steering/requester.rs
+  - claudine/cli/src/steering/wire.rs
+  - claudine/cli/src/steering/tests.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/steer_cli.rs
+  - claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_5:
+  - claudine/README.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/traces-and-logging.md
+docs_created_during_phase_5:
+  - claudine/docs/cli/steer.md
+skills_files_updated_during_phase_5: []
 ---
 # Steering implementation plan
 
-Status: Phases 1–4 implemented (2026-09-28; Pi steering blocked by a reviewed
-policy block); Phases 5–8 not started.
+Status: Phases 1–5 implemented (2026-09-28; Pi steering blocked by a reviewed
+policy block, so no session is selectable yet); Phases 6–8 not started.
 Created: 2026-09-08
 Specification: [spec.md](spec.md)
 Evidence: [fleet run](fleet-run.md), [uncertainty register](uncertainties.md),
@@ -454,25 +487,27 @@ provider-independent work using fake adapters. Do not disable extensions to pass
 
 **Work**
 
-1. Add the specified command forms, validation, exit codes, list JSON schema, and
+- [x] 1. Add the specified command forms, validation, exit codes, list JSON schema, and
    explicit-ID send JSON. Update CLI dispatch, help, argument normalization, and
    completions using existing conventions. Do not introduce send/list subcommands
    or an interruption-consent bypass flag.
-2. Render Provider, Session, Directory, State, and Steering with
+- [x] 2. Render Provider, Session, Directory, State, and Steering with
    `TerminalRenderable` components. Show full IDs and wrapped reasons/details;
    unavailable rows are dim, single-struck, and unselectable. Plain output retains
    clear availability labels. Sort and deduplicate according to the spec.
-3. Require a selection even with one eligible session; support working and idle
+- [x] 3. Require a selection even with one eligible session; support working and idle
    targets and explain when input starts a turn. Handle no sessions, none eligible,
    unknown state, stale selection, and user cancellation without broadcast.
-4. Implement interactive interruption consent bound to the selected identity and
+- [x] 4. Implement interactive interruption consent bound to the selected identity and
    action. Explain running-tool and pending-message effects, revalidate before
    cancellation and replacement, and preserve their separate outcomes. Non-TTY
    and JSON execution never infer consent. If non-interrupting delivery becomes
    unavailable, do not switch to interruption silently.
-5. Return after provider acceptance and report accepted/queued/delivered only as
+- [x] 5. Return after provider acceptance and report accepted/queued/delivered only as
    established. Show held as undelivered, explain separate setup, and keep sending
    free of configuration changes or extension installation.
+- [x] Validation: parser and JSON-contract tests, simulated picker and confirmation
+   input, no-focus rendering tests, and integration tests, as listed below.
 
 **Validation:** Parser and JSON-contract tests; simulated picker/confirmation
 input; no-focus terminal tests for disabled styling, narrow layouts, and plain
@@ -636,7 +671,7 @@ permission question or a fabricated all-green result.
 | Phase 2 | Implemented 2026-09-28 | `claudine::secrets` (one catalog + key-name recognizer; scrub, webhook, and wrapper sanitization migrated), `steering::audit` typed JSONL records under `~/.claudine/logs/steering/`; no live send path calls it yet. See implementation-log.md |
 | Phase 3 | Implemented 2026-09-28 | `steering::controller` (bounded, serialized, audited owner queue), `steering::discovery` aggregator over generated discovery records, in-memory Rendezvous `SteeringControl`/`ListManagedTargets`/`RouteSteering`, wrapper owner link; every managed session registers as unavailable until Phase 4 maps a profile. See implementation-log.md |
 | Phase 4 | Implemented 2026-09-28; Pi steering blocked | Managed Pi RPC execution (`exec/control.rs`, `exec/pi_rpc/`) with pre-submission JSON fallback, unattended-request policy, settlement, Unix tool reaping; `pi-rpc` adapter reviewed and implemented; `retained-rpc` blocked by the new policy `blocks` list. Real Pi 0.87.1 (macOS) and fake-Pi (macOS/Linux/Windows) verified. See implementation-log.md |
-| Phase 5 | Not started | CLI contract resolved in spec |
+| Phase 5 | Implemented 2026-09-28 | `claudine steer` (`cli/src/commands/steer/`): list/JSON, explicit and picked sends, interactive consent, revalidation, receipts, exit codes; listings now carry the route's operation and the owner binding. Verified with fake service, scripted input, off-screen rendering, and a real daemon (macOS, Linux, native Windows). See implementation-log.md |
 | Phase 6 | Not started | Warning, recovery, and cap decisions resolved in spec |
 | Phase 7 | Not started | Full-roster passive research available |
 | Phase 8 | Not started | No new implementation validation claimed by this plan |
@@ -707,3 +742,25 @@ permission question or a fabricated all-green result.
   plan's stated fallback when a guard is unproven). An operational real
   delivery (Phase 8's exit) needs either an effective Pi session guard or
   another provider's adapter.
+
+### Phase 5 progress (2026-09-28)
+
+- **Changed:** see this file's `*_during_phase_5` frontmatter; design
+  decisions, the requirement-to-test map, and the input-robustness matrix are
+  in [implementation-log.md](implementation-log.md#phase-5).
+- **Checks:** `just test --no-fail-fast` (claudine area): 7929 passed, 9
+  skipped, 1 failed — the failure is a compose union test from darkmatter work
+  another session merged mid-phase (`25ca47440`), unrelated to steering.
+  `just lint`: clean. Daemon-backed steer tests: 41/41 (macOS); `just
+  cross-check claudine-cli`: native Windows and Linux 74/74, Windows L1
+  `steer_cli` 3/3. Rendezvous area `just test`: 284 passed.
+- **Departures:** the listing gained `operation` (JSON and a new proto field,
+  `ManagedTargetInfo.operation = 14`), needed because the owner refuses any
+  operation other than its current route's and availability alone cannot say
+  which operation that is; the list JSON also carries `coverage_gaps`; `steer`
+  is exempt from the config/init-wizard check.
+- **Status:** implemented. No row is selectable against the shipped policy (Pi
+  blocked, everything else unmapped), so the send path is proven end to end
+  with fixture eligibility against a real daemon, not against a real provider.
+- **Remaining blockers:** none for Phase 6. Native discovery and delivery are
+  Phase 7 (`SteeringService` is the seam).

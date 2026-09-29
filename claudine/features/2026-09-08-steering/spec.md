@@ -25,48 +25,47 @@ implemented_by: claude/opus
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-    Phases 1-4 are implemented. Read claudine/features/2026-09-08-steering/implementation-log.md
-    (Phase 4 first), claudine/docs/topics/pi-rpc.md, steering-activation.md (new "Blocking a
-    profile" section), and steering-routing.md.
+    Phases 1-5 are implemented. Read claudine/features/2026-09-08-steering/implementation-log.md
+    (Phase 5 first, then Phase 4), claudine/docs/cli/steer.md, steering-routing.md, and pi-rpc.md.
 
-    - Pi steering is BLOCKED by design, not missing: docs/providers/steering-activation.yaml now
-      has a required `blocks:` list, and `pi/retained-rpc` is blocked because Pi's steer/prompt
-      carry no expected-session guard and an enabled extension can switch sessions (the
-      switch-race record pi-rpc-steer-switch-0844 still loses the message on Pi 0.87.1).
-      Eligibility reports `Blocker::ProfileBlocked` first, before state or version. Do not lift the
-      block or add a grant without new evidence that answers its reason. Phase 5 should build
-      `claudine steer` against fake executors (the plan's stated fallback) and must render blocked
-      rows as unavailable with the block's reason.
-    - A managed Pi run now registers with `profile_id: Some("retained-rpc")` and the real
-      `pi-rpc` executor (cli/src/commands/wrap/exec/pi_rpc/executor.rs); every other launch
-      still maps to no profile. `ExecutionFacts.provider_version` is still `None`: the wrapper
-      does not run `pi --version`. A future grant needs it (a background version query would
-      avoid adding launch latency; check L1 fakes that record argv before adding one).
-    - The seam for providers whose managed launch is a stdio protocol is
-      `commands/wrap/exec/control.rs::StdioControl`, passed to `run_child_stream_semantic` and
-      returned by `WrapperProfile::stdio_control(&args)`. Readiness is checked before the task is
-      submitted; a pre-submission failure runs the session's `FallbackLaunch`. Phase 7 adapters
-      (Codex app-server, Claude stream-json, ACP) should reuse it rather than cloning the Kimi wire
-      session. Pi-specific protocol reading lives in
-      `claudine::stream::protocol::pi::rpc` (strict readers) and the parser in
-      `lib/src/stream/providers/pi.rs`.
-    - Phase 6 automatic help: a steering-capable session binds the controller and reports
-      Working on `agent_start` and Idle on `agent_settled`. A settled one-shot Pi run closes stdin
-      and refuses new steering, so automatic help has only the working window.
-    - New `EarlyTermination::InputRequired` (`error_kind = "input_required"`, Aborted,
-      `HumanInputRequested` signal) fails a run that waits on unanswerable input.
-    - Tests: CI-runnable fake Pi at cli/tests/bin/fake_pi (bin `claudine-fake-pi`,
-      `test-fixtures`), driven by cli/tests/l1/pi_managed_rpc.rs. Real tier:
-      `just test-real real_pi_` (needs `pi` on PATH). The probe fixture
-      tests/fixtures/steering/pi-probe.ts was updated for Pi 0.87 (system prompt moved into a
-      `system` message) and now calls its tool batch once per task.
-    - Unchanged gotchas: the error-transport guard wants typed `#[source]` errors rendered once via
-      `crate::steering::render_chain`; re-bless docs/providers/dispatch-inventory.json when
-      `Provider::` references change (env-prefixed commands need approval; the log describes the
-      workaround); the requester's `expect(dead_code)` markers go away when `claudine steer`
-      lands; current steering byte pin is 10005189633011121167.
+    - Phase 5 added `claudine steer` (cli/src/commands/steer/). It is a pure requester: it lists
+      via the daemon and routes to the owner; it never talks to a provider. Automatic help (Phase 6)
+      does NOT go through it: it calls the owner's `SteeringController::submit` directly with
+      `origin: Automatic`, `expected: None`, and an `OpportunityId` (see
+      cli/src/steering/tests.rs `without_a_daemon_the_owner_still_delivers_automatic_help_directly`).
+    - A request must name the operation the owner's current route performs; the controller answers
+      `unavailable` for any other ("no longer available; this session now offers ..."). For
+      automatic help use the route from `AutomaticEligibility::Eligible(route)` and send
+      `route.mechanism.operation_intent`. `AvailabilitySummary` now carries `operation`, and
+      `ManagedTargetInfo.operation = 14` carries it on the wire; `SessionListing.binding` keeps the
+      owner binding (serde-skipped).
+    - Pi steering is still BLOCKED by the reviewed policy (`blocks:` in
+      docs/providers/steering-activation.yaml). Do not lift it or add a grant without new evidence.
+      With the shipped policy every session is unavailable, so Phase 6 must be built and tested with
+      fixture eligibility/executors (as Phases 3-5 did); an unavailable automatic attempt still
+      consumes one of the three opportunities and emits the bounded notice.
+    - Phase 6 hooks: a steering-capable session binds the controller and reports Working on
+      `agent_start` and Idle on `agent_settled`; a settled one-shot Pi run closes stdin and refuses
+      new steering, so automatic help has only the working window. `ExecutionFacts.provider_version`
+      is still `None` (the wrapper does not run `pi --version`).
+    - Stdio-protocol seam for Phase 7 adapters: `commands/wrap/exec/control.rs::StdioControl`.
+      Native discovery/delivery plug into `commands/steer/service.rs::SteeringService`
+      (`LocalService` passes no native discoverers and refuses native targets today).
+    - The branch moved during Phase 5: another session merged darkmatter union work (`281dd2c8d`,
+      `25ca47440`), and `compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch`
+      fails deterministically from that work (not steering). Several Phase 5 files also appeared
+      staged in the index without this session staging them; the index was left alone.
+    - Gotchas: the error-transport guard rejects `format!("{err}")`/`err.to_string()` on typed
+      errors, even inside a `format!` argument list; render once via `crate::steering::render_chain`
+      into a binding first. Re-bless docs/providers/dispatch-inventory.json when `Provider::`
+      references change (env-prefixed commands need approval; force the bless branch for one run and
+      revert, as the log describes). `just cross-check` breaks on `-E` expressions with parentheses;
+      pass positional substring filters. Standalone biscuit-terminal `Prose` does not wrap unless
+      given a `WordWrap`, and a wide `Table` returns an error text below its minimum width
+      (check `plan_widths_for_terminal`). Current steering byte pin is still 10005189633011121167
+      (generated.rs was not touched).
     - Skill files under .claude/skills/claudine/ still could not be written; the intended edits
-      from Phases 1-4 are listed in each phase's "Environment limitations" in the log.
+      from Phases 1-5 are listed in each phase's "Environment limitations" in the log.
 ---
 # Steering Running Agent Sessions
 

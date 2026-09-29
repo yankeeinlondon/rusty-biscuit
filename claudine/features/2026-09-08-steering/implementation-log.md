@@ -196,6 +196,39 @@ docs_updated_during_phase_4:
 docs_created_during_phase_4:
   - claudine/docs/topics/pi-rpc.md
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/discovery.rs
+  - claudine/lib/src/steering/discovery/tests.rs
+  - claudine/rendezvous/core/proto/rendezvous.proto
+  - claudine/cli/src/args.rs
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/telemetry.rs
+  - claudine/cli/src/commands/mod.rs
+  - claudine/cli/src/commands/help.rs
+  - claudine/cli/src/commands/steer/mod.rs
+  - claudine/cli/src/commands/steer/service.rs
+  - claudine/cli/src/commands/steer/interact.rs
+  - claudine/cli/src/commands/steer/render.rs
+  - claudine/cli/src/commands/steer/tests.rs
+  - claudine/cli/src/completion/root_menu.rs
+  - claudine/cli/src/steering/mod.rs
+  - claudine/cli/src/steering/requester.rs
+  - claudine/cli/src/steering/wire.rs
+  - claudine/cli/src/steering/tests.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/steer_cli.rs
+  - claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+  - claudine/docs/providers/dispatch-inventory.json
+docs_updated_during_phase_5:
+  - claudine/README.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/traces-and-logging.md
+docs_created_during_phase_5:
+  - claudine/docs/cli/steer.md
+skills_files_updated_during_phase_5: []
 ---
 # Implementation Log for 2026-09-08-steering (8 phases)
 
@@ -982,3 +1015,215 @@ Object); `kill_process_group` is a no-op on Windows; the real crash test is
 semantic spawn path (line sources, seed gating, merged early-termination and
 completion channels) and the fake-Pi wrapper tests passed natively on Linux and
 Windows, which is where the two OS-specific defects surfaced and were fixed.
+
+## Phase 5
+
+Started 2026-09-28 on macOS. (The work items were plain numbered text and were
+converted to GFM todos, as in Phases 1–4, plus one validation todo.)
+
+### Gaps found before designing
+
+- A listing row could not be routed: `SessionListing` dropped the owner's
+  `ManagedTarget` binding (generation, conversation) that `route_to_owner`
+  needs as `expected`, and nothing carried the route's operation. The owner
+  refuses a request whose operation differs from its current route, and
+  `steer_active_turn` and `queue_follow_up` are both "non-interrupting while
+  working", so the operation cannot be derived from availability.
+- `ensure_config_exists` runs the interactive init wizard when no config
+  exists. Every non-exempt command calls it, which would make `steer --json`
+  interactive and would change configuration, which the spec forbids for a send.
+- Argv Rule 2 rewrites `--provider <fuzzy>` for every subcommand before `--`.
+  A steer message can only meet it as an unknown flag (a clap error), and
+  rewriting stops at `--`, so message bytes are safe; a test locks that.
+- GitNexus `impact` was not permitted in this session. Callers of the edited
+  symbols (`AvailabilitySummary`, `ManualEligibility::summary`,
+  `SessionListing`, `wire::info_to_listing`, `ManagedTargetInfo`) were found by
+  text search instead: all are inside `lib/src/steering`, `cli/src/steering`,
+  and the Rendezvous steering tests (low risk).
+
+### Design decisions
+
+- **The listing carries what routing needs.** `AvailabilitySummary` gained
+  `operation` (the preferred route's `OperationIntent`, `None` exactly when
+  unavailable), serialized in listing JSON as `operation`. The owner publishes
+  it on a new proto field `ManagedTargetInfo.operation = 14`, and
+  `wire::info_to_listing` reads it strictly: absent while selectable, present
+  while unavailable, empty, unknown, or the literal `unknown` are all
+  registration errors, never a guessed operation. `SessionListing` gained a
+  `#[serde(skip)] binding: Option<ManagedTarget>` kept through deduplication,
+  so a request routes with the exact binding it was listed under.
+- **One seam per external effect.** `commands/steer/` is `mod.rs` (args,
+  validation, flow, exit codes), `service.rs` (`SteeringService`: discover and
+  deliver; `LocalService` = daemon managed source + `route_to_owner`),
+  `interact.rs` (`Interaction`: picker and consent; `TerminalInteraction` =
+  biscuit-tui `ChooseOne`/`BooleanSwitch` inside `block_in_place`), and
+  `render.rs` (`SessionTable`, receipts, consent explanation, JSON documents).
+  Tests substitute a fake service, scripted answers, and a captured console,
+  so no interactive test needs a human.
+- **Target and consent rules.** No `--session` requires a TTY (stdin and
+  stderr) and not `--json`, else exit 2 with the `--list` hint; the picker is
+  always shown, even for one selectable row. An explicit ID must appear in
+  this invocation's discovery (exact match; prefixes are rejected by the ID
+  parser). `interruption_required` always asks, explicit ID or not; `--json`
+  and non-TTY refuse with outcome `unavailable`. Consent is sent only for
+  `interrupt_then_submit` and bound to the target.
+- **Revalidation after a human pause.** A picked or consented row is looked up
+  again; a changed binding or a vanished row is "not redirected", a changed
+  operation is refused, except that a newly interruption-required session gets
+  the same explanation and question once more (bounded to two passes). An
+  explicit non-interrupting send has no human pause, so it relies on the
+  owner's own revalidation at submission (one discovery pass).
+- **Output separation.** The listing and receipts are data (stdout); the
+  pre-picker listing, warnings, consent explanation, and "nothing was sent"
+  notes are status (stderr). Every locally refused send still produces a
+  typed result (outcome `unavailable` + masked `detail`), so `--json` callers
+  always get a document for exit 1. Usage errors print nothing on stdout.
+- **No configuration side effects.** `Steer` joined the commands exempt from
+  `ensure_config_exists` (which would otherwise run the interactive init
+  wizard and write a config).
+- **Picker styling.** `ChooseOne` disables unavailable options; its theme's
+  `disabled_style` gains `DIM | CROSSED_OUT` (the default is dim only). Esc in
+  `ChooseOne` submits the initial (empty) selection, which the command maps to
+  cancellation just like Ctrl-C's error.
+- **Narrow terminals.** A six-column table cannot render below ~50 columns
+  (biscuit-terminal returns a width error text). `SessionTable` checks
+  `Table::plan_widths_for_terminal` and, when it fails, renders each row as one
+  wrapped, identically styled summary line. Full IDs are never wrapped (they
+  are copied into `--session`); every other standalone line wraps.
+- **Help/completions.** `steer` appears in the grouped help under Wrapped
+  Execution, in the root completion menu after `config`, and in telemetry.
+  Clap supplies `--help`; there is no consent-bypass flag.
+
+### Defects found and fixed during the phase
+
+- Found by the narrow-layout test: the listing printed biscuit-terminal's
+  "Table could not be rendered in 42 columns" instead of rows (fixed by the
+  stacked fallback above), and the first fallback wrapped IDs at hyphens.
+- The error-transport guard flagged six string collapses of typed errors in
+  the new command; all now render once through `crate::steering::render_chain`.
+
+### Requirement-to-test mapping
+
+All in `cli/src/commands/steer/tests.rs` unless noted.
+
+| Requirement | Test(s) |
+| --- | --- |
+| Command forms parse; `--list` conflicts with message/`--session`; `--` keeps dash text; no bypass flag; clap usage errors exit 2 | `the_specified_command_forms_parse`, `a_message_after_double_dash_keeps_its_exact_bytes`, `invalid_forms_are_usage_errors_and_no_consent_bypass_exists`; L1 `steer_cli::invalid_invocations_exit_with_usage_errors`, `help_documents_the_forms_without_a_consent_bypass` |
+| Argv normalization leaves steer messages alone | `a_message_after_double_dash_keeps_its_exact_bytes` (`--provider cl` after `--`, and in one token) |
+| Message validation (whitespace, NUL, >64 KiB incl. multibyte), malformed IDs → exit 2 before discovery; the limit itself is delivered unchanged | `invalid_messages_and_ids_fail_before_discovery`, `a_message_at_the_limit_is_delivered_unchanged` |
+| No target inferred: `--json` or no TTY without `--session` → exit 2 with guidance | `without_an_explicit_target_json_and_pipes_never_prompt`; L1 `invalid_invocations_exit_with_usage_errors` |
+| List JSON contract (keys, schema_version, unavailable rows with reasons, explicit nulls, operation, masked errors, coverage gaps), partial vs total failure, empty success | `list_json_is_the_versioned_contract_with_unavailable_rows`, `an_empty_listing_succeeds_and_total_failure_fails`; lib `discovery::tests::listing_json_carries_the_specified_fields_and_no_identity_key`; L1 `listing_without_a_daemon_fails_on_stderr_and_changes_no_configuration` |
+| Operation in the summary and on the wire (input robustness) | lib `eligibility::tests::the_summary_names_the_preferred_routes_operation`; CLI `steering::tests::registration_matrix_reads_every_field_strictly` (5 new cells) |
+| Exact targeting with the listed binding and operation; original bytes; send JSON contract | `an_explicit_send_reaches_exactly_its_target_with_the_listed_operation`; daemon `with_daemon::list_then_send_by_id_reaches_the_owner_and_returns_its_receipt` |
+| Exit 0 only for accepted/queued/delivered; receipt never above outcome; sent once; details masked | `exit_codes_follow_the_established_outcome` (all nine outcomes) |
+| Receipt wording: held undelivered + separate setup; acceptance ≠ acted on; unknown not retried | `receipts_say_only_what_was_established` |
+| Unknown/stale explicit ID and unavailable explicit target send nothing | `an_unlisted_or_unavailable_explicit_target_sends_nothing`; daemon `a_blocked_production_owner_is_listed_unavailable_with_its_reason` |
+| Picker required even for one eligible row; unavailable rows offered but disabled; listing with reasons shown first | `one_eligible_session_still_needs_a_choice_and_unavailable_rows_are_offered_disabled`, `the_picker_only_selects_available_rows` (simulated key input) |
+| Empty states, none eligible, unknown state, user cancellation (130), picker failure → no broadcast | `empty_states_and_cancellation_never_broadcast`, `a_picker_failure_sends_nothing` |
+| Idle target explains it starts a turn | `an_idle_target_is_told_it_starts_a_turn` |
+| Stale selection / ended session never redirected | `a_stale_selection_is_reported_and_never_redirected`; daemon `a_conversation_switch_after_listing_is_refused_by_the_owner` |
+| Lost non-interrupting delivery never silently becomes interruption; re-consent required; changed action refused | `a_changed_action_after_choosing_is_never_sent_silently` |
+| Consent explained (turn, tools, pending messages, partial), bound to target+operation, revalidated before cancellation; partial interruption exit 1 with phases | `interruption_consent_is_explained_bound_and_revalidated`; daemon `a_consented_interruption_reports_both_phases_and_json_cannot_consent` |
+| JSON/non-TTY never consent; decline 130; prompt failure is not consent | `interruption_phases_stay_separate_in_json`, `consent_is_never_inferred` |
+| Rendering: five columns, labels in plain text, full IDs, reasons; unavailable rows dim + struck; narrow layout wraps, never hides | `the_listing_labels_every_row_and_styles_unavailable_ones`, `a_narrow_terminal_wraps_details_instead_of_hiding_them`, `the_picker_draws_unavailable_rows_dim_and_struck` (ratatui `TestBackend`, off-screen) |
+| Sending changes no configuration and publishes no audio | L1 `listing_without_a_daemon_fails_on_stderr_and_changes_no_configuration` |
+| Late replies | not re-tested here: the requester reports the owner's `unknown` at its deadline (`exit_codes_follow_the_established_outcome` covers `unknown` → 1, not retried); late provider evidence is the owner's `late_result` audit (Phase 3 `controller::tests::a_late_acceptance_is_logged_as_an_update_and_never_resent`) |
+
+### Input robustness matrix
+
+**Managed registration `operation` (protobuf → `wire::info_to_listing`).**
+Protobuf has no null or duplicate-key shapes, and the field is a scalar.
+
+| Shape | Selectable row | Unavailable row |
+| --- | --- | --- |
+| absent | error (`Missing`) | reads, `operation: None` (control) |
+| empty string | error (`UnknownValue`) | error (`Inconsistent`) |
+| unknown value (`shout`) | error | error |
+| literal `unknown` | error (never a sendable operation) | error |
+| valid value | reads (control row) | error (`Inconsistent`) |
+
+Control rows: the matrix's control registration (interruption_required +
+`interrupt_then_submit`) and the unavailable/absent variant both read.
+
+**Steer CLI arguments** are not a file format; their shapes are covered by
+the parser and validation tests above (absent message, empty, whitespace,
+NUL, over-limit, malformed/uppercase/prefix IDs, conflicting flags).
+
+### Checks run
+
+- `cargo nextest run -p claudine --lib -E 'test(/^steering::/)'`: 67/67.
+- `cargo nextest run -p claudine-cli --bin claudine` steer + steering + menu +
+  help: 68/68; with `--features daemon-tests` (steer + steering): 41/41.
+- L1 `steer_cli` (3), `test_placement`, `spawn_site_guard`: pass.
+  `wrap_basics::help_lists_wrapper_subcommands` snapshot updated for the new
+  help line.
+- Dispatch inventory re-blessed with the Phase 1–4 workaround (bless branch
+  forced for one run and reverted; `dispatch_inventory.rs` unchanged from
+  `HEAD`): 4 new reference-class `Provider::` sites, all in
+  `commands/steer/tests.rs`; no dispatch conditionals.
+- `just lint` (claudine area): clean for all five crates after the
+  error-transport fixes and two clippy `cloned_ref_to_slice_refs` fixes.
+  `cargo clippy -p claudine-cli --all-targets --features
+  daemon-tests,test-fixtures -- -D warnings`: clean.
+- `just test --no-fail-fast` (claudine area): **7929 passed, 1 failed, 9
+  skipped.** The failure is
+  `compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch`,
+  added by `25ca47440 fix(darkmatter): enforce every root-union file(match)
+  glob on its arm`, which another session merged into this branch
+  (`281dd2c8d`) while Phase 5 was in progress. It fails deterministically in
+  darkmatter schema union matching and touches nothing in this phase.
+- Rendezvous area `just test` (proto changed): 284 passed, 2 skipped.
+- `just check-tier-coverage claudine`: nothing stranded.
+- `just cross-check claudine-cli --features daemon-tests steer steering::
+  root_menu help_lists_wrapper`: native Windows 74/74, Linux 74/74 (including
+  the four daemon-backed steer tests over named pipes and Unix sockets).
+  `just cross-check claudine-cli --os windows steer_cli`: 3/3. (A `-E`
+  expression with parentheses breaks the recipe's argument quoting; positional
+  substring filters work.)
+
+### Environment limitations encountered
+
+- GitNexus `impact` was not permitted (see above).
+- `CLAUDINE_UPDATE_INVENTORY=1 …` still needs approval; workaround as above.
+- Writes under `.claude/skills/claudine/` were denied again. Intended skill
+  update (not applied), in addition to the Phase 1–4 items: add a CLI row
+  "`claudine steer "msg" | --session <id> [--json] "msg" | --list [--json]` —
+  send one message to one running session (the requester over
+  `cli/src/steering/requester.rs`); never infers a target; interruption always
+  needs interactive consent (`--json`/no TTY refuse); a picked row is
+  rediscovered after the human pause and a changed binding or operation is
+  reported, never followed; exempt from `ensure_config_exists`; exit 0 only for
+  accepted/queued/delivered, 1 otherwise, 2 usage, 130 cancel; tests
+  `commands/steer/tests.rs` and `tests/l1/steer_cli.rs`; see
+  `claudine/docs/cli/steer.md`".
+- **Concurrent activity in this worktree.** During the phase, HEAD advanced
+  to a merge (`281dd2c8d`) made by another session, and most Phase 5 files
+  appeared staged in the index although this session never ran `git add`.
+  The index was left as found; the working tree holds the complete Phase 5
+  change. Unrelated changes under `content-policy/` and `darkmatter/fixes/`
+  were not touched.
+
+### Known gaps (not blockers)
+
+- **No selectable session exists yet**, so the production send path has only
+  been exercised end to end with fixture eligibility against a real daemon
+  (`with_daemon::*`); against the build's real policy every row is
+  unavailable. This is expected until a grant lands (Phase 7/8).
+- **Native sessions** are neither listed nor deliverable
+  (`service::NATIVE_DELIVERY_UNIMPLEMENTED`); coverage gaps are reported in the
+  listing. Phase 7 adds native discoverers and adapters behind the same
+  `SteeringService` seam.
+- **No PTY test drives the real picker.** The picker is exercised with
+  synthetic key events on the real `ChooseOne` state and rendered off-screen;
+  `TerminalInteraction` itself is a thin `run_standalone` call.
+- **Locally refused sends leave no audit record** (only owners audit); this is
+  documented in `traces-and-logging.md`.
+
+### Cross-OS assessment
+
+The new code has no `#[cfg]` branches. TTY detection uses
+`std::io::IsTerminal` (portable); the picker and consent prompts use
+biscuit-tui's `run_standalone`, already used on all three OSes; transport is
+the Phase 3 requester. The OS-sensitive paths (daemon routing over named pipes,
+the binary's no-daemon failure and exit codes) passed natively on Windows and
+on Linux via `just cross-check`.
