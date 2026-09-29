@@ -478,6 +478,36 @@ fn a_failed_review_is_an_error_not_a_cancellation() {
 }
 
 #[test]
+fn a_wrong_row_count_with_hidden_steps_fails_the_run_instead_of_cancelling_or_truncating() {
+    let steps = steps(&[
+        ("stage-1", Some(ExecutableField::Shell)),
+        ("plan", Some(ExecutableField::Prompt)),
+        ("notify", Some(ExecutableField::SideEffect)),
+        ("build", Some(ExecutableField::Task)),
+    ]);
+    // Two rows are shown. Four is the full step count, the answer a review
+    // that ignored the filter would give.
+    for found in [0, 1, 3, 4, 5] {
+        let error = live_targets(
+            true,
+            &steps,
+            drafts_for(&steps),
+            ProviderResolutionReason::FrontmatterSingle,
+            |rows| {
+                assert_eq!(rows.len(), 2);
+                Ok((0..found).map(reviewed).collect())
+            },
+        )
+        .expect_err("a mismatched answer is neither targets nor a cancellation");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{found} rows");
+        assert_eq!(
+            error.get_ref().and_then(|source| source.downcast_ref::<ReviewRowCountMismatch>()),
+            Some(&ReviewRowCountMismatch { expected: 2, found }),
+        );
+    }
+}
+
+#[test]
 fn a_submitted_review_returns_one_target_per_step() {
     let steps = steps(&[
         ("stage", Some(ExecutableField::Shell)),
