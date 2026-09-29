@@ -19,122 +19,105 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-status: planned
-implemented: false
+status: implemented
+implemented: true
 implemented_by: claude/opus
 review_iterations: 0
 human_review: true
 human_review_items:
   - |-
-    **What to do with the remaining provider adapters (Phase 7 is only partly done).**
+    **Confirm that the feature closes with Codex as the only provider that can be steered.**
 
-    Phase 7 asked for a steering adapter for every provider. What exists now:
+    At the end of Phase 7 you were asked whether to finish with Codex only (option A) or build
+    more provider adapters first (option B). No answer was recorded. Because Phase 8 was requested,
+    it went ahead on **option A**: it built no new adapter and verified, documented, and closed what
+    exists.
 
-    - **Codex:** fully built. Its non-interactive runs go through Codex's own server mode, which
-      has a built-in "only this exact turn" safety check. It is tested against the real Codex and
-      switched on for macOS with Codex 0.157.1. A real run that starts repeating itself gets
-      Claudine's automatic warning and recovers.
-    - **Claude Code:** sessions you start yourself are now found and listed, marked as not yet
-      steerable with the reason. Sending to them is not built: how Claude Code replies to a message
-      is undocumented, so success could never be confirmed.
-    - **Everyone else:** each provider has a recorded outcome, but no adapter was built for OpenCode,
-      Kilo, Gemini, Qwen, Goose, Kimi, or Antigravity. Each would mean replacing how Claudine
-      normally launches that provider with a server or protocol mode, the same size of job Codex
-      was. Most would also be of limited use: Gemini and Qwen cannot safely help a run that is stuck
-      mid-turn, OpenCode's research says a busy session can lose a message, Goose is not installed
-      on any test machine, and Kimi changed major version (see the next item).
+    What is now proven: on macOS with Codex 0.157.1, a run started with `claudine codex` can be
+    sent a message from another terminal with `claudine steer`, the message reaches the agent
+    exactly once, and Claudine's automatic "you are repeating yourself" warning reaches it before
+    the run is stopped. Every other provider is listed with the reason it cannot be steered.
 
-    Why decide before Phase 8: Phase 8 is the final verification and release pass. It needs to know
-    whether it is closing the feature with Codex as the only enabled provider, or whether more
-    adapters belong in this feature first.
+    Why decide now: the review and the move to `_completed` should know whether the unfinished
+    Phase 7 items (adapters for OpenCode, Kilo, Gemini, Qwen, Goose, Kimi, Antigravity) are
+    follow-up work or part of this feature.
 
     Options:
 
-    - **A. Close with Codex, and track the rest as separate follow-up features (recommended).**
-      Group them by protocol: an HTTP-server adapter (Kilo first, since its research shows it can
-      reach a stuck run on macOS, then OpenCode); an ACP adapter (Goose once it is installed, then
-      Gemini); and a Kimi Code 2.x research refresh.
-      - Pros: ships a working, verified feature now. Each adapter gets its own review of launch
-        parity, the same way Codex's was reviewed.
-      - Cons: Codex remains the only provider that can be steered until the follow-ups land.
-    - **B. Reopen Phase 7 and build Kilo and Gemini before Phase 8.**
+    - **A. Keep option A (recommended):** close this feature; open follow-up features grouped by
+      protocol: an HTTP-server adapter (Kilo first, then OpenCode), an ACP adapter (Goose once it
+      is installed, then Gemini), and a Kimi Code 2.x research refresh.
+      - Pros: ships what is verified; each new adapter gets its own review, as Codex did.
+      - Cons: only Codex can be steered until the follow-ups land.
+    - **B. Reopen Phase 7 for Kilo and Gemini first.**
       - Pros: more providers at release.
-      - Cons: each changes that provider's default launch behavior, and needs new real-provider test
-        rigs (a mock model for their APIs). It delays the release pass by roughly a Codex-sized
-        effort per provider.
-    - **C. Build only discovery (listing) for the rest now.**
-      - Pros: cheap.
-      - Cons: for most providers the only discovery available is finding the process, which has no
-        conversation identity to target, so such rows could never be steered. This adds noise for
-        little value.
+      - Cons: each changes how Claudine launches that provider and needs its own real test setup;
+        roughly one Codex-sized effort per provider before this feature can close.
 
-    **Recommendation: A.** The core promise is now demonstrated end to end on a real provider, and
-    the remaining providers' research shows limited or unverified value for real cost and risk.
+    **Recommendation: A.** Nothing in Phase 8 weakened the case for it.
   - |-
-    **A pre-existing Kimi problem found along the way (not caused by steering).**
+    **Kimi's non-interactive launch is broken by Kimi Code 2.x (found in Phase 7, not caused by steering).**
 
-    The installed Kimi is Kimi Code **2.0.2**. It no longer has the `--wire` option, which
-    Claudine's non-interactive Kimi launch depends on: `kimi --wire` fails with "unknown option".
-    So `claudine kimi "task"` (and `compose`/`sequence` with Kimi) most likely cannot run against
-    current Kimi installs. This was confirmed only from Kimi's help output and that error, without
-    running a real task.
-
-    Why decide now: Phase 8's release notes and the Kimi steering follow-up both depend on which
-    Kimi interface Claudine should use.
+    The installed Kimi Code 2.0.2 no longer accepts `--wire`, which Claudine uses to run Kimi
+    non-interactively, so `claudine kimi "task"` (and `compose`/`sequence` with Kimi) most likely
+    fails against current Kimi installs. Nothing changed in Phase 8.
 
     Options:
 
-    - **A. Open a fix now (recommended):** research Kimi Code 2.x's non-interactive options
-      (`-p` with `--output-format stream-json`, `kimi acp`, `kimi web`) and switch the launch.
-      - Pros: restores non-interactive Kimi.
-      - Cons: needs a research refresh first.
-    - **B. Leave it until the Kimi steering follow-up.**
-      - Pros: one piece of work.
-      - Cons: Kimi stays broken until then.
+    - **A. Open a fix now (recommended):** research Kimi Code 2.x's non-interactive options and
+      switch the launch. Pros: restores Kimi for everyone. Cons: needs a research refresh first.
+    - **B. Leave it for the Kimi steering follow-up.** Pros: one piece of work. Cons: Kimi stays
+      broken until then.
 
-    **Recommendation: A.** It is a user-facing breakage independent of steering.
+    **Recommendation: A.** It is a user-facing breakage unrelated to steering.
+  - |-
+    **Two documentation steps need you (this session was not allowed to do them).**
+
+    1. **The cross-provider steering summary.** The prompt document
+       `claudine/docs/research/summary/steering.md` is written in the same form as the other
+       summaries, but generating it runs a real agent and needed a permission this session could
+       not get. To generate it, run this from the repository root, then run
+       `just publish-summary-research` in `claudine/`:
+
+       ```sh
+       claudine sequence claudine/docs/research/summary/steering.md --yolo --codex -- -m gpt-5.6-sol -c model_reasoning_effort=low
+       ```
+
+    2. **The Claudine agent skill** (`.claude/skills/claudine/SKILL.md`). Writing there was denied
+       in every phase. The exact additions (steering and secrets modules, the `claudine steer`
+       command, the managed Codex launch, automatic steering, two testing notes) are listed under
+       "Environment limitations" in the Phase 8 section of the implementation log.
+
+    Options:
+
+    - **A. Do both before closing the feature (recommended):** a few minutes of work; agents that
+      load the skill then know steering exists and how it is tested.
+    - **B. Close now and do them later.** Pros: nothing blocks. Cons: until then, agents working in
+      Claudine will not learn about steering from the skill.
+
+    **Recommendation: A.**
 message_to_agent: |-
-    Phases 1-6 are implemented; Phase 7 is partially implemented with human review requested (read
-    the human_review_items first: they decide whether Phase 8 closes the feature with Codex as the
-    only enabled provider). Read claudine/features/2026-09-08-steering/implementation-log.md
-    (Phase 7, then 6), claudine/docs/topics/codex-app-server.md, steering-activation.md (shipped
-    Codex grants), steering-routing.md (native Claude discovery), and automatic-steering.md.
+    All eight phases are implemented (2026-09-28). The spec's human_review_items are open: the
+    Phase 7 scope question was answered by assumption (option A: Codex is the only enabled
+    provider; the other adapters become follow-up features), the pre-existing Kimi `--wire`
+    breakage is unchanged, and two documentation steps (steering research-summary generation, the
+    Claudine skill edit) were blocked by permissions. Read the Phase 8 section of
+    claudine/features/2026-09-08-steering/implementation-log.md first.
 
-    - OPERATIONAL PATH FOR PHASE 8: a non-interactive `claudine codex` run whose every exec option
-      maps (e.g. `claudine codex -- --skip-git-repo-check "task"` in a non-git dir, or any run in a
-      Git repo) runs `codex app-server` and is steerable on macOS at exactly Codex 0.157.1 (grants
-      for app-server-steer/working and app-server-turn-start/idle). Evidence:
-      `just test-real real_codex_` in claudine/ (real Codex + scripted local model,
-      tests/common/codex_model.rs, disposable CODEX_HOME). `real_codex_app_server_automatic_help_lets_a_repeating_run_recover`
-      already demonstrates "automatic warning followed by recovery" through the production wrapper;
-      L1 `codex_app_server::automatic_help_follows_the_granted_version_and_keeps_the_stop_schedule`
-      shows the unchanged stop at 30. A production-wrapper MANUAL send (`claudine steer --session`
-      through a real daemon to a running `claudine codex`) has NOT been run yet; the in-crate
-      `real_codex_protocol` tests drive the production session+adapter through a controller.
-    - Linux / native Windows: the managed Codex path passed only with the fake Codex
-      (tests/bin/fake_codex) via `just cross-check`; no real-Codex run there, so no grant there.
-    - Grants must match the provider version exactly; the managed Codex launch records it from
-      `initialize` (`SteeringController::set_provider_version`). A new Codex release makes the grant
-      stop applying until re-verified (bump the grant, re-run `just test-real real_codex_`).
-    - Interrupt-then-start for Codex is implemented and verified but deliberately NOT granted: the
-      generator only grants a mechanism whose support matches the researched case
-      (non_interrupting), and a non-interrupting route is always preferred.
-    - Fixed pre-existing defect: Codex whole-item text (agent messages/reasoning) now ends at a line
-      boundary (`complete_line` in lib/src/stream/providers/codex.rs); before, the repetition guard
-      could never trip on Codex agent messages.
-    - Behavior change: `claudine steer --list` without a daemon now SUCCEEDS with native Claude rows
-      and a `managed` discovery error (spec's partial-discovery rule). L1 steer tests set
-      CLAUDE_CONFIG_DIR to the fixture because dirs::home_dir ignores USERPROFILE on Windows.
-    - Test fixtures that model `codex exec` by reading stdin to EOF hang under the managed launch;
-      make such stubs exit on `app-server` (see compose_system_prompt_lifetime / shipped_prompt_contract).
-    - Pre-existing failure still present: compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch.
-    - Gotchas (unchanged): error-transport guard rejects `error.to_string()`/`format!("{err}")` on
-      typed errors; re-bless docs/providers/dispatch-inventory.json when `Provider::` references
-      change (force the bless branch at cli/tests/l1/dispatch_inventory.rs:953 for one run, revert);
-      `just cross-check` runs from the repo root with positional filters; provider CLIs and
-      env-prefixed shell commands need approval, so reach real providers via `just test-real`.
-    - Skill files under .claude/skills/claudine/ still could not be written; intended edits are in
-      each phase's "Environment limitations" in the log.
+    - Operational: Claudine-managed non-interactive Codex runs on macOS at exactly Codex 0.157.1
+      (grants app-server-steer / app-server-turn-start). Evidence through the production wrapper:
+      `just test-real real_codex_app_server::` in claudine/ (6 tests, including
+      manual_steer::real_codex_app_server_manual_steer_reaches_the_running_wrapper_once, which boots
+      a real daemon and drives `claudine steer` as a separate process). `test-real` now runs the
+      CLI half with `--features real-tests,daemon-tests`.
+    - Not claimed: other Codex versions, Linux/native Windows delivery (no real-Codex run; cross-check
+      does not forward CLAUDINE_CONTRACT_REAL), Pi (reviewed block), Claude Code delivery, others.
+    - Phase 8 fixed 9 L2 failures in level2_lifecycle_control.rs that Phase 7 introduced by not
+      running L2: Codex stubs must exit on `app-server` so the managed launch falls back to exec.
+    - Known, unrelated: L1 compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch
+      fails (since Phase 5, Darkmatter); L2 level2_lifecycle_ctrl_c_tmux::level2_repeat_ctrl_c_during_orphan_teardown_is_deferred
+      flaked once under load and passes alone; clippy with `terminal-tests` flags a pre-existing
+      needless_lifetimes in tests/level2/level2_dry_run_metadata_capture.rs:283.
 ---
 # Steering Running Agent Sessions
 

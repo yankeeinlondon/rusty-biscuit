@@ -331,6 +331,214 @@ docs_updated_during_phase_7:
 docs_created_during_phase_7:
   - claudine/docs/topics/codex-app-server.md
 skills_files_updated_during_phase_7: []
+source_files_during_phase_8:
+  - claudine/cli/src/commands/steer/mod.rs
+  - claudine/cli/tests/l1/steer_cli.rs
+  - claudine/cli/tests/real/real_codex_app_server.rs
+  - claudine/cli/tests/level2/level2_lifecycle_control.rs
+  - claudine/justfile
+docs_updated_during_phase_8:
+  - claudine/README.md
+  - claudine/docs/cli/steer.md
+  - claudine/docs/topics/signal-handling.md
+  - claudine/features/2026-09-08-steering/verification/README.md
+  - claudine/features/2026-09-08-steering/uncertainties.md
+  - claudine/features/2026-09-08-steering/fleet-run.md
+docs_created_during_phase_8:
+  - claudine/docs/research/summary/steering.md
+skills_files_updated_during_phase_8: []
+source_code:
+  - claudine/catalog-types/src/steering.rs
+  - claudine/catalog-types/src/lib.rs
+  - claudine/catalog-types/Cargo.toml
+  - claudine/gen/src/steering_catalog.rs
+  - claudine/gen/src/steering_check.rs
+  - claudine/gen/src/apply.rs
+  - claudine/gen/src/errors.rs
+  - claudine/gen/src/inputs.rs
+  - claudine/gen/src/lib.rs
+  - claudine/gen/src/main.rs
+  - claudine/gen/tests/l1/steering_activation.rs
+  - claudine/gen/tests/l1/main.rs
+  - claudine/gen/tests/l1/drift.rs
+  - claudine/gen/tests/l1/generate_ux.rs
+  - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+  - claudine/lib/src/lib.rs
+  - claudine/lib/src/steering/mod.rs
+  - claudine/lib/src/steering/adapters.rs
+  - claudine/lib/src/steering/contract.rs
+  - claudine/lib/src/steering/eligibility.rs
+  - claudine/lib/src/steering/eligibility/tests.rs
+  - claudine/lib/src/steering/identity.rs
+  - claudine/lib/src/steering/generated.rs
+  - claudine/cli/tests/l1/dispatch_inventory.rs
+  - claudine/docs/providers/steering-activation.yaml
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/research/steering/_schema.yaml
+  - claudine/lib/src/secrets/mod.rs
+  - claudine/lib/src/secrets/tests.rs
+  - claudine/lib/src/protect/scrub.rs
+  - claudine/lib/src/messaging/send.rs
+  - claudine/lib/src/reporting/jsonl.rs
+  - claudine/lib/src/reporting/mod.rs
+  - claudine/lib/src/reporting/paths.rs
+  - claudine/lib/src/dispatch/logging.rs
+  - claudine/lib/src/steering/audit.rs
+  - claudine/lib/src/steering/audit/tests.rs
+  - claudine/cli/src/commands/wrap/env/sanitize.rs
+  - claudine/cli/src/commands/wrap/env/tests.rs
+  - claudine/lib/Cargo.toml
+  - claudine/lib/src/steering/controller.rs
+  - claudine/lib/src/steering/controller/tests.rs
+  - claudine/lib/src/steering/discovery.rs
+  - claudine/lib/src/steering/discovery/tests.rs
+  - claudine/rendezvous/core/proto/rendezvous.proto
+  - claudine/rendezvous/core/build.rs
+  - claudine/rendezvous/core/src/lib.rs
+  - claudine/rendezvous/daemon/src/lib.rs
+  - claudine/rendezvous/daemon/src/server.rs
+  - claudine/rendezvous/daemon/src/service.rs
+  - claudine/rendezvous/daemon/src/steering.rs
+  - claudine/rendezvous/daemon/src/steering/tests.rs
+  - claudine/rendezvous/client/Cargo.toml
+  - claudine/rendezvous/client/tests/steering_round_trip.rs
+  - claudine/cli/Cargo.toml
+  - claudine/cli/src/main.rs
+  - claudine/cli/src/cli_utils.rs
+  - claudine/cli/src/budget/run.rs
+  - claudine/cli/src/steering/mod.rs
+  - claudine/cli/src/steering/owner.rs
+  - claudine/cli/src/steering/requester.rs
+  - claudine/cli/src/steering/wire.rs
+  - claudine/cli/src/steering/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/tests/common/mod.rs
+  - Cargo.lock
+  - claudine/docs/providers/facts/pi.yaml
+  - claudine/docs/providers/catalog.json
+  - claudine/catalog-types/src/signal.rs
+  - claudine/lib/src/provider/pi/data.rs
+  - claudine/lib/src/stream/protocol/pi.rs
+  - claudine/lib/src/stream/protocol/pi/rpc.rs
+  - claudine/lib/src/stream/protocol/pi/rpc/tests.rs
+  - claudine/lib/src/stream/providers/pi.rs
+  - claudine/lib/src/stream/providers/pi/tests.rs
+  - claudine/lib/src/stream/logs/opencode/bridge/mod.rs
+  - claudine/cli/src/commands/wrap/exec/mod.rs
+  - claudine/cli/src/commands/wrap/exec/control.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/mod.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/commands.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/executor.rs
+  - claudine/cli/src/commands/wrap/exec/pi_rpc/tests.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/mod.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/retained.rs
+  - claudine/cli/src/commands/wrap/exec/spawn/descendants.rs
+  - claudine/cli/src/commands/wrap/exec/termination/message.rs
+  - claudine/cli/src/commands/wrap/exec/termination/reasons.rs
+  - claudine/cli/src/commands/wrap/exec/termination/summary.rs
+  - claudine/cli/src/commands/wrap/profile/mod.rs
+  - claudine/cli/src/commands/wrap/profile/pi.rs
+  - claudine/cli/src/commands/wrap/profile/tests/pi_managed.rs
+  - claudine/cli/src/commands/wrap/resume.rs
+  - claudine/cli/src/commands/wrap/wrapper_exec.rs
+  - claudine/cli/tests/bin/fake_pi/main.rs
+  - claudine/cli/tests/l1/main.rs
+  - claudine/cli/tests/l1/pi_managed_rpc.rs
+  - claudine/cli/tests/real/main.rs
+  - claudine/cli/tests/real/real_pi_managed_rpc.rs
+  - claudine/cli/tests/real/real_pi_steering.rs
+  - claudine/cli/tests/fixtures/steering/pi-probe.ts
+  - claudine/cli/tests/fixtures/steering/pi-bash-cleanup-probe.ts
+  - claudine/cli/src/args.rs
+  - claudine/cli/src/telemetry.rs
+  - claudine/cli/src/commands/mod.rs
+  - claudine/cli/src/commands/help.rs
+  - claudine/cli/src/commands/steer/mod.rs
+  - claudine/cli/src/commands/steer/service.rs
+  - claudine/cli/src/commands/steer/interact.rs
+  - claudine/cli/src/commands/steer/render.rs
+  - claudine/cli/src/commands/steer/tests.rs
+  - claudine/cli/src/completion/root_menu.rs
+  - claudine/cli/tests/l1/steer_cli.rs
+  - claudine/cli/tests/l1/snapshots/l1__wrap_basics__help_lists_wrapper_subcommands.snap
+  - claudine/lib/src/runaway/detector.rs
+  - claudine/lib/src/runaway/detector/tests.rs
+  - claudine/lib/src/runaway/detector/tests/warnings.rs
+  - claudine/lib/src/runaway/mod.rs
+  - claudine/lib/src/steering/automatic.rs
+  - claudine/lib/src/steering/automatic/tests.rs
+  - claudine/lib/src/config/claudine_config.rs
+  - claudine/lib/src/config/claudine_config/tests.rs
+  - claudine/lib/src/config/merge.rs
+  - claudine/lib/src/dispatch/runner/speak.rs
+  - claudine/lib/src/dispatch/runner/tests.rs
+  - claudine/cli/src/steering/automatic.rs
+  - claudine/cli/src/steering/automatic/tests.rs
+  - claudine/cli/src/commands/init/mod.rs
+  - claudine/cli/src/commands/init_wizard.rs
+  - claudine/cli/src/commands/wrap/runaway_guard.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/automatic_help.rs
+  - claudine/lib/src/stream/protocol/codex.rs
+  - claudine/lib/src/stream/protocol/codex/app_server.rs
+  - claudine/lib/src/stream/protocol/codex/app_server/tests.rs
+  - claudine/lib/src/stream/protocol/fixtures/codex-app-server-steer-0.157.1.jsonl
+  - claudine/lib/src/stream/providers/codex.rs
+  - claudine/lib/src/stream/providers/codex/tests.rs
+  - claudine/lib/src/steering/native/mod.rs
+  - claudine/lib/src/steering/native/claude_registry.rs
+  - claudine/lib/src/steering/native/claude_registry/tests.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/mod.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/commands.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/launch.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/executor.rs
+  - claudine/cli/src/commands/wrap/exec/codex_app_server/tests.rs
+  - claudine/cli/src/commands/wrap/profile/codex.rs
+  - claudine/cli/tests/bin/fake_codex/main.rs
+  - claudine/cli/tests/common/codex_model.rs
+  - claudine/cli/tests/l1/codex_app_server.rs
+  - claudine/cli/tests/l1/compose_system_prompt_lifetime.rs
+  - claudine/cli/tests/l1/shipped_prompt_contract.rs
+  - claudine/cli/tests/real/real_codex_app_server.rs
+  - claudine/features/2026-09-08-steering/verification/codex-macos-0.157.1.json
+  - claudine/cli/tests/level2/level2_lifecycle_control.rs
+  - claudine/justfile
+documentation:
+  - claudine/README.md
+  - claudine/docs/topics/provider-metadata.md
+  - claudine/docs/research/steering/_fleet.md
+  - claudine/docs/research/steering/antigravity.md
+  - claudine/docs/research/steering/claude.md
+  - claudine/docs/research/steering/codex.md
+  - claudine/docs/research/steering/gemini.md
+  - claudine/docs/research/steering/goose.md
+  - claudine/docs/research/steering/kilo.md
+  - claudine/docs/research/steering/kimi.md
+  - claudine/docs/research/steering/opencode.md
+  - claudine/docs/research/steering/pi.md
+  - claudine/docs/research/steering/qwen.md
+  - claudine/docs/topics/steering-activation.md
+  - claudine/docs/topics/messaging.md
+  - claudine/docs/topics/traces-and-logging.md
+  - claudine/docs/topics/secret-recognition.md
+  - claudine/docs/dependencies.md
+  - claudine/docs/rendezvous/local-ipc.md
+  - claudine/docs/topics/steering-routing.md
+  - claudine/docs/topics/timeouts.md
+  - claudine/docs/topics/pi-rpc.md
+  - claudine/docs/cli/steer.md
+  - claudine/docs/topics/automatic-steering.md
+  - claudine/docs/research/non-interactive-sessions/codex.md
+  - claudine/features/2026-09-08-steering/verification/README.md
+  - claudine/docs/topics/codex-app-server.md
+  - claudine/docs/topics/signal-handling.md
+  - claudine/features/2026-09-08-steering/uncertainties.md
+  - claudine/features/2026-09-08-steering/fleet-run.md
+  - claudine/docs/research/summary/steering.md
+completed_phase: 8
+implemented: true
 ---
 # Implementation Log for 2026-09-08-steering (8 phases)
 
@@ -1920,3 +2128,183 @@ spawn path), native discovery's home and process-start lookups, and the
 Windows pipe endpoint in L1. The fake-Codex L1 suite (including automatic
 help, which takes the "no grant" branch off macOS) and the registry tests
 passed natively on Linux and Windows; real Codex was run on macOS only.
+
+## Phase 8
+
+Platform verification, documentation, and release gates, 2026-09-28 on macOS.
+(The work items were plain numbered text and were converted to GFM todos, as
+in Phases 1–7, plus one validation todo.)
+
+### Scope decision carried in from Phase 7
+
+Phase 7 ended with a human-review question: close the feature with Codex as
+the only enabled provider (option A, recommended), or build more adapters
+first. No answer was recorded in the spec. Being asked to implement Phase 8
+was read as proceeding with **option A**: this phase adds no provider adapter
+and verifies, documents, and closes what exists. The question is kept open in
+the spec so the author can confirm it.
+
+### Production-wrapper manual send (the missing release check)
+
+Phase 7 had shown automatic help through the production wrapper but never a
+**manual** send from a separate `claudine steer` process to a running
+`claudine codex`. New real-tier test
+`real_codex_app_server::manual_steer::real_codex_app_server_manual_steer_reaches_the_running_wrapper_once`:
+
+- boots a real `rendezvous-daemon` server in the test process on a private
+  endpoint (short tempdir: Unix socket paths are length-limited) and points
+  both the wrapper and the requester at it through `RENDEZVOUS_ENDPOINT`;
+- runs a real `claudine codex -- --skip-git-repo-check …` against the scripted
+  loopback model, which keeps the turn working with distinct short tools until
+  a request carries the nonce;
+- polls `claudine steer --list --json` (separate process) until the Codex row
+  is `working` with a provider version, then `claudine steer --session <id>
+  --json "<nonce …> token=<secret>"`;
+- asserts, on the granted platform: row `non_interrupting` /
+  `steer_active_turn` / `managed-app-server`, receipt `queued` via
+  `app-server-steer`, receipt never echoes the secret; the model receives the
+  original (unmasked) message exactly once and the run ends successfully; the
+  ended run is unlisted and the same ID then returns `unavailable` with no new
+  model request; the steering audit holds the nonce with the secret masked;
+- elsewhere (not macOS or not 0.157.1): the row is `unavailable`, the send
+  exits 1 with `unavailable`, and the model never sees the nonce.
+
+It needs `rendezvous-daemon`, which only the `daemon-tests` feature brings in,
+so the module is `#[cfg(feature = "daemon-tests")]` and the area's `test-real`
+recipe now runs the CLI half with `--features real-tests,daemon-tests`.
+
+A second new real test,
+`real_codex_app_server_continued_repetition_still_stops_at_the_limit`, closes
+"continued repetition reaching its original stop limit" against real Codex
+(before, only the fake-Codex L1 test showed it): the model ignores the warning,
+one warning is sent before `runaway repetition detected (cycle length 1, 30
+repeats)`, and the run fails on the unchanged schedule.
+
+Both passed on the first run; a `--no-capture` rerun confirmed the granted
+branch ran (`codex-cli 0.157.1`, macOS).
+
+### Defect found and fixed: L2 Codex stubs (Phase 7 regression in tests)
+
+`just test-l2` failed 9 `level2_lifecycle_control` tests, all at ~40 s and all
+involving Codex. Phase 7 had not run L2. Cause: the same fixture assumption
+Phase 7 fixed in L1 — stubs modelling `codex exec` drained stdin (`cat`), so
+under the managed app-server launch they waited on the handshake, and the
+first recorded launch was the app-server argv (e.g. `codex-sink=none`, no
+`--output-last-message`). Fix, as in Phase 7's L1 stubs: every stub in that
+file that can stand in for `codex` exits `2` on `app-server` before recording
+anything, so the wrapper falls back to `codex exec` before submission and the
+recorded launch is exec's (12 stubs; one explanatory doc comment on
+`write_launch_recorder`). Result: `level2_lifecycle_control` 97/97.
+
+### Help and documentation
+
+- `claudine steer --help` gained an `after_help` naming the local Rendezvous
+  daemon as the prerequisite for reaching runs started by another process (the
+  one fact a first-time user was missing); the L1 help test asserts it.
+- `docs/cli/steer.md`: new **Before you start** (install/start the daemon, a
+  two-terminal example, what happens when the daemon starts late or restarts)
+  and **Provider compatibility** (per-provider found-by / steerable / blocker).
+- `docs/topics/signal-handling.md`: new **Controlled launches** subsection —
+  Ctrl+C before readiness abandons without fallback, after readiness the
+  unified loop applies, stdin stays open until settlement (Codex abandons its
+  turn on EOF), steering changes no clock or signal.
+- `README.md`: the daemon prerequisite and a pointer to the compatibility table.
+- Local IPC (`docs/rendezvous/local-ipc.md` §15), timeouts, steering routing,
+  activation, automatic steering, and the Codex app-server topic were
+  re-read and are current; no edit needed.
+- Dependency docs: no dependency was added or removed.
+- Research summary: `docs/research/summary/steering.md` authored in the
+  existing draft → iterate → finalize shape, with a standing correction that
+  research outcomes are not grants. **Generation not run**: `claudine sequence
+  … --yolo --codex -- -m gpt-5.6-sol -c model_reasoning_effort=low` needs
+  approval in this session, which a non-interactive run cannot obtain. To run
+  it (from the repo root), then publish with `just publish-summary-research`
+  in `claudine/`:
+
+  ```sh
+  claudine sequence claudine/docs/research/summary/steering.md --yolo --codex -- -m gpt-5.6-sol -c model_reasoning_effort=low
+  ```
+
+  Until it runs, `publish-summary-research` skips it (empty body).
+
+### Evidence records updated
+
+- `verification/README.md`: production-wrapper release checks (commands,
+  results, what stays unrun).
+- `uncertainties.md`: new **Final status (2026-09-28)** table per provider
+  (implemented / enabled / open with next check); the 2026-09-08 register is
+  kept as written below it.
+- `fleet-run.md`: status line and an **Implementation Outcome** section.
+
+### Checks run
+
+| Check | Result |
+| --- | --- |
+| `just test --no-fail-fast` (claudine area; catalog-types, lib, contract, CLI with daemon/terminal/fixture features, gen) | 8031 passed, **1 failed**, 9 skipped. The failure is the pre-existing `compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch` (Darkmatter union work, recorded since Phase 5; same `/spec` resolution message) |
+| `just test-l2 --no-fail-fast` | first run 264/273 (the 9 Codex stub failures above); after the fix `level2_lifecycle_control` 97/97; full rerun 272/273 — the one failure, `level2_lifecycle_ctrl_c_tmux::level2_repeat_ctrl_c_during_orphan_teardown_is_deferred` (11.5 s under load), passed alone twice (2.4 s) and passed in the first full run; it uses no Codex stub: a load-sensitive timing flake, not this phase |
+| `just lint` (claudine area) | clean (only the existing macOS linker `__eh_frame` notice) |
+| `cargo clippy -p claudine-cli --all-targets --features real-tests,test-fixtures,daemon-tests -- -D warnings` | clean. Adding `terminal-tests` fails on a pre-existing `needless_lifetimes` in `tests/level2/level2_dry_run_metadata_capture.rs:283` (not touched here; outside `just lint`) |
+| Rendezvous area `just test` / `just lint` | 284 passed, 2 skipped / clean |
+| `just test-real real_codex_app_server::` (macOS, Codex 0.157.1) | 6/6 (4 existing + 2 new) |
+| `just test-real real_codex_protocol real_pi_` | 19/19 (Codex protocol 8, Pi managed RPC 4, Pi protocol 3, Pi interactive startup 4) |
+| `just test-real real_pi_steering --run-ignored all` | 3/3 native Pi regressions |
+| `claudine-gen steering check` and `claudine providers steering check` | all ten providers clean; Codex and Pi 7/7 verification records each |
+| `claudine-gen check` | clean for every provider, catalog, signals, stream vocabulary, steering tables, Darkmatter roster, families; only a pre-existing models-catalog staleness warning (84 days) |
+| Negative activation tests | `expected_loss_records_never_activate_delivery`, `unimplemented_or_unreviewed_adapter_revision_blocks_delivery`, `shipped_catalog_activates_exactly_the_reviewed_grants`, `committed_policy_is_valid`, `a_stale_target_is_rejected_instead_of_retargeted`: pass |
+| `just cross-check claudine-cli --os linux\|windows --features daemon-tests,test-fixtures steer steering codex_app_server pi_managed_rpc` | native Linux 98/98, native Windows 98/98 |
+| `just cross-check claudine --os all steering:: secrets:: app_server claude_registry runaway::` | Linux 199/199, native Windows 198/198, WSL2 199/199 |
+| `just cross-check rendezvous-client --os all` (steering round trip + shutdown with a connected owner) | Linux, native Windows (named pipes), WSL2: 2/2 each |
+| `just check-tier-coverage claudine` | nothing stranded |
+| `just test steer_cli::` after the help change | 4/4 |
+
+### Requirement-to-test mapping (Phase 8)
+
+| Requirement | Test(s) / check |
+| --- | --- |
+| Production-wrapper manual send through a real daemon, receipt only as established | real `manual_steer::real_codex_app_server_manual_steer_reaches_the_running_wrapper_once` |
+| No accidental replay; cleanup after the run | same test (unlisted after exit; late send `unavailable`; request count unchanged); daemon-backed `a_restarted_daemon_gets_a_fresh_registration_and_nothing_is_replayed`, `dropping_the_owner_removes_its_route` (macOS, Linux, Windows) |
+| Message text only in the in-memory delivery path; audit masked | same real test (model sees the secret; audit and receipt do not) |
+| Automatic warning followed by recovery | real `real_codex_app_server_automatic_help_lets_a_repeating_run_recover` |
+| Continued repetition reaches the original stop limit | real `real_codex_app_server_continued_repetition_still_stops_at_the_limit`; L1 `codex_app_server::automatic_help_follows_the_granted_version_and_keeps_the_stop_schedule` |
+| Daemon absence | `without_a_daemon_routing_is_unavailable_and_listing_fails_fast`, `without_a_daemon_the_link_gives_up_after_bounded_attempts`, `without_a_daemon_the_owner_still_delivers_automatic_help_directly`; L1 `listing_without_a_daemon_reports_the_missing_route_and_changes_no_configuration` |
+| Slow routing / controller and provider failure | router `no_reply_before_the_deadline_is_unknown_and_a_late_reply_goes_nowhere`, `an_owner_disconnect_resolves_its_in_flight_requests_as_unknown`; adapters `an_unanswered_steer_is_unknown_and_never_resent` (Codex, Pi); real `real_pi_managed_rpc_provider_crash_fails_the_run_and_leaves_no_tool` |
+| Native discovery independently | L1 `native_claude_sessions_are_listed_from_claudes_registry` (macOS, Linux, Windows via cross-check) |
+| Expected-loss artifacts and stale adapter revisions cannot activate | gen `expected_loss_records_never_activate_delivery`; lib `unimplemented_or_unreviewed_adapter_revision_blocks_delivery` |
+| Help names the routing prerequisite | L1 `steer_cli::help_documents_the_forms_without_a_consent_bypass` |
+| L2 lifecycle flows into/out of Codex still record exec launches | `level2_lifecycle_control` (the 9 previously failing rows) |
+
+The input-robustness matrix does not apply: this phase changed no parser,
+schema, or configuration reader.
+
+### Environment limitations
+
+- `claudine sequence …` (the summary generation) needed approval; not run.
+- Writes to `.claude/skills/claudine/` were denied again. Intended skill edits
+  (cumulative with Phases 1–7), for the author to apply:
+  - Library Module Map: add `secrets` (the one credential recognizer behind
+    scrubbing, webhook redaction, argv sanitization, and steering log masking;
+    each consumer keeps its replacement policy) and `steering` (typed contract,
+    generated research + reviewed activation policy, eligibility, controller,
+    discovery with `native::claude_registry`, adapters `pi-rpc` blocked and
+    `codex-app-server` granted on macOS at Codex 0.157.1, `automatic`, JSONL
+    `audit`); extend the `runaway` row with the early-warning/recovery signals.
+  - CLI Commands: a `claudine steer [--list] [--session <id>] [--json]
+    MESSAGE` row (needs the local Rendezvous daemon for managed runs).
+  - Wrapper & composition subsystems: "Managed Codex app-server" (Phase 7's
+    wording in this log) and "Automatic steering: early repetition warning at
+    half the stop limit, 3 opportunities per execution, `CLAUDINE_AUTO_STEER`,
+    never interrupts, stop schedule unchanged | `topics/automatic-steering.md`".
+  - Testing note: `just test-real` runs the CLI half with `daemon-tests`; a
+    Codex test stub that models `codex exec` must exit on `app-server`.
+- `just cross-check` forwards no `CLAUDINE_CONTRACT_REAL`, and no approved
+  non-interactive SSH route was available, so real Codex was not run on Linux
+  or native Windows. No grant exists there.
+
+### Readiness
+
+Implemented and verified for what is enabled: Codex 0.157.1 on macOS
+(Claudine-managed non-interactive runs) has manual delivery and
+non-interrupting automatic help demonstrated through the production wrapper,
+with matching delivery and ownership evidence. Not claimed: any other Codex
+version, Linux or native Windows delivery, Pi (reviewed block), Claude Code
+delivery, or any other provider.
