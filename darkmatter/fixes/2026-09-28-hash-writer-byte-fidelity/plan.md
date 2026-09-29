@@ -1,7 +1,7 @@
 ---
 total_phases: 3
 created: 2026-09-29
-phase: 1
+phase: 2
 agent: claude/opus
 yolo: true
 packages:
@@ -13,6 +13,12 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Plan: Hash Writer Byte Fidelity
@@ -55,22 +61,22 @@ code changes.
 
 ### Success criteria
 
-- [ ] Each of the six spec cases has a unit test in `write.rs` that asserts
+- [x] Each of the six spec cases has a unit test in `write.rs` that asserts
       exact output bytes (cases 1 to 5, with case 1 also in CRLF) or the
       refusal (case 6). Alias refusal (including an alias whose source is
       elsewhere in the frontmatter) and tag refusal are also covered.
-- [ ] Tests cover five more shapes: a mixed-newline file where `last_updated`
+- [x] Tests cover five more shapes: a mixed-newline file where `last_updated`
       is inserted, a mixed-newline file where only the hash changes, a lone-CR
       hash replacement, a BOM before existing frontmatter, and a body with no
       final terminator. Each asserts that untouched spans keep their bytes and
       that existing terminators survive.
-- [ ] Every successful output re-parses. Its frontmatter record differs from
+- [x] Every successful output re-parses. Its frontmatter record differs from
       the input only at `hash` and, when bumped, `last_updated`. Body bytes are
       identical. Every refusal returns `Err`, and the caller's input string is
       unchanged.
-- [ ] The `last_updated` input robustness matrix (below) is covered by one
+- [x] The `last_updated` input robustness matrix (below) is covered by one
       table-driven test with a control row.
-- [ ] One CLI L1 test proves the refusal end to end: `md hash --save` on an
+- [x] One CLI L1 test proves the refusal end to end: `md hash --save` on an
       anchored `last_updated` exits non-zero and leaves the file's bytes
       unchanged.
 - [ ] Existing `write.rs`, CLI `hash_kind_save_diff.rs`, and Claudine closure
@@ -259,21 +265,21 @@ All tasks edit `darkmatter/lib/src/markdown/hash/write.rs`, so they run
 **sequentially**, in this order. Each task should turn its slice of the
 Phase 1 tests green.
 
-- [ ] **Terminator helpers**
+- [x] **Terminator helpers**
     - Add `line_terminator(text, line_end) -> &str` (returns `"\r\n"`, `"\n"`,
       `"\r"`, or `""`), built on the existing `line_spans`.
     - Add `apply_terminators(serialized_lf, original_terminators) -> String`,
       which implements R2 for serde output.
     - Add `preceding_terminator(document, insert_at, fallback)`, which
       implements R3.
-- [ ] **Per-line `hash` node**
+- [x] **Per-line `hash` node**
     - `serialize_entry` and `serialize_existing_entry` stop taking a global
       `newline`. Existing nodes are re-terminated with `apply_terminators`,
       using the original node's line terminators. An inserted node takes
       `preceding_terminator`.
     - Covers the hash-only mixed file, the lone-CR hash, and Wave 2's
       multi-line node.
-- [ ] **`rewrite_date_scalar` fix**
+- [x] **`rewrite_date_scalar` fix**
     - Take the node's own terminator from its text rather than stripping a
       global newline (case 3, and the date line in case 4).
     - For an empty value (R4), emit `{key}: {date}{comment_prefix}`, adding a
@@ -281,26 +287,26 @@ Phase 1 tests green.
     - Otherwise keep the authored key, leading whitespace, quote style, and
       comment exactly as today.
     - Refuse single-line flow collections (R6).
-- [ ] **Node-property refusal**
+- [x] **Node-property refusal**
     - Extract a shared `starts_with_node_property(bytes)` predicate (R5).
       Call it from `locate_frontmatter_leaves` in place of the inline
       `matches!`, which is a behavior-neutral refactor, and from the bump path
       before any edit.
     - The error names `last_updated` and the property kind, and the file is
       untouched (case 6, alias, tag, bare anchor).
-- [ ] **New-block construction**
+- [x] **New-block construction**
     - In the no-frontmatter branch, strip a leading `\u{feff}` and emit BOM,
       block, rest. The terminator is the rest's first line terminator, or LF
       (case 5, and the no-terminator body).
     - Keep it a small private `fn new_frontmatter_block(...)` so the R1
       follow-up can reuse it.
-- [ ] **Output validation**
+- [x] **Output validation**
     - Before `Ok(Some(updated))`, run `parse_text_frontmatter(&updated)` and
       map any error to `FrontmatterTextEdit` ("rewritten frontmatter did not
       parse: ..."). The `new_stored == None` early return stays first and
       parses nothing (the existing
       `textual_no_change_does_not_parse_unsupported_source` pins it).
-- [ ] **Doc comment and drift pass**
+- [x] **Doc comment and drift pass**
     - Rewrite the `apply_hash_save_text` `///` block. Replace "the document
       newline style" with the per-line rule. Add the BOM rule. Extend
       `## Errors` with the anchor, alias, and tag refusal, the flow-collection
@@ -312,11 +318,11 @@ Phase 1 tests green.
 
 ### Checkpoint 2
 
-- [ ] `cd darkmatter && just test` is fully green, including every Phase 1
+- [x] `cd darkmatter && just test` is fully green, including every Phase 1
       test and the existing CRLF and quote-style matrices.
-- [ ] `cd darkmatter && just lint` is clean. Run it after `just test`, never at
+- [x] `cd darkmatter && just lint` is clean. Run it after `just test`, never at
       the same time.
-- [ ] Search the diff for a leftover global-newline use in the
+- [x] Search the diff for a leftover global-newline use in the
       `apply_hash_save_text` path:
       `grep -n "detect_newline" darkmatter/lib/src/markdown/hash/write.rs`
       shows only the restore path.

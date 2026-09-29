@@ -33,36 +33,40 @@ related:
     - 2026-09-28-content-policy
 human_review: false
 message_to_agent: |-
-    Phase 1 is complete. All red tests are in place and gated with
-    `#[ignore = "red until phase 2 of 2026-09-28-hash-writer-byte-fidelity: <slice>"]`,
-    following the schema-plus convention in `grammar.rs`. As each Phase 2 task
-    lands, delete the `#[ignore]` on the tests for its slice (the reason names
-    the slice: empty date value, per-line terminators, BOM stays first,
-    node-property refusal, output validation, robustness matrix). Also remove
-    the one in `darkmatter/cli/tests/l1/hash_kind_save_diff.rs`
-    (`test_hash_save_refuses_anchored_last_updated_without_writing`). Update the
-    comment above `CANONICAL_HASH` in `write.rs` `mod tests` once no gated test
-    remains. List them with:
-    `cargo nextest run -p darkmatter --lib --run-ignored only -E 'test(textual_save)'`.
+    Phase 2 is complete. All Phase 1 `#[ignore]` gates are removed (library
+    and CLI) and every test passes. Phase 3 is docs and downstream only; no
+    writer change should be needed.
 
-    Messages the tests pin: node-property refusals must contain `last_updated`
-    and the word `anchor`, `alias`, or `tag` (a bare `&a` counts as anchor).
-    The CLI test asserts stderr contains `last_updated`; writer reasons do reach
-    stderr through the `MarkdownError` block.
+    Facts the docs must state (see the `apply_hash_save_text` doc comment in
+    `darkmatter/lib/src/markdown/hash/write.rs`, which is now the source):
+    - each rewritten line keeps its own LF/CRLF/lone-CR terminator; extra
+      lines of a longer `hash` node repeat the previous line's terminator;
+    - an inserted property takes the terminator of the line it follows;
+    - a new block (no frontmatter) is terminated like the document's first
+      line, or LF, and goes after a leading BOM;
+    - `last_updated:` (empty) becomes `last_updated: 2026-09-28`; with a
+      comment, `last_updated:   # todo` becomes
+      `last_updated: 2026-09-28   # todo`;
+    - refusals (nothing written) on a date bump: `last_updated` with an
+      anchor, alias, or tag; a block or flow collection. Also any edit whose
+      output frontmatter fails to parse (e.g. replacing an anchored `hash`
+      that another key aliases).
+    - Refusal messages read: "`last_updated` uses a YAML anchor; replacing
+      it would change other values" (alias/tag likewise), and
+      "rewritten frontmatter did not parse: ...".
 
-    Matrix rows that are red today, and only these: the three empty-value rows,
-    the two single-line flow-collection rows (R6), the four node-property rows,
-    and `hash edit orphans an alias` (R7, caught by output validation). Every
-    other row already passes, so a Phase 2 change that turns one of them red is
-    a regression.
+    `restore_properties_text` / `insert_snapshot_node` still use the global
+    `detect_newline` rule and prepend a new block before a BOM (R1); the
+    skill must not claim otherwise. `new_frontmatter_block` and
+    `new_block_terminator` in `write.rs` are the reusable pieces for that
+    follow-up.
 
-    Spike result: lone-CR frontmatter parses end to end (extraction,
-    `validate_block_mapping`, `serde_yaml_ng`, node location). No workaround is
-    needed for case 4.
+    The shared node-property predicate is named `leading_node_property`
+    (returns the property kind) rather than the plan's
+    `starts_with_node_property`, so the refusal can name the kind.
 
-    One unrelated L1 failure predates this fix on this branch:
+    Pre-existing, unrelated L1 failure on this branch:
     `markdown::schemas::file_match::tests::conversion_emits_every_root_union_glob`.
-    It is not caused by this work.
 ---
 
 # Hash Writer Byte Fidelity

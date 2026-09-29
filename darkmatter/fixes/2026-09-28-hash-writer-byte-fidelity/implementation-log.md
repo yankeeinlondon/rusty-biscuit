@@ -12,6 +12,12 @@ source_files_during_phase_1:
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/hash/write.rs
+    - darkmatter/cli/tests/l1/hash_kind_save_diff.rs
+docs_updated_during_phase_2: []
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
 ---
 
 # Implementation Log for 2026-09-28-hash-writer-byte-fidelity (3 phases)
@@ -148,4 +154,127 @@ Phase 2 will cover this.
 ### Skill
 
 No Darkmatter skill change was needed for Phase 1. Phase 3 owns the
+`frontmatter.md` update.
+
+## Phase 2
+
+Started and finished 2026-09-29 on macOS. All changes are in
+`darkmatter/lib/src/markdown/hash/write.rs`, plus removing one `#[ignore]`
+line from `darkmatter/cli/tests/l1/hash_kind_save_diff.rs`.
+
+### What changed
+
+- **Terminator helpers.** `line_terminators(text)` lists every line's
+  terminator (`"\r\n"`, `"\n"`, `"\r"`, or `""`), built on `line_spans`.
+  `apply_terminators(serialized_lf, terminators)` implements R2: line *i*
+  takes `terminators[i]`, and a line past the end (or whose original had no
+  terminator) repeats the previous line's. `preceding_terminator(document,
+  insert_at)` implements R3 from the bytes just before the insertion point.
+  For empty frontmatter, those bytes are the opening delimiter's terminator.
+- **Per-line `hash` node.** `serialize_entry` and `serialize_existing_entry`
+  now return LF output and take no newline. An existing node is re-terminated
+  with its own `line_terminators`, and an inserted node with
+  `&[preceding_terminator(..)]`, so one function covers both R2 and R3.
+- **`rewrite_date_scalar`.** It takes the node's own terminator from
+  `line_spans` instead of stripping a global newline. An empty value (R4)
+  becomes `key: {today}`, followed by the authored whitespace and comment
+  when there is one (a single space is supplied if that run is empty). A
+  value that starts with `[` or `{` is refused as "must be a scalar value"
+  (R6). A nonempty value keeps the authored leading whitespace, quote style,
+  and comment, as before.
+- **Node-property refusal (R5).** The shared predicate is
+  `leading_node_property(bytes) -> Option<&'static str>`, returning
+  `"anchor"`, `"alias"`, or `"tag"`. It returns the kind, not a `bool`, so
+  the refusal can name the property. **This departs from the plan's name**
+  (`starts_with_node_property`). `locate_frontmatter_leaves` calls it with
+  `.is_some()`, which is behavior-neutral, and all of its tests pass.
+  `rewrite_date_scalar` calls it before anything is emitted and returns
+  "`last_updated` uses a YAML {kind}; replacing it would change other
+  values". The check runs only when the date is bumped, because
+  `rewrite_date_scalar` is reached only on that path.
+- **New block.** `new_frontmatter_block(document, yaml)` strips a leading
+  BOM and emits BOM, block, rest. `new_block_terminator(document)` returns
+  the first line's terminator, or LF. Both are private and shaped for the R1
+  restore follow-up.
+- **Output validation.** `validated(document)` runs `parse_text_frontmatter`
+  and maps any failure to "rewritten frontmatter did not parse: ...". Both
+  the new-block branch and the edit branch return through it. The
+  `new_stored == None` early return still comes first and parses nothing.
+- **Docs.** I rewrote the `apply_hash_save_text` `///` block: the per-line
+  rule, the inserted-property rule, the BOM and new-block rule, the empty
+  date, post-edit parsing, and an extended `## Errors`. The module `//!` doc
+  ("preserve every byte outside the managed hash and `last_updated` nodes")
+  and the `Markdown::apply_hash_save` doc are still accurate, and I found no
+  drift. `detect_newline` now has one caller, `insert_snapshot_node` (the
+  restore path, R1).
+- **Gates removed.** I deleted all 14 library `#[ignore = "red until phase
+  2 ..."]` attributes, the CLI one, and the test-module comment that
+  described the gating.
+
+### Tests added in Phase 2 (L1, `write.rs` `mod tests`)
+
+- `textual_save_repeated_save_is_byte_stable`: a read/write/read round trip.
+  It saves each spec-case input (cases 1, 2, 3, 4, and 5, plus the mixed
+  multi-line `hash` node) twice and asserts the second output is
+  byte-identical to the first and passes `assert_fidelity`.
+- A new robustness matrix row, `empty with trailing whitespace`
+  (`last_updated:   `), which becomes `last_updated: 2026-09-28`. The matrix
+  now has 26 rows.
+
+### Requirement-to-test mapping (all green now)
+
+| Requirement | Test |
+| --- | --- |
+| Case 1 (LF, CRLF) | `textual_save_case1_empty_date_gets_one_space`, `..._crlf` |
+| Case 2 | `textual_save_case2_empty_date_keeps_comment_spacing` |
+| Case 3 | `textual_save_case3_lf_date_line_in_crlf_file_keeps_lf` |
+| Case 4 | `textual_save_case4_lone_cr_terminators_survive` |
+| Case 5 | `textual_save_case5_bom_stays_before_new_block` |
+| Case 6, alias, tag, bare anchor | `textual_save_case6_refuses_anchored_date`, `textual_save_refuses_aliased_tagged_and_bare_anchored_dates` |
+| Case 6 end to end (CLI exits non-zero, file bytes unchanged) | `hash_kind_save_diff::test_hash_save_refuses_anchored_last_updated_without_writing` |
+| R2 | `textual_save_hash_only_multi_line_node_keeps_each_line_terminator`, `textual_save_lone_cr_hash_only_replacement` |
+| R3 | `textual_save_inserted_date_inherits_preceding_terminator_in_mixed_file` |
+| New-block terminator, no final terminator | `textual_save_new_block_uses_first_body_terminator`, `textual_save_body_without_final_terminator_stays_unterminated` |
+| R6, R7, and the whole `last_updated` / `hash` matrix | `textual_save_last_updated_robustness_matrix` |
+| Output validation (R7) | `textual_save_refuses_hash_replacement_that_orphans_an_alias` |
+| Round trip | `textual_save_repeated_save_is_byte_stable` |
+| `locate_frontmatter_leaves` refactor is neutral | `node_properties_and_unmodeled_shapes_fail_closed` and siblings |
+
+### Input-robustness smell check
+
+In the `write.rs` date path, there is no `#[serde(default)]`,
+`unwrap_or_default()`, or `.ok()` on `last_updated`. The one
+`unwrap_or_default()` in `serialize_existing_entry` reads serde's own output,
+not user input.
+
+### Gates
+
+- `cargo nextest run -p darkmatter --lib -E 'test(textual_save)'`: 26 of 26
+  pass.
+- `cargo nextest run -p darkmatter-cli -E 'binary(l1) & test(/hash_save/)'`:
+  10 of 10 pass, including the un-gated refusal test.
+- `just test --no-fail-fast` (darkmatter): 8669 run, 8668 pass, 12 skipped,
+  1 failed. Skipped fell from 27 to 12, exactly the 15 un-gated tests. The
+  failure is the same pre-existing, unrelated
+  `markdown::schemas::file_match::tests::conversion_emits_every_root_union_glob`
+  that Phase 1 recorded. It is an in-memory schema-conversion assertion
+  (`left: Null`, `right: ["*.md"]` at `file_match.rs:329`), and no file it
+  exercises was touched.
+- `just lint` (darkmatter): exit 0, no warnings. I ran it after the tests,
+  not at the same time.
+- `grep -n detect_newline write.rs` shows only the definition and the
+  restore caller.
+
+### OS considerations
+
+Every change is a pure in-memory byte and string transform. Terminators are
+handled explicitly as bytes (`\r\n`, `\n`, `\r`) and never through
+platform line APIs, and nothing touches paths or processes. The CLI test
+reuses the existing `CliProcessFixture` temp-file pattern. I judged the OS
+risk too low to justify `just cross-check`; CI's Linux and macOS legs cover
+it.
+
+### Skill
+
+No Darkmatter skill change was needed in Phase 2. Phase 3 owns the
 `frontmatter.md` update.
