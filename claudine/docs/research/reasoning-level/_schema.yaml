@@ -8,6 +8,7 @@ $schema:
     provider: identifier(required)@../_types.yaml -> Roster slug of the provider this document describes
     created: date(required) -> Date this document was first written; kept unchanged on refresh
     last_updated: date(required) -> Date of the research run that produced this version
+    contract_checked: date -> Date the fleet last confirmed this document satisfies the contract; written by the fleet after validation and never by the researcher
     agent: research_agent(required)@../_types.yaml -> Agentic CLI that performed the research, which the fleet checks against its assignment
     model: research_model(required)@../_types.yaml -> Model that performed the research, recorded so findings can be weighed by who produced them
     reasoning_effort: research_effort(required)@../_types.yaml -> Reasoning effort the research itself ran with

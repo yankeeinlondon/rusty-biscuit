@@ -7,17 +7,18 @@ topic: Reasoning Level
 agent: "{{ state.index % 3 == 1 ? 'opencode' : (state.index % 3 == 2 ? 'claude' : 'codex') }}"
 model: "{{ state.index % 3 == 1 ? 'zai-coding-plan/glm-5.3' : (state.index % 3 == 2 ? 'sonnet' : 'gpt-6-luna') }}"
 effort: "{{ state.index % 3 == 1 ? 'provider_default' : 'high' }}"
-# Claudine cannot yet set reasoning effort from a prompt, so a run that must
-# control it is made once per agent, each with that agent's own arguments:
+# A sequence plans one agent before any step exists, and Claudine cannot yet
+# set reasoning effort from a prompt. So the fleet runs once per agent, each
+# run naming its agent, model, and effort. A run researches only the providers
+# assigned to its agent:
 #
-#   claudine sequence _fleet.md -y pass=codex  -- -c model_reasoning_effort=high
-#   claudine sequence _fleet.md -y pass=claude -- --effort high
-#   claudine sequence _fleet.md -y pass=opencode
-#
-# With `pass` unset, one run covers every provider at each agent's default effort.
-pass: all
+#   claudine sequence _fleet.md -y --opencode --model zai-coding-plan/glm-5.3
+#   claudine sequence _fleet.md -y --claude --model sonnet -- --effort high
+#   claudine sequence _fleet.md -y --codex --model gpt-6-luna -- -c model_reasoning_effort=high
 # `only=<slug>` on the command line researches one provider, for a pilot or a repair.
 only: all
+# One provider's rejected research must not stop the others.
+fail_fast: false
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
     stack:
@@ -28,13 +29,20 @@ initialize:
         - when: "only != 'all' && only != state.slug"
           action:
               - skip
-        - when: "pass != 'all' && pass != agent"
+        - when: "env.AGENT != agent"
           action:
-              - stderr: "**{{state.name}}** is assigned to {{agent}}, not this pass; skipping"
+              - stderr: "**{{state.name}}** is assigned to {{agent}}, and this run launches {{env.AGENT}}; skipping"
               - skip
-        - when: "file_exists(file) && frontmatter(file, 'schema_revision') == 1 && frontmatter(file, 'last_updated') && !date_delta(frontmatter(file, 'last_updated'), ctx.today, '14d')"
+        - when: "env.MODEL != model"
           action:
-              - stderr: "**{{state.name}}** has current {{topic}} research; skipping"
+              - warn: "**{{state.name}}** is assigned {{model}}, and this run launches {{env.MODEL}}"
+              - error: "this run launches a model outside the rotation"
+        # Current means the fleet confirmed the document against this revision
+        # of the contract within 14 days. The `success` event writes
+        # `contract_checked`; a document the fleet rejected never carries it.
+        - when: "file_exists(file) && frontmatter(file, 'schema_revision') == 1 && frontmatter(file, 'contract_checked') && !date_delta(frontmatter(file, 'contract_checked'), ctx.today, '14d')"
+          action:
+              - stderr: "**{{state.name}}** has {{topic}} research confirmed on {{ frontmatter(file, 'contract_checked') }}; skipping"
               - skip
         - action:
               - info: "Researching **{{topic}}** for **{{state.name}}** with {{agent}} / {{model}} (effort: {{effort}})"
@@ -62,18 +70,24 @@ success:
               - stderr: "{{{ contract.stdout }}}"
               - error: "the research document does not satisfy its contract"
         - action:
+              - set_frontmatter: ["{{file}}", "contract_checked", "{{ctx.today}}"]
               - success: "{{topic}} research for **{{state.name}}** satisfies its contract: {{ link(file) }}"
               - message: "✅ {{topic}} research for **{{state.name}}** completed and validated"
 failure:
     stack:
         - action:
-              - warn: "{{topic}} research for **{{state.name}}** failed: {{{ err.message }}}"
-              - message: "💥 {{topic}} research for **{{state.name}}** failed: {{{ err.message }}}"
+              - warn: "{{topic}} research for **{{state.name}}** failed: {{ err.msg }}"
+              - message: "💥 {{topic}} research for **{{state.name}}** failed: {{ err.msg }}"
 finalize:
     stack:
-        # One more attempt. The retried run reads `contract`, so the agent
-        # sees exactly which properties were rejected and why.
-        - when: "err"
+        # A usage limit is not cured by trying again. The provider stays
+        # unresearched until the limit resets.
+        - when: "err && err.category == 'cap'"
+          action:
+              - warn: "{{env.AGENT}} has reached a usage limit, so **{{state.name}}** was not researched"
+        # Anything else gets one more attempt. The retried run reads what the
+        # gates rejected, so the researcher sees what to correct.
+        - when: "err && err.category != 'cap'"
           action: { retry: 1 }
 ---
 # Reasoning Level Research on {{state.name}}
@@ -125,6 +139,8 @@ document that does not conform.
   `reasoning_effort: {{effort}}`.
 - Set `last_updated: {{ctx.today}}`. Keep `created` unchanged when the
   document already exists.
+- Do not write `contract_checked`. The fleet writes it after your document
+  passes validation.
 - When a fact cannot be established, record `unknown` and add an entry to
   `gaps` that names the check that would settle it. Never guess, and never
   leave a required property out.
