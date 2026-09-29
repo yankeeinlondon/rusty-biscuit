@@ -1,15 +1,19 @@
 //! The Input Robustness Matrix: one walk per format, each cell a single edit
 //! to a real fixture, asserted through the public result.
 //!
-//! The `FileChanged` fingerprint column arrives with `FileChanged`.
+//! The `FileChanged` fingerprint column walks the same fixture with a
+//! `FileChanged` policy and a scripted file provider.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use content_policy::reader::{MalformedCause, ReadError};
 use content_policy::{
     DiagnosticCode, DocumentError, EntryField, EntryOutcome, EvaluationContext, EvidenceRecord,
-    Location, Policy, PolicySource, Status, UnknownReason, evaluate_document, evaluate_policy,
+    FingerprintScheme, Location, Policy, PolicySource, Status, UnknownReason, evaluate_document,
+    evaluate_policy,
 };
 use serde_json::json;
+
+mod fake;
 
 /// A migrated `biscuit-terminal` terminal-multiplexing note after
 /// `md hash --save` stamped it (body trimmed after stamping). Its policy is
@@ -63,8 +67,11 @@ fn long_form(rule: &str, action: &str) -> String {
 }
 
 fn check(name: &str, bytes: &[u8], expect: &Expect) {
-    let context = EvaluationContext::new(at(WHEN));
-    let result = evaluate_document(bytes, &context);
+    check_in(&EvaluationContext::new(at(WHEN)), name, bytes, expect);
+}
+
+fn check_in(context: &EvaluationContext, name: &str, bytes: &[u8], expect: &Expect) {
+    let result = evaluate_document(bytes, context);
     match (expect, &result) {
         (Report(status, source), Ok(report)) => {
             assert_eq!((report.status, report.policy.source), (*status, *source), "{name}");
@@ -157,6 +164,54 @@ fn yaml_frontmatter_matrix() {
         let edited = FIXTURE.replacen(from, to, 1);
         assert_ne!(edited, FIXTURE, "{name}: the edit changed nothing");
         check(name, edited.as_bytes(), expect);
+    }
+}
+
+/// The fingerprint property column: the fixture's policy becomes one
+/// `FileChanged` rule over `fp`, whose stored value matches the scripted
+/// watched file; each cell is then one edit to the `fp` line.
+#[test]
+fn fingerprint_property_matrix() {
+    const WATCHED: &[u8] = b"pub fn config() {}\n";
+    let stored = FingerprintScheme::Blake3Lf.fingerprint(WATCHED);
+    let hex = &stored["blake3-lf:".len()..];
+    let fp = format!("fp: {stored}\n");
+    let base = FIXTURE
+        .replacen(POLICY, "content_policy:\n  - FileChanged(src/config.rs, @fp)\n", 1)
+        .replacen(DATE, &format!("{DATE}{fp}"), 1);
+    assert_ne!(base, FIXTURE);
+    let provider = fake::FakeFiles::new().present("src/config.rs", WATCHED);
+    let context = EvaluationContext::new(at(WHEN)).with_files(provider, "docs");
+
+    // Control row: the stored fingerprint matches, so the report is fresh.
+    check_in(&context, "control", base.as_bytes(), &Report(Status::Fresh, PolicySource::Declared));
+
+    let fingerprint = || property("fp");
+    let cells: Vec<(&str, String, Expect)> = vec![
+        ("absent", String::new(), Unknown(UnknownReason::MissingBaseline)),
+        ("null (no value)", "fp:\n".into(), Unknown(UnknownReason::MissingBaseline)),
+        ("null (~)", "fp: ~\n".into(), Unknown(UnknownReason::MissingBaseline)),
+        ("quoted", format!("fp: \"{stored}\"\n"), Report(Status::Fresh, PolicySource::Declared)),
+        ("number", "fp: 12\n".into(), Invalid(DiagnosticCode::WrongType, fingerprint())),
+        ("boolean", "fp: true\n".into(), Invalid(DiagnosticCode::WrongType, fingerprint())),
+        ("list", format!("fp: [{stored}]\n"), Invalid(DiagnosticCode::WrongType, fingerprint())),
+        ("mapping", format!("fp: {{v: {stored}}}\n"), Invalid(DiagnosticCode::WrongType, fingerprint())),
+        ("empty", "fp: \"\"\n".into(), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("duplicate key", format!("{fp}{fp}"), Invalid(DiagnosticCode::DuplicateKey, Some(Location::Property { name: "fp".into(), entry: None }))),
+        ("non-hex digest", "fp: blake3-lf:zz\n".into(), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("no digest", "fp: blake3-lf\n".into(), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("no scheme", "fp: ':abc'\n".into(), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("uppercase digest", format!("fp: blake3-lf:{}\n", hex.to_uppercase()), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("short digest", format!("fp: blake3-lf:{}\n", &hex[..63]), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("trailing text", format!("fp: {stored} x\n"), Invalid(DiagnosticCode::InvalidFingerprint, fingerprint())),
+        ("unrecognized scheme", "fp: sha256:ab\n".into(), Unknown(UnknownReason::IncompatibleFingerprint)),
+        ("other recognized scheme", format!("fp: {}\n", FingerprintScheme::Blake3.fingerprint(b"other")), Report(Status::Stale, PolicySource::Declared)),
+    ];
+    for (name, to, expect) in &cells {
+        assert_eq!(base.matches(fp.as_str()).count(), 1, "{name}: edit target must be unique");
+        let edited = base.replacen(fp.as_str(), to, 1);
+        assert_ne!(edited, base, "{name}: the edit changed nothing");
+        check_in(&context, name, edited.as_bytes(), expect);
     }
 }
 

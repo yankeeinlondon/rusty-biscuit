@@ -2583,6 +2583,7 @@ dependencies = [
  "biscuit-file",
  "biscuit-hash",
  "chrono",
+ "gix",
  "serde",
  "serde_json",
  "tempfile",

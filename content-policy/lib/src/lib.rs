@@ -11,15 +11,25 @@
 //! plans byte-exact edits that advance every renewable baseline, and applies
 //! them only to the bytes it planned from.
 //!
+//! `FileChanged` rules observe their files through a [`FileProvider`] and a
+//! base directory, set with [`EvaluationContext::with_files`]. The bundled
+//! `FileAdapter`, behind the off-by-default `file-adapter` feature, reads the
+//! local file system; without a provider a file rule is `unknown`.
+//!
 //! See `content-policy/docs/topics/policy-lifecycle.md` for the behavior this
 //! crate implements.
 
 mod aggregate;
 mod diagnostic;
 mod evaluate;
+#[cfg(feature = "file-adapter")]
+mod file_adapter;
+mod fingerprint;
 mod grammar;
 mod model;
 mod normalized;
+mod path_form;
+mod provider;
 pub mod reader;
 mod renew;
 pub mod time;
@@ -30,15 +40,20 @@ pub use diagnostic::{
 };
 pub use evaluate::{
     DateEvidence, DateSource, DocumentError, EntryOutcome, EntryResult, EvaluationContext,
-    NaiveDateText, PolicySource, PolicySummary, Report, UnknownReason, evaluate_document,
-    evaluate_policy, evaluate_record,
+    FileEvidence, NaiveDateText, PolicySource, PolicySummary, Report, UnknownReason,
+    evaluate_document, evaluate_policy, evaluate_record,
 };
+#[cfg(feature = "file-adapter")]
+pub use file_adapter::FileAdapter;
+pub use fingerprint::FingerprintScheme;
 pub use model::{
     Action, Baseline, Deadline, Duration, DurationUnit, EvidenceRecord, GRAMMAR_VERSION, Policy,
     PolicyEntry, PolicyOptions, Renewal, Rule,
 };
+pub use provider::{FileObservation, FileProvider, FileRequest};
 pub use renew::{
-    BaselineChange, BaselineTarget, ChangeKind, Conflict, ConflictKind, Refusal, RefusalReason,
+    BaselineChange, BaselineTarget, ChangeKind, Conflict, ConflictKind, EvidenceIssue,
+    EvidenceIssueKind, Refusal, RefusalReason,
     RenewalContext, RenewalError, RenewalPlan, TextEdit, apply_renewal, plan_fingerprint,
     plan_renewal,
 };

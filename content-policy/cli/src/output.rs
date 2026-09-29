@@ -45,11 +45,24 @@ impl TextOutput {
         if self.plain { strip_ansi_codes(&rendered) } else { rendered }
     }
 
+    /// Wrapping for the rule and evidence columns. A `FileChanged` rule and
+    /// a fingerprint are long words with no spaces: prose wrapping either
+    /// cannot fit them in 80 columns or splits them mid-word, so a table that
+    /// holds one also breaks at `/` and `_`.
+    fn wrap(long_words: bool) -> WordWrap {
+        if long_words {
+            WordWrap::BespokeProse(None, vec![' ', '-', '/', '_'], None)
+        } else {
+            WordWrap::WrapProse(None, None)
+        }
+    }
+
     pub fn report(&self, report: &Report) -> String {
         let mut out = String::new();
         out.push_str(&self.render(&Prose::new(summary(report))));
         out.push('\n');
-        out.push_str(&self.render(&entries_table(&report.results)));
+        let long_words = report.results.iter().any(|entry| entry.file.is_some());
+        out.push_str(&self.render(&entries_table(&report.results, Self::wrap(long_words))));
         for warning in &report.warnings {
             out.push('\n');
             out.push_str(&self.render(&Prose::new(format!(
@@ -78,7 +91,8 @@ impl TextOutput {
             plan.update_date.0
         )));
         out.push('\n');
-        out.push_str(&self.render(&changes_table(plan)));
+        let long_words = plan.changes.iter().any(|change| change.value.contains(':'));
+        out.push_str(&self.render(&changes_table(plan, Self::wrap(long_words))));
         if !plan.tab_repair.is_empty() {
             out.push('\n');
             out.push_str(&self.render(&Prose::new(format!(
@@ -128,17 +142,25 @@ fn summary(report: &Report) -> String {
     )
 }
 
-fn entries_table(results: &[EntryResult]) -> Table {
+fn entries_table(results: &[EntryResult], wrap: WordWrap) -> Table {
     let rows = results
         .iter()
         .map(|entry| {
-            let date = entry.baseline.as_ref().or(entry.deadline.as_ref());
+            let evidence = match &entry.file {
+                Some(file) => file.stored.as_deref().map_or_else(|| "missing".to_string(), abbreviate),
+                None => entry
+                    .baseline
+                    .as_ref()
+                    .or(entry.deadline.as_ref())
+                    .map(date_label)
+                    .unwrap_or_default(),
+            };
             vec![
                 TableCellContent::from((entry.index + 1).to_string()),
                 entry.rule.clone().into(),
                 entry.action.as_str().into(),
                 outcome_label(entry.outcome).into(),
-                date.map(date_label).unwrap_or_default().into(),
+                evidence.into(),
                 entry
                     .due
                     .map(|due| due.0.to_string())
@@ -150,16 +172,21 @@ fn entries_table(results: &[EntryResult]) -> Table {
     Table::new()
         .with_columns(vec![
             TableColumn::new("#"),
-            TableColumn::new("Rule").with_word_wrap(WordWrap::WrapProse(None, None)),
+            TableColumn::new("Rule").with_word_wrap(wrap),
             TableColumn::new("Action"),
             TableColumn::new("Result").with_word_wrap(WordWrap::WrapProse(None, None)),
-            TableColumn::new("Date").with_word_wrap(WordWrap::WrapProse(None, None)),
+            TableColumn::new("Evidence").with_word_wrap(WordWrap::WrapProse(None, None)),
             TableColumn::new("Due").with_word_wrap(WordWrap::None),
         ])
         .with_data(rows)
 }
 
-fn changes_table(plan: &RenewalPlan) -> Table {
+fn changes_table(plan: &RenewalPlan, wrap: WordWrap) -> Table {
+    // Dates never split at a hyphen while there is room; fingerprints may.
+    let value_wrap = match wrap {
+        WordWrap::WrapProse(..) => WordWrap::None,
+        _ => wrap.clone(),
+    };
     let rows = plan
         .changes
         .iter()
@@ -185,20 +212,20 @@ fn changes_table(plan: &RenewalPlan) -> Table {
                 kind.into(),
                 change
                     .previous
-                    .map(|date| date.0.to_string())
-                    .unwrap_or_else(|| "(none)".to_string())
+                    .as_deref()
+                    .map_or_else(|| "(none)".to_string(), abbreviate)
                     .into(),
-                change.value.0.to_string().into(),
+                abbreviate(&change.value).into(),
             ]
         })
         .collect();
     Table::new()
         .with_columns(vec![
-            TableColumn::new("Baseline").with_word_wrap(WordWrap::WrapProse(None, None)),
+            TableColumn::new("Baseline").with_word_wrap(wrap.clone()),
             TableColumn::new("Entries"),
-            TableColumn::new("Change"),
-            TableColumn::new("From").with_word_wrap(WordWrap::None),
-            TableColumn::new("To").with_word_wrap(WordWrap::None),
+            TableColumn::new("Change").with_word_wrap(WordWrap::None),
+            TableColumn::new("From").with_word_wrap(value_wrap.clone()),
+            TableColumn::new("To").with_word_wrap(value_wrap),
         ])
         .with_data(rows)
 }
@@ -211,6 +238,22 @@ fn outcome_label(outcome: EntryOutcome) -> &'static str {
         EntryOutcome::Unknown(UnknownReason::InconsistentBaseline) => {
             "unknown (future baseline)"
         }
+        EntryOutcome::Unknown(UnknownReason::MissingProvider) => "unknown (no file provider)",
+        EntryOutcome::Unknown(UnknownReason::NotAFile) => "unknown (not a file)",
+        EntryOutcome::Unknown(UnknownReason::UnreadableFile) => "unknown (unreadable file)",
+        EntryOutcome::Unknown(UnknownReason::IncompatibleFingerprint) => {
+            "unknown (unrecognized fingerprint scheme)"
+        }
+    }
+}
+
+/// A date as is; a content fingerprint cut to its scheme and 8 hex digits,
+/// which is enough to tell two apart in a table. `--json` keeps the full
+/// value.
+fn abbreviate(value: &str) -> String {
+    match value.split_once(':') {
+        Some((scheme, hex)) if hex.len() > 8 => format!("{scheme}:{}…", &hex[..8]),
+        _ => value.to_string(),
     }
 }
 

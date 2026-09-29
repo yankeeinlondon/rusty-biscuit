@@ -140,6 +140,11 @@ pub enum Rule {
     ValidFor { duration: Duration, baseline: Baseline },
     /// Triggers once evaluation time reaches the deadline. Renewal never moves it.
     ValidUntil { deadline: Deadline },
+    /// Triggers when the watched file's content no longer matches the
+    /// fingerprint stored in the top-level `property`. `path` is kept as
+    /// authored, with `/` separators on every OS, and is resolved from the
+    /// caller's base directory.
+    FileChanged { path: String, property: String },
 }
 
 impl Rule {
@@ -151,6 +156,7 @@ impl Rule {
             Self::TimeSensitive => "TimeSensitive",
             Self::ValidFor { .. } => "ValidFor",
             Self::ValidUntil { .. } => "ValidUntil",
+            Self::FileChanged { .. } => "FileChanged",
         }
     }
 
@@ -159,7 +165,7 @@ impl Rule {
     pub fn renewal(&self) -> Renewal {
         match self {
             Self::Evergreen | Self::TimeSensitive => Renewal::NoBaseline,
-            Self::ValidFor { .. } => Renewal::Renewable,
+            Self::ValidFor { .. } | Self::FileChanged { .. } => Renewal::Renewable,
             Self::ValidUntil { .. } => Renewal::Nonrenewable,
         }
     }
@@ -180,6 +186,7 @@ impl fmt::Display for Rule {
                 Deadline::Inline(date) => write!(f, "ValidUntil({date})"),
                 Deadline::Reference(name) => write!(f, "ValidUntil(@{name})"),
             },
+            Self::FileChanged { path, property } => write!(f, "FileChanged({path}, @{property})"),
         }
     }
 }
@@ -188,7 +195,8 @@ impl fmt::Display for Rule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Renewal {
-    /// Renewal advances the rule's baseline (`ValidFor`).
+    /// Renewal advances the rule's baseline (`ValidFor`) or recaptures its
+    /// fingerprint (`FileChanged`).
     Renewable,
     /// Renewal never moves the rule's date (`ValidUntil`).
     Nonrenewable,

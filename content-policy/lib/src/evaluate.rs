@@ -4,6 +4,8 @@
 //! mutable, so checking a document can never capture or advance a baseline.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use serde::ser::SerializeMap;
@@ -12,11 +14,13 @@ use serde_json::Value;
 
 use crate::aggregate::{ResultKind, Status, aggregate};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Invalid, Location, Warning, WarningCode};
+use crate::fingerprint::{self, FingerprintScheme, StoredFingerprint};
 use crate::grammar::{self, RuleError};
 use crate::model::{
     Action, Baseline, Deadline, EvidenceRecord, Policy, PolicyOptions, Renewal, Rule,
     serialize_display,
 };
+use crate::provider::{FileObservation, FileProvider, FileSource, Observer};
 use crate::reader::{ReadError, ReadOutcome, read_frontmatter};
 use crate::time::{add_duration, start_of_day};
 
@@ -26,6 +30,7 @@ pub struct EvaluationContext {
     at: DateTime<Utc>,
     options: PolicyOptions,
     document: Option<String>,
+    files: Option<FileSource>,
 }
 
 impl EvaluationContext {
@@ -36,6 +41,7 @@ impl EvaluationContext {
             at,
             options: PolicyOptions::default(),
             document: None,
+            files: None,
         }
     }
 
@@ -43,6 +49,22 @@ impl EvaluationContext {
     #[must_use]
     pub fn with_options(mut self, options: PolicyOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    /// Lets `FileChanged` rules observe their files through `provider`, with
+    /// relative paths resolved from `base_dir`: the document's directory, or
+    /// whatever directory an evidence record's paths are relative to. Without
+    /// a provider, a `FileChanged` entry is `unknown` (missing provider).
+    ///
+    /// The boundary a path must stay inside is not an input; the provider
+    /// discovers it from `base_dir`.
+    #[must_use]
+    pub fn with_files(mut self, provider: Arc<dyn FileProvider>, base_dir: impl Into<PathBuf>) -> Self {
+        self.files = Some(FileSource {
+            provider,
+            base_dir: base_dir.into(),
+        });
         self
     }
 
@@ -64,6 +86,16 @@ impl EvaluationContext {
     #[must_use]
     pub fn options(&self) -> &PolicyOptions {
         &self.options
+    }
+
+    /// The base directory set by [`with_files`](Self::with_files).
+    #[must_use]
+    pub fn base_dir(&self) -> Option<&Path> {
+        self.files.as_ref().map(|files| files.base_dir.as_path())
+    }
+
+    pub(crate) fn files(&self) -> Option<&FileSource> {
+        self.files.as_ref()
     }
 }
 
@@ -117,6 +149,30 @@ pub enum UnknownReason {
     MissingBaseline,
     /// The baseline is later than the evaluation date.
     InconsistentBaseline,
+    /// A `FileChanged` rule was evaluated with no file provider configured.
+    MissingProvider,
+    /// The watched path names a directory or another non-file.
+    NotAFile,
+    /// The watched file exists but could not be read.
+    UnreadableFile,
+    /// The stored fingerprint's scheme is not one this library computes.
+    IncompatibleFingerprint,
+}
+
+/// A `FileChanged` rule's watched file and fingerprints as observed for the
+/// report. The path is as authored, never canonicalized.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileEvidence {
+    pub path: String,
+    /// The property holding the stored fingerprint.
+    pub property: String,
+    /// The stored fingerprint, or `None` when the property is absent or
+    /// `null`.
+    pub stored: Option<String>,
+    /// The watched file's fingerprint now, under the stored value's scheme
+    /// (`blake3-lf` when nothing is stored); `None` when the file could not be
+    /// read or the stored scheme is not recognized.
+    pub current: Option<String>,
 }
 
 /// One entry's result: `triggered`, `not_triggered`, or `unknown` with a
@@ -170,6 +226,8 @@ pub struct EntryResult {
     pub baseline: Option<DateEvidence>,
     /// `ValidUntil`'s deadline.
     pub deadline: Option<DateEvidence>,
+    /// `FileChanged`'s watched file and fingerprints.
+    pub file: Option<FileEvidence>,
     /// The date the rule triggers from (00:00 UTC), when it could be computed.
     pub due: Option<NaiveDateText>,
     pub reason: String,
@@ -238,6 +296,16 @@ pub fn evaluate_record(
     record: &EvidenceRecord,
     context: &EvaluationContext,
 ) -> Result<Report, Invalid> {
+    evaluate_record_observed(record, context, &Observer::new(context.files()))
+}
+
+/// [`evaluate_record`] sharing `observer` with a caller, so renewal observes
+/// each watched file once per run.
+pub(crate) fn evaluate_record_observed(
+    record: &EvidenceRecord,
+    context: &EvaluationContext,
+    observer: &Observer<'_>,
+) -> Result<Report, Invalid> {
     let (policy, source) = match record.get(context.options.key()) {
         None => (context.options.default_policy().clone(), PolicySource::Defaulted),
         Some(declaration) => (
@@ -245,7 +313,7 @@ pub fn evaluate_record(
             PolicySource::Declared,
         ),
     };
-    evaluate_with_source(&policy, source, record, context)
+    evaluate_with_source(&policy, source, record, context, observer)
 }
 
 /// Evaluates an explicit policy against an evidence record.
@@ -258,7 +326,8 @@ pub fn evaluate_policy(
     record: &EvidenceRecord,
     context: &EvaluationContext,
 ) -> Result<Report, Invalid> {
-    evaluate_with_source(policy, PolicySource::Declared, record, context)
+    let observer = Observer::new(context.files());
+    evaluate_with_source(policy, PolicySource::Declared, record, context, &observer)
 }
 
 /// Reads a Markdown document's frontmatter with the library's reader and
@@ -347,11 +416,12 @@ fn evaluate_with_source(
     source: PolicySource,
     record: &EvidenceRecord,
     context: &EvaluationContext,
+    observer: &Observer<'_>,
 ) -> Result<Report, Invalid> {
     let mut diagnostics = Vec::new();
     let mut results = Vec::with_capacity(policy.entries().len());
     for (index, entry) in policy.entries().iter().enumerate() {
-        match evaluate_entry(index, &entry.rule, record, context) {
+        match evaluate_entry(index, &entry.rule, record, context, observer) {
             Ok(evaluated) => results.push(EntryResult {
                 index,
                 rule: entry.rule.to_string(),
@@ -360,6 +430,7 @@ fn evaluate_with_source(
                 outcome: evaluated.outcome,
                 baseline: evaluated.baseline,
                 deadline: evaluated.deadline,
+                file: evaluated.file,
                 due: evaluated.due.map(NaiveDateText),
                 reason: evaluated.reason,
             }),
@@ -391,6 +462,7 @@ struct Evaluated {
     outcome: EntryOutcome,
     baseline: Option<DateEvidence>,
     deadline: Option<DateEvidence>,
+    file: Option<FileEvidence>,
     due: Option<NaiveDate>,
     reason: String,
 }
@@ -401,6 +473,7 @@ impl Evaluated {
             outcome,
             baseline: None,
             deadline: None,
+            file: None,
             due: None,
             reason: reason.to_string(),
         }
@@ -436,6 +509,7 @@ fn evaluate_entry(
     rule: &Rule,
     record: &EvidenceRecord,
     context: &EvaluationContext,
+    observer: &Observer<'_>,
 ) -> Result<Evaluated, Diagnostic> {
     let at = context.at;
     match rule {
@@ -493,6 +567,7 @@ fn evaluate_entry(
                 outcome,
                 baseline: Some(evidence),
                 deadline: None,
+                file: None,
                 due: Some(due),
                 reason: reason.to_string(),
             })
@@ -529,9 +604,133 @@ fn evaluate_entry(
                 outcome,
                 baseline: None,
                 deadline: Some(evidence),
+                file: None,
                 due: Some(date),
                 reason: reason.to_string(),
             })
         }
+        Rule::FileChanged { path, property } => {
+            evaluate_file_changed(index, path, property, record, observer)
+        }
+    }
+}
+
+/// Resolves a fingerprint position: `Ok(None)` for missing evidence (absent
+/// or `null`), a diagnostic for a present value that is not a fingerprint
+/// string.
+pub(crate) fn resolve_fingerprint<'r>(
+    index: usize,
+    name: &str,
+    record: &'r EvidenceRecord,
+) -> Result<Option<(&'r str, StoredFingerprint<'r>)>, Diagnostic> {
+    let location = Location::Property {
+        name: name.to_string(),
+        entry: Some(index),
+    };
+    match record.get(name) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => fingerprint::classify(text)
+            .map(|stored| Some((text.as_str(), stored)))
+            .map_err(|error| Diagnostic::new(error.code, location, error.message)),
+        Some(other) => Err(Diagnostic::new(
+            DiagnosticCode::WrongType,
+            location,
+            format!(
+                "expected a content fingerprint string such as `blake3-lf:…`, found {}",
+                grammar::type_name(other)
+            ),
+        )),
+    }
+}
+
+/// The diagnostic for a watched path the provider found outside the
+/// boundary.
+pub(crate) fn outside_boundary(index: usize, path: &str, detail: &str) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::OutsideBoundary,
+        Location::Entry { index },
+        format!(
+            "`FileChanged` path `{path}` resolves outside the boundary: {detail}; a document may \
+             watch only files inside its repository, or inside the directory the command \
+             started from when there is no repository"
+        ),
+    )
+}
+
+fn evaluate_file_changed(
+    index: usize,
+    path: &str,
+    property: &str,
+    record: &EvidenceRecord,
+    observer: &Observer<'_>,
+) -> Result<Evaluated, Diagnostic> {
+    let stored = resolve_fingerprint(index, property, record)?;
+    let mut evidence = FileEvidence {
+        path: path.to_string(),
+        property: property.to_string(),
+        stored: stored.map(|(text, _)| text.to_string()),
+        current: None,
+    };
+    let Some(observation) = observer.observe(path) else {
+        return Ok(file_result(
+            evidence,
+            EntryOutcome::Unknown(UnknownReason::MissingProvider),
+            "No file provider is configured to observe the watched file".to_string(),
+        ));
+    };
+    // A path outside the boundary is invalid whatever the document stores.
+    if let FileObservation::OutsideBoundary(detail) = observation.as_ref() {
+        return Err(outside_boundary(index, path, detail));
+    }
+    let scheme = match stored {
+        None => Some(FingerprintScheme::DEFAULT),
+        Some((_, StoredFingerprint::Known(scheme))) => Some(scheme),
+        Some((_, StoredFingerprint::Unrecognized(_))) => None,
+    };
+    if let (FileObservation::Present(bytes), Some(scheme)) = (observation.as_ref(), scheme) {
+        evidence.current = Some(scheme.fingerprint(bytes));
+    }
+    let (outcome, reason) = match stored {
+        None => (
+            EntryOutcome::Unknown(UnknownReason::MissingBaseline),
+            "No content fingerprint is recorded".to_string(),
+        ),
+        Some((_, StoredFingerprint::Unrecognized(name))) => (
+            EntryOutcome::Unknown(UnknownReason::IncompatibleFingerprint),
+            format!(
+                "The stored fingerprint's scheme `{name}` is not one this library computes, so \
+                 it proves neither change nor freshness"
+            ),
+        ),
+        Some((text, StoredFingerprint::Known(_))) => match observation.as_ref() {
+            FileObservation::Present(_) if evidence.current.as_deref() == Some(text) => {
+                (EntryOutcome::NotTriggered, "Watched file unchanged".to_string())
+            }
+            FileObservation::Present(_) => {
+                (EntryOutcome::Triggered, "Watched file changed".to_string())
+            }
+            FileObservation::Missing => (EntryOutcome::Triggered, "Source removed".to_string()),
+            FileObservation::NotAFile => (
+                EntryOutcome::Unknown(UnknownReason::NotAFile),
+                "The watched path is not a file".to_string(),
+            ),
+            FileObservation::Unreadable(detail) => (
+                EntryOutcome::Unknown(UnknownReason::UnreadableFile),
+                format!("The watched file could not be read: {detail}"),
+            ),
+            FileObservation::OutsideBoundary(_) => unreachable!("rejected above"),
+        },
+    };
+    Ok(file_result(evidence, outcome, reason))
+}
+
+fn file_result(evidence: FileEvidence, outcome: EntryOutcome, reason: String) -> Evaluated {
+    Evaluated {
+        outcome,
+        baseline: None,
+        deadline: None,
+        file: Some(evidence),
+        due: None,
+        reason,
     }
 }

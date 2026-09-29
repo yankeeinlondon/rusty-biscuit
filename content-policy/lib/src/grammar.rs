@@ -11,7 +11,7 @@ use crate::model::{
 };
 use crate::time;
 
-const RULE_NAMES: [&str; 4] = ["Evergreen", "TimeSensitive", "ValidFor", "ValidUntil"];
+const RULE_NAMES: [&str; 5] = ["Evergreen", "TimeSensitive", "ValidFor", "ValidUntil", "FileChanged"];
 
 /// A rule-level failure; the caller decides its [`Location`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +173,14 @@ pub(crate) fn parse_rule(text: &str) -> Result<Rule, RuleError> {
             format!("`{text}` has leading or trailing whitespace"),
         ));
     }
+    // A path may hold `(`, and a path holding `)` must get the path message,
+    // so `FileChanged(...)` is split here, before parentheses are counted.
+    if let Some(inner) = text
+        .strip_prefix("FileChanged(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        return parse_file_changed(inner);
+    }
     let opens = text.matches('(').count();
     let closes = text.matches(')').count();
     if opens != closes {
@@ -252,7 +260,58 @@ pub(crate) fn parse_rule(text: &str) -> Result<Rule, RuleError> {
         ("ValidUntil", _) => Err(arguments_error(
             "`ValidUntil` takes one deadline: `ValidUntil(2027-01-01)` or `ValidUntil(@name)`",
         )),
+        ("FileChanged", _) => Err(file_changed_arguments()),
         _ => unreachable!("every known rule name is matched above"),
+    }
+}
+
+fn file_changed_arguments() -> RuleError {
+    arguments_error(
+        "`FileChanged` takes a path and the property holding its fingerprint: \
+         `FileChanged(src/config.rs, @config_fingerprint)`",
+    )
+}
+
+/// Parses the arguments of `FileChanged(<path>, @<property>)`. The path is
+/// everything before the last comma, taken verbatim; only the property
+/// argument is trimmed, like every other rule argument.
+fn parse_file_changed(inner: &str) -> Result<Rule, RuleError> {
+    let Some((path, property)) = inner.rsplit_once(',') else {
+        if inner.is_empty() {
+            return Err(file_changed_arguments());
+        }
+        return Err(arguments_error(format!(
+            "`FileChanged({inner})` names no fingerprint property; the one-argument form is not \
+             supported, because every watched file needs its own property: \
+             `FileChanged({inner}, @{inner_hint}_fingerprint)`",
+            inner_hint = fingerprint_hint(inner)
+        )));
+    };
+    let property = property.trim_matches(' ');
+    if !property.starts_with('@') {
+        return Err(file_changed_arguments());
+    }
+    let property = parse_reference(property)?;
+    crate::path_form::validate_path(path)?;
+    Ok(Rule::FileChanged {
+        path: path.to_string(),
+        property,
+    })
+}
+
+/// A property-name stem for the one-argument message: the file name without
+/// its extension, or `file`.
+fn fingerprint_hint(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let stem = name.split('.').next().unwrap_or(name);
+    let stem: String = stem
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    if stem.is_empty() || !stem.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        "file".to_string()
+    } else {
+        stem
     }
 }
 
@@ -595,7 +654,6 @@ mod tests {
             ("ValidFor((3mo))", InvalidRuleSyntax),
             ("Duration(3mo)", UnknownRule),
             ("validfor(3mo)", UnknownRule),
-            ("FileChanged(src/a.rs, @fp)", UnknownRule),
             ("Evergreen()", InvalidArguments),
             ("Evergreen(1d)", InvalidArguments),
             ("ValidFor", InvalidArguments),

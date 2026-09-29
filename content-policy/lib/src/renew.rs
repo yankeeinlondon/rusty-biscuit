@@ -15,6 +15,7 @@ use std::fs;
 use std::io::{self, Write as _};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use biscuit_file::yaml::{
@@ -27,9 +28,12 @@ use serde_json::{Map, Value};
 
 use crate::diagnostic::Invalid;
 use crate::evaluate::{
-    EvaluationContext, NaiveDateText, PolicySummary, duplicate_key_invalid, evaluate_record,
+    EvaluationContext, NaiveDateText, PolicySummary, duplicate_key_invalid,
+    evaluate_record_observed,
 };
+use crate::fingerprint::{self, FingerprintScheme, StoredFingerprint};
 use crate::model::{Baseline, Deadline, EvidenceRecord, Policy, PolicyOptions, Rule};
+use crate::provider::{FileObservation, FileProvider, FileSource, Observer};
 use crate::reader::{Frontmatter, LineEnding, ReadError, ReadOutcome, read_frontmatter};
 use crate::time::start_of_day;
 
@@ -40,6 +44,7 @@ pub struct RenewalContext {
     on: Option<NaiveDate>,
     options: PolicyOptions,
     document: Option<String>,
+    files: Option<FileSource>,
 }
 
 impl RenewalContext {
@@ -52,6 +57,7 @@ impl RenewalContext {
             on: None,
             options: PolicyOptions::default(),
             document: None,
+            files: None,
         }
     }
 
@@ -84,13 +90,26 @@ impl RenewalContext {
         self
     }
 
+    /// Lets renewal recapture `FileChanged` fingerprints through `provider`,
+    /// with relative paths resolved from `base_dir`, as
+    /// [`EvaluationContext::with_files`] does for evaluation. Without it, a
+    /// policy with a `FileChanged` rule cannot be renewed.
+    #[must_use]
+    pub fn with_files(mut self, provider: Arc<dyn FileProvider>, base_dir: impl Into<PathBuf>) -> Self {
+        self.files = Some(FileSource {
+            provider,
+            base_dir: base_dir.into(),
+        });
+        self
+    }
+
     #[allow(missing_docs)]
     #[must_use]
     pub fn today(&self) -> NaiveDate {
         self.today
     }
 
-    /// The date written into every renewed baseline.
+    /// The date written into every renewed date baseline.
     #[must_use]
     pub fn update_date(&self) -> NaiveDate {
         self.on.unwrap_or(self.today)
@@ -110,7 +129,8 @@ pub enum BaselineTarget {
     /// The date inside the rule string of entry `entry`,
     /// `ValidFor(3mo, 2026-09-28)`.
     Inline { entry: usize },
-    /// A top-level frontmatter property, such as `last_updated`.
+    /// A top-level frontmatter property, such as `last_updated` or a
+    /// `FileChanged` fingerprint property.
     Property { name: String },
 }
 
@@ -118,11 +138,12 @@ pub enum BaselineTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
-    /// A recorded date advances to the update date.
+    /// A recorded date advances to the update date, or a recorded
+    /// fingerprint to the watched file's current one.
     Renewed,
     /// First capture: the property was absent or `null`.
     NewBaseline,
-    /// The baseline already holds the update date; no bytes change.
+    /// The baseline already holds the new value; no bytes change.
     Unchanged,
 }
 
@@ -134,9 +155,12 @@ pub struct BaselineChange {
     /// several rules is written once and lists every one.
     pub entries: Vec<usize>,
     pub kind: ChangeKind,
-    /// The date recorded before renewal; `None` for a new baseline.
-    pub previous: Option<NaiveDateText>,
-    pub value: NaiveDateText,
+    /// The value recorded before renewal, a `YYYY-MM-DD` date or a content
+    /// fingerprint; `None` for a new baseline.
+    pub previous: Option<String>,
+    /// The value written: the update date, or the watched file's
+    /// fingerprint.
+    pub value: String,
 }
 
 /// A byte-range replacement in the whole document. An empty span is an
@@ -227,6 +251,34 @@ pub enum ConflictKind {
     MovesDeadline,
 }
 
+/// Why a `FileChanged` fingerprint cannot be recaptured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceIssueKind {
+    /// No file provider was configured.
+    MissingProvider,
+    /// The watched file is missing or deleted.
+    SourceRemoved,
+    /// The watched path is not a file.
+    NotAFile,
+    /// The watched file exists but could not be read.
+    Unreadable,
+    /// The stored fingerprint's scheme is not one this library computes, so
+    /// renewal cannot recompute it; the author corrects the value.
+    IncompatibleFingerprint,
+}
+
+/// Evidence a renewal needed and could not capture.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EvidenceIssue {
+    pub kind: EvidenceIssueKind,
+    /// The zero-based policy entry.
+    pub entry: usize,
+    /// The fingerprint property the entry would write.
+    pub property: String,
+    pub message: String,
+}
+
 /// Planned writes that contradict each other or a nonrenewable rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Conflict {
@@ -259,6 +311,12 @@ pub enum RenewalError {
     Conflict {
         document: Option<String>,
         conflicts: Vec<Conflict>,
+    },
+    /// A `FileChanged` fingerprint could not be recaptured. Every issue is
+    /// listed, and no baseline advances.
+    MissingEvidence {
+        document: Option<String>,
+        issues: Vec<EvidenceIssue>,
     },
     /// The document's bytes differ from the ones the plan was made from.
     ModifiedSincePlan { document: Option<String> },
@@ -306,6 +364,14 @@ impl fmt::Display for RenewalError {
                 }
                 Ok(())
             }
+            Self::MissingEvidence { document, issues } => {
+                prefix(f, document)?;
+                f.write_str("renewal is missing evidence; nothing was written")?;
+                for issue in issues {
+                    write!(f, "\n  entry {}: {}", issue.entry + 1, issue.message)?;
+                }
+                Ok(())
+            }
             Self::ModifiedSincePlan { document } => {
                 prefix(f, document)?;
                 f.write_str(
@@ -333,14 +399,18 @@ pub fn plan_fingerprint(bytes: &[u8]) -> String {
 /// the caller's default policy when the document declares none.
 ///
 /// Nothing is written. Missing baseline properties, and a missing
-/// frontmatter block, become first captures.
+/// frontmatter block, become first captures. A `FileChanged` rule's
+/// fingerprint is recaptured through the context's file provider, keeping
+/// the stored scheme, or `blake3-lf` for a first capture.
 ///
 /// ## Errors
 ///
 /// Returns [`RenewalError`] for a future update date, unreadable or invalid
-/// frontmatter, a present baseline value that is not a date, conflicting
-/// writes, or a source shape renewal will not edit. Every refusal and
-/// conflict is listed, not just the first.
+/// frontmatter, a present baseline value that is not a date or fingerprint,
+/// a watched file that cannot be fingerprinted
+/// ([`RenewalError::MissingEvidence`]), conflicting writes, or a source shape
+/// renewal will not edit. Every refusal, conflict, and evidence issue is
+/// listed, not just the first.
 pub fn plan_renewal(bytes: &[u8], context: &RenewalContext) -> Result<RenewalPlan, RenewalError> {
     let document = context.document.clone();
     let update = context.update_date();
@@ -388,7 +458,14 @@ pub fn plan_renewal(bytes: &[u8], context: &RenewalContext) -> Result<RenewalPla
     if let Some(label) = &document {
         evaluation = evaluation.with_document(label.clone());
     }
-    let report = evaluate_record(&record, &evaluation).map_err(RenewalError::Invalid)?;
+    if let Some(files) = &context.files {
+        evaluation = evaluation.with_files(Arc::clone(&files.provider), files.base_dir.clone());
+    }
+    // One observer for evaluation and planning, so each watched file is read
+    // once and the fingerprint written is the one evaluation saw.
+    let observer = Observer::new(context.files.as_ref());
+    let report = evaluate_record_observed(&record, &evaluation, &observer)
+        .map_err(RenewalError::Invalid)?;
     let key = context.options.key();
     let declaration = record.get(key);
     let policy = match declaration {
@@ -398,10 +475,25 @@ pub fn plan_renewal(bytes: &[u8], context: &RenewalContext) -> Result<RenewalPla
 
     let value = update.to_string();
     let mut refusals = Vec::new();
+    let mut issues = Vec::new();
     let mut writes = Vec::new();
     for (index, entry) in policy.entries().iter().enumerate() {
-        let Rule::ValidFor { baseline, .. } = &entry.rule else {
-            continue;
+        let baseline = match &entry.rule {
+            Rule::ValidFor { baseline, .. } => baseline,
+            Rule::FileChanged { path, property } => {
+                match recapture(index, path, property, &record, &observer) {
+                    Ok(value) => writes.push(Write {
+                        target: BaselineTarget::Property {
+                            name: property.clone(),
+                        },
+                        entry: index,
+                        value,
+                    }),
+                    Err(issue) => issues.push(issue),
+                }
+                continue;
+            }
+            Rule::Evergreen | Rule::TimeSensitive | Rule::ValidUntil { .. } => continue,
         };
         let target = match baseline {
             Baseline::Inline(_) if declaration.is_none() => {
@@ -431,6 +523,9 @@ pub fn plan_renewal(bytes: &[u8], context: &RenewalContext) -> Result<RenewalPla
         });
     }
 
+    if !issues.is_empty() {
+        return Err(RenewalError::MissingEvidence { document, issues });
+    }
     let (groups, mut conflicts) = consolidate(writes);
     conflicts.extend(deadline_conflicts(&policy, &groups));
     if !conflicts.is_empty() {
@@ -474,8 +569,8 @@ pub fn plan_renewal(bytes: &[u8], context: &RenewalContext) -> Result<RenewalPla
             target: group.target.clone(),
             entries: group.entries.clone(),
             kind,
-            previous: previous.map(NaiveDateText),
-            value: NaiveDateText(update),
+            previous,
+            value: group.value.clone(),
         });
     }
     if !refusals.is_empty() {
@@ -653,13 +748,13 @@ impl RenewalPlan {
     /// The record the edited document must read as.
     fn expected(&self, mut record: Map<String, Value>) -> Result<Map<String, Value>, RenewalError> {
         for change in &self.changes {
-            let value = change.value.0.to_string();
+            let value = change.value.clone();
             match &change.target {
                 BaselineTarget::Property { name } => {
                     record.insert(name.clone(), Value::String(value));
                 }
                 BaselineTarget::Inline { entry } => {
-                    let previous = change.previous.map(|date| date.0.to_string());
+                    let previous = change.previous.clone();
                     let rule = record
                         .get_mut(&self.key)
                         .and_then(|policy| policy.get_mut(*entry))
@@ -791,7 +886,7 @@ enum Planned {
     Nothing,
 }
 
-type PlannedChange = (ChangeKind, Option<NaiveDate>, Planned);
+type PlannedChange = (ChangeKind, Option<String>, Planned);
 
 /// The frontmatter YAML as renewal locates values in it: the tab-repaired
 /// text when the reader repaired tabs, since the locator works on valid YAML.
@@ -952,8 +1047,7 @@ fn plan_property(
             Ok((ChangeKind::NewBaseline, None, Planned::Edit(edit)))
         }
         Some(Value::String(text)) => {
-            let previous = NaiveDate::parse_from_str(text, "%Y-%m-%d")
-                .expect("evaluation accepted this baseline as a date");
+            let previous = text.clone();
             let location = yaml.locate(&path).ok_or_else(unlocatable)?;
             check_properties(&yaml.text, &location, &format!("`{name}`"))
                 .map_err(|message| refuse(RefusalReason::AnchorAliasOrTag, message))?;
@@ -982,7 +1076,7 @@ fn plan_property(
             let edit = yaml.edit(start..start + inner.len(), value);
             Ok((ChangeKind::Renewed, Some(previous), Planned::Edit(edit)))
         }
-        Some(_) => unreachable!("evaluation rejects a non-date baseline"),
+        Some(_) => unreachable!("evaluation rejects a baseline that is not a string"),
     }
 }
 
@@ -1088,12 +1182,71 @@ fn plan_inline(
     let Some((position, previous)) = inline_date(rule) else {
         return Err(span_mismatch(target(), authored, rule));
     };
-    if previous.to_string() == value {
+    let previous = previous.to_string();
+    if previous == value {
         return Ok((ChangeKind::Unchanged, Some(previous), Planned::Nothing));
     }
     let start = location.span.start + offset + position;
     let edit = yaml.edit(start..start + value.len(), value);
     Ok((ChangeKind::Renewed, Some(previous), Planned::Edit(edit)))
+}
+
+/// The fingerprint a `FileChanged` entry writes: the stored value's scheme,
+/// or `blake3-lf` for a first capture, over the watched file's bytes.
+fn recapture(
+    entry: usize,
+    path: &str,
+    property: &str,
+    record: &EvidenceRecord,
+    observer: &Observer<'_>,
+) -> Result<String, EvidenceIssue> {
+    let issue = |kind, message: String| EvidenceIssue {
+        kind,
+        entry,
+        property: property.to_string(),
+        message,
+    };
+    let scheme = match record.get(property).and_then(Value::as_str) {
+        None => FingerprintScheme::DEFAULT,
+        Some(stored) => match fingerprint::classify(stored) {
+            Ok(StoredFingerprint::Known(scheme)) => scheme,
+            Ok(StoredFingerprint::Unrecognized(name)) => {
+                return Err(issue(
+                    EvidenceIssueKind::IncompatibleFingerprint,
+                    format!(
+                        "`{property}` holds a `{name}` fingerprint, a scheme renewal cannot \
+                         compute; replace it with a `blake3-lf:` or `blake3:` value, or delete it \
+                         to capture a new `blake3-lf` one"
+                    ),
+                ));
+            }
+            Err(_) => unreachable!("evaluation rejects a malformed fingerprint"),
+        },
+    };
+    let Some(observation) = observer.observe(path) else {
+        return Err(issue(
+            EvidenceIssueKind::MissingProvider,
+            format!("no file provider is configured to read `{path}`"),
+        ));
+    };
+    match observation.as_ref() {
+        FileObservation::Present(bytes) => Ok(scheme.fingerprint(bytes)),
+        FileObservation::Missing => Err(issue(
+            EvidenceIssueKind::SourceRemoved,
+            format!("the watched file `{path}` is missing, so there is no content to fingerprint"),
+        )),
+        FileObservation::NotAFile => Err(issue(
+            EvidenceIssueKind::NotAFile,
+            format!("the watched path `{path}` is not a file"),
+        )),
+        FileObservation::Unreadable(detail) => Err(issue(
+            EvidenceIssueKind::Unreadable,
+            format!("the watched file `{path}` could not be read: {detail}"),
+        )),
+        FileObservation::OutsideBoundary(_) => {
+            unreachable!("evaluation rejects a path outside the boundary")
+        }
+    }
 }
 
 /// Refuses a located value that carries an anchor, tag, or alias.
@@ -1309,8 +1462,8 @@ mod tests {
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].entries, vec![0, 2]);
 
-        // Time rules always write the update date; a later rule kind that
-        // writes something else to the same property must conflict.
+        // Time rules always write the update date; a `FileChanged` rule
+        // writing a fingerprint to the same property must conflict.
         let (_, conflicts) = consolidate(vec![
             write(property("fingerprint"), 0, "2026-12-29"),
             write(property("fingerprint"), 3, "blake3-lf:00"),

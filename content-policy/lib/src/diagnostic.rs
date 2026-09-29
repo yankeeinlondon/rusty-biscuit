@@ -60,6 +60,16 @@ pub enum DiagnosticCode {
     UnsupportedGrammarVersion,
     /// A serialized policy that is not the normalized JSON shape.
     MalformedSerialization,
+    /// A `FileChanged` path in a form the path rules reject: absolute,
+    /// machine-dependent, a sigil other than `&` or `^`, a `\` separator,
+    /// surrounding whitespace, or a `,` or `)`.
+    InvalidPath,
+    /// A `FileChanged` path that resolves outside the boundary: the
+    /// repository root, or the document tree root outside a repository.
+    OutsideBoundary,
+    /// A fingerprint value that is not a `<scheme>:<hex>` string, or a
+    /// recognized scheme with the wrong digest length.
+    InvalidFingerprint,
 }
 
 /// Which part of a long-form entry a diagnostic points at.

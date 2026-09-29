@@ -92,17 +92,17 @@ fn every_renewable_entry_is_renewed_and_nothing_else_changes() {
     let summary: Vec<_> = plan
         .changes
         .iter()
-        .map(|change| (change.target.clone(), change.entries.clone(), change.kind, change.previous))
+        .map(|change| (change.target.clone(), change.entries.clone(), change.kind, change.previous.clone()))
         .collect();
     assert_eq!(
         summary,
         vec![
-            (property("last_updated"), vec![0, 3], ChangeKind::Renewed, Some(NaiveDateText(date("2026-01-01")))),
-            (property("reviewed"), vec![1], ChangeKind::Renewed, Some(NaiveDateText(date("2026-02-01")))),
-            (BaselineTarget::Inline { entry: 2 }, vec![2], ChangeKind::Renewed, Some(NaiveDateText(date("2026-03-01")))),
+            (property("last_updated"), vec![0, 3], ChangeKind::Renewed, Some("2026-01-01".to_string())),
+            (property("reviewed"), vec![1], ChangeKind::Renewed, Some("2026-02-01".to_string())),
+            (BaselineTarget::Inline { entry: 2 }, vec![2], ChangeKind::Renewed, Some("2026-03-01".to_string())),
         ]
     );
-    assert!(plan.changes.iter().all(|change| change.value == NaiveDateText(date(TODAY))));
+    assert!(plan.changes.iter().all(|change| change.value == TODAY));
     assert_eq!(plan.policy.source, PolicySource::Declared);
     assert!(plan.tab_repair.is_empty());
     let expected = source

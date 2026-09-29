@@ -64,6 +64,11 @@ fn mixed_compact_and_long_form_entries_validate() {
             "{rule: 'ValidFor(6mo)', action: archive}",
             "{rule: TimeSensitive, action: remove}",
             "{rule: Evergreen, action: refresh}",
+            "FileChanged(src/config.rs, @config_fingerprint)",
+            "\"FileChanged(&Cargo.toml, @fp)\"",
+            "\"FileChanged(../x.md,@fp)\"",
+            "\"FileChanged(notes/a #1.md, @notes_fingerprint)\"",
+            "{rule: \"FileChanged(^README.md, @fp)\", action: archive}",
         ],
     );
 
@@ -122,6 +127,36 @@ fn compact_rules_outside_the_grammar_are_flagged() {
     assert_eq!(
         problem_paths(&report),
         ["/p0", "/p1", "/p2", "/p3", "/p4", "/p5"],
+        "{:?}",
+        report.problems
+    );
+}
+
+#[test]
+fn file_changed_rules_outside_the_grammar_are_flagged() {
+    let report = validate_entries(
+        include_str!("../../../../content-policy/schemas/content-policy.yaml"),
+        &[
+            "FileChanged(src/config.rs)",
+            "\"FileChanged(src,config.rs, @fp)\"",
+            r"'FileChanged(src\config.rs, @fp)'",
+            "\"FileChanged( src/a.rs, @fp)\"",
+            "\"FileChanged(src/a.rs , @fp)\"",
+            "\"FileChanged(/etc/hosts, @fp)\"",
+            "\"FileChanged(~/x, @fp)\"",
+            "\"FileChanged(@x, @fp)\"",
+            "\"FileChanged(%x, @fp)\"",
+            "\"FileChanged({{HOME}}/x, @fp)\"",
+            "\"FileChanged(src/config.rs, @a.b)\"",
+        ],
+    );
+
+    // Problems arrive sorted by path text, which puts `/p10` before `/p2`.
+    let mut flagged = problem_paths(&report);
+    flagged.sort_by_key(|path| path.trim_start_matches("/p").parse::<usize>().ok());
+    assert_eq!(
+        flagged,
+        ["/p0", "/p1", "/p2", "/p3", "/p4", "/p5", "/p6", "/p7", "/p8", "/p9", "/p10"],
         "{:?}",
         report.problems
     );

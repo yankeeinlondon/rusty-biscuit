@@ -22,6 +22,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [dev-dependencies]
+# Creates fixture repositories for the file adapter tests; pinned and
+# featured as Biscuit File does, so no new crate is compiled.
+gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
 tempfile = "3"
 
 # CI policy: the L1 suite runs with every feature enabled.

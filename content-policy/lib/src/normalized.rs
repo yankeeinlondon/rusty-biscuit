@@ -149,7 +149,8 @@ impl Policy {
 }
 
 /// One entry as hashed: the rule name, its parameters with any inline date
-/// replaced by the marker `inline`, and the action.
+/// replaced by the marker `inline`, and the action. A `FileChanged` path
+/// counts as authored; its stored fingerprint is evidence and never does.
 #[derive(Serialize)]
 struct IdentityEntry {
     rule: &'static str,
@@ -173,6 +174,7 @@ impl From<&PolicyEntry> for IdentityEntry {
                 crate::model::Deadline::Inline(date) => date.to_string(),
                 crate::model::Deadline::Reference(name) => format!("@{name}"),
             }],
+            Rule::FileChanged { path, property } => vec![path.clone(), format!("@{property}")],
         };
         Self {
             rule: entry.rule.name(),
