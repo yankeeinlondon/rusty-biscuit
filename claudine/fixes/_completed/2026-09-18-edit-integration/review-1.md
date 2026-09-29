@@ -5,7 +5,8 @@ fix: 2026-09-18-edit-integration/review-1.md
 spec: 2026-09-18-edit-integration/spec.md
 reviewed_by: codex/gpt-6-sol
 created: 2026-09-28T16:39:09-07:00
-implemented: false
+implemented: true
+next: 2026-09-18-edit-integration/review-2.md
 ready: false
 human_review: true
 human_review_items:
