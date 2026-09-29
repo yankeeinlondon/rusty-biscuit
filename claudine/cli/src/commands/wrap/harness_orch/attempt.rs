@@ -140,7 +140,7 @@ pub(crate) fn execute_harness_attempt(
         .flatten();
     // Steering ownership for the same child: an in-memory control route,
     // separate from replicated presence and its opt-out. Dropped with it.
-    let _steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
+    let steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
         provider,
         !effective_non_interactive,
         child_cwd,
@@ -186,6 +186,14 @@ pub(crate) fn execute_harness_attempt(
         // can bring agent/model-scoped exit expressions into scope.
         sink.set_content_detector(runaway_guards.detector);
         sink.set_guard_rescope_source(guard_inputs.clone(), run_model.as_deref());
+        // Automatic repetition help goes to this attempt's own controller, so
+        // each attempt (retry and resume included) has its own allowance.
+        if guard_inputs.automatic_steering() {
+            sink.set_automatic_help(crate::steering::automatic::AutomaticHelp::new(
+                steering.as_ref().map(|owner| owner.controller().clone()),
+                crate::steering::automatic::stderr_notices(sink.stream_output()),
+            ));
+        }
         let live_metrics = sink.live_metrics();
         let stream_output = sink.stream_output();
         let watchdog_state = Some(sink.watchdog_state());

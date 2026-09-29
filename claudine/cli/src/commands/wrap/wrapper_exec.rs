@@ -45,6 +45,7 @@ pub(crate) fn run_structured_stream_session(
     mut perf_collector: Option<&mut crate::perf::CommandPerfCollector>,
     status_reporter: super::session_report::StatusReporter,
     control: Option<std::sync::Arc<dyn exec::control::StdioControl>>,
+    steering: Option<claudine::steering::controller::SteeringController>,
 ) -> Result<(i32, Option<String>)> {
     let summary_details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
     let parser_config = claudine::stream::ParserConfig {
@@ -74,6 +75,12 @@ pub(crate) fn run_structured_stream_session(
     )?);
     let runaway_guards = guard_inputs.compile_for_model(args.model.as_deref())?;
     sink.set_content_detector(runaway_guards.detector);
+    if guard_inputs.automatic_steering() {
+        sink.set_automatic_help(crate::steering::automatic::AutomaticHelp::new(
+            steering,
+            crate::steering::automatic::stderr_notices(sink.stream_output()),
+        ));
+    }
     sink.set_guard_rescope_source(guard_inputs, args.model.as_deref());
     let live_metrics = sink.live_metrics();
     let stream_output = sink.stream_output();

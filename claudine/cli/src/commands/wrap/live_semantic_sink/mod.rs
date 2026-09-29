@@ -235,6 +235,10 @@ pub(crate) struct LiveSemanticSink {
     /// trip is terminal) and suppresses further output rendering so the
     /// tail of a runaway is not echoed to the terminal (spec Part 1).
     content_tripped: bool,
+    /// Automatic repetition help for this execution. `None` when it is
+    /// turned off, in which case repetition signals are dropped and no
+    /// notice is printed; the detector and its trips are unaffected.
+    automatic_help: Option<crate::steering::automatic::AutomaticHelp>,
     /// Best-effort mid-session status reporter to the rendezvous
     /// dashboard's `sessions-active` register (trigger 1). Inert unless
     /// a session was bracketed against a live daemon.
@@ -286,6 +290,7 @@ impl LiveSemanticSink {
             detector_scope_model: None,
             trip_sender: None,
             content_tripped: false,
+            automatic_help: None,
             status_reporter: super::session_report::StatusReporter::inert(),
             awaiting_user: false,
         }
@@ -392,6 +397,7 @@ impl LiveSemanticSink {
             detector_scope_model: None,
             trip_sender: None,
             content_tripped: false,
+            automatic_help: None,
             status_reporter: super::session_report::StatusReporter::inert(),
             awaiting_user: false,
         }
@@ -593,10 +599,20 @@ impl LiveSemanticSink {
         self.trip_sender = Some(sender);
     }
 
+    /// Enable automatic repetition help for this execution. Left unset when
+    /// the run turned it off.
+    pub(crate) fn set_automatic_help(&mut self, help: crate::steering::automatic::AutomaticHelp) {
+        self.automatic_help = Some(help);
+    }
+
     /// Feed assistant text to the content detector, firing a trip on the
     /// first guard breach. No-op when no detector is armed or a trip has
     /// already fired. Returns `true` when this call fired the trip so the
     /// caller can suppress rendering of the tripping chunk.
+    ///
+    /// A chunk that trips yields no repetition signals, so a warning never
+    /// competes with the stop; otherwise its signals go to automatic help,
+    /// which never blocks this reader.
     fn feed_content_detector(&mut self, text: &str) -> bool {
         if self.content_tripped {
             return false;
@@ -604,9 +620,15 @@ impl LiveSemanticSink {
         let Some(detector) = self.content_detector.as_mut() else {
             return false;
         };
-        if let Some(trip) = detector.feed(text) {
+        let observation = detector.observe(text);
+        if let Some(trip) = observation.trip {
             self.fire_content_trip(trip);
             return true;
+        }
+        if let Some(help) = self.automatic_help.as_mut() {
+            for signal in &observation.signals {
+                help.on_signal(signal);
+            }
         }
         false
     }
@@ -623,7 +645,8 @@ impl LiveSemanticSink {
     /// A trip is terminal: the `content_tripped` flag guards against a
     /// double-send and also suppresses further output rendering. The send
     /// is best-effort — if the receiver has already hung up (the wait loop
-    /// killed the child), dropping the signal is fine.
+    /// killed the child), dropping the signal is fine. Automatic help then
+    /// stops, abandoning any warning still being sent.
     fn fire_content_trip(&mut self, trip: claudine::runaway::Trip) {
         if self.content_tripped {
             return;
@@ -632,6 +655,9 @@ impl LiveSemanticSink {
         if let Some(sender) = self.trip_sender.as_ref() {
             let early = super::exec::termination::trip_to_early_termination(trip);
             let _ = sender.send(early);
+        }
+        if let Some(help) = self.automatic_help.as_mut() {
+            help.hard_stop();
         }
     }
 
@@ -757,6 +783,7 @@ mod tests {
     // here for the `on_semantic_event` driver calls in the child suites.
     use claudine::stream::semantic::SemanticEventSink;
 
+    mod automatic_help;
     mod content_guard;
     mod dispatch_and_recording;
     mod final_response_contract;

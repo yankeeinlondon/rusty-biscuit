@@ -681,12 +681,13 @@ pub(crate) fn run_execution_stage(
         // interface is driven over retained stdin (Pi RPC).
         let control = wire_prompt.is_none().then(|| profile.stdio_control(child_args)).flatten();
         // Steering ownership for the same child; see `crate::steering::owner`.
-        let _steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
+        let steering = crate::steering::owner::ExecutionSteering::for_wrapped_child(
             provider,
             !effective_non_interactive,
             child_cwd,
             control.as_ref(),
         );
+        let steering_controller = steering.as_ref().map(|owner| owner.controller().clone());
         wrapper_exec::run_structured_stream_session(
             args,
             provider,
@@ -709,6 +710,7 @@ pub(crate) fn run_execution_stage(
             perf_collector,
             status_reporter,
             control,
+            steering_controller,
         )
     } else {
         let _session_presence = session_report::SessionPresence::started(
