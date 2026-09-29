@@ -11,8 +11,8 @@ assigned: "{{ state.index % 3 == 1 ? 'opencode' : (state.index % 3 == 2 ? 'claud
 # researcher's providers as well as its own, except a provider that is itself.
 covering: none
 agent: "{{ covering != 'none' && assigned == covering ? env.AGENT : assigned }}"
-model: "{{ agent == 'opencode' ? 'zai-coding-plan/glm-5.3' : (agent == 'claude' ? 'sonnet' : 'gpt-6-luna') }}"
-effort: "{{ agent == 'opencode' ? 'provider_default' : 'high' }}"
+model: "{{ agent == 'opencode' ? 'zai-coding-plan/glm-5.3' : (agent == 'claude' ? 'sonnet' : 'gpt-6.1-sol') }}"
+effort: "{{ agent == 'opencode' ? 'provider_default' : (agent == 'claude' ? 'high' : 'medium') }}"
 # A sequence plans one agent before any step exists, and Claudine cannot yet
 # set reasoning effort from a prompt. So the fleet runs once per researcher,
 # each run naming its agent, model, and effort. `just research <topic>` does

@@ -10,8 +10,11 @@ are truth values to a YAML 1.1 reader.
 """
 import sys, yaml, re, json, glob, os
 
-ROTATION = {'opencode': ('zai-coding-plan/glm-5.3', 'provider_default'),
-            'claude': ('sonnet', 'high'), 'codex': ('gpt-6-luna', 'high')}
+# Each researcher's model and effort. A pair that has left the rotation stays
+# while a document it wrote remains.
+ROTATION = {'opencode': [('zai-coding-plan/glm-5.3', 'provider_default')],
+            'claude': [('sonnet', 'high')],
+            'codex': [('gpt-6.1-sol', 'medium'), ('gpt-6-luna', 'high')]}
 OWN = {'claude': 'claude', 'codex': 'codex', 'opencode': 'opencode'}
 ARG_KINDS = {'launch_flag', 'config_override_flag', 'model_suffix'}
 
@@ -25,8 +28,8 @@ def check(path):
 
     # researcher
     a, m, e = fm.get('agent'), fm.get('model'), fm.get('reasoning_effort')
-    if a in ROTATION and (m, e) != ROTATION[a]:
-        bad('researcher-pairing', f'{a} must record {ROTATION[a]}, found {(m, e)}')
+    if a in ROTATION and (m, e) not in ROTATION[a]:
+        bad('researcher-pairing', f'{a} must record one of {ROTATION[a]}, found {(m, e)}')
     if OWN.get(a) == fm.get('provider'):
         bad('no-self-research', f'{a} researched its own provider')
     slug = os.path.basename(path)[:-3]

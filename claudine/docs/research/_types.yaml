@@ -11,8 +11,8 @@ types:
     launch_mode: enum(interactive,non_interactive) -> Whether the session was started with a terminal interface or without one
 
     research_agent: enum(codex,claude,opencode) -> Agentic CLI that performed the research; it must be the one the fleet assigned to this provider
-    research_model: enum(gpt-6-luna,sonnet,zai-coding-plan/glm-5.3) -> Model that performed the research, as the agent reports it at run time; a default or unnamed model is rejected
-    research_effort: enum(high,provider_default) -> Reasoning effort the research ran with; provider_default only where the fleet assigns none
+    research_model: enum(gpt-6.1-sol,gpt-6-luna,sonnet,zai-coding-plan/glm-5.3) -> Model that performed the research, as the agent reports it at run time; a model that has left the rotation stays here while a document it wrote remains, and a default or unnamed model is rejected
+    research_effort: enum(low,medium,high,provider_default) -> Reasoning effort the research ran with; provider_default only where the fleet assigns none
 
     evidence:
         id: identifier(required)@this -> Stable name other entries use to cite this source
