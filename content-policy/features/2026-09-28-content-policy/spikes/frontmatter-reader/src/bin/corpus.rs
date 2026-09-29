@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use frontmatter_reader_spike::{ReadError, ReadOutcome, parse_strict, read_frontmatter};
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         let Ok(ft) = entry.file_type() else { continue };
@@ -31,7 +33,10 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 fn tab_normalize(yaml: &str) -> String {
     yaml.split('\n')
         .map(|line| {
-            let indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+            let indent: String = line
+                .chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .collect();
             let rest = &line[indent.len()..];
             format!("{}{rest}", indent.replace('\t', "  "))
         })
@@ -59,7 +64,10 @@ fn main() {
     for path in &files {
         let bytes = std::fs::read(path).unwrap();
         let rel = path.strip_prefix(&root).unwrap().display().to_string();
-        let starts = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes).starts_with(b"---");
+        let starts = bytes
+            .strip_prefix(b"\xef\xbb\xbf")
+            .unwrap_or(&bytes)
+            .starts_with(b"---");
         if !starts {
             continue;
         }
@@ -81,15 +89,27 @@ fn main() {
                         .iter()
                         .filter(|(k, v)| dm_map.get(*k) != Some(*v))
                         .map(|(k, _)| k.clone())
-                        .chain(dm_map.keys().filter(|k| !fm.record.contains_key(*k)).cloned())
+                        .chain(
+                            dm_map
+                                .keys()
+                                .filter(|k| !fm.record.contains_key(*k))
+                                .cloned(),
+                        )
                         .collect();
-                    bump("both ok, RECORDS DIFFER".into(), format!("{rel} keys={diff:?}"));
+                    bump(
+                        "both ok, RECORDS DIFFER".into(),
+                        format!("{rel} keys={diff:?}"),
+                    );
                 }
             }
             (Ok(other), Ok(md)) => {
                 let label = match other {
-                    ReadOutcome::Unterminated { dot_close } => format!("both ok, no block: unterminated (dot_close={dot_close})"),
-                    ReadOutcome::NoFrontmatter => "both ok, no block: first line not a fence (e.g. `---x`)".into(),
+                    ReadOutcome::Unterminated { dot_close } => {
+                        format!("both ok, no block: unterminated (dot_close={dot_close})")
+                    }
+                    ReadOutcome::NoFrontmatter => {
+                        "both ok, no block: first line not a fence (e.g. `---x`)".into()
+                    }
                     ReadOutcome::NearMissFence => "both ok, near-miss".into(),
                     ReadOutcome::Found(_) => unreachable!(),
                 };
@@ -103,7 +123,10 @@ fn main() {
                     ReadError::NotMapping(_) => "not-mapping",
                     ReadError::NotUtf8 => "utf8",
                 };
-                bump(format!("both fail ({kind})"), format!("{rel}: dm={}", first_line(&de.to_string())));
+                bump(
+                    format!("both fail ({kind})"),
+                    format!("{rel}: dm={}", first_line(&de.to_string())),
+                );
             }
             (Err(e), Ok(_)) => {
                 // Why did Darkmatter recover? Re-run strict parse on its
@@ -121,16 +144,27 @@ fn main() {
                 } else {
                     "other".into()
                 };
-                bump(format!("DM ok, spike fails [{reason}]"), format!("{rel}: {}", first_line(&format!("{e:?}"))));
+                bump(
+                    format!("DM ok, spike fails [{reason}]"),
+                    format!("{rel}: {}", first_line(&format!("{e:?}"))),
+                );
             }
             (Ok(o), Err(de)) => {
-                let kind = matches!(o, ReadOutcome::Found(_)).then_some("found").unwrap_or("no block");
-                bump(format!("spike ok ({kind}), DM fails"), format!("{rel}: {}", first_line(&de.to_string())));
+                let kind = matches!(o, ReadOutcome::Found(_))
+                    .then_some("found")
+                    .unwrap_or("no block");
+                bump(
+                    format!("spike ok ({kind}), DM fails"),
+                    format!("{rel}: {}", first_line(&de.to_string())),
+                );
             }
         }
     }
 
-    println!("markdown files: {}  starting with ---: {scanned}\n", files.len());
+    println!(
+        "markdown files: {}  starting with ---: {scanned}\n",
+        files.len()
+    );
     for (bucket, n) in &counts {
         println!("{n:>5}  {bucket}");
         for ex in &examples[bucket] {
@@ -140,12 +174,22 @@ fn main() {
 }
 
 fn first_line(s: &str) -> String {
-    s.lines().next().unwrap_or_default().chars().take(160).collect()
+    s.lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(160)
+        .collect()
 }
 
 /// YAML between fences, LF-joined like Darkmatter.
 fn yaml_of(text: &str) -> String {
     let lines: Vec<&str> = text.lines().collect();
-    let close = lines.iter().skip(1).position(|l| l.trim() == "---").map(|i| i + 1).unwrap_or(1);
+    let close = lines
+        .iter()
+        .skip(1)
+        .position(|l| l.trim() == "---")
+        .map(|i| i + 1)
+        .unwrap_or(1);
     lines[1..close].join("\n")
 }

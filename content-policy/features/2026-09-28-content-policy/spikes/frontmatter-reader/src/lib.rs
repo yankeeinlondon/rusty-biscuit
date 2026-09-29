@@ -3,7 +3,9 @@
 
 use std::ops::Range;
 
-use biscuit_file::yaml::{YamlPathSegment, YamlRepair, apply_edit_set, locate_yaml_key, locate_yaml_value};
+use biscuit_file::yaml::{
+    YamlPathSegment, YamlRepair, apply_edit_set, locate_yaml_key, locate_yaml_value,
+};
 use indexmap::IndexMap;
 use serde_json::Value;
 
@@ -24,7 +26,9 @@ pub enum ReadOutcome {
     NoFrontmatter,
     /// Starts with `---` but has no closing `---`. `dot_close` says a YAML
     /// `...` end marker line was seen instead.
-    Unterminated { dot_close: bool },
+    Unterminated {
+        dot_close: bool,
+    },
     /// First line is a dash-only run of 4+ (Darkmatter's near-miss fence).
     NearMissFence,
     Found(Frontmatter),
@@ -58,12 +62,20 @@ fn lines(source: &str) -> Vec<Line> {
                 continue;
             }
         };
-        out.push(Line { start, content_end: i, end: i + term });
+        out.push(Line {
+            start,
+            content_end: i,
+            end: i + term,
+        });
         i += term;
         start = i;
     }
     if start < source.len() {
-        out.push(Line { start, content_end: source.len(), end: source.len() });
+        out.push(Line {
+            start,
+            content_end: source.len(),
+            end: source.len(),
+        });
     }
     out
 }
@@ -97,7 +109,9 @@ pub fn read_frontmatter(bytes: &[u8]) -> Result<ReadOutcome, ReadError> {
     let Some(&first) = ls.first() else {
         return Ok(ReadOutcome::NoFrontmatter);
     };
-    let first_text = content(first).strip_prefix('\u{feff}').unwrap_or(content(first));
+    let first_text = content(first)
+        .strip_prefix('\u{feff}')
+        .unwrap_or(content(first));
     if first_text.trim() != "---" {
         let t = first_text.trim();
         if t.len() >= 4 && t.bytes().all(|b| b == b'-') {
@@ -118,7 +132,11 @@ pub fn read_frontmatter(bytes: &[u8]) -> Result<ReadOutcome, ReadError> {
     let parse_text = if std::env::var_os("SPIKE_RAW_PARSE").is_some() {
         yaml_text.as_str()
     } else {
-        yaml_text.strip_suffix("\r\n").or_else(|| yaml_text.strip_suffix('\n')).or_else(|| yaml_text.strip_suffix('\r')).unwrap_or(&yaml_text)
+        yaml_text
+            .strip_suffix("\r\n")
+            .or_else(|| yaml_text.strip_suffix('\n'))
+            .or_else(|| yaml_text.strip_suffix('\r'))
+            .unwrap_or(&yaml_text)
     };
     let record = parse_strict(parse_text)?;
     Ok(ReadOutcome::Found(Frontmatter {
@@ -142,7 +160,9 @@ pub enum Target {
 pub enum EditError {
     Read(ReadError),
     NoFrontmatter,
-    Unterminated { dot_close: bool },
+    Unterminated {
+        dot_close: bool,
+    },
     NearMissFence,
     TargetAbsent,
     NotAList,
@@ -178,7 +198,10 @@ pub struct PlannedEdit {
 fn why_unlocatable(fm: &Frontmatter, key: &str) -> &'static str {
     // Lexical sniff of the top-level `key:` line for the refusal reason.
     for line in fm.yaml_text.lines() {
-        if let Some(rest) = line.strip_prefix(key).and_then(|r| r.trim_start().strip_prefix(':')) {
+        if let Some(rest) = line
+            .strip_prefix(key)
+            .and_then(|r| r.trim_start().strip_prefix(':'))
+        {
             let rest = rest.trim_start();
             if rest.starts_with('[') || rest.starts_with('{') {
                 return "flow collection";
@@ -191,7 +214,11 @@ fn why_unlocatable(fm: &Frontmatter, key: &str) -> &'static str {
     "multi-line or unrepresentable value"
 }
 
-pub fn plan_edit_date(bytes: &[u8], target: &Target, new_date: &str) -> Result<PlannedEdit, EditError> {
+pub fn plan_edit_date(
+    bytes: &[u8],
+    target: &Target,
+    new_date: &str,
+) -> Result<PlannedEdit, EditError> {
     let fm = frontmatter_of(bytes)?;
     let base = fm.yaml_span.start;
     let yaml = fm.yaml_text.as_str();
@@ -211,33 +238,55 @@ pub fn plan_edit_date(bytes: &[u8], target: &Target, new_date: &str) -> Result<P
                         _ => new_date.to_string(),
                     };
                     let span = base + loc.span.start..base + loc.span.end;
-                    Ok(PlannedEdit { span: span.clone(), replacement, located: Some(span) })
+                    Ok(PlannedEdit {
+                        span: span.clone(),
+                        replacement,
+                        located: Some(span),
+                    })
                 }
                 None if current.is_null() => {
                     // `last_updated:` with no value: insert after the colon.
                     let key = locate_yaml_key(yaml, &path)
                         .ok_or(EditError::NotLocatable("null value, key not locatable"))?;
-                    let colon = yaml[key.end..].find(':').ok_or(EditError::NotLocatable("no colon"))?;
+                    let colon = yaml[key.end..]
+                        .find(':')
+                        .ok_or(EditError::NotLocatable("no colon"))?;
                     let at = base + key.end + colon + 1;
-                    Ok(PlannedEdit { span: at..at, replacement: format!(" {new_date}"), located: None })
+                    Ok(PlannedEdit {
+                        span: at..at,
+                        replacement: format!(" {new_date}"),
+                        located: None,
+                    })
                 }
                 None => Err(EditError::NotLocatable(why_unlocatable(&fm, name))),
             }
         }
         Target::RuleDate { key, index } => {
             let list = fm.record.get(key).ok_or(EditError::TargetAbsent)?;
-            let item = list.as_array().ok_or(EditError::NotAList)?.get(*index).ok_or(EditError::TargetAbsent)?;
-            let mut path = vec![YamlPathSegment::Key(key.clone()), YamlPathSegment::Index(*index)];
+            let item = list
+                .as_array()
+                .ok_or(EditError::NotAList)?
+                .get(*index)
+                .ok_or(EditError::TargetAbsent)?;
+            let mut path = vec![
+                YamlPathSegment::Key(key.clone()),
+                YamlPathSegment::Index(*index),
+            ];
             let rule = match item {
                 Value::String(s) => s.clone(),
                 Value::Object(m) => {
                     path.push(YamlPathSegment::Key("rule".into()));
-                    m.get("rule").and_then(Value::as_str).ok_or(EditError::NotADateRule(item.to_string()))?.to_string()
+                    m.get("rule")
+                        .and_then(Value::as_str)
+                        .ok_or(EditError::NotADateRule(item.to_string()))?
+                        .to_string()
                 }
                 other => return Err(EditError::NotADateRule(other.to_string())),
             };
-            let old_date = valid_for_inline_date(&rule).ok_or_else(|| EditError::NotADateRule(rule.clone()))?;
-            let loc = locate_yaml_value(yaml, &path).ok_or_else(|| EditError::NotLocatable(why_unlocatable(&fm, key)))?;
+            let old_date = valid_for_inline_date(&rule)
+                .ok_or_else(|| EditError::NotADateRule(rule.clone()))?;
+            let loc = locate_yaml_value(yaml, &path)
+                .ok_or_else(|| EditError::NotLocatable(why_unlocatable(&fm, key)))?;
             let text = &yaml[loc.span.clone()];
             if text.starts_with('|') || text.starts_with('>') {
                 return Err(EditError::BlockScalar);
@@ -245,7 +294,10 @@ pub fn plan_edit_date(bytes: &[u8], target: &Target, new_date: &str) -> Result<P
             if text.starts_with('"') && text.contains('\\') {
                 return Err(EditError::DoubleQuotedEscapes);
             }
-            let hits: Vec<usize> = text.match_indices(old_date.as_str()).map(|(i, _)| i).collect();
+            let hits: Vec<usize> = text
+                .match_indices(old_date.as_str())
+                .map(|(i, _)| i)
+                .collect();
             let at = match hits.as_slice() {
                 [] => return Err(EditError::DateNotFoundInSource),
                 [one] => *one,
@@ -267,14 +319,21 @@ pub fn valid_for_inline_date(rule: &str) -> Option<String> {
     let (_, baseline) = args.split_once(',')?;
     let baseline = baseline.trim();
     let b = baseline.as_bytes();
-    (b.len() == 10 && b[4] == b'-' && b[7] == b'-' && baseline.bytes().filter(u8::is_ascii_digit).count() == 8)
+    (b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && baseline.bytes().filter(u8::is_ascii_digit).count() == 8)
         .then(|| baseline.to_string())
 }
 
 fn apply(source: &str, edit: &PlannedEdit) -> Result<Vec<u8>, EditError> {
     let outcome = apply_edit_set(
         source,
-        &[YamlRepair { span: edit.span.clone(), replacement: edit.replacement.clone(), explanation: "renew".into() }],
+        &[YamlRepair {
+            span: edit.span.clone(),
+            replacement: edit.replacement.clone(),
+            explanation: "renew".into(),
+        }],
     );
     if let Some(r) = outcome.audit.rejected.first() {
         return Err(EditError::EditRejected(format!("{:?}", r.reason)));
@@ -324,16 +383,26 @@ pub fn insert_property(bytes: &[u8], key: &str, value_yaml: &str) -> Result<Vec<
             // The newline of the line the new one follows (last YAML line, or
             // the opening fence for an empty block): local style, not global.
             let nl = terminator_before(source, at).unwrap_or("\n");
-            PlannedEdit { span: at..at, replacement: format!("{key}: {value_yaml}{nl}"), located: None }
+            PlannedEdit {
+                span: at..at,
+                replacement: format!("{key}: {value_yaml}{nl}"),
+                located: None,
+            }
         }
         ReadOutcome::NoFrontmatter => {
             let nl = first_terminator(source);
             // A BOM stays first in the file.
             let at = if source.starts_with('\u{feff}') { 3 } else { 0 };
-            PlannedEdit { span: at..at, replacement: format!("---{nl}{key}: {value_yaml}{nl}---{nl}"), located: None }
+            PlannedEdit {
+                span: at..at,
+                replacement: format!("---{nl}{key}: {value_yaml}{nl}---{nl}"),
+                located: None,
+            }
         }
         ReadOutcome::NearMissFence => return Err(EditError::NearMissFence),
-        ReadOutcome::Unterminated { dot_close } => return Err(EditError::Unterminated { dot_close }),
+        ReadOutcome::Unterminated { dot_close } => {
+            return Err(EditError::Unterminated { dot_close });
+        }
     };
     apply(source, &edit)
 }
@@ -341,7 +410,9 @@ pub fn insert_property(bytes: &[u8], key: &str, value_yaml: &str) -> Result<Vec<
 /// Renewal of a property: edit in place when present, insert when absent.
 pub fn set_date_property(bytes: &[u8], key: &str, new_date: &str) -> Result<Vec<u8>, EditError> {
     match edit_date(bytes, &Target::Property(key.into()), new_date) {
-        Err(EditError::TargetAbsent | EditError::NoFrontmatter) => insert_property(bytes, key, new_date),
+        Err(EditError::TargetAbsent | EditError::NoFrontmatter) => {
+            insert_property(bytes, key, new_date)
+        }
         other => other,
     }
 }
@@ -350,7 +421,13 @@ pub fn set_date_property(bytes: &[u8], key: &str, new_date: &str) -> Result<Vec<
 pub fn byte_diff(old: &[u8], new: &[u8]) -> (Range<usize>, Range<usize>) {
     let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
     let max_suffix = old.len().min(new.len()) - prefix;
-    let suffix = old.iter().rev().zip(new.iter().rev()).take(max_suffix).take_while(|(a, b)| a == b).count();
+    let suffix = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take(max_suffix)
+        .take_while(|(a, b)| a == b)
+        .count();
     (prefix..old.len() - suffix, prefix..new.len() - suffix)
 }
 
@@ -362,20 +439,29 @@ mod tests {
     fn edits_only_the_date_under_crlf() {
         let src = b"---\r\nlast_updated: '2026-01-01' # c\r\n---\r\nbody\r\n";
         let out = edit_date(src, &Target::Property("last_updated".into()), "2026-09-28").unwrap();
-        assert_eq!(out, b"---\r\nlast_updated: '2026-09-28' # c\r\n---\r\nbody\r\n");
+        assert_eq!(
+            out,
+            b"---\r\nlast_updated: '2026-09-28' # c\r\n---\r\nbody\r\n"
+        );
     }
 
     #[test]
     fn rule_date_in_rule_mapping() {
         let src = b"---\ncontent_policy:\n  - rule: ValidFor(3mo, 2026-01-01)\n    action: archive\n---\n";
-        let target = Target::RuleDate { key: "content_policy".into(), index: 0 };
+        let target = Target::RuleDate {
+            key: "content_policy".into(),
+            index: 0,
+        };
         let out = edit_date(src, &target, "2026-09-28").unwrap();
         assert_eq!(out, b"---\ncontent_policy:\n  - rule: ValidFor(3mo, 2026-09-28)\n    action: archive\n---\n");
     }
 
     #[test]
     fn duplicate_keys_rejected() {
-        assert!(matches!(read_frontmatter(b"---\na: 1\na: 2\n---\n"), Err(ReadError::Duplicate(_))));
+        assert!(matches!(
+            read_frontmatter(b"---\na: 1\na: 2\n---\n"),
+            Err(ReadError::Duplicate(_))
+        ));
     }
 
     /// Pins observed `locate_yaml_value` behavior on shapes its docs say
@@ -385,19 +471,33 @@ mod tests {
     fn locate_probe() {
         use biscuit_file::yaml::YamlPathSegment::{Index, Key};
         let k = |s: &str| Key(s.to_string());
-        let loc = |src: &str, path: &[YamlPathSegment]| locate_yaml_value(src, path).map(|l| src[l.span].to_string());
+        let loc = |src: &str, path: &[YamlPathSegment]| {
+            locate_yaml_value(src, path).map(|l| src[l.span].to_string())
+        };
         // Multi-line plain mapping value: first line only is returned.
         assert_eq!(loc("a: one\n  two\n", &[k("a")]).as_deref(), Some("one"));
         // Multi-line plain sequence entry: first line only.
-        assert_eq!(loc("p:\n  - V(3mo,\n    x)\n", &[k("p"), Index(0)]).as_deref(), Some("V(3mo,"));
+        assert_eq!(
+            loc("p:\n  - V(3mo,\n    x)\n", &[k("p"), Index(0)]).as_deref(),
+            Some("V(3mo,")
+        );
         // Multi-line double-quoted: first line fragment.
         let dq = loc("a: \"one\n  two\"\n", &[k("a")]);
         eprintln!("multi-line double-quoted -> {dq:?}");
         // Zero-indent (compact) sequence under a key: not found.
         assert_eq!(loc("p:\n- V(3mo)\n", &[k("p"), Index(0)]), None);
-        assert_eq!(loc("p:\n- rule: V(3mo)\n  action: a\n", &[k("p"), Index(0), k("rule")]), None);
+        assert_eq!(
+            loc(
+                "p:\n- rule: V(3mo)\n  action: a\n",
+                &[k("p"), Index(0), k("rule")]
+            ),
+            None
+        );
         // ...and it is reported at the root-sequence path instead.
-        assert_eq!(loc("p:\n- V(3mo)\n", &[Index(0)]).as_deref(), Some("V(3mo)"));
+        assert_eq!(
+            loc("p:\n- V(3mo)\n", &[Index(0)]).as_deref(),
+            Some("V(3mo)")
+        );
         // Block scalar indicator is returned as the value.
         assert_eq!(loc("a: >-\n  text\n", &[k("a")]).as_deref(), Some(">-"));
     }
