@@ -5,8 +5,8 @@ content needs to be refreshed, archived, or removed. Policies live in the
 document's frontmatter and are evaluated against dates or observations of files,
 packages, symbols, programs, and web resources.
 
-**Status: design draft.** The library and CLI are not implemented. Examples below
-show the proposed interface; details identified as proposals remain open for review.
+**Status: planned.** The design is agreed, but the library and CLI are not
+implemented. Examples below show the planned interface.
 
 ## A Document's Lifecycle
 
@@ -25,7 +25,9 @@ content_policy:
 
 The first rule becomes due three months after the last content update. Updating
 `last_updated` renews that interval. The second rule expires at a fixed deadline;
-refreshing the content does not extend it.
+refreshing the content does not extend it. Dates take effect at 00:00 UTC, so
+the named day is not included: the document is archived for all of January 1,
+2027.
 
 Multiple rules act as a logical OR of triggers. When several trigger, the
 highest-priority action wins:
@@ -34,7 +36,7 @@ highest-priority action wins:
 
 The report retains every triggered rule and its reason. Evaluation reports the
 intended action; the consuming application carries out the refresh, archive, or
-removal.
+removal, and decides for itself how to behave while a document is stale.
 
 ## Declaring Rules
 
@@ -66,8 +68,9 @@ content_policy:
 
 The first stores the date inside the rule. The second references a frontmatter
 property using `@`. These forms keep the evidence with the document; a sidecar is
-not required. The proposed shorthand `ValidFor(3mo)` references a configurable
-default date property, `last_updated` unless changed.
+not required. The shorthand `ValidFor(3mo)` references a configurable
+default date property, `last_updated` unless changed. A reference names one
+top-level property; a dotted path such as `@review.last_checked` is an error.
 
 Dates are enough for time policies. Other relative policies need evidence such
 as the package version used during research or a fingerprint of a source file.
@@ -154,7 +157,7 @@ callers as well as the CLI:
 A provider reports a version, presence observation, or content snapshot; the
 library applies the policy. Time rules can evaluate without external providers.
 The initial architecture uses one library with optional integration modules.
-Exact Rust types and signatures will follow design review.
+Exact Rust types and signatures will follow implementation design.
 
 ## CLI Direction
 

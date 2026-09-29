@@ -1,7 +1,7 @@
 # Policy Evaluation and Renewal
 
-**Status: planned.** Content Policy is in design review. This page describes the
-agreed lifecycle; details labeled proposed have not yet been approved or built.
+**Status: planned.** Content Policy is designed but not yet built. This page
+describes the agreed lifecycle.
 
 Use content policies to tell an application when a Markdown document needs a
 refresh or should leave active use. A document can carry both kinds of rule:
@@ -27,7 +27,10 @@ an inline date, `ValidFor(3mo, 2026-09-28)`, or a reference,
 `ValidFor(3mo, @last_updated)`. The `@` prefix means a frontmatter property
 reference in that argument position. No sidecar is required.
 
-The proposed shorthand `ValidFor(3mo)` uses a configurable default date property,
+A reference names one top-level property. A dotted path such as
+`@review.last_checked` is a validation error, not a lookup inside `review`.
+
+The shorthand `ValidFor(3mo)` uses a configurable default date property,
 `last_updated` unless the caller chooses another. Missing baseline evidence
 produces `unknown`; checking a document does not invent an update date.
 
@@ -36,6 +39,15 @@ built-in default is `ValidFor(6mo)`. A caller can replace it with any policy
 but cannot remove it, so every valid document gets a status. A consumer that
 must never treat an undeclared document as fresh, such as a cache, sets its
 default to `TimeSensitive`, so anything without a policy is always recomputed.
+
+An empty list is not the same as no policy. `content_policy: []` is a
+validation error, and the message suggests `Evergreen`, the rule that says a
+document never expires:
+
+```yaml
+content_policy:
+  - Evergreen
+```
 
 A date is written `YYYY-MM-DD` and must be a real calendar date. Quoting it or
 not makes no difference. Anything else in a date position is handled as follows:
@@ -49,6 +61,22 @@ not makes no difference. Anything else in a date position is handled as follows:
 
 Frontmatter that repeats a top-level key is also a validation error, because
 YAML tools disagree about which copy wins.
+
+### When a Date Takes Effect
+
+Every date takes effect at the start of its day, 00:00 UTC. **The named day is
+not included**, whatever the host's timezone:
+
+| Rule | Last day not triggered | First day triggered |
+| --- | --- | --- |
+| `ValidUntil(2027-01-01)` | December 31, 2026 | January 1, 2027, from 00:00 UTC |
+| `ValidFor(3mo, 2026-09-28)` | December 27, 2026 | December 28, 2026, from 00:00 UTC |
+
+A duration is a positive whole number with one unit: `d` (days), `wk` (weeks),
+`mo` (calendar months), or `yr` (calendar years). A month or year that lands on
+a day the destination month lacks moves back to that month's last day: January
+31 plus `1mo` is February 28 in a non-leap year. Only dates are supported;
+timestamps are not.
 
 Policies live under the `content_policy` key by default (snake_case, like the
 repository's other frontmatter keys); a caller can choose a different key.
@@ -142,7 +170,7 @@ frontmatter block holding `last_updated` and leaves the body untouched.
 baseline to advance. `ValidUntil` is nonrenewable: once its deadline passes,
 ordinary renewal does not clear it. Changing that deadline is a policy edit.
 
-Proposed renewal behavior preserves references and edits their target properties.
+Renewal preserves references and edits their target properties.
 If one property supplies both a renewable baseline and a nonrenewable deadline,
 the renewal must surface that conflict rather than silently move the deadline.
 
@@ -222,6 +250,12 @@ explainable. Declaration order does not affect the result.
 The consuming application executes the action. Evaluation itself does not
 refresh, archive, or remove a document.
 
+A document also does not say how a consumer should behave while it is stale;
+each consumer maps the action to its own response. A cache, for example, treats
+`refresh` as "recompute" and `archive` or `remove` as a miss, while a model
+catalog might keep serving its data with a warning. Two consumers can read the
+same document and respond differently.
+
 ## Understand Incomplete Evidence
 
 A valid rule can be triggered, not triggered, or unknown. A missing baseline or
@@ -286,7 +320,7 @@ error: an unsupported YAML shape, a file that changed between planning and
 writing, or missing evidence.
 
 Both subcommands take three settings. Each flag falls back to an environment
-variable, then to a built-in value; the variable names are proposed:
+variable, then to a built-in value:
 
 | Flag | Environment variable | Built-in value |
 | --- | --- | --- |
@@ -335,5 +369,4 @@ name, not a date. Rule parameters such as durations, deadlines, and file paths
 do count. Renewal therefore never changes a policy's identity.
 
 The first implementation is planned in two phases: time and constant rules,
-then file content changes. Exact date boundaries and reference traversal
-remain under design review.
+then file content changes.
