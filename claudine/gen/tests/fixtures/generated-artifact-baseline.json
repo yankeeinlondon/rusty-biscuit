@@ -6,6 +6,7 @@
     { "path": "lib/src/signals/generated.rs", "hash": "6641532667373100434" },
     { "path": "lib/src/model_catalog/families_generated.rs", "hash": "11704988274204864472" },
     { "path": "lib/src/stream/providers/vocabulary.rs", "hash": "537241315263662569" },
+    { "path": "lib/src/steering/generated.rs", "hash": "4303782739945540261" },
     { "path": "lib/src/provider/antigravity/data.rs", "hash": "12939088638076069542" },
     { "path": "lib/src/provider/claude/data.rs", "hash": "911876181393434815" },
     { "path": "lib/src/provider/codex/data.rs", "hash": "12727705138327263807" },

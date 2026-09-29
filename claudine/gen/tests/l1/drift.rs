@@ -1,7 +1,7 @@
 //! Drift tests over the REAL committed inputs.
 //!
 //! The provider-data drift test and the CLI `check` subcommand share
-//! [`claudine_gen::check_area`]. The catalog, families, signals, vocabulary, and agentic CLI
+//! [`claudine_gen::check_area`]. The catalog, families, signals, vocabulary, steering, and agentic CLI
 //! drift tests use their artifact's production check function. For every
 //! provider slug, `generate(committed inputs)` must byte-equal the committed
 //! `lib/src/provider/<slug>/data.rs`.
@@ -11,7 +11,7 @@ use std::path::Path;
 use biscuit_hash::xx_hash_bytes;
 use claudine_gen::{
     CheckOutcome, check_agentic_clis, check_area, check_catalog, check_families, check_signals,
-    check_vocabulary, generate_all, provider_slugs,
+    check_steering_catalog, check_vocabulary, generate_all, provider_slugs,
 };
 
 /// The claudine package-area root (parent of this crate's manifest dir).
@@ -49,7 +49,7 @@ fn committed_generated_artifacts_match_phase_1_byte_baseline() {
     let artifacts = baseline["artifacts"]
         .as_array()
         .expect("artifact baseline must contain an artifacts array");
-    assert_eq!(artifacts.len(), 14, "every generated artifact must be pinned");
+    assert_eq!(artifacts.len(), 15, "every generated artifact must be pinned");
 
     for artifact in artifacts {
         let relative = artifact["path"]
@@ -124,6 +124,24 @@ fn committed_vocabulary_matches_regenerated_inputs() {
         ),
         CheckOutcome::MissingCommitted { path } => panic!(
             "committed vocabulary.rs missing at {} — run `claudine-gen generate`",
+            path.display()
+        ),
+    }
+}
+
+/// build_steering_catalog(committed research + activation policy) ==
+/// committed lib/src/steering/generated.rs.
+#[test]
+fn committed_steering_catalog_matches_regenerated_inputs() {
+    match check_steering_catalog(area()).expect("steering catalog generation must succeed") {
+        CheckOutcome::Clean => {}
+        CheckOutcome::Drift { details } => panic!(
+            "drift between committed steering inputs and lib/src/steering/generated.rs — \
+             run `claudine-gen generate`:\n{}",
+            details.join("\n")
+        ),
+        CheckOutcome::MissingCommitted { path } => panic!(
+            "committed steering generated.rs missing at {} — run `claudine-gen generate`",
             path.display()
         ),
     }

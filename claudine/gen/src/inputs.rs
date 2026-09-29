@@ -198,7 +198,7 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
 /// document's `$schema` sidecar, and returns the schema-coerced
 /// frontmatter object (so `boolish`/`numberlike` quirks never reach the
 /// mapping layer).
-pub(crate) fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
+pub fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
     load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new())
 }
 
