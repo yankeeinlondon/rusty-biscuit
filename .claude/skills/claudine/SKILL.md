@@ -72,7 +72,11 @@ shell. `claudine/cli/tests/l1/spawn_site_guard.rs` enforces it: a raw
 outside the builder fails the suite unless its file carries a reasoned
 `SPAWN_ALLOWLIST` entry, and an entry matching no live site fails too. **That
 list is empty** — every L1 binary goes through the builder — so any raw spawn is
-now simply a failure. Running
+now simply a failure. The same guard requires a test file that builds an emulator session
+(`TmuxHarness`, `WezTermHarness`, …) to be named `level2_`/`level3_`; a
+`real_` file is exempt, since `just test` already excludes it, so a
+real-provider test may drive its provider's TUI in tmux
+(`real/real_pi_interactive_startup.rs`, `real/real_native_interactive_startup.rs`). Running
 the binary from the ambient CWD is both a cost (the 35-member workspace walk,
 20–77 s per test on WSL2) and a correctness hazard (the checkout's git state and
 root `system-prompt.md`, the developer's `$HOME`, the host's real provider
@@ -172,7 +176,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 
 | Command | Description |
 |---------|-------------|
-| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen\|kilo\|pi\|antigravity` | Wrap a provider CLI with preflight checks, env sanitization, system prompt resolution, optional `--edit` prompt drafting, MCP injection, and structured streaming where the provider exposes it |
+| `claudine claude\|codex\|gemini\|goose\|kimi\|opencode\|qwen\|kilo\|pi\|antigravity` | Wrap a provider CLI with preflight checks, env sanitization, system prompt resolution, optional `--edit` prompt drafting, MCP injection, and structured streaming where the provider exposes it. A prompt (typed or `--edit`ed) runs non-interactively; `-i` makes it the first turn of an interactive session (Kimi Code excepted for now: one turn, then exit). `--edit` needs a terminal and rejects `-i` with timeouts before the editor opens; the first `--` ends Claudine flags and is not forwarded — see [cli-reference.md](cli-reference.md#shared-wrapper-flags) |
 
 **Composition**
 

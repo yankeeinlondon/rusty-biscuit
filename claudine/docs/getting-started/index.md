@@ -325,7 +325,7 @@ A few things worth knowing:
 - if you save an empty prompt, Claudine quits without starting the agent
 - `--timeout` and `--step-timeout` only apply to non-interactive sessions, so combining either with `-i` is rejected before the editor opens
 - a startup prompt with `-i` (typed or edited) reaches each agent through that agent's own "start interactively with this message" option; Pi needs version 0.84.3 or later for this
-- Kimi Code is the exception today: it has no option to start an interactive session with a first message, so `claudine kimi 'hello' -i` (and `claudine kimi --edit -i`) runs that one prompt and exits
+- Kimi Code is the exception today: Claudine hands it the first message through `--prompt`, which runs one turn and exits, so `claudine kimi 'hello' -i` (and `claudine kimi --edit -i`) runs that one prompt and exits; a proper interactive start for Kimi is waiting on updated Kimi research
 
 #### Better Output Formatting
 

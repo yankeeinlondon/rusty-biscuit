@@ -178,6 +178,7 @@ Shared wrapper flags:
 |------|-------------|
 | `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
+| `--edit` | Draft the initial prompt in an external editor (`$EDITOR`, then `$VISUAL`, then an installed editor), optionally seeded by a positional prompt; combine with `-i` for an interactive session. Needs a terminal for the editor whatever the session mode; an empty buffer exits 0 without launching the provider. `-i` with `--timeout`/`--step-timeout` is rejected before the editor opens |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `-s, --system-prompt <PROMPT\|FILE>` | Set or append a system prompt (string or file path) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
@@ -191,7 +192,7 @@ Shared wrapper flags:
 | `--perf` | Emit a detailed performance report to stderr after execution |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
-| `-- ...` | Force all remaining args to passthrough unchanged |
+| `-- ...` | End Claudine flags: the remaining args are never read as Claudine flags (a provider `--edit` there does not open the editor) and reach the provider as its options; the `--` itself is not forwarded |
 
 Wrapper behavior:
 
@@ -199,7 +200,7 @@ Wrapper behavior:
   command using the profile's executable name without resolving it on `PATH`;
   the provider need not be installed. Live runs still validate the executable
   before launch.
-- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
+- **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt. A non-empty `--edit` result is treated exactly like a prompt string: plain `--edit` runs non-interactively, `--edit -i` opens an interactive session whose first user turn is the edited text, delivered through the provider's native startup-prompt option (Pi needs 0.84.3 or later). Kimi Code is the exception today: its startup prompt goes through `--prompt`, which runs one turn and exits; a fix is pending updated Kimi research.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON, or JSON-RPC 2.0 for Kimi) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` / `*Envelope` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).
 - **Kimi wire mode**: non-interactive `claudine kimi` and Kimi-resolved composition runs launch the Kimi child with `--wire` and drive a JSON-RPC 2.0 line transport (`claudine/cli/src/commands/wrap/wire_io.rs`). Claudine sends `initialize` (declaring `supports_question: false` and `supports_plan_mode: false`) and a `prompt` request whose `params.user_input` carries the resolved prompt body. `ApprovalRequest` envelopes are auto-approved and surface as visible `auto_approved` info lines; `QuestionRequest` envelopes (which should not arrive given the declared capabilities) are answered with empty synthetic answers and a warning; `ToolCallRequest` is rejected with `-32601 method not found`; `HookRequest` is forwarded through Claudine's existing dispatch pipeline. Cancellation (Ctrl+C / deadline) sends a `cancel` JSON-RPC request before tearing down the child. The legacy `--print --output-format stream-json` Kimi path was removed — that mode emitted OpenAI-shaped envelopes with no top-level `type` field, so every event silently dropped to `ProviderExtension`.
