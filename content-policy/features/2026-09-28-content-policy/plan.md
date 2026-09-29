@@ -64,6 +64,47 @@ docs_updated_during_phase_4:
     - docs/dependencies.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - Cargo.lock
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/boundary_containment.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - content-policy/lib/Cargo.toml
+    - content-policy/lib/src/lib.rs
+    - content-policy/lib/src/model.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/grammar.rs
+    - content-policy/lib/src/normalized.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/src/path_form.rs
+    - content-policy/lib/src/fingerprint.rs
+    - content-policy/lib/src/provider.rs
+    - content-policy/lib/src/file_adapter.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/renewal.rs
+    - content-policy/lib/tests/robustness_matrix.rs
+    - content-policy/lib/tests/file_changed.rs
+    - content-policy/lib/tests/file_renewal.rs
+    - content-policy/lib/tests/file_adapter.rs
+    - content-policy/lib/tests/fake/mod.rs
+    - content-policy/cli/src/commands.rs
+    - content-policy/cli/src/output.rs
+    - content-policy/cli/tests/file_changed.rs
+    - content-policy/schemas/content-policy.yaml
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+docs_updated_during_phase_5:
+    - biscuit-file/docs/topics/file-references.md
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-file/references/file-references.md
 packages:
     - content-policy
     - content-policy-cli
@@ -71,6 +112,7 @@ packages:
     - darkmatter
     - darkmatter-cli
     - claudine-cli
+    - claudine
 ---
 
 # Plan: Content Policy — Evaluation, Baselines, and Renewal
@@ -682,7 +724,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 10 (parallel)
 
-- [ ] **5.1 Biscuit File containment** (spec change table row 5)
+- [x] **5.1 Biscuit File containment** (spec change table row 5)
     - Expose a public relative-path containment check. It wraps the
       crate-private `validate_repository_containment` in
       `biscuit-file/lib/src/file_reference/resolve.rs`, alongside
@@ -691,7 +733,7 @@ Phase 2 and on tasks 1.2 and 1.3.
       symlinks.
     - Add Biscuit File tests for inside, `../` escape, and a symlink escape.
       Update the file-reference docs.
-- [ ] **5.2 `FileChanged` declaration and lexical path rules** (AC 8
+- [x] **5.2 `FileChanged` declaration and lexical path rules** (AC 8
   validation, 32 rejected lexical forms, 33; matrix fingerprint column)
     - Parse `FileChanged(<path>, @<property>)`. The one-argument form is an
       error.
@@ -700,7 +742,7 @@ Phase 2 and on tasks 1.2 and 1.3.
       whose path contains ` #` or `: ` evaluates.
     - Fingerprint value typing per R9 is added to the matrix tests.
     - Identity includes the path (AC 23).
-- [ ] **5.3 Provider contract and fingerprint schemes** (AC 8)
+- [x] **5.3 Provider contract and fingerprint schemes** (AC 8)
     - Add the synchronous file-provider trait and its observation enum (R12).
     - Core computes `blake3-lf`/`blake3` fingerprints via `biscuit-hash`, with
       the R10 normalization.
@@ -721,7 +763,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 11
 
-- [ ] **5.4 Bundled file adapter** (feature `file-adapter`; AC 8, 32)
+- [x] **5.4 Bundled file adapter** (feature `file-adapter`; AC 8, 32)
     - Discover the boundary from the base directory: the repository root via
       Biscuit File's repository scope catalog, or else the current working
       directory as the tree root.
@@ -746,7 +788,7 @@ Phase 2 and on tasks 1.2 and 1.3.
     - Tests must not rely on the process working directory. Pass the tree root
       explicitly through an internal seam, so tests stay parallel-safe under
       nextest.
-- [ ] **5.5 `FileChanged` renewal** (AC 8)
+- [x] **5.5 `FileChanged` renewal** (AC 8)
     - First capture writes a `blake3-lf:` value, and renewal of an existing
       value keeps its `blake3:` scheme.
     - A missing or unreadable file writes nothing and returns diagnostics.
@@ -756,7 +798,7 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Wave 12 (parallel)
 
-- [ ] **5.6 CLI and schema for `FileChanged`**
+- [x] **5.6 CLI and schema for `FileChanged`**
     - The CLI enables `file-adapter`. The base directory is the document's
       directory.
     - `check` and `renew` tests cover a `FileChanged` document, including the
@@ -766,7 +808,7 @@ Phase 2 and on tasks 1.2 and 1.3.
       It requires `@<property>`, and its path pattern excludes what the
       constraint parser allows (at least `,`, `)`, and `\`). Re-run the 4.3
       schema test, adding a `FileChanged(path)` case that must be flagged.
-- [ ] **5.7 Increment 2 documentation**
+- [x] **5.7 Increment 2 documentation**
     - Update the topic page and README for `FileChanged`: the path table, the
       boundary rules with the two-directory example, the fingerprint schemes,
       and the outcome table.
@@ -775,10 +817,10 @@ Phase 2 and on tasks 1.2 and 1.3.
 
 ### Phase 5 checkpoint
 
-- [ ] `just test` and `just lint` pass in `content-policy/` and `biscuit-file/`.
-- [ ] AC 8, 32, and 33 are covered. The fingerprint column of the robustness
+- [x] `just test` and `just lint` pass in `content-policy/` and `biscuit-file/`.
+- [x] AC 8, 32, and 33 are covered. The fingerprint column of the robustness
   matrix is asserted.
-- [ ] `just deps-check` still passes with `--all-features`: the `file-adapter`
+- [x] `just deps-check` still passes with `--all-features`: the `file-adapter`
   feature adds gix but no PDF crate and no `darkmatter`.
 
 ## Phase 6 — Base-Schema Line, Skill, and Cross-OS Closure

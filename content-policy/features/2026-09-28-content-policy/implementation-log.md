@@ -60,6 +60,47 @@ docs_updated_during_phase_4:
     - docs/dependencies.md
 docs_created_during_phase_4: []
 skills_files_updated_during_phase_4: []
+source_files_during_phase_5:
+    - Cargo.lock
+    - biscuit-file/lib/src/file_reference/error.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/boundary_containment.rs
+    - claudine/lib/src/harness/error.rs
+    - claudine/lib/src/harness/error/tests.rs
+    - content-policy/lib/Cargo.toml
+    - content-policy/lib/src/lib.rs
+    - content-policy/lib/src/model.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/grammar.rs
+    - content-policy/lib/src/normalized.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/src/renew.rs
+    - content-policy/lib/src/path_form.rs
+    - content-policy/lib/src/fingerprint.rs
+    - content-policy/lib/src/provider.rs
+    - content-policy/lib/src/file_adapter.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/renewal.rs
+    - content-policy/lib/tests/robustness_matrix.rs
+    - content-policy/lib/tests/file_changed.rs
+    - content-policy/lib/tests/file_renewal.rs
+    - content-policy/lib/tests/file_adapter.rs
+    - content-policy/lib/tests/fake/mod.rs
+    - content-policy/cli/src/commands.rs
+    - content-policy/cli/src/output.rs
+    - content-policy/cli/tests/file_changed.rs
+    - content-policy/schemas/content-policy.yaml
+    - darkmatter/lib/tests/l1/content_policy_editor_schema.rs
+docs_updated_during_phase_5:
+    - biscuit-file/docs/topics/file-references.md
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+    - content-policy/docs/dependencies.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/biscuit-file/references/file-references.md
 packages:
     - content-policy
     - content-policy-cli
@@ -67,6 +108,7 @@ packages:
     - darkmatter
     - darkmatter-cli
     - claudine-cli
+    - claudine
 ---
 
 # Implementation Log for 2026-09-28-content-policy (6 phases)
@@ -778,3 +820,354 @@ that bear on them:
 | Exit codes / streams | `check::json_output_is_the_report_alone`, `plain_output_has_a_summary_and_an_entry_table_without_escapes`, `default_output_is_styled_when_color_is_available`, `a_stale_expired_or_unknown_report_still_exits_zero`, `invalid_declarations_exit_one_with_diagnostics_on_stderr_even_in_json_mode`, `unreadable_files_and_malformed_frontmatter_exit_one`, `usage_errors_exit_two`; `renew::refusals_conflicts_and_bad_evidence_exit_one_and_write_nothing`, `a_future_update_date_is_rejected`, `the_today_option_is_hidden_from_help` |
 | Checkpoint: 23 migrated documents | `check::the_migrated_repository_documents_check_without_diagnostics` |
 | Plan JSON contract | `renewal::plan_json_field_names_are_frozen` |
+
+## Phase 5
+
+### 5.1 Biscuit File containment
+
+- `FileReference::validate_contained_candidate(candidate, boundary)` (public,
+  beside `validate_repository_candidate`) wraps a new crate-private
+  `validate_boundary_containment` in `file_reference/resolve.rs`. It applies to
+  any reference kind and returns the new
+  `FileReferenceError::BoundaryEscape { reference, boundary, escaped_candidate }`.
+- **Departure from the `&`/`^` check it sits beside:** the resolved half
+  canonicalizes the deepest ancestor whose *target* exists (walking up on
+  `NotFound`), instead of the deepest entry `symlink_metadata` finds. A broken
+  symlink is therefore judged by its directory and reads as missing, which the
+  spec requires for `FileChanged` ("a broken symlink included" is "source
+  removed"); the `&`/`^` check is unchanged.
+- Adding a variant broke two intentionally exhaustive matches: Biscuit File's
+  own `classify_error` (mapped to `InvalidReference`, like `RepositoryEscape`)
+  and Claudine's `file_reference_failure_slug` plus its regression test (mapped
+  to `permission_io`, like `RepositoryEscape`; a sample was added to the test).
+- Tests: `biscuit-file::l1 boundary_containment` (5): inside (existing,
+  missing, `../` staying inside), `../` escape (existing and missing targets,
+  a `boundary-extra` sibling), symlink escape (file and directory links, a
+  missing file under an escaping directory link), broken symlink, missing
+  boundary (`Io`). The symlink tests are `#[cfg(unix)]`: creating a Windows
+  symlink needs Developer Mode or elevation.
+- Docs: `biscuit-file/docs/topics/file-references.md` ("Trust boundaries and
+  containment", the method summary, and the error reference).
+
+### 5.2 `FileChanged` declaration and lexical path rules
+
+- `Rule::FileChanged { path, property }` (`model.rs`): `Renewable`, displayed
+  as `FileChanged(<path>, @<property>)`.
+- `grammar.rs`: a string of the exact form `FileChanged(…)` is split before
+  parentheses are counted, so a path holding `(` parses and a path holding
+  `)` gets the path message rather than `unbalanced_parentheses`. The path is
+  everything before the **last** comma, verbatim; the property argument is
+  trimmed like every other argument.
+  - **Decision:** the path is not trimmed. The spec rejects
+    `" src/config.rs"`, and trimming would make that rule unreachable, so
+    `FileChanged( src/a.rs, @fp)` is `invalid_path` while
+    `FileChanged(src/a.rs,  @fp)` is accepted. The schema pattern matches this.
+  - The one-argument form is `invalid_arguments`, and its message proposes
+    `FileChanged(<path>, @<stem>_fingerprint)`.
+- `path_form.rs` (new, core, no feature): R11's lexical rules, one reason per
+  row, new code `invalid_path`. It covers empty, surrounding whitespace, `,`
+  or `)`, `\`, `{{`, `://`, absolute paths (including `&//x`), drive letters
+  (`C:`, and any one-letter `x:`), a scheme in the first segment (`vault:`,
+  `ab:`), a leading `~`, `@`, or `%`, a repeated sigil, and a bare `&`/`^`.
+  `&`/`^` accept one optional `/` after them, as Biscuit File does.
+- Identity (`normalized.rs`): a `FileChanged` entry hashes its path as
+  authored plus `@<property>`, and the stored fingerprint never counts.
+- New diagnostic codes: `invalid_path`, `outside_boundary`,
+  `invalid_fingerprint`.
+
+### 5.3 Provider contract and fingerprints
+
+- `provider.rs` (new): `FileProvider: Send + Sync` with one synchronous
+  `observe(&FileRequest { path, base_dir }) -> FileObservation`
+  (`Present(bytes)`, `Missing`, `NotAFile`, `Unreadable(reason)`,
+  `OutsideBoundary(reason)`), as R12 specifies. A crate-private `Observer` caches one
+  observation per path for a run. Renewal shares its observer with the
+  evaluation it runs first, so a renewal reads each watched file once, and the
+  fingerprint it writes is the one evaluation saw.
+- `fingerprint.rs` (new): public `FingerprintScheme { Blake3Lf, Blake3 }` with
+  `fingerprint(bytes)`, which hashes through `biscuit_hash::blake3_hash_bytes`.
+  R10's normalization turns CRLF pairs into LF and keeps a lone CR. The R9 shape
+  check requires lowercase hex, 64 digits for a known scheme, and treats a
+  well-formed unknown scheme as `Unrecognized`.
+- `EvaluationContext::with_files(Arc<dyn FileProvider>, base_dir)` sets the
+  provider and the base directory together; `base_dir()` reads it back.
+  **Decision:** they are one call because a base without a provider (or a provider
+  without a base) has no meaning. Without them, a file rule is `unknown`
+  (`missing_provider`).
+- Evaluation order (documented, with a Mermaid diagram on the topic page):
+  1. The stored value's shape is checked: a wrong type or a malformed value is a
+     validation error, even without a provider.
+  2. No provider means `missing_provider`.
+  3. `OutsideBoundary` becomes an `outside_boundary` validation error.
+  4. A missing baseline means `missing_baseline`, an unrecognized scheme means
+     `incompatible_fingerprint`, and otherwise the observation decides.
+
+  So a missing file with nothing stored is `unknown`, not "source removed".
+- Report: new `results[].file` (`path`, `property`, `stored`, `current`). It is
+  `null` for other rules, and the frozen-names test now includes it. New
+  `unknown_reason` values are `missing_provider`, `not_a_file`, `unreadable_file`,
+  and `incompatible_fingerprint`.
+
+### 5.4 Bundled file adapter (`file_adapter.rs`, feature `file-adapter`)
+
+- `FileAdapter::new()` takes its tree root from the process's current
+  directory at each request. `with_tree_root(dir)` is the seam every test
+  uses, so no test depends on the working directory.
+  **Departure:** the plan asked for an internal seam, but the tests are
+  integration tests (they cross the file system), so the method is public
+  and documented for callers that know their starting directory.
+- Per request, the adapter:
+  1. Parses the path with `FileReference` and cross-checks `class()`. An
+     implicit relative path becomes `./<path>`; any kind other than
+     explicit relative, `&`, or `^` (or a recursive `%` form) comes back as
+     `OutsideBoundary`.
+  2. Canonicalizes the base and the boundary with
+     `biscuit_file::canonicalize_simplified`. The `os` skill's macOS trap:
+     `current_dir()` spells `/private/var/…` while temp paths spell `/var/…`,
+     so without this a lexical containment check fails.
+  3. Discovers the repository with `find_git_root`, using the tree root when
+     there is none.
+  4. Builds `FileResolutionContext::from_snapshot(base, None, {})` with a
+     `RepositoryScopeCatalog`.
+  5. For an explicit-relative path, runs 5.1's containment check on every
+     candidate.
+  6. Maps `resolve_detailed`: a match is read, and `NotFound` during the read
+     is `Missing`. `NoMatch` is `NotAFile` if any candidate was a non-file,
+     else `Missing`. `RepositoryEscape` from `&`/`^` is `OutsideBoundary`, and
+     anything else is `Unreadable`.
+  7. A base directory outside the tree root is `OutsideBoundary`.
+- **Decision (package roots for `^`):** Biscuit File has no package
+  discovery, and Sniff (which Darkmatter uses) is far too heavy for this
+  feature. The package root is therefore the nearest directory between the base
+  and the repository root that holds `Cargo.toml` or `package.json`, and the
+  package area is the first directory below the repository root. Both are passed
+  explicitly, because `RepositoryScopeCatalog::scope_for` applies its
+  first-component fallback only when no package root was found.
+- Tests: `content-policy::file_adapter` (13), each against real temp
+  directories and repositories made with `gix::init` (new dev-dependency,
+  pinned and featured as Biscuit File's, so it adds no crate):
+  - `./`, `../` inside, and `../` escaping (existing and missing targets);
+  - a bare path that exists only at the repository root is `Missing`;
+  - `&`, `&/`, and `^`, walking package → area → root by deleting READMEs,
+    plus `&`/`^` escapes;
+  - a directory is `NotAFile`;
+  - symlinks: an escaping link, an inner link, and a broken link as `Missing`
+    (`#[cfg(unix)]`);
+  - a mode-000 file is `Unreadable` (`#[cfg(unix)]`, skipped with a message
+    when the process can read it anyway, as root can);
+  - outside a repository: the spec's two-directory example, both sigils from
+    the tree root (and a deeper tree root naming a different file), a base
+    outside the tree root, and a missing base;
+  - the lifecycle on disk through `evaluate_document`, `plan_renewal`, and
+    `apply_renewal`;
+  - a document watching outside its repository gets no verdict, and renewal
+    refuses it too.
+
+  No Windows equivalent of the unreadable-file test: the `os` skill lists no
+  portable way to deny a read to the owner, and Windows ACL manipulation needs
+  more than std.
+- Mutation checks: removing the `./` rewrite turned the bare-path test (and
+  the symlink test) red, and skipping the containment check turned 4 tests red.
+  Both were restored.
+
+### 5.5 `FileChanged` renewal
+
+- `plan_renewal` recaptures each `FileChanged` entry's property through the
+  shared observer. The stored scheme is kept, and a first capture (absent or
+  `null`) writes `blake3-lf`.
+- The recapture goes through the existing property planner, so a `null`
+  placeholder (`fp:   # note`) is filled before its comment, an absent property
+  is appended, consolidation merges identical writes, and two files written
+  to one property are a `different_writes` conflict.
+- New `RenewalError::MissingEvidence { document, issues }`, where each
+  `EvidenceIssue { kind, entry, property, message }` has a kind of
+  `missing_provider`, `source_removed`, `not_a_file`, `unreadable`, or
+  `incompatible_fingerprint`. Every issue is listed, and no baseline
+  advances, the time ones included.
+- **Public API change:** `BaselineChange.previous` and `value` are now
+  `Option<String>` and `String`, not `NaiveDateText`, so they can hold a
+  fingerprint. The JSON is unchanged, since both serialized as strings, and
+  `renewal::plan_json_field_names_are_frozen` still passes untouched.
+- Tests: `content-policy::file_renewal` (7) cover first capture (append and
+  `null` placeholder), keeping `blake3:`, `unchanged`, every unavailable-evidence
+  kind listed together with no provider, a fingerprint property renewing beside
+  a flow-style policy list, time and file baselines renewing together with one
+  read shared across three entries, the conflict, and the lifecycle with the
+  fake provider (with identity unchanged across renewal).
+
+### 5.6 CLI and schema
+
+- CLI: both subcommands call `.with_files(Arc::new(FileAdapter::new()),
+  <document's directory>)`, with `.` for a bare file name.
+- The terminal output has these changes:
+  - The `Date` column is renamed `Evidence`. It shows a file rule's stored
+    fingerprint.
+  - Fingerprints are shortened to the scheme plus 8 hex digits and `…`. The
+    JSON keeps the full value.
+  - The new unknown reasons have labels.
+  - The renew table's `Change` column no longer wraps (`new baseline` split
+    over two lines).
+- **Finding (80 columns):** `policy` renders at 80 columns when piped, and
+  `COLUMNS` does not change that. With prose wrapping, a `FileChanged` row made
+  the table fail to render ("Table could not be rendered in 80 columns"),
+  because the table budgets a wrapping column by its longest unbreakable run
+  (`FileChanged(../src/config.rs,`). A table that holds a file rule or a
+  fingerprint value therefore wraps its rule and baseline columns with
+  `BespokeProse([' ', '-', '/', '_'])`, and time-only tables keep the Phase 4
+  layout. Two alternatives were tried and rejected: falling back only when
+  the width plan fails (the renderer then hard-breaks a word that exactly
+  fills its column: `config.rs-` / `,`), and switching whenever the table
+  wraps (the time-only table already wraps its Result column at 80).
+- CLI tests: `content-policy-cli::file_changed` (4):
+  - the lifecycle through the binary: capture preview (`new baseline`,
+    nothing written), `--write`, match, edit gives stale with
+    `--needs-action` printing `true`, renew with `--json` gives fresh, and
+    delete gives "Source removed" while renew exits 1 without writing;
+  - both tables fit 80 columns;
+  - the spec's two-directory example run from two working directories;
+  - invalid file rules exit 1 with their reason.
+- Schema (subagent): a `FileChanged` member in
+  `content-policy/schemas/content-policy.yaml`, with four anchored branches
+  (no groups are possible). It flags the one-argument form, `,`, `\`,
+  surrounding whitespace, a leading `/ ~ @ %`, `{{HOME}}`, and `@a.b`. It
+  cannot express a `{{` after the first character; the header comment says so,
+  and evaluation enforces it. The suggestion list gains
+  `FileChanged(src/config.rs, @config_fingerprint)`. The Darkmatter test
+  `content_policy_editor_schema` gains 5 valid entries in the mixed list and
+  a new `file_changed_rules_outside_the_grammar_are_flagged` test (11 cases).
+  Each test keeps its own `include_str!`.
+
+### Robustness matrix: fingerprint column
+
+- `robustness_matrix::fingerprint_property_matrix`: from the same stamped
+  fixture, the column's control row swaps the policy for
+  `FileChanged(src/config.rs, @fp)` and adds a matching `fp`, giving `fresh`.
+  Each cell is then one edit to the `fp` line:
+  - absent, null, and `~` are `unknown` (`missing_baseline`);
+  - quoted is `fresh`;
+  - number, bool, list, and mapping are `wrong_type` at `Property{fp, 0}`;
+  - `""` is `invalid_fingerprint`;
+  - a duplicate key is `duplicate_key`;
+  - `blake3-lf:zz`, `blake3-lf`, `':abc'`, uppercase hex, a 63-digit digest,
+    and trailing text are `invalid_fingerprint`;
+  - `sha256:ab` is `unknown` (`incompatible_fingerprint`);
+  - another recognized scheme is `stale`.
+
+  The mutation check (expecting `wrong_type` for `""`) turned it red, and it
+  was restored.
+- Smell grep over `lib/src`: four hits, all justified. `renew.rs`
+  `.unwrap_or_default()` means no frontmatter is an empty record (Phase 3).
+  `renew.rs` and `grammar.rs` `parse_from_str(..).ok()` map `None` to a
+  diagnostic (Phases 2 and 3). `file_adapter.rs` `strip_prefix(..).ok()`
+  follows an already-checked containment, so it is not a load-bearing parse.
+
+### 5.7 Documentation
+
+- `docs/topics/policy-lifecycle.md` changes:
+  - the status line: only the base-schema line is still **planned**;
+  - "Watch a File for Changes": the fingerprint shape, the full outcome table
+    with reason codes, and a Mermaid diagram of the check order;
+  - "Which Files a Rule Can Watch": the verbatim path, a real escape error,
+    the bare-path, `^`, symlink, and case rules, and the quoted flow-list
+    form;
+  - a new "Renew a Watched File's Fingerprint" section with real output;
+  - the renewal and plan-field wording (dates or fingerprints, and
+    `MissingEvidence`);
+  - the report's `file` field and new reasons, with a real file result;
+  - a new "Evaluate File Rules from a Library" section: `with_files`,
+    `FileAdapter`, the `file-adapter` feature, the `FileProvider` contract
+    and observation table, and `FingerprintScheme`;
+  - CLI: the `Evidence` column (recaptured output), a table with a file rule,
+    the base-directory and tree-root note, and exit codes;
+  - editor: the `FileChanged` member and what it cannot see;
+  - Library Ownership.
+
+  Every example output was captured from the binary.
+- `README.md`: the status line, the fingerprint schemes, the "built" wording,
+  the integration table (the file adapter built, the others marked planned),
+  and `with_files`.
+- `content-policy/docs/dependencies.md`: the `gix` dev-dependency.
+  `docs/dependencies.md` (root) is unchanged, because it lists no
+  dev-dependencies and `gix` is not new to the workspace.
+- Drift fixed: `plan_renewal`'s `## Errors` (evidence issues), `ChangeKind`
+  and `BaselineChange` docs (dates *or* fingerprints), a unit-test comment
+  about "a later rule kind", and the crate `//!` (file providers).
+
+### Tests, placement, and gates
+
+- New test binaries all use Cargo's per-file discovery (neither crate sets
+  `autotests = false`). They are `content-policy::file_changed` (14),
+  `::file_renewal` (7), `::file_adapter` (13; the whole file is
+  `#![cfg(feature = "file-adapter")]`, and the package's
+  `[package.metadata.ci.tests] all-features = true` compiles it in CI), and
+  `content-policy-cli::file_changed` (4).
+- New unit tests: `path_form::tests` (2) and `fingerprint::tests` (3). Changed
+  tests: `robustness_matrix` gains `fingerprint_property_matrix`, and
+  `evaluation::report_json_field_names_are_frozen` gains `"file": null`.
+- The scripted provider lives in `lib/tests/fake/mod.rs`, not `common/`.
+  `common/`'s `include_bytes!` reads of the 23 migrated documents would
+  schedule every binary that declares it.
+- Biscuit File: `biscuit-file::l1 boundary_containment` (5), declared in
+  `tests/l1/main.rs`; the layout gate passes. Darkmatter:
+  `darkmatter::l1 content_policy_editor_schema` (7, one new).
+- No tier markers: every new test is L1. `just check-tier-coverage
+  content-policy`: nothing stranded.
+- Gates (macOS):
+  - `content-policy/`: `just test` 167 passed (123 before this phase),
+    `just lint` clean (clippy for both crates and `deps-check` for default
+    and `--all-features`), and `just doctest` clean;
+  - `biscuit-file/`: `just test` 895 passed and `just lint` clean;
+  - `darkmatter` schema tests 7/7 and `cargo clippy -p darkmatter --test l1`
+    clean (subagent, then re-run by me);
+  - Claudine's `every_file_reference_error_maps_to_a_declared_failure_slug`
+    passes;
+  - `cargo check --all-targets` for `claudine`, `claudine-cli`, `darkmatter`,
+    `darkmatter-cli`, `sniff`, and `biscuit-file` is clean.
+- `cargo tree -p content-policy --all-features` includes `gix` and no PDF or
+  Darkmatter crate; the default build has no `gix`.
+- Cross-OS (`just cross-check`):
+  - `content-policy --os linux`: 128/128;
+  - `content-policy --os windows` (native): 125/125, the three
+    `#[cfg(unix)]` tests excluded;
+  - `content-policy-cli --os windows`: 39/39;
+  - `biscuit-file --os windows`: 837/837.
+
+  WSL2 was not run; that is task 6.3.
+- **Pre-existing failure, not from this feature:**
+  `cargo check --workspace --all-targets --all-features` fails in
+  `biscuit-terminal`'s own lib tests (`components/horizontal_rule/mod.rs`, 28
+  type and arity errors). This branch has no changes in `biscuit-terminal`.
+- No skipped tests. The unreadable-file adapter test skips itself only when
+  the process can read a mode-000 file (root); it ran on macOS and Linux.
+
+### Requirement → test map
+
+| Requirement | Test(s) |
+| --- | --- |
+| AC 8, outcome table (fake provider) | `file_changed::every_row_of_the_outcome_table` (match, differ, missing is "Source removed", unreadable, directory, absent, `null`, unrecognized scheme, and the precedence rows), `without_a_provider_the_entry_is_unknown`, `a_path_outside_the_boundary_is_a_validation_error_with_no_verdict` |
+| AC 8, LF/CRLF | `file_changed::blake3_lf_is_stable_across_line_endings_and_blake3_is_not`, `fingerprint::tests::blake3_lf_ignores_crlf_and_blake3_does_not` |
+| AC 8, one-argument form | `file_changed::the_one_argument_form_is_a_validation_error`, `cli file_changed::invalid_file_rules_exit_one_with_the_reason` |
+| AC 8, first capture `blake3-lf:`, keep `blake3:` | `file_renewal::a_first_capture_writes_a_blake3_lf_fingerprint`, `renewal_keeps_an_existing_scheme` |
+| AC 8, evidence map with caller base directory, no document | `file_changed::the_evidence_map_api_uses_the_callers_base_directory`; the adapter with an absolute base in `file_adapter::outside_a_repository_the_boundary_is_the_starting_directory` |
+| AC 8, lifecycle (fake provider and bundled adapter) | `file_renewal::the_file_changed_lifecycle_with_a_fake_provider`, `file_adapter::the_file_changed_lifecycle_on_disk`, `cli file_changed::the_file_changed_lifecycle_through_the_cli` |
+| AC 8, renewal writes nothing without evidence | `file_renewal::unavailable_evidence_writes_nothing_and_lists_every_issue`; the delete step of both on-disk lifecycles |
+| AC 32, lexical rows | `file_changed::every_rejected_lexical_path_form_is_a_validation_error` (13 forms, with and without a provider), `path_form::tests::*` |
+| AC 32, resolution rows | `file_adapter::relative_paths_resolve_from_the_base_directory_inside_the_repository`, `a_parent_path_escaping_the_repository_is_outside_the_boundary`, `a_bare_path_that_exists_only_at_the_repository_root_is_not_found`, `repository_sigils_resolve_inside_the_repository`, `outside_a_repository_the_boundary_is_the_starting_directory` (two directories), `outside_a_repository_both_sigils_resolve_from_the_tree_root`, `a_directory_is_not_a_file_and_a_missing_file_is_missing`, `symlinks_are_followed_and_checked_against_the_boundary`, `a_document_watching_outside_its_repository_gets_no_verdict`; `cli file_changed::the_boundary_depends_on_the_starting_directory_outside_a_repository` |
+| AC 33 | `file_changed::a_path_containing_a_comma_or_a_closing_parenthesis_is_a_validation_error`, `a_quoted_rule_whose_path_holds_a_yaml_trap_evaluates` (` #` and `: `) |
+| AC 23 (path) | `file_changed::identity_includes_the_path_and_property_but_not_the_fingerprint`; identity across renewal in `file_renewal::the_file_changed_lifecycle_with_a_fake_provider` |
+| Identical requests share one observation | `file_changed::identical_requests_share_one_observation_per_run`, `file_renewal::time_and_file_baselines_renew_together_and_identical_requests_share_one_read` |
+| Flow-style policy, fingerprint outside it | `file_renewal::a_fingerprint_property_renews_when_the_policy_list_is_flow_style` |
+| Unreadable file (adapter) | `file_adapter::an_unreadable_file_is_unreadable` (`#[cfg(unix)]`) |
+| Matrix, fingerprint column | `robustness_matrix::fingerprint_property_matrix` |
+| Report JSON for a file result | `file_changed::a_file_result_serializes_its_evidence`, `evaluation::report_json_field_names_are_frozen` |
+| Spec change row 5 (containment) | `biscuit-file::l1 boundary_containment::*` |
+| Schema member (the 4.3 test re-run with `FileChanged`) | `darkmatter::l1 content_policy_editor_schema::mixed_compact_and_long_form_entries_validate`, `file_changed_rules_outside_the_grammar_are_flagged` |
+| 80-column terminal output | `cli file_changed::file_rules_and_fingerprints_fit_an_80_column_table` |
+
+### Skills
+
+- `.claude/skills/biscuit-file/references/file-references.md`: the "complete"
+  `FileReferenceError` vocabulary gains `BoundaryEscape`, and a note on
+  `validate_contained_candidate`. The content-policy skill itself is task 6.2.
+  The `os` skill needs nothing new: the one OS trap met here, the macOS
+  `/var` spelling, is already recorded there.
