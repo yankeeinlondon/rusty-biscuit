@@ -4,7 +4,7 @@ template:
     agent: "{{agent ? agent : 'opencode'}}"
     model: "{{agent ? '' : 'minimax/MiniMax-M3'}}"
     image: "@biscuit-tui/docs/style-guide/examples/{{name}}.png"
-list:
+sequence:
     - name: Design Language
       agent: claude
     - name: apisnip
