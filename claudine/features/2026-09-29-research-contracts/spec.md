@@ -28,6 +28,7 @@ review_iterations: 0
 implemented: false
 related:
     - 2026-09-29-steering-pipeline
+    - 2026-09-29-update-research
 ---
 # Narrow Research Contracts
 
@@ -207,10 +208,58 @@ Each is a difference between the documentation and the parser, observed with
 - A fleet run on a host with the roster fix starts, and a document that
   violates its contract is rejected and retried once.
 
+## What the Pilot Showed
+
+The reasoning-level prompt was run for Claude Code on 2026-09-29, with
+OpenCode and `zai-coding-plan/glm-5.3` as the researcher.
+
+| Hook behavior | Result |
+| --- | --- |
+| `initialize` reports the provider, agent, and model | Confirmed |
+| `success` validates the document and reports the link | Confirmed; the document passed on the first attempt |
+| `success` rejects a document that violates the contract | Confirmed with a deliberately invalid document |
+| `failure` reports the reason | Confirmed after a correction, below |
+| `finalize` retries once | Confirmed |
+| The retry shows the researcher the validator's output | Confirmed |
+| A second failure ends the run with a non-zero exit | Confirmed |
+
+The pilot found these defects, none of which a dry run shows:
+
+| Defect | Where | State |
+| --- | --- | --- |
+| A per-step `agent` expression fails the opening gate, because one agent is planned before any step exists | Claudine sequences | Open; a fleet names its agent on the command line and runs once per agent |
+| A hook may not run a command whose executable is interpolated | The prompt | Fixed; the prompt uses `has_binary` |
+| A document dated today was treated as current even when invalid | The prompt | Fixed; current means recent and valid |
+| `err.message` is not a field; the reason printed empty | The prompt | Fixed; the prompt uses `err.msg`. 20 of the 22 fleet prompts still use `err.message` |
+| `cargo run -p claudine-cli` fails because the package has four binaries | `just run-fleet-research` | Open |
+| The contract could not say that a provider warns while substituting a level | The contract | Fixed; `warns` is separate from `behavior` |
+| `reporting.locator` accepted a sentence | The contract | Fixed; it has a pattern, and `notes` holds the prose |
+
+The pilot also found that `docs/providers/facts/claude.yaml` records
+Claude Code's effort flag as `thinking_effort` with three levels. The
+research found `--effort` with five.
+
+## Relation to 2026-09-29-update-research
+
+That fix builds the machinery that runs a refresh: a topic manifest, one
+freshness oracle, gates, generation, and a refresh record. This spec decides
+what a refresh must produce. They meet at four points.
+
+| Point | That fix | This spec | Resolution |
+| --- | --- | --- | --- |
+| Researcher | Codex with `gpt-5.6-sol` at low effort for every topic | A rotation of three agents, two at high effort | The manifest's `agent` and `model` defaults carry the rotation; its wall-clock estimates are re-measured |
+| Contract changes | None, to avoid a fleet-wide edit | Every contract is narrowed | Narrowing replaces that decision; typed values are what make its frontmatter diff readable |
+| First full refresh | Runs under the current contracts | No topic is refreshed until its contract is narrowed | The first refresh runs topic by topic, in this spec's order |
+| Freshness | The driver decides, from age and then from fingerprints of the prompt and the contract | The fleet stamps `contract_checked` after validation | The stamp is an input to the driver. A fingerprint must cover `_types.yaml` and `docs/research/_types.yaml` as well as `_schema.yaml` |
+
+A contract changed during the pilot without a revision change, and the
+already-written document became invalid while still looking current. A
+fingerprint of the contract files, as that fix proposes, removes the need to
+remember a revision change.
+
 ## Open Decisions
 
-1. **Pilot.** The lifecycle hooks have been checked by dry run only, which
-   fires no events. A pilot on one provider is needed to confirm validation,
-   the retry, and the feedback shown to the researcher.
-2. **Description lint.** Whether the lint is a Darkmatter feature, available
+1. **Description lint.** Whether the lint is a Darkmatter feature, available
    to every contract in the monorepo, or a Claudine check.
+2. **Other rosters.** Three roster files outside Claudine still use `list:`:
+   in Darkmatter, biscuit-terminal, and biscuit-tui.
