@@ -66,6 +66,13 @@ pub(crate) trait StdioControl: Send + Sync {
     /// Reacts to one stdout line.
     fn observe(&self, line: &str);
 
+    /// Whether `line` answers a command the session itself sent (readiness,
+    /// task, steering, settlement). Such a line is control traffic, not
+    /// agent progress, so it does not refresh the stream-silence clock.
+    fn is_control_reply(&self, _line: &str) -> bool {
+        false
+    }
+
     /// The current readiness; it leaves [`Readiness::Pending`] exactly once.
     fn readiness(&self) -> Readiness;
 

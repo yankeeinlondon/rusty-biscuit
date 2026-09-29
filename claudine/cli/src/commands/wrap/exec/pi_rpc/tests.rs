@@ -812,3 +812,25 @@ async fn a_delivery_and_the_settlement_decision_never_interleave() {
         "the settlement check waits for the delivery to finish"
     );
 }
+
+#[test]
+fn only_responses_to_the_sessions_own_commands_are_control_replies() {
+    let session = PiRpcSession::new(None);
+    for reply in [
+        r#"{"type":"response","id":"claudine-3","command":"steer","success":true}"#,
+        r#"{"id":"claudine-4","type":"response","command":"get_state","success":true,"data":{}}"#,
+        r#"  {"type":"response","id":"task","command":"prompt","success":false,"error":"busy"}  "#,
+    ] {
+        assert!(session.is_control_reply(reply), "{reply}");
+    }
+    for activity in [
+        r#"{"type":"agent_start"}"#,
+        r#"{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"the \"response\" was ok"}}"#,
+        r#"{"type":"extension_ui_request","id":"ui-1","method":"confirm","title":"response"}"#,
+        r#"{"type":"tool_execution_end","result":{"type":"response"}}"#,
+        "not json but mentions \"response\"",
+        "",
+    ] {
+        assert!(!session.is_control_reply(activity), "{activity}");
+    }
+}
