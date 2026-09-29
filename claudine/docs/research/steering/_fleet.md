@@ -23,7 +23,7 @@ success:
                 command: "claudine providers steering check '{{state.slug}}'"
               - stderr: "Steering schema and relationship checks completed for **{{state.name}}**; source review and live activation gates remain separate."
 failure:
-    warn: "Steering research failed for **{{state.name}}**: {{err.message}}"
+    warn: "Steering research failed for **{{state.name}}**: {{ err.msg }}"
 ---
 # Steering Research: {{state.name}}
 

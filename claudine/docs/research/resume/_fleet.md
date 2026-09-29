@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Resume** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Resume research on **{{state.name}}** failed to complete!"
-    warn: "The Resume research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Resume research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Resume Research on {{state.name}}
 

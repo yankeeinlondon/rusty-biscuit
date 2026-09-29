@@ -85,7 +85,7 @@ success:
               - message: "🎉  the **Agent Errors** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Errors research on **{{state.name}}** failed to complete!"
-    warn: "The Agent Errors research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Agent Errors research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
     stack:
         - when: "err.category == 'timeout'"
           action:

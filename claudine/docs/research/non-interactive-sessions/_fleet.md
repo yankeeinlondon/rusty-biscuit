@@ -28,7 +28,7 @@ success:
               - message: "🎉  the **Non-Interactive Sessions** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Non-Interactive Sessions research on **{{state.name}}** failed to complete!"
-    warn: "The Non-Interactive Sessions research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Non-Interactive Sessions research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Non-Interactive Session Research on {{state.name}}
 

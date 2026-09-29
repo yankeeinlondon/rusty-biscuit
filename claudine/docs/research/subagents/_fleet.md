@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Subagents** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Subagents research on **{{state.name}}** failed to complete!"
-    warn: "The Subagents research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Subagents research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Subagent Research on {{state.name}}
 

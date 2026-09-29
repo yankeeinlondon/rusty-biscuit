@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Memory** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Memory research on **{{state.name}}** failed to complete!"
-    warn: "The Memory research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Memory research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Memory Research on {{state.name}}
 

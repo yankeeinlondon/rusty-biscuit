@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **ACP** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the ACP research on **{{state.name}}** failed to complete!"
-    warn: "The ACP research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The ACP research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # ACP Research on {{state.name}}
 

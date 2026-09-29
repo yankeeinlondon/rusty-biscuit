@@ -37,7 +37,7 @@ success:
               - message: "🎉  the **Agent Permissions** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Permissions research on **{{state.name}}** failed to complete!"
-    warn: "The Agent Permissions research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Agent Permissions research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 
 ## Skills
