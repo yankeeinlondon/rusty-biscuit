@@ -1,7 +1,9 @@
 # Policy Evaluation and Renewal
 
-**Status: planned.** Content Policy is designed but not yet built. This page
-describes the agreed lifecycle.
+**Status: in progress.** The library's frontmatter reader and evaluation of
+`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil` are built. Renewal,
+the `policy` CLI, the editor schema, and `FileChanged` are **planned**; the
+sections on them describe the agreed design.
 
 Use content policies to tell an application when a Markdown document needs a
 refresh or should leave active use. A document can carry both kinds of rule:
@@ -96,7 +98,7 @@ Some early research notes used a `Duration(3mo)` rule, some of them under an
 `update_policy:` key. `Duration` is not a rule name and is reported as a
 validation error, so write `ValidFor(3mo)` instead. `update_policy:` is not
 read at all: a document that has only that key is evaluated under the default
-policy. The existing notes are planned to be migrated to
+policy. The existing notes have been migrated to
 `content_policy: - ValidFor(...)`, with each `update_policy:` key removed. An
 entry that has no rule yet, such as a major-version check, is kept only as a
 YAML comment beside the migrated rule, so it is visibly not enforced:
@@ -218,8 +220,7 @@ renews every rule whose baseline is `@last_updated`, including the
 A baseline dated later than today's UTC date reads as inconsistent and produces
 `unknown`. That is why every stamp is a UTC date: a local date written just after
 midnight east of Greenwich would be a day ahead. All three of those writers
-currently stamp the local date and are planned to switch to the UTC date for
-this reason.
+stamp the UTC date for this reason.
 
 Renewal also records a baseline that is missing, such as an absent or empty
 `last_updated` or fingerprint property. This first capture needs no extra
@@ -356,6 +357,82 @@ and mark action resolution incomplete.
 If removal is already confirmed, an unknown refresh cannot change the winner.
 Action resolution is complete even though evaluation still has an unknown
 result. Consumers need both completeness indicators.
+
+## Read a Report
+
+An evaluation returns a report only when every entry is valid. Any invalid
+entry, or a date property holding something that is not a date, produces a
+list of diagnostics instead, one per problem, and no status at all. A partial
+verdict could understate the action: the invalid entry might be the only
+`remove` rule.
+
+A report serializes to JSON with these fields. The names are stable:
+
+```json
+{
+  "document": "notes.md",
+  "evaluated_at": "2026-12-28T00:00:00Z",
+  "policy": { "source": "declared", "grammar_version": 1, "identity": "xxh64:…" },
+  "status": "stale",
+  "action": "refresh",
+  "evaluation_complete": true,
+  "action_resolution_complete": true,
+  "results": [
+    {
+      "index": 0,
+      "rule": "ValidFor(3mo, @last_updated)",
+      "action": "refresh",
+      "renewal": "renewable",
+      "result": "triggered",
+      "unknown_reason": null,
+      "baseline": { "source": "property", "property": "last_updated", "value": "2026-09-28" },
+      "deadline": null,
+      "due": "2026-12-28",
+      "reason": "Validity interval elapsed"
+    }
+  ],
+  "warnings": []
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `document` | The document label as the caller gave it (never canonicalized), or `null` |
+| `policy.source` | `declared`, or `defaulted` when the document had no policy key |
+| `policy.identity` | Digest of the rules and actions (see [Library Ownership](#library-ownership)) |
+| `status` | `fresh`, `unknown`, `stale`, or `expired` |
+| `action` | The winning confirmed action, or `null` |
+| `results[].rule` | The rule in canonical form, such as `ValidFor(3mo, 2026-09-28)` |
+| `results[].renewal` | `renewable` (`ValidFor`), `nonrenewable` (`ValidUntil`), or `no_baseline` |
+| `results[].result` | `triggered`, `not_triggered`, or `unknown` |
+| `results[].unknown_reason` | `missing_baseline` (absent or empty date) or `inconsistent_baseline` (a baseline after the evaluation date); `null` otherwise |
+| `results[].baseline` / `deadline` | Where the `ValidFor` start or the `ValidUntil` deadline came from: `inline`, `property`, or `default_property`, with the property name and date |
+| `results[].due` | The date the rule triggers from, at 00:00 UTC |
+| `warnings` | Reader warnings, such as `tab_indentation_repaired` |
+
+A library caller evaluates in one of three ways:
+
+- `evaluate_document` reads Markdown bytes through the library's frontmatter
+  reader;
+- `evaluate_record` takes a map of property names to JSON values that the
+  caller already holds, such as Darkmatter's parsed frontmatter, and reads the
+  policy from its key;
+- `evaluate_policy` takes an explicit policy and a map, such as a cache
+  manifest with no document behind it.
+
+Each takes the evaluation time explicitly. None of them writes anything, so
+checking a document never records a baseline.
+
+A policy can also be stored on its own as JSON, for example in a cache
+manifest:
+
+```json
+{"grammar_version":1,"entries":[{"rule":"ValidFor(30d, @generated_on)","action":"refresh"}]}
+```
+
+Reading it back is strict. A missing, `null`, or duplicated field, an unknown
+field, trailing text, an empty `entries` list, or a `grammar_version` newer
+than the library's is an error, never a policy.
 
 ## Check and Renew from the CLI
 

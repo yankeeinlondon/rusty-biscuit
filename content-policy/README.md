@@ -5,8 +5,10 @@ content needs to be refreshed, archived, or removed. Policies live in the
 document's frontmatter and are evaluated against dates or observations of files,
 packages, symbols, programs, and web resources.
 
-**Status: planned.** The design is agreed, but the library and CLI are not
-implemented. Examples below show the planned interface.
+**Status: in progress.** The library reads frontmatter and evaluates the four
+time and constant rules (`Evergreen`, `TimeSensitive`, `ValidFor`,
+`ValidUntil`). Renewal, the `policy` CLI, the editor schema, and `FileChanged`
+are planned; examples of those show the planned interface.
 
 ## A Document's Lifecycle
 
