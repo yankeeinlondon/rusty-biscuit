@@ -345,6 +345,7 @@ mod classification_tests {
                 E::CurrentDirectory(_)
                 | E::Git(_)
                 | E::RepositoryEscape { .. }
+                | E::BoundaryEscape { .. }
                 | E::RelativePath { .. }
                 | E::Io { .. } => "permission_io",
                 E::RemoteNotLocal(_) => "unsupported_remote",
@@ -382,6 +383,11 @@ mod classification_tests {
                 reference: "&escape/spec.md".to_string(),
                 repository_root: PathBuf::from("/repo"),
                 escaped_candidate: PathBuf::from("/outside/spec.md"),
+            },
+            FileReferenceError::BoundaryEscape {
+                reference: "../escape/spec.md".to_string(),
+                boundary: PathBuf::from("/repo"),
+                escaped_candidate: PathBuf::from("/escape/spec.md"),
             },
             FileReferenceError::RemoteNotLocal("http://x".to_string()),
             FileReferenceError::InvalidUrl("not a URL".to_string()),

@@ -836,6 +836,28 @@ impl FileReference {
         )
     }
 
+    /// Validate an unprobed candidate of any kind against a caller-chosen
+    /// boundary directory, such as the repository root for a relative
+    /// reference.
+    ///
+    /// The candidate must lie inside `boundary` lexically (after `.` and `..`
+    /// collapse) and, for the deepest ancestor whose target exists, after
+    /// following symlinks. A missing candidate, a broken symlink included, is
+    /// judged by the directory that would hold it.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`FileReferenceError::BoundaryEscape`] for a candidate outside
+    /// the boundary, and [`FileReferenceError::Io`] when the boundary or an
+    /// ancestor cannot be inspected.
+    pub fn validate_contained_candidate(
+        &self,
+        candidate: &Path,
+        boundary: &Path,
+    ) -> Result<(), FileReferenceError> {
+        resolve::validate_boundary_containment(&self.raw, candidate, boundary)
+    }
+
     /// Expand a partial completion token into its implied roots and segments.
     ///
     /// Given a (possibly incomplete) reference string like `@prompts/p` and
