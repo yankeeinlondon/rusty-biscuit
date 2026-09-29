@@ -299,6 +299,18 @@ impl SteeringController {
         });
     }
 
+    /// The route automatic help would use now, or why there is none. Automatic
+    /// help names this route's operation in its request; the worker checks
+    /// the route again before submitting.
+    pub fn automatic_route(&self) -> Result<Route, String> {
+        let snapshot = self.snapshot();
+        let facts = session_facts(&snapshot).ok_or_else(|| UNMAPPED_PROFILE_REASON.to_string())?;
+        match (self.shared.eligibility)(&facts).automatic {
+            AutomaticEligibility::Eligible(route) => Ok(route),
+            AutomaticEligibility::Unavailable(blocker) => Err(blocker.to_string()),
+        }
+    }
+
     /// Stops accepting requests. Queued requests are answered as unavailable
     /// without submission; one being submitted is answered as unknown.
     pub fn shutdown(&self) {

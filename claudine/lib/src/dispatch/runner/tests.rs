@@ -48,6 +48,7 @@ fn claudine_config_with_tts(tts: TtsValue) -> ClaudineConfig {
         harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: Default::default(),
+        steering: Default::default(),
     }
 }
 

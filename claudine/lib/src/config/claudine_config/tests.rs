@@ -614,6 +614,7 @@ fn validate_round_trip_fully_populated_config() {
         harvest_unmatched: false,
         exit_expressions: None,
         guard_settings: GuardSettings::default(),
+        steering: Default::default(),
     };
 
     // First validation pass

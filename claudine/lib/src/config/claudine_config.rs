@@ -14,6 +14,7 @@ use crate::events::AgenticEvent;
 use crate::protect::config::ProtectConfig;
 use crate::provider::Provider;
 use crate::runaway::{validate_exit_expressions, ExitExpressionsValue, GuardSettings};
+use crate::steering::automatic::SteeringConfig;
 
 // Re-exports for backward compatibility
 pub use crate::config::messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
@@ -294,6 +295,11 @@ pub struct ClaudineConfig {
     /// mode here, only the list-typed `exit_expressions` carries one.
     #[serde(default, skip_serializing_if = "is_default_guard_settings")]
     pub guard_settings: GuardSettings,
+
+    /// Steering settings; `steering.automatic.enabled` turns automatic
+    /// repetition help off or on. An absent section inherits.
+    #[serde(default, skip_serializing_if = "SteeringConfig::is_unset")]
+    pub steering: SteeringConfig,
 }
 
 fn default_logging() -> bool {
@@ -378,6 +384,11 @@ pub struct RepoOverrideConfig {
     /// sub-fields are not individually merged).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard_settings: Option<GuardSettings>,
+
+    /// Repo-scoped steering settings. A value set here overrides the user's;
+    /// an absent one inherits it.
+    #[serde(default, skip_serializing_if = "SteeringConfig::is_unset")]
+    pub steering: SteeringConfig,
 }
 
 impl RepoOverrideConfig {
@@ -388,6 +399,7 @@ impl RepoOverrideConfig {
             && self.active_messenger.is_none()
             && self.exit_expressions.is_none()
             && self.guard_settings.is_none()
+            && self.steering.is_unset()
     }
 }
 
@@ -418,6 +430,7 @@ impl Default for ClaudineConfig {
             harvest_unmatched: false,
             exit_expressions: None,
             guard_settings: GuardSettings::default(),
+            steering: SteeringConfig::default(),
         }
     }
 }
