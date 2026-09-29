@@ -7,6 +7,31 @@ yolo: true
 spec: 2026-09-28-content-policy
 depends-on:
     - 2026-09-28-recursive-schema-types
+source_files_during_phase_2:
+    - content-policy/lib/src/lib.rs
+    - content-policy/lib/src/model.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/grammar.rs
+    - content-policy/lib/src/normalized.rs
+    - content-policy/lib/src/time.rs
+    - content-policy/lib/src/aggregate.rs
+    - content-policy/lib/src/reader.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/robustness_matrix.rs
+    - content-policy/lib/tests/fixtures/stamped-note.md
+docs_updated_during_phase_2:
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+    - content-policy
+    - content-policy-cli
+    - biscuit-file
+    - darkmatter
+    - darkmatter-cli
+    - claudine-cli
 ---
 
 # Plan: Content Policy — Evaluation, Baselines, and Renewal
@@ -371,7 +396,7 @@ through evaluation and reports. Renewal comes in Phase 3.
 
 ### Wave 3
 
-- [ ] **2.1 Core types** (one agent; later waves build on these)
+- [x] **2.1 Core types** (one agent; later waves build on these)
     - Add `EvidenceRecord`, which wraps `IndexMap`/`Map<String, serde_json::Value>`;
       `Rule`, with `Evergreen`, `TimeSensitive`, `ValidFor { duration, baseline }`,
       and `ValidUntil { deadline }`; `Baseline` (`Inline(date)`,
@@ -387,7 +412,7 @@ through evaluation and reports. Renewal comes in Phase 3.
 
 ### Wave 4 (parallel)
 
-- [ ] **2.2 Declaration parser and validation** (AC 1, 10, 16, 17, 26; the
+- [x] **2.2 Declaration parser and validation** (AC 1, 10, 16, 17, 26; the
   policy-value columns of the matrix)
     - Parse the compact grammar, positive integer durations in
       `d`/`wk`/`mo`/`yr`, `YYYY-MM-DD` dates, `@name` references, and long-form
@@ -407,7 +432,7 @@ through evaluation and reports. Renewal comes in Phase 3.
     - Normalized serialization and grammar version per R8, and a newer version
       is rejected.
     - Policy identity per R7 (AC 23).
-- [ ] **2.3 Time semantics** (AC 3)
+- [x] **2.3 Time semantics** (AC 3)
     - Evaluation time is an explicit `DateTime<Utc>`, and every date takes
       effect at 00:00 UTC.
     - `d`/`wk` are day increments. `mo`/`yr` use calendar arithmetic that
@@ -418,7 +443,7 @@ through evaluation and reports. Renewal comes in Phase 3.
       day and not the day before, `ValidUntil(2027-01-01)` triggered at the
       start of Jan 1 and not at 23:59:59 on Dec 31, and a future baseline
       yielding `unknown` (inconsistent baseline).
-- [ ] **2.4 Frontmatter reader** (AC 18, 27 reader half, 28; the reader rows of
+- [x] **2.4 Frontmatter reader** (AC 18, 27 reader half, 28; the reader rows of
   the matrix)
     - Find the frontmatter block, including under a BOM, CRLF, or lone CR.
     - Parse the YAML **without the block's final line terminator**.
@@ -433,7 +458,7 @@ through evaluation and reports. Renewal comes in Phase 3.
     - Evidence value typing follows the spec's Evidence values table, with one
       test per row, plus the YAML 1.1 arrival rows (`yes`, `True`, `010`,
       `.inf`, `~`) (AC 2).
-- [ ] **2.5 Aggregation** (AC 4)
+- [x] **2.5 Aggregation** (AC 4)
     - Implement the status and action-resolution tables as a pure function over
       entry results.
     - Add an exhaustive test over every combination of confirmed and unknown
@@ -442,7 +467,7 @@ through evaluation and reports. Renewal comes in Phase 3.
 
 ### Wave 5
 
-- [ ] **2.6 Evaluator and report** (AC 1, 2, 5, 10, 11)
+- [x] **2.6 Evaluator and report** (AC 1, 2, 5, 10, 11)
     - The public API evaluates `(Policy or declaration value, EvidenceRecord,
       evaluation time, options)` with no document involved, and a convenience
       API evaluates document bytes through the reader.
@@ -458,17 +483,17 @@ through evaluation and reports. Renewal comes in Phase 3.
         - an absent policy under a `TimeSensitive` default gives `stale`;
         - an `update_policy`-only document uses the default policy;
         - the plain-map evaluation needs no Markdown.
-- [ ] **2.7 Robustness matrix tests** — Build the YAML and JSON matrix tests
+- [x] **2.7 Robustness matrix tests** — Build the YAML and JSON matrix tests
   and the control row from the Input Robustness Matrix section, then run the
   smell grep.
 
 ### Phase 2 checkpoint
 
-- [ ] `just test` and `just lint` pass in `content-policy/`, including
+- [x] `just test` and `just lint` pass in `content-policy/`, including
   `deps-check`.
-- [ ] Every cell of the matrix, except the Phase 5 fingerprint column, is
+- [x] Every cell of the matrix, except the Phase 5 fingerprint column, is
   asserted.
-- [ ] Through the library, steps 1, 2, 5 (with a hand-edited baseline), 6, and
+- [x] Through the library, steps 1, 2, 5 (with a hand-edited baseline), 6, and
   8 of the spec's lifecycle example give the stated results.
 
 ## Phase 3 — Renewal (Increment 1)

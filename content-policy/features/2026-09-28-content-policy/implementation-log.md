@@ -3,6 +3,31 @@ spec: /Volumes/coding/wt/rusty-biscuit/feat-osc-9-4-protocol/content-policy/feat
 plan: content-policy/features/2026-09-28-content-policy/plan.md
 implemented_by: claude/opus
 started_phase: 1
+source_files_during_phase_2:
+    - content-policy/lib/src/lib.rs
+    - content-policy/lib/src/model.rs
+    - content-policy/lib/src/diagnostic.rs
+    - content-policy/lib/src/grammar.rs
+    - content-policy/lib/src/normalized.rs
+    - content-policy/lib/src/time.rs
+    - content-policy/lib/src/aggregate.rs
+    - content-policy/lib/src/reader.rs
+    - content-policy/lib/src/evaluate.rs
+    - content-policy/lib/tests/evaluation.rs
+    - content-policy/lib/tests/robustness_matrix.rs
+    - content-policy/lib/tests/fixtures/stamped-note.md
+docs_updated_during_phase_2:
+    - content-policy/README.md
+    - content-policy/docs/topics/policy-lifecycle.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+packages:
+    - content-policy
+    - content-policy-cli
+    - biscuit-file
+    - darkmatter
+    - darkmatter-cli
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-09-28-content-policy (6 phases)
@@ -207,3 +232,175 @@ that bear on them:
   gate, and that the `md schema validate` half of AC 21 needs a ruling (see
   Spike S1). Raised as a human-review item on the spec, for Phase 6 only.
 
+
+## Phase 2
+
+### 2.1 Core types (`model.rs`, `diagnostic.rs`)
+
+- `Rule` (`Evergreen`, `TimeSensitive`, `ValidFor { duration, baseline }`,
+  `ValidUntil { deadline }`), `Baseline` (`Inline`, `Reference`, `Defaulted`),
+  `Deadline` (`Inline`, `Reference`; the spec lets `@name` fill a deadline
+  position), `Duration`/`DurationUnit`, `Action` (`Ord` is the precedence),
+  `Renewal`, `PolicyEntry`, `Policy`, `EvidenceRecord` (wraps
+  `serde_json::Map`), `PolicyOptions`, `GRAMMAR_VERSION = 1`.
+- `Policy` is non-empty and `Evergreen`-alone by construction (`new`,
+  `from_declaration`, `from_text`, `from_json` all validate).
+  `PolicyOptions` has no way to express "no default" (AC 10): the default is a
+  `Policy`, replaceable with `with_default_policy`, never an `Option`.
+- **Departure from the plan:** `Policy` has no `defaulted` flag. Whether the
+  evaluated policy was declared or defaulted is a property of an evaluation,
+  not of a policy (a caller's default is an ordinary `Policy`), so it lives in
+  the report as `policy.source` (`PolicySource::{Declared, Defaulted}`). It
+  also keeps the serialized form "entries only" (R8).
+- Diagnostics carry a `DiagnosticCode` (23 snake_case codes) and a `Location`
+  (`policy`, `entry`, `entry_field`, `property {name, entry}`, `frontmatter`).
+  `Invalid { document, diagnostics, warnings }` is the no-verdict result.
+
+### 2.2 Declaration parser (`grammar.rs`, `normalized.rs`)
+
+- Compact grammar: `Name` or `Name(args)`, args split at `,` with surrounding
+  spaces trimmed (the schema can stay stricter). Durations
+  `[1-9][0-9]*(d|wk|mo|yr)`; dates are real `YYYY-MM-DD` dates, a timestamp
+  gets the dates-only code; `@name` accepts `[A-Za-z_][A-Za-z0-9_-]*`, and a
+  dotted name is `nested_reference`. `FileChanged` is an unknown rule until
+  Phase 5.
+- Targeted messages: empty list → suggests `Evergreen`; single string → shows
+  the list form; `Duration` → suggests `ValidFor`; a case mismatch names the
+  right spelling; missing `action` (R3) → points at the compact form;
+  unbalanced parentheses → when the neighbouring entry is the other half, the
+  message names the joined rule and shows `- ValidFor(3mo, 2026-09-28)`.
+- All invalid entries are collected; diagnostics are sorted by entry.
+- R8: normalized JSON `{"grammar_version":1,"entries":[{"rule","action"}]}`
+  with `deny_unknown_fields`, required `u32` version, version `0` or newer than
+  the library is an error. A custom sequence visitor prefixes element errors
+  with `entry N` so the diagnostic names the element.
+- R7: identity is `xxh64:` + 16 hex over the compact JSON of sorted entries
+  `{rule, parameters, action}` plus `grammar_version`. Inline baselines become
+  the marker `inline`, the shorthand `default`, a reference `@name`; so the
+  baseline *form* counts but its value does not.
+- `Policy::from_text` implements R5 for Phase 4's `--default-policy`.
+
+### 2.3 Time semantics (`time.rs`)
+
+- `start_of_day` (00:00 UTC) and `add_duration` (chrono `checked_add_months`
+  / `checked_add_days`; `yr` = 12 months with a checked multiply). Table test
+  cross-checks Darkmatter's `add_duration_spec` rule. An inline baseline that
+  overflows is caught while parsing; a referenced one during evaluation, both
+  as `date_out_of_range`.
+
+### 2.4 Frontmatter reader (`reader.rs`, public module)
+
+- `read_frontmatter(bytes) -> Result<ReadOutcome, ReadError>`;
+  `ReadOutcome::{NoFrontmatter, Found(Frontmatter)}`. `Frontmatter` exposes the
+  record, `block()` and `yaml()` byte ranges in document offsets,
+  `fence_line_ending()`, and `tab_repair()` (the Biscuit File repair edits,
+  shifted into document offsets) for Phase 3.
+- Parses through `biscuit_file::Yaml::from_str` and deserializes the
+  `serde_yaml_ng::Value` into `serde_json::Map` without naming
+  `serde_yaml_ng`, so the dependency list is unchanged (AC 22). Final line
+  terminator stripped before parsing. Duplicate keys (any depth, R4) come back
+  as `ReadError::DuplicateKey` with the key name parsed from the parser's
+  message; evaluation turns them into a `duplicate_key` diagnostic.
+- Tab repair: only after a failed parse, only diagnostics with code
+  `yaml.tab-indentation` are applied, and a warning
+  `tab_indentation_repaired` is put on the report (R13).
+- An unparseable block containing `{{` is `MalformedCause::ExpressionTemplate`
+  with a message naming Darkmatter's expression protection.
+- **Decision:** evaluation also fails closed on an unterminated block (with or
+  without `...`) and on a `----` near-miss fence; both are `ReadError`s, not
+  "no frontmatter". The spec lists them only as renewal refusals; reading such
+  a document under the default policy would evaluate a document whose
+  declaration we could not see.
+
+### 2.5 Aggregation (`aggregate.rs`)
+
+- `aggregate(results) -> Aggregate` is a pure function over
+  `(Action, ResultKind)`. Test: all 819 combinations of up to three entries
+  against an oracle transcribed row by row from the spec's two tables, plus
+  every permutation of every three-entry combination.
+
+### 2.6 Evaluator and report (`evaluate.rs`)
+
+- `evaluate_record(record, context)`, `evaluate_policy(policy, record,
+  context)`, `evaluate_document(bytes, context)`. `EvaluationContext` holds the
+  explicit `DateTime<Utc>`, the options, and an optional document label (R13,
+  never canonicalized). Phase 5 can add the base directory and provider here.
+- Every entry is evaluated; any invalid resolved value makes the whole call
+  `Err(Invalid)`. A report therefore always has a verdict.
+- JSON field names frozen by `report_json_field_names_are_frozen`: `document`,
+  `evaluated_at` (RFC 3339, `Z`), `policy {source, grammar_version,
+  identity}`, `status`, `action`, `evaluation_complete`,
+  `action_resolution_complete`, `results[] {index, rule, action, renewal,
+  result, unknown_reason, baseline, deadline, due, reason}`, `warnings[]
+  {code, message}`. Absent optional values serialize as `null`, not omitted.
+
+### 2.7 Robustness matrix (`tests/robustness_matrix.rs`)
+
+- Fixture `lib/tests/fixtures/stamped-note.md`: the migrated
+  `terminal-multiplexing/zellij.md` after `md hash --save` on a temp copy
+  (added `hash:`), body trimmed after stamping. Read with `include_str!`.
+- `yaml_frontmatter_matrix`: a control row (fresh, declared) and 48 one-edit
+  cells over the policy value, one entry, long-form `rule`, long-form
+  `action`, and the date property; each asserts status/source, unknown reason,
+  diagnostic code and location, or malformed cause through
+  `evaluate_document`. Each edit target is asserted unique and each edit is
+  asserted to change the text.
+- `serialized_policy_matrix`: a control row plus 19 one-edit cells over
+  `grammar_version` and `entries`, starting from `Policy::to_json`.
+- Mutation check: flipping one expected outcome in each walk turned both
+  tests red; restored.
+- Smell grep over `lib/src`: no `#[serde(default)]` or `unwrap_or_default()`.
+  `grammar.rs` `NaiveDate::parse_from_str(..).ok()` maps `None` to the
+  `invalid_date` diagnostic (justified). A `filter_map(..).ok()` in the
+  evaluator that pushed errors before discarding was rewritten as an explicit
+  loop.
+
+### Requirement → test map
+
+| Requirement | Test(s) |
+| --- | --- |
+| AC 1 normalize, defaults and sources visible | `evaluation::compact_and_long_forms_normalize_consistently`, `inline_referenced_and_defaulted_baselines_evaluate_alike`, `an_absent_policy_uses_the_callers_default` |
+| AC 2 evidence values, YAML 1.1 rows, quoting | `evidence_values_table_in_every_date_position`, `yaml_1_1_spellings_in_a_date_position`, `quoted_and_unquoted_dates_are_equivalent` |
+| AC 3 time | `valid_until_takes_effect_at_utc_midnight`, `valid_for_is_due_on_its_computed_date`, `month_ends_and_leap_years_clamp`, `a_future_baseline_is_unknown_not_fresh`, `a_referenced_baseline_out_of_calendar_range_is_a_validation_error`, `time::tests::*` |
+| AC 4 aggregation | `aggregate::tests::every_combination_of_up_to_three_entries_follows_the_tables`, `entry_order_never_changes_the_result`, `named_rows` |
+| AC 5 no writes / no capture | `evaluation_never_captures_a_baseline` |
+| AC 7 (library, steps 1, 2, 5, 6, 8) | `lifecycle_steps_through_the_library` |
+| AC 10 fail closed | `fail_closed_declarations_never_yield_fresh`, `an_absent_policy_uses_the_callers_default`, `grammar::tests::policy_new_enforces_shape` |
+| AC 11 plain map | `a_plain_evidence_map_needs_no_document` (deps half: `just deps-check`) |
+| AC 16 legacy + migrated docs | `legacy_duration_and_update_policy`, `migrated_documents_evaluate_without_diagnostics` (23 `include_bytes!` reads) |
+| AC 17 comma trap | `the_flow_list_comma_trap` |
+| AC 18 duplicate keys | `duplicate_top_level_keys_are_validation_errors`, `reader::tests::duplicate_keys_are_rejected_anywhere_in_the_block` |
+| AC 23 identity | `normalized::tests::identity_*` |
+| AC 26 dotted reference | `a_dotted_reference_is_rejected_even_when_the_literal_key_exists` |
+| AC 27 reader half | `tab_indented_frontmatter_is_evaluated_with_a_warning`, `unquoted_templates_are_rejected_with_the_reason`, `reader::tests::tab_indentation_is_repaired_in_memory` |
+| AC 28 clip-chomp | `a_clip_chomped_block_scalar_as_the_last_key_reads_like_darkmatter`, `reader::tests::clip_chomped_block_scalar_as_last_key_has_no_trailing_newline` |
+| Matrix | `robustness_matrix::yaml_frontmatter_matrix`, `serialized_policy_matrix` |
+
+### Tests, placement, and gates
+
+- 24 unit tests in `lib/src` (`--lib`) and two integration binaries,
+  `evaluation` (29 tests) and `robustness_matrix` (2 tests), all L1 with no
+  tier marker. The library keeps Cargo's per-file test discovery (no
+  `autotests = false`), so both files are compiled. `just check-tier-coverage
+  content-policy`: nothing stranded.
+- `just test` in `content-policy/`: 55 passed. `just lint` (clippy for both
+  crates plus `deps-check` for default and `--all-features`): clean.
+- The repository pins `* text=auto eol=lf`, so the `\n`-based fixture edits
+  hold on a Windows checkout. `just cross-check content-policy --os windows`
+  (native Windows): 55 passed. Linux and WSL2 were not run: Phase 2 has no
+  filesystem, path, or process code, and CI's pull-request Linux leg covers
+  it. `just doctest`: no doctests; clean.
+- No pre-existing or skipped failures in the `content-policy` scope.
+
+### Docs
+
+- `content-policy/README.md` and `docs/topics/policy-lifecycle.md`: the status
+  line now says the reader and time-rule evaluation are built, with renewal,
+  CLI, schema, and `FileChanged` still planned. The topic page gains a "Read a
+  Report" section (the frozen JSON fields, the three evaluation entry points,
+  and the strict normalized-policy JSON), as the spec requires field names to
+  be documented in the change that implements them.
+- **Drift fixed from Phase 1:** the topic page still said the legacy notes
+  "are planned to be migrated" and that the three `last_updated` writers
+  "currently stamp the local date"; both were done in Phase 1 and now read as
+  done.

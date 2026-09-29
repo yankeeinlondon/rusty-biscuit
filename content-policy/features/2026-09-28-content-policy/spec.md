@@ -43,6 +43,18 @@ related:
     - 2026-09-28-hash-writer-byte-fidelity
 depends-on:
     - 2026-09-28-recursive-schema-types
+human_review: false
+message_to_agent: |-
+    Phase 2 (library core) is done: reader, grammar, time, aggregation, evaluation, report. Notes for Phase 3 and later:
+
+    - Reader API for renewal: `content_policy::reader::read_frontmatter(bytes)` returns `ReadOutcome::{NoFrontmatter, Found(Frontmatter)}`. `Frontmatter` exposes `record()`, `block()` and `yaml()` (byte ranges in whole-document offsets; `yaml()` includes the final line terminator), `fence_line_ending()`, and `tab_repair()` (Biscuit File `YamlRepair` edits already shifted into document offsets). Unterminated blocks (`Unterminated { dot_close }`) and `----` fences (`NearMissFence`) are `ReadError`s, so renewal's refusals for them come for free. Evaluation also fails closed on them (a logged decision; the spec named them only for renewal).
+    - `Policy` has no `defaulted` flag (a departure from the plan's 2.1). Declared vs defaulted is `Report.policy.source` (`PolicySource`). Renewal decides whether it is renewing a defaulted policy by checking whether `options.key()` is present in the record.
+    - To find a rule string in YAML: entry `i` under the policy key; when the list item is a mapping, append `Key("rule")`. `Rule`'s `Display` is the canonical form, which is not necessarily the authored text (spaces after commas are normalized), so locate the date inside the authored string, not the canonical one.
+    - `@name` references accept `[A-Za-z_][A-Za-z0-9_-]*`. The Phase 4 schema pattern should match this (the spec excerpt omits `-`).
+    - `Policy::from_text` already implements R5 (one compact rule, or a YAML flow list starting with `[`) for Phase 4's `--default-policy` and `CONTENT_POLICY_DEFAULT`.
+    - AC 16's test (`tests/evaluation.rs::migrated_documents_evaluate_without_diagnostics`) already reads the 23 migrated documents with `include_bytes!`. Task 4.6 only needs the `just ci-local --plan` confirmation.
+    - The report JSON field names are frozen by `report_json_field_names_are_frozen` and documented in `docs/topics/policy-lifecycle.md` ("Read a Report").
+    - Carried over from Phase 1, whose log says these were raised on this spec but they are not in its frontmatter: (1) `just deps-check` runs in `just lint` locally but not in CI, whose lint job calls `just _lint <package>` (R16 gap, author decision); (2) the second half of AC 21 needs a ruling on accepting `md schema validate --schema <path to darkmatter.yaml>` as evidence (Phase 6 only). See the Phase 1 sections of the implementation log.
 ---
 
 # Content Policy: Evaluation, Baselines, and Renewal
