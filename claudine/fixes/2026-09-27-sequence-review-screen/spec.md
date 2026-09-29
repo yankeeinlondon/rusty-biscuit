@@ -2,9 +2,21 @@
 created: 2026-09-27
 status: draft-spec
 clarified: false
-reviewed: false
+reviewed: true
+reviewed_by: codex/gpt-6.1-sol
+reviewed_on: 2026-09-29
 review_iterations: 0
 implemented: false
+human_review: false
+message_to_agent: |-
+    Phase 1 is done: rulings R1-R11, the focus spike, and the scaffolded tests are all in implementation-log.md. Read its "Other findings" and "Scaffolded tests" sections before you start.
+
+    - Remove every `#[ignore = "phase-2 scaffold: ..."]` (find them with `rg 'phase-2 scaffold' biscuit-tui claudine`). Also remove the module-level `cfg_attr(not(test), allow(dead_code, ...))` in claudine/cli/src/commands/wrap/sequence/review.rs once execute_sequence calls the functions there.
+    - The layout tests assume ruling R11: when static columns shrink, each gives up an equal share, and the leftmost columns keep the spare cells (preferred widths 10/10 in 13 cells become 7/6; 10/11 in 12 cells become 6/6).
+    - Focus spike: UNDERLINED is painted on blank cells, which confirms the cause of the stray rules. Separately, rendering into the same buffer never clears the old focus styling. Task 2.A4 needs both fixes: drop the blanket underline, and reset each cell rectangle's style before drawing it.
+    - The `130` cancel branch in execute_sequence is dead code. It matches `ErrorKind::Other` + "cancelled", but run_standalone returns ABORTED_KIND (Esc) or CANCELLED_KIND (Ctrl+C). The recommendation is to match those two kinds, the way steer/interact.rs does, and test it through the injected review callback. Record the choice in the log.
+    - Regenerate the dispatch inventory after your edits, because it records line numbers: `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` (run in claudine/).
+    - The host is often heavily loaded. If an untouched claudine lib shell test times out or leaks, rerun with NEXTEST_TEST_THREADS=6 before investigating.
 $schema:
     status: |-
         enum(
@@ -37,9 +49,14 @@ related:
 
 ## Outcome
 
-When `claudine sequence` opens its review screen, you can read which step each
-row belongs to, and every row is a step you can actually choose a provider
-for.
+When `claudine sequence` opens its review screen, step labels fit when space
+allows and show an ellipsis when clipped. Shell and side-effect steps no
+longer have provider or model pickers. Choices still apply to the original
+step, even when some steps have no row.
+
+This fixes presentation and row mapping. The screen continues to show a
+planned target; a prompt document's own provider can override that target
+at launch, as described under Non-goals.
 
 ## Report
 
@@ -54,99 +71,237 @@ claudine sequence ../prompts/review-loop.md \
 
 Three things are wrong with that screen:
 
-1. **Step names are clipped to four cells.** `1 implement` shows as `1 im`
-   and `12 stage-3` as `12 s`. The provider and model columns share all the
-   remaining width, which leaves a wide empty gap between them.
+1. **Step names are clipped to four terminal cells.** `1 implement` shows
+   as `1 im` and `12 stage-3` as `12 s`. The provider and model columns
+   share all the remaining width, leaving a wide empty gap between them.
 2. **Shell steps get a row.** `stage-N` steps (`shell: git add .`) launch no
-   provider, but each one still shows a provider and model picker. That's
-   five extra five-line rows in a 21-step sequence.
+   provider, but each still shows a provider and model picker. In the
+   reported 21-step sequence, five such steps add five five-line rows.
 3. **The first row shows stray horizontal rules** across the provider
-   column that the other rows don't have.
+   column that the other rows don't have. This was seen in WezTerm on macOS.
 
-Separately, every row starts on Claude, even for steps that ask for another
-provider through `params.agent`. Those steps would in fact launch on their own
-agent: at launch, a step's document `agent` overrides whatever the screen
-chose. So the screen misrepresents what will run. That is a
-provider-selection problem, not a display defect, and it is out of scope here
-(see Non-goals).
+Separately, all rows start from the sequence's shared default provider,
+which was Claude in the reported run, even for steps that ask for another
+provider through `params.agent`. At launch, a prompt document's `agent`
+can override the planned target. Correcting that provider-selection behavior
+is outside this fix.
 
 ## Cause
 
 ### Step names
 
-`compute_column_widths` (`biscuit-tui/lib/src/components/input_table/table.rs:892`)
-sizes a `StaticText` column by its header text (`"Step"`, minimum 3 cells). It
-never looks at the row cells. Leftover width then goes only to the focusable
-columns. The step label that `build_initial_rows` produces
-(`format!("{} {}", index, name)` in `claudine/cli/src/commands/wrap/selection_ui.rs`)
-is therefore clipped to the header's width, with no sign that it was clipped.
+In the `biscuit-tui` package,
+[`compute_column_widths`](../../../biscuit-tui/lib/src/components/input_table/table.rs)
+allocates table column widths. It sizes a `StaticText` column using its
+schema text (minimum three terminal cells), ignoring the actual row values.
+There is no separate header row in the current renderer. The schema text
+also seeds cells when no row value is supplied.
+
+In the `claudine-cli` package,
+[`build_initial_rows`](../../cli/src/commands/wrap/selection_ui.rs)
+constructs labels from the original one-based step position and name.
+Its `Step` schema text therefore limits labels to four cells in a wide table.
+Static cells clip without an overflow marker.
 
 ### Shell steps
 
-Phase 1a builds one `SequenceStepDraft` for every step, whatever its
-executable (`claudine/cli/src/commands/wrap/sequence/mod.rs:427-504`).
-`review_sequence` renders one row per draft.
+The `claudine-cli` package's
+[sequence target preparation](../../cli/src/commands/wrap/sequence/mod.rs)
+creates a draft for every normalized step. Its
+[`review_sequence`](../../cli/src/commands/wrap/selection_ui.rs)
+turns every supplied draft into an editable row and returns targets in row
+order. Simply filtering rows would shorten that result and shift targets
+onto the wrong steps.
 
 ### Stray rules
 
-Not yet identified. They appear only on the first row, which starts with
-focus, so the focused row's choice-cell styling is the likely place to look.
+The `biscuit-tui` package's
+[`paint_focus_background`](../../../biscuit-tui/lib/src/components/input_table/table.rs)
+styles the focused cell before drawing its widget. It adds `UNDERLINED`
+across the whole rectangle, including blank cells. This is a concrete
+candidate for the reported horizontal rules; confirm it by inspecting the
+rendered buffer's style modifiers, not only its text. A text snapshot cannot
+show an underline on a space.
 
 ## Requirements
 
-### R1. A static column fits its content
+### Static columns fit their content
 
-In `InputTable`, a `StaticText` column's preferred width is the widest of its
-header and every row cell in that column. When the table is narrower than the
-total preferred width:
+For each `StaticText` column, use the maximum display width of its schema
+text and all current row values, with the existing three-cell floor, as its
+preferred width. Include off-screen rows so scrolling does not change the
+column width. Recalculate from the current state when rendering after a
+resize or a caller's row update. An empty table uses schema text alone.
 
-- focusable columns shrink first, down to their preferred minimums;
-- after that the static column shrinks, and a clipped cell ends with `…`.
+Measure terminal display cells using the existing Unicode width support,
+not byte or character counts. Keep the existing single-line static-cell
+behavior; this fix does not add wrapping or interpret ANSI escape sequences.
+Use sufficiently wide or saturating arithmetic so very long labels cannot
+wrap the width calculation.
 
-This is a `biscuit-tui` change, so every `InputTable` consumer benefits from
-it. No consumer may rely on the old header-only width.
+Allocate width with these rules:
 
-### R2. Only provider-launching steps get a row
+- When all preferred widths fit, static columns get their preferred widths.
+  Share remaining space among focusable columns as today, with remainder
+  cells assigned left to right. An all-static table may leave unused space.
+- The current focusable preferred widths are protected budgets, not hard
+  minimums: eight cells for switches, twenty for text and choice inputs,
+  and the configured preferred width for text areas. This fix introduces
+  no new public width configuration.
+- As space decreases, remove focusable columns' extra space first. If the
+  preferred widths still do not fit, shrink static columns toward three
+  cells, sharing reductions evenly and assigning remainders left to right.
+- If three cells per static column plus the focusable budgets cannot fit,
+  divide the available width evenly among all columns, assigning remainder
+  cells left to right and capping static columns at their preferred widths.
+  Zero-width columns are allowed at extremely small widths. The allocated
+  widths must never exceed the available width; hard minimums cannot be
+  promised when the terminal itself is smaller than their sum.
 
-The review screen lists the steps that launch a provider: steps with a
-`prompt`, `task`, or `group` executable, and body steps with no executable.
-`shell` and `side_effect` steps get no row. The resolved target vector still
-has one entry per step, so the execution code needs no change. A step without
-a row gets the same target that the non-interactive path would give it.
+A clipped static cell ends with `…`, reserving its display width within the
+allocation. At one cell wide, show only `…`; at zero, draw nothing. Keep
+visible character clusters intact (Unicode graphemes), so a letter with a
+combining accent or a joined emoji is not split. Ensure wide characters do
+not overlap the next column. Preserve
+the full original string in returned row values; ellipsis is presentation
+only.
 
-### R3. The stray rules are fixed or explained
+> **Review note:** The original draft referred to editable-column minimums,
+> but the component defines preferred widths, not minimum widths. The rules
+> above reuse those budgets and specify a fallback for terminals too narrow
+> to honor them, avoiding a new configuration API for this display fix.
 
-A render test reproduces the first-row rules and the fix removes them. If
-they don't reproduce in a test backend, the implementation log records that,
-along with the terminal they were seen in (WezTerm on macOS), and R3 closes
-without a code change.
+This intentionally changes layout for every `InputTable` consumer. Preserve
+column identifiers, row validation, keyboard navigation, and returned values.
+Review affected rendering expectations; changes can come from content-based
+widths, narrow layouts, or the focus-style correction below, rather than only
+from previously clipped static cells.
+
+### Only eligible steps get review rows
+
+Classify the already-normalized step's outer executable. Do not compose
+prompt files or run commands to decide whether to show a row.
+
+| Outer executable | Show a row? | Meaning of its target |
+| --- | --- | --- |
+| `prompt` | Yes | Planned fallback for the prompt document |
+| `task` | Yes | Planned fallback for the referenced task |
+| `group` | Yes | Planned fallback for the group; no nested task rows |
+| None (body step) | Yes | Planned target for the sequence body |
+| `shell` | No | Retained target entry for existing execution bookkeeping |
+| `side_effect` | No | Retained target entry for existing execution bookkeeping |
+
+A task or group remains eligible even if its referenced work contains only
+shell or side-effect actions. Recursively determining whether it will launch
+a provider is outside this fix. This table defines eligibility more precisely
+than saying every displayed step necessarily launches a provider.
+
+Keep drafts and a baseline target entry for every original step. Construct
+baseline targets with the same deterministic draft-to-target conversion used
+when review is bypassed, including provider/model reasons. Pass only eligible
+drafts to the review UI, retaining their original step indices. Merge the
+submitted targets back into the baseline vector at those indices. Never map
+by name (names may repeat) or by the filtered row number.
+
+For example, `prompt`, `shell`, body steps appear as rows `1` and `3`.
+Changing row `3` changes the third target, while the second target and its
+resolution reasons remain untouched. The execution-facing target vector
+retains one entry per original step, in original order. Reject an unexpected
+submitted row count before merging rather than silently dropping choices.
+
+If no eligible drafts remain, return the baseline targets without opening
+an empty input table. This is the sole change to when the review UI opens.
+Preserve the existing document-level provider-resolution gate, including its
+failure without a terminal when a provider choice is required. In particular,
+this fix does not make a shell-only sequence with no resolvable top-level
+provider executable in a headless session. An explicit provider still bypasses
+that gate as today. Dry-run behavior is unchanged.
+
+Submitting with `Ctrl+S` commits all reviewed choices. `Esc` and `Ctrl+C`
+retain their existing cancellation behavior and start no sequence work.
+Filtering must not bypass schema checks, shell approval, lifecycle work, or
+execution of hidden steps; it changes only the review rows and their mapping.
+
+### Focus does not draw rules through blank space
+
+Reproduce the focused choice cell using the default component theme in a
+headless render test. Inspect the style of blank buffer cells, then move focus
+to a later row and render again in the same buffer to check cleanup.
+
+If blanket underlining explains the rules, remove that blanket modifier
+while preserving the choice widget's active-option styling and a visible
+focus cue. Do not remove intentional underlining from caller-supplied themes
+or links. Verify another editable cell type as well, since the focus painting
+is shared by all editable cells.
+
+If the reported appearance remains unexplained after style inspection,
+record the evidence and limitation in the implementation log. An inability
+to reproduce is not proof of a fix: report this requirement as unresolved
+rather than closing it without evidence. A real-terminal check is warranted
+only if the headless style evidence cannot answer the question; it must use
+the repository's terminal test harness without taking window focus.
 
 ## Non-goals
 
-- **What the rows offer.** Steps already launch on their own document's
-  `agent`. Making the screen reflect that (read-only rows for steps that
-  name a provider), and not opening it at all when every step names one,
-  belongs to `2026-09-27-sequence-improvements`, which is redesigning how
-  steps and tasks run.
-- **Per-row model catalogs.** With mixed providers, the model column already
-  falls back to free text.
-- **Deciding when the screen opens.** It still opens exactly when it does today.
+- **Per-step provider resolution.** Making rows reflect a prompt document's
+  own provider, making those rows read-only, or suppressing review when
+  every eligible step declares a provider is separate work. The related
+  `2026-09-27-sequence-improvements` changes sequence execution, but this
+  fix does not assume that it has resolved provider-selection behavior.
+- **Per-row model catalogs.** Keep the current shared-column behavior:
+  a shared provider uses its catalog; mixed draft providers use free text.
+  Changing the model editor after an interactive provider change is separate
+  work.
+- **Other review-opening rules.** Preserve the current gate except for
+  bypassing an empty filtered table, as specified above.
+- **New layout options or performance studies.** Reuse current components
+  and width support. No benchmark or performance spike is needed for this fix.
 
 ## Acceptance criteria
 
-1. **Column width.** An `InputTable` render test with the header `"Step"` and
-   the cell `"12 review-5"` shows the full label at 80 columns. At a width
-   too narrow for it, the label ends with `…`, and the focusable columns keep
-   their minimums.
-2. **Existing consumers.** The `biscuit-tui` input-table tests, and the
-   `question` CLI tests that render input tables, pass. Snapshots are updated
-   only where a static column was previously clipped.
-3. **Shell steps.** A test drives Phase 1a/1b with a sequence of
-   `prompt`, `shell`, and body steps and asserts that the review screen
-   receives rows for the `prompt` and body steps only. It also asserts that
-   the resolved target vector still has one entry per step.
-4. **First row.** Either a render test proves the first row has no stray
-   rules, or the implementation log records that the rules don't reproduce
-   (R3).
-5. **Docs.** `docs/topics/execution-flow.md` and `docs/cli/sequence.md`
-   describe which steps appear on the review screen.
+1. **Content widths and resizing.** With schema text `Step` and a row value
+   `12 review-5`, a headless `InputTable` render at 80 columns shows the full
+   label. Include a longer off-screen row and prove scrolling does not change
+   widths. Resize down and back up to demonstrate clipping and restoration.
+2. **Narrow and Unicode labels.** Cover static-column shrinking while
+   editable budgets still fit, the emergency allocation, and widths of zero
+   and one. Include a wide character and a combining sequence. Rendering stays
+   inside column bounds, clipping shows `…`, and submission returns full text.
+   Include multiple static columns and an all-static table.
+3. **Row mapping.** Exercise target preparation, filtering, and merging with
+   interleaved prompt, shell, side-effect, task, group, and body steps. Verify
+   displayed original positions, distinct submitted provider/model choices,
+   unchanged hidden targets and reasons, and the full target-vector length.
+   Include repeated names, a hidden first/last step, an all-hidden sequence,
+   and rejection of an unexpected returned row count.
+4. **Opening and cancellation.** Use an injected review callback or synthetic
+   events to prove the empty table never opens, existing explicit-provider
+   and headless gates remain unchanged, dry-run never prompts, and cancellation
+   starts no steps. Do not invoke the real standalone event loop from ordinary
+   unit tests or launch real providers, shell actions, or lifecycle audio.
+5. **Focus rendering.** A buffer-style assertion verifies the default focused
+   choice cell has no blanket underline on blank cells, that moving focus
+   clears the old styling, and that focus remains visible. If this does not
+   explain the original report, record it as unresolved as described above.
+6. **Existing consumers.** Run `just test` and `just lint` in both `claudine`
+   and `biscuit-tui`; these include the `question` CLI unit tests. Update only
+   rendering expectations explained by this fix. Use `just test-l2` only if
+   real-terminal coverage is added or changed, keeping windows out of focus.
+   The implementation and tests must remain portable across macOS, Linux,
+   native Windows, and WSL2.
+7. **Docs and comments.** Update Claudine's
+   [sequence guide](../../docs/cli/sequence.md) and
+   [execution flow](../../docs/topics/execution-flow.md) with row eligibility,
+   original numbering, and the empty-table exception. Update biscuit-tui's
+   [InputTable guide](../../../biscuit-tui/docs/components/input_table.md) with
+   sizing and display-only clipping, and the relevant README summaries if
+   they describe this behavior. Correct touched symbol documentation that
+   implies every draft is displayed or that static text cannot vary by row.
+   Update skill guidance if it describes the changed workflow. Current docs
+   describe behavior directly and do not refer back to this dated fix.
+
+## Open Questions
+
+None requiring an author decision for the scope above. If headless style
+inspection does not explain the reported rules, their cause remains an
+implementation investigation, not permission to mark the defect fixed.
