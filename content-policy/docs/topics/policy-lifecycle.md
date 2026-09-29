@@ -1,9 +1,10 @@
 # Policy Evaluation and Renewal
 
-**Status: in progress.** The library's frontmatter reader and evaluation of
-`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil` are built. Renewal,
-the `policy` CLI, the editor schema, and `FileChanged` are **planned**; the
-sections on them describe the agreed design.
+**Status: in progress.** The library's frontmatter reader, evaluation of
+`Evergreen`, `TimeSensitive`, `ValidFor`, and `ValidUntil`, and renewal of
+those rules (planning and applying the edits) are built. The `policy` CLI, the
+editor schema, and `FileChanged` are **planned**; the sections on them
+describe the agreed design.
 
 Use content policies to tell an application when a Markdown document needs a
 refresh or should leave active use. A document can carry both kinds of rule:
@@ -237,12 +238,33 @@ Renewal preserves references and edits their target properties.
 If one property supplies both a renewable baseline and a nonrenewable deadline,
 the renewal must surface that conflict rather than silently move the deadline.
 
-Renewal is planned to edit only the bytes of the values it changes, so comments,
+Renewal edits only the bytes of the values it changes, so comments,
 quoting, key order, line endings, a byte-order mark, and the Markdown body
 survive untouched. The one exception is tab-indented frontmatter: the preview
 lists the tab repair as its own edit, and `--write` applies it along with the
 dates. An empty `last_updated:` is filled in as `last_updated: 2026-09-28`,
 and a trailing comment stays after the new value.
+
+A missing property is added as one new line at the end of the frontmatter
+block, using the line ending of the line above it. One case moves it up: when
+the block ends with a block scalar that keeps its final line break (`|` or
+`>`, not `|-`), a line after it would add that break to the scalar's value, so
+the new property goes in front of that last entry instead:
+
+```yaml
+title: Notes
+last_updated: 2026-09-28   # added here, not after `note`
+note: |
+  Text whose value stays "Text"
+```
+
+Renewal writes one date, the **update date**. It defaults to today's UTC date;
+an earlier date can be given, such as the day the content was regenerated, but
+a later one is rejected, because evaluation would read it as inconsistent. A
+baseline that already holds the update date is reported as unchanged. A
+baseline property that holds something other than a date, such as
+`last_updated: Sept 28`, is an error: renewal records updates and does not
+repair values.
 
 That precision limits which YAML shapes renewal can edit. It refuses, and
 writes nothing, when:
@@ -302,6 +324,74 @@ content_policy: [ValidFor(3mo, 2026-09-28)]   # split at the comma
 
 The YAML itself is valid, so the policy check reports the error and shows the
 block-list form above as the fix.
+
+### Renew from a Library
+
+The CLI is not the only way to renew. A library caller plans a renewal from a
+document's bytes, previews it, and applies it:
+
+```rust
+use chrono::NaiveDate;
+use content_policy::{RenewalContext, apply_renewal, plan_renewal};
+
+let path = std::path::Path::new("notes.md");
+let bytes = std::fs::read(path)?;
+// `RenewalContext::now()` uses the system clock's UTC date; tests pass a date.
+let context = RenewalContext::now().with_document("notes.md");
+let plan = plan_renewal(&bytes, &context)?;
+if plan.nothing_to_renew() {
+    println!("nothing to renew");
+} else {
+    for change in &plan.changes {
+        println!("{:?} -> {:?} ({:?})", change.target, change.value, change.kind);
+    }
+    apply_renewal(path, &plan)?; // re-reads the file and writes atomically
+}
+```
+
+Planning never writes. Applying only writes to the exact bytes the plan was
+made from, and only if the edited text passes the safety net:
+
+```mermaid
+sequenceDiagram
+    participant C as Caller
+    participant L as content-policy
+    participant F as Document file
+    C->>F: read bytes
+    C->>L: plan_renewal(bytes, context)
+    L-->>C: plan (changes, edits, tab repair, fingerprint)
+    C->>L: apply_renewal(path, plan)
+    L->>F: re-read bytes
+    alt fingerprint differs
+        L-->>C: ModifiedSincePlan, nothing written
+    else edited text changes anything but the targets
+        L-->>C: SafetyNet, nothing written
+    else
+        L->>F: write temporary file, rename over the document
+    end
+```
+
+A plan holds:
+
+| Field | Meaning |
+| --- | --- |
+| `update_date` | The date every renewed baseline receives |
+| `fingerprint` | `xxh64:` and 16 hex digits of the bytes planned from; never written to the document |
+| `policy` | The policy's source (`declared` or `defaulted`), grammar version, and identity, as in a report |
+| `changes` | One per baseline: its `target` (an `inline` date in entry N, or a `property`), the entries it serves, its `kind` (`renewed`, `new_baseline`, or `unchanged`), and the previous and new dates |
+| `edits` | The byte edits that make those changes, in document offsets |
+| `tab_repair` | The tab-indentation repair, listed separately and applied with `edits` |
+
+Several rules that share one property, such as `ValidFor(3mo)` and
+`ValidFor(1yr, @last_updated)`, produce one change listing both entries. A
+plan with no changes means the policy has nothing to renew.
+
+Planning fails, and returns no plan, for a future update date, unreadable or
+invalid frontmatter, a baseline value that is not a date, a conflict (a
+renewed property that is also a `ValidUntil` deadline), or any refused shape.
+Every refusal and conflict is listed, not only the first. `RenewalPlan::apply_to`
+does the same checks on bytes in memory, for a caller that stores documents
+somewhere other than a file.
 
 ## Choose the Action
 

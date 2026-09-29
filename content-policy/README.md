@@ -5,10 +5,11 @@ content needs to be refreshed, archived, or removed. Policies live in the
 document's frontmatter and are evaluated against dates or observations of files,
 packages, symbols, programs, and web resources.
 
-**Status: in progress.** The library reads frontmatter and evaluates the four
+**Status: in progress.** The library reads frontmatter, evaluates the four
 time and constant rules (`Evergreen`, `TimeSensitive`, `ValidFor`,
-`ValidUntil`). Renewal, the `policy` CLI, the editor schema, and `FileChanged`
-are planned; examples of those show the planned interface.
+`ValidUntil`), and plans and applies their renewal. The `policy` CLI, the
+editor schema, and `FileChanged` are planned; examples of those show the
+planned interface.
 
 ## A Document's Lifecycle
 
@@ -160,6 +161,11 @@ callers as well as the CLI:
 | Symbol extraction | Tree Hugger |
 | HTTP resource fetching | Biscuit File's fetching support, subject to adapter design |
 | Extracted web-page content | Reaper, when implemented |
+
+Renewal is a library operation too: `plan_renewal` returns the proposed
+byte edits without writing, and `apply_renewal` writes them only to the exact
+bytes they were planned from, so any caller can renew a document without the
+CLI.
 
 A provider reports a version, presence observation, or content snapshot; the
 library applies the policy. Time rules can evaluate without external providers.

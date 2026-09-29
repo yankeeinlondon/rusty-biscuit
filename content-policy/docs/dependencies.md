@@ -15,12 +15,21 @@ features and for `--all-features`:
 | --- | --- | --- |
 | `serde`, `serde_json` | `derive` | The normalized policy and the evaluation report serialize to JSON |
 | `chrono` | `std`, `clock`, `now` only | Calendar dates, UTC evaluation instants, and month arithmetic |
-| `biscuit-hash` | `xx_hash`, `blake3` | `xx_hash` names a policy's identity; `blake3` computes `FileChanged` content fingerprints |
+| `biscuit-hash` | `xx_hash`, `blake3` | `xx_hash` names a policy's identity and a renewal plan's fingerprint; `blake3` computes `FileChanged` content fingerprints |
 | `biscuit-file` | `yaml` only (`default-features = false`) | Frontmatter parsing and byte-exact YAML location and edits. Its default features pull in PDF crates, which a policy check never needs |
 
 The optional `file-adapter` feature enables `biscuit-file/file-reference`
 (which brings `gix`, `walkdir`, `dirs`, and `url`) for the bundled `FileChanged`
 file provider. It is off by default.
+
+Renewal writes a document atomically (a sibling temporary file renamed over
+it) with the standard library alone, so it adds no dependency.
+
+Development only, never shipped and not seen by `just deps-check`:
+
+| Crate | Why |
+| --- | --- |
+| `tempfile` | Temporary directories for the renewal tests that write files |
 
 ## CLI (`content-policy-cli`)
 
