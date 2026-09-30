@@ -76,6 +76,19 @@ fn locate_does_not_match_value_substring() {
     assert_eq!(locate_property_line(&block, "message"), None);
 }
 
+/// A `:` inside a plain or quoted key is part of the key, not its separator.
+#[test]
+fn locate_a_key_holding_a_colon() {
+    let block = capture_frontmatter_block(
+        "---\na:b: 1\na: 2\nx:'y:\n    inner: v\n'p: q': 3\n---\nbody\n",
+    )
+    .unwrap();
+    assert_eq!(locate_property_line(&block, "a:b"), Some(2));
+    assert_eq!(locate_property_line(&block, "a"), Some(3));
+    assert_eq!(locate_property_line(&block, "x:'y.inner"), Some(5));
+    assert_eq!(locate_property_line(&block, "p: q"), Some(6));
+}
+
 #[test]
 fn capture_returns_none_without_frontmatter() {
     assert!(FrontmatterExcerpt::capture("no frontmatter", "x", true).is_none());
@@ -166,6 +179,14 @@ fn value_line_offset_counts_newlines_across_continuation_lines() {
     assert_eq!(value_line_offset(&block, 3, 0), 0);
     assert_eq!(value_line_offset(&block, 3, "a\nb".len()), 1);
     assert_eq!(value_line_offset(&block, 3, "a\nb\nc".len()), 2);
+}
+
+#[test]
+fn value_line_offset_reads_past_a_content_colon_in_the_key() {
+    let doc = "---\n$schema:\n    a:b: x\n      y\n---\nbody\n";
+    let block = capture_frontmatter_block(doc).unwrap();
+    // The value is "x\ny", not "b: x\ny".
+    assert_eq!(value_line_offset(&block, 3, "x\ny".len()), 1);
 }
 
 #[test]

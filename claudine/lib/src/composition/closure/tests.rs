@@ -1,4 +1,5 @@
 use super::*;
+use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::hash::{FrontmatterDeltaEntry, StoredHashValue};
 use std::path::Path;
 use tempfile::TempDir;
@@ -619,5 +620,358 @@ fn an_unrepairable_edit_is_refused_without_writing() {
 
         restore_inline_baseline(&plan).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+    }
+}
+
+/// Stamping the new hash replaces the anchored `hash` node; `mirror` would then
+/// resolve to `earlier`'s same-named anchor. The write-back refuses before the
+/// atomic write.
+#[test]
+fn a_hash_stamp_that_would_repoint_an_alias_is_refused_without_writing() {
+    let dir = TempDir::new().unwrap();
+    let original = concat!(
+        "---\n",
+        "prompt: test\n",
+        "earlier: &h before\n",
+        "hash: &h a000000000000000-b000000000000000\n",
+        "mirror: *h\n",
+        "---\n",
+        "Old body\n",
+    );
+    let agent_wrote = original.replace("Old body\n", "Agent body\n");
+    let (file, plan) = agent_run(&dir, original, &agent_wrote);
+
+    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+
+    let CompositionError::InlineHashMalformed(MarkdownError::FrontmatterTextEdit { reason }) =
+        &error
+    else {
+        panic!("expected a refused frontmatter edit, got {error:?}");
+    };
+    assert!(reason.contains("`mirror`"), "{reason}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote, "nothing written");
+}
+
+/// Restoring the owned `hash` drops the anchor the agent's new `mirror` alias
+/// resolved to, so `mirror` would silently take `earlier`'s value.
+#[test]
+fn an_owned_restoration_that_would_repoint_an_alias_is_refused_without_writing() {
+    let dir = TempDir::new().unwrap();
+    let original = concat!(
+        "---\n",
+        "prompt: test\n",
+        "earlier: &h before\n",
+        "hash: a000000000000000-b000000000000000\n",
+        "---\n",
+        "Old body\n",
+    );
+    let agent_wrote = concat!(
+        "---\n",
+        "prompt: test\n",
+        "earlier: &h before\n",
+        "hash: &h a000000000000000-b000000000000000\n",
+        "mirror: *h\n",
+        "---\n",
+        "Agent body\n",
+    );
+    let (file, plan) = agent_run(&dir, original, agent_wrote);
+
+    let error = reconcile_inline_artifact(&plan, "2026-09-06").unwrap_err();
+
+    let CompositionError::InlineArtifactEditFailed(MarkdownError::FrontmatterTextEdit { reason }) =
+        &error
+    else {
+        panic!("expected a refused frontmatter edit, got {error:?}");
+    };
+    assert!(reason.contains("`mirror`"), "{reason}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), agent_wrote, "nothing written");
+}
+
+/// An indented comment under `last_updated` is not part of its value: the
+/// closure stamps the date and keeps the comment and every terminator.
+#[test]
+fn stamps_a_date_above_an_indented_comment_and_keeps_every_byte() {
+    let document = |date_line: &str, hash: &str, body: &str, newline: &str| {
+        [
+            "---",
+            "prompt: test",
+            &format!("hash: {hash}"),
+            date_line,
+            "  # set this when the body changes",
+            "author: A",
+            "---",
+            body,
+            "",
+        ]
+        .join(newline)
+    };
+    let stale = "a000000000000000-b000000000000000";
+    for newline in ["\n", "\r\n", "\r"] {
+        for authored in ["last_updated: 2026-01-01", "last_updated:"] {
+            let dir = TempDir::new().unwrap();
+            let original = document(authored, stale, "Old body", newline);
+            let agent_wrote = document(authored, stale, "Agent body", newline);
+            let (file, plan) = agent_run(&dir, &original, &agent_wrote);
+
+            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+
+            let on_disk = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(on_disk, artifact.text);
+            let hash = on_disk
+                .split(newline)
+                .find_map(|line| line.strip_prefix("hash: "))
+                .unwrap_or_else(|| panic!("{authored:?} {newline:?}: no hash in {on_disk:?}"));
+            // The body goes through the closure's cleanup, which owns its
+            // terminators; every frontmatter byte must match exactly.
+            let expected = document("last_updated: 2026-09-06", hash, "Agent body", newline);
+            let frontmatter_end = expected.find("Agent body").unwrap();
+            assert_eq!(
+                on_disk[..frontmatter_end],
+                expected[..frontmatter_end],
+                "{authored:?} {newline:?}"
+            );
+            assert_eq!(on_disk[frontmatter_end..].trim_end(), "Agent body");
+        }
+    }
+}
+
+#[test]
+fn stamps_a_date_after_a_quote_inside_a_plain_value_and_keeps_its_comment() {
+    let document = |date: &str, hash: &str, body: &str, newline: &str| {
+        [
+            "---",
+            "prompt: test",
+            &format!("hash: {hash}"),
+            &format!("last_updated: {date}   # keep this explanation"),
+            "author: A",
+            "---",
+            body,
+            "",
+        ]
+        .join(newline)
+    };
+    let stale = "a000000000000000-b000000000000000";
+    for newline in ["\n", "\r\n", "\r"] {
+        for authored in ["yesterday's date", "unknown \"date"] {
+            let dir = TempDir::new().unwrap();
+            let original = document(authored, stale, "Old body", newline);
+            let agent_wrote = document(authored, stale, "Agent body", newline);
+            let (file, plan) = agent_run(&dir, &original, &agent_wrote);
+
+            let artifact = written(reconcile_inline_artifact(&plan, "2026-09-06").unwrap());
+
+            let on_disk = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(on_disk, artifact.text);
+            let hash = on_disk
+                .split(newline)
+                .find_map(|line| line.strip_prefix("hash: "))
+                .unwrap_or_else(|| panic!("{authored:?} {newline:?}: no hash in {on_disk:?}"));
+            let expected = document("2026-09-06", hash, "Agent body", newline);
+            let frontmatter_end = expected.find("Agent body").unwrap();
+            assert_eq!(
+                on_disk[..frontmatter_end],
+                expected[..frontmatter_end],
+                "{authored:?} {newline:?}"
+            );
+            assert_eq!(on_disk[frontmatter_end..].trim_end(), "Agent body");
+        }
+    }
+}
+
+/// A `:` inside a plain flow sibling or key (`a:'b`) is content, and so is the
+/// quote after it: an agent-written quoted target beside it is still encoded
+/// in place, its siblings keep their bytes, and the document stamps.
+#[test]
+fn encodes_a_quoted_flow_target_beside_a_content_colon() {
+    // `{T}` marks the quoted target; each row is the value of a new `q`.
+    let rows = [
+        // Controls: ordinary and `don't` siblings, genuinely quoted colons,
+        // and adjacent JSON-like keys.
+        ("[ordinary, {T}]", "\"{{x}}\""),
+        ("[don't, {T}]", "'{{x}}'"),
+        ("['a:''b', {T}]", "\"{{x}}\""),
+        ("{\"a\":b, c: {T}}", "'{{x}}'"),
+        ("[http://x, {T}]", "\"{{x}}\""),
+        // Both quote spellings after a content colon, balanced spellings,
+        // plain keys, mapping values, and nested collections.
+        ("[a:'b, {T}]", "\"{{x}}\""),
+        ("[a:\"b, {T}]", "'{{x}}'"),
+        ("[a:'b, c:'d, {T}]", "\"{{x}}\""),
+        ("[a:\"b, c:\"d, {T}]", "'{{x}}'"),
+        ("{a:'b: {T}}", "\"{{x}}\""),
+        ("{a:\"b: {T}}", "'{{x}}'"),
+        ("{a: a:'b, b: {T}}", "\"{{x}}\""),
+        ("{a: a:\"b, b: {T}}", "'{{x}}'"),
+        ("{list: [a:'b, {T}]}", "\"{{x}}\""),
+        ("[{k: a:'b}, {k: {T}}]", "'{{x}}'"),
+    ];
+    assert_quoted_flow_targets_persist_exactly(&rows);
+}
+
+/// Runs each `(flow, target)` row, where `{T}` in `flow` marks the quoted
+/// `target`, through [`reconcile_inline_artifact`] as the value of a new `q`
+/// under LF and CRLF, and asserts the exact persisted bytes: the target
+/// replaced by its encoded literal token, siblings byte-identical, one
+/// `Addition` delta equal to the authored parse, and a clean stored hash.
+fn assert_quoted_flow_targets_persist_exactly(rows: &[(&str, &str)]) {
+    use darkmatter::markdown::literal_token::encode_yaml_scalar;
+
+    let encoded = encode_yaml_scalar("{{x}}");
+    for newline in ["\n", "\r\n"] {
+        for &(flow, target) in rows {
+            let document = |extra: Option<&str>, body: &str| {
+                let mut lines = vec!["---", "prompt: test"];
+                lines.extend(extra);
+                lines.extend(["after: z", "---", body, ""]);
+                lines.join(newline)
+            };
+            let authored = format!("q: {}", flow.replace("{T}", target));
+            let dir = TempDir::new().unwrap();
+            let original = document(None, "Old body");
+            let agent_wrote = document(Some(&authored), "Agent body");
+            let (file, plan) = agent_run(&dir, &original, &agent_wrote);
+
+            let artifact = written(
+                reconcile_inline_artifact(&plan, "2026-09-06")
+                    .unwrap_or_else(|error| panic!("{authored:?} {newline:?}: {error}")),
+            );
+
+            let on_disk = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(on_disk, artifact.text);
+            let hash = on_disk
+                .split(newline)
+                .find_map(|line| line.strip_prefix("hash: "))
+                .unwrap_or_else(|| panic!("{authored:?}: no hash in {on_disk:?}"));
+            let stored_q = flow.replace("{T}", &encoded);
+            let expected = [
+                "---",
+                "prompt: test",
+                &format!("q: {stored_q}"),
+                "after: z",
+                &format!("hash: {hash}"),
+                "last_updated: 2026-09-06",
+                "---",
+                "",
+            ]
+            .join(newline);
+            // The body is the agent's, through Darkmatter's cleanup pass.
+            let body = darkmatter::markdown::cleanup::cleanup_content(&format!("Agent body{newline}"));
+            assert_eq!(on_disk, format!("{expected}{body}"), "{authored:?} {newline:?}");
+
+            let authored_value: serde_json::Value =
+                biscuit_file::serde_yaml_ng::from_str::<serde_json::Value>(&authored).unwrap()["q"].clone();
+            let FrontmatterDeltaEntry::Addition { property, value } =
+                &artifact.frontmatter_delta.entries[..]
+                    .first()
+                    .unwrap_or_else(|| panic!("{authored:?}: empty delta"))
+            else {
+                panic!("{authored:?}: expected an addition");
+            };
+            assert_eq!(artifact.frontmatter_delta.entries.len(), 1, "{authored:?}");
+            assert_eq!((property.as_str(), value), ("q", &authored_value), "{authored:?}");
+
+            let markdown: Markdown = on_disk.into();
+            let options = inline_hash_options();
+            let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+            let comparison = markdown.compare_hash(&stored, &options).unwrap();
+            assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{authored:?}");
+        }
+    }
+}
+
+/// A parenthesis is plain-scalar content in YAML, so it never hides the `,`
+/// before an agent-written quoted target, even when a later entry closes it.
+#[test]
+fn encodes_a_quoted_flow_target_beside_parentheses() {
+    // `{T}` marks the quoted target; each row is the value of a new `q`.
+    let rows = [
+        // Controls: parentheses inside quotes and balanced in one entry.
+        ("['a(b', {T}]", "\"{{x}}\""),
+        ("[\"a(b, c)d\", {T}]", "'{{x}}'"),
+        ("[a(b)c, {T}]", "\"{{x}}\""),
+        // Unbalanced and cross-entry balanced parentheses, mappings, and
+        // nested collections.
+        ("[a(b, {T}]", "\"{{x}}\""),
+        ("[a)b, {T}]", "'{{x}}'"),
+        ("[a(b, c)d, {T}]", "\"{{x}}\""),
+        ("{a: a(b, b: {T}}", "\"{{x}}\""),
+        ("{a(b: x, c)d: {T}}", "'{{x}}'"),
+        ("{list: [a(b, {T}]}", "\"{{x}}\""),
+        ("[{k: a(b}, {k: c)d}, {T}]", "'{{x}}'"),
+        ("[[a(b, c)d], {T}]", "\"{{x}}\""),
+    ];
+    assert_quoted_flow_targets_persist_exactly(&rows);
+}
+
+/// A quote inside a plain flow sibling or key is content, so an agent-written
+/// quoted target beside it is still encoded in place and the document stamps.
+#[test]
+fn encodes_a_quoted_flow_target_beside_a_plain_scalar_holding_a_quote() {
+    use darkmatter::markdown::literal_token::encode_yaml_scalar;
+
+    // `{T}` marks the quoted target; each row is the value of a new `q`.
+    let rows = [
+        ("[ordinary, {T}]", "\"{{x}}\""),
+        ("['don''t', {T}]", "'{{x}}'"),
+        ("{'don''t': {T}}", "\"{{x}}\""),
+        ("[don't, {T}]", "\"{{x}}\""),
+        ("[say \"hi, {T}]", "'{{x}}'"),
+        ("[don't, can't, {T}]", "\"{{x}}\""),
+        ("{don't: {T}}", "\"{{x}}\""),
+        ("{say \"hi: {T}}", "'{{x}}'"),
+        ("{a: don't, b: {T}}", "\"{{x}}\""),
+        ("{a: say \"hi, b: {T}}", "'{{x}}'"),
+        ("{list: [don't, {T}], z: 1}", "\"{{x}}\""),
+        ("[{k: don't}, {k: {T}}]", "'{{x}}'"),
+        ("[don't, {can't: {T}}]", "\"{{x}}\""),
+    ];
+    let encoded = encode_yaml_scalar("{{x}}");
+    for newline in ["\n", "\r\n"] {
+        for (flow, target) in rows {
+            let document = |extra: Option<&str>, body: &str| {
+                let mut lines = vec!["---", "prompt: test"];
+                lines.extend(extra);
+                lines.extend(["after: z", "---", body, ""]);
+                lines.join(newline)
+            };
+            let authored = format!("q: {}", flow.replace("{T}", target));
+            let dir = TempDir::new().unwrap();
+            let original = document(None, "Old body");
+            let agent_wrote = document(Some(&authored), "Agent body");
+            let (file, plan) = agent_run(&dir, &original, &agent_wrote);
+
+            let artifact = written(
+                reconcile_inline_artifact(&plan, "2026-09-06")
+                    .unwrap_or_else(|error| panic!("{authored:?} {newline:?}: {error}")),
+            );
+
+            let on_disk = std::fs::read_to_string(&file).unwrap();
+            assert_eq!(on_disk, artifact.text);
+            let stored_line = format!("q: {}{newline}", flow.replace("{T}", &encoded));
+            let expected_start = format!("---{newline}prompt: test{newline}{stored_line}after: z{newline}");
+            assert!(
+                on_disk.starts_with(&expected_start),
+                "{authored:?} {newline:?}: {on_disk:?}"
+            );
+            assert!(on_disk.contains(&format!("last_updated: 2026-09-06{newline}")), "{on_disk:?}");
+
+            let authored_value: serde_json::Value =
+                biscuit_file::serde_yaml_ng::from_str::<serde_json::Value>(&authored).unwrap()["q"].clone();
+            let FrontmatterDeltaEntry::Addition { property, value } =
+                &artifact.frontmatter_delta.entries[..]
+                    .first()
+                    .unwrap_or_else(|| panic!("{authored:?}: empty delta"))
+            else {
+                panic!("{authored:?}: expected an addition");
+            };
+            assert_eq!(artifact.frontmatter_delta.entries.len(), 1, "{authored:?}");
+            assert_eq!((property.as_str(), value), ("q", &authored_value), "{authored:?}");
+
+            let markdown: Markdown = on_disk.into();
+            let options = inline_hash_options();
+            let stored = parse_inline_stored_hash(&markdown, &options).unwrap().unwrap();
+            let comparison = markdown.compare_hash(&stored, &options).unwrap();
+            assert!(!comparison.frontmatter_changed && !comparison.body_changed, "{authored:?}");
+        }
     }
 }
