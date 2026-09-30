@@ -1458,3 +1458,71 @@ justified:
 - Spec frontmatter: `status: implemented`, `implemented_by: claude/opus`,
   `implemented: true`. Stopped at "implementation complete, ready for
   review"; the spec was not moved and `just complete` was not run.
+
+## Review 1 remediation
+
+Findings 2 and 3 of `review-1`. Finding 1 stays blocked on the recursive-schema
+dependency and the `md schema validate` decision, so nothing changed for it.
+
+### Finding 2: content edits and the UTC baseline
+
+The three writers (`md hash --save`, Darkmatter's effect writer, Claudine's
+inline closure) each parsed the stored hash, planned the save, and decided the
+`last_updated` policy for themselves. The effect writer passed `None` for the
+stored hash, and `plan_hash_save(None, …)` never bumps, so an effect that edited
+hashed content left `last_updated` stale (reproduced by the review).
+
+- New `Markdown::stamp_baseline(source, &opts, now, Change)` in
+  `darkmatter/lib/src/markdown/hash/baseline.rs` is the one entry point. It reads
+  the stored hash (`Markdown::stored_hash`, which replaces the CLI's
+  `parse_stored_hash` and Claudine's `parse_inline_stored_hash`), plans the save,
+  applies the `Change` policy, and stamps the UTC date of `now`.
+  `Change::Detect` bumps only when the hash moved (`md hash --save`);
+  `Change::Known` bumps because the caller edited the content (effect writer,
+  Claudine closure).
+- Claudine's `reconcile_inline_artifact*` and `CompletionContext` now take
+  `now: DateTime<Utc>` in place of a `today: &str`, so the closure's
+  `decision.bump_last_updated = true` override is gone.
+- **Behavior change:** the effect writer used to overwrite a malformed stored
+  hash silently (it passed `None`). It now returns `EffectError::Markdown`, as
+  `md hash --save` and the inline closure already did.
+- Tests: `stamp_baseline` unit tests (including 23:30 UTC), the effect writer's
+  `set_frontmatter` test now asserts the hash and `last_updated` change, a new
+  malformed-hash effect test, and
+  `stamps_the_utc_date_when_the_local_date_is_ahead` through Claudine's
+  write-back. `wrap_inline_compose` expected `Local::now()`; it now uses `Utc`.
+- Docs and skills that said effect writes renew nothing were corrected
+  (`policy-lifecycle.md`, `side-effects.md`, `composition.md`, the
+  `content-policy` and `darkmatter` skills).
+- `just test` failures seen along the way, both reproduced on an unmodified
+  HEAD and unrelated to this work: `darkmatter`
+  `schemas::file_match::tests::conversion_emits_every_root_union_glob` and
+  `claudine-cli`
+  `compose_schema_cli::compose_enforces_each_root_union_arm_match_before_provider_launch`.
+
+### Finding 3: real-terminal verification of the styled tables
+
+- `content-policy/cli/tests/level2_terminal_tables.rs` runs `policy check` and
+  `policy renew` in a tmux pane resized to 80 columns (one owned session per
+  test, so nothing shares a pane or touches the user's windows) and asserts the
+  rendered pane, not bytes:
+    - every table row closes with its own right border, so the terminal did not
+      wrap it, and each row is as wide in display cells as the top border
+      (`unicode-width`; the fixture's `FileChanged` path holds double-width
+      characters);
+    - a long rule and a fingerprint rejoin after wrapping with no character
+      lost, and the evidence cell shows the abbreviated stored fingerprint;
+    - `fresh`, `stale`, `expired`, and `unknown` carry green, yellow, red, and
+      magenta SGR; the document name is bold; the renew preview note is dim and
+      `written` is green.
+- Six hermetic tests in the same file (Level 1) prove the checks bite: a wrapped
+  row, a wrong display width, and a double-width row measured in cells.
+- `just test-l2` is now live (`_test_l2 content-policy-cli`) instead of a stub,
+  and `content-policy/cli/Cargo.toml` declares
+  `[package.metadata.ci.tests]` with `tiers = ["L1", "L2"]`,
+  `l2-backends = ["tmux"]`, and the harness sidecars, so CI schedules the tier.
+  `--plain`, `--json`, and `--needs-action` keep their Level 1 coverage.
+- Verified: `BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2` ran 4 tests, 4
+  passed, and `backend-proof` reported `tmux run=4`; `just test` 173 passed;
+  `just lint` clean. Not run: `just check-tier-coverage` and a CI plan review
+  (`just ci-local --plan`).
