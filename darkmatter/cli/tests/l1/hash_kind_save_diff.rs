@@ -358,6 +358,281 @@ fn test_hash_save_refuses_anchored_last_updated_without_writing() {
 }
 
 #[test]
+fn test_hash_save_stamps_a_date_above_an_indented_comment_byte_for_byte() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-stamps-a-date-above-an-indented-comment",
+    );
+    const STALE: &str = "aaaa111111111111-bbbb222222222222";
+    // `{date}` is the authored date slot; the stale stored hash makes the
+    // save bump it.
+    let shapes = [
+        ("scalar", "last_updated: 2026-01-01", "last_updated: {date}"),
+        ("empty", "last_updated:", "last_updated: {date}"),
+    ];
+    let document = |date_line: &str, hash: &str, newline: &str| {
+        [
+            "---",
+            &format!("hash: {hash}"),
+            date_line,
+            "  # set this when the body changes",
+            "author: A",
+            "---",
+            "Changed body",
+            "",
+        ]
+        .join(newline)
+    };
+
+    for newline in ["\n", "\r\n", "\r"] {
+        for (name, authored, stamped) in shapes {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join("doc.md");
+            let source = document(authored, STALE, newline);
+            std::fs::write(&file, &source).unwrap();
+
+            let before = chrono::Local::now().format("%Y-%m-%d").to_string();
+            fixture
+                .command()
+                .arg("hash")
+                .arg("--save")
+                .arg(&file)
+                .assert()
+                .success();
+            let after = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+            let written = std::fs::read_to_string(&file).unwrap();
+            let hash = written
+                .split(newline)
+                .find_map(|line| line.strip_prefix("hash: "))
+                .unwrap_or_else(|| panic!("{name} {newline:?}: no hash line in {written:?}"));
+            assert_ne!(hash, STALE, "{name} {newline:?}");
+            let expected: Vec<String> = [&before, &after]
+                .into_iter()
+                .map(|today| document(&stamped.replace("{date}", today), hash, newline))
+                .collect();
+            assert!(
+                expected.contains(&written),
+                "{name} {newline:?}: wrote {written:?}, expected {:?}",
+                expected[0]
+            );
+            fixture
+                .command()
+                .arg("hash")
+                .arg("--diff")
+                .arg(&file)
+                .assert()
+                .success();
+        }
+    }
+}
+
+#[test]
+fn test_hash_save_keeps_the_comment_after_a_quote_inside_a_plain_date() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-keeps-the-comment-after-a-quote-inside-a-plain-date",
+    );
+    const STALE: &str = "aaaa111111111111-bbbb222222222222";
+    // `{date}` is the value slot; the stale stored hash makes the save bump it.
+    let layouts: [&[&str]; 2] = [
+        &["last_updated: {date}   # keep this explanation"],
+        &["last_updated:", "  {date}   # keep this explanation"],
+    ];
+    let document = |date_lines: &[&str], date: &str, hash: &str, newline: &str| {
+        let mut lines = vec!["---".to_string(), format!("hash: {hash}")];
+        lines.extend(date_lines.iter().map(|line| line.replace("{date}", date)));
+        lines.extend(["author: A", "---", "Changed body", ""].map(String::from));
+        lines.join(newline)
+    };
+
+    for newline in ["\n", "\r\n", "\r"] {
+        for authored in ["yesterday's date", "unknown \"date"] {
+            for date_lines in layouts {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join("doc.md");
+                std::fs::write(&file, document(date_lines, authored, STALE, newline)).unwrap();
+
+                let before = chrono::Local::now().format("%Y-%m-%d").to_string();
+                fixture
+                    .command()
+                    .arg("hash")
+                    .arg("--save")
+                    .arg(&file)
+                    .assert()
+                    .success();
+                let after = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+                let written = std::fs::read_to_string(&file).unwrap();
+                let hash = written
+                    .split(newline)
+                    .find_map(|line| line.strip_prefix("hash: "))
+                    .unwrap_or_else(|| panic!("{authored:?} {newline:?}: no hash in {written:?}"));
+                assert_ne!(hash, STALE, "{authored:?} {newline:?}");
+                let expected: Vec<String> = [&before, &after]
+                    .into_iter()
+                    .map(|today| document(date_lines, today, hash, newline))
+                    .collect();
+                assert!(
+                    expected.contains(&written),
+                    "{authored:?} {date_lines:?} {newline:?}: wrote {written:?}, expected {:?}",
+                    expected[0]
+                );
+            }
+        }
+    }
+}
+
+/// A `:` inside a plain top-level key (`a:b`, `hash:x`) is part of the key,
+/// so it neither duplicates `a` nor shadows the managed `hash`, and a quote
+/// after a content colon in a flow value stays content.
+#[test]
+fn test_hash_save_reads_a_content_colon_as_part_of_a_plain_key() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-reads-a-content-colon-as-part-of-a-plain-key",
+    );
+    const STALE: &str = "aaaa111111111111-bbbb222222222222";
+    let document = |date: &str, hash: &str, newline: &str| {
+        [
+            "---",
+            "a:b: one",
+            "a: two",
+            "a:'c: [a:'b, c:\"d, 'v']",
+            "hash:x: keep",
+            &format!("hash: {hash}"),
+            &format!("last_updated: {date}"),
+            "---",
+            "Changed body",
+            "",
+        ]
+        .join(newline)
+    };
+
+    for newline in ["\n", "\r\n"] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, document("2020-01-01", STALE, newline)).unwrap();
+
+        let before = chrono::Local::now().format("%Y-%m-%d").to_string();
+        fixture.command().arg("hash").arg("--save").arg(&file).assert().success();
+        let after = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+        let written = std::fs::read_to_string(&file).unwrap();
+        let hash = written
+            .split(newline)
+            .find_map(|line| line.strip_prefix("hash: "))
+            .unwrap_or_else(|| panic!("{newline:?}: no hash in {written:?}"));
+        assert_ne!(hash, STALE, "{newline:?}");
+        let expected: Vec<String> =
+            [&before, &after].into_iter().map(|today| document(today, hash, newline)).collect();
+        assert!(expected.contains(&written), "{newline:?}: wrote {written:?}");
+
+        fixture.command().arg("hash").arg("--save").arg(&file).assert().success();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), written, "{newline:?}: second save");
+    }
+}
+
+#[test]
+fn test_hash_save_first_baseline_leaves_an_empty_date_above_an_indented_comment() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-first-baseline-leaves-an-empty-date",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    let source = "---\r\nlast_updated:\r\n  # set this when the body changes\r\nauthor: A\r\n---\r\nBody\r\n";
+    std::fs::write(&file, source).unwrap();
+
+    fixture
+        .command()
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
+    let written = std::fs::read_to_string(&file).unwrap();
+    let (frontmatter, hash_line) = written
+        .rsplit_once("hash: ")
+        .unwrap_or_else(|| panic!("no hash line in {written:?}"));
+    assert_eq!(
+        frontmatter,
+        "---\r\nlast_updated:\r\n  # set this when the body changes\r\nauthor: A\r\n"
+    );
+    assert!(hash_line.ends_with("\r\n---\r\nBody\r\n"), "{written:?}");
+}
+
+#[test]
+fn test_hash_save_refuses_a_hash_edit_that_repoints_a_reused_anchor_without_writing() {
+    let fixture = CliProcessFixture::named(
+        "hash-kind-save-diff-test-hash-save-refuses-a-hash-edit-that-repoints-a-reused-anchor",
+    );
+    // `mirror` resolves to the anchor on the managed hash; replacing that node
+    // would leave it resolving to `earlier`'s declaration instead.
+    let cases: [(&str, Option<&str>, &str); 3] = [
+        (
+            "simple",
+            None,
+            concat!(
+                "---\n",
+                "earlier: &h before\n",
+                "hash: &h aaaa111111111111-bbbb222222222222\n",
+                "mirror: *h\n",
+                "last_updated: 2026-01-01\n",
+                "---\n",
+                "Changed body.\n"
+            ),
+        ),
+        (
+            "structured",
+            None,
+            concat!(
+                "---\n",
+                "earlier: &h before\n",
+                "hash:\n",
+                "  kind: structured\n",
+                "  value: &h a000000000000000-b000000000000000-c000000000000000-d000000000000000\n",
+                "mirror: *h\n",
+                "---\n",
+                "Changed body.\n"
+            ),
+        ),
+        (
+            "quoted custom property",
+            Some("fingerprint"),
+            concat!(
+                "---\n",
+                "earlier: &h before\n",
+                "'fingerprint': &h aaaa111111111111-bbbb222222222222\n",
+                "mirror: *h\n",
+                "---\n",
+                "Changed body.\n"
+            ),
+        ),
+    ];
+
+    for (name, property, source) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("doc.md");
+        std::fs::write(&file, source).unwrap();
+
+        let mut builder = fixture.command_builder();
+        if let Some(property) = property {
+            builder = builder.application_input("HASH_PROPERTY", property);
+        }
+        builder
+            .build()
+            .arg("hash")
+            .arg("--save")
+            .arg(&file)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("mirror"));
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            source.as_bytes(),
+            "{name}: the refused save changed the file"
+        );
+    }
+}
+
+#[test]
 fn test_hash_save_honors_quoted_custom_property() {
     let fixture = CliProcessFixture::named(
         "hash-kind-save-diff-test-hash-save-honors-quoted-custom-property",

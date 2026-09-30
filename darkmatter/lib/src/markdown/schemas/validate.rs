@@ -962,7 +962,7 @@ pub fn build_position_map(yaml: &str) -> PositionMap {
         if first.is_whitespace() || first == '#' || first == '-' || first == '.' {
             continue;
         }
-        let Some(colon) = line.find(':') else {
+        let Some(colon) = super::simplified::mapping_separator(line, false) else {
             continue;
         };
         let raw = line[..colon].trim();
@@ -1498,6 +1498,18 @@ mod tests {
         assert_eq!(map.get("title"), Some(&(1, 1)));
         assert_eq!(map.get("body"), Some(&(2, 1)));
         assert!(map.get("nested").is_none());
+    }
+
+    /// A `:` inside a plain or quoted key is content, not the separator.
+    #[test]
+    fn build_position_map_keeps_a_colon_inside_a_key() {
+        let yaml = "a:b: one\na:'c: two\n'x: y': three\n\"u:v\": four\n";
+        let map = build_position_map(yaml);
+        assert_eq!(map.get("a:b"), Some(&(1, 1)));
+        assert_eq!(map.get("a:'c"), Some(&(2, 1)));
+        assert_eq!(map.get("x: y"), Some(&(3, 1)));
+        assert_eq!(map.get("u:v"), Some(&(4, 1)));
+        assert!(map.get("a").is_none() && map.get("x").is_none());
     }
 
     #[test]

@@ -30,7 +30,8 @@ pub use query::{SuggestionItem, SuggestionQuery, suggestions_for_def, suggestion
 pub use serialize::serialize_property_atom;
 pub use source::{
     SchemaSourceMap, SchemaSourcePath, SchemaSourcePathSegment, SchemaSpanKind, SchemaValueEntry,
-    SchemaValueKind, SchemaValueNode, SourceAware, locate_schema_value,
+    SchemaValueKind, SchemaValueNode, SourceAware, flow_collection_end, locate_schema_value,
+    mapping_separator,
     parse_property_definition_with_source, parse_schema_declaration_with_source,
     parse_yaml_schema_with_source, project_suggestion_spans,
 };

@@ -1,6 +1,6 @@
 use darkmatter::markdown::schemas::{
     PropertyDef, SchemaDeclaration, SchemaError, SchemaReferenceKind, SchemaSourcePath,
-    SchemaSpanKind, SimplifiedSchema, parse_property_definition,
+    SchemaSourcePathSegment, SchemaSpanKind, SimplifiedSchema, parse_property_definition,
     parse_property_definition_with_source, parse_schema_declaration,
     parse_schema_declaration_with_source, parse_yaml_schema,
     classify_schema_reference, resolve::resolve_schema_with_roots,
@@ -532,4 +532,358 @@ fn string_and_native_objects_share_the_depth_boundary() {
         parse_property_definition("candidate", &yaml(&source)),
         Err(SchemaError::Grammar { .. })
     ));
+}
+
+/// One expected source-map entry: a dotted property path (`#n` for a union
+/// arm, empty for the root), a role, and the decoded text of each span.
+type Expected = (&'static str, SchemaSpanKind, &'static [&'static str]);
+
+fn render_path(path: &SchemaSourcePath) -> String {
+    path.segments()
+        .iter()
+        .map(|segment| match segment {
+            SchemaSourcePathSegment::Property(name) => name.clone(),
+            SchemaSourcePathSegment::UnionArm(index) => format!("#{index}"),
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// The authored spelling of decoded scalar text inside `quote`.
+fn quoted_spelling(text: &str, quote: char) -> String {
+    match quote {
+        '\'' => text.replace('\'', "''"),
+        _ => text.replace('\\', "\\\\").replace('"', "\\\""),
+    }
+}
+
+/// A property whose definition is one primitive atom: key, definition, atom,
+/// type keyword, then its constraints and arguments.
+fn primitive(
+    path: &'static str,
+    key: &'static [&'static str],
+    definition: &'static [&'static str],
+    atom: &'static [&'static str],
+    keyword: &'static [&'static str],
+    constraints: &'static [&'static str],
+    arguments: &'static [&'static str],
+) -> Vec<Expected> {
+    let mut expected = vec![
+        (path, SchemaSpanKind::MappingKey, key),
+        (path, SchemaSpanKind::Definition, definition),
+        (path, SchemaSpanKind::Atom, atom),
+        (path, SchemaSpanKind::TypeKeyword, keyword),
+    ];
+    if !constraints.is_empty() {
+        expected.push((path, SchemaSpanKind::Constraint, constraints));
+    }
+    if !arguments.is_empty() {
+        expected.push((path, SchemaSpanKind::Argument, arguments));
+    }
+    expected
+}
+
+/// The source map follows the grammar's lexical modes: description prose and
+/// imported file references never nest or quote, while argument lists keep
+/// their quoting. Every expression is accepted by the semantic parser first,
+/// and the whole map is compared so a property that silently merges into its
+/// neighbor fails.
+#[test]
+fn expression_source_maps_follow_description_and_file_reference_modes() {
+    const OFFSET: usize = 23;
+    let b_suggest = || primitive("b", &["b"], &["string(suggest(x, y))"], &["string(suggest(x, y))"], &["string"], &["suggest(x, y)"], &["x", "y"]);
+    let rows: Vec<(&str, Vec<Expected>)> = vec![
+        // Description prose: quotes and brackets are not structure.
+        (
+            "{ a: string -> (it's fine), b: string(suggest(x, y)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> (it's fine), b: string(suggest(x, y)) }"][..])],
+                primitive("a", &["a"], &["string -> (it's fine)"], &["string"], &["string"], &[], &[]),
+                b_suggest(),
+            ]
+            .concat(),
+        ),
+        (
+            "{ a: string -> (say \"hi), b: string(suggest(x, y)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> (say \"hi), b: string(suggest(x, y)) }"][..])],
+                primitive("a", &["a"], &["string -> (say \"hi)"], &["string"], &["string"], &[], &[]),
+                b_suggest(),
+            ]
+            .concat(),
+        ),
+        (
+            "{ a: string -> ({x} it's fine), b: string(suggest(x, y)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> ({x} it's fine), b: string(suggest(x, y)) }"][..])],
+                primitive("a", &["a"], &["string -> ({x} it's fine)"], &["string"], &["string"], &[], &[]),
+                b_suggest(),
+            ]
+            .concat(),
+        ),
+        (
+            "{ a: string -> (it's fine), b: string -> (it's clear), c: string(suggest(x, y)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> (it's fine), b: string -> (it's clear), c: string(suggest(x, y)) }"][..])],
+                primitive("a", &["a"], &["string -> (it's fine)"], &["string"], &["string"], &[], &[]),
+                primitive("b", &["b"], &["string -> (it's clear)"], &["string"], &["string"], &[], &[]),
+                primitive("c", &["c"], &["string(suggest(x, y))"], &["string(suggest(x, y))"], &["string"], &["suggest(x, y)"], &["x", "y"]),
+            ]
+            .concat(),
+        ),
+        (
+            "{ a: string -> plain [x, b: number(min(2)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> plain [x, b: number(min(2)) }"][..])],
+                primitive("a", &["a"], &["string -> plain [x"], &["string"], &["string"], &[], &[]),
+                primitive("b", &["b"], &["number(min(2))"], &["number(min(2))"], &["number"], &["min(2)"], &["2"]),
+            ]
+            .concat(),
+        ),
+        (
+            "{ a: string -> plain ] here, b: number(min(2)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> plain ] here, b: number(min(2)) }"][..])],
+                primitive("a", &["a"], &["string -> plain ] here"], &["string"], &["string"], &[], &[]),
+                primitive("b", &["b"], &["number(min(2))"], &["number(min(2))"], &["number"], &["min(2)"], &["2"]),
+            ]
+            .concat(),
+        ),
+        // The same descriptions one object deeper, and on the nested object.
+        (
+            "{ o: { a: string -> (it's fine), b: string(suggest(x, y)) } -> (outer's [note), c: number(min(2)) }",
+            [
+                vec![
+                    ("", SchemaSpanKind::Atom, &["{ o: { a: string -> (it's fine), b: string(suggest(x, y)) } -> (outer's [note), c: number(min(2)) }"][..]),
+                    ("o", SchemaSpanKind::MappingKey, &["o"][..]),
+                    ("o", SchemaSpanKind::Definition, &["{ a: string -> (it's fine), b: string(suggest(x, y)) } -> (outer's [note)"][..]),
+                    ("o", SchemaSpanKind::Atom, &["{ a: string -> (it's fine), b: string(suggest(x, y)) }"][..]),
+                ],
+                primitive("o.a", &["a"], &["string -> (it's fine)"], &["string"], &["string"], &[], &[]),
+                primitive("o.b", &["b"], &["string(suggest(x, y))"], &["string(suggest(x, y))"], &["string"], &["suggest(x, y)"], &["x", "y"]),
+                primitive("c", &["c"], &["number(min(2))"], &["number(min(2))"], &["number"], &["min(2)"], &["2"]),
+            ]
+            .concat(),
+        ),
+        // Imported file references are opaque up to `,`, `}`, or `->`.
+        (
+            "Name@./a(b.yaml",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a(b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a(b.yaml"][..]),
+            ],
+        ),
+        (
+            "Name@./a[b.yaml",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a[b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a[b.yaml"][..]),
+            ],
+        ),
+        (
+            "Name@./a{b.yaml -> description",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a{b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a{b.yaml"][..]),
+            ],
+        ),
+        (
+            "Name@./a(b.yaml -> it's (the) [note",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a(b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a(b.yaml"][..]),
+            ],
+        ),
+        (
+            "Name(required)@./a('b.yaml",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name(required)@./a('b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a('b.yaml"][..]),
+                ("", SchemaSpanKind::Constraint, &["required"][..]),
+            ],
+        ),
+        (
+            "Name@./a(\"b.yaml",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a(\"b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a(\"b.yaml"][..]),
+            ],
+        ),
+        (
+            "{ r: Name@./a(b.yaml, s: string(min(1)) }",
+            vec![
+                ("", SchemaSpanKind::Atom, &["{ r: Name@./a(b.yaml, s: string(min(1)) }"][..]),
+                ("r", SchemaSpanKind::MappingKey, &["r"][..]),
+                ("r", SchemaSpanKind::Definition, &["Name@./a(b.yaml"][..]),
+                ("r", SchemaSpanKind::Atom, &["Name@./a(b.yaml"][..]),
+                ("r", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("r", SchemaSpanKind::ImportReference, &["./a(b.yaml"][..]),
+                ("s", SchemaSpanKind::MappingKey, &["s"][..]),
+                ("s", SchemaSpanKind::Definition, &["string(min(1))"][..]),
+                ("s", SchemaSpanKind::Atom, &["string(min(1))"][..]),
+                ("s", SchemaSpanKind::TypeKeyword, &["string"][..]),
+                ("s", SchemaSpanKind::Constraint, &["min(1)"][..]),
+                ("s", SchemaSpanKind::Argument, &["1"][..]),
+            ],
+        ),
+        (
+            "{ r: Name@./a[b.yaml, s: string(min(1)) }",
+            vec![
+                ("", SchemaSpanKind::Atom, &["{ r: Name@./a[b.yaml, s: string(min(1)) }"][..]),
+                ("r", SchemaSpanKind::MappingKey, &["r"][..]),
+                ("r", SchemaSpanKind::Definition, &["Name@./a[b.yaml"][..]),
+                ("r", SchemaSpanKind::Atom, &["Name@./a[b.yaml"][..]),
+                ("r", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("r", SchemaSpanKind::ImportReference, &["./a[b.yaml"][..]),
+                ("s", SchemaSpanKind::MappingKey, &["s"][..]),
+                ("s", SchemaSpanKind::Definition, &["string(min(1))"][..]),
+                ("s", SchemaSpanKind::Atom, &["string(min(1))"][..]),
+                ("s", SchemaSpanKind::TypeKeyword, &["string"][..]),
+                ("s", SchemaSpanKind::Constraint, &["min(1)"][..]),
+                ("s", SchemaSpanKind::Argument, &["1"][..]),
+            ],
+        ),
+        (
+            "{ r: Name@./a{b.yaml -> (its file), s: string(min(1)) }",
+            vec![
+                ("", SchemaSpanKind::Atom, &["{ r: Name@./a{b.yaml -> (its file), s: string(min(1)) }"][..]),
+                ("r", SchemaSpanKind::MappingKey, &["r"][..]),
+                ("r", SchemaSpanKind::Definition, &["Name@./a{b.yaml -> (its file)"][..]),
+                ("r", SchemaSpanKind::Atom, &["Name@./a{b.yaml"][..]),
+                ("r", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("r", SchemaSpanKind::ImportReference, &["./a{b.yaml"][..]),
+                ("s", SchemaSpanKind::MappingKey, &["s"][..]),
+                ("s", SchemaSpanKind::Definition, &["string(min(1))"][..]),
+                ("s", SchemaSpanKind::Atom, &["string(min(1))"][..]),
+                ("s", SchemaSpanKind::TypeKeyword, &["string"][..]),
+                ("s", SchemaSpanKind::Constraint, &["min(1)"][..]),
+                ("s", SchemaSpanKind::Argument, &["1"][..]),
+            ],
+        ),
+        (
+            "{ o: { r: Name@./a('b.yaml }, s: string(suggest(\"p\", q)) }",
+            vec![
+                ("", SchemaSpanKind::Atom, &["{ o: { r: Name@./a('b.yaml }, s: string(suggest(\"p\", q)) }"][..]),
+                ("o", SchemaSpanKind::MappingKey, &["o"][..]),
+                ("o", SchemaSpanKind::Definition, &["{ r: Name@./a('b.yaml }"][..]),
+                ("o", SchemaSpanKind::Atom, &["{ r: Name@./a('b.yaml }"][..]),
+                ("o.r", SchemaSpanKind::MappingKey, &["r"][..]),
+                ("o.r", SchemaSpanKind::Definition, &["Name@./a('b.yaml"][..]),
+                ("o.r", SchemaSpanKind::Atom, &["Name@./a('b.yaml"][..]),
+                ("o.r", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("o.r", SchemaSpanKind::ImportReference, &["./a('b.yaml"][..]),
+                ("s", SchemaSpanKind::MappingKey, &["s"][..]),
+                ("s", SchemaSpanKind::Definition, &["string(suggest(\"p\", q))"][..]),
+                ("s", SchemaSpanKind::Atom, &["string(suggest(\"p\", q))"][..]),
+                ("s", SchemaSpanKind::TypeKeyword, &["string"][..]),
+                ("s", SchemaSpanKind::Constraint, &["suggest(\"p\", q)"][..]),
+                ("s", SchemaSpanKind::Argument, &["\"p\"", "q"][..]),
+            ],
+        ),
+        // A pattern key is opaque up to its `>`.
+        (
+            "{ <pattern::^[a,b]:(c|d)$>: string, e: number(min(1)) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ <pattern::^[a,b]:(c|d)$>: string, e: number(min(1)) }"][..])],
+                primitive("<pattern::^[a,b]:(c|d)$>", &["<pattern::^[a,b]:(c|d)$>"], &["string"], &["string"], &["string"], &[], &[]),
+                primitive("e", &["e"], &["number(min(1))"], &["number(min(1))"], &["number"], &["min(1)"], &["1"]),
+            ]
+            .concat(),
+        ),
+        // Controls: argument quoting, balanced and closing filename punctuation,
+        // and quote-free or unparenthesized prose.
+        (
+            "string(suggest('a)b', c))",
+            vec![
+                ("", SchemaSpanKind::Atom, &["string(suggest('a)b', c))"][..]),
+                ("", SchemaSpanKind::TypeKeyword, &["string"][..]),
+                ("", SchemaSpanKind::Constraint, &["suggest('a)b', c)"][..]),
+                ("", SchemaSpanKind::Argument, &["'a)b'", "c"][..]),
+            ],
+        ),
+        (
+            "enum('a(b', c)",
+            vec![
+                ("", SchemaSpanKind::Atom, &["enum('a(b', c)"][..]),
+                ("", SchemaSpanKind::TypeKeyword, &["enum"][..]),
+                ("", SchemaSpanKind::Constraint, &["'a(b', c"][..]),
+            ],
+        ),
+        (
+            "Name@./a(b)c.yaml",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a(b)c.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a(b)c.yaml"][..]),
+            ],
+        ),
+        (
+            "Name@./a)b.yaml",
+            vec![
+                ("", SchemaSpanKind::Atom, &["Name@./a)b.yaml"][..]),
+                ("", SchemaSpanKind::ImportName, &["Name"][..]),
+                ("", SchemaSpanKind::ImportReference, &["./a)b.yaml"][..]),
+            ],
+        ),
+        (
+            "{ a: string -> plain, b: string -> it's fine, c: string -> (plain) }",
+            [
+                vec![("", SchemaSpanKind::Atom, &["{ a: string -> plain, b: string -> it's fine, c: string -> (plain) }"][..])],
+                primitive("a", &["a"], &["string -> plain"], &["string"], &["string"], &[], &[]),
+                primitive("b", &["b"], &["string -> it's fine"], &["string"], &["string"], &[], &[]),
+                primitive("c", &["c"], &["string -> (plain)"], &["string"], &["string"], &[], &[]),
+            ]
+            .concat(),
+        ),
+    ];
+
+    for (expression, expected) in rows {
+        let mut expected: Vec<(String, SchemaSpanKind, Vec<String>)> = expected
+            .into_iter()
+            .map(|(path, kind, texts)| {
+                (path.to_string(), kind, texts.iter().map(ToString::to_string).collect())
+            })
+            .collect();
+        expected.sort();
+        for quote in ['\'', '"'] {
+            for line_ending in ["\n", "\r\n"] {
+                let scalar = format!("{quote}{}{quote}", quoted_spelling(expression, quote));
+                let source = format!("{scalar}{line_ending}");
+                let value = yaml(&source);
+                let semantic = parse_property_definition("candidate", &value)
+                    .unwrap_or_else(|error| panic!("semantic parse of {source:?}: {error:?}"));
+                let projected =
+                    parse_property_definition_with_source("candidate", &value, &source, OFFSET)
+                        .unwrap_or_else(|error| panic!("projection of {source:?}: {error:?}"));
+                assert_eq!(projected.value, semantic, "{source:?}");
+
+                let mut actual = Vec::new();
+                for (path, kind, spans) in projected.source_map.entries() {
+                    let texts: Vec<String> =
+                        spans.iter().map(|span| authored(&source, OFFSET, span).to_string()).collect();
+                    if path.segments().is_empty() && kind == SchemaSpanKind::Definition {
+                        assert_eq!(texts, std::slice::from_ref(&scalar), "{source:?}");
+                        continue;
+                    }
+                    actual.push((render_path(path), kind, texts));
+                }
+                actual.sort();
+                let expected_authored: Vec<_> = expected
+                    .iter()
+                    .map(|(path, kind, texts)| {
+                        let texts: Vec<String> =
+                            texts.iter().map(|text| quoted_spelling(text, quote)).collect();
+                        (path.clone(), *kind, texts)
+                    })
+                    .collect();
+                assert_eq!(actual, expected_authored, "{source:?}");
+            }
+        }
+    }
 }

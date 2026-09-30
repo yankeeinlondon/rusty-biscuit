@@ -72,7 +72,8 @@ pub struct RestoredDocument {
 
 /// Restores selected top-level frontmatter nodes from a document snapshot.
 ///
-/// Values outside `properties` are never rewritten. The returned semantic
+/// Values outside `properties` are never rewritten, and must parse to the
+/// same values in the result as in `current`. The returned semantic
 /// delta describes current-versus-snapshot additions, replacements, and
 /// deletions while ignoring formatting-only changes and all owned properties.
 /// Neither input is written or otherwise mutated.
@@ -81,7 +82,8 @@ pub struct RestoredDocument {
 ///
 /// Returns [`MarkdownError::FrontmatterTextEdit`] when either frontmatter block
 /// is malformed, is not a block mapping, contains duplicate semantic keys, or
-/// cannot be edited without ambiguity.
+/// cannot be edited without ambiguity; or when a restored node's anchors would
+/// make an alias outside `properties` resolve to a different value.
 pub fn restore_properties_text(
     current: &str,
     snapshot: &str,
@@ -130,7 +132,10 @@ pub fn restore_properties_text(
         restored_properties.push(property.to_string());
     }
 
-    parse_text_frontmatter(&text)?;
+    let restored = parse_text_frontmatter(&text)?;
+    ensure_unmanaged_values_kept(&current_frontmatter.values, &restored.values, |property| {
+        owned.contains(property)
+    })?;
     Ok(RestoredDocument {
         text,
         restored_properties,
@@ -167,18 +172,48 @@ fn parse_text_frontmatter(document: &str) -> MarkdownResult<ParsedTextFrontmatte
 
     validate_block_mapping(extraction.yaml)?;
     let nodes = locate_all_nodes(extraction.yaml)?;
-    let values = if extraction.yaml.trim().is_empty() {
-        FrontmatterMap::new()
-    } else {
-        serde_yaml_ng::from_str(extraction.yaml).map_err(|error| {
-            text_edit_error(format!("frontmatter YAML could not be parsed: {error}"))
-        })?
-    };
+    let values = frontmatter_values(extraction.yaml)?;
     Ok(ParsedTextFrontmatter {
         yaml_span: Some(extraction.yaml_span),
         nodes,
         values,
     })
+}
+
+/// The parsed values of a frontmatter YAML block, aliases resolved.
+fn frontmatter_values(yaml: &str) -> MarkdownResult<FrontmatterMap> {
+    if yaml.trim().is_empty() {
+        return Ok(FrontmatterMap::new());
+    }
+    serde_yaml_ng::from_str(yaml)
+        .map_err(|error| text_edit_error(format!("frontmatter YAML could not be parsed: {error}")))
+}
+
+/// Refuses a text edit that changed the parsed value of any property for
+/// which `managed` is false.
+///
+/// Parsing the edited text is not enough: YAML lets an anchor name be declared
+/// again, and an alias resolves to the nearest preceding declaration. Replacing
+/// a node that declared or introduced an anchor can re-point a surviving alias
+/// at another declaration, leaving valid YAML whose unedited bytes now mean
+/// something else.
+fn ensure_unmanaged_values_kept(
+    before: &FrontmatterMap,
+    after: &FrontmatterMap,
+    managed: impl Fn(&str) -> bool,
+) -> MarkdownResult<()> {
+    let changed = before
+        .keys()
+        .chain(after.keys())
+        .filter(|property| !managed(property))
+        .find(|property| before.get(*property) != after.get(*property));
+    match changed {
+        Some(property) => Err(text_edit_error(format!(
+            "the edit would change the value of `{property}`, which it does not manage \
+             (an alias there likely resolves to a different anchor declaration)"
+        ))),
+        None => Ok(()),
+    }
 }
 
 fn node_source<'a>(
@@ -258,15 +293,24 @@ fn semantic_frontmatter_delta(
 ///   document's first line (LF when it has none), placed after a leading BOM.
 ///
 /// An empty `last_updated:` is written as `last_updated: {today}`, keeping any
-/// authored comment. The rewritten frontmatter is parsed before it is returned.
+/// authored comment. A scalar date changes only its value bytes, whether it
+/// follows the colon or sits alone on a following line, and comment and blank
+/// lines around it are kept. The rewritten frontmatter is parsed before it is returned,
+/// and every property except the managed ones must parse to the value it had
+/// before the edit. A decision that needs no write returns `None` without
+/// parsing anything.
 ///
 /// ## Errors
 ///
 /// Returns [`MarkdownError::FrontmatterTextEdit`], and no text, when the YAML
-/// root is not a supported block mapping; a managed semantic key occurs more
-/// than once; a managed node cannot be replaced without ambiguity; a date bump
-/// meets a `last_updated` that is a block or flow collection or carries an
-/// anchor, alias, or tag; or the rewritten frontmatter does not parse.
+/// root is not a supported block mapping or does not parse; a managed semantic
+/// key occurs more than once; a managed node cannot be replaced without
+/// ambiguity; a date bump meets a `last_updated` that is a sequence or
+/// mapping, carries an anchor, alias, or tag, or is a block scalar or a scalar
+/// continued across lines; the rewritten frontmatter
+/// does not parse; or an unmanaged value would change. The last happens when
+/// the replaced hash node declared an anchor whose name an earlier declaration
+/// also uses: a later alias then resolves to the earlier value.
 pub fn apply_hash_save_text(
     document_text: &str,
     decision: &SaveDecision,
@@ -284,10 +328,17 @@ pub fn apply_hash_save_text(
         if decision.bump_last_updated {
             yaml.push_str(&format!("{LAST_UPDATED_KEY}: {today}{newline}"));
         }
-        return validated(new_frontmatter_block(document_text, &yaml)).map(Some);
+        return validated(
+            &FrontmatterMap::new(),
+            new_frontmatter_block(document_text, &yaml),
+            options,
+            decision.bump_last_updated,
+        )
+        .map(Some);
     };
 
     validate_block_mapping(extraction.yaml)?;
+    let original_values = frontmatter_values(extraction.yaml)?;
     let mut updated = document_text.to_string();
     let hash_node = locate_node(extraction.yaml, &options.property)?;
     match hash_node {
@@ -318,7 +369,12 @@ pub fn apply_hash_save_text(
         match last_updated {
             Some(node) => {
                 let node_text = &refreshed.yaml[node.range.clone()];
-                let replacement = rewrite_date_scalar(node_text, &node, today)?;
+                let replacement = rewrite_date_scalar(
+                    node_text,
+                    &node,
+                    original_values.get(LAST_UPDATED_KEY),
+                    today,
+                )?;
                 let range = absolute_range(&refreshed.yaml_span, node.range);
                 if updated[range.clone()] != replacement {
                     updated.replace_range(range, &replacement);
@@ -332,17 +388,25 @@ pub fn apply_hash_save_text(
         }
     }
 
-    validated(updated).map(Some)
+    validated(&original_values, updated, options, decision.bump_last_updated).map(Some)
 }
 
-/// Returns `document` when its frontmatter still parses after an edit.
-fn validated(document: String) -> MarkdownResult<String> {
-    match parse_text_frontmatter(&document) {
-        Ok(_) => Ok(document),
-        Err(error) => Err(text_edit_error(format!(
-            "rewritten frontmatter did not parse: {error}"
-        ))),
-    }
+/// Returns `document` when its frontmatter still parses after an edit and
+/// every property other than the managed hash and, when `bumped`,
+/// `last_updated` keeps the value it had in `original`.
+fn validated(
+    original: &FrontmatterMap,
+    document: String,
+    options: &MdHashOptions,
+    bumped: bool,
+) -> MarkdownResult<String> {
+    let rewritten = parse_text_frontmatter(&document).map_err(|error| {
+        text_edit_error(format!("rewritten frontmatter did not parse: {error}"))
+    })?;
+    ensure_unmanaged_values_kept(original, &rewritten.values, |property| {
+        property == options.property || (bumped && property == LAST_UPDATED_KEY)
+    })?;
+    Ok(document)
 }
 
 /// Prepends a frontmatter block holding `yaml` (already terminated) to a
@@ -614,7 +678,6 @@ fn column_of(text: &str, offset: usize) -> usize {
 struct TextNode {
     range: Range<usize>,
     key_end: usize,
-    first_line_end: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -736,7 +799,6 @@ fn locate_node(yaml: &str, target: &str) -> MarkdownResult<Option<TextNode>> {
             nodes.push(TextNode {
                 range: line.start..last_included_end,
                 key_end: line.start + colon,
-                first_line_end: line.end,
             });
         }
         index = cursor;
@@ -797,7 +859,6 @@ fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
                 TextNode {
                     range: line.start..last_included_end,
                     key_end: line.start + colon,
-                    first_line_end: line.end,
                 },
             )
             .is_some()
@@ -811,22 +872,34 @@ fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
     Ok(nodes)
 }
 
+/// The key/value separator of a top-level key line. A colon inside a plain
+/// key (`a:b: c`) or a quoted one is content, not the separator.
 fn mapping_colon(line: &str) -> Option<usize> {
-    let mut single = false;
-    let mut double = false;
-    let mut escaped = false;
-    for (index, ch) in line.char_indices() {
-        if double && escaped {
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' if double => escaped = true,
-            '\'' if !double => single = !single,
-            '"' if !single => double = !double,
-            ':' if !single && !double => return Some(index),
+    crate::markdown::schemas::simplified::mapping_separator(line, false)
+}
+
+/// Where the quoted scalar opening `text` ends: just past its closing quote,
+/// or `0` when `text` does not open with a quote.
+///
+/// A quote opens quoted syntax only as a scalar's first character; inside a
+/// plain scalar (`yesterday's date`, `unknown "date`) it is content, and a
+/// `#` after it can still start a comment. `None` when the opening quote is
+/// not closed within `text`.
+fn quoted_scalar_end(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let quote = match bytes.first() {
+        Some(&quote @ (b'\'' | b'"')) => quote,
+        _ => return Some(0),
+    };
+    let mut index = 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if quote == b'"' => index += 1,
+            b'\'' if quote == b'\'' && bytes.get(index + 1) == Some(&b'\'') => index += 1,
+            byte if byte == quote => return Some(index + 1),
             _ => {}
         }
+        index += 1;
     }
     None
 }
@@ -917,84 +990,128 @@ fn leading_node_property(value: &[u8]) -> Option<&'static str> {
     }
 }
 
-/// Rewrites a single-line `last_updated` node to `today`, keeping its authored
-/// key, spacing, quote style, comment, and terminator.
-fn rewrite_date_scalar(node_text: &str, node: &TextNode, today: &str) -> MarkdownResult<String> {
-    if node.range.end > node.first_line_end {
-        return Err(text_edit_error(format!("`{LAST_UPDATED_KEY}` must be a scalar value")));
-    }
-    let (line, terminator) = match line_spans(node_text).first() {
-        Some(span) => (
-            &node_text[..span.content_end],
-            &node_text[span.content_end..span.end],
-        ),
-        None => (node_text, ""),
-    };
+/// Rewrites the value of a `last_updated` node to `today`.
+///
+/// Only the scalar's own bytes change; a value that is null by absence gains
+/// the date after the colon. Every other byte of the node is kept: the
+/// authored key, spacing, quote style, trailing and indented comments, blank
+/// lines, and each line's terminator.
+///
+/// `parsed` is the node's value from a YAML parse of the same frontmatter. It,
+/// not the node's line count, decides whether the value is a collection.
+/// A scalar is edited in place when its whole value sits on one line, either
+/// after the colon or alone on the first following line that is not blank or
+/// a comment.
+fn rewrite_date_scalar(
+    node_text: &str,
+    node: &TextNode,
+    parsed: Option<&serde_json::Value>,
+    today: &str,
+) -> MarkdownResult<String> {
     let colon = node.key_end - node.range.start;
-    let key = &line[..=colon];
-    let after_colon = &line[colon + 1..];
-    let leading_len = after_colon.len() - after_colon.trim_start().len();
-    let leading = &after_colon[..leading_len];
-    let value_and_comment = &after_colon[leading_len..];
-    if let Some(property) = leading_node_property(value_and_comment.as_bytes()) {
+    let lines = line_spans(node_text);
+    // Each candidate is the absolute start of a line's value-and-comment text;
+    // on the key line that is the text after the colon and its spacing.
+    let mut value_lines = lines.iter().enumerate().filter_map(|(index, line)| {
+        let content_start = if index == 0 { colon + 1 } else { line.start };
+        let content = &node_text[content_start..line.content_end];
+        let start = content_start + (content.len() - content.trim_start().len());
+        let text = &node_text[start..line.content_end];
+        let is_value = !text.is_empty() && yaml_comment_start(text) != Some(0);
+        is_value.then_some((start, text))
+    });
+    let value_line = value_lines.next();
+
+    if let Some(property) =
+        value_line.and_then(|(_, text)| leading_node_property(text.as_bytes()))
+    {
         return Err(text_edit_error(format!(
             "`{LAST_UPDATED_KEY}` uses a YAML {property}; replacing it would change other values"
         )));
     }
-    if value_and_comment.starts_with(['[', '{']) {
-        return Err(text_edit_error(format!("`{LAST_UPDATED_KEY}` must be a scalar value")));
+    if matches!(
+        parsed,
+        Some(serde_json::Value::Array(_) | serde_json::Value::Object(_))
+    ) {
+        return Err(text_edit_error(format!(
+            "`{LAST_UPDATED_KEY}` must be a scalar value, not a sequence or mapping"
+        )));
     }
-    let comment_start = yaml_comment_start(value_and_comment).unwrap_or(value_and_comment.len());
-    let old_value = value_and_comment[..comment_start].trim_end();
+    let unsupported_layout = || {
+        text_edit_error(format!(
+            "`{LAST_UPDATED_KEY}` is a block scalar or a scalar continued across lines, \
+             which cannot be rewritten in place; write it on one line"
+        ))
+    };
 
-    // An empty value is null by absence: write one space before the date, and
-    // move the authored run before a comment behind the date so `#` never
-    // touches it.
-    if old_value.is_empty() {
-        let comment = &value_and_comment[comment_start..];
-        if comment.is_empty() {
-            return Ok(format!("{key} {today}{terminator}"));
+    let Some((value_start, value_text)) = value_line else {
+        if !matches!(parsed, None | Some(serde_json::Value::Null)) {
+            return Err(unsupported_layout());
         }
-        let spacing = if leading.is_empty() { " " } else { leading };
-        return Ok(format!("{key} {today}{spacing}{comment}{terminator}"));
+        return Ok(insert_date_after_colon(node_text, colon, today));
+    };
+    if value_lines.next().is_some() || value_text.starts_with(['|', '>']) {
+        return Err(unsupported_layout());
+    }
+    let comment_start = yaml_comment_start(value_text).unwrap_or(value_text.len());
+    let old_value = value_text[..comment_start].trim_end();
+    // The bytes replaced must be the complete value: a quoted scalar that
+    // closes on a later line, or a plain one folded over several, reads
+    // differently when parsed alone.
+    let alone = serde_yaml_ng::from_str::<serde_json::Value>(old_value).ok();
+    if alone.as_ref() != parsed {
+        return Err(unsupported_layout());
     }
 
-    let comment_prefix = &value_and_comment[old_value.len()..];
     let rendered = match old_value.as_bytes().first() {
         Some(b'\'') => format!("'{today}'"),
         Some(b'"') => format!("\"{today}\""),
         _ => today.to_string(),
     };
-    Ok(format!("{key}{leading}{rendered}{comment_prefix}{terminator}"))
+    let value_end = value_start + old_value.len();
+    Ok(format!(
+        "{}{rendered}{}",
+        &node_text[..value_start],
+        &node_text[value_end..]
+    ))
 }
 
+/// Writes `today` into a key line whose value is null by absence, keeping the
+/// rest of the node. One space goes before the date, and the authored run
+/// before a comment moves behind the date so `#` never touches it.
+fn insert_date_after_colon(node_text: &str, colon: usize, today: &str) -> String {
+    let first_line_end = line_spans(node_text)
+        .first()
+        .map_or(node_text.len(), |line| line.content_end);
+    let key = &node_text[..=colon];
+    let after_colon = &node_text[colon + 1..first_line_end];
+    let rest = &node_text[first_line_end..];
+    let comment = after_colon.trim_start();
+    if comment.is_empty() {
+        return format!("{key} {today}{rest}");
+    }
+    let leading = &after_colon[..after_colon.len() - comment.len()];
+    let spacing = if leading.is_empty() { " " } else { leading };
+    format!("{key} {today}{spacing}{comment}{rest}")
+}
+
+/// Where the comment in `value`, a scalar's text to the end of its line,
+/// starts: the first `#` that opens `value` or follows whitespace, after any
+/// quoted scalar that opens it (see [`quoted_scalar_end`]).
 fn yaml_comment_start(value: &str) -> Option<usize> {
-    let mut single = false;
-    let mut double = false;
-    let mut escaped = false;
-    for (index, ch) in value.char_indices() {
-        if double && escaped {
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' if double => escaped = true,
-            '\'' if !double => single = !single,
-            '"' if !single => double = !double,
-            '#' if !single
-                && !double
+    let from = quoted_scalar_end(value)?;
+    value[from..]
+        .char_indices()
+        .map(|(offset, ch)| (from + offset, ch))
+        .find(|&(index, ch)| {
+            ch == '#'
                 && (index == 0
                     || value[..index]
                         .chars()
                         .next_back()
-                        .is_some_and(char::is_whitespace)) =>
-            {
-                return Some(index);
-            }
-            _ => {}
-        }
-    }
-    None
+                        .is_some_and(char::is_whitespace))
+        })
+        .map(|(index, _)| index)
 }
 
 fn absolute_range(parent: &Range<usize>, child: Range<usize>) -> Range<usize> {
@@ -1893,6 +2010,107 @@ mod tests {
         assert_refused_canonical("---\nhash: &h old\nother: *h\n---\nBody\n", false);
     }
 
+    /// The parsed value of `property` in `document`'s frontmatter.
+    fn parsed_value(document: &str, property: &str) -> Option<serde_json::Value> {
+        parse_text_frontmatter(document)
+            .unwrap()
+            .values
+            .get(property)
+            .cloned()
+    }
+
+    #[test]
+    fn textual_save_refuses_hash_replacement_that_repoints_a_reused_anchor() {
+        let source = concat!(
+            "---\n",
+            "earlier: &h before\n",
+            "hash: &h aaaa111111111111-bbbb222222222222\n",
+            "mirror: *h\n",
+            "last_updated: 2026-01-01\n",
+            "---\n",
+            "Changed body\n",
+        );
+        assert_eq!(
+            parsed_value(source, "mirror"),
+            Some(serde_json::json!("aaaa111111111111-bbbb222222222222"))
+        );
+        for bump in [false, true] {
+            let reason = assert_refused_canonical(source, bump);
+            assert!(reason.contains("`mirror`"), "bump {bump}: {reason}");
+        }
+    }
+
+    #[test]
+    fn textual_save_refuses_collection_hash_replacement_that_repoints_a_nested_anchor() {
+        let source = concat!(
+            "---\n",
+            "earlier: &h before\n",
+            "hash:\n",
+            "  kind: simple\n",
+            "  value: &h after\n",
+            "mirror: *h\n",
+            "last_updated: 2026-01-01\n",
+            "---\n",
+            "Changed body\n",
+        );
+        assert_eq!(parsed_value(source, "mirror"), Some(serde_json::json!("after")));
+        for bump in [false, true] {
+            let reason = assert_refused_canonical(source, bump);
+            assert!(reason.contains("`mirror`"), "bump {bump}: {reason}");
+        }
+    }
+
+    #[test]
+    fn textual_save_keeps_an_alias_bound_to_a_later_declaration() {
+        let source = concat!(
+            "---\n",
+            "earlier: &h before\n",
+            "hash: &h aaaa111111111111-bbbb222222222222\n",
+            "later: &h after\n",
+            "mirror: *h\n",
+            "last_updated: 2026-01-01\n",
+            "---\n",
+            "Changed body\n",
+        );
+        for bump in [false, true] {
+            let written = saved_canonical(source, bump);
+            assert_eq!(parsed_value(&written, "mirror"), Some(serde_json::json!("after")));
+            assert_eq!(body_of(&written), "Changed body\n");
+        }
+    }
+
+    #[test]
+    fn restore_refuses_a_restoration_that_repoints_an_unowned_alias() {
+        // Restoring drops the anchor `mirror` resolved to, or adds one that
+        // captures it; either way an unowned value would change.
+        let cases = [
+            (
+                "---\nearlier: &h before\nhash: &h current\nmirror: *h\n---\nBody\n",
+                "---\nhash: snapshot\n---\nOld body\n",
+            ),
+            (
+                "---\nearlier: &h before\nhash: current\nmirror: *h\n---\nBody\n",
+                "---\nhash: &h snapshot\n---\nOld body\n",
+            ),
+        ];
+        for (current, snapshot) in cases {
+            let error = restore_properties_text(current, snapshot, &["hash"]).unwrap_err();
+            let MarkdownError::FrontmatterTextEdit { reason } = error else {
+                panic!("expected FrontmatterTextEdit for {current:?}, got {error:?}");
+            };
+            assert!(reason.contains("`mirror`"), "{reason}");
+        }
+
+        let restored = restore_properties_text(
+            "---\nearlier: &h before\nhash: current\nmirror: *h\n---\nBody\n",
+            "---\nhash: snapshot\n---\nOld body\n",
+            &["hash"],
+        )
+        .unwrap();
+        assert_eq!(parsed_value(&restored.text, "mirror"), Some(serde_json::json!("before")));
+        assert_eq!(parsed_value(&restored.text, "hash"), Some(serde_json::json!("snapshot")));
+    }
+
     #[test]
     fn textual_save_last_updated_robustness_matrix() {
         const CONTROL: &str = concat!(
@@ -1922,7 +2140,7 @@ mod tests {
         }
         use Outcome::{Date, Refused, Written};
 
-        let rows: [(&str, &str, &str, Outcome); 26] = [
+        let rows: [(&str, &str, &str, Outcome); 58] = [
             ("control", DATE_LINE, DATE_LINE, Date(BUMPED_LINE)),
             (
                 "empty with trailing whitespace",
@@ -1971,6 +2189,31 @@ mod tests {
                 "last_updated: ''\n",
                 Date("last_updated: '2026-09-28'\n"),
             ),
+            (
+                "scalar with indented comment",
+                DATE_LINE,
+                "last_updated: 2026-01-01\n  # set this when the body changes\n",
+                Date("last_updated: 2026-09-28\n  # set this when the body changes\n"),
+            ),
+            (
+                "empty with indented comment",
+                DATE_LINE,
+                "last_updated:\n  # set this when the body changes\n",
+                Date("last_updated: 2026-09-28\n  # set this when the body changes\n"),
+            ),
+            (
+                "empty with unindented comment",
+                DATE_LINE,
+                "last_updated:\n# set this when the body changes\n",
+                Date("last_updated: 2026-09-28\n# set this when the body changes\n"),
+            ),
+            (
+                "plain scalar on the following line",
+                DATE_LINE,
+                "last_updated:\n  2026-01-01\n",
+                Date("last_updated:\n  2026-09-28\n"),
+            ),
+            ("block scalar", DATE_LINE, "last_updated: |-\n  2026-01-01\n", Refused),
             ("block collection", DATE_LINE, "last_updated:\n  - a\n", Refused),
             ("flow sequence", DATE_LINE, "last_updated: [a]\n", Refused),
             ("flow mapping", DATE_LINE, "last_updated: {a: 1}\n", Refused),
@@ -1985,6 +2228,98 @@ mod tests {
                 Refused,
             ),
             ("invalid YAML", DATE_LINE, "last_updated: [unclosed\n", Refused),
+            (
+                "trailing content after a quoted date",
+                DATE_LINE,
+                "last_updated: \"2026-01-01\" trailing\n",
+                Refused,
+            ),
+            (
+                "trailing invalid line inside frontmatter",
+                "author: A\n",
+                "author: A\n@invalid\n",
+                Refused,
+            ),
+            ("number", DATE_LINE, "last_updated: 42\n", Date(BUMPED_LINE)),
+            ("float", DATE_LINE, "last_updated: 1.5\n", Date(BUMPED_LINE)),
+            ("boolean", DATE_LINE, "last_updated: true\n", Date(BUMPED_LINE)),
+            ("mixed flow sequence", DATE_LINE, "last_updated: [a, 1]\n", Refused),
+            (
+                "mixed block sequence",
+                DATE_LINE,
+                "last_updated:\n  - a\n  - 1\n",
+                Refused,
+            ),
+            ("all-number sequence", DATE_LINE, "last_updated: [1, 2]\n", Refused),
+            ("empty sequence", DATE_LINE, "last_updated: []\n", Refused),
+            ("empty mapping", DATE_LINE, "last_updated: {}\n", Refused),
+            (
+                "plain scalar with an apostrophe and a comment",
+                DATE_LINE,
+                "last_updated: yesterday's date   # keep this explanation\n",
+                Date("last_updated: 2026-09-28   # keep this explanation\n"),
+            ),
+            (
+                "plain scalar with a double quote and a comment",
+                DATE_LINE,
+                "last_updated: unknown \"date   # keep this explanation\n",
+                Date("last_updated: 2026-09-28   # keep this explanation\n"),
+            ),
+            (
+                "single-quoted scalar with an escaped quote and a comment",
+                DATE_LINE,
+                "last_updated: 'yesterday''s date'   # keep this explanation\n",
+                Date("last_updated: '2026-09-28'   # keep this explanation\n"),
+            ),
+            (
+                "double-quoted scalar and a comment",
+                DATE_LINE,
+                "last_updated: \"unknown date\"   # keep this explanation\n",
+                Date("last_updated: \"2026-09-28\"   # keep this explanation\n"),
+            ),
+            (
+                "ordinary plain scalar and a comment",
+                DATE_LINE,
+                "last_updated: ordinary   # keep this explanation\n",
+                Date("last_updated: 2026-09-28   # keep this explanation\n"),
+            ),
+            (
+                "plain scalar with an apostrophe on the following line",
+                DATE_LINE,
+                "last_updated:\n  yesterday's date   # keep this explanation\n",
+                Date("last_updated:\n  2026-09-28   # keep this explanation\n"),
+            ),
+            (
+                "plain scalar with a double quote on the following line",
+                DATE_LINE,
+                "last_updated:\n  unknown \"date   # keep this explanation\n",
+                Date("last_updated:\n  2026-09-28   # keep this explanation\n"),
+            ),
+            (
+                "unterminated quote after a leading quote",
+                DATE_LINE,
+                "last_updated: 'unterminated # not a comment\n",
+                Refused,
+            ),
+            ("hash number", HASH_LINE, "hash: 42\n", Date(BUMPED_LINE)),
+            ("hash boolean", HASH_LINE, "hash: false\n", Date(BUMPED_LINE)),
+            ("hash explicit null", HASH_LINE, "hash: null\n", Date(BUMPED_LINE)),
+            ("hash mixed sequence", HASH_LINE, "hash: [a, 1]\n", Date(BUMPED_LINE)),
+            (
+                "hash mixed block sequence",
+                HASH_LINE,
+                "hash:\n  - a\n  - 1\n",
+                Date(BUMPED_LINE),
+            ),
+            ("hash all-number sequence", HASH_LINE, "hash: [1, 2]\n", Date(BUMPED_LINE)),
+            ("hash empty sequence", HASH_LINE, "hash: []\n", Date(BUMPED_LINE)),
+            ("hash empty mapping", HASH_LINE, "hash: {}\n", Date(BUMPED_LINE)),
+            (
+                "hash trailing content after a quoted value",
+                HASH_LINE,
+                "hash: \"x\" trailing\n",
+                Refused,
+            ),
             (
                 "hash absent",
                 HASH_LINE,
@@ -2033,6 +2368,265 @@ mod tests {
                     assert_refused_canonical(&source, true);
                 }
             }
+        }
+    }
+
+    /// `lines` joined and terminated with `newline`.
+    fn joined(lines: &[&str], newline: &str) -> String {
+        lines.iter().map(|line| format!("{line}{newline}")).collect()
+    }
+
+    /// A document whose frontmatter holds the canonical hash, `date_lines`,
+    /// and `author: A`, with every line terminated by `newline`.
+    fn dated_document(date_lines: &[&str], newline: &str) -> String {
+        let mut lines = vec!["---", "hash: aaaa000000000000-bbbb000000000000"];
+        lines.extend_from_slice(date_lines);
+        lines.extend_from_slice(&["author: A", "---", "Changed body"]);
+        joined(&lines, newline)
+    }
+
+    #[test]
+    fn textual_save_date_keeps_indented_comments_for_every_terminator() {
+        let cases: [(&str, &[&str], &[&str]); 5] = [
+            (
+                "scalar then indented comment",
+                &["last_updated: 2026-01-01", "  # set this when the body changes"],
+                &["last_updated: 2026-09-28", "  # set this when the body changes"],
+            ),
+            (
+                "empty then indented comment",
+                &["last_updated:", "  # set this when the body changes"],
+                &["last_updated: 2026-09-28", "  # set this when the body changes"],
+            ),
+            (
+                "empty, blank lines, then indented comment",
+                &["last_updated:", "", "   ", "  # set this when the body changes"],
+                &["last_updated: 2026-09-28", "", "   ", "  # set this when the body changes"],
+            ),
+            (
+                "empty with trailing comment then indented comment",
+                &["last_updated:   # todo", "    # and more"],
+                &["last_updated: 2026-09-28   # todo", "    # and more"],
+            ),
+            (
+                "quoted scalar with trailing comment then indented comment",
+                &["last_updated: \"2026-01-01\" # keep", "  # and more"],
+                &["last_updated: \"2026-09-28\" # keep", "  # and more"],
+            ),
+        ];
+        for newline in ["\n", "\r\n", "\r"] {
+            for (name, before, after) in cases {
+                let source = dated_document(before, newline);
+                let written = saved_canonical(&source, true);
+                assert_eq!(written, dated_document(after, newline), "{name} {newline:?}");
+                assert_eq!(saved_canonical(&written, true), written, "{name} {newline:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn textual_save_date_rewrites_a_scalar_on_the_following_line() {
+        let cases: [(&[&str], &[&str]); 6] = [
+            (&["last_updated:", "  2026-01-01"], &["last_updated:", "  2026-09-28"]),
+            (
+                &["last_updated:", "    \"2026-01-01\""],
+                &["last_updated:", "    \"2026-09-28\""],
+            ),
+            (&["last_updated:", "  '2026-01-01'"], &["last_updated:", "  '2026-09-28'"]),
+            (&["last_updated:", "  ~"], &["last_updated:", "  2026-09-28"]),
+            (
+                &["last_updated: # todo", "  # why", "", "  2026-01-01  # was", "  # after"],
+                &["last_updated: # todo", "  # why", "", "  2026-09-28  # was", "  # after"],
+            ),
+            (
+                &["last_updated:", "  2026-01-01", "  # set this when the body changes"],
+                &["last_updated:", "  2026-09-28", "  # set this when the body changes"],
+            ),
+        ];
+        for newline in ["\n", "\r\n", "\r"] {
+            for (before, after) in cases {
+                let source = dated_document(before, newline);
+                assert_eq!(
+                    saved_canonical(&source, true),
+                    dated_document(after, newline),
+                    "{before:?} {newline:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn textual_save_refuses_unsupported_scalar_layouts_without_calling_them_collections() {
+        for date_lines in [
+            &["last_updated: |-", "  2026-01-01"][..],
+            &["last_updated: >", "  2026-01-01"],
+            &["last_updated:", "  |-", "    2026-01-01"],
+            &["last_updated: 2026-01", "  -01"],
+            &["last_updated:", "  2026-01", "  -01"],
+            &["last_updated: \"2026-01", "  -01\""],
+            &["last_updated: \"2026-01-01", "  # inside the quotes\""],
+        ] {
+            let source = dated_document(date_lines, "\n");
+            let reason = assert_refused_canonical(&source, true);
+            assert!(reason.contains("continued across lines"), "{date_lines:?}: {reason}");
+            assert!(!reason.contains("sequence or mapping"), "{date_lines:?}: {reason}");
+        }
+    }
+
+    #[test]
+    fn textual_save_still_refuses_a_collection_date() {
+        for date_lines in [
+            &["last_updated:", "  - 2026-01-01"][..],
+            &["last_updated:", "- 2026-01-01"],
+            &["last_updated:", "  # a comment first", "  - 2026-01-01"],
+            &["last_updated:", "  on: 2026-01-01"],
+            &["last_updated: [2026-01-01]"],
+            &["last_updated: {on: 2026-01-01}"],
+        ] {
+            let source = dated_document(date_lines, "\n");
+            let reason = assert_refused_canonical(&source, true);
+            assert!(reason.contains("sequence or mapping"), "{date_lines:?}: {reason}");
+        }
+    }
+
+    #[test]
+    fn textual_save_refuses_node_properties_on_a_following_line_date() {
+        for (date_lines, property) in [
+            (&["last_updated:", "  &lu 2026-01-01"][..], "anchor"),
+            (&["last_updated:", "  !!str 2026-01-01"], "tag"),
+        ] {
+            let reason = assert_refused_canonical(&dated_document(date_lines, "\n"), true);
+            assert!(reason.contains(property), "{date_lines:?}: {reason}");
+        }
+    }
+
+    #[test]
+    fn textual_save_without_bump_leaves_an_empty_date_with_indented_comment() {
+        let source = dated_document(&["last_updated:", "  # set this when the body changes"], "\r\n")
+            .replace("hash: aaaa000000000000-bbbb000000000000", "hash: old");
+        assert_eq!(
+            saved_canonical(&source, false),
+            dated_document(&["last_updated:", "  # set this when the body changes"], "\r\n")
+        );
+    }
+
+    /// A date spelling and its bumped spelling: two plain scalars holding a
+    /// quote as content, their quoted counterparts, and an ordinary control.
+    const QUOTE_SPELLINGS: [(&str, &str); 5] = [
+        ("yesterday's date", "2026-09-28"),
+        ("unknown \"date", "2026-09-28"),
+        ("'yesterday''s date'", "'2026-09-28'"),
+        ("\"unknown date\"", "\"2026-09-28\""),
+        ("ordinary", "2026-09-28"),
+    ];
+
+    #[test]
+    fn textual_save_date_keeps_the_comment_after_a_quote_inside_a_plain_scalar() {
+        for newline in ["\n", "\r\n", "\r"] {
+            for (authored, bumped) in QUOTE_SPELLINGS {
+                let layouts = [
+                    (
+                        vec![format!("last_updated: {authored}   # keep this explanation")],
+                        vec![format!("last_updated: {bumped}   # keep this explanation")],
+                    ),
+                    (
+                        vec![
+                            "last_updated:".to_string(),
+                            format!("  {authored}   # keep this explanation"),
+                        ],
+                        vec![
+                            "last_updated:".to_string(),
+                            format!("  {bumped}   # keep this explanation"),
+                        ],
+                    ),
+                ];
+                for (before, after) in &layouts {
+                    let before: Vec<&str> = before.iter().map(String::as_str).collect();
+                    let after: Vec<&str> = after.iter().map(String::as_str).collect();
+                    let source = dated_document(&before, newline);
+                    let written = saved_canonical(&source, true);
+                    assert_eq!(written, dated_document(&after, newline), "{before:?} {newline:?}");
+                    assert_eq!(saved_canonical(&written, true), written, "{before:?} {newline:?}");
+
+                    let unbumped = source
+                        .replace("hash: aaaa000000000000-bbbb000000000000", "hash: old");
+                    assert_eq!(
+                        saved_canonical(&unbumped, false),
+                        source,
+                        "no bump: {before:?} {newline:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn textual_save_and_restore_accept_a_quote_inside_a_plain_key() {
+        for newline in ["\n", "\r\n", "\r"] {
+            let source = joined(
+                &[
+                    "---",
+                    "author's note: it's \"fine\"   # keep",
+                    "say \"hi: there",
+                    "hash: old",
+                    "last_updated: yesterday's date   # keep this explanation",
+                    "---",
+                    "Body",
+                ],
+                newline,
+            );
+            let written = saved_canonical(&source, true);
+            let expected = source
+                .replace("hash: old", "hash: aaaa000000000000-bbbb000000000000")
+                .replace("yesterday's date", TODAY);
+            assert_eq!(written, expected, "{newline:?}");
+
+            let restored = restore_properties_text(&written, &source, &["hash", "author's note"])
+                .unwrap_or_else(|error| panic!("{newline:?}: {error}"));
+            assert_eq!(
+                restored.text,
+                source.replace("yesterday's date", TODAY),
+                "{newline:?}"
+            );
+            assert_eq!(restored.restored_properties, ["hash"], "{newline:?}");
+        }
+    }
+
+    /// A `:` inside a plain top-level key (`a:b: one`) is content: the key is
+    /// `a:b`, not `a`, so it neither duplicates `a` nor shadows `hash`.
+    #[test]
+    fn textual_save_and_restore_read_a_content_colon_as_part_of_a_plain_key() {
+        for newline in ["\n", "\r\n", "\r"] {
+            let source = joined(
+                &[
+                    "---",
+                    "a:b: one",
+                    "a: two",
+                    "a:'b: it's",
+                    "hash:x: keep",
+                    "hash: old",
+                    "last_updated:x: yesterday",
+                    "last_updated: yesterday",
+                    "---",
+                    "Body",
+                ],
+                newline,
+            );
+            let written = saved_canonical(&source, true);
+            let expected = source
+                .replace("hash: old", "hash: aaaa000000000000-bbbb000000000000")
+                .replace("last_updated: yesterday", &format!("last_updated: {TODAY}"));
+            assert_eq!(written, expected, "{newline:?}");
+
+            let restored =
+                restore_properties_text(&written, &source, &["hash", "a:b", "a:'b", "hash:x"])
+                    .unwrap_or_else(|error| panic!("{newline:?}: {error}"));
+            assert_eq!(
+                restored.text,
+                source.replace("last_updated: yesterday", &format!("last_updated: {TODAY}")),
+                "{newline:?}"
+            );
+            assert_eq!(restored.restored_properties, ["hash"], "{newline:?}");
         }
     }
 
@@ -2297,6 +2891,43 @@ mod leaf_tests {
     }
 
     #[test]
+    fn keys_and_values_holding_a_quote_inside_a_plain_scalar_are_located() {
+        // Nested leaves are not located under lone-CR line endings at all.
+        for newline in ["\n", "\r\n"] {
+            let document = [
+                "---",
+                "it's: v {{x}} # it's a note",
+                "meta:",
+                "  author's note: n {{x}}",
+                "  say \"hi: h {{x}}   # keep",
+                "  title: t {{x}}",
+                "list:",
+                "  - don't: d {{x}}",
+                "    other: o",
+                "flow: {'k''s': 'v {{x}}'}",
+                "---",
+                "Body",
+                "",
+            ]
+            .join(newline);
+            let replaced = replace_one(&document, vec![key("it's")]);
+            assert!(
+                replaced.contains(&format!("it's: {TOKEN} # it's a note{newline}")),
+                "{replaced:?}"
+            );
+            replace_one(&document, vec![key("meta"), key("author's note")]);
+            let replaced = replace_one(&document, vec![key("meta"), key("say \"hi")]);
+            assert!(
+                replaced.contains(&format!("say \"hi: {TOKEN}   # keep{newline}")),
+                "{replaced:?}"
+            );
+            replace_one(&document, vec![key("meta"), key("title")]);
+            replace_one(&document, vec![key("list"), Index(0), key("don't")]);
+            replace_one(&document, vec![key("flow"), key("k's")]);
+        }
+    }
+
+    #[test]
     fn nested_maps_sequences_and_block_scalars_are_located() {
         let document = "---\nouter:\n  inner:\n    deep: v {{x}}\nlist:\n  - one\n  - name: n {{x}}\n    other: o\nblock: |-\n  line one {{x}}\n  line two\nlast: >\n  folded {{x}}\n---\n";
         replace_one(document, vec![key("outer"), key("inner"), key("deep")]);
@@ -2336,6 +2967,150 @@ mod leaf_tests {
             reason(document, vec![key("p"), Index(1)]),
             UnlocatedLeafReason::UnsupportedShape
         );
+    }
+
+    #[test]
+    fn quoted_flow_targets_are_located_beside_plain_scalars_holding_a_quote() {
+        let rows: &[(&str, &str, Vec<FrontmatterPathSegment>)] = &[
+            // Controls: ordinary plain siblings and genuinely quoted spellings.
+            ("[ordinary, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("['don''t', '{{x}}']", "'{{x}}'", vec![Index(1)]),
+            ("{ordinary: '{{x}}'}", "'{{x}}'", vec![key("ordinary")]),
+            ("{'don''t': \"{{x}}\"}", "\"{{x}}\"", vec![key("don't")]),
+            // An internal apostrophe or double quote in a plain sibling or key.
+            ("[don't, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("[say \"hi, '{{x}}']", "'{{x}}'", vec![Index(1)]),
+            ("[don't, can't, \"{{x}}\"]", "\"{{x}}\"", vec![Index(2)]),
+            ("{don't: \"{{x}}\"}", "\"{{x}}\"", vec![key("don't")]),
+            ("{say \"hi: '{{x}}'}", "'{{x}}'", vec![key("say \"hi")]),
+            ("{a: don't, b: \"{{x}}\"}", "\"{{x}}\"", vec![key("b")]),
+            ("{a: say \"hi, b: '{{x}}'}", "'{{x}}'", vec![key("b")]),
+            // Nested collections.
+            ("{list: [don't, \"{{x}}\"], z: 1}", "\"{{x}}\"", vec![key("list"), Index(1)]),
+            ("{list: [don't, can't, '{{x}}']}", "'{{x}}'", vec![key("list"), Index(2)]),
+            ("[{k: don't}, {k: '{{x}}'}]", "'{{x}}'", vec![Index(1), key("k")]),
+            ("[don't, {can't: \"{{x}}\"}]", "\"{{x}}\"", vec![Index(1), key("can't")]),
+        ];
+        for newline in ["\n", "\r\n"] {
+            for (flow, target, inner) in rows {
+                let document =
+                    ["---", "prompt: test", &format!("q: {flow}"), "after: z", "---", "Body", ""]
+                        .join(newline);
+                let mut path = vec![key("q")];
+                path.extend(inner.iter().cloned());
+                let spans = locate_frontmatter_leaves(&document, std::slice::from_ref(&path))
+                    .unwrap_or_else(|error| panic!("{flow:?} {newline:?}: {error:?}"));
+                let start = document.find(target).unwrap();
+                assert_eq!(spans[0].range, start..start + target.len(), "{flow:?} {newline:?}");
+                assert_eq!(spans[0].decoded, "{{x}}", "{flow:?}");
+                replace_one(&document, path);
+            }
+        }
+    }
+
+    /// A `:` inside a plain scalar (`a:'b`) is content, so the quote after it
+    /// is content too; the quoted target beside it is still located exactly.
+    #[test]
+    fn quoted_flow_targets_are_located_beside_content_colons() {
+        let rows: &[(&str, &str, Vec<FrontmatterPathSegment>)] = &[
+            // Controls: ordinary and `don't` siblings, genuinely quoted
+            // colons, and adjacent JSON-like keys.
+            ("[ordinary, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("[don't, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("['a:''b', \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("[\"a:b\", '{{x}}']", "'{{x}}'", vec![Index(1)]),
+            ("{\"a\":b, c: '{{x}}'}", "'{{x}}'", vec![key("c")]),
+            ("{\"k\":'{{x}}'}", "'{{x}}'", vec![key("k")]),
+            ("[http://x, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("{url: http://x:8080, v: '{{x}}'}", "'{{x}}'", vec![key("v")]),
+            // Both quote spellings after a content colon.
+            ("[a:'b, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("[a:\"b, '{{x}}']", "'{{x}}'", vec![Index(1)]),
+            ("[a:'b, c:'d, \"{{x}}\"]", "\"{{x}}\"", vec![Index(2)]),
+            ("[a:\"b, c:\"d, '{{x}}']", "'{{x}}'", vec![Index(2)]),
+            // Plain keys and mapping values.
+            ("{a:'b: \"{{x}}\"}", "\"{{x}}\"", vec![key("a:'b")]),
+            ("{a:\"b: '{{x}}'}", "'{{x}}'", vec![key("a:\"b")]),
+            ("{a: a:'b, b: \"{{x}}\"}", "\"{{x}}\"", vec![key("b")]),
+            ("{a: a:\"b, b: '{{x}}'}", "'{{x}}'", vec![key("b")]),
+            // Nested collections.
+            ("{list: [a:'b, \"{{x}}\"]}", "\"{{x}}\"", vec![key("list"), Index(1)]),
+            ("{list: [a:\"b, c:\"d, '{{x}}'], z: 1}", "'{{x}}'", vec![key("list"), Index(2)]),
+            ("[{k: a:'b}, {k: '{{x}}'}]", "'{{x}}'", vec![Index(1), key("k")]),
+            ("[a:'b, {c:'d: \"{{x}}\"}]", "\"{{x}}\"", vec![Index(1), key("c:'d")]),
+        ];
+        for newline in ["\n", "\r\n"] {
+            for (flow, target, inner) in rows {
+                // The top-level key also holds a content colon and a quote.
+                for top in ["q", "a:'q"] {
+                    let document = [
+                        "---",
+                        "prompt: test",
+                        &format!("{top}: {flow}"),
+                        "after: z",
+                        "---",
+                        "Body",
+                        "",
+                    ]
+                    .join(newline);
+                    let mut path = vec![key(top)];
+                    path.extend(inner.iter().cloned());
+                    let spans = locate_frontmatter_leaves(&document, std::slice::from_ref(&path))
+                        .unwrap_or_else(|error| panic!("{document:?}: {error:?}"));
+                    let start = document.find(target).unwrap();
+                    assert_eq!(spans[0].range, start..start + target.len(), "{document:?}");
+                    assert_eq!(spans[0].decoded, "{{x}}", "{document:?}");
+                    let replaced = replace_one(&document, path);
+                    assert_eq!(
+                        replaced,
+                        format!("{}{TOKEN}{}", &document[..start], &document[start + target.len()..]),
+                        "{document:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A parenthesis is plain-scalar content in YAML, so it never hides the
+    /// `,` before a quoted target, even when a later entry closes it.
+    #[test]
+    fn quoted_flow_targets_are_located_beside_parentheses() {
+        let rows: &[(&str, &str, Vec<FrontmatterPathSegment>)] = &[
+            // Controls: parentheses inside quotes and balanced in one entry.
+            ("['a(b', \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("[\"a(b, c)d\", '{{x}}']", "'{{x}}'", vec![Index(1)]),
+            ("[a(b)c, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            // Unbalanced and cross-entry balanced parentheses.
+            ("[a(b, \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+            ("[a)b, '{{x}}']", "'{{x}}'", vec![Index(1)]),
+            ("[a(b, c)d, \"{{x}}\"]", "\"{{x}}\"", vec![Index(2)]),
+            ("{a: a(b, b: \"{{x}}\"}", "\"{{x}}\"", vec![key("b")]),
+            ("{a(b: x, c)d: '{{x}}'}", "'{{x}}'", vec![key("c)d")]),
+            // Nested collections.
+            ("{list: [a(b, \"{{x}}\"]}", "\"{{x}}\"", vec![key("list"), Index(1)]),
+            ("[{k: a(b}, {k: c)d}, '{{x}}']", "'{{x}}'", vec![Index(2)]),
+            ("[[a(b, c)d], \"{{x}}\"]", "\"{{x}}\"", vec![Index(1)]),
+        ];
+        for newline in ["\n", "\r\n"] {
+            for (flow, target, inner) in rows {
+                let document =
+                    ["---", "prompt: test", &format!("q: {flow}"), "after: z", "---", "Body", ""]
+                        .join(newline);
+                let mut path = vec![key("q")];
+                path.extend(inner.iter().cloned());
+                let spans = locate_frontmatter_leaves(&document, std::slice::from_ref(&path))
+                    .unwrap_or_else(|error| panic!("{document:?}: {error:?}"));
+                let start = document.find(target).unwrap();
+                assert_eq!(spans[0].range, start..start + target.len(), "{document:?}");
+                assert_eq!(spans[0].decoded, "{{x}}", "{document:?}");
+                let replaced = replace_one(&document, path);
+                assert_eq!(
+                    replaced,
+                    format!("{}{TOKEN}{}", &document[..start], &document[start + target.len()..]),
+                    "{document:?}"
+                );
+            }
+        }
     }
 
     #[test]
