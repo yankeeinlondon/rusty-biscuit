@@ -201,7 +201,8 @@ Steps:
      nothing is stamped or written.
    - **Repair.** A top-level key the agent added or changed whose value is a
      single-line plain scalar that YAML would misread is wrapped in double
-     quotes, keeping its whole text: `title: Fix: colons` becomes
+     quotes, keeping its whole text (comment or blank lines under the key do
+     not make the value multi-line): `title: Fix: colons` becomes
      `title: "Fix: colons"`, and `note: see issue #42` becomes
      `note: "see issue #42"` (the `#` is text, not a comment). A value that
      contains `: ` or ` #`, ends with `:`, or starts with a reserved indicator
@@ -226,7 +227,12 @@ Steps:
      touched; this is never an error. Every other frontmatter byte the agent
      wrote is the deliverable and is kept — the 2026-09-01 drift-restoration
      semantics are inverted, because on-disk changes are now the product of the
-     run rather than interference with it.
+     run rather than interference with it. A restoration that would change
+     the value of any other property is refused with
+     `CompositionError::InlineArtifactEditFailed` and nothing is written: for
+     example, when the agent anchored `hash: &h …` and added `mirror: *h`,
+     restoring the original `hash` line would silently re-point `mirror` at an
+     earlier `&h` declaration.
    - **Encode.** Every string value the agent added or changed (compared by
      value, so reformatting does not count; inside a new list or mapping, every
      string) that contains `{{` or `$(` is replaced in place by a Darkmatter
@@ -371,8 +377,16 @@ that persists the body.
 - **Unwritable `last_updated`** — if `last_updated` carries a YAML anchor
   (`&name`), alias (`*name`), or tag (`!tag`), or holds a list or mapping, the
   date cannot be stamped without changing other values, so the closure fails
-  the same way and writes nothing. The same happens if the edited frontmatter
-  would no longer parse.
+  the same way and writes nothing. A single value that cannot be rewritten on
+  one line, a block scalar (`|`, `>`) or a plain or quoted value continued
+  across lines, is refused the same way. An ordinary date is stamped whether
+  it follows the key or sits alone on the line below it, and comment or blank
+  lines under it, such as an indented `# set on save`, are kept byte for
+  byte. The same happens if the edited frontmatter
+  would no longer parse, or if replacing the `hash` node would change the
+  value of any other property (an alias to an anchor declared on the hash,
+  where an earlier declaration reuses the same anchor name, would otherwise
+  resolve to that earlier value).
 
 This behavior is implemented by [`reconcile_inline_artifact`] in the closure
 module, using `inline_hash_options`, `plan_hash_save`,
