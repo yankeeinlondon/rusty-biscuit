@@ -210,7 +210,7 @@ mod tests {
             live_frontmatter: &live,
             inline_guard: Some(plan),
             prior_body_change,
-            today: "2026-09-06",
+            now: "2026-09-06T12:00:00Z".parse().unwrap(),
         })
         .expect("reconciliation should not fail");
         if let Some(artifact) = outcome.artifact.as_deref() {

@@ -8,11 +8,12 @@
 //! frontmatter the agent changed, restores the three owned properties, and
 //! anchors the body-change verdict.
 
+use chrono::{DateTime, Utc};
 use darkmatter::markdown::hash::{
-    FrontmatterDelta, FrontmatterDeltaEntry, MdHashKind, MdHashOptions, StoredHash,
-    apply_hash_save_text, restore_properties_text,
+    Change, FrontmatterDelta, FrontmatterDeltaEntry, MdHashKind, MdHashOptions,
+    restore_properties_text,
 };
-use darkmatter::markdown::{Markdown, MarkdownResult, extract_frontmatter_block};
+use darkmatter::markdown::{Markdown, extract_frontmatter_block};
 
 use crate::composition::error::CompositionError;
 use crate::composition::types::InlineClosurePlan;
@@ -99,9 +100,9 @@ pub enum InlineReconciliation {
 /// parsed, and [`CompositionError::AtomicWriteFailed`] when the write fails.
 pub fn reconcile_inline_artifact(
     plan: &InlineClosurePlan,
-    today: &str,
+    now: DateTime<Utc>,
 ) -> Result<InlineReconciliation, CompositionError> {
-    reconcile_inline_artifact_with_evidence(plan, today, false)
+    reconcile_inline_artifact_with_evidence(plan, now, false)
 }
 
 /// [`reconcile_inline_artifact`], with the operation's accumulated body-change
@@ -119,7 +120,7 @@ pub fn reconcile_inline_artifact(
 /// Identical to [`reconcile_inline_artifact`].
 pub fn reconcile_inline_artifact_with_evidence(
     plan: &InlineClosurePlan,
-    today: &str,
+    now: DateTime<Utc>,
     prior_body_change: bool,
 ) -> Result<InlineReconciliation, CompositionError> {
     let path = plan.document_path.as_path();
@@ -170,16 +171,12 @@ pub fn reconcile_inline_artifact_with_evidence(
 
     let opts = inline_hash_options();
     let md: Markdown = encoded.clone().into();
-    let stored =
-        parse_inline_stored_hash(&md, &opts).map_err(CompositionError::InlineHashMalformed)?;
-    let mut decision = md
-        .plan_hash_save(stored.as_ref(), &opts)
-        .map_err(CompositionError::InlineHashMalformed)?;
-    // Hash-save treats a missing stored hash as baseline creation, but every
-    // accepted inline closure is a known body mutation and must date it.
-    decision.bump_last_updated = true;
-    let text = apply_hash_save_text(&encoded, &decision, &opts, today)
+    // Every accepted inline closure is a known body mutation, so it dates the
+    // baseline even when the document had no stored hash yet.
+    let text = md
+        .stamp_baseline(&encoded, &opts, now, Change::Known)
         .map_err(CompositionError::InlineHashMalformed)?
+        .text
         .unwrap_or(encoded);
 
     crate::config::atomic::atomic_write(path, text.as_bytes()).map_err(|source| {
@@ -289,21 +286,6 @@ fn replace_body(document: &str, body: &str) -> Result<String, CompositionError> 
 fn non_strict_body_hash(document: &str) -> u64 {
     let md: Markdown = document.to_string().into();
     md.hash_body(false)
-}
-
-/// Parses the document's stored `hash` property, or returns `None` when it is
-/// absent or null.
-///
-/// Mirrors the CLI pattern in `darkmatter/cli/src/commands/hash.rs` so
-/// inline-compose shares the same stored-hash contract as `md hash --save`.
-fn parse_inline_stored_hash(
-    md: &Markdown,
-    opts: &MdHashOptions,
-) -> MarkdownResult<Option<StoredHash>> {
-    match md.frontmatter().as_map().get(opts.property.as_str()) {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(value) => StoredHash::parse(value, &opts.property).map(Some),
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -2271,7 +2271,6 @@ fn classify_attempt_phase(
                     .expect("live frontmatter mutex poisoned by a panicking lifecycle action")
                     .clone(),
             );
-            let today = darkmatter::markdown::hash::last_updated_stamp(chrono::Utc::now());
             let completed = claudine::composition::complete_active_document(
                 claudine::composition::CompletionContext {
                     mode,
@@ -2282,7 +2281,7 @@ fn classify_attempt_phase(
                     prior_body_change: inline
                         .as_ref()
                         .is_some_and(|operation| operation.body_changed),
-                    today: &today,
+                    now: chrono::Utc::now(),
                 },
             );
             match completed {

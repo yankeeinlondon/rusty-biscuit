@@ -370,8 +370,9 @@ that persists the body.
   before any write occurs, leaving the file on disk untouched.
 
 This behavior is implemented by [`reconcile_inline_artifact`] in the closure
-module, using `inline_hash_options`, `plan_hash_save`,
-`restore_properties_text`, and `apply_hash_save_text`.
+module, using `inline_hash_options`, `restore_properties_text`, and Darkmatter's
+`Markdown::stamp_baseline` with `Change::Known`, which parses the stored hash,
+plans the save, and writes `hash` and the UTC `last_updated` in one step.
 
 [`reconcile_inline_artifact`]: ../../lib/src/composition/closure.rs
 
