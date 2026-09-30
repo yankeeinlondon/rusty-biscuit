@@ -46,9 +46,9 @@ sanity:
 test *args="":
     @just _test_all "content-policy --all-features; content-policy-cli" {{args}}
 
-# not applicable: content-policy has no real-terminal (Level-2) tests
-test-l2:
-    @echo "test-l2: not applicable for content-policy"
+# Level-2 real-terminal tests: the styled `policy check` and `policy renew` tables in tmux.
+test-l2 *args="":
+    @just _test_l2 content-policy-cli {{args}}
 
 # not applicable: content-policy has no OS-keyboard-injection (Level-3) tests
 test-l3:

@@ -131,9 +131,9 @@ enforces this and runs inside `just lint`. Biscuit File is used with
 `md hash --save` and Claudine's `inline-compose` write-back stamp
 `last_updated` with the UTC date via `darkmatter::markdown::hash::last_updated_stamp`,
 which renews every `@last_updated` rule. Darkmatter's effects auto-rehash
-computes the stamp but does not write it today. Only `policy renew` also
-updates inline dates and fingerprints. New writers must use the same helper
-with an injected `DateTime<Utc>`, never `Local::now()`.
+writes it too. Only `policy renew` also updates inline dates and fingerprints.
+New writers must call `Markdown::stamp_baseline` with an injected
+`DateTime<Utc>`, never `Local::now()`.
 
 ## CLI
 
@@ -164,13 +164,21 @@ in `darkmatter/lib/tests/l1/content_policy_editor_schema.rs`.
 | Recipe | Does |
 | --- | --- |
 | `just test` | L1 for `content-policy --all-features` and `content-policy-cli` |
+| `just test-l2` | the styled `policy check` / `policy renew` tables in a real tmux pane |
 | `just lint` | clippy for both crates, then `deps-check` |
 | `just deps-check` | the dependency rule above |
 | `just doctest` | library doc tests |
 | `just install` | installs `policy` |
 
-There are no L2/L3/browser/real tiers; those recipes are "not applicable"
-stubs, so never give a test a tier-marker name here. Test binaries use
+The only real-terminal tests are `cli/tests/level2_terminal_tables.rs` (tmux,
+80 columns, one owned session per test). They assert what the pane shows: every
+table row keeps its right border, each row is as wide in display cells as the
+top border (`unicode-width`, so double-width characters count twice), a long
+`FileChanged` rule and fingerprint rejoin after wrapping, and the status word
+carries its SGR color. `--plain`, `--json`, and `--needs-action` stay Level 1.
+Run them only through `just test-l2`. There are no L3/browser/real tiers; those
+recipes are "not applicable" stubs, so never give a test their tier-marker
+name here. Test binaries use
 per-file discovery; shared helpers are `tests/common/` and the scripted file
 provider is `lib/tests/fake/`. Keep large `include_bytes!` fixtures out of
 `common/`, because every binary that declares it is then scheduled by them.

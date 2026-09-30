@@ -19,3 +19,14 @@ clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
 serde_json = "1.0"
 tempfile = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }
+unicode-width = "0.2"
+
+# CI policy: the Level-2 tests render the styled tables in a tmux pane.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]
+# The L2 tier spawns one shared terminal pane through the harness broker.
+# It is a compile-time binary of another package, so the producer builds it
+# as a sidecar; an archive consumer has no Cargo to build one with.
+sidecars = ["backend-proof", "harness-broker"]

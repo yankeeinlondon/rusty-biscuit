@@ -2601,6 +2601,8 @@ dependencies = [
  "content-policy",
  "serde_json",
  "tempfile",
+ "test-toolkit",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
