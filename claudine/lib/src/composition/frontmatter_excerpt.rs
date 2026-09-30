@@ -30,6 +30,7 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::dsl::CodeBlockMeta;
+use darkmatter::markdown::schemas::mapping_separator;
 
 /// Lines of context shown above and below each focused line (ruling D2; there
 /// is deliberately no configuration surface).
@@ -460,9 +461,9 @@ fn value_line_offset(block: &str, property_line: usize, span_start: usize) -> us
     // Reconstruct the value text exactly as the schema lexer saw it: the inline
     // remainder after `key:`, then each deeper-indented continuation line joined
     // by the `\n` the lexer's span counts against.
-    let inline = lines[key_idx]
-        .split_once(':')
-        .map_or("", |(_, rest)| rest.trim_start());
+    let key_line = lines[key_idx];
+    let inline = mapping_separator(key_line, false)
+        .map_or("", |colon| key_line[colon + 1..].trim_start());
     let mut value = String::from(inline);
     for line in &lines[key_idx + 1..] {
         if is_blank_or_comment(line) {
@@ -497,14 +498,14 @@ fn is_blank_or_comment(line: &str) -> bool {
 }
 
 /// Extract the mapping key from a `key: value` line, or `None` when the line is
-/// not a plain mapping entry (e.g. a list item or a bare scalar).
+/// not a plain mapping entry (e.g. a list item or a bare scalar). A `:` inside
+/// the key (`a:b: value`, `'x: y': value`) stays part of it.
 fn key_name(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
     if trimmed.starts_with('-') {
         return None;
     }
-    let (key, _) = trimmed.split_once(':')?;
-    let key = key.trim();
+    let key = trimmed[..mapping_separator(trimmed, false)?].trim();
     Some(key.trim_matches(|c| c == '"' || c == '\''))
 }
 

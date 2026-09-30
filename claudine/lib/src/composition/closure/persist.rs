@@ -365,7 +365,7 @@ fn top_level_nodes(yaml: &str) -> Vec<TopNode> {
         if !top_level {
             if let Some(node) = nodes.last_mut()
                 && !line.trim().is_empty()
-                && !line.starts_with('#')
+                && !is_comment_line(line, &yaml[node.value.clone()])
             {
                 node.single_line = false;
                 node.text.push('\n');
@@ -391,7 +391,16 @@ fn top_level_nodes(yaml: &str) -> Vec<TopNode> {
     nodes
 }
 
-/// The first `:` outside quotes that is followed by a space or ends the line.
+/// Whether `line`, below a node whose key line holds `value`, is a comment
+/// rather than part of that value. An indented `#` line is content only when
+/// the value opens a quoted or block scalar, which may continue onto it.
+fn is_comment_line(line: &str, value: &str) -> bool {
+    line.starts_with('#')
+        || (line.trim_start().starts_with('#') && !value.starts_with(['"', '\'', '|', '>']))
+}
+
+/// The first `:` outside a quoted key that is followed by a space or ends the
+/// line; any other `:` is content of a plain key (`a:b: c`).
 fn mapping_colon(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
     let mut quote = None;
@@ -400,6 +409,7 @@ fn mapping_colon(line: &str) -> Option<usize> {
         let byte = bytes[index];
         match (quote, byte) {
             (Some(b'"'), b'\\') => index += 1,
+            (Some(b'\''), b'\'') if bytes.get(index + 1) == Some(&b'\'') => index += 1,
             (Some(active), current) if active == current => quote = None,
             (None, b'"' | b'\'') if index == 0 => quote = Some(byte),
             (None, b':') if matches!(bytes.get(index + 1), None | Some(b' ' | b'\t')) => {

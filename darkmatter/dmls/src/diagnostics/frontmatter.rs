@@ -16,7 +16,8 @@ use darkmatter::markdown::schemas::format::is_pending_expression_value;
 use darkmatter::markdown::schemas::{
     PositionMap, SchemaError, SchemaOriginKind, SuggestionLintProblem, SuggestionLintReason,
     ValidationOptions, ValidationProblem, ValidationProblemCode, ValidationReport,
-    SchemaValueKind, SchemaValueNode, classify_schema_reference, locate_schema_value,
+    SchemaValueKind, SchemaValueNode, classify_schema_reference, flow_collection_end,
+    locate_schema_value,
     parse_property_definition, parse_schema_declaration, parse_yaml_schema,
 };
 use darkmatter::style::{self, StyleWarningKind};
@@ -501,41 +502,8 @@ fn nested_property_value_span(
 }
 
 fn complete_flow_value_span(text: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
-    let Some(open) = text.as_bytes().get(span.start).copied() else {
-        return span;
-    };
-    let close = match open {
-        b'[' => b']',
-        b'{' => b'}',
-        _ => return span,
-    };
-    let mut depth = 0usize;
-    let mut quote = None;
-    let mut escaped = false;
-    for (relative, byte) in text.as_bytes()[span.start..].iter().copied().enumerate() {
-        if let Some(active) = quote {
-            if active == b'"' && byte == b'\\' && !escaped {
-                escaped = true;
-                continue;
-            }
-            if byte == active && !escaped {
-                quote = None;
-            }
-            escaped = false;
-            continue;
-        }
-        if matches!(byte, b'\'' | b'"') {
-            quote = Some(byte);
-        } else if byte == open {
-            depth += 1;
-        } else if byte == close {
-            depth -= 1;
-            if depth == 0 {
-                return span.start..span.start + relative + 1;
-            }
-        }
-    }
-    span
+    let start = span.start;
+    flow_collection_end(text, start).map_or(span, |end| start..end + 1)
 }
 
 fn source_column(text: &str, offset: usize) -> usize {
@@ -1967,6 +1935,104 @@ mod tests {
                 let expected = if last_type == "expression" { vec![definition_line] } else { Vec::new() };
                 assert_eq!(lines, expected, "malformed warnings with `last: {last_type}` ({terms} terms)");
                 assert_eq!(parses, 1, "expression parses with `last: {last_type}` ({terms} terms)");
+            }
+        }
+    }
+
+    /// A quote after a content colon (`a:'b`) is plain-scalar content, so it
+    /// does not hide the collection's closing delimiter.
+    #[test]
+    fn a_flow_value_span_completes_past_a_quote_after_a_content_colon() {
+        for value in [
+            // Controls: genuinely quoted colons, adjacent JSON-like keys, and
+            // a colon-bearing plain scalar without a quote.
+            "['a:''b', \"v\"]",
+            "{\"a\":b, c: 'v'}",
+            "[http://x, 'v']",
+            // One unmatched internal quote in a sequence, mapping value, or key.
+            "[a:'b, \"v\"]",
+            "[a:\"b, 'v']",
+            "{a: a:'b, b: \"v\"}",
+            "{a: a:\"b, b: 'v'}",
+            "{a:'b: \"v\"}",
+            "{a:\"b: 'v'}",
+            "{list: [a:'b, \"v\"]}",
+            // Balanced spellings.
+            "[a:'b, c:'d, \"v\"]",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!("k: {value}{newline}next: [x]{newline}");
+                assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
+            }
+        }
+    }
+
+    /// Parentheses are plain-scalar content; the collection reader nests
+    /// only `[`/`{`, so the span still reaches the collection's close.
+    #[test]
+    fn a_flow_value_span_completes_past_parentheses() {
+        for value in [
+            "['a(b', \"v\"]",
+            "[a(b, \"v\"]",
+            "[a)b, \"v\"]",
+            "[a(b, c)d, \"v\"]",
+            "{a: a(b, b: \"v\"}",
+            "{list: [a(b, \"v\"]}",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!("k: {value}{newline}next: [x]{newline}");
+                assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
+            }
+        }
+    }
+
+    /// The published diagnostic covers the whole authored collection.
+    #[test]
+    fn a_diagnostic_range_covers_a_collection_holding_a_content_colon() {
+        for value in ["[a:'b, 42]", "[a:\"b, 42]", "['a:''b', 42]"] {
+            for newline in ["\n", "\r\n"] {
+                let text = [
+                    "---",
+                    "$schema:",
+                    "  declaration: schema",
+                    &format!("declaration: {value}"),
+                    "---",
+                    "",
+                    "body",
+                    "",
+                ]
+                .join(newline);
+                let start = text.find(value).unwrap();
+                let source_map = SourceMap::new(
+                    "file:///w/doc.md".parse().unwrap(),
+                    1,
+                    PositionEncoding::Utf16,
+                    Arc::from(text.as_str()),
+                );
+                let expected = source_map.byte_range_to_lsp(start..start + value.len()).unwrap();
+                diagnostics_for(&text, |diagnostics| {
+                    let ranges: Vec<_> = diagnostics
+                        .iter()
+                        .filter(|diagnostic| code_of(diagnostic) == Some(code::SCHEMA_INVALID_SHAPE))
+                        .map(|diagnostic| diagnostic.range)
+                        .collect();
+                    assert_eq!(ranges, [expected], "{text:?}: {diagnostics:#?}");
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn a_flow_value_span_completes_past_a_quote_inside_a_plain_scalar() {
+        for value in [
+            "[ordinary, \"v\"]",
+            "[don't, \"v\"]",
+            "{a: say \"hi, b: 'v'}",
+            "[\"a]\", 'b'']', [don't]]",
+        ] {
+            for newline in ["\n", "\r\n"] {
+                let text = format!("k: {value}{newline}next: [x]{newline}");
+                assert_eq!(complete_flow_value_span(&text, 3..4), 3..3 + value.len(), "{text:?}");
             }
         }
     }

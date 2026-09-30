@@ -672,7 +672,7 @@ Rejected: `display name`, `@type`, `x.custom`, `"x-custom"`. There is no quoted-
 
 ### Descriptions
 
-Each property inside `{ ... }` may carry a `-> description` suffix that follows the same four syntax forms as top-level properties. Inside an inline object, **descriptions terminate at the next top-level comma or closing brace** at the current nesting level. Commas inside an inline property description are not supported by this feature — keep descriptions comma-free inside `{ ... }`. Top-level descriptions (outside any inline object) still consume the rest of the scalar string after `->` exactly as before.
+Each property inside `{ ... }` may carry a `-> description` suffix that follows the same four syntax forms as top-level properties. Inside an inline object, **descriptions terminate at the next top-level comma or closing brace** at the current nesting level. Commas inside an inline property description are not supported by this feature — keep descriptions comma-free inside `{ ... }`. A description is plain prose: quotes and square brackets in it mean nothing, so `{ a: string -> (it's fine), b: number }` and `{ a: string -> plain [x, b: number }` both end `a`'s description at the comma before `b`. Top-level descriptions (outside any inline object) still consume the rest of the scalar string after `->` exactly as before.
 
 ### Postfix Constraints
 
@@ -758,6 +758,8 @@ Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? '@' fileref`. Postfix
 - `Name[]@file` — an array of the inlined `Name`.
 - `Name(constraints)@file` — the inlined type with `constraints` applied to it.
 - `@this` — the current schema file (self-target), including inline top-level documents.
+
+The file reference is read as written up to the next `->`, `,`, or `}`, whichever comes first. No other punctuation in it has meaning, so `Name@./a(b.yaml` names the file `./a(b.yaml`, and `Name@./a{b.yaml -> the shared shape` names `./a{b.yaml` and describes it. Inside a YAML flow sequence, quote an arm whose filename contains `[` or `{`, because YAML ends a plain flow scalar there: `['Name@./a{b.yaml', string]`.
 
 Rules:
 

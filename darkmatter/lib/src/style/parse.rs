@@ -347,7 +347,7 @@ pub fn build_yaml_position_map(yaml: &str) -> indexmap::IndexMap<String, StyleSp
         if content.is_empty() || content.starts_with('#') || content.starts_with('-') {
             continue;
         }
-        let Some(colon) = content.find(':') else {
+        let Some(colon) = crate::markdown::schemas::mapping_separator(content, false) else {
             continue;
         };
         let raw_key = content[..colon].trim();
@@ -1106,6 +1106,17 @@ mod tests {
         assert!(map.contains_key("key"));
         // Sequence items are not mapping keys.
         assert!(!map.keys().any(|k| k.contains("one") || k.contains("two")));
+    }
+
+    /// A `:` inside a plain or quoted key is part of the key, so its children
+    /// nest under the whole key.
+    #[test]
+    fn position_map_keeps_a_colon_inside_a_key() {
+        let yaml = "style:\n  a:b:\n    color: red\n  'x: y': 1\nurl:x\n";
+        let map = build_yaml_position_map(yaml);
+        assert_eq!(map.get("style.a:b.color"), Some(&StyleSpan { line: 3, column: 5, length: 5 }));
+        assert_eq!(map.get("style.x: y").map(|span| span.line), Some(4));
+        assert!(!map.contains_key("style.a") && !map.contains_key("url"));
     }
 
     #[test]
