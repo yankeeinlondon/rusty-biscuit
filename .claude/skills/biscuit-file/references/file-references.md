@@ -82,7 +82,9 @@ let target = FileReference::new("prompts/next.md")?
 `FileResolutionContext::new(base_dir)` snapshots the process environment and
 cross-platform home once. Supply a validated repository scope catalog,
 and override the snapshot with `with_env()`, `with_home_dir()`, or
-`without_home_dir()` when the caller has authoritative values. Context-owned
+`without_home_dir()` when the caller has authoritative values. `with_env()`
+replaces the whole environment (it does not merge); non-Unicode variables are
+never captured. Context-owned
 `add_magic_path()` and `add_vault()` configure the roots used by explicit APIs.
 
 Use `for_source(source)` for each in-repository nested file-backed document. It
@@ -216,6 +218,7 @@ not otherwise support.
 
 ```text
 InvalidSyntax(String)
+ForeignAbsolutePath { path }
 MissingEnvironmentVariable { name }
 CurrentDirectory(io::Error)
 Git(Box<gix::discover::Error>)
@@ -234,6 +237,9 @@ InvalidUrl(String)                    # with `url`
 
 `InvalidSyntax` also covers rooted magic payloads and interpolation-injected
 sigils.
+`ForeignAbsolutePath` rejects an absolute path (authored or interpolated) that
+is not absolute on the resolving host (`C:\x` on POSIX, `/x` on Windows);
+nothing is translated between operating systems.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
 request base and normal derived authoring bases. `RemoteNotLocal`
 means a URL reached a local path API; use the `url`-gated `resolve_target()`

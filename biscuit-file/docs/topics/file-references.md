@@ -164,7 +164,12 @@ let path = FileReference::new("README.md")?.resolve()?;
 
 The path is used exactly as written — one candidate, no search. POSIX
 (`/etc/hosts`), Windows drive (`C:\cfg.toml`), and UNC paths are all
-recognized.
+recognized on every host, but only resolve on a host where they are absolute.
+Nothing is translated between operating systems: resolving `C:\cfg.toml` on
+macOS or Linux, or `/etc/hosts` on Windows (where it names no drive), fails
+with `ForeignAbsolutePath` rather than being probed against the process's
+working directory or current drive. The same check applies when interpolation
+produces the absolute path.
 
 ```rust,no_run
 use biscuit_file::FileReference;
@@ -458,7 +463,13 @@ assert_eq!(nested.base_dir(), repo_root.join("includes"));
 ```
 
 `FileResolutionContext::new(base_dir)` captures the process environment and
-the cross-platform home directory once. Everything trusted — the repository
+the cross-platform home directory once. Variables whose name or value is not
+valid Unicode are left out of the snapshot, so a reference naming one fails
+with `MissingEnvironmentVariable`. `with_env(map)` **replaces** that snapshot
+rather than adding to it — after
+`.with_env(HashMap::from([("APP".into(), "x".into())]))`, `{{HOME}}` is
+missing. To add variables while keeping the captured ones, extend a copy of
+`ctx.env()` and pass that. Everything trusted — the repository
 scope catalog plus magic and vault roots — is *supplied by you*; `biscuit-file`
 deliberately leaves that discovery to the caller so the context is a pure
 data snapshot. The base should be an absolute directory.
@@ -688,6 +699,7 @@ The complete `FileReferenceError` vocabulary:
 | Variant | Trigger |
 |---------|---------|
 | `InvalidSyntax(message)` | Empty/malformed syntax, a rooted magic payload, invalid interpolation, or an injected grammar sigil |
+| `ForeignAbsolutePath { path }` | An absolute path (authored or interpolated) is not absolute on this host — a drive or UNC path on macOS/Linux, a `/` path on Windows |
 | `MissingEnvironmentVariable { name }` | `{{NAME}}` is absent from the selected environment snapshot |
 | `CurrentDirectory(source)` | An ambient operation could not read the CWD |
 | `Git(source)` | Ambient repository discovery failed for a reason other than "not a repository" |

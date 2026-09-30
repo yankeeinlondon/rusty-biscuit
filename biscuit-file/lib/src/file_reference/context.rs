@@ -314,7 +314,7 @@ impl ResolutionContext {
     pub fn from_ambient() -> Result<Self, FileReferenceError> {
         let cwd = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
         let home_dir = home_dir();
-        let env: HashMap<String, String> = std::env::vars().collect();
+        let env = capture_env();
 
         debug!(
             ?cwd,
@@ -349,7 +349,7 @@ impl ResolutionContext {
             ambient.join(base)
         };
         let home_dir = home_dir();
-        let env = std::env::vars().collect();
+        let env = capture_env();
 
         Ok(Self {
             cwd,
@@ -502,7 +502,7 @@ impl FileResolutionContext {
             package_area: None,
             repository_scope_catalog: None,
             home_dir: home_dir(),
-            env: std::env::vars().collect(),
+            env: capture_env(),
             magic_paths: MagicPathList::default(),
             vault_roots: Vec::new(),
             trusted_external_authoring_base: false,
@@ -979,9 +979,50 @@ pub fn home_dir() -> Option<PathBuf> {
     dirs::home_dir()
 }
 
+/// Snapshot the process environment for `{{VAR}}` interpolation.
+///
+/// `std::env::vars()` panics when any variable's name or value is not valid
+/// Unicode, which POSIX permits, so one stray variable would crash every
+/// context construction. Such variables are skipped instead; a reference
+/// naming one fails with `MissingEnvironmentVariable`.
+fn capture_env() -> HashMap<String, String> {
+    utf8_env(std::env::vars_os())
+}
+
+fn utf8_env(
+    vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> HashMap<String, String> {
+    vars.into_iter()
+        .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf8_env_skips_non_unicode_variables() {
+        use std::ffi::OsString;
+        #[cfg(unix)]
+        let invalid = {
+            use std::os::unix::ffi::OsStringExt;
+            OsString::from_vec(vec![0x66, 0x6f, 0x80])
+        };
+        #[cfg(windows)]
+        let invalid = {
+            use std::os::windows::ffi::OsStringExt;
+            OsString::from_wide(&[0x0066, 0xD800])
+        };
+
+        let env = utf8_env([
+            (OsString::from("KEPT"), OsString::from("value")),
+            (OsString::from("BAD_VALUE"), invalid.clone()),
+            (invalid, OsString::from("bad name")),
+        ]);
+
+        assert_eq!(env, HashMap::from([("KEPT".to_string(), "value".to_string())]));
+    }
 
     #[test]
     fn from_ambient_succeeds() {

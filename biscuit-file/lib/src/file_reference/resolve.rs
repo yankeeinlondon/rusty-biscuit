@@ -185,6 +185,12 @@ fn is_local_anchoring(kind: &ReferenceKind) -> bool {
 /// Returns [`FileReferenceError::InvalidSyntax`] when interpolation injects a
 /// grammar sigil (`@`, `&`, `^`, `!`, `%`, `vault:`, or a URL scheme); those must stay
 /// author-controlled and are never honored from an environment value.
+///
+/// Returns [`FileReferenceError::ForeignAbsolutePath`] when the payload is
+/// absolute in the host-independent grammar but not on this host — a drive or
+/// UNC path on POSIX, or a drive-less `/` path on Windows. Used verbatim, such
+/// a path would be probed relative to the process CWD (or its current drive),
+/// which neither the reference nor the context names.
 fn compute_effective_anchoring(
     parsed: &ParsedReference,
     interpolated: &str,
@@ -199,6 +205,11 @@ fn compute_effective_anchoring(
         )));
     }
     Ok(Some(if parse::is_absolute_reference(interpolated) {
+        if !Path::new(interpolated).is_absolute() {
+            return Err(FileReferenceError::ForeignAbsolutePath {
+                path: interpolated.to_string(),
+            });
+        }
         EffectiveAnchoring::Absolute
     } else if parse::is_explicit_relative(interpolated) {
         EffectiveAnchoring::ExplicitRelative
@@ -304,6 +315,7 @@ fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         #[cfg(feature = "url")]
         E::InvalidUrl(_) => ResolutionFailure::UnsupportedRemote,
         E::InvalidSyntax(_)
+        | E::ForeignAbsolutePath { .. }
         | E::UnsupportedScheme { .. }
         | E::RepositoryEscape { .. }
         | E::RelativePath { .. } => ResolutionFailure::InvalidReference,

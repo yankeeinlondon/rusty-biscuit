@@ -474,9 +474,10 @@ impl Diagnostic for HarnessError {
 fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
     use FileReferenceError as E;
     match error {
-        E::InvalidSyntax(_) | E::UnsupportedScheme { .. } | E::UnsupportedUserHome(_) => {
-            "invalid_syntax"
-        }
+        E::InvalidSyntax(_)
+        | E::UnsupportedScheme { .. }
+        | E::UnsupportedUserHome(_)
+        | E::ForeignAbsolutePath { .. } => "invalid_syntax",
         E::MissingEnvironmentVariable { .. }
         | E::MissingHomeContext
         | E::VaultNotConfigured

@@ -450,3 +450,46 @@ fn special_kinds_are_unchanged_by_the_flip() {
         Some(FileReferenceError::VaultNotConfigured)
     ));
 }
+
+/// An absolute path in the host-independent grammar that is not absolute on
+/// this host has no location here. Used verbatim it would be probed against
+/// the process CWD (POSIX) or current drive (Windows) — state the explicit
+/// context exists to exclude — so it fails before any candidate is built,
+/// whether authored, recursive, or produced by interpolation.
+#[test]
+fn absolute_path_foreign_to_this_host_is_rejected_before_probing() {
+    let tmp = TempDir::new().unwrap();
+    let (repo, base) = repo_and_base(&tmp);
+
+    #[cfg(not(windows))]
+    let foreign = [r"C:\cfg.toml", "C:/cfg.toml", r"\\server\share\cfg.toml"];
+    #[cfg(windows)]
+    let foreign = ["/etc/cfg.toml"];
+
+    for path in foreign {
+        let ctx = ctx_with_repo(&base, &repo)
+            .with_env(HashMap::from([("ROOT".to_string(), path.to_string())]));
+        for raw in [path.to_string(), format!("%{path}"), "{{ROOT}}".to_string()] {
+            let file_ref = FileReference::new(&raw).unwrap();
+
+            assert!(
+                matches!(
+                    file_ref.resolve_in_context(&ctx),
+                    Err(FileReferenceError::ForeignAbsolutePath { path: ref p }) if p == path
+                ),
+                "`{raw}` must be rejected as foreign to this host",
+            );
+            assert!(matches!(
+                file_ref.candidate_plan(&ctx),
+                Err(FileReferenceError::ForeignAbsolutePath { .. })
+            ));
+
+            let detailed = file_ref.resolve_detailed(&ctx);
+            assert!(detailed.candidates().is_empty());
+            assert!(matches!(
+                detailed.outcome(),
+                DetailedOutcome::Failed(ResolutionFailure::InvalidReference)
+            ));
+        }
+    }
+}

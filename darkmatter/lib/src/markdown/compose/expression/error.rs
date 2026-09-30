@@ -59,8 +59,10 @@ pub enum FileRefFailure {
 impl FileRefFailure {
     /// Classifies a [`biscuit_file::FileReferenceError`] into a failure kind.
     ///
-    /// A syntactically invalid reference is [`Malformed`]; a remote URL that
-    /// cannot resolve to a local path is [`RemoteNotEnabled`]; everything else
+    /// A reference that cannot name a local path as written is [`Malformed`]:
+    /// invalid syntax, an unsupported scheme or `~user` home, or an absolute
+    /// path that belongs to another operating system. A remote URL that cannot
+    /// resolve to a local path is [`RemoteNotEnabled`]. Everything else
     /// (filesystem I/O, relative-path computation, missing env/git/workspace
     /// state, and — when present — an invalid-URL parse) is treated as
     /// [`NotFound`] via the catch-all: the reference was understood but did not
@@ -72,7 +74,10 @@ impl FileRefFailure {
     pub fn classify(error: &biscuit_file::FileReferenceError) -> Self {
         use biscuit_file::FileReferenceError as E;
         match error {
-            E::InvalidSyntax(_) => FileRefFailure::Malformed,
+            E::InvalidSyntax(_)
+            | E::UnsupportedScheme { .. }
+            | E::UnsupportedUserHome(_)
+            | E::ForeignAbsolutePath { .. } => FileRefFailure::Malformed,
             E::RemoteNotLocal(_) => FileRefFailure::RemoteNotEnabled,
             _ => FileRefFailure::NotFound,
         }
@@ -564,6 +569,26 @@ mod tests {
         fn invalid_syntax_is_malformed() {
             let err = FileReferenceError::InvalidSyntax("bad".to_string());
             assert_eq!(FileRefFailure::classify(&err), FileRefFailure::Malformed);
+        }
+
+        #[test]
+        fn unlocatable_as_written_is_malformed() {
+            for err in [
+                FileReferenceError::UnsupportedScheme {
+                    scheme: "ftp".to_string(),
+                    reference: "ftp:spec.md".to_string(),
+                },
+                FileReferenceError::UnsupportedUserHome("~other/spec.md".to_string()),
+                FileReferenceError::ForeignAbsolutePath {
+                    path: r"C:\spec.md".to_string(),
+                },
+            ] {
+                assert_eq!(
+                    FileRefFailure::classify(&err),
+                    FileRefFailure::Malformed,
+                    "`{err}` must not be reported as not found"
+                );
+            }
         }
 
         #[test]

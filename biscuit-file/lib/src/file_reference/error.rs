@@ -8,6 +8,11 @@ pub enum FileReferenceError {
     #[error("unsupported file reference scheme `{scheme}` in `{reference}`")]
     UnsupportedScheme { scheme: String, reference: String },
 
+    #[error(
+        "`{path}` is absolute only on another operating system and cannot be located on this host"
+    )]
+    ForeignAbsolutePath { path: String },
+
     #[error("environment variable `{name}` is not set")]
     MissingEnvironmentVariable { name: String },
 

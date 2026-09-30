@@ -335,6 +335,7 @@ mod classification_tests {
                 E::InvalidSyntax(_)
                 | E::UnsupportedScheme { .. }
                 | E::UnsupportedUserHome(_)
+                | E::ForeignAbsolutePath { .. }
                 | E::InvalidUrl(_) => "invalid_syntax",
                 E::MissingEnvironmentVariable { .. }
                 | E::BareRepository
@@ -362,6 +363,9 @@ mod classification_tests {
                 reference: "ftp://example.com/spec.md".to_string(),
             },
             FileReferenceError::UnsupportedUserHome("other".to_string()),
+            FileReferenceError::ForeignAbsolutePath {
+                path: r"C:\spec.md".to_string(),
+            },
             FileReferenceError::MissingHomeContext,
             FileReferenceError::OutsideRepository {
                 sigil: '^',
