@@ -88,8 +88,10 @@ rather than build a second YAML node editor.
 It returns `RestoredDocument { text, restored_properties, frontmatter_delta }`.
 Every untouched byte survives — block scalars, trailing spaces, four-space
 indentation, LF/CRLF, property order, and platform-native paths. Parse
-failures, a non-mapping root, and duplicate keys are typed errors and nothing
-is written. The `FrontmatterDelta` distinguishes addition, replacement, and
+failures, a non-mapping root, duplicate keys, and a restoration that would
+change the parsed value of a property outside `properties` (a restored node
+adds or drops an anchor that an unowned alias resolves to) are typed errors and
+nothing is written. The `FrontmatterDelta` distinguishes addition, replacement, and
 deletion; value-preserving reformatting is **not** a semantic change, and the
 restored properties are excluded from the delta.
 
@@ -118,14 +120,34 @@ write-back) changes only the managed `hash` node and, on a bump,
   LF;
 - an empty `last_updated:` becomes `last_updated: {today}`, keeping a comment
   (one space is supplied before `#` when none was authored); `~` and `null`
-  are ordinary values.
+  are ordinary values;
+- a scalar date replaces only its value bytes, after the colon or alone on
+  the first following non-blank, non-comment line; indented comment and blank
+  lines in the node are kept. The parsed value type, never the node's line
+  count, decides whether `last_updated` is a collection (`rewrite_date_scalar`
+  takes the parsed value). A quote is quoting syntax only as a scalar's first
+  character (`quoted_scalar_end`): in `yesterday's date   # why` the `#` still
+  starts the kept comment, and a key like `author's note:` still has its
+  colon found. A key's separator is the `:` YAML reads as a value indicator
+  (followed by whitespace or line end in block context), so `a:b: c` has the
+  key `a:b`, not `a`. `mapping_colon` delegates to the public
+  `schemas::mapping_separator`, which nested keys, flow entries, and the
+  position maps (`validate::build_position_map`, `style` positions, DMLS,
+  Claudine excerpts) share; do not split a YAML key line at its first `:`.
 
 It returns `MarkdownError::FrontmatterTextEdit` and no text when a bump meets a
 `last_updated` with an anchor, alias, or tag (the shared
-`leading_node_property` predicate, also used by `locate_frontmatter_leaves`) or
-a block or flow collection, and when the rewritten frontmatter fails
-`parse_text_frontmatter` (for example, a replaced `hash` orphans an alias). A
-decision with no new stored hash returns `None` without parsing.
+`leading_node_property` predicate, also used by `locate_frontmatter_leaves`),
+a value that parses to a sequence or mapping, or a scalar it cannot rewrite
+on one line (a block scalar, or a plain or quoted value continued across
+lines, detected when the value's bytes parsed alone differ from the parsed
+value); when the rewritten frontmatter fails
+`parse_text_frontmatter` (for example, a replaced `hash` orphans an alias); and
+when any property other than the managed hash and a bumped `last_updated`
+parses to a different value than before (`ensure_unmanaged_values_kept`).
+Parsing alone is not enough: YAML permits reusing an anchor name, so removing
+the `hash` node's `&h` can re-point a later `*h` at an earlier `&h` and still
+parse. A decision with no new stored hash returns `None` without parsing.
 
 ## Literal Tokens
 
@@ -189,6 +211,43 @@ text-preserving writer. Do not build another YAML editor.
 - A span is returned only when its decoded text equals what compose reads.
   For a clipped block scalar ending the frontmatter, `decoded` therefore lacks
   the trailing newline.
+- A quoted flow item is located whatever its plain siblings or keys hold:
+  `[don't, "{{x}}"]`, `{a: say "hi, b: '{{x}}'}`, `[a:'b, "{{x}}"]`, and
+  `{a:'b: "{{x}}"}` split as YAML does. Raw YAML flow text goes through
+  `flow_collection_end` and `split_flow_entries` in
+  `schemas/simplified/source.rs`, both built on `scan_raw_yaml`: a quote opens
+  only at a scalar's start, and a `:` starts a new scalar only as a value
+  indicator (followed by whitespace or a flow indicator, or right after a
+  quoted or collection key as in `{"a":b}`). Inside a plain scalar such as
+  `a:'b` or `http://x` the colon, and the quote after it, are content. Only
+  `[`/`{` nest: a parenthesis is plain-scalar content, so `[a(b, "{{x}}"]`
+  has two entries and `[a(b, c)d, "{{x}}"]` three. The schema-declaration
+  cursor splits its opaque file-reference arms with `split_flow_entries` too.
+- Type-expression text is read in the grammar's lexical modes, never by
+  delimiter depth. "Inside parentheses" is not "inside an argument list": a
+  description after `->` and a file reference after `@` can hold parentheses.
+  `grammar.rs` states each mode's boundary once (`quoted_end`,
+  `inline_description_end`, `file_reference_end`, `pattern_key_end`), and the
+  parser, `scan_expression` in `source.rs`, and the type-definition cursor all
+  call them. Only an argument list gives quotes meaning (`\` escapes in either
+  style; `[`/`{` are argument text). Description prose ignores quotes and
+  brackets and, inside an inline object, nests only `()`/`{}` before its `,`
+  or `}`; a top-level description runs to the end. A file reference is opaque
+  up to `,`, `}`, or `->`, so `Name@./a{b.yaml -> d` references `./a{b.yaml`.
+  A `<…>` pattern key is opaque to its first `>`. `scan_expression` takes an
+  `ExpressionContext` (`Expression`, `FlowArm`, `ObjectBody`, `Arguments`)
+  and visits only type text and argument text outside strings, with an
+  `ExpressionLevel { objects, groups }`. `find_top_level_*`,
+  `split_top_level`, `inline_object_end`, `scan_constraint_groups`, and
+  `constraint_call_arguments` use it on decoded expressions; never point them
+  at raw YAML. The type-definition cursor splits flow arms in two layers: a
+  quote at an arm's start is a YAML quoted scalar (`['enum("a)b", c)', str`),
+  and the rest is scanned as `FlowArm`, where YAML ends a top-level
+  description at `,`/`]`, so `[enum('a)b', c), str` and
+  `[string -> (it's fine), s` both have two arms. `scan_scalar` resumes type
+  context after an inline description's `,` and keeps the import-reference
+  role across filename punctuation. Test source maps with
+  `SchemaSourceMap::entries()` so a silently merged property fails.
 - Failure is all-or-nothing. `LeafLocateError::Document` means the
   frontmatter is not a parseable block mapping. `LeafLocateError::Unlocated`
   is the first path that failed, as an `UnlocatedLeaf { path, line, reason }`.

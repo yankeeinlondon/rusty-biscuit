@@ -144,16 +144,57 @@ terminator (LF, CRLF, or a lone CR), even in a file that mixes them.
   last_updated: 2026-09-29 # set on save
   ```
 
+- An existing date changes only its value. Its quoting, a trailing comment,
+  and any comment or blank lines under it are kept. The value may also sit
+  alone on the line below the key:
+
+  ```yaml
+  # before
+  last_updated:
+    # set on save
+  # after
+  last_updated: 2026-09-29
+    # set on save
+  ```
+
+  ```yaml
+  # before
+  last_updated:
+    '2026-01-01'   # quoted, on its own line
+  # after
+  last_updated:
+    '2026-09-29'   # quoted, on its own line
+  ```
+
 When the date needs bumping, `--save` refuses, exits `1`, and leaves the file
 byte-for-byte unchanged if `last_updated`:
 
 - carries a YAML anchor (`&name`), alias (`*name`), or tag (`!tag`), because
   replacing it would change other values that share it;
 - is a collection (a list or mapping, in block or `[...]` / `{...}` flow form)
-  rather than a single value.
+  rather than a single value;
+- is a single value that cannot be rewritten on one line: a block scalar
+  (`|`, `|-`, `>`) or a plain or quoted value continued across several lines.
+  Write the date on one line, after the key or on the line below it, then
+  save again.
 
-`--save` also refuses when the edited frontmatter would no longer parse, for
-example when replacing the hash would orphan an alias that points into it.
+`--save` also refuses, with the same exit code and no write, when replacing
+the hash would change any other property's value. Replacing the hash node
+removes any anchor declared inside it, so an alias that pointed into it either
+stops resolving (the frontmatter no longer parses) or, worse, still resolves
+but to something else. YAML allows the same anchor name to be declared more
+than once, and an alias uses the nearest declaration above it:
+
+```yaml
+earlier: &h before
+hash: &h aaaa111111111111-bbbb222222222222
+mirror: *h   # means aaaa…; after the hash is replaced it would mean "before"
+```
+
+`--save` compares every property except the hash (and `last_updated`, when it
+bumps the date) before and after the edit, and refuses if any value differs,
+naming the property. Point the alias at an anchor outside the hash, then save
+again.
 
 - No stored hash → writes the first baseline and exits `0`.
 - No content change → leaves the file untouched and exits `0`.
