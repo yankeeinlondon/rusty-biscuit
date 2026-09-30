@@ -77,6 +77,17 @@ parse and serialize frontmatter rather than editing YAML as text. When a
 document carries a managed `hash:` property, use the command's normal write
 path so Darkmatter can keep the stored hash consistent.
 
+## Stamping a Baseline
+
+`Markdown::stamp_baseline(source, &opts, now, change)` is the single entry point
+for writing a document's `hash` and `last_updated` together. It parses the
+stored hash (`Markdown::stored_hash`), plans the save, applies the `Change`
+policy, and stamps the UTC date of `now`. `Change::Detect` bumps `last_updated`
+only when the hash moved (`md hash --save`); `Change::Known` bumps it because
+the caller just edited the content (effects auto-rehash, Claudine's inline
+closure). Do not call `plan_hash_save` plus `apply_hash_save_text` directly in
+a new writer.
+
 ## Text-Preserving Property Restoration
 
 `restore_properties_text(current, snapshot, properties)` sits beside

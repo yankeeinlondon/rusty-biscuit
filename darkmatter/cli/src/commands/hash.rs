@@ -4,7 +4,7 @@ use crate::io::{load_markdown, load_markdown_text};
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{
-    ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
+    Change, ComputedHash, DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashKind, MdHashOptions, StoredHash,
     select_kind,
 };
 use darkmatter::markdown::{Markdown, fs::collect_markdown_files};
@@ -47,7 +47,7 @@ pub fn run_hash(
         let input_path = input
             .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
         let (resolved, source, md) = load_markdown_text(input_path)?;
-        let stored = parse_stored_hash(&md, &options)?;
+        let stored = md.stored_hash(&options)?;
         return run_hash_save(
             &md,
             &source,
@@ -59,7 +59,7 @@ pub fn run_hash(
     }
 
     let md = load_markdown(input)?;
-    let stored = parse_stored_hash(&md, &options)?;
+    let stored = md.stored_hash(&options)?;
 
     if diff {
         return run_hash_diff(&md, stored.as_ref(), &options);
@@ -121,15 +121,6 @@ fn parse_ignore_properties(raw: &str, property: &str) -> Vec<String> {
         .collect()
 }
 
-/// Reads and parses the document's stored hash property, or `None` when the
-/// property is absent or null.
-fn parse_stored_hash(md: &Markdown, options: &MdHashOptions) -> Result<Option<StoredHash>> {
-    match md.frontmatter().as_map().get(options.property.as_str()) {
-        None | Some(serde_json::Value::Null) => Ok(None),
-        Some(value) => Ok(Some(StoredHash::parse(value, &options.property)?)),
-    }
-}
-
 /// Prints a computed hash: the flat string for `fm`/`body`/`simple`/`structured`,
 /// or the nested YAML object for `detailed`.
 fn print_computed_hash(computed: &ComputedHash) -> Result<()> {
@@ -183,8 +174,6 @@ fn run_hash_save(
     options: &MdHashOptions,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
-    let decision = md.plan_hash_save(stored, options)?;
-
     // A first baseline has nothing to compare against, so it has no explanation.
     // Computed here, before the write below, so it describes the in-memory
     // document against its *previous* stored hash.
@@ -193,11 +182,9 @@ fn run_hash_save(
         None => None,
     };
 
-    let today = darkmatter::markdown::hash::last_updated_stamp(now);
+    let stamp = md.stamp_baseline(source, options, now, Change::Detect)?;
 
-    if let Some(written) = darkmatter::markdown::hash::apply_hash_save_text(
-        source, &decision, options, &today,
-    )? {
+    if let Some(written) = stamp.text {
         std::fs::write(resolved, written)
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
@@ -207,7 +194,7 @@ fn run_hash_save(
         None => {
             println!(
                 "No stored hash found; wrote initial {} baseline",
-                decision.kind
+                stamp.decision.kind
             );
         }
     }
@@ -315,7 +302,7 @@ mod tests {
         .unwrap();
         let (resolved, source, md) = load_markdown_text(&file).unwrap();
         let options = MdHashOptions::default();
-        let stored = parse_stored_hash(&md, &options).unwrap();
+        let stored = md.stored_hash(&options).unwrap();
 
         run_hash_save(&md, &source, &resolved, stored.as_ref(), &options, instant).unwrap();
 

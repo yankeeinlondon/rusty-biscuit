@@ -288,8 +288,9 @@ the `ValidFor(3mo)` shorthand. Only `policy renew` also updates inline dates suc
 A baseline dated later than today's UTC date reads as inconsistent and produces
 `unknown`. That is why every stamp is a UTC date: a local date written just after
 midnight east of Greenwich would be a day ahead. Both of those writers stamp
-the UTC date for this reason. Darkmatter's effect writes re-hash a document
-without changing `last_updated`, so they renew nothing.
+the UTC date for this reason. Darkmatter's effect writes re-hash a document and
+renew `last_updated` the same way, so an effect that edits hashed content also
+renews every `@last_updated` rule.
 
 Renewal also records a baseline that is missing, such as an absent or empty
 `last_updated` or fingerprint property. This first capture needs no extra
