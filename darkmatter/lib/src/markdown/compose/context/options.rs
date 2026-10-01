@@ -499,6 +499,9 @@ pub struct ComposeOptions {
     /// in addition to those the request environment's
     /// `PORTABLE_ENV_VARIABLES` declares. There is no built-in set.
     pub(crate) portable_env: std::collections::BTreeSet<String>,
+    /// Whether Link Normalization warns when a destination keeps its
+    /// absolute fallback. On by default.
+    pub(crate) absolute_fallback_warning: bool,
 
     // ── Pre-flight graph reuse ────────────────────────────────────
     /// Optional pre-computed preflight graph to seed block transclusion.
@@ -600,6 +603,7 @@ impl std::fmt::Debug for ComposeOptions {
                 },
             )
             .field("portable_env", &self.portable_env)
+            .field("absolute_fallback_warning", &self.absolute_fallback_warning)
             .field(
                 "allow_invalid_frontmatter_assignment",
                 &self.allow_invalid_frontmatter_assignment,
@@ -868,6 +872,7 @@ impl ComposeOptions {
             interpolate_code_blocks: false,
             shell_strip_ansi: true,
             portable_env: std::collections::BTreeSet::new(),
+            absolute_fallback_warning: true,
             baseline_schema: None,
             baseline_is_darkmatter_default: false,
             trigger_schemas: false,
@@ -1266,6 +1271,24 @@ impl ComposeOptions {
     /// The names declared through [`with_portable_env`](Self::with_portable_env).
     pub fn portable_env(&self) -> &std::collections::BTreeSet<String> {
         &self.portable_env
+    }
+
+    /// Controls the warning Link Normalization reports when no portable
+    /// reference reaches a destination and it keeps its absolute path.
+    ///
+    /// On by default: such a destination leaves the composed document with a
+    /// link tied to this host. Pass `false` when host-specific links are
+    /// expected; the destination is kept either way.
+    #[must_use]
+    pub fn with_absolute_fallback_warning(mut self, enabled: bool) -> Self {
+        self.absolute_fallback_warning = enabled;
+        self
+    }
+
+    /// Whether Link Normalization warns about an absolute fallback; see
+    /// [`with_absolute_fallback_warning`](Self::with_absolute_fallback_warning).
+    pub fn absolute_fallback_warning(&self) -> bool {
+        self.absolute_fallback_warning
     }
 
     /// Sets shell expansion options from a `ShellExpansionOptions` struct.
@@ -2627,6 +2650,7 @@ impl ComposeOptions {
             exclude_keys,
             name_coercion_keys,
             portable_env,
+            absolute_fallback_warning,
             preflight_graph,
             remote_fetch,
             file_ref_fallback_dir,
@@ -2998,6 +3022,8 @@ impl ComposeOptions {
         for name in portable_env {
             enc.str(name);
         }
+        enc.field("absolute_fallback_warning");
+        enc.bool(*absolute_fallback_warning);
 
         enc.field("file_ref_fallback_dir");
         match file_ref_fallback_dir {
@@ -3565,6 +3591,11 @@ mod tests {
         let d = fixed_opts().with_portable_env(["B", "A", "B"]);
         assert_eq!(id(&c), id(&d));
         assert_ne!(id(&c), id(&fixed_opts().with_portable_env(["A"])));
+        // Suppressing the absolute-fallback warning changes the report.
+        assert_ne!(
+            id(&fixed_opts()),
+            id(&fixed_opts().with_absolute_fallback_warning(false))
+        );
     }
 
     /// The snapshot's tree root and reader opt-in, and the reference that

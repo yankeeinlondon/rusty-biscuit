@@ -118,10 +118,12 @@ fn compose_spelling(reference: &str, strategy: &PortabilityPreference) -> String
 /// resolution already made every destination it could resolve absolute.
 ///
 /// A destination is left byte-identical, with a warning, when evaluation fails
-/// or when only the absolute fallback matched and the destination has no
-/// faithful portable spelling (a Windows UNC, device, or unreducible verbatim
-/// path). This stage runs after transclusion, so preserving authored text
-/// cannot retarget the link, unlike
+/// or when only the absolute fallback matched. The absolute-fallback warning
+/// says the composed document still links to a path tied to this host (or, for
+/// a Windows UNC, device, or unreducible verbatim path, that it has no faithful
+/// portable spelling); [`ComposeOptions::with_absolute_fallback_warning`]
+/// turns it off. This stage runs after transclusion, so preserving authored
+/// text cannot retarget the link, unlike
 /// [`link_resolve`](super::link_resolve::link_resolve), which errors instead.
 pub fn normalize_links(
     markdown: &mut Markdown,
@@ -214,13 +216,8 @@ pub fn normalize_links(
         // The absolute fallback rewrites nothing: the destination already is
         // the absolute path.
         if *result.strategy() == PortabilityPreference::AbsolutePath {
-            if try_portable_string(Path::new(path_text)).is_none() {
-                report.add_warning(ComposeWarning::new(
-                    STAGE,
-                    format!(
-                        "the destination <blue>{destination}</blue> has no faithful portable spelling and no relative, repository, environment, or home reference reaches it; it was left exactly as authored."
-                    ),
-                ));
+            if options.absolute_fallback_warning {
+                report.add_warning(absolute_fallback_warning(&destination, path_text));
             }
             continue;
         }
@@ -241,6 +238,21 @@ pub fn normalize_links(
     }
 
     Ok(())
+}
+
+/// The warning for a destination that kept its absolute path because no
+/// portable reference reaches it.
+fn absolute_fallback_warning(destination: &str, path_text: &str) -> ComposeWarning {
+    let message = if try_portable_string(Path::new(path_text)).is_none() {
+        format!(
+            "the destination <blue>{destination}</blue> has no faithful portable spelling and no relative, repository, environment, or home reference reaches it; it was left exactly as authored."
+        )
+    } else {
+        format!(
+            "no relative, repository, environment, or home reference reaches the destination <blue>{destination}</blue>, so it was left as an absolute path and the composed document still contains a link tied to this host."
+        )
+    };
+    ComposeWarning::new(STAGE, message)
 }
 
 /// Warns once per invalid `PORTABLE_ENV_VARIABLES` / `with_portable_env` name.
@@ -469,7 +481,9 @@ mod tests {
 
         assert_eq!(output, content, "the absolute fallback rewrites nothing");
         assert_eq!(report.link_normalizations_applied, 0);
-        assert!(link_warnings(&report).is_empty(), "{:?}", report.warnings);
+        let warnings = link_warnings(&report);
+        assert_eq!(warnings.len(), 1, "only the absolute-fallback warning: {warnings:?}");
+        assert!(warnings[0].contains("tied to this host"), "{warnings:?}");
     }
 
     /// `PORTABLE_ENV_VARIABLES` is read from the request's captured
@@ -671,25 +685,70 @@ mod tests {
         assert!(link_warnings(&report).is_empty(), "{:?}", report.warnings);
     }
 
-    /// A target nothing portable reaches keeps its absolute destination
-    /// silently: the absolute path is a faithful spelling of itself.
-    #[test]
-    fn the_absolute_fallback_keeps_the_destination_without_a_warning() {
+    /// A target outside the fallback tree, with no home or portable
+    /// environment anchor, so only the absolute fallback reaches it. Returns
+    /// the temporary directory, the options, and the destination text.
+    fn absolute_only_fixture() -> (tempfile::TempDir, ComposeOptions, String) {
         let dir = tempdir().unwrap();
         let root = fs::canonicalize(dir.path()).unwrap();
         let other = root.join("other");
         fs::create_dir_all(&other).unwrap();
         fs::write(other.join("x.md"), "").unwrap();
-        let content = format!(
-            "[x]({})\n",
-            biscuit_file::to_portable_string(&other.join("x.md"))
-        );
+        let destination = biscuit_file::to_portable_string(&other.join("x.md"));
+        (dir, detached_options(&root, HashMap::new()), destination)
+    }
 
-        let (output, report) = normalize(&content, &detached_options(&root, HashMap::new()));
+    /// Every destination form normalization rewrites, around one absolute
+    /// destination `{}`.
+    const DESTINATION_FORMS: [(&str, &str); 11] = [
+        ("markdown link", "[x]({})\n"),
+        ("markdown image", "![x]({})\n"),
+        ("html link", "<a href=\"{}\">x</a>\n"),
+        ("html image", "<img src=\"{}\">\n"),
+        ("video", "<video src=\"{}\"></video>\n"),
+        ("audio", "<audio src=\"{}\"></audio>\n"),
+        ("media source", "<source src=\"{}\">\n"),
+        ("iframe", "<iframe src=\"{}\"></iframe>\n"),
+        ("script", "<script src=\"{}\"></script>\n"),
+        ("stylesheet", "<link rel=\"stylesheet\" href=\"{}\">\n"),
+        ("font", "<link rel=\"preload\" as=\"font\" href=\"{}\">\n"),
+    ];
 
-        assert_eq!(output, content);
-        assert_eq!(report.link_normalizations_applied, 0);
-        assert!(link_warnings(&report).is_empty(), "{:?}", report.warnings);
+    /// A target nothing portable reaches keeps its absolute destination, and
+    /// the report says the document still holds a host-tied link, whichever
+    /// form carries the destination.
+    #[test]
+    fn the_absolute_fallback_keeps_every_destination_form_and_warns() {
+        let (_dir, options, destination) = absolute_only_fixture();
+
+        for (label, form) in DESTINATION_FORMS {
+            let content = form.replace("{}", &destination);
+
+            let (output, report) = normalize(&content, &options);
+
+            assert_eq!(output, content, "{label}: destination was rewritten");
+            assert_eq!(report.link_normalizations_applied, 0, "{label}");
+            let warnings = link_warnings(&report);
+            assert_eq!(warnings.len(), 1, "{label}: {warnings:?}");
+            assert!(warnings[0].contains("tied to this host"), "{label}: {warnings:?}");
+            assert!(warnings[0].contains(&destination), "{label}: {warnings:?}");
+        }
+    }
+
+    #[test]
+    fn a_suppressed_absolute_fallback_warning_keeps_the_destination_silently() {
+        let (_dir, options, destination) = absolute_only_fixture();
+        let options = options.with_absolute_fallback_warning(false);
+
+        for (label, form) in DESTINATION_FORMS {
+            let content = form.replace("{}", &destination);
+
+            let (output, report) = normalize(&content, &options);
+
+            assert_eq!(output, content, "{label}: destination was rewritten");
+            assert_eq!(report.link_normalizations_applied, 0, "{label}");
+            assert!(link_warnings(&report).is_empty(), "{label}: {:?}", report.warnings);
+        }
     }
 
     /// A probe failure (here a path through a regular file) is never read as

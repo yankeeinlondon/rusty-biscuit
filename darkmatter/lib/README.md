@@ -21,7 +21,7 @@ Markdown parsing, rendering, and Mermaid diagram support for terminal and HTML o
     - **Interpolation:** interpolate frontmatter, ENV vars, and context variables into Markdown body
     - **Frontmatter Shell Expansion:** execute top-level `$(...)` frontmatter values before effective-state construction, storing trimmed `stdout` back into frontmatter
     - **Normalization:** fix heading hierarchy violations, re-level documents
-    - **Link Normalization:** convert absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
+    - **Link Normalization:** convert absolute paths back to portable forms (relative, `&repo/path`, a declared `{{{VAR}}}`, or `~/`), otherwise keep the absolute path and warn that the document links to this host; see [Link Normalization](../docs/inline/link-normalization.md)
     - **TOC Linking:** hyperlink to each of the headings of another page as a strategy for progressive disclosure
     - **Text Replacement:** Dictionary replacement of terms on a page
     - **Conditional Block Rendering:** Conditionally render parts of a Markdown document based on frontmatter, ENV, and context

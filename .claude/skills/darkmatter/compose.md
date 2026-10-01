@@ -91,7 +91,9 @@ the compose pipeline.
   references through `biscuit_file::PortablePath` (default strategy, root document's
   context): nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
   (written as the literal `{{{VAR}}}` so recompose is stable), `~/`, else the absolute
-  path is kept. `#frag` / `?q` / `:line` suffixes are split and reattached. No variable
+  path is kept with a `link_normalization` warning (the document still holds a
+  host-tied link); `ComposeOptions::with_absolute_fallback_warning(false)`
+  suppresses it. `#frag` / `?q` / `:line` suffixes are split and reattached. No variable
   is portable by default: declare names with `PORTABLE_ENV_VARIABLES` or
   `ComposeOptions::with_portable_env` (the old `with_env_path_whitelist` and its
   `PROJECT_ROOT` / `DOCS_BASE` defaults are gone). See

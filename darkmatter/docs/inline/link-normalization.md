@@ -20,7 +20,7 @@ composed root document: /home/ana/repo/docs/guide/intro.md
 /home/ana/repo/src/main.rs:42            → &src/main.rs:42
 /home/ana/notes/todo.md                  → ~/notes/todo.md
 /opt/shared/assets/save.svg              → {{{ASSETS}}}/save.svg   (ASSETS declared portable)
-/opt/elsewhere/x.md                      → /opt/elsewhere/x.md     (nothing portable reaches it)
+/opt/elsewhere/x.md                      → /opt/elsewhere/x.md     (nothing portable reaches it; warns)
 ```
 
 ## How a destination is chosen
@@ -40,17 +40,20 @@ the same file:
    value of a declared variable; the deepest matching value wins.
 4. **The home directory**: `~/notes/todo.md`.
 5. **The absolute path**, as the last resort. The destination is already
-   absolute, so it is left as written.
+   absolute, so it is left as written, and a warning says the composed
+   document still contains a link tied to this host (see
+   [Warnings](#warnings)).
 
 ```mermaid
 flowchart TD
     A[absolute destination] --> B[split off #fragment, ?query, :line]
     B --> C[PortablePath with the root document's context]
     C -->|relative, &, VAR, or ~ verified| D[write the reference + suffix]
-    C -->|only the absolute path| E{faithful portable spelling?}
-    E -->|yes| F[leave as written]
-    E -->|no: UNC, device, verbatim| G[leave as written + warning]
-    C -->|evaluation failed| G
+    C -->|only the absolute path| E[leave as written]
+    E --> W{absolute-fallback warning on?}
+    W -->|yes, the default| G[warning]
+    W -->|no| F[no warning]
+    C -->|evaluation failed| H[leave as written + warning]
 ```
 
 Relative and sigil destinations (`./x.md`, `&docs/x.md`, `~/x.md`) are not
@@ -102,16 +105,27 @@ composing a composed document is stable.
 
 A destination is left byte-identical, with a `link_normalization` warning, when:
 
-- only the absolute fallback matched and the path has no faithful portable
-  spelling (a Windows UNC, device, or verbatim path whose components would
-  change meaning without the `\\?\` prefix), or
+- only the absolute fallback matched. The composed document still contains a
+  link that works only on this host, and the warning names the destination.
+  When the path also has no faithful portable spelling (a Windows UNC, device,
+  or verbatim path whose components would change meaning without the `\\?\`
+  prefix), the warning says that instead; or
 - `PortablePath` could not evaluate it, for example because probing the target
   failed for a reason other than absence.
 
-An absolute destination that is a faithful spelling of itself is kept without
-a warning. Because this stage runs after transclusion, keeping the authored
-text cannot retarget the link; Link Resolve, which runs before transclusion,
-errors in the same situation instead.
+The absolute-fallback warning is on by default and applies to every
+destination form: Markdown links and images, and HTML `<a>`, `<img>`,
+`<video>`, `<audio>`, `<source>`, `<iframe>`, `<script>`, and stylesheet or
+font `<link>` tags. A caller that expects host-specific links turns it off;
+the destination is kept either way, and evaluation failures still warn:
+
+```rust
+let options = ComposeOptions::new().with_absolute_fallback_warning(false);
+```
+
+Because this stage runs after transclusion, keeping the authored text cannot
+retarget the link; Link Resolve, which runs before transclusion, errors in the
+same situation instead.
 
 ## Phase
 

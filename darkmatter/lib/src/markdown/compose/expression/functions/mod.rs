@@ -3827,7 +3827,9 @@ mod tests {
 
         #[test]
         fn dirname_renamed_without_dir_alias() {
-            let ctx = ResolutionContext::new(std::path::PathBuf::from("."));
+            // A relative context directory fails resolution validation.
+            let dir = tempfile::TempDir::new().unwrap();
+            let ctx = ResolutionContext::new(dir.path().to_path_buf());
             assert_eq!(
                 dispatch_fs("dirname", &[json!("sub/note.md")], &ctx)
                     .unwrap()
@@ -5642,7 +5644,10 @@ mod arity_gating_tests {
 
     #[test]
     fn context_fixed_arity_accepts_exact_count() {
-        let ctx = ResolutionContext::default();
+        // The default context's empty `cwd` is relative, which resolution
+        // validation rejects.
+        let dir = tempfile::TempDir::new().unwrap();
+        let ctx = ResolutionContext::new(dir.path().to_path_buf());
         assert_eq!(
             dispatch_fs("basename", &[json!("foo/bar.md")], &ctx)
                 .unwrap()

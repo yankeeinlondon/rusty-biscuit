@@ -980,7 +980,11 @@ This shortcut resolves variables in the same order as the compose pipeline:
 The `work_dir` argument supplies the resolution context, so the
 [read-side functions](#read-side-functions) (`file_exists`, `absolute`,
 `relative`, …) resolve against it — a public-API capability for external
-callers.
+callers. Pass an absolute directory when the expression uses those functions:
+a relative `work_dir` such as `.` is rejected as a relative context directory
+rather than resolved against whatever the process directory is at the time.
+Expressions that read only `data`, `env.*`, or `ctx.*` (like the example
+above) accept any `work_dir`.
 
 ### `evaluate_condition`
 
