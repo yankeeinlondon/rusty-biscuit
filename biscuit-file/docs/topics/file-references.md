@@ -502,7 +502,9 @@ may be relative: environment values (a relative `{{VAR}}` expansion resolves
 like any relative reference), configured magic roots (anchored on the
 captured request directory), and vault roots. The ambient `home_dir()`
 provider reports a relative `$HOME` as no home directory, so `new()` never
-captures one.
+captures one. `new()` reads the environment through the public
+`capture_env()`; a caller that builds with `from_snapshot` and wants the same
+process values calls `home_dir()` and `capture_env()` itself.
 
 ### Deriving contexts for documents
 
@@ -830,6 +832,10 @@ data — never re-derive it from the reference kind:
 | `NoMatch` | The complete applicable search found no regular file |
 | `Io` | CWD access or a candidate metadata probe failed |
 | `UnsupportedRemote` | A remote reference was sent through local-path resolution |
+
+To classify a `FileReferenceError` you already hold, call
+`error.resolution_failure()`; it returns the same class a detailed result
+reports, and never `NoMatch`.
 
 Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
 `RootProvenance` vocabulary is `Repository`, `Source`, `PackageRoot`,

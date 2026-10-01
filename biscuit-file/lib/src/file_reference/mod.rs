@@ -46,7 +46,7 @@ pub use error::FetchError;
 /// `prompts/` directories) around the resolver's intrinsic scope roots.
 pub use context::{
     BaseDirOrigin, ContextAnchor, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
-    RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, find_git_root,
+    RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, capture_env, find_git_root,
     home_dir,
 };
 
