@@ -1,215 +1,205 @@
 ---
 area: claudine
-status: ready for review
+status: proposed
 created: 2026-07-22
 packages:
     - claudine-cli
-review_iterations: 0
+related:
+    - 2026-07-13-cli-switches
+review_iterations: 1
 ---
 
-# Composition setters are swallowed into the provider tail when placed after an unowned switch
+# A shorthand setter after a provider switch is forwarded without notice
 
 ## Problem
 
-A shorthand frontmatter setter (`key=value`) passed positionally to a
-composition subcommand is silently dropped — forwarded to the underlying agent
-as a meaningless argument instead of being applied as a Claudine override —
-**whenever it appears after a provider switch Claudine does not own**.
-
-The same setter applied earlier in the same command (before the unowned switch)
-works correctly. So the result depends on argument position, which violates the
-documented setter contract.
-
-Observed in the wild with the `_implement/implement-plan.md` prompt:
+A shorthand frontmatter setter (`key=value`) placed **after** a provider switch
+Claudine does not own is forwarded to the agent rather than applied as a
+frontmatter override. Nothing tells the user. The prompt renders with the
+key's fallback value, and the agent receives a stray operand.
 
 ```sh
-# works: phase=2 applied, prompt renders "Phase 2 of 8"
-claudine compose prompts/_implement/implement-plan.md \
-  spec='fixes/2026-07-22-mega-merge/spec.md' \
-  phase=2 \
-  -c 'model_reasoning_effort="medium"' -y --codex
+# phase=2 applied: setter precedes the provider tail
+claudine compose plan.md phase=2 --codex -c 'model_reasoning_effort="medium"'
 
-# BROKEN: phase=2 dropped, prompt still renders "Phase 1 of 8"
-claudine compose prompts/_implement/implement-plan.md \
-  spec='fixes/2026-07-22-mega-merge/spec.md' \
-  -c 'model_reasoning_effort="medium"' \
-  phase=2 \
-  -y --codex
+# phase=2 forwarded to codex: setter follows the provider tail's first switch
+claudine compose plan.md --codex -c 'model_reasoning_effort="medium"' phase=2
 ```
 
-The only difference between the two invocations is that `phase=2` sits after
-the codex `-c` switch in the broken case. Because the prompt's `phase`
-frontmatter falls back to `1` when no override is supplied, the dropped setter
-manifests as "Phase **1** of 8" instead of "Phase **2** of 8".
+Forwarding is the intended routing. The defect is that it is **silent**. The
+user wrote a token that is valid setter syntax and names a key the prompt
+declares, and Claudine dropped it without saying so.
 
-## Reproduction
+## Decided contract this fix must keep
 
-Either invocation below composes with `--dry-run` so no agent is launched.
-`--silent` prints only the rendered prompt body.
+`2026-07-13-cli-switches` decided how composition argv is routed, and
+`partition.rs:15-30` and `docs/topics/argv-normalization.md` (Provider-argument
+partition) document it:
 
-```sh
-# control: setter before the unowned switch
-claudine compose prompts/_implement/implement-plan.md \
-  spec='fixes/2026-07-22-mega-merge/spec.md' phase=2 \
-  -c 'model_reasoning_effort="medium"' --dry-run --silent | head -n1
-# => # Implement Phase 2 of 8
+1. A token on Claudine's clap surface belongs to Claudine everywhere before an
+   explicit `--`, even after an implicit tail has started.
+2. The first unowned switch after the file starts the implicit agent tail.
+   **Every non-Claudine token from there, setter-shaped values included, is
+   forwarded in original order.**
+3. **Routing never depends on researched switch metadata.** Claudine does not
+   model how many values an unowned switch takes, so it cannot tell `-c` and
+   its value apart from `--yolo` followed by a free-standing setter. Guessing
+   would let a switch steal the composition file or a real setter.
+4. Setters meant for Claudine go before the tail. This follows from rule 1
+   rather than being stated separately: `--set` is a Claudine-owned flag, so it
+   is reclaimed anywhere before `--`, which makes it the escape hatch for a
+   setter that has to come later.
 
-# regression: setter after the unowned switch
-claudine compose prompts/_implement/implement-plan.md \
-  spec='fixes/2026-07-22-mega-merge/spec.md' \
-  -c 'model_reasoning_effort="medium"' phase=2 --dry-run --silent | head -n1
-# => # Implement Phase 1 of 8
-```
-
-The behavior is position-dependent and therefore a parsing defect, not a
-frontmatter or loop defect. `total_phases` resolves correctly (it is read
-directly from the plan frontmatter); the loop seed and iteration engine are
-uninvolved.
+Any fix that moves a setter-shaped tail token back to Claudine breaks rule 2,
+that spec's acceptance criterion 4 ("a setter-shaped token after tail start is
+forwarded"), and `reported_command_forwards_config_switch`.
+In `-c model_reasoning_effort=low`, the partition does not take a value for
+the unowned `-c`, so `model_reasoning_effort=low` reaches the partition as a
+free-standing positional. A `looks_like_setter` check in the `tail_started`
+branch would pull it back into Claudine. Leaving the token right after a
+space-form unowned switch in the tail would still guess at arity (rule 3).
 
 ## Root cause
 
-`claudine compose` (and `inline-compose` / `sequence`) partition the raw argv
-**before** clap parses it, splitting tokens into the Claudine argv (for clap)
-and a **provider tail** forwarded to the agent. That logic lives in
-`claudine/cli/src/argv/partition.rs::partition_composition_tail`.
+`partition_composition_tail` (`cli/src/argv/partition.rs:307-309`) pushes every
+positional to the tail once `tail_started` is set. That matches rule 2. The
+defect is downstream: no surface checks the forwarded tail against the keys
+the composition can set, so a misplaced setter fails silently.
 
-Tokens after the subcommand are classified left to right:
+Two pieces of supporting text add to the confusion:
 
-1. A Claudine-owned flag (derived from the clap surface via
-   `OwnedFlags::for_composition`) always belongs to Claudine, even after the
-   tail has started.
-2. The first **unowned** switch after the composition file starts an *implicit
-   provider tail* (`tail_started = true`). The codex `-c` switch is unowned.
-3. Once the tail has started, **every subsequent positional is pushed into the
-   tail unconditionally** — the branch never consults `looks_like_setter`:
+- The `looks_like_setter` doc comment (`cli/src/argv/mod.rs`) says the
+  partition "classifies a token the same way the downstream positional parser
+  will". That is true only for positionals before the tail starts. The comment
+  should be scoped to that case.
+- `docs/topics/composition.md` (Provider Argument Forwarding) shows a
+  setter-shaped *value* being forwarded, but never says that a free-standing
+  setter after the tail is forwarded too, or how to apply one there.
 
-   ```rust
-   // claudine/cli/src/argv/partition.rs:307-309
-   // Positional token (file, setter, operand) or a non-UTF-8 token.
-   if tail_started {
-       tail.push(token.to_string_lossy().into_owned());   // phase=2 -> forwarded to codex
-   } else if !file_seen {
-       // setters honored here ...
-   } else {
-       // ... and here, but only while tail_started is false
-   }
-   ```
+The partition has not changed since `2c7f98dcf` (2026-07-13), and no test
+covers a free-standing setter after an unowned switch.
 
-Trace for the broken invocation
-(`… spec=… -c 'model_reasoning_effort="medium"' phase=2`):
+## Fix
 
-| Token                                 | Decision                                   | Bucket   |
-| ------------------------------------- | ------------------------------------------ | -------- |
-| `prompts/…/implement-plan.md`         | positional → `file_seen = true`            | claudine |
-| `spec=…`                              | setter, `tail_started` still false         | claudine |
-| `-c`                                  | `Ownership::Unowned` → `tail_started=true` | tail     |
-| `model_reasoning_effort="medium"`     | positional while `tail_started`            | tail     |
-| **`phase=2`**                         | **positional while `tail_started`**        | **tail** |
+Keep the routing. Add a reporting-only diagnostic, which the 2026-07-13
+contract allows to use any information without changing ownership.
 
-`phase=2` is handed to codex and never reaches Claudine's frontmatter
-overrides, so the prompt's `phase` stays at its template fallback of `1`.
+### Misplaced-setter warning
 
-### Why this contradicts the documented contract
+After the composition file's frontmatter is loaded, check each **forwarded**
+tail token. If a token:
 
-`claudine/cli/src/argv/mod.rs` defines `looks_like_setter` with the explicit
-guarantee:
+- comes from an **implicit** tail. An explicit `--` tail is opaque and is
+  never checked. Read the source from the tail itself: today that is
+  `provider_args_explicit`, and after cli-switches R6 it is the typed tail
+  descriptor's implicit/explicit source;
+- satisfies `looks_like_setter`; and
+- has a key that is a top-level frontmatter key of the composition file (for
+  `sequence`, the sequence file),
 
-> ```rust
-> /// This is the same key validation used by
-> /// `crate::commands::compose`'s `parse_compose_setter`; keeping them in lockstep
-> /// guarantees the ownership partition classifies a token the same way the
-> /// downstream positional parser will.
-> pub(crate) fn looks_like_setter(token: &str) -> bool { … }
-> ```
+then print one warning per token, before the dry-run seam, so `--dry-run`
+prints it as well:
 
-The downstream positional parser (`parse_compose_setter` /
-`parse_composition_positionals`) treats `phase=2` as a Claudine setter. The
-partition honors that lockstep promise only while `tail_started == false`, then
-abandons it for the rest of the line.
-
-### Contrast with the retired Rule 3
-
-The partition replaced `claudine/cli/src/argv/rule3_separator.rs` (deleted in
-the same commit). Its `apply_composition_separator` explicitly scanned for
-`looks_like_setter` tokens and protected them (by inserting a `--` so they
-remained positional). The new partition retained the `looks_like_setter`
-helper but stopped consulting it once the tail began — a behavioral regression
-that the helper's own doc comment still promises.
-
-## When it regressed
-
-- **Commit:** `2c7f98dcf` — *refactor(claudine-cli): replace argv Rule 3 with
-  ownership partition*
-- **Date:** 2026-07-13
-- **Author:** Ken Snyder
-
-`partition.rs` was introduced in this single commit and has not been modified
-since (`git log --follow` shows it as the only touch). It is an ancestor of
-`HEAD` on `feat/mega-merge`. The greedy `tail_started` branch has therefore
-been dropping trailing setters since the day provider-switch forwarding was
-introduced.
-
-## Proposed fix
-
-Reclaim setter-shaped tokens for Claudine in the `tail_started` branch before
-forwarding them, restoring the "setters belong to Claudine regardless of
-position" guarantee:
-
-```rust
-// claudine/cli/src/argv/partition.rs
-if tail_started {
-    if text.map(looks_like_setter).unwrap_or(false) {
-        claudine.push(token.clone());
-    } else {
-        tail.push(token.to_string_lossy().into_owned());
-    }
-}
+```text
+warning: [setter] `phase=…` follows a provider switch, so it was forwarded to codex and not applied to frontmatter.
+         Move it before the first provider switch, or pass --set '{"phase": …}'.
 ```
 
-A setter-shaped token is unambiguous Claudine syntax — no provider accepts
-`^[A-Za-z_][A-Za-z0-9_-]*=` as a switch — so reclaiming it is safe and
-position-independent.
+Rules for the warning:
 
-### Non-goal: greedy value consumption for unowned switches
+- It never shows the value: the key is printed and the value is replaced by
+  `…`, consistent with the tail-redaction policy.
+- It follows the frontmatter `model` mismatch warning's contract: it does not
+  block, it is suppressed by `--silent`, and `--dry-run` prints it.
+- It is deduplicated per `(provider, tail)` in the same state the forwarding
+  notice uses, so a `sequence` or loop does not repeat it on every step. Do
+  not add a second process-wide static: cli-switches R3 moves that state into
+  per-command execution state, and the warning goes with it.
+- It stays in the composition path even after cli-switches R5 moves the
+  forwarding notice into a module shared with direct wrappers. Direct wrappers
+  have no frontmatter, so the check does not apply there.
+- It does not change argv. The token is still forwarded.
 
-The existing `reported_command_forwards_config_switch` behavior must be
-preserved: a setter-shaped token that is the **direct argument** of an unowned
-switch rides with that switch because it is consumed as the switch's value, not
-encountered as a free-standing positional. The fix above does not change how
-unowned switches consume their following token; it only changes the handling of
-**free-standing** positionals encountered after the tail has started. In
-`-c model_reasoning_effort=low`, the `model_reasoning_effort=low` token still
-belongs to the tail; a *subsequent* free-standing `phase=2` is reclaimed.
+Because the warning does not guess arity, it also fires for a switch's value
+whose key matches a frontmatter key. For example, `-c model=o3` warns when the
+prompt declares `model`. The warning is still accurate in that case: the token
+was forwarded and not applied. A key the prompt does not declare does not warn;
+a setter that introduces a new key after the tail is a known gap that this
+fix leaves open.
 
-> Note: `-c` is classified `Ownership::Unowned`, so the partition does not
-> model its arity. The direct-argument case works today only because the value
-> happens to be the next positional and falls into the same `tail_started`
-> branch. If codex ever requires an explicit-space `--flag value` form for an
-> unowned value-bearing switch, that should be addressed separately; it is out
-> of scope for this setter-reclamation fix.
+### Docs and comments
+
+- `docs/topics/composition.md`, in both Positional Arguments and Provider
+  Argument Forwarding: state that a setter after the first provider switch is
+  forwarded, give the supported order
+  (`<file> [key=value ...] [CLAUDINE_OPTIONS] [AGENT_ARGS ...]`), show the
+  `--set` form for a late setter, and describe the warning.
+- `docs/topics/argv-normalization.md`, in Provider-argument partition: add a
+  free-standing-setter example next to the `-c model_reasoning_effort=low`
+  example, and note that the partition never warns. The warning is a
+  composition-time report.
+- `cli/src/argv/partition.rs:24-27`: no change to the rule. Add one clause
+  noting that a free-standing setter is included.
+- `looks_like_setter` doc comment: scope the "same classification" guarantee
+  to positionals before the tail starts.
+
+## Reproduction
+
+Self-contained; `--dry-run` launches no agent and writes the composed body to
+stdout.
+
+```sh
+dir=$(mktemp -d)
+cat > "$dir/plan.md" <<'EOF'
+---
+phase: 1
+---
+Phase {{ phase }}
+EOF
+
+# control: setter before the tail => "Phase 2"
+claudine compose "$dir/plan.md" phase=2 --codex -c 'model_reasoning_effort="medium"' --dry-run
+
+# defect: setter after the tail => "Phase 1", with no warning today
+claudine compose "$dir/plan.md" --codex -c 'model_reasoning_effort="medium"' phase=2 --dry-run
+
+# escape hatch: --set is reclaimed after the tail => "Phase 2"
+claudine compose "$dir/plan.md" --codex -c 'model_reasoning_effort="medium"' --set '{"phase":2}' --dry-run
+```
+
+After the fix, the second command still renders "Phase 1" and its dry-run
+metadata still lists `phase=2` in the forwarded tail (redacted), but stderr
+carries the `[setter]` warning for `phase`.
 
 ## Scope
 
-- **Affected:** `claudine-cli` argv partition (`partition_composition_tail`),
-  exercised by `compose`, `inline-compose`, and `sequence`.
-- **Behavior change:** free-standing shorthand setters (`key=value`) encountered
-  after the implicit provider tail has started are applied as Claudine
-  frontmatter overrides instead of forwarded to the agent.
-- **No change:** Claudine-owned flags, the explicit `--` boundary, the
-  `SwitchBeforeFile` / `SeparatorBeforeFile` errors, and direct-argument
-  forwarding of values to unowned switches.
+- **Changed:** a new composition-time warning; documentation and doc-comment
+  corrections.
+- **Unchanged:** `partition_composition_tail` routing, Claudine-owned flag
+  reclaim, the explicit `--` boundary, `SwitchBeforeFile` /
+  `SeparatorBeforeFile`, the forwarding INFO notice, and the child argv.
+- **Non-goal:** arity-aware routing for unowned switches. If research-backed
+  switch metadata (R8 of `2026-07-13-cli-switches`, including `value_arity`) arrives, it may make
+  the warning more precise. For example, it could skip the declared value of a
+  known one-value switch. It must not change routing.
 
 ## Acceptance criteria
 
-- [ ] A shorthand setter placed anywhere in a `compose` / `inline-compose` /
-      `sequence` invocation — before, between, or after provider switches — is
-      applied as a frontmatter override.
-- [ ] The regression reproductions above both render "Phase 2 of 8".
-- [ ] `reported_command_forwards_config_switch` continues to forward
-      `model_reasoning_effort=low` to the agent as the value of `-c`.
-- [ ] A new unit test in `partition.rs` asserts that a trailing setter
-      (`phase=2`) following an unowned switch (`-c`) lands in the Claudine argv,
-      not the provider tail.
-- [ ] A new unit test asserts the same setter is reclaimed even when multiple
-      unowned switches precede it.
-- [ ] No change to `SwitchBeforeFile` / `SeparatorBeforeFile` error semantics.
+- [ ] `reported_command_forwards_config_switch` passes unchanged.
+- [ ] A new partition unit test pins the current routing: in
+      `compose file.md -c x=y phase=2`, both `x=y` and `phase=2` land in the
+      tail.
+- [ ] A new partition unit test pins the escape hatch: in
+      `compose file.md -c x=y --set '{"phase":2}'`, `--set` and its value land
+      in the Claudine argv.
+- [ ] A setter-shaped implicit-tail token whose key is a top-level
+      frontmatter key prints one `[setter]` warning naming the key and
+      provider, with no value. A token whose key is not declared prints none.
+      A token after an explicit `--` prints none.
+- [ ] The warning is printed under `--dry-run`, suppressed by `--silent`, and
+      printed once per `(provider, tail)` across `sequence` steps.
+- [ ] The second reproduction command above prints the warning; the first and
+      third do not.
+- [ ] `composition.md`, `argv-normalization.md`, `partition.rs` module docs,
+      and the `looks_like_setter` doc comment are updated as described in
+      Docs and comments.

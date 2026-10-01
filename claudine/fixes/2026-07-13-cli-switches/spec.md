@@ -1,382 +1,312 @@
 ---
-reviewed: true
-reviewed_by: codex/default
-reviewed_on: 2026-07-13
+reviewed: false
+refreshed_on: 2026-10-01
 ---
 
-# Composition rejects provider CLI switches instead of proxying them
+# Composition forwards provider CLI switches to the agent
+
+## Status (2026-10-01)
+
+The headline bug is fixed. Commit `2c7f98dcf` landed the ownership
+partition, the implicit and explicit (`--`) agent tail, the switch-before-file
+error, Claudine ownership of colliding switches, the retirement of argv Rule 3,
+request-level threading of the tail, the dry-run "Provider args" row, and a
+dormant typed native-exit classifier. This command now works:
+
+```sh
+claudine sequence docs/research/agent-errors/_fleet.md -y --codex -c 'model_reasoning_effort="low"'
+```
+
+The rest of this spec states the contract and describes only the work that
+remains. [Remaining work](#remaining-work) lists the gaps, and
+[Acceptance criteria](#acceptance-criteria) records which criteria already
+pass. `plan.md` still applies to the remaining work. Its Phase 1 audit is
+answered by this status section, and most of its Phase 2 partition tasks are
+done (see the criteria table).
 
 ## Problem
 
-Composition subcommands (`compose`, `inline-compose`, `sequence`) reject any
-CLI switch that is not part of Claudine's own surface instead of forwarding it
-to the underlying agent CLI. Direct wrappers (`claudine codex ...`) already
-forward provider arguments; composition never adopted that launch contract.
+Composition subcommands (`compose`, `inline-compose`, `sequence`) rejected any
+switch outside Claudine's own surface instead of forwarding it to the agent CLI,
+the way direct wrappers (`claudine codex ...`) already did. The parsing half of
+that is solved. What remains is making the forwarded tail survive every launch,
+report honestly, and fail understandably:
 
-Observed in the wild:
+- **Resume drops the tail.** A lifecycle `resume` rebuilds the provider's argv
+  from its resume entrypoint and carries over only a hardcoded allowlist, so
+  `-c model_reasoning_effort=low` is silently lost on the resumed attempt.
+- **A provider that rejects the tail gets a generic error.** The correlated
+  report exists in code but nothing calls it.
+- **The INFO notice says something false.** It claims the switches are "not
+  recognized by Claudine" before any switch catalog exists.
+- **Completion keeps a second, already drifted ownership list.**
 
-```sh
-💻❯ sequence docs/research/agent-errors/_fleet.md -y --codex -c 'model_reasoning_effort="low"'
-error: unexpected argument '-c' found
+## Contract
 
-  tip: to pass '-c' as a value, use '-- -c'
+These rules are implemented unless a [remaining-work](#remaining-work) item
+says otherwise.
 
-💻❯ sequence docs/research/agent-errors/_fleet.md -y --codex -- -c 'model_reasoning_effort="low"'
+### Token ownership
 
-Error: expected at most one file reference, but got multiple: docs/research/agent-errors/_fleet.md, -c
-```
+A single pass in `cli/src/argv/partition.rs` (`partition_composition_tail`)
+runs after `argv::normalize` and before clap. It splits composition argv into
+two explicit vectors: the Claudine argv clap parses, and a `ProviderArgs` tail.
+The tail is never rebuilt later from clap matches or `std::env::args()`.
 
-`-c model_reasoning_effort="low"` is Codex's `--config` short form. The
-expected contract is that a switch Claudine does not own is proxied to the
-agent, as it is on the direct-wrapper surface.
-
-> **Reader's note (inline review, 2026-07-13):** the draft proposed routing
-> unknown switches by greedily consuming their next non-flag token. That is
-> not deterministic: `compose --unknown file.md` can consume the required
-> file as the switch value, while `compose file.md --boolean key=value` can
-> consume a real shorthand setter. This revision makes the first unowned
-> switch start an agent-owned **tail** after the file has been identified.
-> Correct forwarding therefore does not depend on researched arity. Phase 2
-> metadata enriches reporting only; it never changes token ownership.
->
-> The draft also referenced the generated `agent-errors` vocabulary for
-> post-spawn correlation. That vocabulary classifies structured stream error
-> events and expressly excludes `cli/src/output/error_report.rs`. Native CLI
-> argument rejection must use a typed native-process classifier at the CLI
-> reporting boundary instead; the two vocabularies must not be conflated.
-
-## Reproduction
-
-```sh
-claudine sequence <file> --codex -c 'model_reasoning_effort=low'
-claudine compose <file> --codex --some-codex-flag
-claudine inline-compose <file> --codex --some-codex-flag=value
-```
-
-All three fail during Claudine argument parsing, before the agent is launched.
-
-## Root cause
-
-Two independent parsing decisions cause the failure:
-
-1. **No provider-argument bucket.** `ComposeArgs`, `InlineComposeArgs`, and
-   `SequenceArgs` expose one greedy positional (`num_args = 1..`) containing
-   one file reference plus `key=value` setters. Composition uses strict clap
-   parsing, so an unknown switch such as `-c` is rejected. Direct wrappers use
-   a lenient command tree plus a trailing passthrough positional.
-2. **Provider values enter the composition grammar.** Even if clap accepts the
-   tokens, `parse_composition_positionals` classifies `-c` as a second file
-   reference and `model_reasoning_effort=low` as a Claudine setter. A naive
-   "accept unknown flags" change can therefore launch with the wrong prompt
-   state even when it does not error.
-
-There is no provider-argument channel in `CompositionExecutionRequest`, and
-the composition wrapper currently builds child argv only from Claudine-owned
-flags, provider-profile injections, and MCP injections.
-
-## Design decisions
-
-### One ownership pass before clap
-
-Composition argv is partitioned into three categories before the normal clap
-parse:
-
-1. **Claudine-owned options.** The root and active composition command's clap
-   definitions are the source of truth, including aliases and value arity.
-   These options and their values remain in the Claudine argv.
-2. **Composition positionals.** Before an agent tail starts, non-switch tokens
-   retain the existing one-file-plus-setters grammar and may appear in either
-   order.
-3. **Agent tail.** After the composition file has been identified, the first
-   switch not owned by Claudine starts an agent-owned tail. Every non-Claudine
-   token from that point onward is forwarded in original order. In particular,
-   setter-shaped tokens in the tail are agent values, not frontmatter
-   overrides.
-
-The ownership pass produces two explicit vectors: normalized Claudine argv
-for clap, and the provider tail for execution. It must not reconstruct the
-provider tail from clap matches or from `std::env::args()` later in the run.
-
-This yields an intentional ordering rule: the composition file must precede
-the first implicit provider switch. Shorthand setters intended for Claudine
-should also precede the provider tail; `--set` remains available as an
-unambiguous Claudine-owned option anywhere before an explicit `--` boundary.
-If an unowned switch appears before the file, fail before clap with a targeted
-error that shows the supported order:
+| Token, scanned left to right | Owner |
+| --- | --- |
+| A switch on Claudine's clap surface, before an explicit `--` | Claudine, even after an implicit tail has started |
+| A bare token or `key=value` before the tail starts | Composition grammar: one file plus setters, in any order |
+| The first unowned switch **after** the file | Starts the implicit agent tail |
+| Every non-Claudine token after the tail starts | Agent, in original order. Setter-shaped tokens are agent values |
+| An authored `--` after the file | Consumed by Claudine. Everything after it is an opaque agent tail |
+| An unowned switch or `--` **before** the file | Error with ordering guidance |
 
 ```sh
 claudine compose <file> [key=value ...] [CLAUDINE_OPTIONS] [AGENT_ARGS ...]
+
+claudine compose doc.md --codex -c model_reasoning_effort=low   # tail: -c model_reasoning_effort=low
+claudine compose doc.md --codex -c x -m gpt-5                   # -m stays Claudine's; tail: -c x
+claudine compose doc.md --codex -- -m gpt-5 --help              # tail: -m gpt-5 --help (opaque)
+claudine compose --unknown doc.md                               # error: the file must come before agent switches
 ```
 
-This is preferable to guessing whether the first non-switch token is a file,
-a provider-switch value, a provider subcommand, or a prompt operand.
+The owned surface is `OwnedFlags::for_composition`, derived from the clap
+definitions, never from a handwritten list. Bare provider operands need an
+explicit `--`. Two ordinary bare positionals keep clap's multiple-file error.
+Routing never depends on researched switch metadata.
 
-### Explicit `--` remains the escape hatch
+### Launch threading
 
-An explicit `--` is optional. When present after the composition file, it
-starts the agent tail immediately. The delimiter itself is consumed by
-Claudine and is not inserted into the child's argv; every following token is
-opaque and is never extracted as a Claudine flag, even when it collides with
-one.
+The tail is request-level launch state on `CompositionExecutionRequest`,
+separate from MCP arguments and Claudine-owned flags. It seeds the child argv at
+the same stage as direct-wrapper passthrough (`LaunchPlanInputs::provider_args_tail`),
+before entrypoint, model, transport, system-prompt, MCP, and prompt-delivery
+injections. Fresh retries and proxy targets rebuild the launch plan from the
+same inputs, so they carry the tail. Every `sequence` step receives the same
+tail token for token, whichever provider the step resolves to.
 
-An explicit `--` before the file is an error because the opaque tail cannot
-contain the composition source. This keeps file resolution independent from
-provider argv.
+### Reporting and redaction
 
-### Claudine owns collisions before `--`
+- One INFO status before launch, rendered with `TerminalRenderable` and
+  suppressed by `--quiet` and `--silent`. It shows switch names only and strips
+  any `=value` suffix.
+- Every surface that shows more of the tail (dry-run, debug traces,
+  `AGENT_PARAMS`, correlated diagnostic excerpts) passes it through
+  `redact_sensitive_args`. The child receives the original tokens.
+- Correlated errors are never suppressed by quiet or silent modes.
 
-Before an explicit boundary, a token matching Claudine's clap surface always
-belongs to Claudine, even after an implicit agent tail has started. This
-preserves the direct wrapper's established precedence for flags such as
-`-i`, `-m`, `-o`, `-q`, `-y`, `--model`, `--silent`, and `--help`. A user who
-intends a colliding native switch must place it after `--`.
+### Native-exit classification
 
-The collision set must be derived from the clap command definitions and
-covered by a drift test; do not maintain a second handwritten list. Generate
-the user-facing collision reference from the same data and document that
-`--help` before the boundary is Claudine help while `-- --help` is agent help.
+`NativeCliCause` and `classify_native_cli_cause` in
+`cli/src/output/error_report.rs` classify a provider's process exit. They are
+deliberately separate from the structured-stream vocabulary in
+`lib/src/stream/providers/vocabulary.rs` and must stay that way.
 
-### Routing never depends on researched arity
+## Remaining work
 
-Both known and unknown switches are forwarded from the already-partitioned
-tail. Phase 2 metadata may identify switch names, aliases, descriptions, and
-arity for reporting, but it must not regroup, drop, or reorder argv. This
-keeps stale research from changing execution behavior and handles provider
-operands, variadic values, negative values, and setter-shaped values without
-heuristics.
+### R1. Resume carries the forwarded tail
 
-### Forwarded arguments are request-level launch state
+`commands/wrap/resume.rs::append_resume_passthrough_args` copies a fixed
+allowlist (`--json`, `--verbose`, `--print-logs`, `--approve`/`--no-approve`,
+`--output-format`, `--format`, `--output-last-message`, `--log-level`, `--mode`)
+from the base argv into the resume argv. `harness_orch/launch.rs` calls it on
+every resume attempt, so any forwarded switch outside that list is dropped.
 
-The provider tail is threaded through `CompositionExecutionRequest` as a
-distinct field, separate from MCP arguments and Claudine-owned flags. It
-seeds the provider-profile argv pipeline at the same point as direct-wrapper
-passthrough, before Claudine applies entrypoint, model, structured-transport,
-system-prompt, MCP, and prompt-delivery requirements.
+Required:
 
-Claudine's required transport and safety injections retain their existing
-precedence. A user tail must not disable structured output, prompt delivery,
-sandboxing, or another Claudine-owned behavior accidentally. Known conflicts
-should use the existing provider-profile validation/reporting path rather than
-silently relying on a provider's first-wins or last-wins behavior.
+- The resume argv receives the request's provider tail exactly once, at the
+  position the profile's resume entrypoint expects. Read the tail from the
+  typed request state (R6), not by pattern-matching the base argv.
+- The transport/safety allowlist keeps its job for Claudine's own injections.
+  The tail is not added to it as a second mechanism.
+- If a provider's resume entrypoint does not accept the tail (for example a
+  subcommand that rejects root switches), that is an R2 correlated error, not
+  a silent drop. Claudine does not filter the tail per entrypoint.
+- `harness_orch/session_key.rs` compares the **canonical** argv and documents
+  the allowlist as an intentional drop. Update that comment. The tail is
+  invocation-fixed, so it must not make a resume look incompatible.
 
-The same tail applies to:
+### R2. Correlate argument rejection on every launch path
 
-- every `sequence` step, including steps that resolve to different providers;
-- every fresh retry or proxy attempt; and
-- resume attempts, inserted through the provider profile's resume-aware argv
-  assembly rather than the current transport-only carry-forward allowlist.
+`AgentErrorReport::correlated_with_forwarded_tail` is `#[allow(dead_code)]`.
+The direct wrapper (`commands/wrap/mod.rs`) renders
+`from_exit_code_with_source`, and the composition attempt path
+(`harness_orch/attempt.rs`) echoes stderr without building a native-cause
+report at all. The classifier has three defects:
 
-For a multi-provider sequence, classification and status wording are resolved
-against each step's actual provider. Forwarding remains token-for-token the
-same for every step; a provider that rejects the tail is handled by the
-correlated error contract below.
+1. **It reads stderr only.** Some providers print usage errors on stdout.
+   Classification takes the exit code, termination state, and bounded tails of
+   both streams.
+2. **The precedence is wrong.** It checks `ArgumentRejected` before
+   `AuthOrPermission` and before `FileNotFound`, `classify_exit` checks API
+   errors after both, and timeouts are invisible to it. The required order is:
+   interruption → timeout → missing binary → authentication/permission → API
+   failure → model not found → argument rejected → missing argument → none.
+3. **A signature is too broad.** `invalid argument` matches auth and API
+   messages (`invalid argument: api key`). Keep only signatures backed by a
+   positive fixture and a near-miss fixture. An uncertain exit returns `None`.
 
-### Composition and direct wrappers share classification and reporting
+Required:
 
-The tokenizer is composition-specific because only composition has a file and
-setter grammar. After token ownership is resolved, both composition and direct
-wrappers use the same provider-tail descriptor, status renderer, metadata
-lookup, redaction, and correlated-error path. Direct-wrapper launch behavior
-must remain unchanged.
+- A typed native-exit input carrying the exit code, `ProcessTermination`, and
+  bounded stdout/stderr tails, produced by both the direct wrapper and the
+  composition attempt.
+- One report builder that both paths call exactly once per terminal failure.
+  It produces the correlated report only when the launch had a non-empty tail,
+  the exit was non-zero, and the classifier returned `ArgumentRejected`.
+  Otherwise it produces the existing report unchanged.
+- The correlated report names the redacted switch names, or says the tail was
+  opaque. It includes a redacted excerpt of the provider's diagnostic and says
+  "likely caused by the forwarded arguments". Its wording must not claim
+  Claudine failed to recognize the switch (that claim waits for R8).
+- Presentation only: exit code, termination state, lifecycle
+  `failure`/`finalize`, and retry policy are unchanged.
+- Remove the `dead_code` allowances that this wiring makes stale.
 
-## Required behavior
+### R3. Fix the INFO notice
 
-### Forwarding
+`commands/wrap/composition/provider_args.rs`:
 
-1. A non-Claudine switch after the composition file starts the implicit agent
-   tail; the switch and every provider-owned token following it reach the
-   provider in original order.
-2. A setter-shaped provider value such as `model_reasoning_effort=low` remains
-   in the agent tail and is never applied to frontmatter.
-3. A literal `--` after the file starts an opaque agent tail. Its contents are
-   not scanned for Claudine collisions, setters, or switch/value grouping.
-4. Bare provider operands with no preceding provider switch require explicit
-   `--`; otherwise they retain the existing second-file error.
-5. The provider tail survives sequence iteration, loop retries, proxy runs,
-   and resume reconstruction.
-6. `--dry-run` never launches the provider, but its metadata report includes a
-   redacted provider-argument tail so the proposed launch can be audited.
-7. Provider arguments are distinct from `mcp_extra_args`; both contributions
-   are preserved and provider-profile ordering remains valid.
+- **Scope.** Deduplication uses a process-wide `static ANNOUNCED`. Move it into
+  per-command execution state owned by the top-level command and threaded to
+  the launch. It holds at most one notice per distinct `(provider, tail)` pair,
+  and nothing leaks between invocations or between tests in one process.
+- **Wording.** "not recognized by Claudine" is forbidden until R8 can know it.
+  Implicit tail: `Forwarding provider arguments to Codex: -c`. Explicit tail:
+  `Forwarding an opaque argument tail to Codex (passed after --).`
+- **Location.** The notice moves out of `wrap/composition/` into a module both
+  launch paths can use (R5).
 
-### Communication
+### R4. Completion uses the owned surface
 
-Before launch, render an INFO status through `TerminalRenderable` components.
-It is suppressed by both `--quiet` and `--silent`, matching the existing
-status-output contract.
+`completion/engine/tokens.rs::is_value_bearing_flag` is a handwritten list of
+value-bearing switches. Its doc comment points at
+`crate::argv::COMPOSITION_FLAGS_WITH_VALUE`, which `2c7f98dcf` deleted.
 
-- **Phase 1, implicit tail:** report once that a provider argument tail
-  beginning with the first switch is being forwarded to the resolved
-  provider. Because the switch catalog is not compiled yet, do not claim that
-  the switch itself is unknown.
-- **Phase 1, explicit boundary:** report once that an opaque argument tail is
-  being forwarded. Do not claim individual switch classification.
-- **Phase 2, known switch:** identify its canonical name and concise
-  description, for example: `-c is Codex's --config switch (override a
-  configuration value); forwarding to Codex.`
-- **Phase 2, unknown switch:** state only that Claudine does not recognize it
-  and is forwarding it.
+Required:
 
-Sequence and loop execution must not emit the same INFO line on every attempt.
-Emit at most once per distinct `(provider, provider-tail)` pair per top-level
-command. Correlated errors are never suppressed by quiet/silent modes.
+- Completion's cursor scan uses `OwnedFlags::for_composition`, the partition's
+  surface, so the two cannot drift. Delete the list and the stale comment.
+- Composition completion never fails while the cursor is inside an implicit
+  tail. Claudine suggestions stop after an authored `--`. File and setter
+  completion before the tail are unchanged. Completing provider switches stays
+  out of scope.
 
-INFO messages display switch names only and strip any `=value` suffix. Every
-surface that renders more of the tail (provider diagnostic excerpts, debug
-traces, dry-run output, and `AGENT_PARAMS`-style metadata) must pass it through
-the existing `redact_sensitive_args` policy and must never expose an
-unredacted sensitive value. The actual child argv remains unchanged.
+### R5. Direct wrappers share reporting
 
-### Refuses-to-start correlation
+Today direct wrappers share only `classify_native_cli_cause`. They forward
+their passthrough positional with no INFO notice and no correlation. After this
+work both launch paths use the same tail descriptor (R6), notice (R3),
+redaction, and correlated report (R2). Direct-wrapper child argv must not
+change. `tests/l1/wrap_direct_argv.rs` is the guard for that.
 
-Forwarding an invalid switch can cause the provider to reject its argv. When
-all of the following hold, render a correlated provider-argument error instead
-of the generic provider-failure report:
+### R6. One typed tail descriptor, and no silent byte changes
 
-- this launch had a non-empty provider tail;
-- the child exited non-zero;
-- the typed native CLI classifier returns `ArgumentRejected` from the
-  provider's captured process exit (`exit_code` plus the captured stdout/stderr
-  tails); and
-- no stronger failure classification, such as authentication, missing binary,
-  timeout, interruption, or API failure, won first.
+- `CompositionExecutionRequest` (lib) and `SharedComposeArgs` (cli) carry the
+  tail as parallel fields, `provider_args: Vec<String>` and
+  `provider_args_explicit: bool`. Replace both with one typed descriptor in the
+  library, holding the ordered args and an implicit/explicit source. The CLI's
+  `argv::ProviderArgs` becomes that type or converts into it at one place.
+  Constructors that build an empty tail (for example the test helper in
+  `commands/sequence.rs`) use `Default`.
+- The partitioner converts non-UTF-8 tail tokens with `to_string_lossy`, so
+  the child can receive different bytes than the user typed. Child argv is
+  `String`-based throughout. Refuse a non-UTF-8 tail token with a targeted
+  partition error instead of changing it. Clap already refuses non-UTF-8
+  passthrough for direct wrappers, so this makes the two paths consistent.
 
-Refactor `classify_native_cli_error` so classification returns a typed cause
-before rendering. Do not consult `stream/providers/vocabulary.rs`: that table
-classifies structured semantic error events, not provider process argv
-rejections. Keep the initial argument-rejection signatures narrow and backed
-by positive and collision fixtures; an uncertain result must fall back to the
-generic provider error rather than misattribute the failure.
+### R7. Compiled-binary coverage
 
-The correlated report must:
+Binary-level coverage of the tail is currently two dry-run cases in
+`tests/l1/argv_normalization.rs`. Add L1 cases under `claudine/cli/tests` that
+use a deterministic fake provider through `CliProcessFixture` and assert:
 
-- identify the redacted forwarded switch names, or identify an opaque tail
-  without attempting to parse it;
-- include a redacted excerpt of the provider's own diagnostic;
-- distinguish a Phase 2 known switch from one unknown to Claudine; and
-- say "likely caused by the forwarded arguments" rather than asserting
-  causality when the provider only supplied a generic parse error.
+- the exact child argv for the headline command under `compose`,
+  `inline-compose`, and `sequence`, with the setter-shaped value not applied to
+  frontmatter;
+- that the tail is present exactly once on a retry, a proxy target, a
+  resume (R1), and each step of a multi-provider sequence;
+- that a secret-shaped tail value (`--api-key sk-…`, `--token=…`) reaches the
+  fake provider unchanged but appears in none of the INFO, dry-run, debug,
+  `AGENT_PARAMS`, or correlated-error output;
+- one INFO notice per distinct pair, and none under `--quiet` or `--silent`;
+- one correlated report for a fixture-backed rejection, no correlation for
+  auth, timeout, interruption, API, or ambiguous failures, and the exit code
+  preserved.
 
-Correlation changes presentation only. Preserve the provider's exit code,
-termination state, lifecycle `failure`/`finalize` behavior, and retry policy,
-and render exactly one final error report.
+### R8. Phase 2: research-backed enrichment (not started)
 
-## Phasing
+This is advisory and must never change argv.
 
-### Phase 1 - deterministic forwarding, generic INFO, and correlation
-
-- Add the composition ownership pass before clap. Keep clap authoritative for
-  all Claudine-owned options, values, conflicts, and diagnostics.
-- Replace Rule 3's synthetic-separator coupling with the explicit partitioned
-  result. A synthetic `--` must never become an agent boundary, and an authored
-  `--` must remain distinguishable from any internal clap protection.
-- Thread the provider tail and its implicit/explicit source through every
-  `CompositionExecutionRequest` construction and the sequence request-copy
-  path.
-- Seed composition child argv at the same provider-profile stage used by
-  direct-wrapper passthrough, including retry/proxy/resume reconstruction.
-- Add generic INFO rendering, deduplication, redaction, and dry-run reporting.
-- Introduce the typed native CLI `ArgumentRejected` classification and the
-  correlated error renderer.
-- Update the completion command tree and the `__complete` context classifier
-  so composition remains lenient after an agent tail starts. Claudine
-  completions stop at an explicit boundary; provider-switch completion is not
-  added in Phase 1.
-- Update `argv-normalization.md`, `cli-pre-parsing.md`, CLI reference/help, and
-  the argv module docs. Remove obsolete claims that Rule 3's separator is the
-  only owner of trailing composition values.
-
-Phase 1 alone makes the reported command work safely.
-
-### Phase 2 - research-backed enrichment
-
-- Extend `agent-cli` research `cli_switches[]` with first-class machine fields
-  rather than inferring behavior from prose:
-  - `aliases` (including short forms such as `-c`),
-  - `value_arity` (`none`, `one`, `optional`, `variadic`), and
-  - a normalized invocation scope sufficient to disambiguate aliases whose
-    meaning changes by provider subcommand.
-- Retain the current human-facing `value` placeholder for documentation, but
-  never derive arity from strings such as `<FILE>...` or from `notes`.
-- Re-research/backfill all providers and update the topic sidecar before
-  enabling runtime enrichment. Ambiguous or out-of-scope aliases fall back to
-  the unknown tier; they never guess.
-- Project the switch catalog through `claudine-gen` into each generated
-  `lib/src/provider/<slug>/data.rs` and expose it as typed, static provider
-  metadata. Add generator validation for canonical/alias uniqueness within an
-  invocation scope, valid arity, non-empty descriptions, and deterministic
-  ordering. The existing generated-data drift check covers the output.
-- Use the resolved provider and effective native entrypoint to enrich INFO and
-  correlation messages. Metadata lookup remains read-only with respect to the
-  already-partitioned argv.
+- Extend `docs/research/agent-cli/_schema.yaml` `cli_switches[]` (today
+  `{ flag, value, scope, default, description, example, notes }`) with
+  `aliases`, `value_arity` (`none`, `one`, `optional`, `variadic`), and a
+  normalized invocation scope (global, or exact native command paths). Keep
+  `value` as a human placeholder. Arity is never inferred from it or from
+  `notes`.
+- Update the fleet prompt, re-research all roster providers, and validate them
+  against the sidecar. An ambiguous alias is recorded as unknown, never guessed.
+- Project the catalog through `claudine-gen` into each generated
+  `lib/src/provider/<slug>/data.rs` as typed static metadata. The generator
+  validates alias/canonical uniqueness per scope, legal arity, non-empty
+  descriptions, and deterministic order. The existing drift check covers the
+  output.
+- A read-only lookup keyed by resolved provider and effective entrypoint
+  enriches the R3 notice and R2 report:
+  - known switch: `-c is Codex's --config switch (override a configuration value); forwarding to Codex.`
+  - unknown switch: Claudine does not recognize it and forwards it anyway.
+  - explicit tail: still opaque.
 
 ## Out of scope
 
-- Validating provider-switch values. Claudine forwards; the provider validates.
-- Rewriting, normalizing, or expanding provider switches. Recognition does not
-  alter argv.
-- Adding bare provider operands to the implicit grammar. Use explicit `--`.
+- Validating, rewriting, normalizing, or expanding provider switches.
+- Bare provider operands without `--`.
 - Changing which switches Claudine owns.
-- Provider-switch shell completion in Phase 1.
-- Folding native CLI rejection signatures into the structured-stream
-  `agent-errors` vocabulary.
-- Adding provider arguments to Markdown frontmatter. This specification is
-  limited to invocation-level CLI forwarding.
+- Completing provider switches.
+- Folding native-exit signatures into the structured-stream `agent-errors`
+  vocabulary.
+- Provider arguments in Markdown frontmatter.
 
 ## Verification and test placement
 
-- Keep tokenizer/partition tests beside the argv module. Cover file/setter
-  ordering, implicit and explicit tails, Claudine flags after tail start,
-  collisions after `--`, help behavior, non-UTF-8 pass-through at the
-  normalizer boundary, and missing-file diagnostics.
-- Keep small metadata/classifier tests inline; split them into sibling test
-  files when the production file or test module crosses the package's
-  architecture thresholds.
-- Add compiled-binary integration coverage under `claudine/cli/tests` using a
-  deterministic fake provider executable. Assert exact argv, stdout/stderr
-  separation, INFO suppression, redaction, exit-code preservation, and both
-  positive and negative correlation cases. Do not require a real provider or
-  network access.
-- Use nextest through the package `just test`/`just test-l2` recipes; do not
-  introduce `cargo test` instructions.
+- Partition tests stay beside `argv/partition.rs`. Classifier tests stay inline
+  in `error_report.rs` until the file crosses the package's placement
+  thresholds (`tests/l1/test_placement.rs`), then move to a sibling test module.
+- Binary tests follow the L1 spawn contract (`CliProcessFixture`) and need no
+  real provider or network.
+- Run `just test`, `just test-l2`, and `just lint` from `claudine/`. R8 also
+  needs `cargo run -p claudine-gen -- check`.
+
+## Documentation
+
+`docs/topics/argv-normalization.md`, `docs/topics/cli-pre-parsing.md`, and
+the "Provider Argument Forwarding" section of `docs/topics/composition.md`
+already describe the partition. Each remaining item updates those pages in the
+change that lands it: resume carry-over (R1), correlated errors (R2), notice
+scope and wording (R3), completion behavior (`docs/topics/completions/`, R4),
+and direct-wrapper parity in the CLI reference (R5). Until R8 lands, no page
+promises switch recognition.
 
 ## Acceptance criteria
 
-1. `claudine sequence <file> --codex -c 'model_reasoning_effort=low'`
-   launches Codex with the exact tail `-c model_reasoning_effort=low`, and the
-   value is not applied as frontmatter. The same holds for `compose` and
-   `inline-compose`.
-2. `claudine compose <file> --codex -- -c value` consumes Claudine's `--`,
-   forwards `-c value`, and performs no collision extraction from the tail.
-3. `claudine compose --unknown <file>` fails with the targeted file-before-tail
-   guidance rather than guessing that `<file>` is a switch value.
-4. A genuine shorthand setter before the provider tail is applied; a
-   setter-shaped token after tail start is forwarded.
-5. A Claudine flag before an explicit boundary remains Claudine-owned even
-   when it follows the first provider switch. The same spelling after `--` is
-   forwarded.
-6. Bare provider operands require `--`; the existing multiple-file diagnostic
-   remains for two ordinary non-setter positionals.
-7. The exact provider tail survives sequence steps, loop retries, proxy runs,
-   and resume launches. A multi-provider sequence classifies messages against
-   each resolved provider without changing argv.
-8. Generic INFO output is emitted once per distinct provider/tail pair and is
-   suppressed by `--quiet` and `--silent`. Explicit opaque tails are reported
-   as a unit.
-9. INFO output reveals no provider argument values, and debug, dry-run,
-   metadata, and correlated-error surfaces reveal no unredacted sensitive
-   values or recognizable secret tokens.
-10. An invalid forwarded switch with a fixture-backed native argv-rejection
-    signature produces one correlated error naming the redacted switch and
-    provider diagnostic. Auth, timeout, interruption, API, and ambiguous
-    failures are not misattributed.
-11. Direct wrappers use the shared reporting/classification path without any
-    change to the child argv they forward today.
-12. Completion remains non-failing while entering provider args, stops
-    Claudine suggestions after explicit `--`, and preserves existing file and
-    setter completion before the tail.
-13. Rule 3 documentation and tests are replaced or revised so no synthetic
-    separator can be mistaken for an authored provider boundary.
-14. **Phase 2:** generated provider metadata recognizes Codex `-c` as
-    `--config`, enriches its message, rejects schema alias/arity drift, and has
-    no effect on the exact forwarded argv.
+The numbering matches the original spec, and `plan.md`'s traceability table
+uses these numbers.
+
+| # | Criterion | Status |
+| --- | --- | --- |
+| 1 | `sequence`/`compose`/`inline-compose <file> --codex -c 'model_reasoning_effort=low'` launches Codex with exactly that tail. The value is not applied as frontmatter | Implemented. Exact-argv binary proof outstanding (R7) |
+| 2 | `compose <file> --codex -- -c value` consumes `--`, forwards `-c value`, and does no collision extraction | Implemented. Binary proof outstanding (R7) |
+| 3 | `compose --unknown <file>` fails with file-before-tail guidance | Done |
+| 4 | A shorthand setter before the tail is applied. A setter-shaped token after tail start is forwarded | Done (unit). Binary proof outstanding (R7) |
+| 5 | A Claudine flag before `--` stays Claudine's even after the first provider switch. The same spelling after `--` is forwarded | Done (unit) |
+| 6 | Bare provider operands require `--`. The multiple-file diagnostic remains | Done |
+| 7 | The exact tail survives sequence steps, retries, proxy runs, and **resume**. Multi-provider sequences classify messages per provider without changing argv | Open: resume (R1), coverage (R7) |
+| 8 | INFO is emitted once per distinct provider/tail pair **per command**, is suppressed by `--quiet`/`--silent`, and reports explicit tails as a unit | Open: scope and wording (R3) |
+| 9 | INFO reveals no values. Debug, dry-run, metadata, and correlated surfaces reveal no unredacted secret | Open: binary proof (R7), correlated surface (R2) |
+| 10 | A fixture-backed native rejection produces one correlated error. Auth, timeout, interruption, API, and ambiguous failures are not misattributed | Open (R2) |
+| 11 | Direct wrappers share the tail descriptor, notice, classification, and reporting, with no child-argv change | Open (R5) |
+| 12 | Completion never fails inside the tail, stops Claudine suggestions after `--`, and keeps pre-tail file/setter completion | Open (R4) |
+| 13 | No synthetic separator can be mistaken for an authored boundary. Rule 3 is retired | Done |
+| 14 | Phase 2: generated metadata recognizes Codex `-c` as `--config`, enriches the message, rejects alias/arity drift, and never changes argv | Open (R8) |
+| 15 | A non-UTF-8 tail token is refused with a targeted error, never rewritten | Open (R6) |
