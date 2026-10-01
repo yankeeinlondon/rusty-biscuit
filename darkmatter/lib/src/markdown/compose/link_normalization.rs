@@ -22,150 +22,7 @@ use crate::markdown::reference::{
     local::{extract_markdown_images, extract_markdown_links},
 };
 use crate::markdown::types::MarkdownResult;
-use biscuit_file::{to_portable_string, try_portable_string};
-
-/// A Windows-prefix-agnostic path identity for `starts_with`, `strip_prefix`,
-/// and relative-path arithmetic.
-///
-/// Path identity and path rendering are different contracts, and this is the
-/// identity one: a key is never emitted as document text. A repository root
-/// short enough for `dunce` to reduce can hold a descendant that is too long
-/// for it, so routing either operand through [`to_portable_string`] would spell
-/// the two differently and silently stop normalizing a path that really is
-/// inside the repository.
-///
-/// Keys compare equal across the spellings of one location: `C:\x` and
-/// `\\?\C:\x` (a drive letter is case-insensitive), `\\server\share\x` and
-/// `\\?\UNC\server\share\x`. Device (`\\.\`) and unrecognized verbatim
-/// (`\\?\Volume{…}`) namespaces keep their own prefix text, because neither has
-/// an equivalent spelling in another namespace.
-///
-/// Only the drive letter is case-folded. Windows compares whole paths
-/// case-insensitively, so a root recorded as `C:\repo` still fails to match a
-/// destination canonicalized as `C:\Repo\…`. That gap predates this key and is
-/// deliberately not widened here.
-///
-/// The suffix is split into components out of the raw platform units, and a key
-/// is never turned back into a [`Path`]. Two separate reasons, both
-/// load-bearing:
-///
-/// - [`Path::components`] drops a `.` and reads `..` as a parent hop. Under a
-///   verbatim prefix both are ordinary directory names, so re-parsing would let
-///   `strip_prefix` hand back a remainder naming a different file.
-/// - [`OsStr`](std::ffi::OsStr) is not UTF-8 on Windows. A key built through `to_string_lossy`
-///   maps two paths differing only in unpaired surrogates onto one
-///   U+FFFD-bearing identity, which is enough for the wrong anchor to match and
-///   for a destination to be rewritten as some other path.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ComparisonKey {
-    /// The namespace-independent root: `""`, `"C:"`, or `\\server\share`.
-    root: OsString,
-    /// Whether a separator follows the root, separating `C:\a` from `C:a`.
-    rooted: bool,
-    components: Vec<OsString>,
-}
-
-impl ComparisonKey {
-    fn starts_with(&self, base: &ComparisonKey) -> bool {
-        self.root == base.root
-            && self.rooted == base.rooted
-            && base.components.len() <= self.components.len()
-            && self.components[..base.components.len()] == base.components[..]
-    }
-
-    fn strip_prefix(&self, base: &ComparisonKey) -> Option<&[OsString]> {
-        self.starts_with(base)
-            .then(|| &self.components[base.components.len()..])
-    }
-
-    fn parent(&self) -> ComparisonKey {
-        let mut parent = self.clone();
-        parent.components.pop();
-        parent
-    }
-}
-
-#[cfg(windows)]
-fn comparison_key(path: &Path) -> ComparisonKey {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use std::path::{Component, Prefix};
-
-    const SEPARATOR: u16 = b'\\' as u16;
-    const ALT_SEPARATOR: u16 = b'/' as u16;
-
-    let units: Vec<u16> = path.as_os_str().encode_wide().collect();
-    let (root, verbatim, prefix_units) = match path.components().next() {
-        Some(Component::Prefix(prefix)) => {
-            let consumed = prefix.as_os_str().encode_wide().count();
-            let (root, verbatim) = match prefix.kind() {
-                Prefix::Disk(drive) => (drive_root(drive), false),
-                Prefix::VerbatimDisk(drive) => (drive_root(drive), true),
-                Prefix::UNC(server, share) => (unc_root(server, share), false),
-                Prefix::VerbatimUNC(server, share) => (unc_root(server, share), true),
-                Prefix::DeviceNS(_) => (prefix.as_os_str().to_os_string(), false),
-                Prefix::Verbatim(_) => (prefix.as_os_str().to_os_string(), true),
-            };
-            (root, verbatim, consumed)
-        }
-        _ => (OsString::new(), false, 0),
-    };
-
-    let is_separator =
-        |unit: u16| unit == SEPARATOR || (!verbatim && unit == ALT_SEPARATOR);
-    let rooted = units.get(prefix_units).copied().is_some_and(is_separator);
-    let components = units[prefix_units..]
-        .split(|unit| is_separator(*unit))
-        .filter(|segment| !segment.is_empty())
-        .map(OsString::from_wide)
-        // A `.` is a self-reference only outside a verbatim namespace; inside
-        // one it is a directory whose name happens to be a dot.
-        .filter(|segment| verbatim || segment != ".")
-        .collect();
-
-    ComparisonKey {
-        root,
-        rooted,
-        components,
-    }
-}
-
-#[cfg(windows)]
-fn drive_root(drive: u8) -> OsString {
-    OsString::from(format!("{}:", drive.to_ascii_uppercase() as char))
-}
-
-#[cfg(windows)]
-fn unc_root(server: &OsStr, share: &OsStr) -> OsString {
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-
-    let mut units: Vec<u16> = r"\\".encode_utf16().collect();
-    units.extend(server.encode_wide());
-    units.push(b'\\' as u16);
-    units.extend(share.encode_wide());
-    OsString::from_wide(&units)
-}
-
-/// Off Windows there is no namespace to be agnostic about, and
-/// [`Path::components`] is both faithful and non-lossy: `/` is the only
-/// separator and `.` is never a literal name.
-#[cfg(not(windows))]
-fn comparison_key(path: &Path) -> ComparisonKey {
-    use std::path::Component;
-
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
-            other => components.push(other.as_os_str().to_os_string()),
-        }
-    }
-
-    ComparisonKey {
-        root: OsString::new(),
-        rooted: path.has_root(),
-        components,
-    }
-}
+use biscuit_file::{PathIdentity, RelativeRoute, to_portable_string, try_portable_string};
 
 /// Whether `component` still names the same thing once a Windows namespace
 /// prefix is dropped.
@@ -246,11 +103,10 @@ fn render_components(components: &[OsString]) -> String {
     to_portable_string(&path)
 }
 
-/// Renders `up` parent hops followed by `forward` names, as
-/// [`compute_relative_path`] returns them.
-fn render_relative(up: usize, forward: &[OsString]) -> String {
-    let mut components: Vec<OsString> = vec![OsString::from(".."); up];
-    components.extend_from_slice(forward);
+/// Renders a route's parent hops followed by its forward names.
+fn render_relative(route: &RelativeRoute) -> String {
+    let mut components: Vec<OsString> = vec![OsString::from(".."); route.parent_hops()];
+    components.extend_from_slice(route.forward());
     let rendered = render_components(&components);
     if rendered.is_empty() {
         ".".to_string()
@@ -372,7 +228,7 @@ pub fn normalize_links(
         _ => None,
     };
 
-    let base_file = base_file.as_deref().map(comparison_key);
+    let doc_dir = base_file.as_deref().and_then(Path::parent).map(PathIdentity::new);
     let captured_context = match (&options.file_resolution_context, &source) {
         (None, ComposeSource::File(path)) => path
             .parent()
@@ -385,17 +241,17 @@ pub fn normalize_links(
         None => None,
     }
     .map(|r| std::fs::canonicalize(&r).unwrap_or(r))
-    .map(|r| comparison_key(&r));
+    .map(|r| PathIdentity::new(&r));
     let home = match request_context {
         Some(context) => context.home_dir().map(Path::to_path_buf),
         None => dirs::home_dir(),
     }
     .map(|path| std::fs::canonicalize(&path).unwrap_or(path))
-    .map(|path| comparison_key(&path));
+    .map(|path| PathIdentity::new(&path));
 
     for (record, abs_path) in to_normalize {
         let resolved_abs = std::fs::canonicalize(&abs_path).unwrap_or_else(|_| abs_path.clone());
-        let comparable_abs = comparison_key(&resolved_abs);
+        let comparable_abs = PathIdentity::new(&resolved_abs);
         // Every anchor arm emits the destination without its namespace prefix.
         // When the whole path had no faithful portable spelling, that removal
         // has to be proved component by component before any arm may write text.
@@ -408,14 +264,14 @@ pub fn normalize_links(
         // 3.6 Same-repo rule
         if let Some(ref repo) = git_root
             && comparable_abs.starts_with(repo)
-            && let Some(ref doc_path) = base_file
+            && let Some(ref doc_dir) = doc_dir
+            && let Some(route) = comparable_abs.relative_from(doc_dir)
         {
-            let (up, forward) = compute_relative_path(doc_path, &comparable_abs);
-
-            // Only `forward` is audited: the `..` hops are this pipeline's own
-            // parent navigation, not names copied out of the destination.
-            if audit(&forward) {
-                replacement = Some(render_relative(up, &forward));
+            // Only the forward names are audited: the `..` hops are this
+            // pipeline's own parent navigation, not names copied out of the
+            // destination.
+            if audit(route.forward()) {
+                replacement = Some(render_relative(&route));
             } else {
                 anchor_rejected = true;
             }
@@ -447,9 +303,9 @@ pub fn normalize_links(
                 if let Some(val) = val {
                     let var_path = PathBuf::from(val);
                     let var_path = std::fs::canonicalize(&var_path).unwrap_or(var_path);
-                    let var_path = comparison_key(&var_path);
+                    let var_path = PathIdentity::new(&var_path);
                     if comparable_abs.starts_with(&var_path) {
-                        let depth = var_path.components.len();
+                        let depth = var_path.components().len();
                         if best_var.is_none() || depth > longest_len {
                             longest_len = depth;
                             best_var = Some((var_name, var_path));
@@ -517,57 +373,6 @@ pub fn normalize_links(
     Ok(())
 }
 
-/// Splits the route from `from`'s directory to `to` into parent hops and the
-/// names below the point where the two diverge.
-///
-/// The halves are returned separately rather than pre-joined because only
-/// `forward` carries names copied out of the destination; that is the slice
-/// [`survives_namespace_removal`] must audit, and a joined path would leave the
-/// generated `..` hops indistinguishable from a literal `..` directory name.
-fn compute_relative_path(
-    from: &ComparisonKey,
-    to: &ComparisonKey,
-) -> (usize, Vec<OsString>) {
-    let from = strip_macos_private(from);
-    let to = strip_macos_private(to);
-
-    let from_dir = if from
-        .components
-        .last()
-        .is_some_and(|name| Path::new(name).extension().is_some())
-    {
-        from.parent()
-    } else {
-        from
-    };
-
-    let common = from_dir
-        .components
-        .iter()
-        .zip(to.components.iter())
-        .take_while(|(base, target)| base == target)
-        .count();
-
-    (
-        from_dir.components.len() - common,
-        to.components[common..].to_vec(),
-    )
-}
-
-/// macOS canonicalizes `/tmp` and `/var` under `/private`, so a document and
-/// its destination can disagree about that leading component depending on which
-/// of them was canonicalized. Dropping it keeps the two comparable.
-fn strip_macos_private(key: &ComparisonKey) -> ComparisonKey {
-    let mut key = key.clone();
-    if key.rooted
-        && key.components.len() > 1
-        && key.components.first().is_some_and(|first| first == "private")
-    {
-        key.components.remove(0);
-    }
-    key
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -614,6 +419,38 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_normalizations_applied, 1);
+    }
+
+    /// The document's own directory is the route's origin, whatever the
+    /// document's name looks like: an extensionless source (`docs/README`)
+    /// is not a directory, and a dotted directory name (`v1.2`) is not a file.
+    #[test]
+    fn test_normalize_links_routes_from_the_source_directory() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        let docs = repo.join("docs").join("v1.2");
+        fs::create_dir_all(&docs).unwrap();
+        fs::create_dir_all(repo.join("assets")).unwrap();
+        let target_file = repo.join("assets").join("image.png");
+        fs::write(&target_file, "png").unwrap();
+        let abs_path = std::fs::canonicalize(&target_file).unwrap();
+
+        for source_name in ["README", "guide.md"] {
+            let source_file = docs.join(source_name);
+            fs::write(&source_file, "").unwrap();
+            let content = format!("![img]({})\n", biscuit_file::to_portable_string(&abs_path));
+            let mut md = Markdown::new(&content);
+            let options = options_with_repo(&source_file);
+            let mut report = ComposeReport::new();
+            normalize_links(&mut md, &options, &mut report).unwrap();
+            assert_eq!(
+                md.content(),
+                "![img](../../assets/image.png)\n",
+                "source {source_name}"
+            );
+            assert_eq!(report.link_normalizations_applied, 1, "source {source_name}");
+        }
     }
 
     #[test]
@@ -957,74 +794,33 @@ mod tests {
         assert_eq!(report.link_normalizations_applied, 4);
     }
 
-    /// Both spellings of one share must land on one key, or a document under
-    /// `\\server\share` stops normalizing the moment something canonicalizes a
-    /// destination into the verbatim namespace.
+    /// Both spellings of one share share an identity but have no portable
+    /// text, which is why equating them cannot be done by rendering both.
     ///
-    /// Equality alone would not prove the pipeline works, so the prefix tests
-    /// and the relative arithmetic run across the two spellings as well. The
-    /// pair is not driven through [`normalize_links`] because every anchor arm
-    /// canonicalizes, and `canonicalize` against a `\\server\share` path blocks
-    /// on SMB name resolution for tens of seconds.
+    /// The prefix test and the relative route run across the two spellings, so
+    /// a document under `\\server\share` keeps normalizing when something
+    /// canonicalizes a destination into the verbatim namespace. The pair is not
+    /// driven through [`normalize_links`] because every anchor arm
+    /// canonicalizes, and `canonicalize` against a `\\server\share` path
+    /// blocks on SMB name resolution for tens of seconds.
     #[cfg(windows)]
     #[test]
-    fn comparison_key_equates_legacy_and_verbatim_unc() {
-        assert_eq!(
-            comparison_key(Path::new(r"\\server\share\x")),
-            comparison_key(Path::new(r"\\?\UNC\server\share\x"))
-        );
-
-        let legacy_root = comparison_key(Path::new(r"\\server\share\repo"));
+    fn unc_spellings_share_an_identity_but_no_portable_text() {
+        let legacy_root = PathIdentity::new(Path::new(r"\\server\share\repo"));
         let verbatim_child =
-            comparison_key(Path::new(r"\\?\UNC\server\share\repo\docs\f.md"));
+            PathIdentity::new(Path::new(r"\\?\UNC\server\share\repo\docs\f.md"));
         assert!(verbatim_child.starts_with(&legacy_root));
         assert_eq!(
             verbatim_child.strip_prefix(&legacy_root).map(render_components),
             Some("docs/f.md".to_string())
         );
 
-        let legacy_doc = comparison_key(Path::new(r"\\server\share\repo\assets\a.md"));
-        let (up, forward) = compute_relative_path(&legacy_doc, &verbatim_child);
-        assert_eq!(render_relative(up, &forward), "../docs/f.md");
+        let legacy_doc_dir = PathIdentity::new(Path::new(r"\\server\share\repo\assets"));
+        let route = verbatim_child.relative_from(&legacy_doc_dir).unwrap();
+        assert_eq!(render_relative(&route), "../docs/f.md");
 
-        // Equal as identities, declined as text: the pair a UNC destination
-        // reaches Finalization with, and the reason equating them cannot be
-        // done by rendering both.
         assert!(try_portable_string(Path::new(r"\\server\share\x")).is_none());
         assert!(try_portable_string(Path::new(r"\\?\UNC\server\share\x")).is_none());
-    }
-
-    /// A key is an identity, so two paths that differ only in an unpaired
-    /// surrogate must not share one.
-    ///
-    /// `to_string_lossy` maps both onto the same U+FFFD-bearing text, which is
-    /// enough for one path to match the other's anchor and be rewritten as a
-    /// destination naming a different file.
-    #[cfg(windows)]
-    #[test]
-    fn comparison_key_keeps_unpaired_surrogates_distinct() {
-        use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
-
-        let with_trailing_unit = |unit: u16| {
-            let units: Vec<u16> = r"C:\repo\".encode_utf16().chain([unit]).collect();
-            PathBuf::from(OsString::from_wide(&units))
-        };
-        let first = with_trailing_unit(0xD800);
-        let second = with_trailing_unit(0xD801);
-
-        assert_ne!(first, second);
-        assert_eq!(
-            first.to_string_lossy(),
-            second.to_string_lossy(),
-            "fixture must be one a lossy key would collapse, or it proves nothing"
-        );
-
-        let first_key = comparison_key(&first);
-        let second_key = comparison_key(&second);
-        assert_ne!(first_key, second_key);
-        assert!(!first_key.starts_with(&second_key));
-        assert!(first_key.starts_with(&comparison_key(Path::new(r"C:\repo"))));
     }
 
     /// A repository root short enough for `dunce` to reduce, holding a
@@ -1039,7 +835,7 @@ mod tests {
     #[test]
     fn safe_repo_root_contains_declined_long_verbatim_descendant() {
         let repo = Path::new(r"C:\r");
-        let doc = Path::new(r"C:\r\docs\a.md");
+        let doc_dir = Path::new(r"C:\r\docs");
         let long_a = "a".repeat(150);
         let long_b = "b".repeat(150);
         let descendant =
@@ -1055,18 +851,16 @@ mod tests {
             "the descendant must be one `dunce` declines, or this proves nothing"
         );
 
-        let repo_key = comparison_key(repo);
-        let doc_key = comparison_key(doc);
-        let descendant_key = comparison_key(&descendant);
-        assert!(descendant_key.starts_with(&repo_key));
+        let descendant_key = PathIdentity::new(&descendant);
+        assert!(descendant_key.starts_with(&PathIdentity::new(repo)));
 
-        let (up, forward) = compute_relative_path(&doc_key, &descendant_key);
+        let route = descendant_key.relative_from(&PathIdentity::new(doc_dir)).unwrap();
         assert!(
-            survives_namespace_removal(&forward),
+            survives_namespace_removal(route.forward()),
             "length alone must not disqualify an anchored replacement"
         );
         assert_eq!(
-            render_relative(up, &forward),
+            render_relative(&route),
             format!("../assets/{long_a}/{long_b}/image.png")
         );
     }
@@ -1406,7 +1200,7 @@ mod tests {
     /// It is a verbatim path rather than the UNC one because `canonicalize`
     /// against `\\server\share` blocks on SMB name resolution for tens of
     /// seconds; UNC's decline is pinned in
-    /// [`comparison_key_equates_legacy_and_verbatim_unc`] instead.
+    /// [`unc_spellings_share_an_identity_but_no_portable_text`] instead.
     #[cfg(windows)]
     #[test]
     fn declined_absolute_destination_is_preserved_and_warned() {
