@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use biscuit_terminal::terminal::Terminal;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::generate::generate;
 use messenger::research::model::{Date, PlatformId};
 use messenger::research::publish::{Options, Point};
@@ -19,6 +20,14 @@ use tempfile::TempDir;
 
 fn cli_dir() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
+}
+
+/// A loader whose context is built for the workspace root from a snapshot
+/// that reads nothing from the test process.
+fn research_loader(workspace: Workspace) -> Loader {
+    let snapshot = RequestSnapshot::new(workspace.repo_root());
+    let context = build_resolution_context(&snapshot).expect("research root context builds");
+    Loader::new(workspace, context)
 }
 
 fn repo_root() -> PathBuf {
@@ -297,7 +306,7 @@ fn an_interrupted_generation_requires_explicit_recovery() {
     assert_eq!(code(&fleet.research(&["generate"])), 0);
     let published = fleet.docs();
 
-    let loader = Loader::new(Workspace::new(fleet.root()).expect("absolute"));
+    let loader = research_loader(Workspace::new(fleet.root()).expect("absolute"));
     let discord = fleet.text("messenger/docs/research/platforms/discord.md").replacen("  value: 2000\n", "  value: 4000\n", 1);
     let updates = BTreeMap::from([(PlatformId::Discord, discord)]);
     let today = Date::parse("2026-09-17").unwrap();

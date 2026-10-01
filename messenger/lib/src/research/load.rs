@@ -7,9 +7,9 @@
 //! expressions, spawns a process, or touches the network, and it never
 //! shells out to `md`.
 //!
-//! File references (`$schema`, roster `file`) resolve through one
-//! [`FileResolutionContext`] captured when the [`Loader`] is built, anchored
-//! at the workspace's repository root.
+//! File references (`$schema`, roster `file`) resolve through the one
+//! [`FileResolutionContext`] the [`Loader`] is given, which the caller builds
+//! for the workspace root.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -115,11 +115,16 @@ pub struct Loader {
 }
 
 impl Loader {
-    /// Captures the file-resolution context once, anchored at the repository
-    /// root, and shares it with Darkmatter's schema resolution.
-    pub fn new(workspace: Workspace) -> Self {
-        let root = workspace.repo_root().to_path_buf();
-        let context = FileResolutionContext::new(root.clone()).with_repository_root(root);
+    /// A loader that resolves every file reference, and Darkmatter's schema
+    /// resolution, through `context`.
+    ///
+    /// `context` should be built for the workspace root, for example with
+    /// `darkmatter::markdown::compose::build_resolution_context` over a
+    /// request snapshot rebased with `at_request_dir(workspace.repo_root())`.
+    /// The loader reads no process state and does no repository discovery of
+    /// its own, so `&` and `^` anchor wherever that build found the
+    /// repository (none for a workspace outside any Git repository).
+    pub fn new(workspace: Workspace, context: FileResolutionContext) -> Self {
         let schemas = DarkmatterSchemas::new().with_file_resolution_context(context.clone());
         Self {
             workspace,

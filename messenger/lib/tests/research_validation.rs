@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 use messenger::research::assess::{AssessmentState, evaluate};
 use messenger::research::canonical::{record_fingerprint, schema_fingerprint, text_fingerprint};
@@ -31,6 +32,14 @@ fn lib_dir() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
 }
 
+/// A loader whose context is built for the workspace root from a snapshot
+/// that reads nothing from the test process.
+fn research_loader(workspace: Workspace) -> Loader {
+    let snapshot = RequestSnapshot::new(workspace.repo_root());
+    let context = build_resolution_context(&snapshot).expect("research root context builds");
+    Loader::new(workspace, context)
+}
+
 fn repo_root() -> PathBuf {
     lib_dir().parent().and_then(Path::parent).expect("repository root").to_path_buf()
 }
@@ -40,7 +49,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn repo_loader() -> Loader {
-    Loader::new(Workspace::new(repo_root()).expect("absolute root"))
+    research_loader(Workspace::new(repo_root()).expect("absolute root"))
 }
 
 fn shipped_roster() -> Roster {
@@ -95,7 +104,7 @@ impl TempWorkspace {
             fs::create_dir_all(target.parent().expect("parent")).expect("mkdir");
             fs::copy(repo_root().join(schema), target).expect("copy schema");
         }
-        let loader = Loader::new(Workspace::new(dir.path()).expect("absolute tempdir"));
+        let loader = research_loader(Workspace::new(dir.path()).expect("absolute tempdir"));
         Self { dir, loader }
     }
 

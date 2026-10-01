@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::generate::{self, GenerateError, check, generate};
 use messenger::research::model::{Date, PlatformId};
 use messenger::research::publish::{self, Options, Point, read_verified};
@@ -29,6 +30,14 @@ use tempfile::TempDir;
 
 fn lib_dir() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
+}
+
+/// A loader whose context is built for the workspace root from a snapshot
+/// that reads nothing from the test process.
+fn research_loader(workspace: Workspace) -> Loader {
+    let snapshot = RequestSnapshot::new(workspace.repo_root());
+    let context = build_resolution_context(&snapshot).expect("research root context builds");
+    Loader::new(workspace, context)
 }
 
 fn repo_root() -> PathBuf {
@@ -79,7 +88,7 @@ impl Repo {
             fs::create_dir_all(target.parent().expect("parent")).expect("mkdir");
             fs::copy(repo_root().join(path), target).expect("copy shipped input");
         }
-        Self { loader: Loader::new(Workspace::new(dir.path()).expect("absolute")), dir }
+        Self { loader: research_loader(Workspace::new(dir.path()).expect("absolute")), dir }
     }
 
     /// The fleet fixture published as a snapshot (no review records).
@@ -448,7 +457,7 @@ fn concurrent_preparations_leave_exactly_one_open_run() {
         let workers: Vec<_> = (0..2)
             .map(|_| {
                 scope.spawn(|| {
-                    let loader = Loader::new(Workspace::new(repo.root()).expect("absolute"));
+                    let loader = research_loader(Workspace::new(repo.root()).expect("absolute"));
                     let request = Request { forced: [PlatformId::Discord].into(), ..Request::default() };
                     barrier.wait();
                     prepare::prepare(&loader, &[PlatformId::Discord], LIMITS, &day("2026-09-18"), &request)

@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::generate::generate;
 use messenger::research::model::{Date, PlatformId};
 use messenger::research::publish::Options;
@@ -17,6 +18,14 @@ use tempfile::TempDir;
 
 fn cli_dir() -> PathBuf {
     biscuit_test_harness::manifest_dir!()
+}
+
+/// A loader whose context is built for the workspace root from a snapshot
+/// that reads nothing from the test process.
+fn research_loader(workspace: Workspace) -> Loader {
+    let snapshot = RequestSnapshot::new(workspace.repo_root());
+    let context = build_resolution_context(&snapshot).expect("research root context builds");
+    Loader::new(workspace, context)
 }
 
 fn repo_root() -> PathBuf {
@@ -44,7 +53,7 @@ struct Fleet {
 impl Fleet {
     fn published() -> Self {
         let fleet = Self::unpublished_at(None);
-        let loader = Loader::new(Workspace::new(fleet.root()).expect("absolute"));
+        let loader = research_loader(Workspace::new(fleet.root()).expect("absolute"));
         generate(&loader, &BTreeMap::new(), &Date::parse("2026-09-17").expect("date"), Options::default()).expect("publish");
         fleet
     }
@@ -111,7 +120,7 @@ impl Fleet {
     }
 
     fn curated(&self, platform: PlatformId) -> Vec<String> {
-        let loader = Loader::new(Workspace::new(self.root()).expect("absolute"));
+        let loader = research_loader(Workspace::new(self.root()).expect("absolute"));
         let roster = loader.load_roster(&loader.workspace().roster()).expect("roster").record.expect("typed");
         roster.platform(platform).expect("platform").curated_sources.iter().map(|s| s.url.clone()).collect()
     }
