@@ -295,15 +295,17 @@ tagged, anchored, or aliased frontmatter scalars. `interpolation_block` renders 
 authored line and column for every cause, and
 `interpolation/fatality_characterization.rs` is the drift guard.
 
-A well-formed identifier that resolves to nothing warns as
-`dm.expression.unknown_identifier` (once per root per document) unless the
-author handled its absence (`x || d`, `x ? …`, `is_null(x)`) or the root is
-known to the final state, a caller input, or the effective schema. Read
-[compose.md](compose.md#unknown-identifiers-dmexpressionunknown_identifier)
+A well-formed identifier that resolves to nothing is an absent document
+property (`null`); a bare name never falls back to `ctx`. Compose reports it as
+the advisory `dm.expression.undeclared_property` (once per root per document)
+unless the author handled its absence (`x || d`, `x ? …`, `is_null(x)`) or the
+root is declared by the final state, a caller input, or the effective schema.
+Read
+[compose.md](compose.md#undeclared-properties-dmexpressionundeclared_property)
 before changing a runtime evaluation surface: new surfaces must observe
-through the shared `AbsenceScope`, not a new walk. DMLS reports the same code
-at `WARNING` through the static twin, `expression::static_variable_reads`
-(see [dmls.md](dmls.md#unknown-identifiers)).
+through the shared `AbsenceScope`, not a new walk. DMLS still reports its own
+`dm.expression.unknown_identifier` at `WARNING` through the static twin,
+`expression::static_variable_reads` (see [dmls.md](dmls.md#unknown-identifiers)).
 
 Each issue is reported once. A coded `ComposeWarning` family declares its
 identity in its constructor (`from_schema_advisory`,
@@ -318,7 +320,7 @@ not `report.warnings.push`. Membership is O(1) through a private
 vector shrinks, but an element replaced in place is not seen.
 `interpolate_text` scans once, so a failed span
 is reported once. A new coded family, such as
-`dm.expression.unknown_identifier`, adds a `WarningSubject` constructor
+`dm.expression.undeclared_property`, adds a `WarningSubject` constructor
 rather than a message-based check.
 
 Deterministic `md` integration tests must launch through
