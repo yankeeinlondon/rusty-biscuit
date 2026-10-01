@@ -16,12 +16,35 @@ cyan := '\033[36m'
 
 # Stand-in for the coming sequence support: alternate implement → review on an
 # implemented spec until a review marks it production ready (at most 5 cycles).
-fix spec:
+# Pass `--use-defaults` to skip the agent/model prompts and use the defaults.
+[positional-arguments]
+fix +args:
     #!/usr/bin/env bash
     set -euo pipefail
 
     max_cycles=5
-    spec="{{ spec }}"
+    use_defaults=false
+    spec=""
+    for arg in "$@"; do
+        case "${arg}" in
+            --use-defaults) use_defaults=true ;;
+            -*)
+                echo -e "{{ red }}ERROR:{{ reset }} unknown option '${arg}' (supported: --use-defaults)" >&2
+                exit 1
+                ;;
+            *)
+                if [[ -n "${spec}" ]]; then
+                    echo -e "{{ red }}ERROR:{{ reset }} expected one spec, got '${spec}' and '${arg}'" >&2
+                    exit 1
+                fi
+                spec="${arg}"
+                ;;
+        esac
+    done
+    if [[ -z "${spec}" ]]; then
+        echo -e "{{ red }}ERROR:{{ reset }} no spec given; usage: just fix <spec> [--use-defaults]" >&2
+        exit 1
+    fi
 
     if [[ ! -f "${spec}" ]]; then
         dirs=()
@@ -64,17 +87,19 @@ fix spec:
 
     choose_agent() {
         local label="$1" default="$2"
+        if [[ "${use_defaults}" == "true" ]]; then echo "${default}"; return; fi
         { echo "${default}"; echo -e "{{ agents }}" | rg -vx -- "${default}" | rg -v '^$'; } \
             | fzf --height=12 --border --border-label "${label} agent (default: ${default})"
     }
     choose_model() {
         local label="$1" default="$2" answer
+        if [[ "${use_defaults}" == "true" ]]; then echo "${default}"; return; fi
         read -r -p "$(echo -e "${label} model [{{ bold }}${default}{{ reset }}]: ")" answer
         echo "${answer:-${default}}"
     }
 
     review_agent="$(choose_agent "Review" codex)"
-    review_model="$(choose_model "Review" gpt-6-sol)"
+    review_model="$(choose_model "Review" gpt-6.1-sol)"
     implement_agent="$(choose_agent "Implementation" claude)"
     implement_model="$(choose_model "Implementation" opus)"
 
