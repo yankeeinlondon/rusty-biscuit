@@ -9,7 +9,96 @@ docs_updated_during_phase_1:
     - claudine/fixes/2026-09-17-remove-strict-mode/design.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/subtree.rs
+    - darkmatter/lib/tests/l1/binding_contract.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/subtree.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/context/runtime.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+    - darkmatter/lib/tests/l1/absent_property_contract.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__performance-review.md
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/brainstorm.md
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/authored_text_rendering.rs
+    - prompts/_reviews/performance-review.md
+    - prompts/brainstorm.md
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/parsing/index.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/parsing/lexing.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-cli
 ---
 
 # Implementation Log for 2026-09-17-remove-strict-mode (7 phases)
@@ -237,3 +326,303 @@ behavior, so the requirement-to-test mapping is empty; the four baseline gates
 are the verification. Source files changed: none. Planning/docs changed:
 `claudine/docs/rollout-strategy.md` (NR-1), this fix's `design.md` status line
 (NR-1), `plan.md` checkboxes and frontmatter, and this log.
+
+## Phase 2
+
+Phase 2 adds Darkmatter's binding model and the passive prepared-expression
+validator. It is additive: strict mode, `is_known_variable_root`, and the
+bare-name `ctx` fallback are all untouched, every crate compiles, and no
+existing caller changes behavior. All Phase 2 code is in the `darkmatter`
+library; Claudine needed no source change.
+
+### What was built
+
+| Plan task | Where | Notes |
+|---|---|---|
+| Binding types | `darkmatter/lib/src/markdown/compose/expression/binding.rs` (new) | `ResolvedBinding { Document, Namespace, Global }` carrying `Option<Value>` / `Value` (NR-2); `BindingError` (configuration arms `ReservedName`, `InvalidRoot`, `Duplicate`, `UnknownGlobal`, `OmittedDeclaredGlobal`, `ContradictsDeclaration`, `InvalidReasonCode`, plus `Unavailable(Box<UnavailableBinding>)` with `root`, `path`, `scope`, `reason`, `span`); `UnavailabilityReason` (namespaced `owner.reason` code + structured `parameters`) |
+| Declarations and sessions | same file | `ScopeId` (opaque), `Availability { Available, Unavailable(reason), ExecutionDependent }`, immutable provider-free `BindingView` built by `BindingView::builder(scope).declare(..).build()`, `RootClass` + `BindingView::classify_root`, `RuntimeBinding { Eager, Lazy(Arc<dyn Fn() -> Value>), Unavailable }`, and `EvaluationSession::associate(view, document, runtime)` |
+| Trait channel (NR-5) | `expression/mod.rs` | `get_checked` → `resolve(&self, path) -> Result<ResolvedBinding, ExpressionError>` (default wraps `get` as `Document`); new `binding_view()` (default `None`) and `format_resolved(path, value)` (default = the old `get_string` rendering); `get_string`'s default now composes `get` + `format_resolved`. `ExpressionError::Binding(Box<BindingError>)` added, authoring-fatal |
+| Evaluator routing | `expression/mod.rs` (`evaluate_expr`), `interpolation/evaluator.rs` (`Evaluator::eval` fast path) | Both read through `resolve`; the fast path formats through `format_resolved` instead of a second `get_string` lookup |
+| Prepared validator | `expression/prepared.rs` (new) | `AuthoredMode { Expression(ParseMode), InterpolatedValue, Subtree }`, `prepare_value`, `validate_prepared`, `evaluate_prepared`, `PreparedValue`/`PreparedExpression`, `PreparationError`, `ValidationDiagnostic`; reuses `ExpressionFinder::scan_plain`, `parse_spanned`/`parse_condition_spanned`, and `static_variable_reads` (the existing all-branches walk) |
+| Binding/passive tests | `darkmatter/lib/tests/l1/binding_contract.rs` (new, declared in `tests/l1/main.rs`) | 16 tests, see the mapping below |
+
+The six lookups that overrode `get_checked` now override `resolve`, each
+classifying its result with `ResolvedBinding::classify` (reserved root →
+`Namespace`, otherwise `Document`): `EffectiveState`, `ResolvingLookup`,
+`FrontmatterSeedState`, `ShortcutLookup`, `CtxLookup`, `LayeredLookup`
+(injected globals → `Global`), and the forwarder `DeferrableLookup` (still maps
+`ContextNotCaptured` to an absent value when deferring, now as a classified
+`None`). Each keeps exactly its old values and errors.
+
+### Decisions and departures
+
+- **`EvaluationSession::associate`, not `BindingEnvironment::associate`.**
+  C1 and the plan name a `BindingEnvironment` type whose only member would be
+  `associate`. An empty struct that hosts one function adds nothing in Rust, so
+  the constructor lives on the type it returns. Same arguments, same checks.
+- **No `PreparationContext` parameter.** NR-6 removed the schema, policy, and
+  feature-restriction inputs C2 put in it, which leaves it with nothing to
+  carry. `prepare_value(input, mode)` takes two arguments, and the parse mode
+  of a bare expression lives in `AuthoredMode::Expression(ParseMode)` because a
+  `when:` condition (`||` = OR) and an interpolation expression (`||` =
+  fallback) parse differently.
+- **No prepared identity check.** NR-6 makes the `BindingView` identity the
+  only prepared identity. A `PreparedValue` stores no view-derived data (the
+  view is an explicit argument to `validate_prepared`, and the session supplies
+  it at evaluation), so there is nothing a stale view could corrupt and no
+  `PreparedContextMismatch` to raise. Add it if C5 later caches view data.
+- **Error sizes.** Clippy's `result_large_err` rejected the first shape, so
+  `ExpressionError::Binding` holds a `Box<BindingError>`, the unavailable read
+  is a boxed `UnavailableBinding` struct, and `PreparationError::cause` is a
+  `Box<ExpressionError>`, matching `MarkdownError::Interpolation`'s boxed cause.
+- **Unknown-function check.** `validate_prepared` decides "unknown function"
+  with a new `functions::is_dispatchable`, which matches names exactly as
+  `evaluate_function` does (lowercased, canonical name or alias, lazy
+  operators included). It builds the diagnostic with the evaluator's own
+  `unknown_function_error`, so validation and runtime raise the same typed
+  error (now `pub(crate)`).
+- **Reserved roots (NR-3)** come from `reserved_root_descriptors()` through
+  `binding::is_reserved_namespace`: `doc`, `ctx`, `env`, `current`,
+  `current_env`. If the owner chooses option B, that function is the one place
+  to narrow.
+- **Lazy cache.** One `Mutex<HashMap<root, Value>>` per session. The lock is
+  dropped before a provider runs and re-taken to insert (first value wins if a
+  re-entrant provider filled the slot). A poisoned lock is recovered with
+  `PoisonError::into_inner`, never read as missing data. Members are projected
+  from the cached root, so `err` and `err.message` share one provider call.
+- **A global's missing member is `Global { null }`** in the session, which
+  differs from `LayeredLookup` (where it was `None` and then `null` in the
+  evaluator). The rendered output is the same; only the classification is new.
+- **`LayeredLookup` keeps the default `format_resolved`.** It never applied the
+  base state's name coercion when rendering (its old `get_string` override did
+  not), so overriding the hook would have been a behavior change.
+  `EffectiveState`, `ResolvingLookup`, `FrontmatterSeedState`, and
+  `DeferrableLookup` override or forward it, preserving coercion. Coercion only
+  ever touches objects (`coerce_named_object`), so routing arrays and scalars
+  through the hook renders the same bytes as the old fast path.
+- **Claudine forwarders were left alone.** `SizedLookup` is only used with the
+  generic `evaluate` (never the interpolation fast path), so the new
+  `format_resolved` hook cannot change its output. It and
+  `EventMetaConditionLookup` gain `resolve`/`binding_view`/`format_resolved`
+  forwarding in Phase 4 (Wave 9), as planned; forwarding `resolve` now would
+  surface errors they drop today, which is a behavior change.
+
+### Pre-existing defect fixed
+
+The rustdoc example on `expression::evaluate` (`expression/mod.rs`, the second
+`SimpleLookup` example the plan names) did not compile at HEAD: it imported
+`evaluate` but called the private `evaluate_expr`. `just test` does not run
+doctests, which is why Phase 1's baseline missed it. It now calls `evaluate`.
+`just doctest` in `darkmatter/` passes (192 passed, 10 ignored).
+
+### Requirement-to-test mapping
+
+All tests are in `darkmatter/lib/tests/l1/binding_contract.rs`, compiled by the
+declared `l1` binary (`tests/l1/main.rs`) and selected by L1 (no tier marker in
+any path segment). They read no repository file.
+
+| Requirement (plan Wave 5) | Test |
+|---|---|
+| available-null vs unavailable vs absent document property | `resolution::available_null_unavailable_and_absent_property_are_distinct` (whole value, mixed string, ternary, `\|\|` fallback does not hide an unavailable global, `doc.group` still reads the document) |
+| an injected global shadows a same-named document property | `resolution::a_global_shadows_a_document_property_of_the_same_name` (missing member stays `Global { null }`) |
+| each reserved root's registration fails before any lazy provider runs | `registration::every_reserved_root_is_rejected_before_any_provider_runs` (declaration and association, with a panicking provider; asserts the five-name table) |
+| an omitted declared global fails association even when only referenced in an inactive branch | `registration::an_omitted_declared_global_fails_association` (each of the three globals omitted in turn; control row evaluates) |
+| configuration errors (duplicate, unknown, dotted, contradicting, reason codes) | `registration::association_rejects_every_inconsistent_registration`, `registration::a_view_rejects_invalid_duplicate_and_unnamespaced_declarations` |
+| `doc.doc`, `doc.ctx`, `doc.env` read document data | `resolution::doc_prefixed_reserved_names_read_document_data` |
+| one lazy evaluation per session, including a `null` result | `resolution::a_lazy_global_runs_once_per_session_including_a_null_result` (0 calls before reference, 1 across four reads, 2 after a new session) |
+| a get-only lookup stays source-compatible | `resolution::a_get_only_lookup_resolves_as_document_data` |
+| an unavailable root in an inactive ternary branch fails `validate_prepared` | `passive_validation::an_unavailable_root_in_an_inactive_branch_fails_validation` (runtime takes the other branch and succeeds) |
+| an `execution-dependent` root is deferred | `passive_validation::validation_walks_every_position_and_defers_execution_dependent_roots` |
+| a counting provider records zero calls during preparation and validation | `passive_validation::preparation_and_validation_invoke_no_provider` |
+| unknown functions in every branch; aliases and letter case accepted | `passive_validation::unknown_functions_are_reported_in_every_branch` |
+| mode semantics (condition `\|\|`, typed whole value, subtree) | `passive_validation::each_authored_mode_evaluates_with_its_own_rules` |
+| malformed input located; literals not prepared | `passive_validation::a_malformed_expression_fails_preparation_with_its_location`, `passive_validation::literals_are_not_prepared` |
+
+Unchanged behavior for existing callers is shown by the existing suites, which
+pass unmodified apart from the mechanical `get_checked` → `resolve` call-site
+edits in `context/checked.rs` and `expression/ctx.rs` unit tests.
+
+Input Robustness Matrix: not applicable (no file-format or configuration
+reader changed; plan § Input Robustness Matrix).
+
+### Gates
+
+| Area | Recipe | Result |
+|---|---|---|
+| workspace | `cargo check --workspace --all-targets` | clean |
+| `darkmatter/` | `just test` | 8760 passed (baseline 8744 + 16 new), 12 skipped |
+| `darkmatter/` | `just lint` | exit 0 |
+| `darkmatter/` | `just doctest` | 192 passed, 10 ignored (includes the repaired `evaluate` example and the new `prepared` module example) |
+| `claudine/` | `just test` | 8072 passed, 9 skipped (identical to baseline) |
+| `claudine/` | `just lint` | exit 0 |
+
+No `just test-l2` was run: Phase 2 changes no L2-covered boundary, and the
+checkpoint names only `just test`/`just lint`. Cross-OS: the change is pure Rust
+with no `#[cfg]`, path, or process code, so no `just cross-check` was needed;
+CI covers the other environments.
+
+### Docs
+
+`darkmatter/docs/topics/darkmatter-expressions.md` § `EvaluationLookup` Trait
+named the removed `get_checked`; it now describes `resolve`/`format_resolved`,
+and a new "Host Bindings" subsection documents the resolution order, the three
+availability states, association checks, lazy caching, and
+prepare/validate/evaluate with a compact example. Phase 7 still owns the full
+documentation pass (the Mermaid resolution diagram and the remaining pages).
+
+### Phase 2 outcome
+
+Checkpoint 2 is met: `cargo check --workspace` is clean, `darkmatter` and
+`claudine` `just test`/`just lint` pass, and no existing caller changed
+behavior. Evidence toward acceptance criteria 6 and 8 (partial): an unavailable
+global is a typed error that never reads the document (6), and the passive
+validator reports definitely unavailable roots in every branch without running
+a provider (8).
+
+## Phase 3
+
+Phase 3 removes strict mode and the bare-name `ctx` fallback from Darkmatter,
+rebuilds subtree compose on the Phase 2 binding session, renames the
+undeclared-property advisory (NR-7), and makes Claudine compile against the
+result. Claudine's own walkers (`first_undefined_stack_variable`,
+`validate_no_undefined_lifecycle_variables`, the `err` placement scan) are
+untouched; Phase 4 owns them.
+
+### What was built
+
+| Plan task | Where | Notes |
+|---|---|---|
+| Subtree API removal | `darkmatter/lib/src/markdown/compose/subtree.rs` | `SubtreeStrictness`, `.strict()`, `with_strictness`, the `compose_subtree` strictness argument, `validate_strict_roots`, and the subtree-local `collect_variable_roots` are deleted. Subtree compose always runs `ExpressionFailurePolicy::Strict` (ordinary fail-fast propagation). `InjectedGlobal` is now `pub type InjectedGlobal = RuntimeBinding<'static>`, so a caller can also pass `InjectedGlobal::unavailable(reason)`. `SubtreeCompose` gains `with_binding_view(Arc<BindingView>)` |
+| `LayeredLookup` rebuilt on the session | same file, `expression/binding.rs` | `LayeredLookup` is deleted; `subtree::layered_session(base, globals, view, resolution_context) -> Result<EvaluationSession, BindingError>` replaces it. Without a view it synthesizes one (scope `darkmatter.subtree`) declaring each supplied global as supplied (available, or unavailable with its reason). `EvaluationSession::with_resolution_context` was added so the session can carry the read-side context that `LayeredLookup` used to hold. An association failure surfaces from `SubtreeCompose::compose` as `MarkdownError::Interpolation { cause: ExpressionError::Binding(..) }`, keyed by the new `BindingError::root()` |
+| Namespace fallback removal | `context/effective_state.rs`, `frontmatter_interpolation.rs`, `conditions.rs`, `context/checked.rs`, `context/runtime.rs` | `EffectiveState::get`/`get_checked` and `ShortcutLookup` no longer read `ctx.<name>` for a missing bare name; `CtxLookupOutcome::into_checked_bare_name` is deleted. Exact `ctx` and `env` roots are resolved as namespaces before any document key (`ComposeContext::env_value` added for bare `env`), so a frontmatter `env` key is reachable only as `doc.env` |
+| Trait + remaining lookups | `expression/mod.rs` and every override | `EvaluationLookup::is_known_variable_root` is removed from the trait and from `EffectiveState`, `ResolvingLookup`, `FrontmatterSeedState`, `DeferrableLookup`, `EvaluationSession`, and the test-only `Nothing` |
+| Lookup parity inventory (R3) | `darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs` (new) | See the test mapping below |
+| Undeclared-property advisory (NR-7) | `unknown_identifiers.rs`, `expression/mod.rs` (`observe_missing`), `interpolation/evaluator.rs`, `context/report.rs`, `expression/absence.rs` | The observer now takes the `ResolvedBinding`: only `Document { value: None }` is a candidate (never a namespace or global; reserved roots and `null` skipped). `reconcile` filters by final-state keys (`state.data()`), caller input records, and the effective schema. `ComposeWarning::UNDECLARED_PROPERTY_CODE = "dm.expression.undeclared_property"` and `ComposeWarning::undeclared_property` replace the old constant/constructor, with no alias. Message: `` `{root}`{location} is an undeclared document property (unknown type; `null` unless supplied at runtime) ``. `is_statically_known_root` is now exactly the reserved roots (context-descriptor names dropped) |
+| Claudine compile bridge | `lifecycle/executor.rs`, `preflight.rs`, `sequence/preflight/mod.rs`, `sequence/task/mod.rs`, `lifecycle/context/tests.rs`, `interpolation_conformance.rs`, `event_time_interpolation.rs`, `cli/.../loop_control/tests/mod.rs` | `.strict()` deleted at the five sites; `eval_expr` and the two tests use `layered_session`. `strict_mode_provenance_spike.rs` deleted and unregistered from `tests/l1/main.rs` (NR-10). `signals/version.rs`, `darkmatter/cli/src/commands/compose.rs`, and `dmls/src/diagnostics/frontmatter.rs` needed no change |
+
+### Decisions and departures
+
+- **`LayeredLookup` is deleted, not wrapped.** A struct owning both a
+  `ResolvingLookup` and a session that borrows it is self-referential, and a
+  forwarding wrapper is the partial-forwarding hazard the inventory exists to
+  prevent. A constructor function that returns the `EvaluationSession` keeps one
+  lookup type. Callers change from `LayeredLookup::new(&s, &g, ctx)` to
+  `layered_session(&s, g, None, ctx)?`.
+- **A reserved-root global now fails association instead of being silently
+  ignored.** `LayeredLookup` quietly skipped a global named `current`; the
+  session rejects it (`BindingError::ReservedName`) before any provider runs.
+  `compose/tests/lazy_roots.rs::an_injected_global_cannot_shadow_a_reserved_root`
+  now asserts the typed refusal, with no provider call. No production caller
+  registers a reserved name.
+- **Subtree formatting now matches main compose.** The session forwards
+  `format_resolved` to the document lookup, so `EffectiveState`'s configured
+  name coercion now applies in subtree compose. `LayeredLookup` used the trait
+  default. This brings subtree compose to its documented "byte-for-byte with
+  main compose" contract. No test depended on the old rendering.
+- **`group` outside a group is already an unavailable global (bridge toward
+  Phase 4).** Without strict mode, a later sequence step's `{{ group.label }}`
+  stopped failing (`group_variables_do_not_leak_to_a_later_step` and the CLI
+  `sequence_groups::group_variables_reach_members_and_do_not_leak_to_the_next_step`
+  turned red): sequence members carry `group` as *document data*, so outside a
+  group it was an absent property. Rather than weaken two safety tests,
+  `lifecycle::context::outside_group_global()` registers `group` as
+  `InjectedGlobal::unavailable("claudine.outside-group")` (the code Wave 8
+  names) in `TaskExecution::resolve_value` when the task's overlay carries no
+  `group` scope, and in the lifecycle executor's `injected_globals` when
+  `self.group` is `None`. This is NR-11's ruled behavior ("bare `group` outside
+  a group raises a typed unavailable error; `doc.group` still reads the
+  document"). Phase 4's catalog should replace the helper and both call sites.
+- **Shipped-prompt fixes moved forward from Phase 6 (group D of the Phase 1
+  audit).** Removing the fallback made `prompts/_reviews/performance-review.md`
+  (`{{time}}`) and `prompts/brainstorm.md` (`{{area}}`) render those names
+  empty, and DMLS's mapping-only corpus test reported the new advisory on the
+  fixture copy. Both prompts and both fixture copies now say `ctx.time` /
+  `ctx.area`. Neither prompt carries a `hash:` pin. The remaining group D rows
+  are documentation (Phase 7) and `claudine/cli/tests/fixtures/nested_span_regression/commit.md:31`
+  (`{{repo.name}}`), whose expected output was already empty and whose tests pass.
+- **Minimal DMLS edits.** DMLS calls the library's `is_statically_known_root`,
+  so dropping context names changed one DMLS unit test and one LSP session
+  expectation: bare `repo` is now reported. DMLS still emits its own
+  `dm.expression.unknown_identifier` code and wording; Phase 5 renames it. So
+  between Phase 3 and Phase 5 the library and DMLS spell the code differently.
+- **Old-contract Claudine tests updated, not left red.** Checkpoint 3 allowed
+  old-contract failures to be listed for Phase 4, but this phase's completion
+  bar is a green `just test`. The four tests that asserted "an unknown root
+  fails" now assert the ruled contract (R1: absent is `null`):
+  `event_time_interpolation::top_level_absent_property_renders_empty` (emits
+  `""`), `::an_authored_span_with_an_absent_property_renders_empty` (emits
+  `"done: "`), `cli agent_text_is_data::an_absent_property_in_an_authored_lifecycle_span_is_not_an_error`,
+  and `cli authored_text_rendering::diagnostic_quotes_an_underscored_root_exactly`,
+  which keeps its subject (an underscored root quoted verbatim) by sourcing it
+  from the body advisory, since a lifecycle field no longer produces a root
+  diagnostic. `interpolation_conformance.rs` only lost its strictness parameter.
+  Its former "unknown-root divergence" is now `an_absent_root_is_empty_in_both_engines`,
+  and the full matrix rewrite remains Phase 4.
+- **Doc drift fixed in this phase.** Pages that described the removed fallback,
+  `SubtreeStrictness`, or the old code were corrected (list in the frontmatter).
+  Claudine's lifecycle docs now describe the interim state:
+  `LifecycleUndefinedVariable` still guards `stack` entries, and its removal is
+  marked **planned**. DMLS's docs (`darkmatter/docs/lsp/features.md`,
+  `topics/schemas/dmls-schema-support.md`, `dmls/docs/*`) still describe
+  DMLS's unchanged code and are Phase 5's.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) | Level / target |
+|---|---|---|
+| Strict mode removed; subtree compose fails on real failures only (malformed, unknown function, rejected argument, failed file read) in whole values and mixed strings; absent → `null`/empty | `lib/tests/l1/compose_expression_failure_contract.rs::subtree_compose_fails_on_real_expression_failures_only`; `subtree.rs` unit tests `an_absent_property_is_null_whole_value_and_empty_in_a_mixed_string`, `malformed_spans_and_unknown_functions_fail_in_any_position`; `tests/frontmatter.rs::dm2_subtree_absent_property_is_null_not_an_error`, `dm2_subtree_rejects_malformed_span`, `dm2_subtree_rejects_unknown_function`, `dm2_subtree_absent_function_argument_is_null` | Darkmatter L1 (`l1` binary) + lib unit |
+| Unavailable global is a typed error and never reads the document; `doc.group` still does | `subtree.rs::an_unavailable_global_fails_and_never_reads_the_document` | lib unit |
+| Reserved roots cannot be registered; no provider runs (AC 2, widened by NR-3) | `subtree.rs::a_reserved_root_cannot_be_registered_and_no_provider_runs` (all five roots, panicking lazy provider); `tests/lazy_roots.rs::an_injected_global_cannot_shadow_a_reserved_root` | lib unit |
+| A declared view is enforced at association | `subtree.rs::a_declared_view_is_enforced_at_association` | lib unit |
+| No bare-name `ctx` fallback in any lookup (R3, AC 4) | `compose/tests/lookup_parity.rs::the_inventory_lists_every_lookup_implementation` (source scan of `CARGO_MANIFEST_DIR/src`, 13 implementations), `::every_production_lookup_keeps_bare_names_out_of_ctx` (7 production lookups probed), `::the_probe_name_is_a_captured_context_key` (control row). Mutation-checked: restoring the fallback in `EffectiveState` turns the probe red | lib unit |
+| Exact `ctx`/`env` roots never read a document key; `doc.env` does | `lookup_parity` probe; `conditions.rs::shortcut_bare_name_never_reads_ctx`; `absent_property_contract::an_exact_namespace_root_is_never_a_document_property` | lib unit + L1 |
+| Missing bare property does not resolve from `ctx` (body, frontmatter, `when=`) | `lib/tests/l1/absent_property_contract.rs::a_missing_bare_property_does_not_resolve_from_ctx`; `context/checked.rs::a_bare_name_never_reads_the_ctx_namespace`; `subtree.rs::a_bare_name_never_reads_ctx` | L1 + lib unit |
+| Absent bare and `doc.<p>` are `null` whole values; empty in mixed strings; ternary falsy branch; `\|\|` value semantics (AC 1, 3) | `absent_property_contract::an_absent_property_is_a_null_whole_value`, `::an_absent_property_is_empty_in_a_mixed_string`, `::an_absent_property_takes_the_falsy_branch_and_the_fallback` | L1 |
+| Schema-declared-unset and undeclared both valid; required violation still blocks | `absent_property_contract::a_schema_declared_unset_property_and_an_undeclared_one_are_both_valid`, `::a_required_property_violation_still_blocks`; `cli/tests/l1/compose_schema.rs::declared_unset_and_undeclared_properties_are_both_null_in_subtree_compose` | L1 (lib + `md` CLI) |
+| Malformed syntax, unknown function, rejected arguments, file failure still raise | `absent_property_contract::expression_failures_still_stop_composition` (body + frontmatter mixed text); the existing body/frontmatter matrix in `compose_expression_failure_contract.rs` | L1 |
+| All three escape forms inert; whole-value and mixed; no extra evaluation pass | `absent_property_contract::every_escape_form_is_inert` (asserts no advisory, i.e. nothing evaluated) | L1 |
+| NR-7 code, wording, `ctx`-name drop, suppression kept | `unknown_identifier_warning.rs` (all rows updated; new `a_bare_context_name_is_an_undeclared_property_not_ctx`), `unknown_identifiers.rs` message unit tests, `absence.rs::statically_known_roots_are_exactly_the_reserved_roots`, `feature_review_incident.rs`, `cli/tests/l1/compose_unknown_identifiers.rs` (end-to-end `md compose`) | L1 + lib unit + `md` CLI L1 |
+| Group variables do not leak (bridge) | existing `sequence/task/tests.rs::group_variables_do_not_leak_to_a_later_step`, `cli/tests/l1/sequence_groups.rs::group_variables_reach_members_and_do_not_leak_to_the_next_step` (unchanged, green again) | Claudine lib unit + CLI L1 |
+| Shipped prompt corpus | `dmls/tests/l1/mapping_only_corpus.rs` (passive corpus over the fixture copies; baseline unchanged after the prompt fix) | DMLS L1 |
+
+Tier and placement: `absent_property_contract.rs` is declared in
+`darkmatter/lib/tests/l1/main.rs`, and `lookup_parity.rs` in
+`compose/tests/mod.rs`. One new name, `real_expression_failures_still_stop_composition`,
+was first stranded by its `real_` prefix (seen as a 13th skip) and renamed to
+`expression_failures_still_stop_composition`; the final run shows the baseline
+12 skips. The source scan joins a literal onto `CARGO_MANIFEST_DIR`, as the
+test-inputs rule asks. Input Robustness Matrix: not applicable (no file-format
+or configuration reader changed).
+
+### Gates
+
+| Area | Recipe | Result |
+|---|---|---|
+| workspace | `cargo check --workspace --all-targets` | clean |
+| `darkmatter/` | `just test` | 8768 passed, 12 skipped (baseline skips) |
+| `darkmatter/` | `just lint` | exit 0 |
+| `darkmatter/` | `just doctest` | 192 passed, 10 ignored |
+| `claudine/` | `just test` | 8068 passed, 9 skipped (baseline 8072 minus the 4 deleted spike tests) |
+| `claudine/` | `just lint` | exit 0 |
+| `claudine/` | `just test-l2` | 277 + 3 passed |
+| `darkmatter/` | `just test-l2` | 3 + 18 + 69 passed |
+
+Pre-existing or unrelated: none failed. Two specs outside this fix
+(`claudine/fixes/2026-07-13-cli-switches/spec.md`,
+`claudine/fixes/2026-07-22-setters/spec.md`) were rewritten by another session
+during this phase; they are not part of this change. One `just test` run went
+to the main checkout by mistake (`cd claudine` from inside `claudine/`
+resolved through zsh `CDPATH`). It changed nothing; every gate above was run
+with an absolute worktree path. Cross-OS: the change is pure Rust plus
+Markdown, with no `#[cfg]`, process, or path-comparison code. The new source
+scan normalizes `\` to `/`, so no `just cross-check` was run; CI covers the
+other environments.
+
+### Phase 3 outcome
+
+Checkpoint 3 is met, and exceeded: `cargo check --workspace` is clean,
+`darkmatter` `just test`/`just lint` pass, and Claudine's `just test` is fully
+green rather than limited to listed old-contract failures. Acceptance criteria
+1 (absent → `null`), 3 (no extra evaluation of escapes/inserted data), and 4
+(no bare-name `ctx` fallback, with the parity inventory) hold in Darkmatter. For
+criterion 2, the reserved-root refusal is now enforced in subtree compose too.

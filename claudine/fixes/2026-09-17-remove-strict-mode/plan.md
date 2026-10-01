@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-01
-phase: 1
+phase: 3
 agent: claude/opus
 yolo: "true"
 source_files_during_phase_1: []
@@ -10,7 +10,96 @@ docs_updated_during_phase_1:
     - claudine/fixes/2026-09-17-remove-strict-mode/design.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/subtree.rs
+    - darkmatter/lib/tests/l1/binding_contract.rs
+    - darkmatter/lib/tests/l1/main.rs
+docs_updated_during_phase_2:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2: []
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/compose/subtree.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/context/runtime.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+    - darkmatter/lib/tests/l1/absent_property_contract.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__performance-review.md
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/brainstorm.md
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/authored_text_rendering.rs
+    - prompts/_reviews/performance-review.md
+    - prompts/brainstorm.md
+docs_updated_during_phase_3:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/parsing/index.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/parsing/lexing.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+packages:
+    - darkmatter
+    - darkmatter-cli
+    - dmls
+    - claudine
+    - claudine-cli
 ---
 
 # Remove Strict Mode and Centralize Expression Binding — Implementation Plan
@@ -291,7 +380,7 @@ beside `subtree.rs`; the implementer chooses).
 
 ### Wave 3 — binding types and checked association (serial; the foundation)
 
-- [ ] **Binding types**
+- [x] **Binding types**
   - Add `ResolvedBinding { Document, Namespace, Global }` carrying
     `Option<Value>` or `Value` (NR-2).
   - Add `BindingError`, with `Unavailable { root, path, scope_id, reason, span }`
@@ -299,7 +388,7 @@ beside `subtree.rs`; the implementer chooses).
     global, omitted declared global, and contradicting a definite declaration.
   - Add `UnavailabilityReason` with a stable namespaced code and structured
     parameters.
-- [ ] **Declarations and sessions**
+- [x] **Declarations and sessions**
   - Add an immutable, provider-free `BindingView`. It declares global roots,
     each scope's availability (`available`, `unavailable(reason)`, or
     `execution-dependent`), and scope identity.
@@ -315,7 +404,7 @@ beside `subtree.rs`; the implementer chooses).
   - Following D2, the session owns one lazy cache. It caches a root once
     (including a `null` result) and does not hold its lock while user code
     runs.
-- [ ] **Trait channel (NR-5)**
+- [x] **Trait channel (NR-5)**
   - Evolve `EvaluationLookup::get_checked` into `resolve`. The default wraps
     `get` as `Document`. Add `binding_view()` and `format_resolved`, and keep
     `get`/`get_string` for external callers.
@@ -324,7 +413,7 @@ beside `subtree.rs`; the implementer chooses).
 
 ### Wave 4 — evaluator routing and passive validation (parallel after Wave 3)
 
-- [ ] **Evaluator routing**
+- [x] **Evaluator routing**
   - The evaluator and interpolator resolve every variable through `resolve`,
     and format through `format_resolved`. That includes the interpolation
     variable fast path that D4 flagged as calling `get`/`get_string`.
@@ -333,7 +422,7 @@ beside `subtree.rs`; the implementer chooses).
     classified as a global or namespace, a missing descendant stays within that
     root.
   - Files: `expression/` evaluator and `interpolation/`.
-- [ ] **Prepared validator**
+- [x] **Prepared validator**
   - Add `prepare_value(input, AuthoredMode, &PreparationContext)`,
     `validate_prepared(&PreparedValue, &BindingView) -> Vec<ValidationDiagnostic>`,
     and `evaluate_prepared(&PreparedValue, &EvaluationSession)` (C2, scoped by
@@ -346,7 +435,7 @@ beside `subtree.rs`; the implementer chooses).
 
 ### Wave 5 — contract tests (parallel after Wave 4)
 
-- [ ] **Binding contract tests** (Darkmatter L1, a `darkmatter/lib/tests/l1/`
+- [x] **Binding contract tests** (Darkmatter L1, a `darkmatter/lib/tests/l1/`
   file or module tests). Cover:
   - available-null compared with unavailable compared with absent document
     property;
@@ -357,7 +446,7 @@ beside `subtree.rs`; the implementer chooses).
     reference is in an inactive branch;
   - `doc.doc`, `doc.ctx`, and `doc.env` reading document data;
   - one lazy evaluation per session, including a `null` result.
-- [ ] **Passive validation tests**
+- [x] **Passive validation tests**
   - A definitely unavailable root in an inactive ternary branch fails
     `validate_prepared`.
   - An `execution-dependent` root is deferred.
@@ -376,7 +465,7 @@ unchanged except that Darkmatter no longer pre-rejects roots.
 
 ### Wave 6 — Darkmatter removals (parallel; disjoint files)
 
-- [ ] **Subtree API removal** (`darkmatter/lib/src/markdown/compose/subtree.rs`,
+- [x] **Subtree API removal** (`darkmatter/lib/src/markdown/compose/subtree.rs`,
   `interpolation/rewrite.rs`)
   - Delete `SubtreeStrictness`, `.strict()`, `with_strictness`, the
     `compose_subtree` strictness argument, `validate_strict_roots`, and the
@@ -388,7 +477,7 @@ unchanged except that Darkmatter no longer pre-rejects roots.
     global.
   - Rewrite the strict/lenient unit tests in `subtree.rs` as single-behavior
     tests and fix the rustdoc examples.
-- [ ] **Namespace fallback removal** (`context/effective_state.rs`,
+- [x] **Namespace fallback removal** (`context/effective_state.rs`,
   `frontmatter_interpolation.rs`, `conditions.rs`, `expression/ctx.rs`)
   - Remove the bare-name `get_context_value(path)` fallback from
     `EffectiveState` (lines 247 and 277), from `FrontmatterSeedState`, and
@@ -396,7 +485,7 @@ unchanged except that Darkmatter no longer pre-rejects roots.
   - Resolve reserved namespaces first, including exact namespace roots. Keep
     name coercion and captured context.
   - Delete `is_known_variable_root` from these implementations.
-- [ ] **Lookup migration, remaining implementations**
+- [x] **Lookup migration, remaining implementations**
   - Remove `is_known_variable_root` from the trait and from every other
     implementation on the Wave 2 checklist: catalog fixtures, semantics,
     `TestLookup`, `Nothing`, the two `tests/l1` fixtures, and
@@ -405,7 +494,7 @@ unchanged except that Darkmatter no longer pre-rejects roots.
   - Add the lookup parity inventory test required by R3. It enumerates the
     implementations and asserts that none of them resolves a bare missing name
     from `ctx`, so a new lookup cannot quietly restore the fallback.
-- [ ] **Undeclared-property advisory** (`unknown_identifiers.rs`,
+- [x] **Undeclared-property advisory** (`unknown_identifiers.rs`,
   `expression/absence.rs`, `pipeline/mod.rs`, `transclusion/engine.rs`,
   `context/report.rs`)
   - Replace the missing-root observer's dependence on `is_known_variable_root`
@@ -418,7 +507,7 @@ unchanged except that Darkmatter no longer pre-rejects roots.
 
 ### Wave 7 — Claudine compile bridge and Darkmatter test updates (parallel after Wave 6)
 
-- [ ] **Claudine compile bridge**
+- [x] **Claudine compile bridge**
   - Delete `.strict()` at the five call sites: `lifecycle/executor.rs:1023`,
     `preflight.rs:480`, `sequence/preflight/mod.rs:944`,
     `sequence/task/mod.rs:913`, and `lifecycle/context/tests.rs:613`.
@@ -430,7 +519,7 @@ unchanged except that Darkmatter no longer pre-rejects roots.
     `darkmatter/cli/src/commands/compose.rs`, and
     `darkmatter/dmls/src/diagnostics/frontmatter.rs`, if they use the removed
     API. DMLS behavior is Phase 5.
-- [ ] **Darkmatter Level 1 contract tests** (spec § Verification → Darkmatter
+- [x] **Darkmatter Level 1 contract tests** (spec § Verification → Darkmatter
   Level 1, in-scope items)
   - Cover absent bare property and `doc.<p>` as `null` whole values, empty in
     mixed strings, the ternary falsy branch, and `||` value semantics.

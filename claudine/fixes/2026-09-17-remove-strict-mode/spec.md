@@ -1,68 +1,4 @@
 ---
-created: 2026-09-17
-status: finalized-spec
-clarified: true
-reviewed: true
-needs_rulings: false
-clarified_by: codex/gpt-6-astra
-reviewed_by: claude/fable
-reviewed_on: 2026-09-19
-review_iterations: 0
-implemented: false
-review_note: the clarification process served as a review
-human_review: true
-human_review_items:
-    - |-
-        **Which names may a host never register as its own global? (plan ruling NR-3)**
-
-        **Why this must be settled before Phase 2.** Phase 2 builds the check that rejects a
-        host's attempt to register a global under a reserved name. The spec's acceptance
-        criterion 2 says exactly three names are reserved: `doc`, `ctx`, and `env`. Since the
-        spec was written, Darkmatter added two more built-in namespaces, `current` and
-        `current_env` (lazily refreshed views of `ctx` and `env`), and keeps all five in one
-        table. The spec says any widening of an acceptance criterion must come back to you,
-        so Phase 2 should not hard-code the answer without your sign-off.
-
-        **Options**
-
-        - **A. Reserve all five names, taken from Darkmatter's one table (recommended).**
-          - Pro: one source of truth; a future built-in namespace is reserved automatically.
-          - Pro: a host can never shadow `current`/`current_env`, which would silently
-            change what `current.branch` means inside a prompt.
-          - Con: widens criterion 2 from "exactly three" to "every built-in namespace";
-            recorded as a departure in the implementation log (the spec stays as written).
-        - **B. Reserve only `doc`, `ctx`, `env`, as the spec says.**
-          - Pro: matches the spec text literally.
-          - Con: a host (Claudine or another) could register a global named `current`
-            and hide the built-in namespace, the exact ambiguity this fix exists to remove.
-          - Con: needs a second hard-coded list that drifts from Darkmatter's table.
-
-        **Recommendation: A.** The agent has already recorded A as accepted under the plan's
-        "accept the stated recommendation" rule; answer only if you want B instead.
-message_to_agent: |-
-    Phase 1 is planning only; read `## Phase 1` of implementation-log.md before Phase 2. Key points:
-    (1) All rulings NR-1..NR-11 were recorded as "accept the recommendation" (yolo). NR-3
-    (reserve all five roots from reserved_root_descriptors()) is pending owner sign-off via
-    human_review; build it as recommended unless the owner overrules.
-    (2) Baseline: darkmatter and claudine `just test` and `just lint` are all green with no
-    pre-existing failures, so any later failure is ours.
-    (3) Inventory: 23 compiled EvaluationLookup impls + 2 rustdoc examples. The bare-name
-    ctx fallback lives only in EffectiveState (effective_state.rs:247 and :277, via
-    into_checked_bare_name) and ShortcutLookup (conditions.rs:388/:400). LoopExpressionLookup
-    and SourceExpressionLookup have NO ctx fallback today. SizedLookup (looping/actions.rs)
-    and EventMetaConditionLookup (dispatch/expression.rs) forward only get/get_string /
-    get+resolution_context and drop get_checked; they must forward resolve/binding_view/
-    format_resolved after the trait change. DeferrableLookup (inline/interpolation.rs:163)
-    maps ContextNotCaptured -> Ok(None) when deferring; preserve that on resolve.
-    (4) Unlisted callers to keep compiling: SubtreeCompose in claudine/cli/tests/l1/composition_seams.rs,
-    darkmatter/cli/tests/l1/compose_schema.rs, darkmatter compose/tests/lazy_roots.rs;
-    InjectedGlobal in compose/tests/frontmatter.rs. LifecycleUndefinedVariable's renderers are in
-    claudine/lib/src/composition/error/render/ (lib, not cli).
-    (5) Phase 6 must also fix two shipped prompts that silently relied on the ctx fallback:
-    prompts/brainstorm.md:20 `{{area}}` -> ctx.area and prompts/_reviews/performance-review.md:342
-    `{{time}}` -> ctx.time (plus their copies in darkmatter/dmls/tests/fixtures/mapping_only_corpus/).
-    The `|| ''` guards in proxy `with:` of prompts/pr.md and prompts/_pr/{dirty,push}.md are real
-    defaults (pass '' not null to a string-typed callee); keep them.
 $schema:
     status: |-
         enum(
@@ -83,13 +19,50 @@ $schema:
     clarified: boolean -> indicates whether the specification was built -- _in part_ -- with the 'clarify.md' prompt
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
-area: claudine
-packages:
-    - darkmatter
-    - darkmatter-cli
-    - dmls
-    - claudine
-    - claudine-cli
+created: 2026-09-17
+status: planned
+clarified: true
+reviewed: true
+needs_rulings: false
+clarified_by: codex/gpt-6-astra
+reviewed_by: claude/fable
+reviewed_on: 2026-09-19
+review_iterations: 0
+implemented: false
+implemented_by: claude/opus
+review_note: the clarification process served as a review
+human_review: false
+message_to_agent: |-
+    Phase 3 (strict mode and the ctx fallback removed in Darkmatter) is done; read `## Phase 3`
+    of implementation-log.md first. What Phase 4 builds on:
+    (1) `LayeredLookup` no longer exists. Use `darkmatter::markdown::compose::subtree::layered_session(
+    &EffectiveState, HashMap<String, RuntimeBinding>, Option<Arc<BindingView>>,
+    Option<ResolutionContext>) -> Result<EvaluationSession, BindingError>` for direct `evaluate`, and
+    `SubtreeCompose::with_binding_view(view)` for subtree compose. Without a view each supplied
+    global is accepted as supplied; with your Wave 8 catalog view, association enforces it.
+    `InjectedGlobal` is now an alias of `RuntimeBinding<'static>`, so
+    `InjectedGlobal::unavailable(UnavailabilityReason::new("claudine.x"))` works. An association
+    failure arrives as `MarkdownError::Interpolation { cause: ExpressionError::Binding(..) }`.
+    (2) Bridge to replace: `lifecycle::context::outside_group_global()` registers `group` as
+    unavailable (`claudine.outside-group`) in `TaskExecution::resolve_value` (when the overlay
+    carries no `group` scope) and in the executor's `injected_globals` (when `self.group` is None).
+    It kept the group-leak tests green. Replace it with the catalog entry; do not keep both.
+    (3) Claudine's walkers (`first_undefined_stack_variable`, `validate_no_undefined_lifecycle_variables`,
+    `LifecycleUndefinedVariable`) are untouched and still guard `stack` entries only; top-level
+    lifecycle fields already render an absent property as `null`. Four old-contract tests were
+    rewritten to that contract (listed in the log). claudine/docs lifecycle.md marks the walker
+    removal **planned**; remove the marker when you land it.
+    (4) `interpolation_conformance.rs` only lost its strictness parameter; Wave 11 still owns the
+    matrix rewrite.
+    (5) Phase 5 note: the library now emits `dm.expression.undeclared_property`, but DMLS still emits
+    its own `dm.expression.unknown_identifier` (codes.rs/overlay/expressions.rs) until Phase 5.
+    `is_statically_known_root` is exactly the reserved roots now, so DMLS already reports bare
+    context names such as `repo` (one unit test and one lsp_session expectation were updated).
+    (6) Phase 6 note: `prompts/_reviews/performance-review.md` (`ctx.time`) and `prompts/brainstorm.md`
+    (`ctx.area`), plus their DMLS corpus copies, were already fixed here (group D of the Phase 1
+    audit). Group A (`|| false` guards) is untouched.
+    (7) Use absolute paths for `cd`: `cd claudine` from inside `claudine/` resolves through zsh
+    CDPATH to the main checkout (/Volumes/coding/personal/rusty-biscuit).
 ---
 
 # Remove Strict Mode and Centralize Expression Binding
