@@ -1,8 +1,8 @@
 # Remove Strict Mode: Technical Design
 
-Status: **design rulings resolved; ready for independent review;
-not yet approved for implementation planning**.
-Last updated: 2026-09-19.
+Status: **in-scope core approved for implementation 2026-10-01** (rollout
+ruling 2; the plan review covers the in-scope design artifacts).
+Last updated: 2026-10-01.
 
 > **Re-scoped 2026-10-01.** The fix is now its core only; see
 > [spec.md § Scope](spec.md#scope-re-scoped-2026-10-01). In scope: D1, D2, D4,

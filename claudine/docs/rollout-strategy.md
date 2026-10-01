@@ -26,8 +26,8 @@ implemented yet.** The 2026-09-28 baseline was checked against source, not
 only against spec status fields; see [Evidence](#evidence).
 
 **Next:** step 3 (the strict-mode core) and step 4 (Phase A), in parallel.
-Step 3's spec was re-scoped to its core on 2026-10-01; it cannot be planned
-until ruling 2 (design review and approval) is made. See
+Step 3's spec was re-scoped to its core on 2026-10-01, and ruling 2 (design
+review and approval) was made the same day; its plan is in implementation. See
 [step 3](#3-2026-09-17-remove-strict-mode-core-only).
 
 ## The order
@@ -216,9 +216,8 @@ classification from Darkmatter, but gains no lifecycle-specific errors. The
 `initialize` shell prohibition stays enforced by Claudine's parser and runtime
 backstop.
 
-**Needs first.** The independent design review and the owner's design
-approval that the spec records as outstanding, then a new plan for the core
-(the old `plan.md` is superseded). In scope from the design record: D1, D2,
+**Needs first.** Met 2026-10-01: the design approval (ruling 2) and a new
+plan for the core, which replaces the superseded one. In scope from the design record: D1, D2,
 D4, D7, D8, D21, and contracts C1, C2, C9, and C3's per-event scope matrix.
 
 **Provides downstream.**
@@ -481,7 +480,7 @@ Step 0 is spec work only. Each ruling blocks the planning of the step named.
 | # | Ruling | Blocks |
 |---|---|---|
 | 1 | ~~Accept or reject the split of `2026-09-17-remove-strict-mode`~~ **Made 2026-10-01: accepted**; the spec is re-scoped | Step 3 |
-| 2 | Independent design review and design approval for the strict-mode core | Step 3 |
+| 2 | ~~Independent design review and design approval for the strict-mode core~~ **Made 2026-10-01: approved**; the plan review covers the in-scope design artifacts | Step 3 |
 | 3 | ~~Mixed line endings: per-line or global~~ **Made: per-line** | Step 1 (complete) |
 | 4 | `params` → `with`, and its three sub-questions | Steps 5 and 6 |
 | 5 | Merge `amendments-provider-and-with.md` into the sequence spec | Step 6 |
@@ -544,7 +543,7 @@ strict-mode re-scope updated on 2026-10-01:
 | Spec | Status |
 |---|---|
 | `2026-09-21-lifecycle-ergonomics` | Finalized; clarified; no rulings remain |
-| `2026-09-17-remove-strict-mode` | Finalized; re-scoped to its core 2026-10-01; design drafted; independent review and design approval outstanding; plan superseded |
+| `2026-09-17-remove-strict-mode` | Finalized; re-scoped to its core 2026-10-01; design approved 2026-10-01; core plan in implementation |
 | `2026-09-27-sequence-improvements` | Draft; reviewed; four open questions; amendments proposed and unmerged |
 | `2026-09-21-schema-enhancements` | Draft; no open questions of its own; reconciliation with the parent pending |
 | `2026-09-16-expression-type-system` | Draft charter; clarified; reconciliation pending |

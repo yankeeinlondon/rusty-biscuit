@@ -1,658 +1,777 @@
 ---
-status: superseded
-superseded: 2026-09-19
 total_phases: 7
-created: 2026-09-17
+created: 2026-10-01
 phase: 1
-agent: "codex/gpt-5.6-sol"
+agent: claude/opus
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+    - claudine/docs/rollout-strategy.md
+    - claudine/fixes/2026-09-17-remove-strict-mode/design.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Remove Strict Mode and Centralize Expression Binding — Implementation Plan
 
-> **Superseded — do not execute this plan.** This 2026-09-17 plan predates the
-> subsequent human design rulings and the two completed spikes. Its API choices,
-> migration counts, schema ordering and recovery assumptions are historical.
-> [design.md](design.md), [design-contracts.md](design-contracts.md), and
-> [migration-inventory.md](migration-inventory.md) contain the current design
-> work. Replace this plan only after the pending rulings and independent design
-> review are complete and the human approves the design. The remaining text is
-> retained solely as historical planning evidence.
->
-> **Re-scoped 2026-10-01.** The replacement plan covers only the core defined
-> in [spec.md § Scope](spec.md#scope-re-scoped-2026-10-01). This plan's phases
-> for schema moves, generation, activation, and feature restrictions are out of
-> scope.
+This plan implements the **core** of [spec.md](spec.md) as re-scoped on
+2026-10-01 ([spec.md § Scope](spec.md#scope-re-scoped-2026-10-01)). It replaces
+the 2026-09-17 draft, which was marked superseded and is preserved in git
+history at commit `13df7698f`. The design inputs are the in-scope parts of
+[design.md](design.md) (D1, D2, D4, D7, D8, D21),
+[design-contracts.md](design-contracts.md) (C1, C2, C9, and C3's per-event
+matrix), and [migration-inventory.md](migration-inventory.md) without its
+"Schema and trigger migration" section.
+
+Nothing the spec marks **Out of scope** is planned here: R10, R11, R12, R7c,
+the unified global schema entry point, schema exports and local type names,
+the `schema-trigger` and `--no-schema-triggers` renames, the trigger AND/OR
+grammar, and acceptance criteria 18 and 20–22. The same applies to C4
+(provenance envelopes), C5–C8, D3, D5, D6, and D9–D20, D22.
 
 ## Work Summary and Definition of Success
 
-This plan replaces Darkmatter's split strict/lenient subtree behavior with one
-expression contract, then moves lifecycle-global availability, schema feature
-restrictions, and editor diagnostics onto shared Darkmatter-owned primitives.
-The work spans `darkmatter`, `darkmatter-cli`, `dmls`, `claudine`,
-`claudine-cli`, and `claudine-gen`: Darkmatter owns binding classification and
-passive validation; Claudine supplies lifecycle policy and retains typed causes;
-DMLS consumes the same schema and binding descriptors without depending on
-Claudine; and authoritative YAML schemas move to package-owned `schemas/`
-directories with deterministic runtime generation.
+### What changes
 
-Successful completion is observable at every boundary:
+1. **Darkmatter gains a binding model (R2, D1, D2, D7, C1).** Expression lookup
+   gets one fallible resolution channel that can tell four outcomes apart:
+   - a document property, present or absent (absent evaluates to `null`);
+   - a reserved namespace (`doc`, `ctx`, `env`, `current`, `current_env`);
+   - an available global, including one whose value is `null`;
+   - an unavailable global, which raises a typed error.
 
-- `SubtreeStrictness`, `.strict()`, `with_strictness`, strict-root validation,
-  and the strictness argument to `compose_subtree` no longer exist. Subtree
-  interpolation is always fail-fast for real parser/evaluator failures while
-  missing document properties evaluate normally as `null`.
-- A Darkmatter binding environment distinguishes a missing document property,
-  an available eager or memoized-lazy global (including a real `null` value),
-  an unavailable reserved global with a typed reason, and the reserved
-  `doc`/`ctx`/`env` namespaces. The same declarations drive passive all-branch
-  validation and runtime evaluation without invoking lazy providers during
-  validation.
-- Bare identifiers resolve only through document state; they never fall
-  through to a same-named `ctx` value. Explicit globals shadow document roots,
-  unavailable globals never fall through, and `doc.<name>` remains the escape
-  hatch for colliding document properties.
-- Claudine contains one lifecycle-global catalog and event/scope availability
-  matrix. Event-time interpolation, lifecycle shell preflight, sequence shell
-  preflight, and sequence task values all use Darkmatter's common API; the old
-  undefined-variable, `err`, and surviving-span AST walkers are removed.
-- Lifecycle messages, `proxy.with`, and batched `set` remain atomic; shell
-  approval still compares the exact resolved bytes; genuine failures stop the
-  affected operation before its effect; and Claudine library callers can
-  inspect both lifecycle context and the original typed Darkmatter cause.
-- `no-shell-expansion` is a first-class SimplifiedSchema constraint. It
-  inherits through arrays, key/value containers, imports, merges, and deferred
-  evaluation, cannot be relaxed by descendants, and blocks `initialize`
-  expansion before execution while the existing runtime shell backstop remains.
-- `darkmatter/schemas` and `claudine/schemas` are the sole editable schema
-  sources. `claudine-gen` deterministically produces the runtime embedding and
-  drift-checks it without depending on `claudine` or `claudine-cli`; DMLS loads
-  the same source format dynamically rather than compiling Claudine data.
-- DMLS always includes the Darkmatter base schema, supports direct and
-  conditional schema inputs, discovers scope-local `schemas/` directories and
-  additive `SCHEMA_DIR`, refreshes on create/update/delete and marker changes,
-  and diagnoses unavailable globals/feature violations through passive
-  Darkmatter validation. An undeclared bare property gets at most one advisory
-  stating that it is valid, unknown-typed, and runtime-null unless supplied.
-- The literal `prompts/implement.md` regression reaches its authored routing
-  error with no provider process or audio publication and without changing the
-  prompt to add fallback guards.
-- Darkmatter and Claudine Level 1 tests and lint pass; existing applicable L2
-  suites pass; schema drift checks are part of existing verification rather
-  than a new CI matrix cell; and representative DMLS refresh responsiveness is
-  recorded without inventing a numeric requirement.
+   Hosts declare their globals in an immutable, provider-free declaration
+   (`BindingView`). They associate the runtime entries (eager, lazy, or
+   unavailable) through a checked boundary that rejects reserved names and
+   incomplete registrations before any provider runs. Each
+   `SubtreeCompose::compose` call or direct evaluation gets a fresh session
+   with its own lazy cache.
+2. **Darkmatter gains a passive prepared-expression validator (R2, D4, C2).** It
+   checks every authored reference, including references in inactive branches,
+   against a `BindingView`. It reports definitely unavailable globals without
+   invoking providers or evaluating anything. Runtime evaluation uses the same
+   classification.
+3. **Strict mode is removed (R1, R3).** This removes `SubtreeStrictness`,
+   `.strict()`, `with_strictness`, the strictness argument of
+   `compose_subtree`, `validate_strict_roots`, the subtree-local
+   `collect_variable_roots`, and `EvaluationLookup::is_known_variable_root`
+   from every implementation. The bare-name fallback to `ctx` is removed from
+   every lookup. The `collect_variable_roots` that orders shell-expansion
+   dependencies in `frontmatter_interpolation.rs` stays.
+4. **Claudine declares lifecycle bindings and stops walking expressions (R4,
+   R5, R6, D8, C3, C9).** One Claudine-owned catalog declares `err`, `timing`,
+   and `group` with per-scope availability. Every event, task, and approval
+   surface hands Darkmatter a complete session. The following are deleted:
+   - `first_undefined_stack_variable` and its walkers;
+   - `validate_no_undefined_lifecycle_variables` and
+     `CompositionError::LifecycleUndefinedVariable`;
+   - the custom AST walk inside `validate_no_err_in_no_error_events`;
+   - the surviving-span post-evaluation rejection.
 
-Planning evidence and risk shape:
+   The typed Darkmatter cause survives through the Claudine library boundary.
+   Setup and teardown commands run the bytes approved at sequence-wide
+   preflight.
+5. **DMLS reports an undeclared property as an advisory and takes its root
+   classification from Darkmatter (R7a, R7b).**
+6. **Prompts and docs are corrected (R8, R9).** The `(x || false)` legality
+   guards are removed from shipped prompts. A literal shipped-prompt regression
+   proves the reported router case. The hash pin is refreshed after that
+   regression passes, and docs and skills describe one contract.
 
-- GitNexus is bound to `better-static-analysis` at
-  `4399b3a4b53553ad3c89e1f4bc1dbec1aa02e6e6`, matching `HEAD`. Its current
-  `EvaluationLookup` upstream walk is CRITICAL and partially enriched (6 direct
-  graph edges, 38 affected indexed processes, and broad transitive fan-out), so
-  the partial graph result is not treated as a complete inventory.
-- Text inspection currently finds 23 Rust `EvaluationLookup` implementation
-  sites including test fixtures, while the specification records 17 direct
-  implementations from its earlier graph walk. Phase 1 must reconcile and
-  classify every live site before changing the shared seam.
-- The four production `SubtreeCompose` consumers are lifecycle event-time
-  interpolation, lifecycle shell-command preflight, sequence shell preflight,
-  and sequence task value resolution. The migration is one coordinated API
-  cutover, not a staged compatibility period.
-- Existing DMLS trigger discovery already performs bounded ancestor scanning,
-  last-good transactional caching, dependency hashing, and YAML file watching.
-  The planned work extends those mechanisms for scoped roots, marker facts,
-  direct inputs, and `SCHEMA_DIR`; it does not introduce a second loader.
+### Definition of success
 
-## Phase 1 — Lock Architecture and Baselines
+The phase is done when all of these are true:
+
+- Spec acceptance criteria **1–17 and 19** each have passing evidence. Each
+  phase's checkpoint names the criteria it closes; Phase 7 closes the rest
+  and records the mapping in the implementation log.
+- `rg 'SubtreeStrictness|with_strictness|is_known_variable_root|validate_strict_roots|first_undefined_stack_variable|LifecycleUndefinedVariable|validate_no_undefined_lifecycle_variables'`
+  over `darkmatter/` and `claudine/` source returns nothing outside historical
+  specs and logs.
+- `{{ plan ? '- a plan file was identified: ' + plan : '' }}` in the
+  repository-root `prompts/implement.md` runs unguarded to the router's
+  authored `error` action in a hermetic CLI L1 test.
+- `just test` and `just lint` pass in `darkmatter/` and `claudine/`, and
+  `just test-l2` passes where an existing L2 suite covers the changed
+  composition boundary. No CI matrix cell is added.
+- The spec's frontmatter is left for the author. The terminal state is
+  "implementation complete, ready for review"; no agent moves this fix to
+  `_completed`.
+
+### Input Robustness Matrix
+
+Not applicable. This fix changes expression binding and lookup, not a reader
+of a file format or configuration. The lifecycle-global catalog is declared in
+Rust (R4); the parked R7c would make it schema data and would need the matrix
+then.
+
+## Phase 1 — Rulings, approval gate, and baseline
 
 ### Necessary Rules
 
-- **Additive binding seam.** Keep `EvaluationLookup::get` as the lightweight
-  value lookup and remove only `is_known_variable_root`. Introduce a composed
-  Darkmatter `BindingEnvironment` above the trait with an ordinary-lookup
-  adapter where `None` means a valid missing document property. Rich global
-  classification is opt-in for consumers that reserve global names; this avoids
-  forcing unrelated lookup implementations to duplicate lifecycle semantics.
-- **One binding declaration.** Model document properties, reserved namespaces,
-  available eager globals, available memoized-lazy globals, and unavailable
-  globals explicitly. An unavailable-global record carries stable structured
-  reason data; runtime resolution and passive validation consume the same
-  declaration object. Validation walks every reference, including inactive
-  branches, but never invokes a lazy provider.
-- **Shared mechanics, domain policy retained.** Darkmatter owns parsing,
-  traversal, precedence, binding resolution, and typed binding errors.
-  Claudine owns the names, event/scope availability, values, and capture timing
-  of `err`, `timing`, `current`, `current_env`, and sequence-only `group`.
-  `current` and `current_env` are independent lazy globals in the final catalog;
-  the implementation removes the transitional `current.ctx`/`current.env`
-  projection so code, descriptors, and current docs agree.
-- **Prepared validation boundary.** Expose a reusable parser-aware binding
-  validation operation and reuse the resulting parsed expression where a
-  caller immediately evaluates the same source. Do not create a broad prepared
-  evaluator across sources with different parse modes, schema locations, or
-  snapshot timing; those differences are intentional policy, not duplication.
-- **Document namespace rule.** `EffectiveState::get` stops after document
-  lookup for bare roots. `ctx.*`, `env.*`, and `doc.*` remain explicit reserved
-  namespaces, and each non-EffectiveState lookup is audited so no matching
-  context-tail or ambient map fallback recreates the removed behavior.
-- **Fail-fast means evaluator failure.** The single subtree API uses the
-  existing interpolation machinery in fail-fast form for malformed mixed
-  strings, unknown functions, rejected arguments, and file-operation errors.
-  Missing document data is successful `null` evaluation and never a permission
-  check. `||` remains value selection, not identifier legalization.
-- **Literal output is complete data.** Triple braces, `\{{ ... }}` and
-  `\{\{ ... }}` retain ordinary one-pass Darkmatter escaping. Claudine must not
-  reject a successful result merely because it contains expression-looking
-  braces, and must not add another interpolation pass.
-- **Feature policy is monotonic.** Represent `no-shell-expansion` in shared
-  schema metadata and propagate it downward through arrays, mapping values,
-  imported named types, merged baselines/triggers, and deferred values. Once
-  inherited, no descendant schema or higher-precedence overlay may relax it.
-  `initialize` uses the existing narrow `lifecycle-event` import with this
-  constraint; a generic `object` replacement is forbidden.
-- **Schema source and generation boundary.** Move the settled file inventory
-  exactly as specified. Add deterministic schema generation to `claudine-gen`,
-  which may depend on Darkmatter but never on `claudine` or `claudine-cli`.
-  Emit one generated Rust module under `claudine/lib/src/composition/` containing
-  normalized source text and parsed descriptor data; both generate and check
-  paths cover it, and no second hand-authored runtime schema is retained.
-- **Neutral descriptor format.** Add a generic Darkmatter-owned binding-catalog
-  envelope referenced by trigger/direct schema metadata. Claudine authors its
-  lifecycle descriptors beside `claudine.yaml`; `claudine-gen` consumes that
-  file for runtime declarations and DMLS loads it dynamically through
-  Darkmatter. DMLS contains no Claudine names, event table, or package
-  dependency.
-- **Generic activation.** Extend trigger matching with a generic
-  workspace-marker predicate and use `.claudine/config.json` or
-  `.claudine/config.json5` in Claudine-authored trigger data. Automatic schema
-  roots remain document-scope-local; `SCHEMA_DIR` is an additive,
-  workspace-wide source whose triggers still must match and whose relative
-  imports remain source-relative.
-- **Diagnostic rename.** Replace `dm.expression.unknown_identifier` with one
-  advisory `dm.expression.undeclared_document_property`; no compatibility alias
-  is retained because there are no established external users. Unknown
-  functions, unavailable globals, and schema feature violations remain distinct
-  hard diagnostics.
-- **No prompt workaround.** Preserve the reported ternary in
-  `prompts/implement.md`; do not add `|| false`, null placeholders, or schema
-  materialization. Audit existing fallbacks and remove only those documented by
-  evidence as legality workarounds, retaining semantic defaults.
-- **No separate spike.** The specification's risk review is accepted. Phase 1
-  records inventories and failing-before fixtures; reopen a spike only if those
-  checks disprove the selected binding or schema-generation seams.
-- **Cross-platform paths and watching.** All discovery, environment parsing,
-  marker matching, generated paths, and tests use `Path`/`PathBuf`, accept
-  native Windows separators where input is textual, preserve case-collision
-  checks, and avoid symlink-dependent behavior.
-
-### Wave 1 — Contract Evidence (parallel)
-
-- [ ] **Lookup Inventory**
-  - Reconcile the specification's 17-site graph inventory with every live
-    `EvaluationLookup` implementation found in Darkmatter and Claudine,
-    separating production adapters, test fixtures, doctests, and unrelated
-    lookup surfaces.
-  - For each production implementation, record its document/context/env/global
-    precedence, missing-value behavior, resolution-context support, and whether
-    it needs only the ordinary adapter or a rich binding environment.
-  - Run focused GitNexus context/impact queries for the concrete binding and
-    subtree symbols before implementation; treat HIGH/CRITICAL or partial
-    results as explicit migration/review gates and confirm unresolved callers
-    with `rg`.
-
-- [ ] **Consumer Inventory**
-  - Record the four production `SubtreeCompose` sites and all direct `evaluate`
-    paths in lifecycle, loop, dispatch, sequence, and Darkmatter composition.
-  - Map each caller's parse mode, state snapshot, resolution context, schema
-    location, source/property/task identity, atomicity boundary, and current
-    error wrapper so the cutover cannot flatten diagnostics or alter capture
-    timing.
-  - Inventory Claudine AST walkers for undefined roots, lifecycle-global
-    availability, shell late-binding, and surviving spans; classify each as
-    removable expression mechanics or retained domain policy.
-
-- [ ] **Schema Inventory**
-  - Resolve every reference to the files beneath `darkmatter/docs/schemas`, the
-    empty `schema-definition.yaml`, and draft/empty files beneath
-    `claudine/docs/schemas`; document move, delete, or intentional historical
-    dispositions without broad path replacement.
-  - Trace Darkmatter base embedding, DMLS configured extensions, trigger
-    discovery/cache/watch invalidation, Claudine runtime schema use, and
-    `claudine-gen` generate/check application paths.
-  - Capture the current trigger precedence, package-scope behavior, named-type
-    import origin, and last-good refresh tests as regression baselines.
-
-### Wave 2 — Regression Baselines (parallel)
-
-- [ ] **Semantic Fixtures**
-  - Add failing-before characterization cases for absent bare/document paths,
-    schema-declared-but-unset values, bare-vs-`ctx` collision, global shadowing,
-    unavailable-vs-null globals, inactive branches, malformed expressions, and
-    all three literal escape forms.
-  - Preserve whole-value and mixed-string fixtures and the real
-    `prompts/implement.md` ternary so tests compare the new behavior with
-    ordinary Darkmatter semantics rather than a rewritten prompt.
-  - Retain or replace the fatality matrix around genuine parser/evaluator
-    failures; do not encode root membership as fatality.
-
-- [ ] **DRY Audit**
-  - Record the ownership, inputs, outputs, snapshot timing, and errors for
-    effective-state construction, early/late contexts, global declarations,
-    parsing, validation, evaluation, interpolation, descriptors, and error
-    projection.
-  - Select the shared `BindingEnvironment` plus passive validation operation as
-    the consolidation seam; list each intentionally retained duplicate where
-    Claudine policy, DMLS presentation, parse mode, or capture timing differs.
-  - Verify the seam can preserve lazy memoization and typed causes before any
-    public API removal begins.
-
-### Phase 1 Checkpoint
-
-- [ ] **Architecture Review**
-  - The complete lookup/consumer/schema inventories, failing-before fixtures,
-    global availability matrix, DRY audit, and generator artifact layout are
-    recorded and internally consistent.
-  - No implementation starts while a CRITICAL/HIGH caller is unclassified, a
-    schema file has two proposed authorities, or the selected binding model
-    collapses absent document data, null globals, and unavailable globals.
-
-## Phase 2 — Build Darkmatter Binding Semantics
-
-### Wave 3 — Binding Foundation
-
-- [ ] **Binding Model**
-  - Add the public Darkmatter binding descriptors/environment and typed
-    unavailable-global error, with eager and memoized-lazy global providers and
-    explicit reserved namespaces.
-  - Provide the ordinary `EvaluationLookup` adapter so existing lightweight
-    implementations map `None` to a missing document property without an
-    invasive trait rewrite; remove `is_known_variable_root` and its docs.
-  - Route variable evaluation through the binding environment while preserving
-    member/index null propagation, global precedence, read-side function
-    resolution contexts, and lazy-provider at-most-once behavior.
-
-### Wave 4 — Binding Consumers (parallel)
-
-- [ ] **Passive Validator**
-  - Add parser-aware validation that visits every variable reference in all
-    branches, classifies it through the same environment as runtime, and reports
-    definitely unavailable globals without reading their values.
-  - Represent execution-dependent availability explicitly so passive validation
-    defers it and runtime resolution enforces it; prove validation never invokes
-    lazy providers, filesystem functions, shell, or other effects.
-  - Return structured errors with reference/binding details suitable for
-    Claudine context wrapping and DMLS source-range diagnostics.
-
-- [ ] **Namespace Isolation**
-  - Remove `EffectiveState`'s bare-name fallback to `get_context_value`; retain
-    explicit `ctx.*`, `env.*`, and `doc.*` paths and document-property collision
-    access through `doc`.
-  - Audit and migrate every production/test `EvaluationLookup` implementation,
-    adding parity coverage for conditions, loops, dispatch, frontmatter seeds,
-    catalogs, filesystem functions, and non-Claudine fixtures.
-  - Add a guard/inventory test that fails when a new implementation introduces
-    implicit context-tail fallback or bypasses the ordinary/rich adapter choice.
-
-### Wave 5 — Unified Evaluation
-
-- [ ] **Subtree Unification**
-  - Remove `SubtreeStrictness`, builder selectors, convenience arguments,
-    `validate_strict_roots`, `collect_variable_roots`, and strictness-specific
-    documentation/tests.
-  - Make the one subtree path use fail-fast interpolation for genuine failures
-    while accepting missing document properties as `null` in whole values,
-    empty text in mixed strings, falsy ternaries, and fallback value selection.
-  - Preserve triple-brace/backslash escapes and single-pass literal output with
-    no surviving-span rejection or additional evaluation pass.
-
-### Phase 2 Checkpoint
-
-- [ ] **Binding Gate**
-  - Run focused Darkmatter nextest targets for expression, subtree,
-    interpolation, condition, and lookup-adapter contracts.
-  - Confirm absent and schema-declared-but-unset properties, unavailable and
-    null globals, inactive-branch validation, literal parity, genuine failures,
-    and non-Claudine lookup behavior match the Phase 1 matrix before consumers
-    migrate.
-
-## Phase 3 — Enforce Schema Feature Policy
-
-### Wave 6 — Constraint Grammar
-
-- [ ] **Constraint Syntax**
-  - Add `no-shell-expansion` to `Constraint`, postfix grammar, native mapping
-    `$constraints`, serializer, source spans, descriptors/completion, semantic
-    compatibility checks, and documentation.
-  - Preserve constrained named-import syntax such as
-    `lifecycle-event(no-shell-expansion)@./claudine-types.yaml`; correct current
-    docs that claim native mapping schema forms are unsupported.
-  - Reject invalid placements or attempts to negate/relax the flag with typed
-    schema diagnostics.
-
-### Wave 7 — Policy Metadata
-
-- [ ] **Policy Metadata**
-  - Carry the restriction in effective-schema metadata independently of JSON
-    value validation so composition and DMLS can inspect the applicable policy
-    at an exact schema location.
-  - Define monotonic merge/import rules and origin attribution for direct
-    baselines, triggers, document schemas, named types, unions, arrays, and
-    key/value containers.
-  - Keep generic feature vocabulary in Darkmatter; no lifecycle event name or
-    Claudine-specific rule enters the grammar.
-
-### Wave 8 — Deferred Enforcement
-
-- [ ] **Expansion Guard**
-  - Enforce the location policy during preparation before shell expansion and
-    carry it with deferred values for evaluation-time enforcement when content
-    was unavailable earlier.
-  - Ensure a failed required-schema, binding, or feature-policy validation
-    blocks the affected operation rather than continuing as an advisory, while
-    preserving existing recovery routing and completed prior effects.
-  - Prove restricted arrays/mappings cover every descendant and cannot be
-    relaxed; generated, overlaid, proxied, mutated, and moved values retain the
-    applicable destination/source policy defined by the effective schema.
-
-### Wave 9 — Initialize Enforcement
-
-- [ ] **Initialize Schema**
-  - Apply `no-shell-expansion` to the narrow imported lifecycle-event type for
-    `initialize`; retain its explicit communication/stack key structure.
-  - Keep Claudine's runtime preflight-boundary shell backstop and bootstrap
-    frontmatter prohibition as defense in depth, including dead branches,
-    failure/catch/finalize routes, approvals, whitelists, caches, and
-    `no_error` attempts.
-  - Add Darkmatter tests for blocked expansion and Claudine-facing fixtures for
-    all preflight-shell regressions.
-
-### Phase 3 Checkpoint
-
-- [ ] **Policy Gate**
-  - Run focused SimplifiedSchema grammar, import, merge, source-map,
-    composition, and DMLS metadata tests.
-  - Confirm validation is passive, blocking, location-specific, inherited,
-    non-relaxable, and preserved through deferred evaluation before lifecycle
-    schemas adopt it.
-
-## Phase 4 — Centralize Claudine Lifecycle Bindings
-
-### Wave 10 — Catalog and Errors (parallel)
-
-- [ ] **Global Catalog**
-  - Replace omission-based `lifecycle_injected_globals` with one Claudine
-    catalog declaring `err`, `timing`, `current`, `current_env`, and `group`,
-    including types, eager/lazy capture, event/scope availability, conditional
-    runtime availability, and structured unavailable reasons.
-  - Reserve every catalog name even when unavailable so bare access cannot fall
-    through; preserve explicit `doc.<name>` access and global shadowing.
-  - Exercise every global against every lifecycle event/scope through
-    Darkmatter validation and runtime APIs, including sequence groups and
-    conditional `finalize` error state.
-
-- [ ] **Typed Context**
-  - Extend lifecycle composition errors/wrappers so event, action, property,
-    task, and source-path context surrounds—rather than stringifies—the original
-    typed Darkmatter error.
-  - Remove prose-only undefined-variable construction and the
-    `LifecycleUndefinedVariable` variant/rendering/snapshots; map unavailable
-    global and feature-policy errors to stable Claudine diagnostics without
-    losing their typed source.
-  - Add library-only downcast/source-chain tests independent of CLI rendering.
-
-### Wave 11 — Consumer Cutover (parallel)
-
-- [ ] **Event Evaluation**
-  - Remove `first_undefined_stack_variable` calls from `when_matches`,
-    `render_message`, and `resolve_typed_value`, plus the helper/root walkers and
-    closed-world preparation validator when no producer remains.
-  - Replace `validate_no_err_in_no_error_events` traversal with a thin adapter
-    that builds the event binding environment, invokes Darkmatter passive
-    validation, and adds lifecycle location context; remove the adapter entirely
-    if normal preparation can supply that context directly.
-  - Remove shallow/deep surviving-span guards while retaining atomic full-value
-    resolution, typed whole values, ordinary mixed interpolation, and genuine
-    evaluation failure before dispatch/mutation.
-
-- [ ] **Preflight Cutover**
-  - Migrate lifecycle shell preflight and sequence shell preflight from custom
-    root walkers to explicit unavailable-global declarations plus Darkmatter
-    validation/evaluation.
-  - Preserve source/property/task diagnostics, resolution contexts, no-effect
-    preflight behavior, exact resolved command bytes, and approval byte parity.
-  - Keep target-identity and other genuinely domain-specific sequence checks
-    only where they are not expression-binding mechanics; document that
-    ownership in the DRY audit.
-
-- [ ] **Task Cutover**
-  - Migrate sequence task value resolution and all production subtree callers
-    to the single API in the same coordinated change; remove every `.strict()`
-    and old convenience signature.
-  - Verify `proxy.with`, mapping-based `set`, communication batches, and group
-    task values resolve completely before mutation or dispatch and treat missing
-    properties as successful `null` values.
-  - Update interpolation conformance tests to use shared Darkmatter/lifecycle
-    fixtures for escapes, whole values, mixed strings, missing values, and
-    genuine failures.
-
-### Phase 4 Checkpoint
-
-- [ ] **Lifecycle Gate**
-  - Run focused Claudine library tests for every former undefined-variable call
-    shape, the complete global matrix, shell restrictions, atomic mutation,
-    typed causes, literal parity, and recovery routes.
-  - Confirm no Claudine production code parses or walks expression ASTs solely
-    to classify variable roots, reproduce short-circuit behavior, or reject
-    successful expression-looking output.
-
-## Phase 5 — Establish Authoritative Schema Distribution
-
-### Wave 12 — Source Migration
-
-- [ ] **Schema Move**
-  - Move `darkmatter.yaml` and `expression-functions.yaml` to
-    `darkmatter/schemas`; move populated `claudine.yaml`,
-    `claudine-types.yaml`, `err.yaml`, and `env.yaml` to `claudine/schemas` while
-    preserving `claudine/schemas/review.yaml`.
-  - Keep `darkmatter-schema.md` as documentation with corrected transclusion;
-    remove or retire the empty `schema-definition.yaml` reference after proving
-    no functional consumer; prevent empty/draft `claudine/docs/schemas` files
-    from becoming authorities.
-  - Update imports, fixtures, loaders, documentation links, tests, and skill
-    paths individually, preserving source-relative named imports and avoiding
-    unrelated historical records.
-
-### Wave 13 — Distribution Inputs (parallel)
-
-- [ ] **Trigger Data**
-  - Author generic Claudine trigger data and the lifecycle binding descriptor
-    catalog beside the Claudine schemas, using workspace-marker facts and
-    ordinary frontmatter/path predicates rather than DMLS code.
-  - Ensure automatic activation remains scoped to documents beneath the schema
-    source root; cover wider intentional use through `SCHEMA_DIR` or a root
-    schema installation, never sibling leakage.
-  - Validate the descriptor catalog and trigger envelopes through Darkmatter's
-    standalone schema APIs before either runtime generation or editor loading.
-
-- [ ] **Base Embedding**
-  - Repoint Darkmatter's base and expression-function embedding at
-    `darkmatter/schemas`, update transclusion/build paths, and retain one parsed
-    cache rather than adding generation where the specification does not
-    require it.
-  - Add source-location and line-ending portability tests for macOS, Linux, and
-    Windows compilation, using repository-relative `/` in `include_str!` paths
-    and normalized generated output.
-  - Add an inventory guard preventing reintroduction of competing live schema
-    copies under documentation directories.
-
-### Wave 14 — Runtime Generation
-
-- [ ] **Schema Generator**
-  - Add dedicated `claudine-gen schemas generate` and `schemas check` paths for
-    deterministic schema parsing/normalization and emission of the Claudine
-    runtime schema/binding module without adding a dependency on `claudine` or
-    `claudine-cli`.
-  - Integrate the schema artifact into generator reporting, unit fixtures, and
-    the existing package verification recipes; byte-compare committed output so
-    source/artifact drift fails existing gates without coupling it to a
-    provider-only slug selection.
-  - Make the Claudine library consume only the generated module and prove the
-    embedded schema/descriptors are semantically equivalent to the YAML inputs.
-
-### Phase 5 Checkpoint
-
-- [ ] **Authority Gate**
-  - Run `claudine-gen` check/generation tests and Darkmatter shipped-schema/meta
-    schema tests from a clean generated state.
-  - Confirm editing authoritative YAML changes both generated runtime drift and
-    DMLS-loaded semantics, while DMLS itself contains no embedded Claudine
-    schema or lifecycle catalog.
-
-## Phase 6 — Complete DMLS Static Analysis and Discovery
-
-### Wave 15 — Editor and Discovery Foundations (parallel)
-
-- [ ] **Binding Diagnostics**
-  - Feed Darkmatter binding descriptors and passive validation results into
-    expression diagnostics, hover, and completion for body and schema-typed
-    frontmatter surfaces.
-  - Rename the advisory code/message to undeclared document property, emit at
-    most one warning per reference, use schema type information for declared
-    but unset properties, and keep bare identifiers classified as document
-    properties rather than `ctx` tails.
-  - Emit hard, source-ranged diagnostics for unavailable lifecycle globals and
-    schema feature violations—including inactive branches—while deferring
-    execution-dependent availability and keeping unknown functions distinct.
-
-- [ ] **Scoped Roots**
-  - Extend the existing trigger registry to compose repository/open-tree,
-    package-area, and package `schemas/` roots with explicit scope ownership;
-    nearest definitions retain deterministic precedence without affecting
-    sibling scopes.
-  - Add generic direct always-on schema inputs alongside conditional triggers,
-    always layering them over the Darkmatter base through the same effective
-    schema engine.
-  - Detect generic workspace marker facts at the applicable root and feed them
-    to trigger matching without a Claudine-specific filename in DMLS.
-
-- [ ] **Environment Source**
-  - Read a valid `SCHEMA_DIR` as an additive workspace-wide schema source,
-    preserve trigger conditions and source-relative imports, and allow paths
-    outside the workspace or inside another package.
-  - Define process-start/config-reload environment timing and diagnose invalid
-    values without replacing automatic discovery.
-  - Prove a normally scope-local source can apply elsewhere only when selected
-    through `SCHEMA_DIR` and its trigger matches.
-
-### Wave 16 — Editor and Refresh Proof (parallel)
-
-- [ ] **Passive Proof**
-  - Test editor validation with effect-counting lazy providers and filesystem/
-    shell sentinels to prove it executes no action, expansion, read-side
-    operation, or provider.
-  - Compare DMLS results directly with Darkmatter preparation validation for the
-    same schemas, binding catalogs, inactive branches, and feature policies.
-  - Migrate diagnostic documentation, suppression fixtures, severity tests, and
-    mapping-only corpora atomically with the code rename.
-
-- [ ] **Refresh Pipeline**
-  - Extend existing watcher globs, server-rescan fallback, dependency hashes,
-    and cache keys for marker files, direct inputs, `SCHEMA_DIR`, nested roots,
-    and newly created/deleted `schemas/` directories.
-  - Preserve last-good transactional behavior for malformed edits and refresh
-    startup/create/update/delete state for open documents without requiring an
-    editor window to gain focus.
-  - Add deterministic macOS tests using temporary workspaces plus path/case
-    fixtures that exercise native Windows/Linux semantics; record representative
-    startup and refresh observations without a numeric pass/fail budget.
-
-### Phase 6 Checkpoint
-
-- [ ] **Editor Gate**
-  - Run DMLS Level 1 unit/integration tests for diagnostics, hover, completion,
-    base/direct/conditional layering, root scoping, marker changes,
-    `SCHEMA_DIR`, imports, and watcher/rescan invalidation.
-  - Confirm the editor is responsive in representative fixtures, produces no
-    side effects, never embeds Claudine data, and agrees with runtime
-    preparation on every shared validation case.
-
-## Phase 7 — Regression, Documentation, and Handoff
-
-### Wave 17 — End-to-End Proof (parallel)
-
-- [ ] **Router Regression**
-  - Add a literal shipped-prompt CLI test for the implementation router with
-    only `spec` supplied and no pending review, preserving the authored
-    `plan`/`review` ternaries.
-  - Use `CliProcessFixture` with its hermetic CWD/home/PATH,
-    `PLAYA_DRY_RUN=1`, and private spool; assert the intended identified-spec
-    line and routing error, absence of unknown-root/undefined/fallback advice,
-    no provider spawn, and no audio publication.
-  - Keep the test at Level 1 and avoid terminal/browser focus.
-
-- [ ] **Fallback Audit**
-  - Search shipped prompts for fallbacks or synthetic null keys added solely to
-    satisfy closed-world validation; remove only evidence-backed legality
-    workarounds and retain real authored defaults.
-  - Add prompt guards proving the reported expression remains unmodified and no
-    obsolete strict-mode guidance reappears.
-
-- [ ] **Reference Update**
-  - Update Darkmatter expression/interpolation/schema documentation, Claudine
-    lifecycle/composition topics, READMEs, timeline, DMLS diagnostics/editor
-    docs, and all mirrored `.claude/skills/claudine` and Darkmatter skill
-    references.
-  - Describe missing properties as valid runtime `null`, distinguish
-    unavailable globals and genuine evaluator failures, document explicit
-    `ctx.*`, literal escapes, feature restrictions, schema ownership,
-    generation, dynamic discovery, and `SCHEMA_DIR`.
-  - Review every behavior-changing symbol's `///`/`//!` and inline comments;
-    remove stale strict/unknown-root/surviving-span narration without rewriting
-    unrelated historical specifications or logs.
-
-### Wave 18 — Darkmatter Gate
-
-- [ ] **Darkmatter Gates**
-  - From `darkmatter/`, run `just test` and `just lint` with nextest-backed
-    recipes; run existing relevant `just test-l2` coverage only if it exercises
-    the changed DMLS/schema boundary.
-  - Record focused test commands, outcomes, and representative DMLS refresh
-    observations; do not run `cargo fmt` unless separately requested.
-
-### Wave 19 — Claudine Gate
-
-- [ ] **Claudine Gates**
-  - From `claudine/`, run `just test`, `just lint`, and generator drift checks;
-    run `just test-l2` only for an existing suite covering the changed
-    composition boundary or an added L2 regression.
-  - Verify the CLI regression remains hermetic/silent and no new CI matrix cell
-    was introduced.
-
-### Wave 20 — Graph Review
-
-- [ ] **Graph Review**
-  - Refresh GitNexus with `just gitnexus` if the index no longer matches HEAD,
-    then run complete `detect-changes --scope all`; re-run any partial or
-    truncated result and review every HIGH/CRITICAL affected symbol/process.
-  - Re-run text inventories for strictness APIs, root walkers, old diagnostic
-    terminology, old schema paths, competing schema copies, and every
-    `EvaluationLookup` implementation.
-
-### Wave 21 — Acceptance Review
-
-- [ ] **Acceptance Review**
-  - Trace each specification acceptance criterion to code, tests,
-    documentation, and recorded evidence; confirm all seven phase checkpoints
-    are satisfied and all plan tasks are checked.
-  - Report implementation complete and ready for review without moving the fix
-    to `_completed`, running `just complete`, committing, or altering unrelated
-    working-tree changes.
-
-### Final Checkpoint
-
-- [ ] **Review Handoff**
-  - Darkmatter, DMLS, Claudine library/CLI, schema generation, shipped prompt,
-    docs, and skill snapshots all express the same binding and feature-policy
-    contract.
-  - Required package gates and applicable existing L2 suites are green, graph
-    review is complete, cross-platform risks are covered by portable design and
-    CI evidence, and the change is implementation-complete for author review.
+These rulings must be recorded, by the owner or by accepting the stated
+recommendation, before Phase 2 starts. Each one resolves a gap between the
+design record (written 2026-09-19) and either the re-scope or the code as it
+stands on 2026-10-01.
+
+- [x] **NR-1: Design approval gate (rollout ruling 2).** The rollout
+  strategy lists "independent design review and design approval for the
+  strict-mode core" as unmade, and `design.md` still reads "not yet approved
+  for implementation planning". This plan was requested before that ruling was
+  recorded.
+  - **Recommendation:** treat the review as covering this plan together with
+    the in-scope design artifacts. Record the approval in
+    `claudine/docs/rollout-strategy.md` (ruling 2) and in the `design.md`
+    status line before Phase 2.
+- [x] **NR-2: Plain values instead of `ValueEnvelope`.** C1 and C2 are written
+  against C4's `ValueEnvelope`, and C4 is out of scope.
+  - **Recommendation:** in the core, `ResolvedBinding`, `RuntimeBinding::Eager`,
+    lazy providers, and `evaluate_prepared` carry `serde_json::Value`. Lazy
+    providers keep today's `InjectedGlobal::lazy(Fn() -> Value)` shape.
+  - No provenance, stage, or policy metadata is introduced. The envelope can
+    later wrap the value without changing the classification.
+- [x] **NR-3: Which names are reserved.** The spec's Language Contract names
+  three reserved namespaces (`doc`, `ctx`, `env`). Darkmatter now reserves
+  five through `reserved_root_descriptors()` in
+  `darkmatter/lib/src/markdown/compose/expression/catalog/roots.rs`: `doc`,
+  `ctx`, `env`, `current`, and `current_env`. The more-context work landed
+  after the design.
+  - **Recommendation:** the binding model takes its reserved-namespace set from
+    that one table. Registration rejects every name in it, which slightly
+    widens acceptance criterion 2 from "exactly `doc`, `ctx`, `env`" to "every
+    reserved root".
+  - `current` therefore leaves C3's Claudine catalog: it is a Darkmatter
+    namespace, not a lifecycle global.
+  - **Owner sign-off required**, because this widens an acceptance criterion
+    (spec: "bring that decision back to the human").
+- [x] **NR-4: `timing`, not `tracking`.** C3 and the parked unified schema name
+  a `tracking` global; Claudine injects `timing`
+  (`lifecycle_injected_globals` in
+  `claudine/lib/src/composition/lifecycle/context.rs`).
+  - **Recommendation:** the catalog declares `err`, `timing`, and `group`. No
+    rename in this fix; a rename belongs to the parked schema work.
+- [x] **NR-5: One resolution channel, not three methods.** D1 chose a richer
+  method with an ordinary default. Since then the trait has gained
+  `get_checked`, a fallible channel the evaluator already reads through.
+  - **Recommendation:** evolve `get_checked` into
+    `resolve(&self, path) -> Result<ResolvedBinding, ExpressionError>`, with a
+    default that wraps `get` as `Document`. Add `binding_view()` (default
+    `None`) and `format_resolved`, as C1 describes.
+  - Existing `ContextNotCaptured` and `ContextProjectionInvariant` errors move
+    onto that channel unchanged. This is D1 option B with one channel instead
+    of two parallel fallible methods.
+- [x] **NR-6: Scope of the prepared representation (D4, C2).** Without R10 and
+  C5, C2's feature-violation family, schema-generation identity, and
+  `PreparedContextMismatch` against a mutable editor registry have no caller.
+  - **Recommendation:** the core ships `prepare_value`, `validate_prepared`,
+    and `evaluate_prepared`. The prepared identity is the `BindingView`
+    identity alone.
+  - The core omits the feature-restriction policy and the semantic-bundle
+    identity, and adds error families only for binding configuration and
+    unavailable bindings. The existing parse, evaluation, and schema errors
+    remain as they are.
+- [x] **NR-7: Diagnostic code and classification for undeclared properties
+  (R7a).** The Darkmatter library (`unknown_identifiers.rs`, `absence.rs`)
+  and DMLS (`overlay/expressions.rs`) share the code
+  `dm.expression.unknown_identifier`. Its message says the name "matches no
+  frontmatter key, schema property, `ctx.*`, `env.*`, or function".
+  `absence.rs::is_statically_known_root` also treats bare context-descriptor
+  names as known roots, which is the static mirror of the `ctx` fallback that
+  R3 removes.
+  - **Recommendation:** rename the code to
+    `dm.expression.undeclared_property` in the library, DMLS, `md` CLI tests,
+    and docs in one change, with no alias.
+  - Reword the message to "`{root}` is an undeclared document property (unknown
+    type; `null` unless supplied at runtime)".
+  - Drop context-descriptor names from the known-root check.
+  - Keep the existing suppression when an author wrote a fallback or ternary.
+    The diagnostic is an advisory, and the suppression does not make anything
+    legal at runtime.
+- [x] **NR-8: Loop `_loop_*` names.** The inventory (row 13) proposes
+  registering `_loop_*` as explicit loop globals. `2026-09-21-lifecycle-ergonomics`
+  removes those names, and the spec's Non-Goals exclude reworking loop action
+  handling.
+  - **Recommendation:** `LoopExpressionLookup` keeps `_loop_*` as ordinary data
+    through the default `resolve`, and only its `ctx` fallback is removed. No
+    loop catalog is built.
+- [x] **NR-9: Approved command artifacts for setup and teardown (D8, C9).** The
+  lifecycle investigation found that setup and teardown commands are approved
+  as resolved bytes, then re-parsed and re-evaluated at execution
+  (`collect_lifecycle_shell` compared with `TaskExecution::parse_stacks`).
+  - **Recommendation:** fix this gap in scope, as D8 and acceptance criterion 9
+    (byte parity) require. Use a minimal Claudine-private `ApprovedCommand`
+    (site identity plus `String` bytes) with no envelope (NR-2).
+- [x] **NR-10: Delete the provenance spike test.**
+  `claudine/lib/tests/l1/strict_mode_provenance_spike.rs` is a test-only D5
+  prototype, and D5 is out of scope.
+  - **Recommendation:** delete it when `.strict()` is removed. Its findings
+    stay recorded in [spike-results.md](spike-results.md).
+- [x] **NR-11: Behavior changes the owner should see before merge.** These
+  follow from the spec and design. They are listed because shipped prompts or
+  user documents may depend on today's behavior:
+  - bare `err` in `finalize` or teardown with no error now reads an explicit
+    `null` global instead of falling through to a document property `err` (D7);
+  - bare `group` outside any group, and inside sequence-wide shell approval,
+    raises a typed unavailable error instead of reading a document property
+    `group` (D8). `doc.group` still reads the document;
+  - a bare name matching a context key (for example `branch`) no longer reads
+    `ctx.branch` (R3).
+  - **Recommendation:** accept these. Task "Prompt exposure audit" below
+    measures their reach before Phase 2.
+
+### Spikes
+
+No new spike is scheduled. The two spikes the owner requested on 2026-09-19
+covered provenance transfer and DMLS failure recovery, and both subjects are
+now out of scope. The core's remaining risks concern API shape and migration
+breadth, not unknown runtime behavior. They are handled by the inventory and
+impact tasks in Wave 2 and by Phase 2's contract tests.
+
+### Wave 1 — rulings (serial, owner)
+
+- [x] **Record rulings**
+  - Record NR-1 through NR-11 outcomes in a `## Rulings` section of
+    `implementation-log.md` beside this plan (create it), with the date and
+    the person who decided.
+  - If NR-3 is accepted, note the widened criterion 2 in the implementation
+    log. The spec is a snapshot and is not edited.
+
+### Wave 2 — baseline and inventory (parallel; read-only except the log)
+
+- [x] **Test baseline**
+  - Run `just test` and `just lint` in `darkmatter/` and `claudine/` on the
+    unmodified tree. Record pre-existing failures in the implementation log so
+    later phases are not blamed for them.
+- [x] **Lookup inventory refresh**
+  - Re-verify the 21-row lookup table in
+    [migration-inventory.md](migration-inventory.md) against current source and
+    record the deltas in the implementation log. Known deltas on 2026-10-01:
+    - **New:** `DeferrableLookup` (`darkmatter/lib/src/markdown/compose/inline/interpolation.rs:163`)
+      is a forwarding wrapper and must forward the richer method.
+    - **New:** the test-only `Nothing` in `expression/absence.rs:398`.
+    - **Moved:** the two integration fixtures now live under
+      `darkmatter/lib/tests/l1/`.
+    - **Ignore:** `darkmatter/features/2026-09-21-schema-enhancements/spikes/coercion-baseline`
+      has no `Cargo.toml` and is not compiled.
+  - The result is the checklist Phase 3 migrates: 23 implementations plus
+    2 rustdoc examples.
+- [x] **Seam impact check**
+  - Run GitNexus `impact` on `EvaluationLookup`, `SubtreeCompose`,
+    `InjectedGlobal`, `LayeredLookup`, `lifecycle_injected_globals`, and
+    `CompositionError`. Verify `UNKNOWN` results by text search, and record
+    callers outside the inventory.
+- [x] **Prompt exposure audit**
+  - Search `prompts/`, `claudine/` prompts and fixtures, and `darkmatter/`
+    fixtures for:
+    - `|| false` and `|| ''` guards whose only purpose is legality;
+    - bare `err` in `finalize` or teardown;
+    - bare `group` outside a group;
+    - bare names that match `ctx` keys.
+  - Known instances:
+    - `prompts/implement.md` lines 53–82 (`review || false` in `when:`, and
+      `spec`/`plan`/`review` guards in messages);
+    - `prompts/review.md` lines 32–45;
+    - the guidance line `prompts/_prompt.md:89`, which teaches the
+      workaround.
+  - Classify each instance as **legality guard** (remove in Phase 6) or **real
+    default** (keep). For example, `frontmatter(spec, "implemented") || false`
+    renders the word `false` on purpose and is kept.
+
+**Checkpoint 1:** rulings recorded, the baseline is known, and the migration
+checklist and prompt-exposure list are written in the implementation log.
+This closes the planning half of acceptance criterion 13.
+
+## Phase 2 — Darkmatter binding model (additive)
+
+Everything in this phase is additive. Strictness still exists, every crate
+still compiles, and no caller changes behavior yet. Code lives in
+`darkmatter/lib/src/markdown/compose/` (new module `expression/binding.rs`, or
+beside `subtree.rs`; the implementer chooses).
+
+### Wave 3 — binding types and checked association (serial; the foundation)
+
+- [ ] **Binding types**
+  - Add `ResolvedBinding { Document, Namespace, Global }` carrying
+    `Option<Value>` or `Value` (NR-2).
+  - Add `BindingError`, with `Unavailable { root, path, scope_id, reason, span }`
+    and the configuration arms from C2: reserved name, duplicate, unknown
+    global, omitted declared global, and contradicting a definite declaration.
+  - Add `UnavailabilityReason` with a stable namespaced code and structured
+    parameters.
+- [ ] **Declarations and sessions**
+  - Add an immutable, provider-free `BindingView`. It declares global roots,
+    each scope's availability (`available`, `unavailable(reason)`, or
+    `execution-dependent`), and scope identity.
+  - Add `RuntimeBinding { Eager(Value), Lazy(provider), Unavailable(reason) }`.
+  - Add `BindingEnvironment::associate(view, document, runtime) -> EvaluationSession`.
+    Following D7, association checks the full registration map before any
+    evaluation or provider call:
+    - reserved names from `reserved_root_descriptors()` are rejected (NR-3);
+    - root identifiers only, never dotted paths;
+    - every declared global has an entry;
+    - an `execution-dependent` declaration resolves to an explicit entry;
+    - definite declarations are not contradicted.
+  - Following D2, the session owns one lazy cache. It caches a root once
+    (including a `null` result) and does not hold its lock while user code
+    runs.
+- [ ] **Trait channel (NR-5)**
+  - Evolve `EvaluationLookup::get_checked` into `resolve`. The default wraps
+    `get` as `Document`. Add `binding_view()` and `format_resolved`, and keep
+    `get`/`get_string` for external callers.
+  - The two `SimpleLookup` rustdoc examples in `expression/mod.rs` must still
+    compile.
+
+### Wave 4 — evaluator routing and passive validation (parallel after Wave 3)
+
+- [ ] **Evaluator routing**
+  - The evaluator and interpolator resolve every variable through `resolve`,
+    and format through `format_resolved`. That includes the interpolation
+    variable fast path that D4 flagged as calling `get`/`get_string`.
+  - An unavailable global raises a typed error and never falls through to the
+    document. An available `null` global stays a global. Once a root is
+    classified as a global or namespace, a missing descendant stays within that
+    root.
+  - Files: `expression/` evaluator and `interpolation/`.
+- [ ] **Prepared validator**
+  - Add `prepare_value(input, AuthoredMode, &PreparationContext)`,
+    `validate_prepared(&PreparedValue, &BindingView) -> Vec<ValidationDiagnostic>`,
+    and `evaluate_prepared(&PreparedValue, &EvaluationSession)` (C2, scoped by
+    NR-6).
+  - Reuse the existing scanners and `SpannedExpr`. Walk all branches and report
+    definitely unavailable roots and unknown functions. Defer
+    `execution-dependent` roots, invoke no provider, and evaluate nothing.
+  - Files: a new prepared module only; do not touch the evaluator files that
+    the "Evaluator routing" task owns.
+
+### Wave 5 — contract tests (parallel after Wave 4)
+
+- [ ] **Binding contract tests** (Darkmatter L1, a `darkmatter/lib/tests/l1/`
+  file or module tests). Cover:
+  - available-null compared with unavailable compared with absent document
+    property;
+  - an injected global shadowing a same-named document property;
+  - registration of each reserved root failing before any lazy provider runs.
+    Use a provider that panics, to prove it is never called;
+  - an omitted declared global failing association even when its only
+    reference is in an inactive branch;
+  - `doc.doc`, `doc.ctx`, and `doc.env` reading document data;
+  - one lazy evaluation per session, including a `null` result.
+- [ ] **Passive validation tests**
+  - A definitely unavailable root in an inactive ternary branch fails
+    `validate_prepared`.
+  - An `execution-dependent` root is deferred.
+  - A counting provider records zero calls during preparation and validation.
+
+**Checkpoint 2:** `cargo check --workspace` is clean, and `just test` and
+`just lint` pass in `darkmatter/`. No behavior has changed for existing
+callers. This is evidence toward acceptance criteria 6 and 8 (partial).
+
+## Phase 3 — Remove strict mode and the `ctx` fallback in Darkmatter
+
+This phase breaks Claudine's compile at the five `.strict()` call sites. To
+keep the workspace building, the same phase deletes those calls mechanically
+(Wave 7). Claudine's own walkers stay until Phase 4, so Claudine behavior is
+unchanged except that Darkmatter no longer pre-rejects roots.
+
+### Wave 6 — Darkmatter removals (parallel; disjoint files)
+
+- [ ] **Subtree API removal** (`darkmatter/lib/src/markdown/compose/subtree.rs`,
+  `interpolation/rewrite.rs`)
+  - Delete `SubtreeStrictness`, `.strict()`, `with_strictness`, the
+    `compose_subtree` strictness argument, `validate_strict_roots`, and the
+    subtree-local `collect_variable_roots`. Subtree interpolation stays
+    fail-fast; this is ordinary error propagation, not a mode.
+  - Rebuild `LayeredLookup` on the Wave 3 session. `with_global` and the
+    `globals` map become runtime entries associated against an optional
+    `BindingView`. Without a view, an injected global is simply an available
+    global.
+  - Rewrite the strict/lenient unit tests in `subtree.rs` as single-behavior
+    tests and fix the rustdoc examples.
+- [ ] **Namespace fallback removal** (`context/effective_state.rs`,
+  `frontmatter_interpolation.rs`, `conditions.rs`, `expression/ctx.rs`)
+  - Remove the bare-name `get_context_value(path)` fallback from
+    `EffectiveState` (lines 247 and 277), from `FrontmatterSeedState`, and
+    from `ShortcutLookup`.
+  - Resolve reserved namespaces first, including exact namespace roots. Keep
+    name coercion and captured context.
+  - Delete `is_known_variable_root` from these implementations.
+- [ ] **Lookup migration, remaining implementations**
+  - Remove `is_known_variable_root` from the trait and from every other
+    implementation on the Wave 2 checklist: catalog fixtures, semantics,
+    `TestLookup`, `Nothing`, the two `tests/l1` fixtures, and
+    `ResolvingLookup`/`DeferrableLookup`. Each forwarder forwards `resolve`,
+    `binding_view`, and `format_resolved`.
+  - Add the lookup parity inventory test required by R3. It enumerates the
+    implementations and asserts that none of them resolves a bare missing name
+    from `ctx`, so a new lookup cannot quietly restore the fallback.
+- [ ] **Undeclared-property advisory** (`unknown_identifiers.rs`,
+  `expression/absence.rs`, `pipeline/mod.rs`, `transclusion/engine.rs`,
+  `context/report.rs`)
+  - Replace the missing-root observer's dependence on `is_known_variable_root`
+    with the binding classification. The advisory fires only for a
+    `Document` binding that is absent from both authored frontmatter and the
+    effective schema.
+  - Apply NR-7 (code rename, wording, dropping context-descriptor names from
+    `is_statically_known_root`) across the library and the `md` CLI tests
+    (`darkmatter/cli/tests/l1/compose_unknown_identifiers.rs`).
+
+### Wave 7 — Claudine compile bridge and Darkmatter test updates (parallel after Wave 6)
+
+- [ ] **Claudine compile bridge**
+  - Delete `.strict()` at the five call sites: `lifecycle/executor.rs:1023`,
+    `preflight.rs:480`, `sequence/preflight/mod.rs:944`,
+    `sequence/task/mod.rs:913`, and `lifecycle/context/tests.rs:613`.
+  - Update `interpolation_conformance.rs` and other test-only
+    `SubtreeStrictness` uses so they compile. The matrix rewrite itself is
+    Phase 4.
+  - Delete `claudine/lib/tests/l1/strict_mode_provenance_spike.rs` (NR-10).
+  - Also fix compile-only references in `claudine/lib/src/signals/version.rs`,
+    `darkmatter/cli/src/commands/compose.rs`, and
+    `darkmatter/dmls/src/diagnostics/frontmatter.rs`, if they use the removed
+    API. DMLS behavior is Phase 5.
+- [ ] **Darkmatter Level 1 contract tests** (spec § Verification → Darkmatter
+  Level 1, in-scope items)
+  - Cover absent bare property and `doc.<p>` as `null` whole values, empty in
+    mixed strings, the ternary falsy branch, and `||` value semantics.
+  - Cover a schema-declared but unset property and an undeclared property both
+    being valid, while a required-property violation still blocks.
+  - Cover a missing bare property not resolving from `ctx.<p>`.
+  - Cover malformed syntax, unknown functions, rejected arguments, and
+    file-operation failures still raising errors.
+  - Cover all three escape forms (triple braces, `\{{ x }}`, `\{\{ x }}`),
+    whole-value results, and mixed strings, with no extra evaluation pass.
+  - Rewrite the fatality characterization matrix in
+    `darkmatter/lib/tests/l1/compose_expression_failure_contract.rs` so it
+    tests real expression failures instead of root membership.
+  - Update `unknown_identifier_warning.rs`, `compose_diagnostic_identity.rs`,
+    `feature_review_incident.rs`, and `schemas_literal_expression.rs` for
+    NR-7.
+
+**Checkpoint 3:** `cargo check --workspace` is clean, `darkmatter`
+`just test`/`just lint` pass, and the `claudine` `just test` failures are
+limited to tests that encode the old contract (listed in the implementation
+log for Phase 4). Acceptance criteria 1, 3, and 4 hold in Darkmatter.
+
+## Phase 4 — Claudine lifecycle binding catalog and consumer migration
+
+Claudine changes are all in `claudine/lib/src/composition/` unless stated.
+Phase 5 (DMLS) can run **concurrently** with this phase; it depends only on
+Phase 3.
+
+### Wave 8 — catalog and session construction (serial; the foundation)
+
+- [ ] **Lifecycle binding catalog**
+  - Add one Claudine-owned module (for example `lifecycle/bindings.rs`) that
+    builds a `BindingView` declaring `err`, `timing`, and `group` (NR-3,
+    NR-4). It covers every scope in C3's matrix:
+    - `initialize`, `start`, `success`, `loop`, `blocked`, `failure`, and
+      `finalize`;
+    - task setup and task teardown;
+    - early lifecycle shell approval and sequence-wide shell approval.
+  - Reasons use namespaced codes: `claudine.event-has-no-error`,
+    `claudine.preflight-unavailable`, and `claudine.outside-group`.
+    Darkmatter never matches on them.
+  - `group` follows the lexical rule: an established group means available
+    (an empty object counts); a known absence means unavailable; unknown
+    membership means `execution-dependent` during passive checks.
+  - `outputs` stays unavailable at sequence shell approval under its existing
+    policy, expressed in the same catalog (C3).
+- [ ] **Complete runtime entries**
+  - Replace `lifecycle_injected_globals` with a constructor that returns a
+    complete runtime map per scope. For example, `err` is eager in
+    `blocked`/`failure`, eager or explicit `null` in `finalize`/teardown, and
+    `Unavailable` elsewhere.
+  - Replace the `group` injection at `lifecycle/executor.rs:914` with the
+    catalog's entry. Do not express unavailability by leaving an entry out.
+
+### Wave 9 — consumer migration (parallel after Wave 8; each task owns its files)
+
+- [ ] **Event-time lifecycle** (`lifecycle/executor.rs`,
+  `lifecycle/action_shape.rs`)
+  - `when_matches`, `render_message`, `resolve_typed_value`, and
+    `resolve_string_value` evaluate through the event's session.
+  - Delete the three `first_undefined_stack_variable` calls, `ctx_scan_hint`
+    and its variable-path traversal, the surviving-span rejection, and
+    typed-result re-evaluation.
+  - `proxy.with` and mapping-based `set` resolve the complete candidate before
+    any write. A genuine error leaves nothing published, and an absent
+    property is a successful `null`.
+- [ ] **Shell approval and byte parity** (`preflight.rs`,
+  `sequence/preflight/mod.rs`, `sequence/task/` setup and teardown paths)
+  - Lifecycle shell preflight uses the early-approval scope. Sequence-wide
+    preflight uses the sequence-approval scope, in which `group` is
+    unavailable for primary, setup, teardown, and referenced-prompt commands
+    (D8).
+  - Add the Claudine-private `ApprovedCommand { site, bytes }` (NR-9). Store it
+    beside prepared task stacks, and execute setup and teardown from those
+    approved bytes rather than re-evaluating the authored string.
+- [ ] **Sequence values and expressions** (`sequence/task/mod.rs`,
+  `sequence/expr.rs`, `sequence/task/group.rs`)
+  - Task value resolution uses the actual task scope.
+  - `SourceExpressionLookup` treats the per-item overlay as the document layer
+    beneath the reserved namespaces, with no `ctx` fallback. Replace its
+    duplicate `evaluate_whole`/`render_interpolated` traversal with
+    `prepare_value`/`evaluate_prepared`.
+  - Group variables still evaluate before the new group's scope is entered.
+- [ ] **Loop and hook lookups** (`looping/expression.rs`, `looping/actions.rs`,
+  `dispatch/expression.rs`)
+  - Remove the `ctx` fallback. `SizedLookup` and `EventMetaConditionLookup`
+    forward the full contract.
+  - Keep `_loop_*` and the hook metadata as ordinary data (NR-8). No lifecycle
+    catalog is installed on these surfaces.
+
+### Wave 10 — remove validators and preserve typed causes (parallel after Wave 9)
+
+- [ ] **Prepare-time validation** (`lifecycle/validate.rs`, `prepare.rs`)
+  - Delete `validate_no_undefined_lifecycle_variables`,
+    `first_undefined_stack_variable`, and their root-inventory walkers.
+  - Reduce `validate_no_err_in_no_error_events` to an adapter. It builds the
+    event's `BindingView`, prepares each authored value, calls
+    `validate_prepared`, and maps diagnostics into Claudine context.
+    Alternatively, inline that into the existing prepare path and delete the
+    function.
+  - The `initialize` shell prohibition (parser rejection plus
+    `DisabledShellRunner`) is untouched.
+- [ ] **Typed cause preservation** (`lifecycle/` error types,
+  `CompositionError`, proxy and recovery transport)
+  - Delete `CompositionError::LifecycleUndefinedVariable` and its renderer
+    branches in `claudine/cli`.
+  - Give `LifecycleExprError` typed Darkmatter arms, and have
+    `CompositionError` carry an owned or `Arc` cause reachable through typed
+    accessors and `Error::source`. Remove the proxy-overlay conversion to text.
+  - `LifecycleErrorInfo` JSON remains the `err` projection, not the cause.
+
+### Wave 11 — Claudine Level 1 tests (parallel after Wave 10)
+
+- [ ] **Event-time behavior tests** (spec § Claudine Level 1)
+  - An absent property in `when:` skips the action.
+  - An absent property in a message renders as `null`.
+  - An absent property in a typed value resolves to `null`.
+  - `proxy.with` and `set` stay atomic with `null` values, and a failing last
+    member publishes nothing.
+  - An unavailable global fails with its diagnostic and never reads a
+    same-named document property.
+  - Malformed expressions and unknown functions halt before side effects.
+- [ ] **Lifecycle binding matrix**
+  - One table-driven test crosses each catalog global (`err`, `timing`,
+    `group`) with every scope in Wave 8. Each case goes through both
+    `validate_prepared` and runtime resolution, with no Claudine walker.
+  - Include an omitted entry compared with an explicit unavailable entry, and
+    explicit `null` in `finalize`/teardown.
+- [ ] **Library typed-cause test**
+  - A library-only test downcasts the original Darkmatter cause and reads the
+    Claudine context after direct, proxy, lifecycle, and catch wrapping,
+    without the CLI and without parsing rendered text (acceptance criterion 16).
+- [ ] **Validation boundary and initialize regressions**
+  - A required-schema failure stops before lifecycle actions or provider
+    launch, and recovery routes still run under existing policy.
+  - Prohibited shell expansion never runs, including on recovery routes and in
+    inactive branches.
+  - Keep the existing `initialize` regressions.
+- [ ] **Conformance and parity**
+  - Rewrite `interpolation_conformance.rs` as one shared missing-property
+    semantics table, with no strict/lenient divergence.
+  - Use the same escape, whole-value, and mixed-string fixtures as Darkmatter
+    Wave 7. Successful output containing braces is not rejected.
+  - Add byte-parity tests for approval and execution of primary, setup,
+    teardown, and referenced-prompt commands. Add a test that `group` is
+    unavailable at sequence-wide approval while `doc.group` still reads the
+    document.
+
+**Checkpoint 4:** `claudine` `just test` and `just lint` pass, and the
+existing L2 suites that cover lifecycle and composition pass under
+`just test-l2` (for example `level2_lifecycle_control.rs`). The source scan in
+the Definition of Success returns nothing for Claudine. Acceptance criteria 5,
+6, 7, 8, 9, 16, 17, and 19 hold.
+
+## Phase 5 — DMLS consumes the shared classification (concurrent with Phase 4)
+
+DMLS lives in `darkmatter/dmls/`. This phase depends on Phase 3 only, and its
+files do not overlap Phase 4's.
+
+### Wave 12 — DMLS migration (serial within the crate)
+
+- [ ] **Shared classification**
+  - Replace DMLS's own root decisions (`overlay/expressions.rs::is_unknown_root`,
+    and the `"ctx"` special cases in `providers/frontmatter.rs` and
+    `providers/dsl.rs`) with Darkmatter's classification:
+    `reserved_root_descriptors()` and the binding model's baseline view.
+  - No hardcoded root list remains in DMLS. Claudine descriptors are not
+    supplied (R7c is out of scope).
+- [ ] **Advisory diagnostic**
+  - Apply NR-7 in `diagnostics/codes.rs`, `diagnostics/frontmatter.rs`, and
+    `overlay/expressions.rs`. The code is `dm.expression.undeclared_property`,
+    with advisory severity, at most one per source span, worded as a valid,
+    currently undeclared, unknown-typed document property.
+  - Unknown functions stay hard errors. Keep the dash-separated-key quick-fix.
+- [ ] **DMLS Level 1 tests** (spec § DMLS Level 1, in-scope items)
+  - An undeclared property produces at most one advisory.
+  - A schema-declared but unset property keeps its type in hover.
+  - A runtime-supplied property is not a parser error.
+  - Unknown functions are distinct errors.
+  - Validation runs no actions, no shell, no file effects, and no lazy
+    providers.
+  - Completion and hover classify bare names as document properties.
+  - A source-scan test asserts that DMLS has no separate root catalog.
+  - Update `nested_span_tests.rs` and `darkmatter/dmls/tests/l1/lsp_session.rs`.
+
+**Checkpoint 5:** `darkmatter` `just test` and `just lint` (which cover DMLS)
+pass. Acceptance criterion 10 holds.
+
+## Phase 6 — Shipped prompts and the reported-case regression
+
+This phase depends on Phase 4. Per the rollout strategy's
+[one prompt sweep at a time](../../docs/rollout-strategy.md#one-prompt-sweep-at-a-time)
+rule, this sweep merges before `2026-09-21-lifecycle-ergonomics` touches
+`prompts/`.
+
+### Wave 13 — prompt restoration and regression (serial: the test before the pin)
+
+- [ ] **Restore plain expressions** (R8)
+  - In `prompts/implement.md`, restore
+    `{{ plan ? '- a plan file was identified: ' + plan : '' }}` and the
+    sibling `spec`/`review` lines to plain ternaries. Remove the other
+    legality guards found by the Wave 2 audit, including `when: "review || false"`
+    and the guard comment above it.
+  - Make the same changes in `prompts/review.md` lines 32–45.
+  - Rewrite the guidance at `prompts/_prompt.md:89` so it no longer tells
+    authors to guard optional inputs. A fallback is for choosing a default
+    value.
+  - Keep fallbacks classified as real defaults.
+- [ ] **CLI L1 regression** (`claudine/cli/tests/l1/`, a new file or an
+  extension of `shipped_prompts.rs`)
+  - Use `CliProcessFixture::command()` with its child-local `PLAYA_DRY_RUN=1`
+    and private spool.
+  - Copy the root `prompts/implement.md` into the fixture with `include_str!`
+    and create the `spec` file inside the fixture.
+  - Assert, in one run:
+    - the list-form `$schema` accepts the document with only `spec` supplied;
+    - every absent `plan`/`review` reference evaluates without a lifecycle
+      evaluation error;
+    - the run ends at the authored routing `error`;
+    - the output contains the spec line and the routing error, and does not
+      contain `unknown root`, `undefined variable`, or fallback advice;
+    - no provider starts, and `fixture.audio_spool()` is absent.
+  - No window gains focus.
+- [ ] **Refresh pins** (only after the regression passes)
+  - Re-derive the route-drift fixture under
+    `claudine/cli/tests/fixtures/shipped_implement_route/_implement`.
+  - Refresh `prompts/implement.md`'s hash in `shipped-hashes.json`.
+  - Confirm `shipped_prompt_route_drift.rs`, `shipped_prompt_contract.rs`, and
+    `compose_initialize_acceptance.rs` pass.
+
+**Checkpoint 6:** `claudine` `just test` passes with the new regression and
+the refreshed pin. Acceptance criterion 11 holds.
+
+## Phase 7 — Documentation, audits, and final gates
+
+Wave 14 can start once Phases 4 and 5 are complete, in parallel with Phase 6.
+Wave 15 waits for everything.
+
+### Wave 14 — documentation and skills (parallel; disjoint files)
+
+- [ ] **Darkmatter docs** (R9)
+  - Update the expression and interpolation docs (`darkmatter/docs/inline/interpolation.md`,
+    the expression topic pages, `darkmatter/docs/lsp/features.md`, and
+    `darkmatter/docs/topics/schemas/dmls-schema-support.md`):
+    - one namespace contract;
+    - absent means `null`;
+    - no `ctx` fallback;
+    - executable expressions fail on parser and evaluator errors and on
+      unavailable globals;
+    - literal and escape output follows ordinary rules;
+    - the binding API for hosts, with a compact example;
+    - the renamed advisory code.
+  - Add a Mermaid diagram of the resolution order (reserved namespace, then
+    registered global, available or unavailable, then document property). The
+    pages are written for a developer new to the repository.
+  - Update the `.claude/skills/darkmatter` snapshot to match.
+- [ ] **Claudine docs and skill** (R9)
+  - Update `claudine/docs/topics/composition.md`,
+    `topics/flow-control/lifecycle.md`, and
+    `topics/flow-control/flow-control-reference.md`:
+    - remove strict-mode and "unknown root" claims and `||`-for-legality
+      advice;
+    - document the `err`/`timing`/`group` availability table per event and
+      scope;
+    - document explicit `null` `err` in `finalize`;
+    - document `group` being unavailable at sequence-wide approval.
+  - Update `.claude/skills/claudine/SKILL.md` (the "strict, fail-closed"
+    wording in the Lifecycle stacks row) and add a `timeline.md` entry.
+  - Historical specs and completed logs are not edited.
+- [ ] **Stale-wording sweep**
+  - Search `darkmatter/` and `claudine/` docs, READMEs, rustdoc, and skills
+    for "strict mode", "unknown root", "strict()", and "SubtreeStrictness" in
+    the expression sense. Many hits are unrelated style or schema strictness;
+    leave those alone.
+  - Fix drifted rustdoc on every symbol whose behavior changed, under the
+    CLAUDE.md comment rules.
+
+### Wave 15 — audits and gates (serial)
+
+- [ ] **DRY seam audit** (acceptance criterion 14)
+  - Check the [DRY table](migration-inventory.md#dry-and-ownership-audit)
+    against the final code, adjusted for the re-scope. There is no envelope,
+    and descriptors exist only in Rust.
+  - Record in the implementation log each retained duplication with its
+    owner reason, and each consolidation made.
+- [ ] **Acceptance evidence map**
+  - In the implementation log, map acceptance criteria 1–17 and 19 to the
+    test or source scan that proves each one.
+  - Record departures from the spec or design (for example the NR-3 widening,
+    NR-4, and NR-5) as departures. Correct the docs; leave the spec unchanged.
+- [ ] **Final gates**
+  - Run `just test` and `just lint` in `darkmatter/` and `claudine/`, plus
+    `just test-l2` in both areas where an existing L2 suite covers lifecycle,
+    composition, or subtree interpolation.
+  - Review `just ci-local --plan` before any push. Do not add a CI cell.
+  - Changed Rust must stay portable across macOS, Linux, Windows, and WSL2.
+    No `#[cfg]` paths are expected; if any are added, load the `os` skill.
+- [ ] **Hand-off**
+  - Set the implementation log to "implementation complete, ready for review".
+  - Do not edit the spec's `status`/`implemented` fields unless the author's
+    workflow asks for it, and do not move the fix to `_completed`.
+
+**Checkpoint 7:** every gate is green, the acceptance map is complete, and
+docs and skills carry one vocabulary. Acceptance criteria 12, 13, 14, and 15
+hold.
+
+## Dependency Overview
+
+```mermaid
+flowchart TD
+    P1["Phase 1<br/>rulings · baseline"] --> P2["Phase 2<br/>binding model (additive)"]
+    P2 --> P3["Phase 3<br/>remove strict mode · ctx fallback"]
+    P3 --> P4["Phase 4<br/>Claudine catalog · consumers"]
+    P3 --> P5["Phase 5<br/>DMLS classification"]
+    P4 --> P6["Phase 6<br/>prompts · CLI regression · pin"]
+    P4 --> P7a["Phase 7 · Wave 14<br/>docs · skills"]
+    P5 --> P7a
+    P6 --> P7b["Phase 7 · Wave 15<br/>audits · gates"]
+    P7a --> P7b
+```
+
+| Wave | Phase | Parallel tasks | Blocks on |
+| --- | --- | --- | --- |
+| 1 | 1 | rulings (owner) | — |
+| 2 | 1 | baseline ∥ inventory ∥ impact ∥ prompt audit | — (may overlap Wave 1) |
+| 3 | 2 | binding types → declarations and sessions → trait channel | Wave 1 |
+| 4 | 2 | evaluator routing ∥ prepared validator | Wave 3 |
+| 5 | 2 | binding tests ∥ passive validation tests | Wave 4 |
+| 6 | 3 | subtree removal ∥ namespace fallback ∥ lookup migration ∥ advisory | Wave 5 |
+| 7 | 3 | Claudine compile bridge ∥ Darkmatter L1 tests | Wave 6 |
+| 8 | 4 | catalog → complete runtime entries | Wave 7 |
+| 9 | 4 | event-time ∥ shell approval ∥ sequence values ∥ loop/hook | Wave 8 |
+| 10 | 4 | prepare-time validation ∥ typed causes | Wave 9 |
+| 11 | 4 | five Claudine test tasks in parallel | Wave 10 |
+| 12 | 5 | DMLS classification → advisory → tests | Wave 7 (runs alongside Waves 8–11) |
+| 13 | 6 | restore prompts → regression → pins | Wave 11 |
+| 14 | 7 | Darkmatter docs ∥ Claudine docs ∥ wording sweep | Waves 11, 12 |
+| 15 | 7 | DRY audit → evidence map → gates → hand-off | Waves 13, 14 |
+
+In Wave 6, the lookup migration task and the namespace fallback task both
+remove `is_known_variable_root`. Split them strictly by file (the
+fallback task owns `effective_state.rs`, `frontmatter_interpolation.rs`,
+`conditions.rs`, and `ctx.rs`; the migration task owns the rest), and land the
+trait-method deletion last, in the lookup migration task.

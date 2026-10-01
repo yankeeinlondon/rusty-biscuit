@@ -10,6 +10,59 @@ reviewed_on: 2026-09-19
 review_iterations: 0
 implemented: false
 review_note: the clarification process served as a review
+human_review: true
+human_review_items:
+    - |-
+        **Which names may a host never register as its own global? (plan ruling NR-3)**
+
+        **Why this must be settled before Phase 2.** Phase 2 builds the check that rejects a
+        host's attempt to register a global under a reserved name. The spec's acceptance
+        criterion 2 says exactly three names are reserved: `doc`, `ctx`, and `env`. Since the
+        spec was written, Darkmatter added two more built-in namespaces, `current` and
+        `current_env` (lazily refreshed views of `ctx` and `env`), and keeps all five in one
+        table. The spec says any widening of an acceptance criterion must come back to you,
+        so Phase 2 should not hard-code the answer without your sign-off.
+
+        **Options**
+
+        - **A. Reserve all five names, taken from Darkmatter's one table (recommended).**
+          - Pro: one source of truth; a future built-in namespace is reserved automatically.
+          - Pro: a host can never shadow `current`/`current_env`, which would silently
+            change what `current.branch` means inside a prompt.
+          - Con: widens criterion 2 from "exactly three" to "every built-in namespace";
+            recorded as a departure in the implementation log (the spec stays as written).
+        - **B. Reserve only `doc`, `ctx`, `env`, as the spec says.**
+          - Pro: matches the spec text literally.
+          - Con: a host (Claudine or another) could register a global named `current`
+            and hide the built-in namespace, the exact ambiguity this fix exists to remove.
+          - Con: needs a second hard-coded list that drifts from Darkmatter's table.
+
+        **Recommendation: A.** The agent has already recorded A as accepted under the plan's
+        "accept the stated recommendation" rule; answer only if you want B instead.
+message_to_agent: |-
+    Phase 1 is planning only; read `## Phase 1` of implementation-log.md before Phase 2. Key points:
+    (1) All rulings NR-1..NR-11 were recorded as "accept the recommendation" (yolo). NR-3
+    (reserve all five roots from reserved_root_descriptors()) is pending owner sign-off via
+    human_review; build it as recommended unless the owner overrules.
+    (2) Baseline: darkmatter and claudine `just test` and `just lint` are all green with no
+    pre-existing failures, so any later failure is ours.
+    (3) Inventory: 23 compiled EvaluationLookup impls + 2 rustdoc examples. The bare-name
+    ctx fallback lives only in EffectiveState (effective_state.rs:247 and :277, via
+    into_checked_bare_name) and ShortcutLookup (conditions.rs:388/:400). LoopExpressionLookup
+    and SourceExpressionLookup have NO ctx fallback today. SizedLookup (looping/actions.rs)
+    and EventMetaConditionLookup (dispatch/expression.rs) forward only get/get_string /
+    get+resolution_context and drop get_checked; they must forward resolve/binding_view/
+    format_resolved after the trait change. DeferrableLookup (inline/interpolation.rs:163)
+    maps ContextNotCaptured -> Ok(None) when deferring; preserve that on resolve.
+    (4) Unlisted callers to keep compiling: SubtreeCompose in claudine/cli/tests/l1/composition_seams.rs,
+    darkmatter/cli/tests/l1/compose_schema.rs, darkmatter compose/tests/lazy_roots.rs;
+    InjectedGlobal in compose/tests/frontmatter.rs. LifecycleUndefinedVariable's renderers are in
+    claudine/lib/src/composition/error/render/ (lib, not cli).
+    (5) Phase 6 must also fix two shipped prompts that silently relied on the ctx fallback:
+    prompts/brainstorm.md:20 `{{area}}` -> ctx.area and prompts/_reviews/performance-review.md:342
+    `{{time}}` -> ctx.time (plus their copies in darkmatter/dmls/tests/fixtures/mapping_only_corpus/).
+    The `|| ''` guards in proxy `with:` of prompts/pr.md and prompts/_pr/{dirty,push}.md are real
+    defaults (pass '' not null to a string-typed callee); keep them.
 $schema:
     status: |-
         enum(
