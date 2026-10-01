@@ -48,18 +48,19 @@ what every existing call site means.
     - **in a repository**, `base_dir` is the repository root, and
       `repository_root()` continues to return it; `repository_root()` is
       `Some` exactly when the tree is a repository.
-    - **outside a repository**, `base_dir` is supplied with
-      `with_base_dir(dir)`.
-    - **when neither applies**, `base_dir` defaults to `cwd`: the tree is the
-      `cwd` subtree. This matches how the launch `@` scope already picks its
-      local root (`LaunchMagicScope::local_root`: the repository root, else the
-      request directory).
+    - **outside a repository**, `base_dir` comes from an explicit
+      `with_base_dir(dir)`, a containing vault, or the `~`/`{{VAR}}` anchor of
+      the reference that opened the document, falling back to `cwd`; see
+      [how `base_dir` is chosen](#decision-how-base_dir-is-chosen).
     - **`cwd` must be inside `base_dir`**, the containment rule that
       `RepositoryRootNotContainingSource` already enforces for repositories;
       `for_trusted_external_source` / `for_trusted_external_cwd` remain the
       explicit escape hatch.
-    - **deriving keeps the tree**: `for_source` and `for_cwd` change `cwd`
-      only; `base_dir` carries over unchanged.
+    - **deriving keeps the tree**: a document reached by a link inside the
+      current tree changes `cwd` only; `base_dir` carries over unchanged. A
+      document opened through a reference that leads into a different tree
+      (`~`, `{{VAR}}`, a vault) takes that tree's root, per
+      [how `base_dir` is chosen](#decision-how-base_dir-is-chosen).
 
 ```rust
 // in a repo: base_dir is discovered as the repo root
@@ -100,7 +101,9 @@ or implicit relative reference whose normalized target leaves `base_dir`
 outside the tree. The rule is the same inside and outside a repository: today
 an in-repository reference such as `./../../outside.md` may leave the
 repository (only `&` and `^` are contained), and after this change it fails
-too. This is a deliberate behavior change.
+too. This is a deliberate behavior change. The one exception is a `base_dir`
+that only fell back to `cwd`, which is not a boundary (see
+[how `base_dir` is chosen](#decision-how-base_dir-is-chosen)).
 
 Leaving the tree is opt-in, never a default. `PortablePath` mirrors this with
 the `ExternalRelativePath` strategy: it may emit a relative path that leaves
@@ -141,6 +144,46 @@ later:
 - **Coordination.** `2026-09-30-file-refs-use-magic` reshapes the same struct
   around one prepared context. Whichever lands second builds on the other's
   vocabulary; neither reintroduces the old names.
+
+### Decision: how `base_dir` is chosen
+
+A document's tree root is the first of these that applies:
+
+1. **the repository root**, when the document is in a repository;
+2. **an explicit `with_base_dir(dir)`**;
+3. **the vault root** containing the document, when it is inside a configured
+   vault (`add_vault`);
+4. **the anchor of the reference that opened the document**, when that
+   reference is `~`- or `{{VAR}}`-anchored:
+
+   ```text
+   md compose ~/Downloads/a.md      → base_dir = ~        ("../b.md" = ~/b.md, inside the tree)
+   md compose {{NOTES}}/inbox/a.md  → base_dir = $NOTES
+   ```
+
+   Claudine's external prompts, opened as `~/.claudine/prompts/x.md`, get `~`
+   as their tree root this way;
+5. **`cwd`**, as the last resort.
+
+An explicit `with_base_dir` outranks a containing vault: what the caller
+states beats what is inferred.
+
+**A `base_dir` that fell back to `cwd` is not a boundary.** Nothing told the
+resolver where the tree is, so resolution does not reject a relative reference
+for leaving it; a link such as `../b.md` resolves as it does today. Writing
+stays strict: `PortablePath` treats an upward relative path out of a fallback
+`base_dir` as external and does not emit one unless `ExternalRelativePath` is
+in the strategy.
+
+- `~` as a tree root is large, so the boundary there only stops links that
+  leave the home directory. That is the honest limit of what is known.
+- **The opening reference must reach the context.** Today callers derive a
+  document's context from an already-resolved path
+  (`for_source(path)`, `for_trusted_external_source(path)` in Darkmatter's
+  compose, transclusion, and reference code), and a resolved path no longer
+  says whether it was reached through `~` or `{{VAR}}`. Deriving from the
+  opening `FileReference` (or passing its anchor alongside the path) is part
+  of this change.
 
 ### Decision: resolving an external relative path is a reader opt-in
 
@@ -279,6 +322,9 @@ pub enum PortabilityPreference {
     ExternalRelativePath,
     /// a path that is rooted in a portable ENV variable
     EnvRootedPath,
+    /// a path under the user's home directory, written as `~/…`; the home
+    /// directory comes from the context, or the OS when there is none
+    HomeDir,
     /// an absolute path as a file reference (highly non-portable)
     AbsolutePath,
 }
@@ -295,9 +341,19 @@ let def_strategy = [
     PortabilityPreference::ImmediateParentDir,
     PortabilityPreference::RepoRoot(None),
     PortabilityPreference::EnvRootedPath,
+    PortabilityPreference::HomeDir,
     PortabilityPreference::AbsolutePath,
 ];
 ```
+
+Two orderings in the default are deliberate:
+
+- **`RepoRoot` before `HomeDir`**: a repository usually lives under `~`, so a
+  file in `~/code/rusty-biscuit/docs/x.md` is `&docs/x.md`, not
+  `~/code/rusty-biscuit/docs/x.md`.
+- **`EnvRootedPath` before `HomeDir`**: with `CONFIG_DIR=~/.config/myapp`,
+  `{{CONFIG_DIR}}/x.json` survives a host where the config lives elsewhere,
+  while `~/.config/myapp/x.json` assumes the same layout everywhere.
 
 While this strategy may be good for a lot of callers, a caller like Claudine might want to make some adjustments like:
 
@@ -312,6 +368,7 @@ let def_strategy = [
     PortabilityPreference::ImmediateParentDir,
     PortabilityPreference::RepoRoot(None),
     PortabilityPreference::EnvRootedPath,
+    PortabilityPreference::HomeDir,
     PortabilityPreference::AbsolutePath,
 ];
 ```
@@ -426,6 +483,17 @@ change is the point of the cleanup.
   running `md clean` twice changes nothing the second time. This is a required
   test property.
 
+### Suffixes stay with the caller
+
+`PortablePath` takes a path or a path reference only. A link layer such as
+`md clean` splits off a `#fragment`, a `?query`, and a `:line` / `:line-line`
+location suffix before calling it, and reattaches them to the result:
+
+```text
+../../src/x.rs:42        → &src/x.rs:42
+../../docs/x.md#install  → &docs/x.md#install
+```
+
 ### Resolving a reference input
 
 - A relative reference needs a `cwd`; for `md clean` it is the document's
@@ -510,8 +578,9 @@ environment variable's value is a prefix of the target.
 `CONFIG_DIR` or `OBSIDIAN_VAULT`, set deliberately by a user or tool, qualify.
 `PWD`, `OLDPWD`, and `TMPDIR` do not: they exist everywhere but mean something
 different on every host and at every moment. `HOME` qualifies but is
-unnecessary, because `~` already expresses it; declaring it is allowed (no
-special case), and with the default strategy order `~` wins anyway.
+unnecessary, because `~` already expresses it. Declaring it is allowed (no
+special case); because `EnvRootedPath` precedes `HomeDir` in the default
+strategy, a caller who declares `HOME` gets `{{HOME}}/…` rather than `~/…`.
 
 **Declaring them.** The portable set is the union of two sources:
 
@@ -657,3 +726,43 @@ Design rules:
 - **The variant lists above are placeholders.** The real `NotApplicable` list
   falls out of writing down each strategy's "does not apply" conditions, which
   is also the precise definition of each strategy.
+
+## Spike Findings (2026-09-30)
+
+A throwaway dry run applied a simplified default strategy (`AuthoredIntent`,
+the four relative strategies, `RepoRoot`, `AbsolutePath`; no environment
+anchors) to every Markdown link in three trees, using today's `FileReference`
+for resolution and verification.
+
+| Tree                               | Files | Local links | Notes                                                |
+| ---------------------------------- | ----- | ----------- | ---------------------------------------------------- |
+| this repository                    | 5,281 | 7,834       | the useful corpus                                    |
+| `~/.claudine` prompts (not a repo) | 25    | 0           | no local links; no signal                            |
+| an Obsidian vault (not a repo)     | 3,339 | 19          | 6,846 `[[wiki links]]`, which are not Markdown links |
+
+In this repository:
+
+- **The default strategy behaves as intended.** 121 sigil references kept
+  (`@` 96, `^` 25); 3,365 relative links kept by minimal churn; 739 rewritten,
+  728 of them `../../…` → `&…` (for example
+  `../../../docs/cicd/test-inputs.md` → `&docs/cicd/test-inputs.md`). Zero
+  verification failures, zero idempotence failures.
+- **The boundary breaks nothing inside the repository**: no relative link
+  leaves the repository root.
+- **Relative links leave their own document's directory often**: 1,228 of
+  4,104 resolved relative links (30%). Outside a repository this is what a
+  `base_dir` defaulted to the document's directory would reject.
+- **`&` would have prevented a large class of broken links.** 1,147 links in
+  `_completed` specs resolve from the spec's pre-move location but not from
+  the current one: moving a spec one directory deeper broke every `../` link
+  in it.
+- **`path:line` links are not understood by `FileReference`.** 1,295 links use
+  the `file.rs:42` convention: 1,195 parse as a file literally named
+  `file.rs:42` (when the path contains `/`) and resolve to nothing; 100 are
+  rejected as an unsupported scheme (when it does not, e.g. `spec.md:21`).
+- **Ten implicit (bare) links rely on the repository-root fallback** (e.g.
+  `claudine/docs/research/mcp/kilo.md` written from inside
+  `claudine/docs/research/subagents/`); the default strategy rewrites them to
+  `PeerDir` (`../mcp/kilo.md`) rather than `&…`.
+- The remaining 1,063 broken links are genuinely missing targets; `md clean`
+  would report them as `TargetMissing` findings.
