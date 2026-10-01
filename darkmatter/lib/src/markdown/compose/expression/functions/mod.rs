@@ -1520,7 +1520,7 @@ fn file_reference_error(
     let (reference, base_dir) = ctx
         .active_caller_file_provenance
         .as_ref()
-        .map(|provenance| (provenance.reference.clone(), provenance.origin.base_dir().to_path_buf()))
+        .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
         .unwrap_or_else(|| (raw.to_string(), ctx.base_dir.clone()));
     ExpressionError::FileReference(FileReferenceDiagnostic {
         function,

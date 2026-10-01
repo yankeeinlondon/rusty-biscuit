@@ -567,7 +567,7 @@ fn resolve_file_reference_in_context(
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
     match request_context {
-        Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_base(base_dir)),
+        Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_cwd(base_dir)),
         None => file_ref.resolve_in_context(&document_resolution_context(
             base_dir, None, &[], None,
         )),

@@ -617,7 +617,7 @@ mod tests {
         std::fs::write(&request_target, "request").unwrap();
         let context = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path())
-            .for_trusted_external_base(nested_repo.path().join("docs"));
+            .for_trusted_external_cwd(nested_repo.path().join("docs"));
 
         let resolved = resolve_file_reference_in_context(
             "spec.md",

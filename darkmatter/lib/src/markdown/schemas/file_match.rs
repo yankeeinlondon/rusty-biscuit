@@ -162,7 +162,7 @@ pub(crate) fn file_match_patterns(definition: &PropertyDef) -> Option<&[String]>
 #[must_use]
 pub fn file_match_admits(value: &str, patterns: &[String], origin: &FileResolutionContext) -> bool {
     FileMatchGlobs::compile(patterns).is_none_or(|globs| {
-        admits(&globs, value, Some(origin.base_dir()), None, Some(origin))
+        admits(&globs, value, Some(origin.cwd()), None, Some(origin))
     })
 }
 

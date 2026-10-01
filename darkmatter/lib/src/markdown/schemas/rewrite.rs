@@ -495,7 +495,7 @@ mod tests {
         std::fs::write(child_repo.path().join("spec.md"), "child decoy").unwrap();
         let context = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path())
-            .for_trusted_external_base(&child_base);
+            .for_trusted_external_cwd(&child_base);
         let schema = json!({
             "type": "object",
             "properties": {

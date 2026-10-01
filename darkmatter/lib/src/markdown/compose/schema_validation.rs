@@ -773,9 +773,9 @@ fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::C
         options.file_resolution_context.as_ref(),
         options.file_ref_fallback_dir.as_ref(),
     ) {
-        (Some(context), Some(fallback)) => context.for_trusted_external_base(fallback),
+        (Some(context), Some(fallback)) => context.for_trusted_external_cwd(fallback),
         (Some(context), None) => {
-            context.for_trusted_external_base(context.request_base_dir())
+            context.for_trusted_external_cwd(context.request_cwd())
         }
         (None, Some(fallback)) => biscuit_file::FileResolutionContext::new(fallback),
         (None, None) => return Default::default(),
@@ -827,7 +827,7 @@ fn select_file_mode(
                     // `match`: an arm that glob rules out is still a file arm.
                     crate::markdown::schemas::validate::build_validator_in_context(
                         &without_match_keyword(arm),
-                        Some(context.base_dir()),
+                        Some(context.cwd()),
                         None,
                         Some(context),
                     )
@@ -1191,7 +1191,7 @@ fn resolve_caller_file_value(
                     failure(
                         format!(
                             "could not bind file reference `{raw}` from `{}`: {err}",
-                            context.base_dir().display()
+                            context.cwd().display()
                         ),
                         FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
                         None,
@@ -1201,7 +1201,7 @@ fn resolve_caller_file_value(
                 failure(
                     format!(
                         "file reference `{raw}` produced no candidate from `{}`",
-                        context.base_dir().display()
+                        context.cwd().display()
                     ),
                     FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
                     None,
@@ -1212,7 +1212,7 @@ fn resolve_caller_file_value(
                 return Err(failure(
                     format!(
                         "file reference `{raw}` produced a non-absolute candidate from `{}`",
-                        context.base_dir().display(),
+                        context.cwd().display(),
                     ),
                     FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
                     Some(candidate.clone()),
@@ -1254,7 +1254,7 @@ fn resolve_caller_file_value(
                 return failure(
                     format!(
                         "could not resolve file reference `{raw}` from `{}`: {err}",
-                        context.base_dir().display()
+                        context.cwd().display()
                     ),
                     FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
                     detailed
@@ -1266,11 +1266,11 @@ fn resolve_caller_file_value(
             failure(
                 format!(
                     "file reference `{raw}` did not match a file from `{}`",
-                    context.base_dir().display()
+                    context.cwd().display()
                 ),
                 FileReferenceDiagnostic::NoMatch {
                     raw: raw.to_string(),
-                    resolved_from: Some(context.base_dir().to_path_buf()),
+                    resolved_from: Some(context.cwd().to_path_buf()),
                 },
                 detailed
                     .candidates()

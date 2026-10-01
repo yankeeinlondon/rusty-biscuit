@@ -146,7 +146,7 @@ fn resolve_file_reference(
                 snapshot.for_trusted_external_source(path)
             }
             (Some(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
-            (None, _) => snapshot.for_base(&base_dir),
+            (None, _) => snapshot.for_cwd(&base_dir),
         },
         None => document_resolution_context(
             &base_dir,

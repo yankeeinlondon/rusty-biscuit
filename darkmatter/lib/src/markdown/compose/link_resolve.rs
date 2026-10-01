@@ -179,7 +179,7 @@ fn resolve_absolute(
     // not make them relative again.
     let resolved = if let Some(dir) = base_dir {
         let resolution_ctx = match options.file_resolution_context.as_ref() {
-            Some(snapshot) => snapshot.for_base(dir),
+            Some(snapshot) => snapshot.for_cwd(dir),
             None => {
                 let snapshot = crate::markdown::compose::capture_file_resolution_context(dir);
                 document_resolution_context(dir, None, &options.magic_paths, Some(&snapshot))

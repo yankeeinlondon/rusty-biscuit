@@ -77,7 +77,7 @@ pub(crate) fn document_resolution_context(
 ) -> FileResolutionContext {
     let mut ctx = match (request_context, source_path) {
         (Some(snapshot), Some(source)) => snapshot.for_source(source),
-        (Some(snapshot), None) => snapshot.for_base(base_dir),
+        (Some(snapshot), None) => snapshot.for_cwd(base_dir),
         (None, _) => FileResolutionContext::new(base_dir),
     };
     for (path, position) in magic_paths {

@@ -1454,7 +1454,7 @@ impl ComposeOptions {
                     snapshot.for_trusted_external_source(path)
                 }
                 (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
-                _ => snapshot.for_base(&base_dir),
+                _ => snapshot.for_cwd(&base_dir),
             }
         });
         let (repository_root, package_area, home_dir) = match &file_resolution_context {
@@ -1512,7 +1512,7 @@ impl ComposeOptions {
                     snapshot.for_trusted_external_source(path)
                 }
                 (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
-                _ => snapshot.for_base(&base_dir),
+                _ => snapshot.for_cwd(&base_dir),
             }
         });
         let (repository_root, package_area, home_dir) = match &file_resolution_context {
@@ -2404,8 +2404,8 @@ fn encode_file_resolution_context(
 
     for path in [
         context.source_path(),
-        Some(context.base_dir()),
-        Some(context.request_base_dir()),
+        Some(context.cwd()),
+        Some(context.request_cwd()),
         context.repository_root(),
         context.package_root(),
         context.package_area(),
@@ -2419,7 +2419,7 @@ fn encode_file_resolution_context(
             None => enc.tag(0),
         }
     }
-    enc.bool(context.is_trusted_external_authoring_base());
+    enc.bool(context.is_trusted_external_authoring_cwd());
 
     let scope = context.launch_magic_scope();
     enc.field("launch_magic_scope");

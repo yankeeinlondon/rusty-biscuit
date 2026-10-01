@@ -358,8 +358,8 @@ pub(crate) fn resolve_document_file_ref(
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
     let ctx = match request_context {
-        Some(snapshot) if snapshot.base_dir() == base_dir => snapshot.clone(),
-        Some(snapshot) => snapshot.for_base(base_dir),
+        Some(snapshot) if snapshot.cwd() == base_dir => snapshot.clone(),
+        Some(snapshot) => snapshot.for_cwd(base_dir),
         None => crate::markdown::compose::util::document_resolution_context(
             base_dir,
             None,
@@ -401,7 +401,7 @@ pub(crate) fn resolve_document_file_ref_shape(
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<PathBuf, FileReferenceError> {
     let ctx = match request_context {
-        Some(snapshot) => snapshot.for_base(base_dir),
+        Some(snapshot) => snapshot.for_cwd(base_dir),
         None => crate::markdown::compose::util::document_resolution_context(
             base_dir,
             None,
@@ -447,7 +447,7 @@ pub(crate) fn resolve_document_directory(
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
     let ctx = match request_context {
-        Some(snapshot) => snapshot.for_base(base_dir),
+        Some(snapshot) => snapshot.for_cwd(base_dir),
         None => crate::markdown::compose::util::document_resolution_context(
             base_dir,
             None,
