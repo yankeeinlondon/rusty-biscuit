@@ -1467,7 +1467,7 @@ fn file_reference_detail_serializes_kind_as_snake_case() {
             function: "frontmatter",
             reference: "features/spec.md".to_string(),
             kind,
-            base_dir: PathBuf::from("/repo"),
+            cwd: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
             caller: None,
@@ -1488,7 +1488,7 @@ fn file_reference_detail_emits_full_registry_field_set() {
         function: "frontmatter",
         reference: "features/spec.md".to_string(),
         kind: FileRefFailure::Malformed,
-        base_dir: PathBuf::from("/repo/area"),
+        cwd: PathBuf::from("/repo/area"),
         fallback_dir: None,
         source: None,
         caller: None,
@@ -1530,7 +1530,7 @@ fn file_reference_detail_reserves_the_unavailable_resolver_fields_as_null() {
         function: "frontmatter",
         reference: "features/spec.md".to_string(),
         kind: FileRefFailure::NotFound,
-        base_dir: PathBuf::from("/repo/area"),
+        cwd: PathBuf::from("/repo/area"),
         fallback_dir: None,
         source: None,
         caller: None,
@@ -1565,7 +1565,7 @@ fn file_reference_detail_carries_fallback_dir_when_set() {
         function: "frontmatter",
         reference: "features/spec.md".to_string(),
         kind: FileRefFailure::NotFound,
-        base_dir: PathBuf::from("/repo/area"),
+        cwd: PathBuf::from("/repo/area"),
         fallback_dir: Some(PathBuf::from("/launch/area")),
         source: None,
         caller: None,
@@ -1583,7 +1583,7 @@ fn file_reference_detail_projects_lazy_caller_origin_and_candidate() {
         function: "frontmatter",
         reference: "fixes/case/spec.md".to_string(),
         kind: FileRefFailure::NotFound,
-        base_dir: PathBuf::from("/repo/claudine"),
+        cwd: PathBuf::from("/repo/claudine"),
         fallback_dir: Some(PathBuf::from("/repo/claudine")),
         source: None,
         caller: Some(std::sync::Arc::new(
@@ -1622,7 +1622,7 @@ fn file_reference_detail_does_not_invent_a_miss_for_a_read_io_failure() {
         function: "frontmatter",
         reference: "fixes/case/spec.md".to_string(),
         kind: FileRefFailure::NotFound,
-        base_dir: PathBuf::from("/repo/claudine"),
+        cwd: PathBuf::from("/repo/claudine"),
         fallback_dir: Some(PathBuf::from("/repo/claudine")),
         source: Some(std::sync::Arc::new(
             biscuit_file::FileReferenceError::Io {
@@ -1657,7 +1657,7 @@ fn file_reference_detail_suggestions_match_rendered_did_you_mean() {
         function: "frontmatter",
         reference: "specs.md".to_string(),
         kind: FileRefFailure::NotFound,
-        base_dir: dir.path().to_path_buf(),
+        cwd: dir.path().to_path_buf(),
         fallback_dir: None,
         source: None,
         caller: None,
@@ -1666,7 +1666,7 @@ fn file_reference_detail_suggestions_match_rendered_did_you_mean() {
     let detail = err.detail();
 
     // The same computation the renderer runs (errors/blocks.rs).
-    let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+    let expected_path = diagnostic.cwd.join(&diagnostic.reference);
     let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
 
     assert_eq!(rendered, vec!["spec.md".to_string()], "fixture sanity");
@@ -1698,7 +1698,7 @@ fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
         function: "frontmatter",
         reference: "features/2026-06-21-opencode-log-fix/spec.md".to_string(),
         kind: FileRefFailure::NotFound,
-        base_dir: dir.path().to_path_buf(),
+        cwd: dir.path().to_path_buf(),
         fallback_dir: None,
         source: None,
         caller: None,
@@ -1707,7 +1707,7 @@ fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
     let detail = err.detail();
 
     // The same computation the renderer runs (errors/blocks.rs).
-    let expected_path = diagnostic.base_dir.join(&diagnostic.reference);
+    let expected_path = diagnostic.cwd.join(&diagnostic.reference);
     let rendered = suggest_sibling_files(&expected_path, DEFAULT_MAX_SUGGESTIONS);
 
     assert_eq!(

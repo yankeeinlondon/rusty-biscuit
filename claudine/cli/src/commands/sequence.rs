@@ -304,8 +304,9 @@ fn run_sequence_inner(
     // Derive the definitive source bundle from the same owner so a
     // top-level document selected from a different repository keeps that
     // repository's nested references (D2/D10, AC12). Downstream sequence
-    // surfaces receive the source-derived file-resolution projection.
-    let source_context = invocation.derive_source(&source.resolved_path)?;
+    // surfaces receive the source-derived file-resolution projection. A
+    // `~`/`{{VAR}}` argument can supply its tree root.
+    let source_context = invocation.derive_composition_source(&source)?;
     let file_resolution_context = source_context.file_resolution_context().clone();
 
     reject_sequence_interactive(&source)?;

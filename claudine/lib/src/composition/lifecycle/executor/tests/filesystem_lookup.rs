@@ -405,8 +405,8 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
         prepare_ctx.file_ref_fallback_dir, event_ctx.file_ref_fallback_dir,
         "prepare-time and event-time must share the launch-area fallback"
     );
-    // Both base dirs point at the prompt's parent.
-    assert_eq!(prepare_ctx.base_dir, event_ctx.base_dir);
+    // Both document directories point at the prompt's parent.
+    assert_eq!(prepare_ctx.cwd, event_ctx.cwd);
 
     // The event-time file_exists agrees with the prepare-time anchor.
     let resolved = context

@@ -223,7 +223,7 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
 /// [`null_detail_for`] so every declared key is present. `kind` is the catalog
 /// snake_case slug, never the `Debug` form. `suggestions` reuses the **same**
 /// render-time did-you-mean computation as the interpolation block (a missing
-/// reference, `base_dir`-joined, ranked against its siblings) so
+/// reference, joined onto the diagnostic's `cwd`, ranked against its siblings) so
 /// `err.detail.suggestions` is byte-for-byte what the human report shows.
 ///
 /// A schema-projected caller value also carries its raw authoring context and
@@ -237,7 +237,7 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     // for a *missing* reference — a malformed/remote reference has no sibling
     // hint, so the array stays empty rather than fabricating one.
     let suggestions = if matches!(diagnostic.kind, FileRefFailure::NotFound) {
-        let expected = diagnostic.base_dir.join(&diagnostic.reference);
+        let expected = diagnostic.cwd.join(&diagnostic.reference);
         suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS)
     } else {
         Vec::new()
@@ -245,7 +245,9 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     let mut base = null_detail_for("composition.invalid_file_reference");
     base["reference"] = json!(diagnostic.reference);
     base["kind"] = json!(diagnostic.kind.as_str());
-    base["base_dir"] = json!(biscuit_file::to_portable_string(&diagnostic.base_dir));
+    // The published key predates the `cwd` vocabulary; it is the document
+    // directory, not the tree root.
+    base["base_dir"] = json!(biscuit_file::to_portable_string(&diagnostic.cwd));
     base["suggestions"] = json!(suggestions);
     base["fallback_dir"] = json!(
         diagnostic

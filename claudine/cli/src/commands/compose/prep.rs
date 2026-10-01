@@ -208,8 +208,9 @@ pub(crate) fn run_composition_inner(
     // top-level document selected from a different repository keeps that
     // repository's nested references (D2/D10, AC12). The launch projection is
     // used only for resolving the top-level argument; downstream surfaces
-    // receive this source bundle.
-    let mut source_context = invocation.derive_source(&source.resolved_path)?;
+    // receive this source bundle. A `~`/`{{VAR}}` argument can supply its tree
+    // root.
+    let mut source_context = invocation.derive_composition_source(&source)?;
     let mut file_resolution_context = source_context.file_resolution_context().clone();
     record_prep_substage(
         &mut prep_substages,
