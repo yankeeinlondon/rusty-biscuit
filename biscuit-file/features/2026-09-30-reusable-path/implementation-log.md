@@ -121,6 +121,50 @@ skills_files_updated_during_phase_5:
   - .claude/skills/biscuit-file/SKILL.md
   - .claude/skills/biscuit-file/references/api.md
   - .claude/skills/biscuit-file/references/architecture.md
+source_files_during_phase_6:
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/portable/strategy.rs
+  - biscuit-file/lib/src/file_reference/portable/diagnostics.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/evaluate.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/text.rs
+  - biscuit-file/lib/src/file_reference/portable/text/tests.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/tests/l1/portable_path/mod.rs
+  - biscuit-file/lib/tests/l1/portable_path/configuration.rs
+  - biscuit-file/lib/tests/l1/portable_path/environment.rs
+  - biscuit-file/lib/tests/l1/portable_path/inputs.rs
+  - biscuit-file/lib/tests/l1/portable_path/platform.rs
+  - biscuit-file/lib/tests/l1/portable_path/properties.rs
+  - biscuit-file/lib/tests/l1/portable_path/strategies.rs
+docs_updated_during_phase_6:
+  - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
+  - .claude/skills/os/windows.md
+source_files_during_phase_7:
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/type_tests.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+docs_updated_during_phase_7:
+  - darkmatter/docs/inline/link-normalization.md
+  - darkmatter/docs/darkmatter-compose-pipeline.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/os/windows.md
 packages:
   - biscuit-file
   - darkmatter
@@ -1213,3 +1257,408 @@ tests are in-crate unit tests run by `just test` (L1).
 - Darkmatter on Linux and WSL2 not run: the only Darkmatter change is
   platform-neutral identity plumbing, and the Windows-specific parts live in
   biscuit-file, which passed on Linux and Windows. CI covers the remaining legs.
+
+## Phase 6
+
+`PortablePath` core. Ran in a single agent; no subagents. Rulings R1, R7, R9,
+and R11 applied as recorded.
+
+### What was built
+
+All under `biscuit-file/lib/src/file_reference/portable/` (R9), re-exported
+from `file_reference/mod.rs` and `lib.rs` under `file-reference`:
+
+- **`strategy.rs`**: `PortabilityPreference` (13 variants, spec meanings),
+  `IntentForms::ALL` (a struct with a private field, so narrower sets can be
+  added later without breaking callers), and
+  `PortabilityPreference::DEFAULT_STRATEGY` (a `const` slice). `Display` gives
+  `RepoRoot(docs)`-style names.
+- **`diagnostics.rs`**: `Attempt { strategy, outcome, rejected }`,
+  `AttemptOutcome`, `NotApplicable`, `SpellingProblem`, `EnvAnchorProblem`,
+  `Finding`, `ResolutionProblem`, `ProbeError`, `InvalidTarget`,
+  `ConfigurationProblem`, `FilterProblem`, `PortablePathError`. Everything is
+  `Clone`; no `io::Error` is held. `PortablePathError::attempts()` and
+  `findings()` exist on every variant; `Display` is a one-line headline then
+  one line per attempt.
+- **`env_anchor.rs`**: `PORTABLE_ENV_VARIABLES` (public const), declaration
+  parsing (trim, skip empty, `[A-Z0-9_]+`, invalid recorded once, union with
+  builder names, `BTreeSet` for dedupe and name order), value eligibility
+  (`Unset` / `NotAbsolute` / `ForeignAbsolute` / `NotAPrefix`, via
+  `PathIdentity::strip_prefix`), deepest-first with a stable sort for name
+  ties.
+- **`evaluate.rs`**: `PortablePath` builders, `PortableReference`
+  (`reference`, `strategy`, `attempts`, `findings`, `into_reference`,
+  `AsRef<FileReference>`), and the evaluator.
+- `path_identity.rs` / `mod.rs`: the Phase 5 `expect(dead_code)` markers were
+  removed (the seam is now consumed).
+- `text.rs`: `Lead::Relative { parent_hops: 0 }` with no names now renders
+  `./` instead of `.` (spec: "a target equal to CWD renders as `./`"). The
+  one seam test row was updated. The seam is crate-internal; no consumer saw
+  the old spelling.
+
+### How evaluation works
+
+1. Settings are checked before anything else: `with_ctx` with `with_cwd` /
+   `with_base_dir`, filter syntax, a path input that is not host-absolute.
+2. The context: a clone of `with_ctx`, or `FileResolutionContext::new(cwd)`
+   (captures home and env once) plus `find_git_root(cwd)` and `with_base_dir`.
+   `validate()` errors map to `InvalidConfiguration`.
+3. Portable names come from the context's env plus the builder names.
+4. Preferences run in order. `AuthoredIntent` needs no target. The target is
+   established lazily, at the first target preference, so an input that only
+   `AuthoredIntent` decides is looked up once. A reference input is resolved
+   with `resolve_detailed`: a match, or the one candidate of a
+   single-candidate plan when nothing matched; otherwise `UnresolvableInput`
+   with a typed finding. A non-Unicode target is `UnrenderableTarget`.
+5. Each target preference renders through the `text` seam and verifies the
+   text by resolving it with `resolve_detailed` in the same context (for
+   `ExternalRelativePath`, with `allow_external_relative()`). The resolver
+   applies the boundary and the real-landing (symlink) check, so no parallel
+   check exists. `Io` during verification aborts with `ProbeFailed`.
+
+### Decisions and departures from the spec (spec left as decided)
+
+- **`Attempt` has a `rejected` list.** The spec's illustrative `Attempt` has
+  `strategy` and `outcome` only; it also says an attempt "can contain several
+  candidate rejections or environment-anchor evaluations". `rejected` holds
+  the earlier candidates (a shadowed `@` spelling, each ineligible variable);
+  `outcome` is the match or the last rejection.
+- **`NotApplicable::RouteShape { parent_hops, names }` replaces
+  `TooManyParentHops { needed }`**: one typed reason for every relative shape
+  mismatch, including "too few hops". Added reasons the spec's list did not
+  name: `OutsideRepository`, `InsideBaseDir`, `NoSharedRoot`,
+  `FilterNotASearchRoot`, `FilterUnavailable`, `HomeUnavailable`,
+  `TargetNotFile` (search form on a directory), `NoPortableVariables`,
+  `NotRewritable` (URL / `%` input), `UnsafeSpelling(SpellingProblem)`,
+  `Rejected(ResolutionProblem)` (boundary denial or missing anchor during
+  verification), `NoCandidate` (internal fallback, unreachable in practice).
+- **Added error variants** for the spec's "must cover" list:
+  `ProbeFailed { target, error: ProbeError, attempts }` (I/O other than
+  absence, for a path target or during verification), `CwdUnavailable`,
+  `RepositoryDiscoveryFailed`. `NoStrategyMatched` and `UnresolvableInput`
+  carry `findings`; `UnrenderableTarget` carries `attempts`.
+- **R11** as ruled: a kept intent form's lookup failure is
+  `Finding::ResolutionFailed(ResolutionProblem)`; a position form's is
+  `UnresolvableInput`.
+- **The `reference` in `UnresolvableInput` and `NormalizationUnsupported` is
+  `Box<FileReference>`.** Unboxed, `PortablePathError` exceeds
+  `clippy::result_large_err`; boxing the arm follows the precedent in
+  `claudine/lib/src/error.rs`.
+- **Only `NotFound` is absence.** A path through a regular file (`ENOTDIR`) is
+  a probe failure, matching the resolver's own probe.
+- **`ParentDir` accepts any in-tree route with at least one hop** (it is
+  "up, optionally down"); it does not accept same-directory or child routes.
+- **`MagicPath(Some(filter))` spells from the filter root.** The filter is
+  resolved with `candidate_plan`, must equal a context `@` root, and the only
+  spelling tried is from that root (`@b.md`, not `@.claudine/prompts/b.md`
+  from the earlier home root). Still verified by lookup (`Shadowed` if
+  another root wins). Without a filter, every containing root is tried in
+  resolver order.
+- **Minimal churn** compares the authored text's literal route (leading `./`,
+  `..` hops, then names; anything else disqualifies) with the generated route.
+  A bare input qualifies only when its match (or single candidate) has
+  `RootProvenance::Source`. `./a/../foo.md` is respelled `./foo.md`.
+- **A value with a trailing separator** (`/opt/config/`) is eligible: path
+  identity compares whole components, so it equals `/opt/config`. The plan's
+  matrix row "trailing separator … is `NotAPrefix`" was read as the
+  lexical-only-prefix case (`/opt/conf`), which is `NotAPrefix`.
+- **URLs and `%` inputs** record `NotApplicable(NotRewritable)` for each target
+  preference, then `NormalizationUnsupported` if nothing kept them.
+- **Spec example drift (not a code change).** The spec's
+  `from_path(".../file-references.md")` → `&biscuit-file/...` example says
+  "e.g. from its root". From the repository root, `ChildDir` precedes
+  `RepoRoot` in the spec's own default strategy, so the result is
+  `./biscuit-file/docs/topics/file-references.md`. The test pins both: `&…`
+  from elsewhere in the repository, `./…` from the root.
+
+### Requirement → test mapping
+
+New tests: `biscuit-file/lib/tests/l1/portable_path/` (declared as
+`mod portable_path;` in `tests/l1/main.rs`; no tier marker, so L1;
+`just check-tier-coverage biscuit-file` reports 0 stranded) and
+`portable/env_anchor/tests.rs` (unit).
+
+| Requirement | Test(s) |
+| ----------- | ------- |
+| each relative preference's shape; `strategy()` names the match; last attempt is the match | `strategies::each_relative_preference_writes_its_own_route_shape`, `a_relative_preference_refuses_other_route_shapes` |
+| `ParentDir` catch-all; R1 (absent from the default, falls through) | `strategies::parent_dir_is_the_in_tree_catch_all_and_absent_from_the_default` |
+| target equal to cwd → `./`, directory → `TargetNotFile` | `strategies::a_target_equal_to_cwd_is_dot_slash_with_a_not_file_finding` |
+| fallback tree: upward route is external | `strategies::a_fallback_tree_treats_any_upward_route_as_external` |
+| `ExternalRelativePath` opt-in, verified with the reader opt-in, `InsideBaseDir` | `strategies::external_relative_path_is_opt_in_and_verified_with_the_reader_opt_in` |
+| `RepoRoot` needs the document's repository; another checkout; `with_ctx` stays non-repository | `strategies::repo_root_needs_a_repository_containing_the_target` |
+| filters are eligibility only, whole component | `strategies::filters_restrict_eligibility_but_never_add_roots` |
+| default vs reordered (Claudine's list), `^` and `@` with filters | `strategies::a_reordered_strategy_prefers_searched_forms_the_default_never_writes` |
+| `MagicPath` filter not a root / unavailable | `strategies::a_magic_filter_must_name_a_search_root` |
+| shadowing recorded, next root tried, never skipped | `strategies::a_shadowed_spelling_is_recorded_and_the_next_root_is_tried` |
+| search forms need an existing file; single-location may be missing; non-file | `strategies::search_forms_need_an_existing_file_while_single_locations_do_not` |
+| home from context; `HomeUnavailable`; visible `AbsolutePath`; `NoStrategyMatched` + `attempts()` + `Display` | `strategies::home_comes_from_the_context_and_absolute_is_a_visible_fallback` |
+| empty strategy | `strategies::an_empty_strategy_matches_nothing` |
+| input robustness matrix (both reads, control row, one edit per cell) | `environment::the_declaration_and_value_matrix_has_one_defined_outcome_per_cell` (+ unit: `env_anchor::tests::*`) |
+| deepest anchor wins, name-order ties | `environment::the_deepest_anchor_wins_and_names_break_ties` |
+| `HOME` declared → `{{HOME}}` | `environment::declaring_home_writes_the_variable_instead_of_tilde` |
+| `with_portable_env` accumulates and dedupes | `environment::portable_names_accumulate_across_builder_calls` |
+| `md clean` table (`^/foo.md`, `../../../foo.md` → `&foo.md`, portable vs non-portable `{{VAR}}`) | `inputs::the_md_clean_table_keeps_intent_and_rewrites_position` |
+| `AuthoredIntent` on a path input | `inputs::a_path_input_is_never_authored_intent` |
+| kept-reference findings (unset/relative portable var, later placeholders, sigil payload, missing, directory, R11 missing home) | `inputs::a_kept_reference_still_reports_its_findings` |
+| URL / `%` kept, never rewritten (`NormalizationUnsupported`) | `inputs::urls_and_recursive_searches_are_kept_or_refused_never_rewritten` |
+| position of `AuthoredIntent` in the strategy | `inputs::intent_after_same_dir_lets_a_plain_link_win` |
+| minimal churn, bare repository-fallback link not same-dir | `inputs::minimal_churn_keeps_a_relative_link_already_in_the_chosen_form` |
+| multi-candidate miss, boundary escape, missing anchor → `UnresolvableInput` with typed finding; single candidate missing → target | `inputs::an_input_without_one_target_is_unresolvable_with_a_typed_finding` |
+| probe failure (ENOTDIR) never `TargetMissing` (unix) | `inputs::a_probe_failure_is_never_a_missing_target` |
+| cleanup with reader opt-in, strict output | `inputs::an_opted_in_reader_replaces_an_escaping_link_without_writing_another` |
+| idempotence over a corpus; candidate equality for single-location results | `properties::every_result_is_a_fixed_point_and_names_its_target`, `cleaning_authored_links_twice_changes_nothing_the_second_time` |
+| `UnresolvableInput` fails identically on retry | `properties::an_unresolvable_input_fails_the_same_way_on_retry` |
+| captured-state isolation, batch reuse | `properties::a_captured_context_isolates_evaluation_from_later_changes` |
+| spec examples, suffix stays with the caller | `properties::the_documented_examples_hold` |
+| builder conflicts in either order; directories/targets absolute; invalid context before strategies; discovery without a context; `with_base_dir` in a repository; filter syntax | `configuration::*` (5 tests) |
+| sigil names protected by `./`; `{{VAR}}` and Unix `\` names refused; non-Unicode → `UnrenderableTarget` | `platform::a_leading_sigil_in_a_file_name_is_protected_by_dot_slash`, `interpolation_syntax_in_a_file_name_has_no_reference_spelling`, `a_unix_backslash_in_a_name_is_never_split` (unix), `a_non_unicode_target_is_unrenderable_even_with_absolute_path` (unix) |
+| in-tree vs out-of-tree directory links (symlink / junction, R7) | `platform::a_relative_link_must_land_inside_the_tree` |
+| Windows verbatim and drive-letter case; another drive has no route | `platform::windows_spellings_of_one_directory_route_alike`, `a_target_on_another_drive_has_no_relative_route` (windows) |
+
+UNC and distinct-share identity are covered by the Phase 5 `path_identity` and
+`text` tests (`windows_absolute_spellings` keeps a UNC spelling native); the
+evaluator adds no UNC-specific code. R7: only directory links are used, so
+nothing is skipped.
+
+**Load-bearing check** (each mutation reverted afterwards): disabling minimal
+churn failed 2 tests; making invalid names portable failed 3; dropping the
+identity comparison in verification failed the shadowing test; dropping the
+in-tree check failed 8.
+
+### Gates
+
+- `biscuit-file` (macOS): `just test` 973 passed (was 925 + new); `just
+  doctest` 25 passed; `just lint` clean; `cargo check -p biscuit-file
+  --no-default-features` clean; `just test-l2` is a "not applicable" stub.
+- `just cross-check biscuit-file --os linux`: 911/911 passed.
+- `just cross-check biscuit-file --os windows` (native): first run 914/916.
+  Both failures were fixture bugs: `root.join("repo/docs/x.md")` kept `/` in
+  the native text, which is invalid under `\\?\` (os error 123) and refused by
+  `mklink /J`. The fixture now joins name by name; rerun 916/916 passed. The
+  trap is recorded in the `os` skill (`windows.md`, Path spelling item 10).
+- WSL2 not run: no WSL-specific code; the nightly leg covers it.
+- `cargo check -p darkmatter -p darkmatter-cli -p claudine -p claudine-cli
+  --all-targets`: clean. Their test suites were not rerun: this phase only
+  added `biscuit-file` exports and changed one crate-internal spelling that
+  only `PortablePath` uses.
+
+### Docs and skills
+
+- `biscuit-file/docs/topics/file-references.md`: new section "Portable
+  References: `PortablePath`" (strategy table, opt-in preferences, filters,
+  reference inputs, verification, portable variables, builders, diagnostics;
+  records R1). Phase 8 expands it into the full guide with a Mermaid diagram.
+- `.claude/skills/biscuit-file/SKILL.md` (pointer + trigger words),
+  `references/api.md` (new section), `references/architecture.md` (module
+  row).
+
+## Phase 7
+
+Consumer migration. Ran in a single agent; no subagents (Darkmatter was
+sequential and Claudine turned out to be the skip case).
+
+### What was built (Darkmatter)
+
+- **`compose/link_normalization.rs` now uses `PortablePath`.** The three
+  hand-written arms (same-repo relative, `~/`, `${VAR}/`) and the Windows
+  `survives_namespace_removal` / `is_reserved_dos_name` / `render_*` helpers
+  are deleted. Each absolute destination in the composed root document is
+  split into path + suffix, re-spelled into the context's spelling (below),
+  and evaluated with `PortablePath::from_path(..).with_ctx(&ctx)
+  .with_portable_env(options.portable_env)` using the default strategy.
+- **Context.** New `compose::util::source_link_context(options)`: the
+  snapshot's derivation for the source (`source_file_resolution_context`), or
+  a context captured from a file source's directory. `link_resolve` now uses
+  the same helper, so both stages read links in one context. A source with
+  neither a snapshot nor a path gets no context and `PortablePath` captures
+  the process directory, home, and environment itself (the old stage applied
+  only `~` / env there).
+- **Suffix layer** (`split_suffix`): `#fragment`, `?query`, and a trailing
+  `:line` / `:line-line` are split from the parsed destination
+  (`ReferenceTarget::LocalPath`) and reattached. Only a digits-only tail after
+  the last colon is a line suffix, so `C:/x.md` keeps its drive colon.
+- **Spelling reconciliation** (`in_context_spelling`): `link_resolve`
+  canonicalizes what it writes (`/private/var/…` on macOS) while the context
+  keeps the opened spelling (`/var/…`); `PortablePath` compares lexically. A
+  canonical target under the canonical form of `base_dir`, `cwd`, the
+  repository root, or home is re-spelled under that anchor's context spelling.
+  Load-bearing: disabling it fails 9 of the 20 unit tests on macOS.
+- **Error/finding mapping** (Darkmatter vocabulary is `ComposeWarning` with
+  stage `link_normalization`):
+  - any `PortablePathError` (including `UnresolvableInput`, `ProbeFailed`):
+    keep the destination byte-identical, one warning with the error's
+    headline;
+  - `strategy() == AbsolutePath`: keep the destination (it already is the
+    absolute path); warn only when it has no faithful portable spelling
+    (`try_portable_string` declines: UNC, device, unreducible verbatim) —
+    the same warn/no-warn split the old stage had;
+  - `Finding::InvalidPortableVariableName`: one warning per name per document;
+  - `TargetMissing` / `TargetNotFile` findings are not repeated (reference
+    validation owns missing links).
+- **Emitted `{{VAR}}` spelling (decision; Phase 4 asked for it).** An
+  `EnvRootedPath` result is written as the interpolation literal
+  `{{{VAR}}}/rest`. A composed document is Darkmatter source again; a bare
+  `{{VAR}}` would be evaluated as an (unknown) expression on recompose and
+  collapse to `/rest`. The literal composes to `{{VAR}}`, `link_resolve`
+  expands it from the captured environment, and normalization writes the
+  literal again: compose → recompose is a fixed point (tested end to end
+  through the CLI and through `compose_with` with the default operation
+  order). Trade-off: a reader of the composed Markdown sees three braces.
+- **`ComposeOptions`**: `with_env_path_whitelist`,
+  `effective_env_path_whitelist`, `default_env_path_whitelist`, and the
+  `PROJECT_ROOT` / `DOCS_BASE` defaults are removed. New
+  `with_portable_env(names)` (accumulates, `BTreeSet` dedupe) and
+  `portable_env()`. Options identity encodes the set in sorted order, so
+  declaration order and repeats no longer change the graph/cache identity
+  (tested), while a different name does.
+- **One-way effect (spec: intentional).** Links the old stage generated as
+  `${VAR}/…` were never `FileReference` syntax and never resolved; nothing
+  reads them back. Previously env-anchored targets now become relative,
+  `&`, `~`, or stay absolute unless the variable is declared portable. Other
+  visible output changes: a same-directory target is `./x.md` (was bare
+  `x.md`), so an authored `./x.md` now round-trips unchanged; a target two or
+  more levels up inside the repository is `&path` (was `../../path`; R1); the
+  old "found to be an offset of the … environment variable" warning is gone.
+
+### Decisions and departures (spec left as decided)
+
+- **Inputs are absolute destinations only (`from_path`), not
+  `from_reference`.** In compose, `link_resolve` makes every resolvable link
+  absolute before transclusion, so authored intent forms (`^`, `@`, `&`,
+  `{{VAR}}`) are already gone by finalization. A relative or sigil
+  destination still present is one `link_resolve` could not resolve; after
+  transclusion it may be a child's link sitting in the root document, so
+  evaluating it against the root context could retarget it. Those are left
+  alone, as before. Consequence: compose does not keep an authored `^/foo.md`
+  or `@x.md` spelling; it rewrites to the strategy's spelling of the same
+  file (the old stage did the same). Keeping authored intent through compose
+  would need `link_resolve` to carry the authored text and the authoring
+  document per edit; recorded as a possible follow-up, not built.
+- **No reader opt-in was added (task "Opt-in for cleanup reads").** No
+  Darkmatter cleanup reads escaping relative links: `md clean` does no link
+  work (the spec scopes a link-cleaning `md clean` out), and normalization
+  never reads relative input. Adding `allow_external_relative()` to compose
+  would be the "silent opt-in for arbitrary inputs" the plan forbids.
+- **Windows helper tests removed from Darkmatter.**
+  `unc_spellings_share_an_identity_but_no_portable_text`,
+  `safe_repo_root_contains_declined_long_verbatim_descendant`,
+  `unsafe_components_do_not_survive_namespace_removal`,
+  `non_unicode_component_does_not_survive_namespace_removal`, and
+  `component_length_is_measured_in_utf16_units` tested the deleted private
+  helpers; `biscuit-file`'s `path_identity` / `text`
+  (`survives_without_verbatim_prefix`) tests cover the same rules. The six
+  end-to-end Windows tests (repo/env/home anchor × unsafe categories, the two
+  over-`MAX_PATH` success controls, the declined verbatim destination) are
+  kept and adapted: the warning text is now "left exactly as authored", env
+  anchors are declared with `with_portable_env`, the env result is
+  `{{{PROJECT_ROOT}}}/…`, and the env/home fixtures put `cwd` beside the
+  target so a relative preference cannot claim it first.
+
+### Claudine: the skip case
+
+Claudine has no document-link rewriting. Its only absolute→text renderers are
+shell-completion insert texts (`cli/src/completion/operation_file.rs`
+`format_relative_insert`, `cli/src/completion/composition/compose.rs`
+repo-/home-/scope-relative inserts). They produce command-line arguments
+resolved from the shell's directory, a different contract from portable
+document links (bare repo-relative text, not `&`), so adopting `PortablePath`
+there would change completion UX and is out of scope. Claudine never called
+`with_env_path_whitelist`. Its composition goes through Darkmatter, so the
+new normalization reaches Claudine output; the full Claudine L1/L2 suites
+were rerun (below). No Claudine docs mention link normalization or the
+removed options; nothing to update.
+
+### Requirement → test mapping
+
+| Requirement | Test(s) |
+| ----------- | ------- |
+| relative rewrite (peer, same-dir, child) | `link_normalization::tests::a_peer_directory_target_becomes_a_relative_link`, `deep_and_same_directory_targets`, `css_font_and_script_destinations_normalize`, `spaced_html_attributes_normalize`, `angle_bracket_and_quoted_destinations_keep_their_delimiters` |
+| route from the document's directory; deep in-repo → `&` (R1) | `a_distant_target_in_the_repository_is_repository_rooted`, `deep_and_same_directory_targets` |
+| home | `a_target_under_home_is_home_rooted`; integration `test_home_dir_interpolation` |
+| declared portable variable → `{{{VAR}}}` | `a_declared_portable_variable_is_written_as_an_interpolation_literal` |
+| no built-in `PROJECT_ROOT` / `DOCS_BASE` | `no_variable_is_portable_unless_declared`; CLI `test_compose_portable_env_variable_round_trips` (undeclared leg) |
+| `PORTABLE_ENV_VARIABLES` from the captured env, union with the option, invalid name warned once | `the_captured_environment_declares_and_supplies_variables` |
+| deepest variable wins | `the_deepest_portable_variable_wins` |
+| suffix handling (`#`, `?`, `:n`, `:a-b`, combined; drive colon kept) | `fragment_query_and_line_suffixes_are_reattached`, `split_suffix_only_takes_trailing_line_numbers_after_a_colon` |
+| idempotence (run twice) | `normalizing_twice_changes_nothing_the_second_time`; compose → recompose: lib `link_interpolation_integration::test_env_var_interpolation`, CLI `test_compose_portable_env_variable_round_trips` |
+| preservation: relative/sigil untouched; absolute fallback silent; failure kept + warned (unix ENOTDIR); remote URLs | `relative_and_sigil_destinations_are_left_alone`, `the_absolute_fallback_keeps_the_destination_without_a_warning`, `an_evaluation_failure_keeps_the_destination_and_warns`, `remote_urls_are_not_touched` |
+| canonical vs lexical spelling | `a_canonical_destination_routes_from_a_lexical_context` |
+| Windows unsafe verbatim components preserved + warned; over-`MAX_PATH` still normalizes (repo/env/home) | `repo_anchor_preserves_every_unsafe_category`, `env_anchor_preserves_every_unsafe_category`, `home_anchor_preserves_every_unsafe_category`, `anchored_over_max_path_destination_still_normalizes`, `env_anchored_over_max_path_destination_still_normalizes`, `home_anchored_over_max_path_destination_still_normalizes`, `declined_absolute_destination_is_preserved_and_warned` (windows) |
+| options: no built-in names, accumulate/dedupe; identity is set-shaped | `type_tests::portable_env_has_no_built_in_names_and_accumulates`; `options::…::options_identity_ignores_unordered_set_insertion_order`, `options_identity_portable_env_and_host_element_boundaries_are_injective` |
+| transcluded child's link normalized relative to the root | CLI `test_compose_link_transcluded_child`, lib `test_end_to_end_link_interpolation` (unchanged, pass) |
+| spaced HTML attributes through the CLI | CLI `test_compose_html_spaced_attributes` (now asserts `./other.md` round-trips and no absolute path) |
+
+All new unit tests are in `darkmatter/lib/src/markdown/compose/link_normalization.rs`
+(`#[cfg(test)] mod tests`, the lib target); the integration and CLI tests are
+in the existing `tests/l1/` binaries. No tier markers, so all are L1.
+
+**Input robustness matrix.** Darkmatter adds no parser: `with_portable_env`
+forwards names and `PORTABLE_ENV_VARIABLES` is parsed by `biscuit-file`
+(matrix walked in Phase 6, `environment::the_declaration_and_value_matrix_…`).
+The Darkmatter-side cells that matter (declaration from the captured env,
+union with the option, invalid name reported once, undeclared variable never
+written) are asserted through `normalize_links` output above.
+
+### Windows defects found by cross-check (fixed)
+
+The first `just cross-check darkmatter --os windows` run failed 11 new tests
+(plus the 7 pre-existing). Two causes:
+
+1. **`split_suffix` cut a verbatim path at the `?` of its `\\?\` prefix**, so
+   every verbatim destination read as `\\` (not absolute) and was silently
+   skipped. Fixed by skipping a `\\?\` / `//?/` prefix before searching for
+   `#` / `?`; four verbatim rows added to
+   `split_suffix_only_takes_trailing_line_numbers_after_a_colon`.
+2. **Env fixtures used canonical (verbatim) values.** `FileReference`
+   interpolation concatenates text (`resolve.rs` `interpolate`), so
+   `{{VAR}}/x` under `VAR=\\?\C:\…` is one component under the prefix and
+   `PortablePath` correctly refuses to write it. The fixtures now store
+   `to_portable_string(&path)` (the spelling a user exports). The resolver
+   behavior is pre-existing and unchanged; recorded as items 11 and 12 in the
+   `os` skill's `windows.md`.
+
+### Gates
+
+- `darkmatter` (macOS): `just test` 8743 passed, 12 skipped; `just test-l2`
+  all passed (18, 69, 3 across the three runs); `just lint` clean.
+- `claudine` (macOS): `just test` 8071 of 8072 passed. The one failure,
+  `claudine-cli completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope`,
+  is environmental and pre-existing: the test reads the real home and this
+  host has `~/.claudine/prompts/plan.md`; it passes with `HOME` pointed at an
+  empty directory. Not caused by this phase (completion does not use
+  normalization or `ComposeOptions`). `just test-l2` 277 + 3 passed; `just
+  lint` clean (only the known `__eh_frame` linker note).
+- `biscuit-file` (macOS): `just test` 973 passed; `just lint` clean; `just
+  test-l2` is a "not applicable" stub. No `biscuit-file` source changed.
+- Load-bearing check: disabling `in_context_spelling` failed 9 of 20
+  normalization unit tests (reverted).
+
+### Other operating systems
+
+- Linux (`build-linux`, `just cross-check`): `darkmatter` 7169 passed;
+  `darkmatter-cli` 797 passed (both before the Windows fix; the fix only
+  touches a `\\?\` prefix branch and fixture env spelling, no-ops off
+  Windows).
+- Native Windows (`build-win-native`): full `darkmatter` run 7115 passed, 18
+  failed = the 7 pre-existing (`lazy_roots::ambient_repository::*` ×5,
+  `resolve_file_reference_no_match_for_missing_absolute_path`,
+  `schema_number_increment_survives_quoted_persistence_round_trips`) + 11
+  new, all fixed above. After the fix: `darkmatter` filtered to
+  `link_normalization link_interpolation` 30/30 passed (includes the 7
+  Windows-only tests); `darkmatter-cli` filtered to `compose_transclusion`
+  11/11 passed.
+- WSL2 not run: no WSL-specific code; the nightly leg covers it.
+
+### Docs and skills
+
+- `darkmatter/docs/inline/link-normalization.md`: rewritten for the
+  `PortablePath` contract (examples per rule, Mermaid flow, suffixes,
+  declaring portable variables, why `{{{VAR}}}`, warnings). Updated now
+  rather than in Phase 8 because the old page described removed behavior
+  (Drift Maintenance); Phase 8 may still polish it.
+- `darkmatter/docs/darkmatter-compose-pipeline.md`: one-line summary of the
+  stage (no `${ENV}`).
+- `.claude/skills/darkmatter/compose.md`: Link Normalization bullet.
+- `.claude/skills/biscuit-file/references/api.md`: lexical-comparison and
+  verbatim-value notes, consumer pattern.
+- `.claude/skills/os/windows.md`: Path spelling items 11 and 12.

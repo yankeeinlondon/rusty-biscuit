@@ -124,6 +124,50 @@ skills_files_updated_during_phase_5:
   - .claude/skills/biscuit-file/SKILL.md
   - .claude/skills/biscuit-file/references/api.md
   - .claude/skills/biscuit-file/references/architecture.md
+source_files_during_phase_6:
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/portable/strategy.rs
+  - biscuit-file/lib/src/file_reference/portable/diagnostics.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/evaluate.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/text.rs
+  - biscuit-file/lib/src/file_reference/portable/text/tests.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/tests/l1/portable_path/mod.rs
+  - biscuit-file/lib/tests/l1/portable_path/configuration.rs
+  - biscuit-file/lib/tests/l1/portable_path/environment.rs
+  - biscuit-file/lib/tests/l1/portable_path/inputs.rs
+  - biscuit-file/lib/tests/l1/portable_path/platform.rs
+  - biscuit-file/lib/tests/l1/portable_path/properties.rs
+  - biscuit-file/lib/tests/l1/portable_path/strategies.rs
+docs_updated_during_phase_6:
+  - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
+  - .claude/skills/os/windows.md
+source_files_during_phase_7:
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/type_tests.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+docs_updated_during_phase_7:
+  - darkmatter/docs/inline/link-normalization.md
+  - darkmatter/docs/darkmatter-compose-pipeline.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/os/windows.md
 packages:
   - biscuit-file
   - darkmatter
@@ -479,7 +523,7 @@ diagnostics. Prerequisites: Phases 3 and 5; rulings R1, R9, R11.
 
 ### Wave 1: types (parallel, disjoint files)
 
-- [ ] **Diagnostics types.** `Attempt`, `AttemptOutcome`, `NotApplicable`,
+- [x] **Diagnostics types.** `Attempt`, `AttemptOutcome`, `NotApplicable`,
   `EnvAnchorProblem`, `Finding`, `PortablePathError`, `ConfigurationProblem`,
   `InvalidTarget`, plus the outcomes the spec lists as required but not
   shown: unavailable home/CWD, boundary denial, non-file target,
@@ -487,10 +531,10 @@ diagnostics. Prerequisites: Phases 3 and 5; rulings R1, R9, R11.
   typed data. All errors are `Clone` (no `io::Error`); every error variant
   exposes `attempts()` through an accessor; `Display` is a one-line headline
   then the attempts.
-- [ ] **Strategy types.** `PortabilityPreference`, `IntentForms::ALL`, the
+- [x] **Strategy types.** `PortabilityPreference`, `IntentForms::ALL`, the
   default strategy list and doc comments (position-in-strategy meaning of
   `AuthoredIntent`).
-- [ ] **Environment anchors.** Parse `PORTABLE_ENV_VARIABLES` (comma list,
+- [x] **Environment anchors.** Parse `PORTABLE_ENV_VARIABLES` (comma list,
   trimmed, `[A-Z0-9_]+`, invalid entries skipped and recorded as
   `InvalidPortableVariableName`), union with `with_portable_env`, dedupe,
   read values from the context's captured env or the process env; eligibility
@@ -523,7 +567,7 @@ make a variable silently portable or silently not portable without a finding.
 
 ### Wave 2: evaluator (sequential; depends on Wave 1)
 
-- [ ] **Builders and captured state.** `from_path` (absolute host path
+- [x] **Builders and captured state.** `from_path` (absolute host path
   required), `from_reference`, `with_ctx` (clone; no discovery; stays
   non-repository), `with_cwd`, `with_base_dir`, `with_strategy` (replace; empty
   list valid), `with_portable_env` (accumulate, dedupe), `file_reference()`.
@@ -532,26 +576,26 @@ make a variable silently portable or silently not portable without a finding.
   discover the repository once from the effective CWD via the existing
   resolver preparation; `with_base_dir` inside a repo must equal the repo root.
   Invalid contexts error before any strategy runs.
-- [ ] **Relative strategies.** `SameDirRelative`, `ChildDir`, `PeerDir`,
+- [x] **Relative strategies.** `SameDirRelative`, `ChildDir`, `PeerDir`,
   `ImmediateParentDir`, `ParentDir`, `ExternalRelativePath` with the exact
   meanings in the spec; target equal to CWD renders `./` (`TargetNotFile`
   finding for directories); a fallback `base_dir` treats an upward path as
   external; `ExternalRelativePath` needs a shared root and turns on the
   reader opt-in for its round-trip verification; a target reached only
   through an out-of-tree symlink falls through.
-- [ ] **Searched and anchored strategies.** `RepoRoot`, `RepoMultiPath`,
+- [x] **Searched and anchored strategies.** `RepoRoot`, `RepoMultiPath`,
   `MagicPath` with eligibility filters (never extra roots; filters cannot
   escape; invalid syntax is `InvalidConfiguration`); try roots in resolver
   order and verify each spelling; never skip a shadowing root;
   `HomeDir` (home from context, else OS); `EnvRootedPath`; `AbsolutePath`
   (native UNC spelling kept faithfully); output spelling after a sigil has no
   `/`.
-- [ ] **Verification.** Single-location forms: build, boundary-check, compare;
+- [x] **Verification.** Single-location forms: build, boundary-check, compare;
   a missing anchor or containment failure rejects. Search forms: target must
   exist and `resolve_detailed` must find that file, else `Shadowed` or
   `TargetMissing`. Use `candidate_plan` and `resolve_detailed`, not a parallel
   resolver. Round-trip every generated spelling through `FileReference` parse.
-- [ ] **Input handling.** Classify with `FileReference::class()` and its
+- [x] **Input handling.** Classify with `FileReference::class()` and its
   parsed payload (no string-prefix checks). `AuthoredIntent(IntentForms)`:
   keep intent forms exactly (including a leading portable `{{VAR}}`, a
   sigil's whole payload, URLs without lookup or network, recursive `%`), report
@@ -562,27 +606,27 @@ make a variable silently portable or silently not portable without a finding.
   `NormalizationUnsupported`; minimal churn (`foo.md` and `./foo.md` kept when
   lookup confirms same-directory; a repo-fallback bare link is not same-
   directory); idempotence.
-- [ ] **Errors and findings from probes.** Permission errors never become
+- [x] **Errors and findings from probes.** Permission errors never become
   `TargetMissing` or a silent fallback; `NoStrategyMatched` when
   `AbsolutePath` absent; `InvalidTarget`; `UnrenderableTarget` even with
   `AbsolutePath`.
 
 ### Wave 3: tests (parallel subagents; depend on Wave 2)
 
-- [ ] **Strategy matrix.** One test per relative strategy, repo/vault/home/
+- [x] **Strategy matrix.** One test per relative strategy, repo/vault/home/
   env roots, default vs reordered (Claudine's list), filters, ties, shadowing,
   missing and non-file targets, `strategy()` always names the matched
   preference, and `AbsolutePath` fallback is visible.
-- [ ] **Input-robustness matrix test** as tabulated above (one test, one edit
+- [x] **Input-robustness matrix test** as tabulated above (one test, one edit
   per cell, control row).
-- [ ] **Properties.** Idempotence over a generated corpus; candidate equality
+- [x] **Properties.** Idempotence over a generated corpus; candidate equality
   for single-location output; `UnresolvableInput` fails identically on retry;
   captured-state isolation (changing the live env/home/cwd after `with_ctx`
   does not change the result; batch reuse).
-- [ ] **Cross-platform.** Windows drives/UNC/verbatim, distinct shares,
+- [x] **Cross-platform.** Windows drives/UNC/verbatim, distinct shares,
   non-Unicode, literal backslash and `{{VAR}}` filenames, symlink versus
   junction containment; follow R7 gating and the `os` skill.
-- [ ] **Doc examples.** Spec examples (the `md clean` table, `^/foo.md`,
+- [x] **Doc examples.** Spec examples (the `md clean` table, `^/foo.md`,
   `../../../foo.md` to `&foo.md`, suffix handling stays with the caller) as
   executable tests, not prose-only.
 
@@ -599,34 +643,38 @@ Prerequisite: Phase 6.
 
 ### Wave 1: Darkmatter (sequential)
 
-- [ ] **Migrate link normalization** (`link_normalization.rs`, link rewrite
+- [x] **Migrate link normalization** (`link_normalization.rs`, link rewrite
   paths, `md clean` contract) to `PortablePath` using the captured request
   context; the suffix layer (`#fragment`, `?query`, `:line`) stays in
   Darkmatter, using the parsed link destination, and reattaches to the
   result. Map `PortablePathError`/findings into Darkmatter's vocabulary;
   `UnresolvableInput` means keep the link and report it.
-- [ ] **Remove** `ComposeOptions::with_env_path_whitelist` and the
+- [x] **Remove** `ComposeOptions::with_env_path_whitelist` and the
   `PROJECT_ROOT` / `DOCS_BASE` defaults; add `with_portable_env` on the
   options, forwarded to `PortablePath`. Update all call sites and tests
   together. Note in the log the one-way effect: previously generated `${VAR}/…`
   links were never references; authored `{{VAR}}` links are now rewritten
   unless declared portable or protected by another intent form.
-- [ ] **Opt-in for cleanup reads.** A cleanup that must read older escaping
+- [x] **Opt-in for cleanup reads.** A cleanup that must read older escaping
   links uses an opted-in context (reader opt-in) while keeping the strict
   default output strategy; no silent opt-in for arbitrary inputs.
+  *(Phase 7: no Darkmatter cleanup reads escaping relative links: `md clean`
+  does no link work and compose normalization only takes absolute
+  destinations, so no opt-in was added; see the log.)*
 - [x] **Darkmatter tests.** Cover rewrite, preservation, idempotence run
   twice, environment names, suffix handling.
 
 ### Wave 2: Claudine (parallel with Wave 1; disjoint area)
 
-- [ ] **Claudine strategy and portable env.** If Claudine has link/path
+- [x] **Claudine strategy and portable env.** If Claudine has link/path
   rewriting or needs portable output, adopt `PortablePath` with the adjusted
   strategy (`AuthoredIntent` first, `RepoMultiPath(Some("prompts"))`,
   `MagicPath(Some("~/.claudine/prompts"))`) and names from its configuration.
   Where Claudine has no such consumer, limit the work to confirming that
   tests and docs reflect the boundary (Phase 4 fallout) and skip; record which
-  case applies.
-- [ ] **Claudine tests/docs** for whichever case applied.
+  case applies. *(Phase 7: the skip case; Claudine has no document-link
+  rewriting, only shell-completion insert text; see the log.)*
+- [x] **Claudine tests/docs** for whichever case applied.
 
 **Checkpoint 7:** `just test`, `just test-l2`, `just lint` in `biscuit-file`,
 `darkmatter`, `claudine`; L2/L3 steps must not focus a window.

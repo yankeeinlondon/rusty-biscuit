@@ -28,44 +28,38 @@ reviewed_on: "2026-09-30"
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 5 (path identity) is complete; read the "Phase 5" section of
-  implementation-log.md. Key points for Phase 6 (PortablePath core):
+  Phase 7 (consumer migration) is complete; read the "Phase 7" section of
+  implementation-log.md. Points for Phase 8 (docs, skills, final validation):
 
-  - Use `biscuit_file::PathIdentity` (file_reference/portable/path_identity.rs)
-    for every prefix test and relative route. `relative_from(dir)` treats
-    `dir` as a directory and returns None across roots; `RelativeRoute` keeps
-    `parent_hops` apart from `forward` names (a verbatim path can hold a
-    literal `..` name), so do not join them before rendering.
-  - Render every generated reference through the crate-internal seam
-    `portable::text::{render_reference(Lead, names), render_absolute(path)}`.
-    Map `TextRejection::Unrenderable` -> `PortablePathError::UnrenderableTarget`
-    (it is checked before anything else, also for AbsolutePath);
-    `GrammarMismatch` / `ChangesComponents` mean "this strategy's spelling is
-    unsafe", so record them in the attempt and try the next strategy. The seam
-    already re-parses text with the reference parser and checks the kind, `%`,
-    and interpolation; still resolve/verify the candidate as the spec requires.
-    `Lead::Bare` rejects a leading sigil; `Lead::Relative { parent_hops: 0 }`
-    gives `./x` and protects it. `Lead::Env(name)` gives `{{NAME}}/x`.
-  - `portable/mod.rs` and `PathIdentity::is_unanchored` carry
-    `#[cfg_attr(not(test), expect(dead_code, ...))]`; once Phase 6 calls the
-    seam the `expect` becomes unfulfilled and fails the build: delete those
-    attributes then.
-  - Put the new submodules (`strategy`, `env_anchor`, `diagnostics`,
-    `evaluate`) under file_reference/portable/ per R9 and re-export from
-    file_reference/mod.rs and lib.rs.
-  - The resolver's own containment/dedupe still uses
-    `resolve::normalize_components` + `Path::starts_with` (collapses `..` even
-    under `\\?\`, confirmed on native Windows). That governs what is allowed;
-    PathIdentity governs which spelling is preferred. Do not merge them.
-  - Darkmatter keeps `survives_namespace_removal` in link_normalization.rs
-    until Phase 7 replaces that stage; the same rule now also exists as
-    `portable::text::survives_without_verbatim_prefix` in biscuit-file. Phase 7
-    should delete the Darkmatter copy along with the stage.
-  - Still open from Phase 4: Darkmatter evaluates `{{ ... }}` in a composed
-    body, so an emitted `{{NOTES}}/x.md` link must be escaped (`{{{NOTES}}}`)
-    by Darkmatter in Phase 7; native Windows still has the 7 pre-existing
-    Darkmatter L1 failures; CandidatePlanOrder::AuthoringBaseFirst is still not
-    renamed.
+  - Darkmatter compose finalization (`compose/link_normalization.rs`) now uses
+    `PortablePath::from_path` + `with_ctx(source_link_context(options))` with
+    the default strategy. Inputs are ABSOLUTE destinations only; relative and
+    sigil destinations are left alone (link_resolve already absolutized
+    everything it could). So compose does not preserve authored intent
+    (`^/foo.md` comes back as the strategy's spelling of the same file); this
+    is recorded as a possible follow-up, not a defect of this feature.
+  - An `EnvRootedPath` result is written as `{{{VAR}}}/rest` (interpolation
+    literal) so compose -> recompose is a fixed point. The docs page
+    `darkmatter/docs/inline/link-normalization.md` was already rewritten in
+    Phase 7 (examples, Mermaid, suffixes, warnings); polish, do not revert.
+  - `ComposeOptions::with_env_path_whitelist` / `effective_env_path_whitelist`
+    / `default_env_path_whitelist` and the PROJECT_ROOT / DOCS_BASE defaults
+    are gone; `with_portable_env(names)` + `portable_env()` replace them.
+    Phase 8's leftover search should find none (Phase 7 checked
+    `darkmatter`, `claudine`, `docs`, `.claude/skills`).
+  - Claudine was the skip case: no document-link rewriting (only
+    shell-completion insert text). Nothing in Claudine docs to change.
+  - Windows traps found and recorded in `.claude/skills/os/windows.md`
+    (items 11, 12): a `{{VAR}}` whose value is verbatim `\\?\C:\...` never
+    resolves (interpolation concatenates text), and a suffix splitter must
+    skip the `?` in a `\\?\` prefix.
+  - Pre-existing failures, not from this feature: native Windows still has
+    the 7 Darkmatter L1 failures listed in the Phase 4 log; on Ken's Mac
+    `claudine-cli completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope`
+    fails because it reads the real `~/.claudine/prompts/plan.md` (passes with
+    an isolated HOME).
+  - Still open from earlier phases: `CandidatePlanOrder::AuthoringBaseFirst`
+    is not renamed.
 ---
 
 # Portable Paths
