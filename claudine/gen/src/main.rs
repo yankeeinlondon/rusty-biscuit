@@ -14,6 +14,7 @@ use std::process::ExitCode;
 
 use biscuit_terminal::terminal::Terminal;
 use clap::{Parser, Subcommand};
+use darkmatter::markdown::compose::RequestSnapshot;
 
 use claudine_gen::{CheckOutcome, Decision, GenError, report};
 
@@ -129,7 +130,13 @@ fn main() -> ExitCode {
         cli.command.unwrap_or(Command::Check { slug: None })
     };
     let term = report::output_terminal();
-    match run(&term, cli.area, command) {
+    // The binary's one read of its process state (directory, home,
+    // environment); everything below works from this snapshot.
+    let snapshot = RequestSnapshot::from_process().map_err(|source| GenError::Io {
+        path: PathBuf::from("."),
+        source,
+    });
+    match snapshot.and_then(|snapshot| run(&term, &snapshot, cli.area, command)) {
         Ok(code) => code,
         Err(err) => {
             eprint!("{}", report::fatal(&term, &err));
@@ -138,7 +145,12 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitCode, GenError> {
+fn run(
+    term: &Terminal,
+    snapshot: &RequestSnapshot,
+    area: Option<PathBuf>,
+    command: Command,
+) -> Result<ExitCode, GenError> {
     match command {
         Command::Mapping => {
             // Machine-facing: raw JSON on stdout, never routed through the
@@ -156,11 +168,11 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
             dry_run,
             scaffold,
         } => {
-            let area = resolve_area(area)?;
-            run_generate(term, &area, &slug, yes, dry_run, scaffold)
+            let area = resolve_area(snapshot, area)?;
+            run_generate(term, snapshot, &area, &slug, yes, dry_run, scaffold)
         }
         Command::Check { slug } => {
-            let area = resolve_area(area)?;
+            let area = resolve_area(snapshot, area)?;
             let mut drifted = false;
             let slugs = claudine_gen::provider_slugs();
             let mut generations = Vec::with_capacity(slugs.len());
@@ -168,7 +180,7 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
             // catalog.json spans every provider, so generate the full
             // roster even when only one data.rs is being checked.
             for slug in &slugs {
-                let (generation, outcome) = claudine_gen::check_area(&area, slug)?;
+                let (generation, outcome) = claudine_gen::check_area(&area, slug, snapshot)?;
                 if scope.contains(slug) {
                     if !matches!(outcome, CheckOutcome::Clean) {
                         drifted = true;
@@ -204,7 +216,7 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 )
             );
 
-            let vocabulary = claudine_gen::check_vocabulary(&area)?;
+            let vocabulary = claudine_gen::check_vocabulary(&area, snapshot)?;
             drifted |= !matches!(vocabulary, CheckOutcome::Clean);
             print!(
                 "{}",
@@ -267,7 +279,7 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
             })
         }
         Command::AgentErrors { command } => {
-            let area = resolve_area(area)?;
+            let area = resolve_area(snapshot, area)?;
             match command {
                 AgentErrorsCommand::Check { slug, findings } => {
                     let findings_path = findings
@@ -307,7 +319,7 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
             }
         }
         Command::Steering { command } => {
-            let area = resolve_area(area)?;
+            let area = resolve_area(snapshot, area)?;
             match command {
                 SteeringCommand::Check { slug, json } => {
                     let results = match slug {
@@ -341,6 +353,7 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
 /// remains unreconciled.
 fn run_generate(
     term: &Terminal,
+    snapshot: &RequestSnapshot,
     area: &std::path::Path,
     slug: &Option<String>,
     yes: bool,
@@ -394,13 +407,13 @@ fn run_generate(
         }
     }
     let scope = slug_scope(slug);
-    let generations = claudine_gen::generate_all(area)?;
+    let generations = claudine_gen::generate_all(area, snapshot)?;
     print!("{}", report::artifact_warning(term, &generations));
     // The signals and families artifacts are full-scope like catalog.json:
     // always rebuilt, written through the same per-file confirmation flow.
     let signals = claudine_gen::build_signals(area)?;
     let families = claudine_gen::build_families(area, &generations)?;
-    let vocabulary = claudine_gen::build_vocabulary(area)?;
+    let vocabulary = claudine_gen::build_vocabulary(area, snapshot)?;
     let agentic_clis = claudine_gen::build_agentic_clis(area)?;
     let steering_catalog = claudine_gen::build_steering_catalog(area)?;
     print!(
@@ -482,15 +495,11 @@ fn prompt_decision(term: &Terminal, path: &std::path::Path) -> Decision {
     }
 }
 
-fn resolve_area(area: Option<PathBuf>) -> Result<PathBuf, GenError> {
+/// `--area` as given, else the area found walking up from the request
+/// directory.
+fn resolve_area(snapshot: &RequestSnapshot, area: Option<PathBuf>) -> Result<PathBuf, GenError> {
     match area {
         Some(area) => Ok(area),
-        None => {
-            let cwd = std::env::current_dir().map_err(|source| GenError::Io {
-                path: PathBuf::from("."),
-                source,
-            })?;
-            claudine_gen::find_area(&cwd)
-        }
+        None => claudine_gen::find_area(snapshot.request_dir()),
     }
 }

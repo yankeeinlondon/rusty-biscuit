@@ -26,6 +26,13 @@ pub enum GenError {
     #[error("failed to load Markdown at `{path}`: {message}")]
     Markdown { path: PathBuf, message: String },
 
+    #[error("cannot build the file-resolution context for area `{area}`: {source}")]
+    ResolutionContext {
+        area: PathBuf,
+        #[source]
+        source: darkmatter::markdown::compose::ContextBuildError,
+    },
+
     #[error("no `{slug}` entry (matched on `slug:`) in roster `{path}`")]
     RosterEntryMissing { slug: String, path: PathBuf },
 

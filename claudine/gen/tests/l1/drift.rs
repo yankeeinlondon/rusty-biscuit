@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use biscuit_hash::xx_hash_bytes;
+use darkmatter::markdown::compose::RequestSnapshot;
 use claudine_gen::{
     CheckOutcome, check_agentic_clis, check_area, check_catalog, check_families, check_signals,
     check_steering_catalog, check_vocabulary, generate_all, provider_slugs,
@@ -23,6 +24,11 @@ fn area() -> &'static Path {
             .expect("gen crate lives under the claudine package area")
             .to_path_buf()
     })
+}
+
+/// A request snapshot at the area that reads nothing from the test process.
+fn snapshot() -> RequestSnapshot {
+    RequestSnapshot::new(area())
 }
 
 /// Phase 1 byte baseline for every committed artifact owned by the provider
@@ -75,7 +81,7 @@ fn committed_generated_artifacts_match_phase_1_byte_baseline() {
 #[test]
 fn committed_data_matches_regenerated_inputs() {
     for slug in provider_slugs() {
-        let (_, outcome) = check_area(area(), slug)
+        let (_, outcome) = check_area(area(), slug, &snapshot())
             .unwrap_or_else(|err| panic!("generation for `{slug}` must succeed: {err}"));
         match outcome {
             CheckOutcome::Clean => {}
@@ -115,7 +121,7 @@ fn committed_signals_match_regenerated_inputs() {
 /// Goose's explicitly empty table included).
 #[test]
 fn committed_vocabulary_matches_regenerated_inputs() {
-    match check_vocabulary(area()).expect("vocabulary generation must succeed") {
+    match check_vocabulary(area(), &snapshot()).expect("vocabulary generation must succeed") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
             "drift between committed facts and lib/src/stream/providers/vocabulary.rs — \
@@ -170,7 +176,7 @@ fn committed_agentic_clis_match_regenerated_roster() {
 /// (the full wired-scope superset projection travels with the compiled subset).
 #[test]
 fn committed_catalog_matches_regenerated_inputs() {
-    let generations = generate_all(area()).expect("full wired-scope generation must succeed");
+    let generations = generate_all(area(), &snapshot()).expect("full wired-scope generation must succeed");
     match check_catalog(area(), &generations).expect("catalog check must run") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
@@ -190,7 +196,7 @@ fn committed_catalog_matches_regenerated_inputs() {
 /// wired-scope slice tracks the expected-offering joins AND the artifact).
 #[test]
 fn committed_families_match_regenerated_inputs() {
-    let generations = generate_all(area()).expect("full wired-scope generation must succeed");
+    let generations = generate_all(area(), &snapshot()).expect("full wired-scope generation must succeed");
     match check_families(area(), &generations).expect("families generation must succeed") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
