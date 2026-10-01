@@ -23,6 +23,10 @@ evidence, not the implementation checklist. Nineteen implementations are under
 absent from the graph's 17-result set. This inventory supersedes the counts in
 the old plan and earlier investigation checkpoints.
 
+> **Re-scoped 2026-10-01.** "Schema and trigger migration" is out of scope; see
+> [spec.md § Scope](spec.md#scope-re-scoped-2026-10-01). The rest of this
+> inventory applies to the core.
+
 ## Lookup-by-lookup disposition
 
 Paths in this table are relative to the repository root. DM means

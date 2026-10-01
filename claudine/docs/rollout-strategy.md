@@ -1,35 +1,43 @@
 ---
 title: Rollout Strategy — Lifecycle, Sequence, and Schema Specs
 description: |-
-    The order in which nine open Claudine and Darkmatter specs should be
+    The order in which nine related Claudine and Darkmatter specs should be
     implemented, what each one provides to the specs after it, which parts no
     longer apply, and the rulings that must be made before planning starts.
-last_updated: 2026-09-28
+    Steps 1 and 2 are complete; seven specs remain open.
+last_updated: 2026-10-01
 ---
 
 # Rollout Strategy — Lifecycle, Sequence, and Schema Specs
 
 > **This page is a planning snapshot, not a behavior reference.** It names specs
 > by their `{date}-{name}` directory, which topic pages never do. It describes
-> the state of the repository on 2026-09-28 and should be deleted when the last
-> step below has merged.
+> the state of the repository on 2026-09-28, updated on 2026-10-01 for the two
+> completed steps, and should be deleted when the last step below has merged.
 
-Nine specs are open across Claudine and Darkmatter. They overlap: several edit
+Nine specs were open across Claudine and Darkmatter when this page was
+written; two are now complete and seven remain. They overlap: several edit
 the same parser, the same shipped prompts, and the same schema resolver, and
 some contradict each other. This page fixes one order, says why, and lists
 what has to be decided first.
 
-**Nothing in any of the nine specs is implemented yet.** This was checked
-against source, not only against spec status fields; see [Evidence](#evidence).
+**Steps 1 and 2 are complete; nothing in the other seven specs is
+implemented yet.** The 2026-09-28 baseline was checked against source, not
+only against spec status fields; see [Evidence](#evidence).
+
+**Next:** step 3 (the strict-mode core) and step 4 (Phase A), in parallel.
+Step 3's spec was re-scoped to its core on 2026-10-01; it cannot be planned
+until ruling 2 (design review and approval) is made. See
+[step 3](#3-2026-09-17-remove-strict-mode-core-only).
 
 ## The order
 
 | Step | Spec | Area | Size | Verdict |
 |---|---|---|---|---|
 | 0 | Rulings and spec reconciliation | — | spec work only | **Blocks planning.** See [Rulings needed](#rulings-needed) |
-| 1 | `2026-09-28-hash-writer-byte-fidelity` | Darkmatter | small | Start now, independent |
-| 2 | `2026-09-27-sequence-review-screen` | Claudine CLI, biscuit-tui | small | Start now, independent |
-| 3 | `2026-09-17-remove-strict-mode` | Darkmatter, Claudine | medium after re-scope | **Re-scope to its core**, then first on the lifecycle track |
+| 1 | `2026-09-28-hash-writer-byte-fidelity` | Darkmatter | small | **Complete** (closed 2026-09-30) |
+| 2 | `2026-09-27-sequence-review-screen` | Claudine CLI, biscuit-tui | small | **Complete** (closed 2026-09-29) |
+| 3 | `2026-09-17-remove-strict-mode` | Darkmatter, Claudine | medium | **Next.** Re-scoped to its core; first on the lifecycle track |
 | 4 | `2026-09-16-expression-type-system`, Phase A only | Darkmatter | small | First on the schema track; parallel with step 3 |
 | 5 | `2026-09-21-lifecycle-ergonomics` | Claudine, biscuit-speaks, DMLS | very large | The pivot: three specs wait on it |
 | 6 | `2026-09-27-sequence-improvements` | Claudine | large | Directly after step 5 |
@@ -45,9 +53,9 @@ number of files each spec names, not a forecast.
 flowchart TD
     R["Step 0<br/>rulings"]
 
-    subgraph now["Independent: start now"]
-        HW["1 · hash-writer-byte-fidelity"]
-        RS["2 · sequence-review-screen"]
+    subgraph done["Independent: complete"]
+        HW["1 · hash-writer-byte-fidelity ✓"]
+        RS["2 · sequence-review-screen ✓"]
     end
 
     subgraph L["Lifecycle track (Claudine)"]
@@ -79,11 +87,14 @@ flowchart TD
     SM -.-> SE
     SM -.-> CE
     RS -.-> SI
+
+    classDef complete fill:#d4edda,stroke:#2e7d32,color:#1b5e20
+    class HW,RS complete
 ```
 
 Thick arrows are dependencies a spec declares itself. Thin arrows are the order
 this page recommends. Dotted arrows mean "lands first so the later spec does
-not redo work".
+not redo work". Green nodes are complete.
 
 ### The two tracks
 
@@ -129,9 +140,9 @@ a BOM without frontmatter) and cannot safely edit a sixth (an anchored value).
 The fix makes each case change only the date bytes, and refuses the anchored
 case.
 
-**Needs first.** One ruling: how to pick a line terminator in a file that
-mixes them. The spec leans per-line, which is the only rule that keeps the
-writer's own promise.
+**Status.** Complete; closed 2026-09-30 after six review cycles. The
+line-terminator ruling was made per-line: an edited line keeps its own
+terminator, and an inserted line inherits a nearby one.
 
 **Provides downstream.**
 
@@ -141,8 +152,7 @@ writer's own promise.
   produce identical bytes; this fix is the other half of that guarantee.
 - Nothing in this set waits on it.
 
-**Verdict.** Start now. It is small, self-contained, and the only one of the
-nine that corrupts user files today.
+**Verdict.** Done. It was the only one of the nine that corrupted user files.
 
 ### 2. `2026-09-27-sequence-review-screen`
 
@@ -152,7 +162,7 @@ provider, and draws stray rules on the first row. The fix sizes a static table
 column to its content (a `biscuit-tui` change every `InputTable` consumer
 gets), lists only provider-launching steps, and fixes or explains the rules.
 
-**Needs first.** Nothing.
+**Status.** Complete; closed 2026-09-29.
 
 **Provides downstream.**
 
@@ -162,8 +172,8 @@ gets), lists only provider-launching steps, and fixes or explains the rules.
 - Keeps the screen usable for the 21-step `review-loop.md` until step 6
   collapses that prompt to a loop.
 
-**Verdict.** Start now. It is a display fix; the provider-selection redesign
-it deliberately leaves out belongs to step 6.
+**Verdict.** Done. It was a display fix; the provider-selection redesign it
+deliberately left out belongs to step 6.
 
 ### 3. `2026-09-17-remove-strict-mode`, core only
 
@@ -177,18 +187,20 @@ also gives Darkmatter a binding model that can tell apart three things the
 current lookup cannot: an absent document property, a global whose value is
 `null`, and a global that is not available at this event.
 
-**The re-scope.** The spec as written is about 1,600 lines and also covers
+**The re-scope.** The spec was written at about 1,600 lines and also covered
 schema discovery, activation predicates, code generation, and a trigger
-grammar change. Split it:
+grammar change. The owner accepted this split on 2026-10-01, and the spec's
+own Scope section now records it:
 
 | Part | Disposition |
 |---|---|
-| Outcome, Language Contract, Ownership Seam, R1–R9, acceptance criteria 1–16 and 19 | **Stays.** This is the fix |
+| Outcome, Language Contract, Ownership Seam (less the unified global entry point), R1–R6, R7a–b, R8, R9, acceptance criteria 1–17 and 19 | **Stays.** This is the fix. Criteria 2, 10, and 17 are reworded to drop parked dependencies |
+| The `doc.err` examples in the Language Contract, R2, R5, Verification, and criterion 2 | **Withdrawn**; see [What no longer applies](#what-no-longer-applies) |
 | R11 rows that move `claudine.yaml` and `claudine-types.yaml` | **Superseded by step 5**, which deletes both and writes six new files |
 | R11 classification of `claudine.yaml` as always-on | **Superseded by step 5**, which makes it a trigger |
 | R11 row that moves `expression-functions.yaml` | **Superseded by step 7**, which replaces the catalog; moving it first means migrating it twice |
 | Named-type constraint inheritance and bare local type names | **Moves** to the Darkmatter schema groundwork ahead of step 8; see [conflict X2](#conflicts-between-specs) |
-| R10 (`no-shell-expansion`), R11 code-generated embedding, R12 (discovery scopes, `SCHEMA_DIR`, activation predicates, failure recovery), the `schema-trigger` rename, the AND/OR trigger grammar, the unified global entry point | **Parked** as an unscheduled Darkmatter feature. Revisit when step 10 is planned, because step 10 needs the same descriptor mechanism |
+| R10 (`no-shell-expansion`), R11 code-generated embedding, R12 (discovery scopes, `SCHEMA_DIR`, activation predicates, failure recovery), R7c (lifecycle error diagnostics in the editor), criteria 18 and 20–22, the `schema-trigger` rename, the AND/OR trigger grammar, the unified global entry point | **Parked** as an unscheduled Darkmatter feature. Revisit when step 10 is planned, because step 10 needs the same descriptor mechanism |
 
 The alternative on record, in the schema-enhancements directory's
 `strict-mode-integration-design.md`, is to fold the core into step 7 and have
@@ -197,9 +209,17 @@ already the highest-risk spec in the set, the motivating expression contains
 no function call so the coercion engine cannot fix it, and the lifecycle track
 needs this fix before step 5.
 
-**Needs first.** The ruling on the split, then the independent design review
-and the owner's design approval that the spec records as outstanding. After
-the split only design contracts C1–C3 and C9 are in play.
+**What the core keeps working without the parked parts.** Claudine declares
+lifecycle globals through the Rust host-binding API rather than schema data.
+The editor reports undeclared properties as advisories and takes its root
+classification from Darkmatter, but gains no lifecycle-specific errors. The
+`initialize` shell prohibition stays enforced by Claudine's parser and runtime
+backstop.
+
+**Needs first.** The independent design review and the owner's design
+approval that the spec records as outstanding, then a new plan for the core
+(the old `plan.md` is superseded). In scope from the design record: D1, D2,
+D4, D7, D8, D21, and contracts C1, C2, C9, and C3's per-event scope matrix.
 
 **Provides downstream.**
 
@@ -212,9 +232,8 @@ the split only design contracts C1–C3 and C9 are in play.
 | Step 9 | The meaning of an undeclared name (valid, type `unknown`) that declaration projection and diagnostics build on |
 | Step 10 | The binding seam and the typed error cause that the extracted engine consumes |
 
-**Verdict.** First on the lifecycle track, but only once re-scoped. **If the
-split is rejected, swap steps 3 and 5**: a finalized spec should not wait
-behind an unapproved design of that size.
+**Verdict.** First on the lifecycle track. The split is accepted, so steps 3
+and 5 keep their order.
 
 ### 4. `2026-09-16-expression-type-system`, Phase A
 
@@ -430,8 +449,8 @@ recommendation is this page's; none is an owner decision yet.
 | X1 | Steps 3 and 6 | Step 6 says a missing caller value in a `shell:` string is an error. Step 3 says a missing name is `null` and renders empty | Step 3's contract holds everywhere. "Must be supplied" is said with `required` in the prompt's `$schema` | Step 6 planning |
 | X2 | Steps 3, 5, and 8 | `required` on a reused named type is stripped today. Step 3 calls that a bug (owner ruling, 2026-09-19). Step 5 works around it. Step 8 calls it deliberate and out of scope | Honor the ruling; land it as groundwork before step 8. Step 5's spelling stays valid either way | Step 8 planning |
 | X3 | Steps 3 and 5 | Step 3 renames the trigger kind to `schema-trigger` with no alias. Step 5 ships three files as `trigger-schema`, the spelling the parser accepts | Parked with R12. Whoever renames later migrates Claudine's three triggers | Nothing now |
-| X4 | Steps 3 and 5 | Step 3 moves Claudine's two old schema files and makes `claudine.yaml` always-on. Step 5 deletes both and makes it a trigger | Step 5 governs | Step 3 re-scope |
-| X5 | Steps 3 and 7 | Step 3 moves the function catalog. Step 7 replaces it | Step 7 governs; one migration | Step 3 re-scope |
+| X4 | Steps 3 and 5 | Step 3 moves Claudine's two old schema files and makes `claudine.yaml` always-on. Step 5 deletes both and makes it a trigger | Step 5 governs | Nothing; resolved by the step 3 re-scope |
+| X5 | Steps 3 and 7 | Step 3 moves the function catalog. Step 7 replaces it | Step 7 governs; one migration | Nothing; resolved by the step 3 re-scope |
 | X6 | Steps 7 and 9 (parent annexes) | See [the reconciliation list](#reconciling-the-type-system-charter-with-its-phase-b-spec) | A dated reconciliation round | Step 7 planning |
 | X7 | Steps 3 and 9 | The charter keeps `is_known_variable_root` as a sanctioned hook and allows an unknown-root error. Step 3 deletes the hook and the error | Step 3 governs; correct the charter in the same round as X6 | Step 9 planning |
 | X8 | Steps 3 and 5 | Step 3's global entry point has no `current_env`. Step 5's pre-warm classifier and the current docs list it | Leaves with the parked material; no change in this rollout | Nothing now |
@@ -461,9 +480,9 @@ Step 0 is spec work only. Each ruling blocks the planning of the step named.
 
 | # | Ruling | Blocks |
 |---|---|---|
-| 1 | Accept or reject the split of `2026-09-17-remove-strict-mode` | Step 3, and the order of steps 3 and 5 |
+| 1 | ~~Accept or reject the split of `2026-09-17-remove-strict-mode`~~ **Made 2026-10-01: accepted**; the spec is re-scoped | Step 3 |
 | 2 | Independent design review and design approval for the strict-mode core | Step 3 |
-| 3 | Mixed line endings: per-line or global | Step 1 |
+| 3 | ~~Mixed line endings: per-line or global~~ **Made: per-line** | Step 1 (complete) |
 | 4 | `params` → `with`, and its three sub-questions | Steps 5 and 6 |
 | 5 | Merge `amendments-provider-and-with.md` into the sequence spec | Step 6 |
 | 6 | The sequence spec's four open questions: iteration `skip`, what finishes after `break`, `prep` from `initialize`, control flow in parallel groups | Step 6 |
@@ -519,16 +538,17 @@ taken as proof of what is built.
 | `required` is still stripped on reuse | The resolver's stripping function is present and documented |
 | The schema move is half done | `darkmatter/schemas/` holds `darkmatter.yaml` and five partials, while `darkmatter/docs/schemas/` still holds the full old set. `claudine/schemas/claudine.yaml` is an empty file |
 
-Spec status on the same date:
+Spec status on the same date, with the two completed fixes and the
+strict-mode re-scope updated on 2026-10-01:
 
 | Spec | Status |
 |---|---|
 | `2026-09-21-lifecycle-ergonomics` | Finalized; clarified; no rulings remain |
-| `2026-09-17-remove-strict-mode` | Finalized; design drafted; independent review and design approval outstanding; plan superseded |
+| `2026-09-17-remove-strict-mode` | Finalized; re-scoped to its core 2026-10-01; design drafted; independent review and design approval outstanding; plan superseded |
 | `2026-09-27-sequence-improvements` | Draft; reviewed; four open questions; amendments proposed and unmerged |
 | `2026-09-21-schema-enhancements` | Draft; no open questions of its own; reconciliation with the parent pending |
 | `2026-09-16-expression-type-system` | Draft charter; clarified; reconciliation pending |
 | `2026-09-28-recursive-schema-types` | Draft; two open questions |
 | `2026-09-22-lifecycle-events` | Draft for review; no frontmatter; boundary prototype not started |
-| `2026-09-27-sequence-review-screen` | Draft; not reviewed |
-| `2026-09-28-hash-writer-byte-fidelity` | Draft; one decision open; not yet committed |
+| `2026-09-27-sequence-review-screen` | **Complete**; implemented, reviewed (2 iterations), closed 2026-09-29 |
+| `2026-09-28-hash-writer-byte-fidelity` | **Complete**; implemented, reviewed (6 iterations), closed 2026-09-30 |

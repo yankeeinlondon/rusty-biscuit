@@ -62,6 +62,76 @@ packages:
 >   design record but were missing here (R12, Compatibility);
 > - the technical design checkpoint now reflects the artifacts that exist.
 
+## Scope (re-scoped 2026-10-01)
+
+On 2026-10-01 the owner accepted splitting this fix down to its **core**: a bare
+name means a document property, an absent property evaluates to `null`, strict
+mode and Claudine's duplicate checks are removed, and Darkmatter gains a binding
+model that tells an absent property, a `null`-valued global, and an unavailable
+global apart. The rest of this specification grew into a schema platform that
+newer specifications now own or that no near-term work depends on. That
+material stays below for the record, each section carrying an
+**Out of scope** marker, and must not be planned or implemented as part of this
+fix. The [rollout strategy](../../docs/rollout-strategy.md) explains the order.
+
+### In scope
+
+| Section | Notes |
+| --- | --- |
+| Outcome, Language Contract | The `doc.err` examples are withdrawn; see below |
+| Ownership Seam, including "Preparation and validation boundaries" | The "Unified global schema entry point" subsection is out. The two bullets about schema-location feature restrictions describe R10 and are out |
+| R1–R6, R8, R9 | R2 and R5 amended for `doc.err` |
+| R7, parts 7a and 7b | 7c is out |
+| Compatibility: strictness API removal, behavior changes, `EvaluationLookup` | The trigger-kind and flag renames are out |
+| Technical Design Checkpoint: items 1–4, risk assessment, DRY seam audit | Items 5–8 are out |
+| Verification, except the items grouped under an Out of scope marker | |
+| Acceptance criteria 1–17 and 19 | 2, 10, and 17 are reworded |
+| Evidence and Impact | Unchanged |
+
+### Out of scope
+
+| Material | Disposition |
+| --- | --- |
+| R11 rows that move `claudine.yaml` and `claudine-types.yaml`, and R11's classification of `claudine.yaml` as always-on | **Superseded** by `2026-09-21-lifecycle-ergonomics`, which deletes both files, writes Claudine's new schemas, and makes `claudine.yaml` a trigger |
+| R11 row that moves `expression-functions.yaml` | **Superseded** by `2026-09-21-schema-enhancements`, which replaces the catalog |
+| Schema Exports and Local Type Names (bare local type names, named-type constraint inheritance) | **Moved** to the Darkmatter schema groundwork that lands before `2026-09-28-recursive-schema-types` |
+| R10, the rest of R11, R12, the unified global schema entry point, the `schema-trigger` and `--no-schema-triggers` renames, the trigger AND/OR grammar, R7c, and acceptance criteria 18, 20, 21, and 22 | **Parked**, to be filed as an unscheduled Darkmatter feature and revisited when `2026-09-22-lifecycle-events` is planned, because that feature needs the same descriptor mechanism |
+
+### What holds without the parked material
+
+- **Lifecycle globals are declared in code.** Claudine declares each global and
+  its availability per event through the Rust host-binding API (R4). No schema
+  file or generated descriptor carries that catalog in this fix.
+- **The editor stays at the Darkmatter baseline.** DMLS reports an undeclared
+  document property as an advisory and takes its root classification from
+  Darkmatter (R7a, R7b). It offers no Claudine-specific lifecycle errors and
+  receives no host global descriptors, so editor reporting of a registration
+  named `doc`, `ctx`, or `env` waits for R7c; Darkmatter's runtime rejection of
+  it is in scope.
+- **The `initialize` shell prohibition stays where it is.** Claudine's parser
+  rejection and runtime backstop continue to enforce it. R10 would have moved
+  that enforcement into Darkmatter schema locations.
+- **The `doc.err` examples are withdrawn.** The owner's clarification, recorded
+  in `strict-mode-integration-design.md` of `2026-09-21-schema-enhancements`,
+  is that `err` is a lifecycle global and there is no `doc.err` model to
+  introduce or preserve. Examples presenting `doc.err` as the way to reach a
+  same-named document property are removed from the Language Contract, R2, R5,
+  Verification, and criterion 2. The general rules are unchanged: `doc.<name>`
+  reads a document property, and an unavailable reserved global never falls
+  through to one.
+
+### Design artifacts
+
+| In scope | Out of scope |
+| --- | --- |
+| D1, D2, D4, D7, D8, D21 | D3, D5, D6, D9–D20, D22 |
+| C1, C2, C9; C3's per-event scope matrix | C3's encoding as schema data, C4–C8, and C9's use of the C4 envelope and C5 bundle |
+| [Migration inventory](migration-inventory.md), except "Schema and trigger migration" | That section |
+
+D2's "declaration serialization/distribution format remains open" stays open;
+it is part of R7c. Where D7 says `doc.err` remains explicit document access,
+the withdrawal above applies.
+
 ## Outcome
 
 Darkmatter has one expression language and one variable-resolution model. A
@@ -233,7 +303,8 @@ Resolution follows this order:
 Darkmatter rejects caller global registrations named exactly `doc`, `ctx`, or
 `env` with a structured configuration error before evaluation or lazy-provider
 invocation. DMLS reports the same invalid registration through shared
-Darkmatter validation. Ordinary globals retain their precedence over
+Darkmatter validation once it receives host descriptors (R7c, out of scope for
+this fix). Ordinary globals retain their precedence over
 same-named document properties.
 
 There is no implicit fallback from a missing bare document property to a
@@ -252,8 +323,7 @@ items[0]             doc.items[0]
 
 Injected globals retain their documented precedence over document properties
 with the same root. An out-of-scope reserved lifecycle global remains an error;
-it must not silently fall back to a document property. `doc.err` remains the
-explicit way to read a document property named `err`.
+it must not silently fall back to a document property.
 
 ### Missing properties are valid lookups
 
@@ -374,7 +444,39 @@ Claudine provides those declarations to Darkmatter. It must not independently
 decide identifier validity, traverse Darkmatter ASTs to find unavailable
 bindings, or recreate evaluator short-circuit rules.
 
+### Preparation and validation boundaries
+
+During preparation, Darkmatter must reject every reference that is definitely
+forbidden in the declared event or scope, including references in inactive
+branches. Availability that depends on execution state is checked at runtime.
+Preparation must be passive: validation cannot invoke lazy value providers or
+perform effects merely to determine availability. Both phases use the same
+binding declarations and variable classification.
+
+Passive validation is blocking, not advisory: a required schema or expression
+validation failure stops normal execution at that boundary. The operation
+that failed validation cannot proceed to its lifecycle actions, provider
+launch, or prohibited expansion. Passive means that validation itself performs
+no effects; it does not mean that the failed operation continues. Existing
+error reporting and recovery policy remains in force, including applicable
+failure, catch, and finalize routes; those routes must obey all feature
+restrictions, including the preflight shell prohibition. This requirement
+does not introduce rollback of effects that completed before a later validation
+boundary.
+
+Darkmatter returns structured errors to its library callers. The `claudine`
+library adds lifecycle context while preserving the original typed Darkmatter
+cause, so a library caller can inspect the failure and choose its own
+presentation. `claudine-cli` only renders those errors; it does not own
+validation. The existing lifecycle evaluation wrapper retains context and a
+reason classification but does not retain the original typed Darkmatter
+cause. Preserving that cause is a required change, not an existing guarantee.
+
 ### Unified global schema entry point
+
+> **Out of scope (re-scope 2026-10-01).** Parked with R10–R12; see
+> [Scope](#scope-re-scoped-2026-10-01). Lifecycle globals are declared through
+> the host-binding API in this fix.
 
 `darkmatter/schemas/darkmatter.yaml` is the single authoritative entry point
 for global shapes. Its `$schema` declares `doc`, `ctx`, `current`, `env`, `err`,
@@ -419,32 +521,6 @@ schema parity for every global, identical `ctx`/`current` shapes, independent
 catalog from automatic document application, passive global hover/completion,
 and event-specific availability. Verify `current.cwd` against the captured event
 snapshot and reject the removed nested form under its schema.
-
-During preparation, Darkmatter must reject every reference that is definitely
-forbidden in the declared event or scope, including references in inactive
-branches. Availability that depends on execution state is checked at runtime.
-Preparation must be passive: validation cannot invoke lazy value providers or
-perform effects merely to determine availability. Both phases use the same
-binding declarations and variable classification.
-
-Passive validation is blocking, not advisory: a required schema or expression
-validation failure stops normal execution at that boundary. The operation
-that failed validation cannot proceed to its lifecycle actions, provider
-launch, or prohibited expansion. Passive means that validation itself performs
-no effects; it does not mean that the failed operation continues. Existing
-error reporting and recovery policy remains in force, including applicable
-failure, catch, and finalize routes; those routes must obey all feature
-restrictions, including the preflight shell prohibition. This requirement
-does not introduce rollback of effects that completed before a later validation
-boundary.
-
-Darkmatter returns structured errors to its library callers. The `claudine`
-library adds lifecycle context while preserving the original typed Darkmatter
-cause, so a library caller can inspect the failure and choose its own
-presentation. `claudine-cli` only renders those errors; it does not own
-validation. The existing lifecycle evaluation wrapper retains context and a
-reason classification but does not retain the original typed Darkmatter
-cause. Preserving that cause is a required change, not an existing guarantee.
 
 ## Required Behavior
 
@@ -497,15 +573,14 @@ event selection remain host responsibilities.
 Reject caller global registrations named exactly `doc`, `ctx`, or `env` with a
 structured configuration error before evaluation or lazy-provider invocation.
 The shared passive validation operation must expose this error to DMLS as
-well. Explicit document access through `doc.err`, `doc.doc`, `doc.ctx`, and
-`doc.env` remains valid regardless of same-named document properties or ordinary
+well. Explicit document access through `doc.doc`, `doc.ctx`, and `doc.env`
+remains valid regardless of same-named document properties or ordinary
 global declarations.
 
 An unavailable global is still reserved. It must not fall through to a
 same-named document property. For example, if `err` is unavailable during
 `initialize`, bare `err` raises the typed unavailable-global error even when
-the document contains an `err` property. `doc.err` remains the explicit access
-to that document property.
+the document contains an `err` property.
 
 Provide both runtime resolution and reusable parser-aware validation against
 this environment. Darkmatter owns expression traversal in both cases. The
@@ -563,8 +638,7 @@ dead public or crate-visible validator solely for compatibility.
 Replace the custom AST traversal inside `validate_no_err_in_no_error_events`
 with Darkmatter's generic binding validation. The Claudine policy remains:
 bare `err` in `initialize` is invalid because `err` is a reserved but
-unavailable lifecycle global there, while `doc.err` remains valid document
-access. If the function remains as a lifecycle-oriented adapter, it must only
+unavailable lifecycle global there. If the function remains as a lifecycle-oriented adapter, it must only
 construct the event-specific binding environment, invoke Darkmatter, and map
 the typed result into Claudine's diagnostic context.
 
@@ -609,9 +683,9 @@ or dispatch lookups.
 
 ### R7. Static diagnostics consume the shared binding model
 
-DMLS may warn when a bare document property is absent from both authored
-frontmatter and the effective schema. The diagnostic must be advisory and make
-the runtime contract clear: the property is valid, currently undeclared, has
+**7a. Advisory wording (in scope).** DMLS may warn when a bare document
+property is absent from both authored frontmatter and the effective schema.
+The diagnostic must be advisory and make the runtime contract clear: the property is valid, currently undeclared, has
 unknown static type, and resolves to `null` unless supplied at runtime.
 
 Replace terminology such as "unknown identifier" where it implies the name is
@@ -624,11 +698,22 @@ Unknown `ctx.*` tails may retain their existing schema/catalog-aware advisory,
 but runtime lookup still resolves a missing tail to `null` unless a more
 specific function contract rejects that value.
 
-DMLS must consume Darkmatter's binding classification or a descriptor catalog
-derived from it. It must not maintain another hardcoded list that can drift
-from runtime global precedence or availability. Claudine-specific lifecycle
+**7b. One classification (in scope).** DMLS must consume Darkmatter's binding
+classification or a descriptor catalog derived from it. It must not maintain
+another hardcoded list that can drift from runtime global precedence or availability. Claudine-specific lifecycle
 descriptors may be supplied as an extension, but the classification and
 validation machinery remain Darkmatter-owned.
+
+**In this fix** DMLS validates against the Darkmatter baseline and the schemas
+it already loads, and offers no Claudine-specific lifecycle checks. Runtime
+enforcement does not depend on the editor: a bare `err` in `initialize` is
+still rejected when the prompt is prepared (R5).
+
+**7c. Lifecycle error diagnostics.**
+
+> **Out of scope (re-scope 2026-10-01).** The rest of R7 depends on R10–R12
+> and on distributing host descriptors to DMLS, all parked; see
+> [Scope](#scope-re-scoped-2026-10-01).
 
 DMLS must also show authors error diagnostics for schema feature violations
 under the applicable schemas and binding descriptors,
@@ -701,6 +786,11 @@ entries, and skill snapshots must describe the corrected contract.
 
 ### R10. Darkmatter enforces feature restrictions by schema location
 
+> **Out of scope (re-scope 2026-10-01).** Parked. Claudine's existing parser
+> rejection and runtime backstop keep enforcing the `initialize` shell
+> prohibition.
+> See [Scope](#scope-re-scoped-2026-10-01).
+
 Darkmatter must accept caller-supplied schemas for lifecycle properties and
 allow callers to disable features for selected portions of a frontmatter
 schema. Claudine declares the policy; Darkmatter validates and enforces it
@@ -746,6 +836,11 @@ technical design choice subject to the confirmed inheritance and non-relaxation
 rules, narrow initialization typing, and initialization prohibition.
 
 ### R11. Repository YAML owns schemas and generates runtime embedding
+
+> **Out of scope (re-scope 2026-10-01).** Its file moves are superseded by
+> `2026-09-21-lifecycle-ergonomics` and `2026-09-21-schema-enhancements`; the
+> rest is parked.
+> See [Scope](#scope-re-scoped-2026-10-01).
 
 Claudine schema definitions must be developer-editable YAML files in
 `claudine/schemas`. Those files are authoritative; a code generation step must
@@ -855,6 +950,9 @@ in R12 are settled. A concrete workspace marker filename or trigger matching
 syntax is not implied.
 
 ### R12. Shared schemas support dynamic, neutral editor activation
+
+> **Out of scope (re-scope 2026-10-01).** Parked.
+> See [Scope](#scope-re-scoped-2026-10-01).
 
 DMLS always begins with the base Darkmatter schema. Additional schemas augment
 that baseline rather than bypassing it. Darkmatter consumers must be able to
@@ -1024,6 +1122,17 @@ either of these accidental semantics:
 Both behaviors conflict with the namespace contract and must be removed rather
 than preserved behind compatibility flags.
 
+`EvaluationLookup` has a materially larger blast radius than strict mode
+itself. If its public contract changes, migrate every implementation in one
+coordinated change and retain parity tests for lookup surfaces that do not use
+lifecycle globals. Do not force an invasive trait break when a Darkmatter-owned
+adapter or additive resolution method can provide the richer binding result
+without semantic duplication.
+
+> **Out of scope (re-scope 2026-10-01).** The trigger-kind rename below and
+> the flag rename in its reader's note are parked with R12. The parser keeps
+> accepting `trigger-schema`.
+
 Compatibility clarification agreed 2026-09-18: the canonical trigger envelope
 is `kind: schema-trigger`. Migrate active parser, schema, fixture, test,
 documentation, and skill usage directly from `trigger-schema`, without an
@@ -1045,13 +1154,6 @@ specifications remain unchanged.
 > existing Darkmatter variables; the only similarly named string,
 > `DARKMATTER_SCHEMA_ROOT`, is a test-local placeholder inside a fixture, not a
 > configuration variable, so there is no collision to resolve.
-
-`EvaluationLookup` has a materially larger blast radius than strict mode
-itself. If its public contract changes, migrate every implementation in one
-coordinated change and retain parity tests for lookup surfaces that do not use
-lifecycle globals. Do not force an invasive trait break when a Darkmatter-owned
-adapter or additive resolution method can provide the richer binding result
-without semantic duplication.
 
 ## Technical Design Checkpoint Before Planning
 
@@ -1111,6 +1213,12 @@ the confirmed requirements:
 8. The schema-generation integration and artifact layout, generic activation
    syntax, and refresh mechanisms that satisfy R11 and R12, including passive
    failure recovery and the confirmed limits on discovery scope.
+
+> **Out of scope (re-scope 2026-10-01): items 5–8.** They concern the parked
+> descriptor format, unified entry point, `no-shell-expansion`, and schema
+> generation and activation. In this fix Claudine declares lifecycle bindings
+> through the Rust host-binding API, and no descriptor format for DMLS is
+> designed.
 
 ### Risk assessment outcome
 
@@ -1174,7 +1282,7 @@ Add focused tests proving:
 - an explicitly injected global shadows a same-named document property;
 - registrations named exactly `doc`, `ctx`, and `env` each fail with a
   structured configuration error before evaluation or lazy-provider invocation;
-- `doc.err`, `doc.doc`, `doc.ctx`, and `doc.env` read the corresponding
+- `doc.doc`, `doc.ctx`, and `doc.env` read the corresponding
   document properties while built-in namespaces remain reserved;
 - an unavailable reserved global raises a typed error and never falls through
   to a same-named document property;
@@ -1192,7 +1300,10 @@ Add focused tests proving:
 - preparation invokes no lazy providers and produces no effects;
 - failed required schema validation blocks execution, including prohibited
   expansion, rather than producing an advisory and continuing;
-- execution-dependent availability is deferred and checked at runtime;
+- execution-dependent availability is deferred and checked at runtime.
+
+> **Out of scope (re-scope 2026-10-01): parked with R10.**
+
 - schema-location feature restrictions survive deferred evaluation, with
   shell expansion rejected for the restricted initialization location;
 - `no-shell-expansion` on an array or key/value container reaches every
@@ -1217,6 +1328,15 @@ Add or update tests proving:
 - a schema-declared property receives schema type information even when unset;
 - a runtime-supplied property is not treated as a parser error;
 - unknown functions remain distinct hard expression defects;
+- editor validation executes no actions or shell expansion, causes no file
+  side effects, and invokes no lazy providers;
+- completion and hover continue to classify bare identifiers as document
+  properties rather than context variables;
+- DMLS takes its reserved-root and global classification from Darkmatter's
+  binding model, and no separate hardcoded root catalog remains in DMLS.
+
+> **Out of scope (re-scope 2026-10-01): parked with R7c and R12.**
+
 - with the lifecycle extension active and valid, prohibited shell expansion
   in `initialize` produces a schema feature error;
 - with the lifecycle extension active and valid, definitely unavailable
@@ -1226,11 +1346,7 @@ Add or update tests proving:
   distinct from undeclared-document-property advisories;
 - invalid global registrations named exactly `doc`, `ctx`, and `env` produce
   the shared structured configuration error;
-- editor validation executes no actions or shell expansion, causes no file
-  side effects, and invokes no lazy providers;
 - execution-dependent availability is deferred rather than guessed;
-- completion and hover continue to classify bare identifiers as document
-  properties rather than context variables;
 - the base Darkmatter schema always participates alongside direct always-on
   schema files and conditionally activated schemas;
 - generic filesystem activation works at startup and refreshes when relevant
@@ -1282,8 +1398,8 @@ Cover every event-time shape that previously called
   values;
 - an unavailable reserved lifecycle global still fails with its specific
   diagnostic;
-- a document property sharing the name of an unavailable lifecycle global is
-  reachable only through `doc.*`;
+- an unavailable reserved lifecycle global never falls through to a
+  same-named document property;
 - malformed expressions and unknown functions still halt before side effects.
 
 Add a lifecycle binding matrix covering each reserved global against every
@@ -1357,9 +1473,10 @@ and is covered by the affected packages' existing gates.
 2. Every bare identifier other than a reserved namespace or registered global
    resolves as a document property. Caller registrations named exactly `doc`,
    `ctx`, or `env` fail with a structured configuration error before evaluation
-   or provider invocation, and DMLS reports that shared validation error.
-   Ordinary globals shadow document properties; explicit `doc.err`, `doc.doc`,
-   `doc.ctx`, and `doc.env` access remains valid.
+   or provider invocation. Ordinary globals shadow document properties;
+   explicit `doc.doc`, `doc.ctx`, and `doc.env` access remains valid.
+   *(Reworded 2026-10-01: the DMLS report moves to R7c, and the `doc.err`
+   example is withdrawn.)*
 3. An absent document property evaluates to `null` and never raises an
    unknown-root or undefined-variable runtime error.
 4. Bare document lookup never falls through to `ctx`; context access requires
@@ -1380,15 +1497,11 @@ and is covered by the affected packages' existing gates.
 9. Lifecycle, shell-preflight, and sequence consumers preserve contextual
    diagnostics, atomicity, and shell approval byte parity.
 10. DMLS treats an undeclared bare property as a valid unknown-typed document
-    property, limits any report to an advisory diagnostic, and consumes shared
-    Darkmatter binding descriptors rather than a separate root catalog. It
-    also reports schema feature violations and definitely unavailable lifecycle
-    globals under applicable schemas and descriptors as errors through the
-    same passive Darkmatter validation used in preparation, without guessing
-    runtime-dependent availability. An absent or inactive optional lifecycle
-    extension leaves baseline and other applicable checks available without
-    promising Claudine-specific checks; mandatory runtime policies remain
-    independent of editor activation.
+    property, limits any report to an advisory "undeclared document property"
+    diagnostic, keeps unknown functions as errors, and consumes Darkmatter's
+    binding classification rather than a separate root catalog. *(Reworded
+    2026-10-01: the lifecycle error diagnostics this criterion also required
+    are R7c, out of scope.)*
 11. The reported repository-root `prompts/implement.md` route reaches its
     authored routing error without a lifecycle evaluation crash. The
     `(… || false)` guards added on 2026-09-19 are removed, the plain ternary
@@ -1413,10 +1526,13 @@ and is covered by the affected packages' existing gates.
     suites pass.
 16. Library callers can inspect the original typed Darkmatter error and added
     Claudine context independently of CLI presentation.
-17. Lifecycle properties use ordinary Darkmatter frontmatter semantics with
-    caller-supplied schemas and late-bound globals. Darkmatter owns all
-    expression, schema, and result validation.
-18. Darkmatter enforces caller-supplied feature restrictions by schema location
+17. Lifecycle frontmatter uses ordinary Darkmatter interpolation and escape
+    semantics. Claudine supplies lifecycle globals through the host-binding
+    API and performs no post-evaluation check of its own. Darkmatter owns
+    expression and result validation. *(Reworded 2026-10-01: the original
+    tied this to the parked unified global schema catalog.)*
+18. *(Out of scope, re-scope 2026-10-01: parked with R10.)*
+    Darkmatter enforces caller-supplied feature restrictions by schema location
     through deferred evaluation. `initialize` forbids shell expansion, and the
     existing initialization shell-action and bootstrap prohibitions remain
     enforced. Its schema uses narrow key/value typing. The
@@ -1428,7 +1544,8 @@ and is covered by the affected packages' existing gates.
     preserved, and recovery routes obey the same applicable feature
     restrictions. Missing required properties still fail schema validation
     even though expression lookup of missing properties returns `null`.
-20. Authoritative Claudine schemas are editable YAML in `claudine/schemas` and
+20. *(Out of scope, re-scope 2026-10-01: superseded or parked with R11.)*
+    Authoritative Claudine schemas are editable YAML in `claudine/schemas` and
     are embedded into the Claudine binary through code generation. Darkmatter's
     schema directory moves to `darkmatter/schemas`; affected imports, loaders,
     fixtures, documentation, and skill references are updated. Runtime and DMLS
@@ -1439,7 +1556,8 @@ and is covered by the affected packages' existing gates.
     libraries and bare reference-only schemas never auto-apply, and the
     function catalog is not a schema. `claudine-types.yaml` declares its
     helpers under `types:`, not `$schema:`.
-21. DMLS always includes the Darkmatter base schema and dynamically consumes
+21. *(Out of scope, re-scope 2026-10-01: parked with R12.)*
+    DMLS always includes the Darkmatter base schema and dynamically consumes
     generic direct schemas and conditional triggers without embedding Claudine
     schemas or depending on Claudine. Startup and filesystem changes activate
     applicable schemas, including generic workspace marker conditions.
@@ -1457,7 +1575,8 @@ and is covered by the affected packages' existing gates.
     `--no-schema-triggers` with no alias. Authored root unions, including the
     router's list-form `$schema` and the repository-root feature-review
     export, are preserved as alternatives rather than flattened.
-22. Failed loading or refresh of an applicable schema, trigger, import, or
+22. *(Out of scope, re-scope 2026-10-01: parked with R12.)*
+    Failed loading or refresh of an applicable schema, trigger, import, or
     global descriptor reports incomplete validation with the failing source
     and cause. Dependent checks are suspended, independent checks continue,
     and stale definitions or dependent diagnostics are not presented as
@@ -1498,6 +1617,10 @@ and is covered by the affected packages' existing gates.
   alias.
 
 ## Schema Exports and Local Type Names
+
+> **Out of scope (re-scope 2026-10-01).** Moved to the Darkmatter schema
+> groundwork that lands before `2026-09-28-recursive-schema-types`. The
+> "part of this fix" statements below no longer apply.
 
 The human resolved the schema-pointer discussion by updating `err.yaml`:
 `$schema` now exports the `err` property, and `types` supplies its reusable

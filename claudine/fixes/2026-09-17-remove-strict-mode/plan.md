@@ -18,6 +18,11 @@ yolo: "true"
 > work. Replace this plan only after the pending rulings and independent design
 > review are complete and the human approves the design. The remaining text is
 > retained solely as historical planning evidence.
+>
+> **Re-scoped 2026-10-01.** The replacement plan covers only the core defined
+> in [spec.md § Scope](spec.md#scope-re-scoped-2026-10-01). This plan's phases
+> for schema moves, generation, activation, and feature restrictions are out of
+> scope.
 
 ## Work Summary and Definition of Success
 
