@@ -7,7 +7,62 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/schemas/detect.rs
+  - darkmatter/lib/src/markdown/schemas/file_match.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/schema/supplied.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/invocation_context/tests.rs
+  - claudine/cli/src/commands/schema_interactive/supplied.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+docs_updated_during_phase_2:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/tech-spec/file-reference-struct.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_3:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/tests/l1/file_tree.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/harness/error/tests.rs
+docs_updated_during_phase_3:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/tech-spec/file-reference-struct.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/biscuit-file/SKILL.md
+packages:
+  - biscuit-file
+  - darkmatter
+  - claudine
+  - claudine-cli
 ---
 
 # Implementation Log for 2026-09-30-reusable-path (8 phases)
@@ -360,3 +415,400 @@ appears in no doc. Excluded as unrelated `base_dir`: sniff (detection base),
 worktree and test-toolkit (`~/.worktree.json`), research (library directory),
 claudine `signals/harvest.rs` (output directory), DMLS lexical helpers,
 frontmatter keys in fixtures, and historical review files.
+
+## Phase 2
+
+Phase 2 is the behavior-neutral Step 1 rename: the context's "where `./`
+starts" value is now spelled `cwd` everywhere. No `base_dir` identifier
+remains on `FileResolutionContext` or `DetailedResolution`, so a missed call
+site fails to compile when Phase 3 reintroduces `base_dir` as the tree root.
+
+### Wave 1: biscuit-file
+
+Renamed public API (`biscuit-file/lib/src/file_reference/{context.rs,mod.rs,resolve.rs}`;
+`fetch.rs` had no occurrences):
+
+| Before | After |
+| ------ | ----- |
+| `FileResolutionContext::base_dir()` (and field) | `cwd()` |
+| `new(base_dir)`, `from_snapshot(base_dir, ..)` parameter | `cwd` |
+| `for_base(dir)` | `for_cwd(dir)` |
+| `for_trusted_external_base(dir)` | `for_trusted_external_cwd(dir)` |
+| `request_base_dir()` (and field) | `request_cwd()` |
+| `is_trusted_external_authoring_base()` (and field `trusted_external_authoring_base`) | `is_trusted_external_authoring_cwd()` / `trusted_external_authoring_cwd` |
+| `DetailedResolution::base_dir()` (and field) | `cwd()` |
+
+Decisions on the names the plan's table omitted (raised in Phase 1):
+
+- `is_trusted_external_authoring_base` → `is_trusted_external_authoring_cwd`
+  (it names the authoring cwd, per the Phase 1 recommendation).
+- internal `ResolutionContext::from_base` → `from_cwd`. The internal resolver
+  context already used `cwd`; this removes the last translation layer, so
+  there is one name end to end (`from_context` now reads `ctx.cwd`).
+- `CompletionAnchors::base` → `cwd`; the ambient `complete_partial`'s local
+  `base_abs` → `cwd_abs`.
+- parameter names: `FileReference::resolve_from(cwd)` and
+  `complete_partial(token, cwd)` (cosmetic; signatures unchanged).
+- `FileReference::resolve_relative(base: Option<&Path>)` keeps its `base`
+  parameter: it is the directory the returned path is relative *to*, not the
+  context's cwd. Its local `base_dir` became `from_dir`, matching the
+  `RelativePath { from, .. }` error field it feeds.
+- **Kept as is:** `LaunchMagicScope::request_dir` (a request directory, per
+  the plan), `RepositoryScopeCatalog::scope_for(base)` (a generic lookup
+  directory), `resolve::diff_paths(target, base)` (generic), and the public
+  enum variant `CandidatePlanOrder::AuthoringBaseFirst` with
+  `RootProvenance::Source`'s "authoring base" wording. Renaming that variant
+  is outside the plan's table and would ripple into Darkmatter. Phase 3 should
+  decide whether "authoring base" prose collides with the new tree-root
+  `base_dir` (see `message_to_agent`).
+
+Doc comments touched by the rename were updated in the same edit: every
+"base"/"base directory" that meant the context's working directory now says
+`cwd` / "working directory" (context struct notes, derivation docs,
+`validate`, `resolve_from`, `resolve_in_context`, `complete_partial*`,
+`FileReferenceKind`, `RootProvenance`, `PartialCompletionForm`,
+`implicit_relative_roots`, `build_anchoring_candidates`, `completion_roots`).
+
+Tests: only `resolution_context.rs`, `repository_scope_catalog.rs`, and
+`magic_local_roots.rs` named the renamed API. Their diff is rename-only
+(method calls, one helper parameter, and one test function name
+`..._laundered_via_for_cwd_or_trusted_external_derivation`). Constructor
+argument audit: every `new(..)` / `from_snapshot(..)` argument in the 7 L1
+files is a document directory, as Phase 1 recorded; no argument changed.
+Local test variables named `base` were left alone (not API; renaming them
+would make the diff no longer rename-only in spirit).
+
+Docs updated for the rename: `biscuit-file/docs/topics/file-references.md`
+("Base directory" glossary → "Working directory (`cwd`)", the kinds table,
+explicit/implicit relative sections, the context example, the derivation
+list, the trust-boundary section, both method tables, the error table, and
+the `DetailedResolution` accessor list), `biscuit-file/docs/tech-spec/file-reference-struct.md`,
+and the skill reference `.claude/skills/biscuit-file/references/file-references.md`.
+The topic page's Rust snippets are not compiled by any test (checked:
+no `include_str!` of the page); they were reviewed by hand.
+
+Out-of-workspace hit: `content-policy/features/2026-09-28-content-policy/spikes/filechanged-paths`
+(a spike, not a workspace member) calls only `from_snapshot`, whose
+signature is unchanged. Left untouched.
+
+**Neutrality check (biscuit-file, macOS):** `just test` 860 run, 860 passed,
+0 skipped, plus 6 doctests passed (baseline: identical). `just test-l2` is
+the "not applicable" stub (as at baseline). `just lint` clean.
+
+### Wave 2: consumers
+
+Two subagents, one for Darkmatter and one for Claudine plus messenger. Each
+changed only the call sites the compiler flagged whose receiver is a
+biscuit-file `FileResolutionContext` / `DetailedResolution`.
+
+- **Darkmatter** (13 files under `darkmatter/lib/src/markdown/`): `for_base`
+  → `for_cwd`, `for_trusted_external_base` → `for_trusted_external_cwd`,
+  `base_dir()` → `cwd()`, `request_base_dir()` → `request_cwd()`,
+  `is_trusted_external_authoring_base()` → `is_trusted_external_authoring_cwd()`.
+  Darkmatter's own `base_dir` fields (expression `ResolutionContext.base_dir`,
+  `FileReferenceDiagnostic`, etc.) are untouched, per the plan (Phase 4).
+  `encode_file_resolution_context` (options.rs) encodes the same values in
+  the same positions, so the context cache key is unchanged.
+  `darkmatter/cli` and `darkmatter/docs/topics/magic-paths.md` needed nothing
+  (constructor signatures are unchanged; the doc example uses `new(&launch_dir)`).
+- **Claudine** (7 one-line edits): `caller.origin.base_dir()` → `cwd()` in
+  `composition/error/render/mod.rs` (the serialized JSON key
+  `detail["base_dir"]` is unchanged: it is output, and changing it is a
+  Phase 7 question), `for_base` → `for_cwd` in `lifecycle/executor.rs`,
+  `DetailedResolution::base_dir()` → `cwd()` in `harness/error.rs` (Claudine's
+  own `ResolutionDetail::base_dir` projection keeps its name; it is a
+  documented diagnostic field), plus `schema/supplied.rs`, the CLI's
+  `schema_interactive/supplied.rs`, and two tests.
+- **messenger**: no change needed (`research/load.rs` only calls `new(root)`).
+- **claudine/rendezvous, claudine/gen, research, worktree**: no change.
+  Rendezvous does not depend on `biscuit-file`; `claudine/gen` only calls
+  `new(area)`; research and worktree own unrelated `base_dir` identifiers.
+
+Constructor audit: every `new(..)` / `from_snapshot(..)` / `for_cwd(..)`
+argument in the Phase 1 table was rechecked; all are working directories, so
+none changed. Notes for Phase 3/4 (no behavior change now):
+
+- `darkmatter/lib/src/markdown/compose/schema_validation.rs` ~776:
+  `for_trusted_external_cwd(fallback)` is given `options.file_ref_fallback_dir`,
+  a launch-area fallback directory, not a document directory. It is still the
+  "where `./` starts" value, so `cwd` is the right name.
+- `darkmatter/lib/src/markdown/schemas/detect.rs:105`:
+  `request_context.for_cwd(request_context.cwd())` re-derives a context at its
+  own cwd (clears `source_path`, re-selects scopes). Phase 3 must make sure
+  `for_cwd` keeps the tree root so this self-derivation stays a no-op on it.
+- Darkmatter's `expression/functions/mod.rs:1523` and
+  `schema_validation.rs` (`NoMatch.resolved_from`) copy `ctx.cwd()` into
+  Darkmatter fields still named `base_dir` / `resolved_from` (Phase 4).
+
+### Checkpoint 2
+
+- `cargo check --workspace --all-targets` exit 0 (macOS).
+- Repo-wide search for `for_trusted_external_base`, `.for_base(`,
+  `request_base_dir`, `is_trusted_external_authoring_base`, and
+  `ResolutionContext::from_base` in Rust and Markdown, excluding feature/fix
+  snapshot directories and `target/`: no hits. `FileResolutionContext::base_dir`
+  and `DetailedResolution::base_dir` no longer exist, so the compiler proves
+  there are no remaining calls to them. Remaining `.base_dir()` calls belong
+  to Claudine's `SourceContext` / `ResolutionDetail` and sniff's builders.
+- Constructor audit table (Phase 1): every row rechecked, no argument changed
+  meaning.
+
+| Area | `just test` (L1) | `just test-l2` | `just lint` | vs baseline |
+| ---- | ---------------- | -------------- | ----------- | ----------- |
+| biscuit-file | 860 run, 860 passed, 0 skipped; 6 doctests passed | not applicable (stub) | clean | identical |
+| darkmatter | 8726 run, 8726 passed, 12 skipped | not rerun | clean | identical |
+| claudine (`--no-fail-fast`) | 8071 run, 8070 passed, 1 failed, 9 skipped | not rerun | clean | identical; the failure is the pre-existing, host-dependent `compose_magic_does_not_emit_a_nested_file_without_its_scope` |
+| messenger | 688 run, 688 passed, 2 skipped | not rerun | clean | no baseline recorded in Phase 1; no source change |
+
+Darkmatter and Claudine L2 were not rerun: the edits are method renames that
+the compiler checks, L1 counts are identical, and no L2 test reads a renamed
+name differently. Phase 3 changes behavior and should rerun L2.
+
+**Requirement-to-test mapping.** Phase 2 changes no behavior, so it adds no
+tests; its requirement is "the existing suites pass unchanged except for
+renamed identifiers".
+
+| Requirement | Evidence |
+| ----------- | -------- |
+| `cwd()` returns what `base_dir()` returned | `resolution_context::*` assertions at the former `base_dir()` sites (now `cwd()`), plus `for_source` derivation test (`child.cwd()`) |
+| `for_cwd` / `for_trusted_external_cwd` keep derivation and containment semantics | `resolution_context::invalid_request_root_cannot_be_laundered_via_for_cwd_or_trusted_external_derivation`, `repository_scope_catalog` trusted-external tests |
+| `from_snapshot(cwd, ..)` unchanged | `magic_local_roots` synthetic snapshot cases |
+| internal `from_cwd` (ambient `resolve_from`) unchanged | `context::tests::from_cwd_absolute_path_is_preserved` / `from_cwd_relative_path_is_joined_to_ambient_cwd` (in-module unit tests, renamed with the function) |
+| consumers unchanged | Darkmatter and Claudine L1 counts identical to baseline |
+
+No test was added, removed, or retiered, so tier placement is unchanged.
+
+**Other operating systems.** Not cross-checked. The change is a pure rename:
+after it, the old names occur nowhere in the repository's Rust source, so no
+`#[cfg(windows)]` or Linux-only block can still call a removed name, and no
+path handling changed. CI's Linux leg and the post-merge Windows leg cover
+compilation.
+
+## Phase 3
+
+Phase 3 reintroduces `base_dir` on `FileResolutionContext` as the **tree
+root**, with an origin, and enforces it as a boundary on relative references.
+Rulings R2-R7 were applied as recorded (provisional, `yolo: true`).
+
+### Wave 1: model (`context.rs`, `error.rs`)
+
+- `pub enum BaseDirOrigin { Repository, Explicit, Vault, Home, Environment { name }, Fallback }`
+  (R5), re-exported from `file_reference` and the crate root. Accessors:
+  `base_dir()`, `base_dir_origin()`, `base_dir_is_boundary()` (false only for
+  `Fallback`), `external_relative_allowed()`. Builders: `with_base_dir(dir)`,
+  `allow_external_relative()` (R4).
+- Selection (`select_tree`): repository root (direct or catalog-selected) >
+  explicit > deepest containing vault (configured roots, then captured
+  `VAULT` paths; first wins a depth tie) > opening anchor > fallback to `cwd`.
+  Builders that change a selection input (`with_repository_root`,
+  `with_repository_scope_catalog`, `with_base_dir`, `add_vault`, `with_env`)
+  reselect. Constructors select too, so a captured `VAULT` containing `cwd`
+  already makes a vault tree. `new` now delegates to `from_snapshot`.
+- `repository_root()` is `Some` exactly when the selected tree is a repository,
+  except in a context that `validate()` rejects (see the catalog note below).
+- Errors (R2): `CwdOutsideBaseDir { base_dir, cwd }`,
+  `RelativeTreeEscape { base_dir, candidate, reference }`, and one the rulings
+  did not name: **`BaseDirNotRepositoryRoot { base_dir, repository_root }`**
+  for the spec's "`with_base_dir` inside a repository is `InvalidConfiguration`".
+  The spec's `InvalidConfiguration` is a `PortablePath` error (Phase 6); the
+  context has no configuration-error variant, and `with_base_dir` is an
+  infallible builder, so the conflict surfaces from `validate()` as a typed
+  variant. Classification: the two context errors are `MissingContext` (like
+  `RepositoryRootNotContainingSource`); `RelativeTreeEscape` is
+  `InvalidReference` (like `RepositoryEscape`).
+- `validate()`: explicit-vs-repository conflict, then the request `cwd`
+  against `request_tree`, then (unless trusted external) `cwd` against `tree`.
+  A repository tree reports `RepositoryRootNotContainingSource`; any other
+  boundary tree `CwdOutsideBaseDir`; a fallback tree contains everything.
+  Lexical containment (R6), unchanged from before.
+- **Request tree.** The context now stores `request_tree`, kept equal to `tree`
+  by builders until the first derivation and frozen afterwards. This is how a
+  trusted external derivation "validates the original request
+  independently" after it has dropped the source repository. Builders on a
+  derived context reselect only the document's tree.
+- **Derivation** (one private `derive` behind every `for_*`):
+  - normal (`for_source`, `for_cwd`, `for_source_reference`): a boundary tree
+    is kept unchanged even if the new `cwd` leaves it, so `validate()` reports
+    the escape; a fallback tree has nothing to keep, so a tree is selected for
+    the new `cwd` (catalog repository, containing vault, or the opening
+    anchor);
+  - trusted (`for_trusted_external_source`, `for_trusted_external_cwd`,
+    `for_trusted_external_source_reference` (R3)): if the new `cwd` is still
+    inside the current boundary tree it behaves like a normal derivation
+    (keeps the repository; Darkmatter's
+    `for_trusted_external_cwd(request_cwd())` relies on this). Otherwise it
+    drops the explicit root, recomputes scopes from the catalog or clears
+    repository/package/package-area, and selects a new tree. It never
+    discovers a repository. The launch `@` scope and the opt-in are copied
+    unchanged.
+- **Opening anchor** (`for_source_reference`): `~` gives the captured home;
+  a leading `{{VAR}}` (only parses as implicit relative) gives the captured
+  value. It must be absolute on this host and lexically contain the resolved
+  source (R6), else it supplies nothing. It ranks after a containing vault and
+  never replaces a tree that already contains the document.
+
+### Wave 2: boundary enforcement (`resolve.rs`)
+
+- One `Boundary<'_>` enum (`Repository { sigil, root }` / `Tree { base_dir }`)
+  and one `validate_lexical` / `validate_containment` pair replace
+  `validate_repository_lexical` / the body of `validate_repository_containment`
+  (kept as a thin wrapper for `FileReference::validate_repository_candidate`).
+  Only the escape error differs, so there is no second containment check.
+- The internal `ResolutionContext` gains `relative_boundary: Option<PathBuf>`,
+  `Some(base_dir)` only for a boundary tree without the opt-in. Ambient
+  contexts set `None`.
+- Seams: `build_candidates` (lexical check of **every** relative candidate
+  before probing, which is what `candidate_plan` sees), `build_search_roots`
+  (recursive: each root joined with the payload), `resolve_direct_core` and
+  `resolve_recursive_core` (real-landing check per candidate / root / match,
+  via `candidate_boundary`, which picks the repository rule for `&`/`^` and the
+  tree rule for effective `ExplicitRelative`/`ImplicitRelative`), and
+  `expand_completion` (implicit-relative roots; `CompletionAnchors` carries
+  `relative_boundary`). Effective `Absolute` (including an absolute
+  `{{VAR}}` expansion) is never checked.
+- `deepest_existing_ancestor` now treats `NotADirectory` like `NotFound`.
+  Without that, a candidate beneath a regular file (`blocker/x.md`) failed in
+  the new containment step instead of in the probe, which broke
+  `detailed_resolution::io_probe_failure_stops_with_typed_error_identifying_candidate`.
+- A **tree** root that does not exist skips the canonical step (the lexical
+  result stands). Nothing under a missing root can exist, so this loses no
+  protection. It keeps synthetic-path contexts and a dropped `TempDir` from
+  turning every relative miss into an `Io` error. The repository (`&`/`^`) rule
+  is unchanged and still reports `Io` for a missing repository root.
+
+**Decisions taken in this phase (not in the rulings):**
+
+1. **Ambient methods carry no tree.** `resolve()`, `resolve_from()`, and
+   `complete_partial()` have no `FileResolutionContext`, so they behave like a
+   fallback root (no boundary). Giving them one would need a live git
+   discovery for every relative reference, and the spec's tree model is
+   defined on the explicit context. The topic page says so.
+2. **All relative candidates are checked before any probe.** A bare reference
+   whose repository-root fallback candidate leaves the tree is rejected even
+   when its `cwd` candidate exists (`a/../../x.md` from `repo/docs`). This
+   matches the existing `^` behavior (every root checked up front) and the
+   spec's "never silently try another root", and it keeps `candidate_plan`
+   and resolution in agreement. Pinned by
+   `file_tree::an_escaping_repository_fallback_candidate_is_an_error_not_a_skipped_root`.
+3. **Catalog contexts are now strict on normal derivation.** Before, a
+   catalog-backed context derived (`for_source`/`for_cwd`) to a `cwd` outside
+   the catalog repository silently lost its repository and stayed valid. Now
+   the tree is kept and `validate()` fails with
+   `RepositoryRootNotContainingSource`, per "`cwd` must be inside `base_dir`
+   after normal derivation". This is the root cause of three Darkmatter
+   failures below.
+4. **Completion errors rather than filters.** An implicit-relative completion
+   token whose roots leave the tree returns `RelativeTreeEscape`, mirroring how
+   `&`/`^` completion already returns `RepositoryEscape`.
+5. `CandidatePlanOrder::AuthoringBaseFirst` was **not** renamed. "Authoring
+   base" now collides with `base_dir`, but the variant is public, used by
+   Darkmatter, and outside this phase's tasks. Phase 4 can rename it alongside
+   Darkmatter's own `base_dir` → `cwd` rename.
+
+### Wave 3: tests
+
+New file `biscuit-file/lib/tests/l1/file_tree.rs` (declared in
+`tests/l1/main.rs`; no tier marker, so it runs in L1; `just
+check-tier-coverage biscuit-file` reports 0 stranded). 25 tests.
+
+| Requirement | Test(s) |
+| ----------- | ------- |
+| Fallback when nothing names the tree; not a boundary | `without_any_tree_input_base_dir_is_a_fallback_to_cwd` |
+| Repository is the tree root; equal explicit root accepted (both builder orders, respelled) | `repository_root_is_the_tree_root_and_an_equal_explicit_root_is_accepted` |
+| Unequal explicit root inside a repository → `BaseDirNotRepositoryRoot` from `validate`, `resolve_detailed` (`MissingContext`), completion | `an_explicit_root_other_than_the_repository_root_is_a_configuration_error` |
+| Explicit beats vault; explicit equal to `cwd` is still a boundary | `an_explicit_root_outranks_a_containing_vault_and_is_a_boundary_even_at_cwd` |
+| Deepest vault wins; captured `VAULT` participates; configured roots win depth ties; non-containing vault supplies nothing | `the_deepest_containing_vault_wins_and_configured_roots_win_depth_ties` |
+| `~` opening anchor → `Home` tree; in-tree `../` resolves; leaving home is `RelativeTreeEscape` | `a_home_anchored_opening_reference_makes_home_the_tree_root` |
+| `{{NOTES}}` opening anchor → `Environment { name }` | `an_environment_anchored_opening_reference_makes_the_variable_the_tree_root` |
+| Unset / relative / foreign-host / non-containing env value, and `~` without home → no tree | `unset_relative_foreign_or_non_containing_anchors_supply_no_tree_root` |
+| Vault outranks the opening anchor | `a_containing_vault_outranks_the_opening_anchor` |
+| Anchor never replaces a tree that contains the document | `an_anchor_in_a_link_does_not_replace_a_tree_that_already_contains_the_document` |
+| `./../../x.md`, `../../x.md`, `a/../../../x.md` in a repository → `RelativeTreeEscape` with exact fields, through `resolve_in_context`, `resolve_detailed` (`InvalidReference`, no probes), `candidate_plan`; in-tree `../` still resolves | `relative_references_that_leave_a_repository_are_rejected` |
+| Escaping fallback candidate is an error, not a skipped root | `an_escaping_repository_fallback_candidate_is_an_error_not_a_skipped_root` |
+| Same boundary outside a repository with `with_base_dir` | `an_explicit_root_bounds_relative_references_outside_a_repository` |
+| Fallback root is not a boundary; ambient `resolve_from` unaffected; completion allowed | `a_fallback_tree_root_does_not_reject_relative_references` |
+| Opt-in permits escapes, copies to children, works in completion; does not excuse an invalid `cwd` or relax `&` | `the_reader_opt_in_permits_escaping_targets_and_survives_derivation` |
+| Absolute `{{VAR}}` expansion is not checked | `an_absolute_environment_expansion_is_not_held_to_the_boundary` |
+| `&`/`^` stay repository-only with an explicit root | `repository_sigils_stay_repository_only_with_an_explicit_root` |
+| Recursive relative search cannot start outside the tree | `recursive_relative_searches_cannot_start_outside_the_tree` |
+| Completion does not offer escaping relative roots; in-tree roots unchanged | `completion_does_not_offer_escaping_relative_roots` |
+| Symlink/junction (R7): in-tree allowed; out-of-tree rejected for an existing target, a bare reference, a not-yet-created target, and completion; lexical plan cannot see it; opt-in and fallback permit | `the_boundary_follows_directory_links_to_where_they_land` |
+| `for_source`/`for_cwd` keep tree, origin, launch scope; self-derivation is a no-op on the tree (Darkmatter `detect.rs`); leaving the tree is `CwdOutsideBaseDir` | `normal_derivation_keeps_the_tree_its_origin_and_the_launch_scope` |
+| Derivation from a fallback selects a vault or follows `cwd` | `derivation_from_a_fallback_tree_selects_a_tree_for_the_new_document` |
+| Trusted external drops repository/package/area, keeps launch `@`, takes the `~` anchor, drops the explicit root, accepts explicit destination state | `trusted_external_derivation_drops_source_anchors_but_keeps_the_launch_scope` |
+| Trusted external never discovers a repository (destination inside a real git worktree); a catalog that contains the destination supplies it | `trusted_external_derivation_uses_a_catalog_repository_and_never_discovers_one` |
+| Missing tree root is checked lexically (no `Io`) | `a_tree_root_that_does_not_exist_is_checked_lexically` |
+
+R7: the symlink test uses directory links only: a symlink on Unix, a junction
+(`mklink /J`, no privilege) on Windows. No file symlink is needed, so nothing is
+skipped.
+
+Load-bearing check: with `relative_boundary` forced to `None`, 8 or more of the
+new tests failed (fail-fast stopped the run early). Reverted.
+
+**Regression: existing tests changed for deliberate behavior changes**
+(all in `tests/l1/resolution_context.rs`):
+
+- `external_source_requires_explicit_trust`: a trusted external child no
+  longer falls back to the launch repository for bare `shared.md`. It now
+  asserts `repository_root() == None` and `Ok(None)`.
+- `valid_request_supports_in_repo_and_explicit_trusted_external_derivations`:
+  same change for the external child, plus a new assertion that an
+  *in-repository* trusted derivation keeps the repository and still resolves
+  `shared.md`.
+- `normal_derivation_reenables_containment_after_trusted_external_derivation`:
+  the external document now gets its own tree. The test uses a vault so that
+  tree is a boundary, and asserts that a nested derivation inside the vault is
+  valid and one outside it fails with `CwdOutsideBaseDir`. Before, it asserted
+  the launch repository still bounded the external document.
+
+No existing test relied on an in-repository `./../../outside.md` resolving.
+
+### Checkpoint 3
+
+| Area | `just test` (L1) | `just test-l2` | `just lint` | vs baseline |
+| ---- | ---------------- | -------------- | ----------- | ----------- |
+| biscuit-file (macOS) | 885 run, 885 passed; 6 doctests passed | not applicable (stub) | clean | +25 new tests |
+| biscuit-file (`just cross-check --os linux`) | 822 run, 822 passed | n/a | n/a | includes all 24 `file_tree` tests at that time |
+| biscuit-file (`just cross-check --os windows`, native) | 828 run, 828 passed | n/a | n/a | includes all 24 `file_tree` tests at that time (junction path) |
+| claudine (`--no-fail-fast`) | 8071 run, 8070 passed, 1 failed, 9 skipped | 277 + 3 run, all passed | not rerun | identical; the failure is the pre-existing host-dependent `compose_magic_does_not_emit_a_nested_file_without_its_scope` |
+| darkmatter | 8726 run, 8720 passed, **6 failed**, 12 skipped (full rerun after the final change) | 18 + 69 + 3 run, all passed | not rerun | 6 new failures (fallout, below) |
+
+`cargo check --workspace --all-targets` is clean (no errors, no warnings).
+The cross-checks ran before `a_tree_root_that_does_not_exist_is_checked_lexically`
+and the missing-root change were added. That change is platform-neutral
+(`ErrorKind::NotFound` from `dunce::canonicalize`), so it was not re-run
+remotely.
+
+**Claudine compile fix (in this phase).** Adding three `FileReferenceError`
+variants broke Claudine's deliberately exhaustive
+`file_reference_failure_slug` (`claudine/lib/src/harness/error.rs`) and its
+mirror test (`harness/error/tests.rs`). Both now map `CwdOutsideBaseDir` and
+`BaseDirNotRepositoryRoot` to `missing_context` (like
+`RepositoryRootNotContainingSource`) and `RelativeTreeEscape` to
+`permission_io` (like `RepositoryEscape`), and the test samples include all
+three. Without this the workspace did not compile, so it could not wait for
+Phase 7. Phase 7 may revisit the slug if Claudine wants a dedicated one.
+
+**Darkmatter fallout (fixes belong to Phase 4; not changed here):**
+
+| Test | Root cause | Category |
+| ---- | ---------- | -------- |
+| `markdown::schemas::format::tests::eager_file_validation_reuses_request_repository` | `for_trusted_external_cwd(nested_repo/docs)` outside the request repository now drops the repository; bare `spec.md` no longer falls back to the request repository root → `NoMatch` | spec: trusted external drops source anchors |
+| `markdown::schemas::rewrite::tests::eager_rewrite_uses_request_repository_instead_of_rediscovering_from_child` | same (`for_trusted_external_cwd(child_base)`) | spec: trusted external drops source anchors |
+| `markdown::compose::expression::functions::repository::tests::valid_misses_are_empty_strings` | `package("../../outside/…")` from `repo/docs` is now `RelativeTreeEscape` → "invalid file path" instead of an empty-string miss | spec: boundary; Phase 4 "Handle the new boundary errors" decides the mapping |
+| `darkmatter::l1 expression_regression::regression_basename_in_interpolation` | a document with no path gets `for_cwd(".")` (a relative cwd) from a catalog-backed request; `.` is outside the repository tree → `RepositoryRootNotContainingSource` | decision 3 (catalog strictness) exposing a relative-cwd derivation in Darkmatter |
+| `darkmatter::l1 expression_regression::regression_page_block_with_is_indexed_file` | same | same |
+| `darkmatter-cli::l1 compose_transclusion::test_compose_link_transcluded_child` | `transclusion/resolver.rs` canonicalizes the child path (`/private/var/…` on macOS) and derives `for_source(canonical)` from a request whose tree is spelled `/var/…`; the derived cwd is lexically outside the tree, so link normalization fails and keeps `./sibling.md`. Reproduced by hand: `md compose` from the `/var` spelling keeps the link, from the `pwd -P` spelling it normalizes | decision 3; Darkmatter mixes canonical and lexical spellings |
+
+A seventh failure from the first run,
+`functions::repository::tests::uncaptured_repository_observation_is_fatal`,
+was caused by its fixture dropping the `TempDir` before resolving (the tree
+root no longer existed). The missing-root rule above fixed it; it now passes.
+
+### Other operating systems
+
+The change touches path containment, so Linux and native Windows were run
+with `just cross-check` (results above). Windows exercised the junction branch
+of the new symlink test and the `NotADirectory` change. WSL2 was not run: the
+code has no WSL-specific branch, and the nightly leg covers it.

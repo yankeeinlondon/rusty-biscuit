@@ -10,7 +10,62 @@ source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
-packages: []
+source_files_during_phase_2:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/schemas/detect.rs
+  - darkmatter/lib/src/markdown/schemas/file_match.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/schema/supplied.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/invocation_context/tests.rs
+  - claudine/cli/src/commands/schema_interactive/supplied.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+docs_updated_during_phase_2:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/tech-spec/file-reference-struct.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_3:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/tests/l1/file_tree.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/harness/error/tests.rs
+docs_updated_during_phase_3:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/tech-spec/file-reference-struct.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+  - .claude/skills/biscuit-file/references/file-references.md
+  - .claude/skills/biscuit-file/SKILL.md
+packages:
+  - biscuit-file
+  - darkmatter
+  - claudine
+  - claudine-cli
 ---
 
 # Plan: Portable Paths (`PortablePath`) and the File-Tree Model
@@ -160,7 +215,7 @@ Prerequisite: Phase 1 inventory.
 
 ### Wave 1: biscuit-file (single agent, sequential edits)
 
-- [ ] **Rename public API.** In `context.rs` (and `mod.rs`, `resolve.rs`,
+- [x] **Rename public API.** In `context.rs` (and `mod.rs`, `resolve.rs`,
   `fetch.rs`): `base_dir()` to `cwd()`, `for_base` to `for_cwd`,
   `for_trusted_external_base` to `for_trusted_external_cwd`,
   `request_base_dir()` to `request_cwd()`, parameter names in `new` and
@@ -170,13 +225,13 @@ Prerequisite: Phase 1 inventory.
   a tree root). Do not add the new `base_dir` yet; no `base_dir` identifier
   may remain on the context during this phase so a missed site fails to
   compile.
-- [ ] **Align the internal resolver naming.** The resolver's internal
+- [x] **Align the internal resolver naming.** The resolver's internal
   `ResolutionContext` already says `cwd`; remove any remaining translation
   layer so there is one name.
-- [ ] **Update biscuit-file tests, examples, doc comments.** The 7 L1 test
+- [x] **Update biscuit-file tests, examples, doc comments.** The 7 L1 test
   files, doctests, and `///` examples. Audit each `new(...)` and
   `from_snapshot(...)` argument.
-- [ ] **Verify neutrality.** `just test`, `just test-l2`, `just lint` in
+- [x] **Verify neutrality.** `just test`, `just test-l2`, `just lint` in
   `biscuit-file`; the diff of tests must be rename-only.
 
 ### Wave 2: consumers (parallel subagents, one per area; all depend on Wave 1)
@@ -184,14 +239,14 @@ Prerequisite: Phase 1 inventory.
 Each subagent: rename call sites, audit constructor arguments against the
 Phase 1 classification, run that area's `just test` and `just lint`.
 
-- [ ] **Darkmatter.** `darkmatter/lib`, `darkmatter/cli`
+- [x] **Darkmatter.** `darkmatter/lib`, `darkmatter/cli`
   (compose, context/capture, expression, reference, schemas, link
   resolution). Do **not** rename Darkmatter's own `ResolutionContext` fields
   yet (that is Phase 4); only adapt calls into `biscuit-file`.
-- [ ] **Claudine library and CLI.** `claudine/lib`, `claudine/cli`
+- [x] **Claudine library and CLI.** `claudine/lib`, `claudine/cli`
   (composition, harness, system_prompt, invocation_context, completion,
   commands), `claudine/gen`.
-- [ ] **Claudine rendezvous daemon and remaining.** `claudine/rendezvous/daemon`
+- [x] **Claudine rendezvous daemon and remaining.** `claudine/rendezvous/daemon`
   (src, examples, tests) and `research`, `worktree` if they call the renamed
   API (verify; ignore unrelated `base_dir` identifiers).
 
@@ -209,7 +264,7 @@ Prerequisite: Phase 2 complete; rulings R2-R7.
 
 ### Wave 1: model (sequential; touches the same struct)
 
-- [ ] **Tree root + origin on the context.** Add `base_dir()`,
+- [x] **Tree root + origin on the context.** Add `base_dir()`,
   `base_dir_origin()`, `base_dir_is_boundary()`, `with_base_dir(dir)`.
   Selection order (spec precedence): supplied/discovered repository root
   (when it contains the document) > explicit `with_base_dir` > containing
@@ -222,11 +277,11 @@ Prerequisite: Phase 2 complete; rulings R2-R7.
     `with_repository_root`, and later on `PortablePath`).
   - explicit contexts never discover repositories; ambient preparation
     (`from_ambient`/`from_base`) may.
-- [ ] **Containment validation.** `cwd` must be inside `base_dir` after normal
+- [x] **Containment validation.** `cwd` must be inside `base_dir` after normal
   derivation, using the new non-repository error (R2); trusted external
   derivations remain the escape hatch. Keep `RepositoryRootNotContainingSource`
   for repositories.
-- [ ] **Derivation rules.** `for_source` / `for_cwd` preserve `base_dir`, its
+- [x] **Derivation rules.** `for_source` / `for_cwd` preserve `base_dir`, its
   origin, captured process state, and the launch `@` scope; an anchor in a
   link does not replace the tree when the document is already inside it.
   Trusted external derivation validates the original request independently,
@@ -234,51 +289,51 @@ Prerequisite: Phase 2 complete; rulings R2-R7.
   vault/home/environment anchor, else new cwd), drops source repository,
   package, and package-area anchors when no catalog contains the document,
   keeps launch `@` scope, never discovers another repository.
-- [ ] **Provenance-carrying derivation.** Add
+- [x] **Provenance-carrying derivation.** Add
   `for_source_reference(&FileReference, resolved_source)` and the trusted
   counterpart (R3). They do not re-resolve and grant no permission to open the
   file. Only a captured absolute home/env anchor that contains the resolved
   source qualifies (relative, unset, or foreign-host values supply no root;
   environment portability policy does not affect this).
-- [ ] **Reader opt-in.** Add `allow_external_relative()` (R4); copied during
+- [x] **Reader opt-in.** Add `allow_external_relative()` (R4); copied during
   child derivation; permits relative targets (and symlink escapes) outside the
   tree but not invalid requests/cwd, file access, or repository sigils.
 
 ### Wave 2: boundary enforcement (depends on Wave 1; sequential through the one seam found in Phase 1)
 
-- [ ] **Shared boundary decision.** One function applied to the resolver's
+- [x] **Shared boundary decision.** One function applied to the resolver's
   *effective relative kind* after interpolation, including bare
   repository-fallback candidates. Candidate planning, `resolve_detailed`,
   convenience APIs, and completion all call it. A blocked candidate is
   `RelativeTreeEscape { base_dir, candidate, reference }`, never a missing
   file and never a silent try-another-root. Absolute environment expansions
   are unaffected.
-- [ ] **Real-landing check.** Reuse the existing `&`/`^` containment code
+- [x] **Real-landing check.** Reuse the existing `&`/`^` containment code
   (lexical, then canonical of the existing target or deepest existing
   ancestor); do not write a second one. In-tree symlinks work; symlink,
   junction, or reparse point leading out is `RelativeTreeEscape`.
-- [ ] **Fallback exception.** When `base_dir_is_boundary()` is false, resolution
+- [x] **Fallback exception.** When `base_dir_is_boundary()` is false, resolution
   does not reject relative references (today's behavior).
-- [ ] **Completion.** Do not suggest escaping relative links when the opt-in
+- [x] **Completion.** Do not suggest escaping relative links when the opt-in
   is off; recursive relative searches keep the no-directory-symlink contract.
-- [ ] **Sigils unchanged.** `&`/`^` still fail with `OutsideRepository`
+- [x] **Sigils unchanged.** `&`/`^` still fail with `OutsideRepository`
   outside a repository even when `base_dir` is supplied; `RepositoryEscape`
   intact.
 
 ### Wave 3: tests (parallel subagents, one per concern; all depend on Wave 2)
 
-- [ ] **Selection precedence tests.** Each rung of the order wins over the
+- [x] **Selection precedence tests.** Each rung of the order wins over the
   rungs beneath it; explicit beats vault; repo beats explicit with the equal-
   and unequal-directory cases; overlapping vaults; `~` and `{{NOTES}}` anchored
   documents; unset/relative/foreign-host env supplies no root.
-- [ ] **Boundary tests.** `./../../x.md`, `a/../../x.md`, in- and
+- [x] **Boundary tests.** `./../../x.md`, `a/../../x.md`, in- and
   out-of-repository; fallback not a boundary; opt-in on/off; completion.
-- [ ] **Symlink tests** (R7). In-tree allowed, out-of-tree rejected, not-yet-
+- [x] **Symlink tests** (R7). In-tree allowed, out-of-tree rejected, not-yet-
   created target via deepest existing ancestor, opt-in permits.
-- [ ] **Derivation tests.** `for_source` preserves tree; `for_source_reference`
+- [x] **Derivation tests.** `for_source` preserves tree; `for_source_reference`
   with `~`/`{{VAR}}`; trusted external drops repository/package anchors but
   keeps launch `@`; no repository discovery.
-- [ ] **Regression.** Existing biscuit-file suites remain green except for
+- [x] **Regression.** Existing biscuit-file suites remain green except for
   deliberate behavior change: update tests that relied on an in-repository
   `./../../outside.md` resolving, and note each one in the log.
 

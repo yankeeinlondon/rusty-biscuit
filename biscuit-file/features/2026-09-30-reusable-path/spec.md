@@ -28,29 +28,44 @@ reviewed_on: "2026-09-30"
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 1 (rulings, audits, baseline) is complete; it changed no source code.
-  Read the "Rulings" and "Phase 1" sections of implementation-log.md before
-  starting Phase 2. Key points:
+  Phase 3 (tree root + boundary in biscuit-file) is complete; read the
+  "Phase 3" section of implementation-log.md, especially "Decisions taken in
+  this phase" and the Darkmatter fallout table. Key points for Phase 4:
 
-  - R1-R11 were adopted as the plan recommended, as *provisional* working
-    rulings (non-interactive session, plan has yolo: true). None gates Phase 2.
-  - Every FileResolutionContext constructor / for_base argument in the repo is
-    a document (cwd) directory; there is no tree-root intent anywhere, so the
-    Phase 2 rename is purely mechanical.
-  - messenger/lib/src/research/load.rs is a genuine FileResolutionContext
-    consumer; the plan listed messenger as unrelated. Compile it in Phase 2.
-  - Do NOT rename every `.base_dir()` by text search: claudine's SourceContext
-    and ResolutionDetail also have base_dir() methods. The log lists exactly
-    which call sites belong to FileResolutionContext / DetailedResolution.
-  - Names the plan's rename table omits: is_trusted_external_authoring_base()
-    (+ field), internal ResolutionContext::from_base, CompletionAnchors.base,
-    and cwd-meaning parameter names on resolve_from / complete_partial /
-    resolve_relative. Decide and log how they are handled.
-  - Baseline: one pre-existing claudine L1 failure
-    (completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope),
-    caused by the host's real ~/.claudine/prompts/plan.md leaking into the
-    test. claudine's `just test` fails fast; use `just test --no-fail-fast`
-    to compare counts (8071 run / 8070 passed / 1 failed / 9 skipped).
+  - FileResolutionContext now has base_dir(), base_dir_origin()
+    (BaseDirOrigin::{Repository, Explicit, Vault, Home, Environment{name},
+    Fallback}), base_dir_is_boundary(), with_base_dir(), allow_external_relative()
+    / external_relative_allowed(), for_source_reference(&FileReference,
+    resolved) and for_trusted_external_source_reference(..). New errors:
+    CwdOutsideBaseDir, BaseDirNotRepositoryRoot (the context's form of the
+    spec's "InvalidConfiguration"), RelativeTreeEscape.
+  - Darkmatter L1 has 6 failures caused by the deliberate behavior change;
+    Phase 4 owns them (none were changed in Phase 3):
+      * schemas/format.rs and schemas/rewrite.rs tests: for_trusted_external_cwd
+        outside the request repository now drops the repository (spec), so a
+        bare `spec.md` no longer falls back to the request repo root.
+      * expression/functions/repository.rs valid_misses_are_empty_strings:
+        `../../outside/...` is now RelativeTreeEscape, not a miss.
+      * expression_regression x2: a pathless document derives for_cwd(".")
+        (relative cwd) from a catalog-backed request; normal derivation outside
+        the tree is now invalid (RepositoryRootNotContainingSource).
+      * darkmatter-cli compose_transclusion::test_compose_link_transcluded_child:
+        transclusion/resolver.rs canonicalizes the child path (/private/var on
+        macOS) then calls for_source on it while the request tree is spelled
+        /var/...; the derived cwd is lexically outside the tree. Derive from the
+        lexical resolved path (ideally via for_source_reference), canonicalize
+        only for transclusion identity.
+  - Catalog-backed contexts are now strict: a normal derivation to a cwd
+    outside the catalog repository fails validate() instead of silently
+    dropping the repository. Use the trusted-external derivations for that.
+  - Ambient resolve()/resolve_from()/complete_partial() carry no tree (no
+    boundary), by decision; only explicit contexts enforce it.
+  - Claudine: only harness/error.rs (+ tests) changed, to map the 3 new
+    variants (it did not compile otherwise). Claudine L1 is identical to
+    baseline (8070 passed, 1 known host-dependent failure, 9 skipped).
+  - CandidatePlanOrder::AuthoringBaseFirst was not renamed; "authoring base"
+    now collides with base_dir. Cheap to rename with Darkmatter's own
+    base_dir -> cwd rename in Phase 4.
 ---
 
 # Portable Paths
