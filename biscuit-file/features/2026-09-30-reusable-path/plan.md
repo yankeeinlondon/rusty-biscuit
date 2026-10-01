@@ -61,9 +61,73 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/biscuit-file/references/file-references.md
   - .claude/skills/biscuit-file/SKILL.md
+source_files_during_phase_4:
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/nested.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - darkmatter/lib/tests/l1/file_tree_roots.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/invocation_context/tests.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/sequence.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/transclusion/block-transclusion.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - claudine/docs/topics/composition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/os/build-hosts.md
+source_files_during_phase_5:
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/text.rs
+  - biscuit-file/lib/src/file_reference/portable/text/tests.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/lib.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+docs_updated_during_phase_5:
+  - biscuit-file/README.md
+  - biscuit-file/docs/topics/file-references.md
+  - darkmatter/docs/inline/link-normalization.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
 packages:
   - biscuit-file
   - darkmatter
+  - darkmatter-cli
   - claudine
   - claudine-cli
 ---
@@ -350,25 +414,25 @@ opening reference. Prerequisite: Phase 3; ruling R8.
 
 ### Wave 1 (sequential within Darkmatter)
 
-- [ ] **Two-step rename inside Darkmatter.** In
+- [x] **Two-step rename inside Darkmatter.** In
   `expression/resolve_ctx.rs`: current `base_dir` to `cwd` (audit constructors),
   then `base_dir` as tree root sourced from the request's
   `FileResolutionContext` (no re-derivation of rules). Check R8 first.
-- [ ] **Use `for_source_reference`.** Switch compose, transclusion, and
+- [x] **Use `for_source_reference`.** Switch compose, transclusion, and
   reference code that derives from a resolved path
   (`for_source`, `for_trusted_external_source`) to the opening-reference
   variants where the opening `FileReference` is available, so `~`/`{{VAR}}`
   anchors survive.
-- [ ] **Handle the new boundary errors.** Map `RelativeTreeEscape` and the
+- [x] **Handle the new boundary errors.** Map `RelativeTreeEscape` and the
   non-repository containment error into Darkmatter's own error vocabulary
   (`Arc<FileReferenceError>` today).
 
 ### Wave 2: tests and fallout (parallel)
 
-- [ ] **Darkmatter tests.** Update/add tests for boundary behavior and
+- [x] **Darkmatter tests.** Update/add tests for boundary behavior and
   anchored-document tree roots (`::file ~/Downloads/a.md`,
   `::file {{NOTES}}/inbox/a.md`).
-- [ ] **Claudine fallout.** Claudine external prompts opened as
+- [x] **Claudine fallout.** Claudine external prompts opened as
   `~/.claudine/prompts/x.md` must get `~` as tree root; fix any Claudine
   call sites broken by the boundary; add a test for that case.
 
@@ -384,21 +448,21 @@ Prerequisite: Phase 1 `ComparisonKey` audit. Can start as soon as Phase 2 is
 done (it does not depend on the boundary work), so it runs **in parallel with
 Phases 3 and 4** if capacity allows; Phase 6 requires it.
 
-- [ ] **Internal `path_identity` module** in `biscuit-file` (R9): component-
+- [x] **Internal `path_identity` module** in `biscuit-file` (R9): component-
   based normalization (`.`/`..` collapse without walking above a root),
   whole-component prefix test, lossless OS-string components, separate roots
   for different drives/UNC shares, verbatim-prefix handling only where the
   existing safe simplification permits, never reinterpreting literal verbatim
   dot segments. No canonicalization, no case-folding, no symlink aliasing.
-- [ ] **Relative-path computation** from `cwd` to target (component-based),
+- [x] **Relative-path computation** from `cwd` to target (component-based),
   returning `None` across roots (Windows drives/shares).
-- [ ] **Migrate Darkmatter** `ComparisonKey` consumers onto it; delete the
+- [x] **Migrate Darkmatter** `ComparisonKey` consumers onto it; delete the
   private copy.
-- [ ] **Text rendering seam.** Wrapper that renders via `try_portable_string`
+- [x] **Text rendering seam.** Wrapper that renders via `try_portable_string`
   and rejects spellings that change native components or introduce grammar
   (`{{VAR}}` in a literal filename, leading sigil in a bare filename), and
   returns `UnrenderableTarget` for non-Unicode paths.
-- [ ] **Tests.** `/opt/config` vs `/opt/config-old`; `..` handling; Windows
+- [x] **Tests.** `/opt/config` vs `/opt/config-old`; `..` handling; Windows
   drives, UNC, verbatim and literal dot segments (portable fixtures that run
   on every OS by feeding strings to a Windows-flavored comparison where the
   implementation allows it, otherwise `#[cfg(windows)]` with a note per the
@@ -550,7 +614,7 @@ Prerequisite: Phase 6.
 - [ ] **Opt-in for cleanup reads.** A cleanup that must read older escaping
   links uses an opted-in context (reader opt-in) while keeping the strict
   default output strategy; no silent opt-in for arbitrary inputs.
-- [ ] **Darkmatter tests.** Cover rewrite, preservation, idempotence run
+- [x] **Darkmatter tests.** Cover rewrite, preservation, idempotence run
   twice, environment names, suffix handling.
 
 ### Wave 2: Claudine (parallel with Wave 1; disjoint area)

@@ -28,44 +28,44 @@ reviewed_on: "2026-09-30"
 review_iterations: 0
 human_review: false
 message_to_agent: |-
-  Phase 3 (tree root + boundary in biscuit-file) is complete; read the
-  "Phase 3" section of implementation-log.md, especially "Decisions taken in
-  this phase" and the Darkmatter fallout table. Key points for Phase 4:
+  Phase 5 (path identity) is complete; read the "Phase 5" section of
+  implementation-log.md. Key points for Phase 6 (PortablePath core):
 
-  - FileResolutionContext now has base_dir(), base_dir_origin()
-    (BaseDirOrigin::{Repository, Explicit, Vault, Home, Environment{name},
-    Fallback}), base_dir_is_boundary(), with_base_dir(), allow_external_relative()
-    / external_relative_allowed(), for_source_reference(&FileReference,
-    resolved) and for_trusted_external_source_reference(..). New errors:
-    CwdOutsideBaseDir, BaseDirNotRepositoryRoot (the context's form of the
-    spec's "InvalidConfiguration"), RelativeTreeEscape.
-  - Darkmatter L1 has 6 failures caused by the deliberate behavior change;
-    Phase 4 owns them (none were changed in Phase 3):
-      * schemas/format.rs and schemas/rewrite.rs tests: for_trusted_external_cwd
-        outside the request repository now drops the repository (spec), so a
-        bare `spec.md` no longer falls back to the request repo root.
-      * expression/functions/repository.rs valid_misses_are_empty_strings:
-        `../../outside/...` is now RelativeTreeEscape, not a miss.
-      * expression_regression x2: a pathless document derives for_cwd(".")
-        (relative cwd) from a catalog-backed request; normal derivation outside
-        the tree is now invalid (RepositoryRootNotContainingSource).
-      * darkmatter-cli compose_transclusion::test_compose_link_transcluded_child:
-        transclusion/resolver.rs canonicalizes the child path (/private/var on
-        macOS) then calls for_source on it while the request tree is spelled
-        /var/...; the derived cwd is lexically outside the tree. Derive from the
-        lexical resolved path (ideally via for_source_reference), canonicalize
-        only for transclusion identity.
-  - Catalog-backed contexts are now strict: a normal derivation to a cwd
-    outside the catalog repository fails validate() instead of silently
-    dropping the repository. Use the trusted-external derivations for that.
-  - Ambient resolve()/resolve_from()/complete_partial() carry no tree (no
-    boundary), by decision; only explicit contexts enforce it.
-  - Claudine: only harness/error.rs (+ tests) changed, to map the 3 new
-    variants (it did not compile otherwise). Claudine L1 is identical to
-    baseline (8070 passed, 1 known host-dependent failure, 9 skipped).
-  - CandidatePlanOrder::AuthoringBaseFirst was not renamed; "authoring base"
-    now collides with base_dir. Cheap to rename with Darkmatter's own
-    base_dir -> cwd rename in Phase 4.
+  - Use `biscuit_file::PathIdentity` (file_reference/portable/path_identity.rs)
+    for every prefix test and relative route. `relative_from(dir)` treats
+    `dir` as a directory and returns None across roots; `RelativeRoute` keeps
+    `parent_hops` apart from `forward` names (a verbatim path can hold a
+    literal `..` name), so do not join them before rendering.
+  - Render every generated reference through the crate-internal seam
+    `portable::text::{render_reference(Lead, names), render_absolute(path)}`.
+    Map `TextRejection::Unrenderable` -> `PortablePathError::UnrenderableTarget`
+    (it is checked before anything else, also for AbsolutePath);
+    `GrammarMismatch` / `ChangesComponents` mean "this strategy's spelling is
+    unsafe", so record them in the attempt and try the next strategy. The seam
+    already re-parses text with the reference parser and checks the kind, `%`,
+    and interpolation; still resolve/verify the candidate as the spec requires.
+    `Lead::Bare` rejects a leading sigil; `Lead::Relative { parent_hops: 0 }`
+    gives `./x` and protects it. `Lead::Env(name)` gives `{{NAME}}/x`.
+  - `portable/mod.rs` and `PathIdentity::is_unanchored` carry
+    `#[cfg_attr(not(test), expect(dead_code, ...))]`; once Phase 6 calls the
+    seam the `expect` becomes unfulfilled and fails the build: delete those
+    attributes then.
+  - Put the new submodules (`strategy`, `env_anchor`, `diagnostics`,
+    `evaluate`) under file_reference/portable/ per R9 and re-export from
+    file_reference/mod.rs and lib.rs.
+  - The resolver's own containment/dedupe still uses
+    `resolve::normalize_components` + `Path::starts_with` (collapses `..` even
+    under `\\?\`, confirmed on native Windows). That governs what is allowed;
+    PathIdentity governs which spelling is preferred. Do not merge them.
+  - Darkmatter keeps `survives_namespace_removal` in link_normalization.rs
+    until Phase 7 replaces that stage; the same rule now also exists as
+    `portable::text::survives_without_verbatim_prefix` in biscuit-file. Phase 7
+    should delete the Darkmatter copy along with the stage.
+  - Still open from Phase 4: Darkmatter evaluates `{{ ... }}` in a composed
+    body, so an emitted `{{NOTES}}/x.md` link must be escaped (`{{{NOTES}}}`)
+    by Darkmatter in Phase 7; native Windows still has the 7 pre-existing
+    Darkmatter L1 failures; CandidatePlanOrder::AuthoringBaseFirst is still not
+    renamed.
 ---
 
 # Portable Paths

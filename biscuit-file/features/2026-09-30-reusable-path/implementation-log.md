@@ -58,9 +58,73 @@ docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
   - .claude/skills/biscuit-file/references/file-references.md
   - .claude/skills/biscuit-file/SKILL.md
+source_files_during_phase_4:
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/nested.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - darkmatter/lib/tests/l1/file_tree_roots.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/invocation_context/tests.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/sequence.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/transclusion/block-transclusion.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - claudine/docs/topics/composition.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/compose.md
+  - .claude/skills/os/build-hosts.md
+source_files_during_phase_5:
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/text.rs
+  - biscuit-file/lib/src/file_reference/portable/text/tests.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/src/lib.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+docs_updated_during_phase_5:
+  - biscuit-file/README.md
+  - biscuit-file/docs/topics/file-references.md
+  - darkmatter/docs/inline/link-normalization.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/api.md
+  - .claude/skills/biscuit-file/references/architecture.md
 packages:
   - biscuit-file
   - darkmatter
+  - darkmatter-cli
   - claudine
   - claudine-cli
 ---
@@ -812,3 +876,340 @@ The change touches path containment, so Linux and native Windows were run
 with `just cross-check` (results above). Windows exercised the junction branch
 of the new symlink test and the `NotADirectory` change. WSL2 was not run: the
 code has no WSL-specific branch, and the nightly leg covers it.
+
+## Phase 4
+
+Darkmatter's expression `ResolutionContext` now uses the same two terms as
+`FileResolutionContext`, documents derive their context from the reference
+that opened them, and the six Phase 3 fallout failures are resolved.
+
+**R8:** `2026-09-30-file-refs-use-magic` has **not** landed (its spec is still
+`draft-spec`; no implementation commits). Phase 4 builds on the current
+vocabulary. Whichever lands second must keep `cwd` / `base_dir()` as defined
+here and must not reintroduce `ResolutionContext.base_dir` as the document
+directory.
+
+### Wave 1: rename, provenance, errors
+
+**Step 1, rename (behavior-neutral).** `ResolutionContext.base_dir` →
+`cwd`. The compiler found 36 field uses; every one read it as the document
+directory (audited by hand). Every `ResolutionContext::new(..)` argument in
+Darkmatter and Claudine (about 90, mostly tests) is a document directory, so
+`new(cwd)` keeps its positional meaning. The same rename applied to:
+
+- `FileReferenceDiagnostic.base_dir` → `cwd` (it was filled from the
+  document directory). Claudine's JSON detail **keeps the published key
+  `base_dir`** (`composition/error/render/mod.rs`, now with a comment). Renaming
+  a wire key is a catalog change; left for Phase 7 or later if wanted.
+- parameter and local names in `resolve_ctx.rs` (`resolve_document_file_ref*`,
+  `resolve_document_directory`), `path_projection.rs` (test
+  `base_dir_relative_outside_repo` → `cwd_relative_outside_repo`, rename only),
+  `util.rs::document_resolution_context`, `link_resolve.rs`, and the
+  transclusion resolver.
+
+**Step 2, tree root.** `ResolutionContext::base_dir()` and
+`base_dir_origin()` read the tree root from the document's
+`FileResolutionContext` (`file_context()`); Darkmatter does not re-derive the
+rules. `repository_root` stays as the repository root, which is not always the
+tree root. The three helpers that derived a document context
+(`resolve_document_file_ref`, `_shape`, `resolve_document_directory`) now
+share one `document_file_context`. Only the first had the "snapshot already
+at this `cwd` → use it as is" shortcut; all three now have it, because
+`for_cwd` drops the source path and a trusted-external derivation.
+
+**`for_source_reference` adoption.**
+
+- New crate-private `SourceOpening { reference, resolved }` and the single
+  derivation rule `source_file_context(snapshot, path, derivation, opening)`
+  in `context/options.rs`. Every Darkmatter surface that derives a file
+  source's context goes through it: `ComposeOptions::source_file_resolution_context`
+  (expression and frontmatter contexts), the transclusion resolver,
+  `reference::resolve_transclusion_target`, and `link_resolve`.
+- `ComposeSource::File` **stays canonical**; it is the source's identity for
+  cycle detection, caches, and the pre-flight graph. `SourceOpening.resolved`
+  is the lexical path the parent's context produced. This is the fix for
+  `test_compose_link_transcluded_child`: the canonical `/private/var/…` child
+  no longer derives its context outside the `/var/…` tree. (Switching the
+  child path itself to lexical would have touched every canonical-identity
+  comparison in pre-flight; rejected.)
+- Plumbing: `ResolvedTarget::File` and `PreflightResolvedTarget::File` gain a
+  `resolved` field (both are public enums; `PreflightResolvedTarget::File` is
+  now a struct variant). `PreparedTransclusion::Markdown` carries `opening`;
+  `markdown_child_options` and `with_accepted_source_file` take
+  `Option<SourceOpening>`; `RootSource` is now a 3-tuple. Remote children and
+  `with_source_file` / `with_source_url` clear the opening. The reference
+  graph passes an opening for directive, prologue, and epilogue children;
+  TOC-linking and the validation re-entry points have no opening reference
+  and pass `None` (they derive from the path, as before).
+- The expression context's `cwd` now comes from the derived file context when
+  there is one, so the expression helpers and the file context spell it the
+  same way.
+- The child compose-cache key includes an opening hash: two directives
+  reaching the same file through `~/a.md` and `./a.md` can have different
+  tree roots.
+- `encode_file_resolution_context` (graph and compose-cache identity) now
+  encodes `base_dir`, `base_dir_origin`, and `external_relative_allowed`.
+  Phase 3 added them without updating the identity, so two snapshots that
+  differed only in `with_base_dir` shared a cache entry. `source_opening` is
+  classified and encoded in both products too.
+- **CLI root document:** `md compose` parses its input argument as a
+  `FileReference` and uses `for_source_reference` /
+  `for_trusted_external_source_reference`, so a quoted `"~/x.md"` argument can
+  supply the tree root.
+- **Pathless sources:** a string/stdin/URL source now uses the request
+  snapshot unchanged instead of `snapshot.for_cwd(".")`. The relative `.`
+  depended on the process directory and is lexically outside a catalog
+  repository, which caused both `expression_regression` failures. Same change
+  in the transclusion resolver's non-file branch.
+
+**Boundary errors.** `FileRefFailure::classify` maps `RelativeTreeEscape`,
+`CwdOutsideBaseDir`, and `BaseDirNotRepositoryRoot` explicitly to `NotFound`,
+the kind their repository counterparts (`RepositoryEscape`,
+`RepositoryRootNotContainingSource`) already get through the catch-all
+("understood, but no usable path"). The typed cause stays in
+`FileReferenceDiagnostic.source`. No new wire slug: the Claudine catalog locks
+the `kind` slugs, and a dedicated `outside_tree` kind is a later decision.
+Transclusion surfaces the typed `TransclusionError::FileReference(RelativeTreeEscape)`.
+
+### Wave 2: tests and fallout
+
+| Requirement | Test(s) | Where |
+| ----------- | ------- | ----- |
+| `::file ~/Downloads/a.md` → tree root `~`; in-tree `../b.md` composes; `../../outside.md` is `RelativeTreeEscape { base_dir: home }`; lenient mode shows a notice and warning and never reads the outside file | `file_tree_roots::a_home_anchored_document_resolves_within_home_and_cannot_leave_it` | darkmatter `tests/l1/file_tree_roots.rs` (new, declared in `main.rs`) |
+| `::file "{{NOTES}}/inbox/a.md"` → tree root `$NOTES`, same in/out cases | `file_tree_roots::an_environment_anchored_document_resolves_within_the_variable_and_cannot_leave_it` | same |
+| Control: same documents opened by absolute path have a fallback root, escape resolves | `file_tree_roots::the_same_document_opened_without_an_anchor_has_no_boundary` | same |
+| Anchor never replaces a containing repository tree | `file_tree_roots::an_anchor_inside_the_repository_keeps_the_repository_as_the_tree` | same |
+| Repository boundary for `./../../x`, `../../x`, `sub/../../../x`; in-tree `../shared.md` composes | `file_tree_roots::a_relative_link_that_leaves_the_repository_is_an_error` | same |
+| Normal `md compose` path, `{{{NOTES}}}` authoring form: in-tree composes; escape fails with the boundary message and never prints the outside file | `compose_transclusion::compose_env_anchored_child_is_bounded_by_the_variable` | darkmatter-cli `tests/l1/compose_transclusion.rs` |
+| `ResolutionContext::base_dir()` / `base_dir_origin()`: fallback, repository, `~` anchor | `resolve_ctx::tests::base_dir_is_the_tree_root_of_the_document_context` | darkmatter unit |
+| Tree root, opt-in, and opening participate in graph and compose-cache identity | `options::tests::file_tree_and_source_opening_participate_in_graph_and_cache_identity` | darkmatter unit |
+| `package()` / `package_area()` with an escaping `where` is a typed error, not a miss | `repository::tests::references_leaving_the_repository_tree_are_errors_not_misses` (the `../../outside/...` case moved out of `valid_misses_are_empty_strings`) | darkmatter unit |
+| Claudine: prompt opened as `~/.claudine/prompts/x.md` gets `~` as tree root; in-tree resolves; escape is `RelativeTreeEscape`; `derive_source` (no anchor) is a fallback | `invocation_context::tests::an_external_prompt_opened_through_home_takes_home_as_its_tree_root` | claudine unit (L1) |
+
+Load-bearing checks (each reverted afterwards):
+
+- `source_file_context` ignoring the opening: 4 of the 5 `file_tree_roots`
+  tests fail; the no-anchor control still passes.
+- the two new identity encodings short-circuited: the identity test fails.
+
+**Fallout tests changed for deliberate behavior** (spec: an external
+document's repository anchors are dropped; the launch repository stays
+reachable only through the launch `@` scope):
+
+- `schemas::format::tests::eager_file_validation_reuses_request_repository`
+  → `eager_file_validation_of_an_external_document_keeps_only_the_launch_scope`:
+  bare `spec.md` is now `NoMatch` (a decoy in the child repository proves no
+  rediscovery); `@spec.md` still reaches the request repository.
+- `schemas::rewrite::tests::eager_rewrite_uses_request_repository_instead_of_rediscovering_from_child`
+  → `eager_rewrite_uses_the_launch_scope_instead_of_rediscovering_from_child`:
+  `@spec.md` resolves to the request file, not the decoy; with no repository
+  for the external document the stored value is the full portable path, not
+  `spec.md`. The context uses `without_home_dir()` so Windows (temp under the
+  profile) does not render `~/…`.
+- `valid_misses_are_empty_strings`: escape case moved to its own test (above).
+- `expression_regression` ×2 and `test_compose_link_transcluded_child`: fixed by
+  code (pathless sources; `SourceOpening`), tests unchanged.
+
+**Claudine.** New `InvocationContext::derive_composition_source(&ResolvedCompositionSource)`:
+`derive_source` followed by `for_source_reference` with `original_ref` (a no-op
+on the tree when a repository contains the prompt). Used by `claudine compose`
+(`compose/prep.rs`) and `claudine sequence` (`commands/sequence.rs`). The
+proxy-handoff and task-run sites pass already-resolved paths and keep
+`derive_source`. No Claudine call site was broken by the boundary beyond the
+Phase 3 compile fix.
+
+### Finding: `{{VAR}}` in a Darkmatter body directive
+
+Darkmatter's interpolation stage evaluates `{{ … }}` before transclusion. In a
+full `md compose`, `::file "{{NOTES}}/inbox/a.md"` became `/inbox/a.md`
+(`NOTES` is an unknown expression name), so the environment anchor never
+reached the file reference. `{{{NOTES}}}` (the documented "emit a literal
+`{{ … }}`" form) works end to end and is pinned by the CLI test above. The `~`
+anchor is unaffected. This matters for Phase 7: if Darkmatter's link
+normalization starts *emitting* `{{VAR}}/…` links through `PortablePath`, a
+later compose of that output would evaluate them as expressions. Phase 7 must
+decide the emitted spelling for Darkmatter (for example the triple-brace form,
+or an escape) and test a compose → recompose round trip.
+
+### Checkpoint 4
+
+| Area | `just test` (L1) | `just test-l2` | `just lint` |
+| ---- | ---------------- | -------------- | ----------- |
+| darkmatter (macOS) | 8734 run, 8734 passed, 12 skipped (Phase 3: 6 failed) | 3 + 18 + 69 run, all passed | clean (exit 0) |
+| claudine (macOS) | 8072 run, 8071 passed, 1 failed, 9 skipped | 3 + 277 run, all passed | clean (exit 0; only the known macOS linker `__eh_frame` size note) |
+| biscuit-file (macOS) | 885 passed, 6 doctests passed (no source change this phase) | n/a (stub) | clean |
+| darkmatter (`just cross-check --os linux`, archive mode) | 7161 run, 7161 passed, 67 skipped | — | — |
+
+The Claudine failure is the pre-existing, host-dependent
+`compose_magic_does_not_emit_a_nested_file_without_its_scope` (same as the
+Phase 1 and Phase 3 baselines). `cargo check --workspace --all-targets` is
+clean. `just check-tier-coverage` reports 0 stranded tests for darkmatter and
+claudine. The CLI test and the docs were added after the Linux run started;
+the CLI test ran on macOS only.
+
+Linux host note: the first Linux run failed before testing on stale
+read-only kache links in this worktree's standing clone (373 files). Cleared
+with the command recorded in the `os` skill and reran; recorded there.
+
+### Other operating systems
+
+- **Linux** (`just cross-check darkmatter --os linux`, archive mode): 7161
+  run, 7161 passed, 67 skipped.
+- **Native Windows** (`just cross-check darkmatter --os windows`): 7132 run,
+  7125 passed, **7 failed**, 67 skipped. All seven also fail on Windows at the
+  committed Phase 3 state (`1d008f155`, run from a temporary detached worktree
+  with the same tests), so none is caused by Phase 4. Whether they predate the
+  feature branch was not checked; Darkmatter was not run on Windows before.
+  - `schemas::format::tests::resolve_file_reference_no_match_for_missing_absolute_path`
+    (`/tmp/…` is a foreign absolute path on Windows);
+  - `compose::tests::schema::schema_validation_integration::schema_number_increment_survives_quoted_persistence_round_trips`
+    (`dirname(spec) + '/review-…'` gives `/review-2.md`, a foreign absolute
+    path on Windows);
+  - five `compose::tests::lazy_roots::ambient_repository::*` tests
+    (repository discovery counted twice, and `current.current_package` empty).
+- The new tests (`file_tree_roots`, the identity and accessor unit tests)
+  passed on Linux and Windows. The Claudine test and the CLI end-to-end test
+  were added later and ran on macOS only; CI covers the other legs.
+- WSL2 not run: no WSL-specific code; the nightly leg covers it.
+- Remote filtersets: on the Windows leg a parenthesized nextest filterset
+  breaks inside the remote `just` recipe even when calling
+  `scripts/cross-check.sh` directly; plain substring filters work.
+
+## Phase 5
+
+Path identity (shared internals). Ran in a single agent; no subagents.
+
+### What was built
+
+- **`biscuit-file/lib/src/file_reference/portable/`** (R9 location). `mod.rs`
+  declares `path_identity` and `text`; `PathIdentity` and `RelativeRoute` are
+  re-exported from `file_reference/mod.rs` and `lib.rs` under
+  `file-reference`.
+- **`PathIdentity`** (public): `new`, `components`, `starts_with`,
+  `strip_prefix`, `relative_from(dir) -> Option<RelativeRoute>`. Fields: root
+  text, `rooted`, `leading_parents`, lossless `OsString` names.
+  `RelativeRoute`: `parent_hops`, `forward`, `to_path_buf` (`.` when empty).
+- **Windows grammar is a portable UTF-16 parser**
+  (`portable::path_identity::windows`), compiled on every host, so every
+  Windows rule has a test that runs on macOS/Linux too. It mirrors std's
+  `parse_prefix` (including the first-8-units `/`→`\` normalization and the
+  "`\\?\` must be spelled with backslashes" rule). A `#[cfg(windows)]` test
+  (`prefix_grammar_agrees_with_the_standard_library`) pins it to std's
+  `Prefix` classification on a fixture table, and
+  `host_identity_matches_the_portable_parser_on_windows` checks the real
+  constructor against the portable one.
+- **Text seam** (`portable::text`, crate-internal):
+  `render_reference(Lead, names)` and `render_absolute(path)`, returning
+  `TextRejection::{Unrenderable, NoPortableSpelling, ChangesComponents,
+  GrammarMismatch}`. Renders via `try_portable_string`, then (a) rejects
+  non-Unicode first, (b) on Windows rejects names that change without `\\?\`
+  (`survives_without_verbatim_prefix`, ported from Darkmatter and compiled
+  everywhere), (c) re-reads the rendered tail as a `PathIdentity` and requires
+  exactly the input names (catches Unix `\` and literal verbatim `.`/`..`),
+  (d) re-parses the full text with the reference parser and requires the
+  lead's `FileReferenceKind`, no `%`, and no interpolation except the
+  `Env` lead's own variable. Grammar checks therefore use the parser itself,
+  not a duplicated sigil list. A legacy UNC absolute path keeps its native
+  spelling (spec: "keep a faithful native Windows UNC absolute spelling").
+  The module carries `#[cfg_attr(not(test), expect(dead_code, …))]` until
+  Phase 6 consumes it; the `expect` will fail the build once it is used,
+  forcing its removal.
+- **`resolve::diff_paths`** now normalizes with `normalize_components` (the
+  resolver's semantics, unchanged) and computes the route with
+  `PathIdentity::relative_from`. The second relative-path algorithm is gone.
+- **Darkmatter `link_normalization.rs`**: `ComparisonKey`, both
+  `comparison_key`s, `drive_root`, `unc_root`, `compute_relative_path`, and
+  `strip_macos_private` deleted; the repo/home/env arms use `PathIdentity`.
+  The same-repo arm routes from the canonical source's **parent directory**.
+  `survives_namespace_removal` / `is_reserved_dos_name` stay in Darkmatter
+  (they are text policy, not identity; Phase 7 replaces this stage with
+  `PortablePath`).
+
+### Decisions
+
+- **`PathIdentity` is public.** The plan calls it "internal", but migrating
+  Darkmatter onto it and deleting the private copy needs a cross-crate type.
+  It is documented as a comparison key that is never rendered.
+- **Audit gaps closed** (Phase 1 table):
+  - `..` collapse on ordinary paths: added; never above a root; a relative
+    path keeps uncancellable `..` as a separate `leading_parents` count so a
+    generated hop is never confused with a name.
+  - Verbatim: `.`/`..` literal, `/` not a separator; verbatim disk/UNC roots
+    equated with legacy roots **regardless of whole-path length** (keeps the
+    "long descendant inside a short root" property the audit required).
+  - `strip_macos_private` (symlink alias equation): **dropped**. Every operand
+    in `normalize_links` is canonicalized before comparison, so it was inert
+    for an existing target; a missing target under `/tmp` already failed the
+    canonical repository-root prefix test before the alias mattered.
+  - Extension heuristic for the "from" file: **dropped**; `relative_from`
+    takes a directory and Darkmatter passes the source's parent.
+  - New: a UNC or verbatim path is always rooted (`\\server\share` equals
+    `\\server\share\`), and a drive letter is folded for both legacy and
+    verbatim spellings.
+- **Resolver normalization left as is.** The Windows leg confirmed that
+  `resolve::normalize_components` collapses `..` under `\\?\`
+  (`normalize_components_reduces_verbatim_paths` passed on native Windows).
+  The spec asks to preserve the resolver's lexical semantics and that check
+  governs what is allowed, not which spelling is preferred, so the resolver's
+  containment and dedupe comparisons keep `Path::starts_with` on
+  `normalize_components` output. Only `diff_paths` moved onto the shared
+  route. The identity is used for portability preference (Darkmatter now,
+  `PortablePath` in Phase 6).
+- **Behavior change (Windows only): `resolve_relative` across drives/shares**
+  now returns `FileReferenceError::RelativePath` (as its docs already said)
+  instead of an absolute path assembled by the old common-prefix walk.
+- **Known limitation, unchanged from `ComparisonKey`:** a legacy name with a
+  trailing dot or space (`C:\x.`, which Win32 reads as `C:\x`) is compared as
+  written, so it equals `\\?\C:\x.` (a different file). Neither identity nor
+  the old key strips Win32 trailing characters; the text seam refuses to
+  render such names on Windows, so no reference is written from them.
+
+### Requirement → test mapping
+
+| Requirement | Test(s) | Level |
+| ----------- | ------- | ----- |
+| whole-component prefix (`/opt/config` vs `/opt/config-old`) | `path_identity::tests::prefix_matches_whole_components_only`, `strip_prefix_returns_the_names_below_the_base`, `rooted_and_relative_paths_never_share_a_prefix` | biscuit-file unit |
+| `.`/`..` collapse, never above a root, leading `..` kept | `dot_segments_collapse_on_ordinary_paths`, `parent_segments_never_walk_above_a_root`, `relative_paths_keep_leading_parent_hops` | unit |
+| relative route from a directory; `None` across roots | `routes_between_directories_and_targets`, `equal_paths_give_an_empty_route_rendered_as_dot`, `the_from_operand_is_always_a_directory`, `routes_between_relative_paths_respect_leading_hops`, `route_to_path_buf_joins_hops_and_names`, `different_drives_and_shares_are_separate_roots` | unit |
+| Windows drives / drive-relative / case | `drive_letters_are_case_insensitive_and_names_are_not`, `drive_absolute_and_drive_relative_differ` | unit (portable) |
+| verbatim prefix normalization, UNC, device, `\\?\Volume` | `verbatim_drive_equals_its_legacy_spelling`, `unc_spellings_of_one_share_are_equal`, `device_and_other_verbatim_prefixes_keep_their_own_text`, `long_verbatim_descendant_stays_inside_a_short_legacy_root` | unit (portable) |
+| literal verbatim dot segments | `verbatim_dot_segments_are_literal_names`, `verbatim_paths_split_only_on_backslash`, `a_literal_verbatim_parent_name_is_kept_in_a_route` | unit (portable) |
+| lossless encoding | `unpaired_surrogates_stay_distinct` (portable), `host_identity_keeps_unpaired_surrogates_distinct_on_windows`, `non_unicode_names_stay_distinct_on_unix` | unit |
+| Unix backslash is a name character | `backslash_is_part_of_a_unix_name` | unit (unix) |
+| portable parser == std on Windows | `prefix_grammar_classifies_each_windows_form`, `prefix_grammar_agrees_with_the_standard_library` (windows), `host_identity_matches_the_portable_parser_on_windows` (windows) | unit |
+| `diff_paths` on shared route; cross-drive `None`; absolute operands | existing `diff_paths_*` and `diff_paths_bridges_verbatim_and_legacy_spellings` (windows), new `diff_paths_across_drives_is_none` (windows), `diff_paths_requires_absolute_operands` | resolve unit |
+| text seam: spelling per lead, round-trip kind | `text::tests::each_lead_spells_its_reference_form`, `rendered_text_parses_back_as_the_intended_kind` | unit |
+| text seam: leading sigil in a bare name, `./` protection | `a_leading_sigil_in_a_bare_name_is_rejected_and_dot_slash_protects_it`, `a_colon_name_is_rejected_on_every_host` | unit |
+| text seam: `{{VAR}}` in a literal filename (all leads, `./` does not protect) | `interpolation_in_a_literal_name_is_rejected_under_every_lead`, `interpolation_in_an_absolute_name_is_rejected` | unit |
+| text seam: changes native components | `literal_dot_names_are_rejected`, `a_unix_backslash_name_is_rejected_rather_than_split`, `names_that_change_without_a_verbatim_prefix_are_detected`, `name_length_is_measured_in_utf16_units`, `a_windows_name_that_changes_meaning_is_rejected` (windows) | unit |
+| text seam: non-Unicode → `Unrenderable`, even absolute | `non_unicode_names_are_unrenderable_before_any_other_check` | unit (unix) |
+| text seam: absolute spellings, UNC native, unreducible → `NoPortableSpelling` | `an_absolute_unix_path_keeps_its_spelling`, `a_relative_input_is_not_an_absolute_spelling`, `windows_absolute_spellings` (windows) | unit |
+| Darkmatter on shared identity; route from the source directory | `link_normalization::tests::test_normalize_links_routes_from_the_source_directory` (new; the extensionless `README` case fails under the old heuristic), all existing `test_normalize_links_*` | darkmatter unit, through `normalize_links` |
+| Darkmatter Windows identity cases | `unc_spellings_share_an_identity_but_no_portable_text` (renamed from `comparison_key_equates_legacy_and_verbatim_unc`), `safe_repo_root_contains_declined_long_verbatim_descendant`; the surrogate test moved to biscuit-file | darkmatter unit (windows) |
+
+Load-bearing check: mutating the verbatim branch of the Windows parser fails
+the two verbatim-dot tests; disabling the seam's re-read check fails the Unix
+backslash and literal-dot tests.
+
+The Input Robustness Matrix does not apply: no file format or configuration
+reader was added or changed. No `level2_`/`real_` markers were added; all new
+tests are in-crate unit tests run by `just test` (L1).
+
+### Gates
+
+- `biscuit-file`: `just test` 925 passed (plus doctests; the new
+  `PathIdentity` doctest passes); `just lint` clean.
+- `darkmatter`: `just test` 8736 passed, 12 skipped; `just lint` clean.
+- `just cross-check biscuit-file --os windows`: 869/869 passed (after
+  fixing two portable tests whose `:` names are rejected as
+  `ChangesComponents` on Windows rather than `GrammarMismatch`).
+- `just cross-check biscuit-file --os linux`: 863/863 passed.
+- `just cross-check darkmatter --os windows`: 7132 run, 7125 passed,
+  **7 failed**, 67 skipped. The seven are exactly the pre-existing failures
+  listed under Phase 4 (`resolve_file_reference_no_match_for_missing_absolute_path`,
+  `schema_number_increment_survives_quoted_persistence_round_trips`, five
+  `lazy_roots::ambient_repository::*`). All 24 `link_normalization` tests,
+  including the `#[cfg(windows)]` ones edited here, passed.
+- Darkmatter on Linux and WSL2 not run: the only Darkmatter change is
+  platform-neutral identity plumbing, and the Windows-specific parts live in
+  biscuit-file, which passed on Linux and Windows. CI covers the remaining legs.
