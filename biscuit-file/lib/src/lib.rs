@@ -164,9 +164,9 @@ pub use self::file_reference::{
     BaseDirOrigin, CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference,
     FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
     LaunchMagicScope, MagicPathRegistration, MagicPathTier, MagicSearchRoot, PackageAreaFallback,
-    PartialCompletion, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
+    PartialCompletion, PathIdentity, PathPosition, ProbeDisposition, ProbedCandidate, RepositoryScope,
     RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate, ResolutionFailure,
-    RootProvenance, find_git_root, home_dir,
+    RelativeRoute, RootProvenance, find_git_root, home_dir,
 };
 
 #[cfg(feature = "url")]

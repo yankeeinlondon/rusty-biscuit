@@ -25,11 +25,13 @@ pub mod error;
 #[cfg(feature = "fetch")]
 pub mod fetch;
 mod parse;
+mod portable;
 mod resolve;
 
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
+pub use portable::{PathIdentity, RelativeRoute};
 
 #[cfg(feature = "fetch")]
 pub use error::FetchError;

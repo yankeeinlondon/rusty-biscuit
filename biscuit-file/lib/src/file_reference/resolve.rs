@@ -8,6 +8,7 @@ use crate::file_reference::context::{
 };
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::parse;
+use crate::file_reference::portable::PathIdentity;
 use crate::file_reference::{
     CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
     PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
@@ -1469,45 +1470,21 @@ fn deepest_existing_ancestor(path: &Path) -> Result<PathBuf, FileReferenceError>
     })
 }
 
-/// Compute a relative path from `base` to `target`.
+/// Compute a relative path from the directory `base` to `target`.
+///
+/// Both are first normalized by [`normalize_components`], so the resolver's
+/// lexical semantics apply; the route itself comes from the shared
+/// [`PathIdentity`]. `None` when either is relative or the two have different
+/// roots (another drive or share).
 pub(crate) fn diff_paths(target: &Path, base: &Path) -> Option<PathBuf> {
     let target = normalize_components(target);
     let base = normalize_components(base);
-
-    // Both must be absolute
     if !target.is_absolute() || !base.is_absolute() {
         return None;
     }
-
-    let mut target_components = target.components().peekable();
-    let mut base_components = base.components().peekable();
-
-    // Skip common prefix
-    while let (Some(t), Some(b)) = (target_components.peek(), base_components.peek()) {
-        if t == b {
-            target_components.next();
-            base_components.next();
-        } else {
-            break;
-        }
-    }
-
-    // Add `..` for each remaining base component
-    let mut result = PathBuf::new();
-    for _ in base_components {
-        result.push("..");
-    }
-
-    // Add remaining target components
-    for component in target_components {
-        result.push(component);
-    }
-
-    if result.as_os_str().is_empty() {
-        Some(PathBuf::from("."))
-    } else {
-        Some(result)
-    }
+    PathIdentity::new(&target)
+        .relative_from(&PathIdentity::new(&base))
+        .map(|route| route.to_path_buf())
 }
 
 /// Expand a partial completion token into its implied roots and segments,
@@ -1878,6 +1855,22 @@ mod tests {
     fn diff_paths_bridges_verbatim_and_legacy_spellings() {
         let result = diff_paths(Path::new(r"C:\a\b\file.txt"), Path::new(r"\\?\C:\a\c")).unwrap();
         assert_eq!(result, PathBuf::from(r"..\b\file.txt"));
+    }
+
+    /// Another drive has no relative route; the caller reports
+    /// [`FileReferenceError::RelativePath`] instead of receiving an absolute
+    /// path dressed up as a relative one.
+    #[cfg(windows)]
+    #[test]
+    fn diff_paths_across_drives_is_none() {
+        assert_eq!(diff_paths(Path::new(r"D:\a\file.txt"), Path::new(r"C:\a")), None);
+        assert_eq!(diff_paths(Path::new(r"\\server\share\f.txt"), Path::new(r"C:\a")), None);
+    }
+
+    #[test]
+    fn diff_paths_requires_absolute_operands() {
+        assert_eq!(diff_paths(Path::new("a/file.txt"), &abs("a")), None);
+        assert_eq!(diff_paths(&abs("a/file.txt"), Path::new("a")), None);
     }
 
     #[test]
