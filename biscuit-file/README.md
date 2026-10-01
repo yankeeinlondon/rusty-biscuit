@@ -86,6 +86,19 @@ Two conversions are lossy and deliberate: non-Unicode path data becomes U+FFFD
 via `Path::to_string_lossy`, and on Unix a literal `\` in a filename is rendered
 as `/`.
 
+Because rendering is lossy, rendered text is never a comparison key. To ask
+"is this path inside that directory?" or "what is the relative route from here
+to there?", use `PathIdentity` (feature `file-reference`), which compares whole
+components losslessly:
+
+```rust
+use std::path::Path;
+use biscuit_file::PathIdentity;
+
+let root = PathIdentity::new(Path::new("/opt/config"));
+assert!(!PathIdentity::new(Path::new("/opt/config-old/a.toml")).starts_with(&root));
+```
+
 ## Supported Formats
 
 | Format                 | Read | Write |

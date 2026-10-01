@@ -1176,8 +1176,11 @@ To add a function:
    metadata.
 
 For a read-side function, obtain paths through the `ResolutionContext`
-(`base_dir`, magic search paths, optional remote runtime) rather than the
-process CWD. Honor remote URL arguments only when the context carries a remote
+(`cwd`, the document's directory; magic search paths; optional remote runtime)
+rather than the process CWD. Its `base_dir()` is the document's tree root, which
+relative references may not leave (see
+[File Trees](../transclusion/block-transclusion.md#file-trees)); resolve through
+the shared helpers so that rule applies. Honor remote URL arguments only when the context carries a remote
 runtime; in a local-only context (any frontmatter surface) a remote URL
 must **fail loudly**, not silently default. Because every surface now supplies a
 context, a read-side function either resolves or fails loudly on every surface —

@@ -9,7 +9,8 @@ Link Normalization applies the following rules in order of precedence:
 ### 1. Same-Repo Rule (Relative Paths)
 If an absolute path points to a file within the same Git repository as the root document, it is converted to a relative path. This ensures that documentation remains portable across different checkouts of the same repository.
 
-- **Example:** `/home/user/repo/docs/img.png` becomes `../docs/img.png` (relative to the output file).
+- **Example:** `/home/user/repo/docs/img.png` becomes `../docs/img.png` when the root document is in `/home/user/repo/guide/`.
+- The route starts at the root document's directory, whatever the document's name looks like (an extensionless `README` is still a file). Containment and the route compare whole path components lexically, using `biscuit_file::PathIdentity`.
 
 ### 2. Home-Dir Rule (`~/` Alias)
 If the path is outside the repository but within the user's home directory, the home prefix is replaced with the `~/` alias.

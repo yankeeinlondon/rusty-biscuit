@@ -918,10 +918,62 @@ which belongs to the optional fetching API rather than local resolution.
 
 ## Relative Path Computation
 
-`resolve_relative()` resolves ambiently, then lexically normalizes the target
-and the selected base, strips their common prefix, adds `..` for the base's
-remaining components, and appends the target's remaining components. When no
-lexical relative path can be produced, it reports `RelativePath`.
+`resolve_relative()` resolves ambiently, lexically normalizes the target and
+the selected base directory, and returns the route between them by the
+[path identity](#path-identity) rules below. When no lexical relative path
+exists, for example because the target is on another Windows drive or share,
+it reports `RelativePath` rather than returning an absolute path.
+
+## Path Identity
+
+`PathIdentity` answers two questions without touching the filesystem: "is this
+path inside that directory?" (`starts_with`, `strip_prefix`) and "what is the
+relative route from this directory to that path?" (`relative_from`). It is the
+one implementation of both in this crate, and Darkmatter's link normalization
+uses it too.
+
+```rust
+use std::path::Path;
+use biscuit_file::PathIdentity;
+
+let target = PathIdentity::new(Path::new("/repo/assets/logo.png"));
+let docs = PathIdentity::new(Path::new("/repo/docs/guide"));
+
+let route = target.relative_from(&docs).unwrap();
+assert_eq!(route.parent_hops(), 2);                 // ../..
+assert_eq!(route.forward().len(), 2);               // assets/logo.png
+assert_eq!(route.to_path_buf(), Path::new("../../assets/logo.png"));
+```
+
+The rules, each with an example:
+
+| Rule | Example |
+| ---- | ------- |
+| Whole names are compared, never text prefixes | `/opt/config-old` is **not** inside `/opt/config` |
+| `.` is dropped and `..` removes the name before it | `/a/b/../c/./d` equals `/a/c/d` |
+| `..` never climbs above a root | `/../a` equals `/a` |
+| A relative path keeps the `..` it cannot cancel | `a/../../b` equals `../b`, not `b` |
+| The "from" side of a route is always a directory | from `/repo/README` to `/repo/x.md` is `../x.md` |
+| A Windows drive letter is case-insensitive; names are not | `c:\x` equals `C:\x`; `C:\Repo` differs from `C:\repo` |
+| A verbatim drive or share equals its legacy spelling | `\\?\C:\x` equals `C:\x`; `\\?\UNC\srv\share\x` equals `\\srv\share\x` |
+| Under `\\?\`, `.` and `..` are ordinary names | `\\?\C:\a\..\b` keeps three names and differs from `C:\b` |
+| Different drives and shares are separate roots | no route exists from `C:\repo` to `D:\x` |
+| Names are compared as raw platform data | two names differing only in invalid Unicode stay distinct |
+
+What it deliberately does **not** do: it does not resolve symlinks (so
+`/private/tmp/x` and `/tmp/x` on macOS differ), does not case-fold names, and
+does not check that anything exists. Failing to recognize two spellings of one
+file is acceptable; treating two different files as one is not.
+
+A route keeps its generated `..` hops apart from the names copied from the
+target, because a Windows verbatim path can contain a literal directory named
+`..`. `to_path_buf()` joins the two and so loses that distinction; it is meant
+for paths where no such name can occur.
+
+The resolver's own containment checks (the `&`/`^` repository boundary and the
+file-tree boundary) keep their existing normalization, which collapses `..`
+even under a Windows `\\?\` prefix and then canonicalizes; see
+[Trust boundaries and containment](#trust-boundaries-and-containment).
 
 ## Feature Flag
 
