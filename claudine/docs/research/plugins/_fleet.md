@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Plugins** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Plugins research on **{{state.name}}** failed to complete!"
-    warn: "The Plugins research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Plugins research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Plugin Research on {{state.name}}
 

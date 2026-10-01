@@ -42,6 +42,9 @@ use super::{CLEANUP_TIMEOUT, SPAWN_TIMEOUT, wait_for_prompt};
 /// The `Control_L` keysym.
 const CONTROL_L: Keysym = 0xffe3;
 
+/// The `Escape` keysym.
+const ESCAPE: Keysym = 0xff1b;
+
 /// A private `Xvfb` server. [`Drop`] stops it.
 pub struct XvfbDisplay {
     server: Child,
@@ -246,13 +249,30 @@ impl XvfbKitty {
     pub fn press_ctrl(&self, key: char) -> io::Result<()> {
         let control = self.keycode(CONTROL_L)?;
         let letter = self.keycode(Keysym::from(key))?;
-        self.focus()?;
-        for (kind, code) in [
+        self.press_sequence(&[
             (KEY_PRESS_EVENT, control),
             (KEY_PRESS_EVENT, letter),
             (KEY_RELEASE_EVENT, letter),
             (KEY_RELEASE_EVENT, control),
-        ] {
+        ])
+    }
+
+    /// Presses Escape as XTEST key events after giving the kitty window input
+    /// focus on the private display.
+    ///
+    /// ## Errors
+    ///
+    /// As [`press_ctrl`](Self::press_ctrl).
+    pub fn press_escape(&self) -> io::Result<()> {
+        let escape = self.keycode(ESCAPE)?;
+        self.press_sequence(&[(KEY_PRESS_EVENT, escape), (KEY_RELEASE_EVENT, escape)])
+    }
+
+    /// Focuses the window, then sends `events` in order and waits until the
+    /// server has processed them.
+    fn press_sequence(&self, events: &[(u8, Keycode)]) -> io::Result<()> {
+        self.focus()?;
+        for &(kind, code) in events {
             self.connection
                 .xtest_fake_input(kind, code, CURRENT_TIME, x11rb::NONE, 0, 0, 0)
                 .map_err(io::Error::other)?;

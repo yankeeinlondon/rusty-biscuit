@@ -496,12 +496,10 @@ path (`file_exists`/`frontmatter`) use. No ambient current working directory is 
 once the resolution context is captured.
 
 `match(globs)` shapes path completion: it decides which candidates a tool offers.
-On its own it never rejects a value, so an existing file that matches no
-configured glob still validates.
-
-The exception is a root union whose arms **disagree** about a property's globs.
-There the glob is what tells the arms apart, so it becomes part of each arm's
-contract: an existing file outside an arm's glob rules that arm out.
+In a single schema it only suggests paths, so an existing file outside the
+configured globs still validates. In a root union, it is also an arm constraint:
+an existing file outside an arm's declared glob rules that arm out. This holds
+when the other arms declare the same glob, a different glob, or no glob.
 
 ```yaml
 $schema:
@@ -518,12 +516,17 @@ $schema:
 | `spec: features/x/spec.md` | the `feature` arm applies |
 | `kind: fix`, `spec: features/x/spec.md` | invalid: the only arm `kind` allows rejects the path |
 
+The same rule applies when both arms declare `match(**/fixes/**/spec.md)`:
+`kind: fix` with `spec: features/x/spec.md` is invalid. It also applies when
+only the `fix` arm declares `spec` with that glob, or when the other arm is a
+referenced raw JSON Schema. In each case, `kind: fix` with an existing
+`fixes/x/spec.md` is valid; the raw arm may separately accept other values.
+
 The rules:
 
-- The glob is enforced only when the union has two or more arms, at least two
-  of them declare the property, and those declarations do not all carry the same
-  globs. A property only one arm declares, or one every arm globs identically,
-  keeps suggestion-only semantics.
+- Each simplified arm in a root union enforces its own declared glob, including
+  beside an arm written as raw JSON Schema. The raw arm follows its own schema;
+  it may still accept a value the simplified arm rejects.
 - Only an **existing** file is judged. A value that names no file yet (a lazy
   output path, a partial a chooser is about to complete, a value still holding
   `{{ … }}` or `$(…)`) never rules an arm out; existence is `eager`'s job.
@@ -568,7 +571,7 @@ $schema:
 items lazy. Neither placement makes the property required — declare `required`
 independently, and prefer `file[](required; eager)` when the array must be
 present and eagerly validated. `match(...)` still applies per item, both to
-completion and, in a contested root union, to the arm's verdict.
+completion and, in a root union, to the arm's verdict.
 
 ### URLs
 
@@ -669,7 +672,7 @@ Rejected: `display name`, `@type`, `x.custom`, `"x-custom"`. There is no quoted-
 
 ### Descriptions
 
-Each property inside `{ ... }` may carry a `-> description` suffix that follows the same four syntax forms as top-level properties. Inside an inline object, **descriptions terminate at the next top-level comma or closing brace** at the current nesting level. Commas inside an inline property description are not supported by this feature — keep descriptions comma-free inside `{ ... }`. Top-level descriptions (outside any inline object) still consume the rest of the scalar string after `->` exactly as before.
+Each property inside `{ ... }` may carry a `-> description` suffix that follows the same four syntax forms as top-level properties. Inside an inline object, **descriptions terminate at the next top-level comma or closing brace** at the current nesting level. Commas inside an inline property description are not supported by this feature — keep descriptions comma-free inside `{ ... }`. A description is plain prose: quotes and square brackets in it mean nothing, so `{ a: string -> (it's fine), b: number }` and `{ a: string -> plain [x, b: number }` both end `a`'s description at the comma before `b`. Top-level descriptions (outside any inline object) still consume the rest of the scalar string after `->` exactly as before.
 
 ### Postfix Constraints
 
@@ -755,6 +758,8 @@ Grammar: `type_ref := ident ('[]')? ('(' constraints ')')? '@' fileref`. Postfix
 - `Name[]@file` — an array of the inlined `Name`.
 - `Name(constraints)@file` — the inlined type with `constraints` applied to it.
 - `@this` — the current schema file (self-target), including inline top-level documents.
+
+The file reference is read as written up to the next `->`, `,`, or `}`, whichever comes first. No other punctuation in it has meaning, so `Name@./a(b.yaml` names the file `./a(b.yaml`, and `Name@./a{b.yaml -> the shared shape` names `./a{b.yaml` and describes it. Inside a YAML flow sequence, quote an arm whose filename contains `[` or `{`, because YAML ends a plain flow scalar there: `['Name@./a{b.yaml', string]`.
 
 Rules:
 

@@ -326,7 +326,13 @@ mod tests {
             .and_then(|arms| arms.iter().find(|arm| arm.get("format").is_some()))
             .unwrap_or(spec);
         assert_eq!(file_arm[DARKMATTER_MATCH_KEYWORD], serde_json::json!(["**/fixes/**/spec.md"]));
-        assert_eq!(json["anyOf"][0]["properties"]["plan"]["items"][DARKMATTER_MATCH_KEYWORD], serde_json::json!(["*.md"]));
+        for arm in &json["anyOf"].as_array().unwrap()[..2] {
+            let plan = &arm["properties"]["plan"];
+            assert!(
+                plan.to_string().contains("\"x-darkmatter-match\":[\"*.md\"]"),
+                "the identical array glob must constrain each arm: {plan}"
+            );
+        }
         let single: serde_yaml_ng::Value =
             serde_yaml_ng::from_str("{spec: 'file(eager;match(**/fixes/**/spec.md))'}").unwrap();
         let single =

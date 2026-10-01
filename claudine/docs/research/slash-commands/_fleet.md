@@ -30,7 +30,7 @@ success:
               - message: "🎉  the **Slash Commands** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Slash Commands research on **{{state.name}}** failed to complete!"
-    warn: "The Slash Commands research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Slash Commands research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Slash Commands Research on {{state.name}}
 

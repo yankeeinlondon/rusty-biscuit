@@ -1,0 +1,32 @@
+# DRAFT revision 5 of the steering research contract. Not live: the live
+# contract is docs/research/steering/_schema.yaml (revision 4).
+#
+# Every object shape is a named type in ./_types.yaml. A named type is closed:
+# a key it does not declare is an error.
+$schema:
+    schema_revision: literal(5; required) -> Revision of this research contract; a document written for another revision is rejected
+    provider: identifier(required)@./_types.yaml -> Roster slug of the provider this document describes
+    created: date(required) -> Date this document was first written; kept unchanged on refresh
+    last_updated: date(required) -> Date of the research run that produced this version
+    agent: enum(codex,claude,opencode; required) -> Agentic CLI that performed the research; it must be the one the fleet assigned to this provider
+    model: enum(gpt-6.1-sol,sonnet,zai-coding-plan/glm-5.3; required) -> Model that performed the research, as the agent reports it at run time; a default or unnamed model is rejected
+    reasoning_effort: enum(low,medium,high,provider_default; required) -> Reasoning effort the research ran with; provider_default only where the fleet assigns none
+    versions_examined: version[](required)@./_types.yaml -> Provider versions whose documentation, source, or behavior was examined
+    evidence: evidence[](required)@./_types.yaml -> Every source a claim in this document rests on
+    interface_inventory: interface[](required)@./_types.yaml -> Every control interface that was considered, including the ones ruled out
+    launch_profiles: launch_profile[](required)@./_types.yaml -> The distinct ways a session can be started, each with its own capabilities
+    channels: channel[](required)@./_types.yaml -> How a sender connects to a session and reads its state; one entry per distinct connection
+    discovery: discovery[](required)@./_types.yaml -> How running sessions are found and identified
+    discovery_gaps: discovery_gap[](required)@./_types.yaml -> Session kinds that cannot be found, each with the next check to run
+    mechanisms: mechanism[](required)@./_types.yaml -> Each operation that can put a message into a session
+    access_findings: access_finding[](required)@./_types.yaml -> Whether each mechanism is reachable under each launch profile and operating system
+    delivery_states: delivery_state[](required)@./_types.yaml -> The states a sent message can pass through and whether a sender can observe them
+    receipt_guarantees: receipt_guarantee[](required)@./_types.yaml -> What the provider's answer proves about a sent message
+    receipt_observations: receipt_observation[](required)@./_types.yaml -> When the provider's answer arrives relative to delivery
+    compatibility: compatibility[](required)@./_types.yaml -> How to confirm before sending that an installed provider speaks the researched protocol
+    verification: verification[](required)@./_types.yaml -> Live tests against disposable sessions; empty when none has been run
+    cases: case[](required)@./_types.yaml -> The verdict for every combination of launch profile, operating system, launch mode, origin, and session state
+    gaps: gap[](required)@./_types.yaml -> What remains unknown, each with the next check to run
+    changes: string[](required) -> What changed in this document since the previous version
+    requires_claudine_update: boolean(required) -> Whether a finding here means Claudine's code or policy must change
+    reason: string(required; not-empty) -> Why Claudine does or does not need to change

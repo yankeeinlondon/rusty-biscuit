@@ -37,7 +37,7 @@ success:
               - message: "🎉  the **Agent Logging** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent Logging research on **{{state.name}}** failed to complete!"
-    warn: "The Agent Logging research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Agent Logging research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Agent Logging Research on {{state.name}}
 

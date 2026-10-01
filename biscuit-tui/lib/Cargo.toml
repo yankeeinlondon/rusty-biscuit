@@ -21,6 +21,9 @@ tui-input = "0.15"
 ratatui-textarea = "0.9"
 thiserror = "2"
 unicode-width = "0.2"
+# Clipping a static cell keeps whole grapheme clusters (combining marks,
+# joined emoji); `unicode-width` measures but cannot segment.
+unicode-segmentation = "1"
 serde_yaml_ng = "0.10"
 rand = "0.9"
 nucleo-matcher = "0.3"

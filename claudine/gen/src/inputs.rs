@@ -100,11 +100,11 @@ pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, 
 fn load_roster_entry(path: &Path, slug: &str) -> Result<Value, GenError> {
     let value = read_yaml(path)?;
     let entries = value
-        .get("list")
+        .get("sequence")
         .and_then(Value::as_array)
         .ok_or_else(|| GenError::Yaml {
             path: path.to_path_buf(),
-            message: "expected a top-level `list:` sequence".into(),
+            message: "expected a top-level `sequence:` list".into(),
         })?;
     let entry = entries
         .iter()
@@ -134,11 +134,11 @@ pub fn roster_active_slugs(area: &Path) -> Result<Vec<String>, GenError> {
     let path = area.join("docs/providers.yaml");
     let value = read_yaml(&path)?;
     let entries = value
-        .get("list")
+        .get("sequence")
         .and_then(Value::as_array)
         .ok_or_else(|| GenError::Yaml {
             path: path.clone(),
-            message: "expected a top-level `list:` sequence".into(),
+            message: "expected a top-level `sequence:` list".into(),
         })?;
     let mut slugs = Vec::new();
     for entry in entries {

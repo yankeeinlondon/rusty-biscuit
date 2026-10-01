@@ -489,6 +489,9 @@ fn passthrough_launch_intent(
         // rebuilt fallback would republish — though the empty dispatch context
         // below means the passthrough publishes no selection metadata at all.
         fallback_provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
+        // The passthrough's only model source is `--model`, which every rebuild
+        // receives as `cli_model`; there is no planned model to fall back to.
+        fallback_model: None,
         dispatch_context: std::collections::HashMap::new(),
         launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs::recorded_only(
             crate::commands::wrap::launch_plan::DocumentLaunchFacets {

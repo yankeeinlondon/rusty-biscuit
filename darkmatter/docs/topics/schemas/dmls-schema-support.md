@@ -132,6 +132,8 @@ While *authoring a schema* — inside an inline `$schema` value, a `type-definit
 
 A deliberate gap: a constraint's *arguments* (a regex body, a glob, an enum member) are author-supplied values — the catalog has nothing truthful to offer there, so completion is silent rather than guessing.
 
+Grammar completion reads each part of a definition the way the parser does. Text after `->` is a human description, so completion is silent while the cursor is inside it. Inside an inline object that description ends at the property's `,`, and completion resumes for the next property: in `{ a: string -> (it's fine), b: str`, the cursor after `str` is offered `string`. A `Name@reference` filename is one token up to its `,`, `}`, or `->`, so `Name@./a(b.yaml` is a file reference rather than a constraint list, and `[Name@./a(b.yaml, s` offers type keywords for the second alternative.
+
 All items are **eager and self-contained**: every item carries an explicit `textEdit` replacing the exact token under the cursor, with plain insert text (no snippets) and no `completionItem/resolve` round-trip. This is deliberately Zed-safe. Trigger characters are `/` (paths), `#` (anchors), `(` (directive options and function arguments), and `.` (`ctx.` members inside an open `{{ }}`).
 
 ### Hover

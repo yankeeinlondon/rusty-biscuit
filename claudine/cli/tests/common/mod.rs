@@ -154,6 +154,8 @@ pub(crate) mod incomplete_subagents;
 pub(crate) mod pty;
 pub(crate) mod review_router;
 #[cfg(unix)]
+pub(crate) mod review_screen;
+#[cfg(unix)]
 pub(crate) mod signal;
 pub(crate) mod site_identity;
 pub(crate) mod source_scan;

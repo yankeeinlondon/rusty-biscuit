@@ -5,7 +5,7 @@
 kind: sequence
 template:
     filepath: "./{{name}}.md"
-list:
+sequence:
     - nom
     - logos
     - rowan

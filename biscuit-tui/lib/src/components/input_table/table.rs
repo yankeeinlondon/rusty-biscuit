@@ -31,8 +31,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::StatefulWidget,
+    widgets::{Clear, StatefulWidget, Widget},
 };
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::components::{BooleanSwitch, ChooseMany, ChooseOne, TextAreaInput, TextInput};
 use crate::core::{
@@ -388,7 +390,7 @@ impl StatefulWidget for InputTable {
             return;
         }
 
-        let column_widths = compute_column_widths(&state.columns, area.width);
+        let column_widths = compute_column_widths(&state.columns, &state.rows, area.width);
         let row_heights: Vec<u16> = state
             .rows
             .iter()
@@ -889,70 +891,141 @@ fn first_focusable_cell(rows: &[Vec<CellState>]) -> Option<(usize, usize)> {
     None
 }
 
-fn compute_column_widths(columns: &[InputTableColumn], total_width: u16) -> Vec<u16> {
-    use unicode_width::UnicodeWidthStr;
+/// Narrowest width a static column shrinks to before the emergency tier.
+const STATIC_FLOOR: u16 = 3;
 
-    if columns.is_empty() {
-        return Vec::new();
-    }
-    let preferred: Vec<u16> = columns
+/// Preferred width of each column: a static column's widest text (schema
+/// text or any row's value, off-screen rows included, at least
+/// [`STATIC_FLOOR`]), and each focusable column's protected budget.
+fn preferred_column_widths(columns: &[InputTableColumn], rows: &[Vec<CellState>]) -> Vec<u16> {
+    columns
         .iter()
-        .map(|col| match col {
+        .enumerate()
+        .map(|(col_idx, col)| match col {
             InputTableColumn::StaticText { text, .. } => {
-                (UnicodeWidthStr::width(text.as_str()) as u16).max(3)
+                let widest = rows
+                    .iter()
+                    .filter_map(|row| match row.get(col_idx) {
+                        Some(CellState::StaticText(value)) => Some(value.width()),
+                        _ => None,
+                    })
+                    .fold(text.width(), usize::max);
+                u16::try_from(widest).unwrap_or(u16::MAX).max(STATIC_FLOOR)
             }
             InputTableColumn::BooleanSwitch { .. } => 8,
             InputTableColumn::TextInput { .. } => 20,
             InputTableColumn::TextAreaInput { config, .. } => config.preferred_width,
             InputTableColumn::ChooseOne(_) | InputTableColumn::ChooseMany(_) => 20,
         })
-        .collect();
+        .collect()
+}
 
-    let total_preferred: u32 = preferred.iter().map(|&w| w as u32).sum();
-
-    if total_preferred <= total_width as u32 && total_preferred > 0 {
-        let leftover = total_width as u32 - total_preferred;
-        let focusable_count = columns
+/// Allocates `total_width` cells across the columns; the widths never sum
+/// to more than `total_width`, and a column may get zero cells.
+///
+/// The first tier that applies wins:
+///
+/// 1. Every preferred width fits: static columns get theirs and focusable
+///    columns share what is left, remainder cells going left to right. An
+///    all-static table may leave cells unused.
+/// 2. Focusable budgets plus [`STATIC_FLOOR`] per static column fit:
+///    focusable columns get their budgets and static columns give up equal
+///    shares of the overflow, the leftmost keeping any spare cells. A column
+///    that reaches the floor stops, and the rest absorb its share.
+/// 3. Otherwise the width is divided evenly, remainder cells going left to
+///    right, with static columns capped at their preferred width.
+fn compute_column_widths(
+    columns: &[InputTableColumn],
+    rows: &[Vec<CellState>],
+    total_width: u16,
+) -> Vec<u16> {
+    let mut widths = preferred_column_widths(columns, rows);
+    let is_static: Vec<bool> = columns.iter().map(|col| !col.is_focusable()).collect();
+    let total = u64::from(total_width);
+    let sum_where = |want_static: bool| -> u64 {
+        widths
             .iter()
-            .filter(|col| !matches!(col, InputTableColumn::StaticText { .. }))
-            .count() as u32;
+            .zip(&is_static)
+            .filter(|(_, s)| **s == want_static)
+            .map(|(w, _)| u64::from(*w))
+            .sum()
+    };
+    let static_sum = sum_where(true);
+    let focusable_sum = sum_where(false);
+    let static_count = is_static.iter().filter(|s| **s).count() as u64;
+    let focusable_count = is_static.len() as u64 - static_count;
 
-        if focusable_count == 0 {
-            return preferred;
+    if static_sum + focusable_sum <= total {
+        let leftover = total - static_sum - focusable_sum;
+        if let Some(share) = leftover.checked_div(focusable_count) {
+            let remainder = leftover % focusable_count;
+            let focusable = widths.iter_mut().zip(&is_static).filter(|(_, s)| !**s);
+            for (k, (width, _)) in focusable.enumerate() {
+                let extra = share + u64::from((k as u64) < remainder);
+                // The sum of all widths is at most `total_width`, so each fits.
+                *width += extra as u16;
+            }
         }
-
-        let per_focusable = leftover / focusable_count;
-        let remainder = (leftover % focusable_count) as u16;
-        let mut focusable_idx = 0u16;
-
-        preferred
-            .into_iter()
-            .enumerate()
-            .map(|(i, p)| {
-                if matches!(columns[i], InputTableColumn::StaticText { .. }) {
-                    p
-                } else {
-                    let extra =
-                        per_focusable as u16 + if focusable_idx < remainder { 1 } else { 0 };
-                    focusable_idx += 1;
-                    p + extra
-                }
-            })
-            .collect()
+    } else if static_count * u64::from(STATIC_FLOOR) + focusable_sum <= total {
+        shrink_static_columns(&mut widths, &is_static, static_sum + focusable_sum - total);
     } else {
-        let base = total_width / columns.len() as u16;
-        let remainder = total_width % columns.len() as u16;
-        (0..columns.len())
-            .map(|i| {
-                let base_w = base + if (i as u16) < remainder { 1 } else { 0 };
-                if matches!(columns[i], InputTableColumn::StaticText { .. }) {
-                    base_w.min(preferred[i])
-                } else {
-                    base_w
-                }
-            })
-            .collect()
+        let count = widths.len() as u64;
+        let (share, remainder) = (total / count, total % count);
+        for (i, (width, is_static)) in widths.iter_mut().zip(&is_static).enumerate() {
+            let even = (share + u64::from((i as u64) < remainder)) as u16;
+            *width = if *is_static { even.min(*width) } else { even };
+        }
     }
+    widths
+}
+
+/// Removes `reduction` cells from the static columns, never taking one
+/// below [`STATIC_FLOOR`]. The caller guarantees the floors leave room.
+fn shrink_static_columns(widths: &mut [u16], is_static: &[bool], mut reduction: u64) {
+    while reduction > 0 {
+        let shrinkable: Vec<usize> = (0..widths.len())
+            .filter(|&i| is_static[i] && widths[i] > STATIC_FLOOR)
+            .collect();
+        if shrinkable.is_empty() {
+            return;
+        }
+        let count = shrinkable.len() as u64;
+        let (share, remainder) = (reduction / count, reduction % count);
+        for (k, &i) in shrinkable.iter().enumerate() {
+            // The rightmost `remainder` columns give up one extra cell, so
+            // the leftmost keep the spare ones.
+            let wanted = share + u64::from(k as u64 >= count - remainder);
+            let cut = wanted.min(u64::from(widths[i] - STATIC_FLOOR));
+            widths[i] -= cut as u16;
+            reduction -= cut;
+        }
+    }
+}
+
+/// `text` as it fits in `width` cells: unchanged when it fits, otherwise
+/// the longest run of whole grapheme clusters that fits in `width - 1`
+/// cells followed by `…`. A cluster that would straddle the boundary is
+/// left out rather than split.
+fn clip_with_ellipsis(text: &str, width: u16) -> std::borrow::Cow<'_, str> {
+    let width = usize::from(width);
+    if text.width() <= width {
+        return text.into();
+    }
+    if width == 0 {
+        return "".into();
+    }
+    let budget = width - 1;
+    let mut used = 0;
+    let mut clipped = String::new();
+    for cluster in text.graphemes(true) {
+        used += cluster.width();
+        if used > budget {
+            break;
+        }
+        clipped.push_str(cluster);
+    }
+    clipped.push('…');
+    clipped.into()
 }
 
 fn adjust_table_scroll(state: &mut InputTableState, row_heights: &[u16], available: u16) {
@@ -1015,14 +1088,19 @@ fn draw_cell(
         return;
     }
 
+    // Widgets write only the cells they use, so styling left in this buffer
+    // by an earlier render (such as a previous focus) would otherwise stay.
+    Clear.render(area, buf);
     if focused {
-        paint_focus_background(area, buf, theme);
+        // Not underlined: an underline on the cell's blank space draws as a
+        // horizontal rule across the column.
+        buf.set_style(area, theme.label_style);
     }
 
     match cell {
         CellState::StaticText(text) => {
-            let line = Line::from(text.clone());
-            buf.set_line(area.x, area.y, &line, area.width);
+            let clipped = clip_with_ellipsis(text, area.width);
+            buf.set_stringn(area.x, area.y, clipped, usize::from(area.width), Style::default());
         }
         CellState::BooleanSwitch(state) => {
             BooleanSwitch.render(area, buf, state);
@@ -1038,18 +1116,6 @@ fn draw_cell(
         }
         CellState::ChooseMany(state) => {
             ChooseMany::new().render(area, buf, state);
-        }
-    }
-}
-
-fn paint_focus_background(area: Rect, buf: &mut Buffer, theme: &ComponentTheme) {
-    let underline = Style::default()
-        .add_modifier(Modifier::UNDERLINED)
-        .patch(theme.label_style);
-    for y in area.top()..area.bottom() {
-        for x in area.left()..area.right() {
-            let cell = &mut buf[(x, y)];
-            cell.set_style(underline);
         }
     }
 }

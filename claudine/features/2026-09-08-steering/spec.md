@@ -22,7 +22,7 @@ $schema:
 status: implemented
 implemented: true
 implemented_by: claude/opus
-review_iterations: 0
+review_iterations: 1
 human_review: true
 human_review_items:
   - |-

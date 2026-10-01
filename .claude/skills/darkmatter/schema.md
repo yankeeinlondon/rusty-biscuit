@@ -106,12 +106,12 @@ excluded keys without executing anything.
 - `Name@file` and `Name@this` import named types eagerly with dependency and
   cycle tracking.
 - Root unions can compose schema arms without erasing each arm's origin.
-- `file(match(...))` only suggests files, except where root-union arms declare
-  the same property with differing globs: `schemas::file_match` then emits
-  `x-darkmatter-match` on each arm (attached after all arms convert, in
-  `convert.rs` and both `resolve.rs` union sites) and an existing file outside
-  the glob rules that arm out. `FileMatchGlobs` is the one comparison, shared
-  with Claudine's candidate walk.
+- `file(match(...))` only suggests files in a single schema. In a root union,
+  each simplified arm's declared glob emits `x-darkmatter-match`, including
+  beside a raw JSON Schema arm. An existing file outside that glob rules the
+  arm out. Attachment happens per arm in `convert.rs` and both `resolve.rs`
+  union sites. `FileMatchGlobs` is the one comparison, shared with Claudine's
+  candidate walk.
 - Pattern dictionary keys lower to `additionalProperties` or
   `patternProperties`; literal keys take precedence.
 - `min-keys` and `max-keys` constrain dictionaries.

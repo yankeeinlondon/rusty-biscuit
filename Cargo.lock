@@ -1484,6 +1484,7 @@ dependencies = [
  "serde_yaml_ng",
  "thiserror 2.0.18",
  "tui-input",
+ "unicode-segmentation",
  "unicode-width 0.2.2",
  "windows-sys 0.61.2",
 ]

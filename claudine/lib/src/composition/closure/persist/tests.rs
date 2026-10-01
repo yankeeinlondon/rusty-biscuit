@@ -164,6 +164,42 @@ fn a_changed_key_is_repaired_and_an_owned_property_is_not() {
     assert_eq!(parsed(&repaired)["note"], json!("new: text"));
 }
 
+/// A key's separator is the first `:` YAML reads as one: a `''` escape does
+/// not end a single-quoted key, and a `:` inside a plain key is content.
+#[test]
+fn a_key_holding_an_escaped_quote_or_a_content_colon_keeps_its_separator() {
+    for (key_source, key, value) in [
+        ("'it''s: a'", "it's: a", "plain"),
+        ("'it''s: b'", "it's: b", "Fix: colons"),
+        ("a:b", "a:b", "Fix: colons"),
+        ("a:'b", "a:'b", "Fix: colons"),
+        ("\"a\\\": b\"", "a\": b", "Fix: colons"),
+    ] {
+        let line = &format!("{key_source}: {value}");
+        for newline in ["\n", "\r\n"] {
+            let original = ORIGINAL.replace('\n', newline);
+            let candidate = with_added(line).replace('\n', newline);
+            let repaired = repair_agent_frontmatter(&candidate, &original)
+                .unwrap_or_else(|error| panic!("{line:?}: {error}"));
+            let expected_value = if value.contains(": ") {
+                format!("\"{value}\"")
+            } else {
+                value.to_string()
+            };
+            assert_eq!(
+                repaired,
+                candidate.replace(line, &format!("{key_source}: {expected_value}")),
+                "{line:?} {newline:?}"
+            );
+            assert_eq!(parsed(&repaired)[key], json!(value), "{line:?} {newline:?}");
+        }
+    }
+    // Two keys that differ only after an escaped quote are not duplicates.
+    let candidate = with_added("'it''s: a': one\n'it''s: b': two");
+    let repaired = repair_agent_frontmatter(&candidate, ORIGINAL).unwrap();
+    assert_eq!(repaired, candidate);
+}
+
 #[test]
 fn duplicate_keys_name_the_line_and_the_agent() {
     let candidate = with_added("title: again");
@@ -192,6 +228,25 @@ fn crlf_line_endings_survive_a_repair() {
         repaired,
         "---\r\nprompt: p\r\ntitle: t\r\nnote: \"see issue #42\"\r\nhead: \"Fix: colons\"\r\n---\r\nNew\r\n"
     );
+}
+
+#[test]
+fn an_indented_comment_below_a_value_does_not_block_its_repair() {
+    let candidate = with_added("head: Fix: colons\n  # agent note\n\n    # another");
+    let repaired = repair_agent_frontmatter(&candidate, ORIGINAL).unwrap();
+    assert_eq!(
+        repaired,
+        with_added("head: \"Fix: colons\"\n  # agent note\n\n    # another")
+    );
+    assert_eq!(parsed(&repaired)["head"], json!("Fix: colons"));
+}
+
+#[test]
+fn an_indented_hash_line_inside_a_multi_line_quoted_value_stays_content() {
+    let candidate = with_added("quote: \"first\n  # second\"");
+    let repaired = repair_agent_frontmatter(&candidate, ORIGINAL).unwrap();
+    assert_eq!(repaired, candidate);
+    assert_eq!(parsed(&repaired)["quote"], json!("first # second"));
 }
 
 #[test]

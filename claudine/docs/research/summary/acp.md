@@ -14,8 +14,6 @@ prompt: |-
   4. What is the current level of support for ACP across the supported providers in Claudine?
   5. How could Claudine benefit from using the ACP functionality provided by these Agentic CLI programs? What would be the downsides of using ACP versus simply wrapping the execution of these Agentic CLI's?
 
-  Note: `json-rpc.md` in the research directory is protocol-level background rather than a provider document.
-
   Important: your final response is saved verbatim as the body of this summary document, so it must be the complete document text and nothing else — no preamble, no commentary. Never write to this document yourself.
 
   ::block when="state.name == 'draft'"

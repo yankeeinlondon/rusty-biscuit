@@ -26,7 +26,7 @@ success:
               - message: "🎉  the **Agent CLI** research on **{{state.name}}** completed successfully"
 failure:
     message: "💥 the Agent CLI research on **{{state.name}}** failed to complete!"
-    warn: "The Agent CLI research on **{{state.name}}** failed to complete! (err: {{err.message}})"
+    warn: "The Agent CLI research on **{{state.name}}** failed to complete! (err: {{ err.msg }})"
 ---
 # Agent CLI Research on {{state.name}}
 

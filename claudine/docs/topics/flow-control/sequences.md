@@ -627,7 +627,7 @@ effective value reaches child processes as `CLAUDINE_FAIL_FAST`.
 |---|---|
 | `0` | Every executed step succeeded (or a dynamic source resolved to 0 steps) |
 | `1` | At least one step failed |
-| `130` | Ctrl+C interrupted the sequence |
+| `130` | Ctrl+C interrupted the sequence, or `Esc`/Ctrl+C left the provider review screen before any step started |
 
 `--dry-run` performs the **full preflight**, then just-in-time-composes every
 step against the *initial* state — empty `outputs`, no runtime mutations —

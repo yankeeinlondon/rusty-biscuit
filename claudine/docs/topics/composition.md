@@ -201,7 +201,8 @@ Steps:
      nothing is stamped or written.
    - **Repair.** A top-level key the agent added or changed whose value is a
      single-line plain scalar that YAML would misread is wrapped in double
-     quotes, keeping its whole text: `title: Fix: colons` becomes
+     quotes, keeping its whole text (comment or blank lines under the key do
+     not make the value multi-line): `title: Fix: colons` becomes
      `title: "Fix: colons"`, and `note: see issue #42` becomes
      `note: "see issue #42"` (the `#` is text, not a comment). A value that
      contains `: ` or ` #`, ends with `:`, or starts with a reserved indicator
@@ -226,7 +227,12 @@ Steps:
      touched; this is never an error. Every other frontmatter byte the agent
      wrote is the deliverable and is kept — the 2026-09-01 drift-restoration
      semantics are inverted, because on-disk changes are now the product of the
-     run rather than interference with it.
+     run rather than interference with it. A restoration that would change
+     the value of any other property is refused with
+     `CompositionError::InlineArtifactEditFailed` and nothing is written: for
+     example, when the agent anchored `hash: &h …` and added `mirror: *h`,
+     restoring the original `hash` line would silently re-point `mirror` at an
+     earlier `&h` declaration.
    - **Encode.** Every string value the agent added or changed (compared by
      value, so reformatting does not count; inside a new list or mapping, every
      string) that contains `{{` or `$(` is replaced in place by a Darkmatter
@@ -368,6 +374,19 @@ that persists the body.
 - **Malformed existing hash** — if the source file contains a malformed
   `hash:` value, the closure fails with `CompositionError::InlineHashMalformed`
   before any write occurs, leaving the file on disk untouched.
+- **Unwritable `last_updated`** — if `last_updated` carries a YAML anchor
+  (`&name`), alias (`*name`), or tag (`!tag`), or holds a list or mapping, the
+  date cannot be stamped without changing other values, so the closure fails
+  the same way and writes nothing. A single value that cannot be rewritten on
+  one line, a block scalar (`|`, `>`) or a plain or quoted value continued
+  across lines, is refused the same way. An ordinary date is stamped whether
+  it follows the key or sits alone on the line below it, and comment or blank
+  lines under it, such as an indented `# set on save`, are kept byte for
+  byte. The same happens if the edited frontmatter
+  would no longer parse, or if replacing the `hash` node would change the
+  value of any other property (an alias to an anchor declared on the hash,
+  where an earlier declaration reuses the same anchor name, would otherwise
+  resolve to that earlier value).
 
 This behavior is implemented by [`reconcile_inline_artifact`] in the closure
 module, using `inline_hash_options`, `restore_properties_text`, and Darkmatter's
@@ -868,7 +887,7 @@ $schema:
 
 `spec=cli` lists matching specs from both trees. The pick is a literal path, and the arms' globs then settle which arm applies: picking `fixes/…/spec.md` rules the `feature` arm out, so only the `fix` arm's requirements and types apply. The pick resolves from the launch directory, because both arms declare `spec` as an eager `file` (see [Caller File Provenance and Materialization](#caller-file-provenance-and-materialization)). If any contending arm types the property differently (a `string`, a lazy `file`, `file[]` against `file`) or does not declare it, the pass stays out and the full verdict decides.
 
-A glob decides between arms only where the arms disagree about it. In a root union whose arms declare the same property with different `match(...)` globs, an **existing** file outside an arm's glob rules that arm out, whether you typed the path, picked it in the chooser, or the document authored it. A single schema's glob, or one no other arm contests, still only suggests candidates:
+In a root union, an **existing** file outside a simplified arm's declared `match(...)` glob rules that arm out, whether you typed the path, picked it in the chooser, or the document authored it. The rule also applies when another arm declares the same glob, does not declare the property, or uses raw JSON Schema. A single schema's glob still only suggests candidates:
 
 | Schema and input | Result |
 |---|---|
@@ -1048,7 +1067,7 @@ The table describes live entry. Direct documents with an authored `initialize` k
 
 Retry and resume replace only the **provider-attempt slice** of the active document. They refresh the document canonically (a fresh read, full validation), keep the document's overlay and proxy provenance, and retain and decrement their own budgets — a retry cannot reset its budget by replacing the attempt. Retry drops any live session and starts a fresh attempt; resume keeps the session and delivers its follow-up message. Proxy and the next loop iteration are the two transitions that grant *fresh* budgets, because both are new active-document scope; retry, resume, proxy, and loop counters each have their own labeled home rather than sharing one counter.
 
-**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot.
+**Launch identity is rebuilt at the fresh-read boundary, not snapshotted at adoption.** Every retry/resume re-materializes the active document from disk and recomputes the whole launch bundle against *that* read — provider, the profile and binary it selects, the resume protocol that profile supports, model, interactivity, the permission mode `--yolo` actually achieves for that pair, the structured-output shape it implies, the MCP tag set lexed from the refreshed body, the provider argv, and the environment overlay (`harness_orch/loop_control/target_launch.rs::rebuild_launch_identity`, called at every fresh-read boundary). An attempt therefore launches with the identity the document it is about to run resolves to now, not with an adoption-time snapshot. What the document does not name falls back to the invocation's plan: a document with no `agent:` keeps the planned provider, and one with no `model:` (and no `--model`) keeps the planned model while it keeps that provider. A sequence step's plan is its reviewed or planned target; elsewhere the planned model is the invocation's own, minus a model the launched document's frontmatter chose, so a retry after `model:` is removed launches without it.
 
 **One rebuild per attempt, and it *is* the launch.** The rebuilt bundle is both what the child is spawned with and what the compatibility key below is computed from, so the key can never describe a plan the child did not receive. Argv and MCP injection come from `wrap/launch_plan.rs::build_launch_plan`, a re-entrant, side-effect-free builder the invocation feeds once with the results of every effect it performed (temp files, the provider overlay plan, MCP tag ambiguity resolutions — which is why a retry never re-prompts for an ambiguous tag). A rebuild whose facets match the invocation's gets that recorded plan back verbatim, so an unchanged document is byte-identical to the invocation by construction. System-prompt *delivery* is re-applied per provider and so moves with the provider; its *content* is composed once at invocation.
 

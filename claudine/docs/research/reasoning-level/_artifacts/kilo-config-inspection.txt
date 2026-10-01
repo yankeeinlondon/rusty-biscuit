@@ -1,0 +1,7 @@
+Inspected on 2026-09-29:
+- ~/.kilo: no configuration files found to depth 3.
+- ~/.config/kilo/kilo.jsonc:
+{
+  "$schema": "https://app.kilo.ai/config.json"
+}
+No variant or reasoning effort was configured in the inspected files.
