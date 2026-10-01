@@ -257,6 +257,40 @@ impl BaseDirOrigin {
     }
 }
 
+/// The role of a [`FileResolutionContext`] directory that must be absolute,
+/// reported by [`FileReferenceError::RelativeContextDirectory`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextAnchor {
+    /// The directory the request was captured in
+    /// ([`request_cwd`](FileResolutionContext::request_cwd)), or the request
+    /// directory of the launch `@` scope
+    /// ([`LaunchMagicScope::request_dir`]).
+    RequestDirectory,
+    /// The current authoring directory ([`cwd`](FileResolutionContext::cwd)).
+    WorkingDirectory,
+    /// A root supplied with [`with_base_dir`](FileResolutionContext::with_base_dir).
+    BaseDir,
+    RepositoryRoot,
+    PackageRoot,
+    PackageArea,
+    /// The captured home directory.
+    HomeDir,
+}
+
+impl std::fmt::Display for ContextAnchor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::RequestDirectory => "request directory",
+            Self::WorkingDirectory => "working directory",
+            Self::BaseDir => "base directory",
+            Self::RepositoryRoot => "repository root",
+            Self::PackageRoot => "package root",
+            Self::PackageArea => "package area",
+            Self::HomeDir => "home directory",
+        })
+    }
+}
+
 /// A selected tree root and its origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TreeRoot {
@@ -279,17 +313,68 @@ impl TreeRoot {
             || normalize_components(dir).starts_with(normalize_components(&self.path))
     }
 
-    /// The containment error for a `dir` this tree does not contain.
-    fn not_containing(&self, dir: &Path) -> FileReferenceError {
+    /// The containment failure for a `dir` this tree does not contain.
+    fn not_containing(&self, dir: &Path) -> ContextFailure {
         match self.origin {
-            BaseDirOrigin::Repository => FileReferenceError::RepositoryRootNotContainingSource {
+            BaseDirOrigin::Repository => ContextFailure::RepositoryRootNotContainingSource {
                 repository_root: self.path.clone(),
                 source_path: dir.to_path_buf(),
             },
-            _ => FileReferenceError::CwdOutsideBaseDir {
+            _ => ContextFailure::CwdOutsideBaseDir {
                 base_dir: self.path.clone(),
                 cwd: dir.to_path_buf(),
             },
+        }
+    }
+}
+
+/// A [`FileResolutionContext::validate`] failure, kept in a cloneable form so
+/// a derived context can carry the failure of the context it came from.
+/// Each variant converts to the [`FileReferenceError`] variant of the same
+/// name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ContextFailure {
+    RelativeContextDirectory {
+        anchor: ContextAnchor,
+        path: PathBuf,
+    },
+    BaseDirNotRepositoryRoot {
+        base_dir: PathBuf,
+        repository_root: PathBuf,
+    },
+    RepositoryRootNotContainingSource {
+        repository_root: PathBuf,
+        source_path: PathBuf,
+    },
+    CwdOutsideBaseDir {
+        base_dir: PathBuf,
+        cwd: PathBuf,
+    },
+}
+
+impl From<ContextFailure> for FileReferenceError {
+    fn from(failure: ContextFailure) -> Self {
+        match failure {
+            ContextFailure::RelativeContextDirectory { anchor, path } => {
+                Self::RelativeContextDirectory { anchor, path }
+            }
+            ContextFailure::BaseDirNotRepositoryRoot {
+                base_dir,
+                repository_root,
+            } => Self::BaseDirNotRepositoryRoot {
+                base_dir,
+                repository_root,
+            },
+            ContextFailure::RepositoryRootNotContainingSource {
+                repository_root,
+                source_path,
+            } => Self::RepositoryRootNotContainingSource {
+                repository_root,
+                source_path,
+            },
+            ContextFailure::CwdOutsideBaseDir { base_dir, cwd } => {
+                Self::CwdOutsideBaseDir { base_dir, cwd }
+            }
         }
     }
 }
@@ -522,7 +607,12 @@ impl ResolutionContext {
 /// containing `cwd`, the `~`/`{{VAR}}` anchor of the reference that opened the
 /// document ([`for_source_reference`](Self::for_source_reference)), and
 /// finally `cwd` itself, which is a [`BaseDirOrigin::Fallback`] and enforces
-/// no boundary. `cwd` must stay inside `base_dir` (see [`validate`]).
+/// no boundary. `cwd` must stay inside `base_dir`, and every directory and
+/// tree anchor must be absolute (see [`validate`]). Builders and derivations
+/// are infallible; an invalid context fails `validate`, which every resolver
+/// entry point and [`PortablePath`](super::PortablePath) run first. A derived
+/// context keeps the failure of the context it was derived from, so deriving
+/// a document never turns an invalid request into a valid one.
 ///
 /// [`for_source`](Self::for_source) and [`for_cwd`](Self::for_cwd) keep the
 /// tree: a derived document must remain inside it. A caller that deliberately
@@ -575,6 +665,10 @@ pub struct FileResolutionContext {
     /// original request is validated against its own tree independently of
     /// whatever tree a derived document selected.
     request_tree: TreeRoot,
+    /// The validation failure of the context this one was derived from,
+    /// captured before derivation discarded or recomputed any of its
+    /// settings. Builders never clear it.
+    inherited_failure: Option<ContextFailure>,
     derived: bool,
     allow_external_relative: bool,
 }
@@ -618,6 +712,7 @@ impl FileResolutionContext {
             opening_anchor: None,
             request_tree: tree.clone(),
             tree,
+            inherited_failure: None,
             derived: false,
             allow_external_relative: false,
         };
@@ -629,8 +724,8 @@ impl FileResolutionContext {
     /// Create a context anchored at `cwd`, snapshotting the ambient
     /// environment and home directory.
     ///
-    /// `cwd` should be an absolutized directory. Builder methods layer
-    /// the remaining anchors on top.
+    /// `cwd` must be an absolute directory, or [`validate`](Self::validate)
+    /// fails. Builder methods layer the remaining anchors on top.
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self::from_snapshot(cwd, home_dir(), capture_env())
     }
@@ -673,7 +768,8 @@ impl FileResolutionContext {
     /// anchors no catalog assigns are dropped, an explicit
     /// [`with_base_dir`](Self::with_base_dir) of the originating tree does not
     /// carry over, and no repository is discovered. The launch `@` scope is
-    /// unchanged.
+    /// unchanged. A validation failure of this context is kept regardless (see
+    /// [`validate`](Self::validate)).
     #[must_use]
     pub fn for_trusted_external_source(&self, source_path: impl Into<PathBuf>) -> Self {
         let source_path = source_path.into();
@@ -761,6 +857,9 @@ impl FileResolutionContext {
         trusted: bool,
     ) -> Self {
         let mut derived = self.clone();
+        // Captured first: the steps below can clear the explicit root and
+        // replace the repository and package anchors this check reads.
+        derived.inherited_failure = self.check().err();
         derived.source_path = source_path;
         derived.cwd = cwd;
         derived.trusted_external_authoring_cwd = trusted;
@@ -1053,6 +1152,9 @@ impl FileResolutionContext {
 
     /// Replace the launch `@` scope with an explicitly captured one.
     ///
+    /// Every directory the scope carries, its request directory included,
+    /// must be absolute or [`validate`](Self::validate) fails.
+    ///
     /// For requests that rebuild their resolution context around a source in
     /// another repository or an external prompt directory: the context's own
     /// anchors may then be re-anchored on that source (giving `./`, bare,
@@ -1219,7 +1321,18 @@ impl FileResolutionContext {
         self.launch_magic_scope.package_area = self.package_area.clone();
     }
 
-    /// Validate tree containment for the request and authoring `cwd`s.
+    /// Validate the absolute-anchor invariant and tree containment for the
+    /// request and authoring `cwd`s.
+    ///
+    /// The request and authoring `cwd`s, an explicit
+    /// [`with_base_dir`](Self::with_base_dir), the request directory,
+    /// repository, package, and package-area roots of both the current anchors
+    /// and the launch `@` scope, and a captured home
+    /// directory must all be absolute host paths, whether or not a later
+    /// resolution reads them. This is checked first, and trusted derivations
+    /// are not exempt: trust lets a document change trees, not use a relative
+    /// directory. Captured environment values and configured magic and vault
+    /// roots keep their own rules and may be relative.
     ///
     /// Containment is component-aware and lexical after `.`/`..` normalization
     /// and Windows verbatim-prefix reduction, so a root and a `cwd` that name the
@@ -1232,11 +1345,21 @@ impl FileResolutionContext {
     /// Normal derivations must keep their authoring `cwd` inside the tree.
     /// Trusted-external derivations exempt only the current authoring `cwd`;
     /// the originating request is always checked against the tree it was
-    /// captured with, so derivation cannot make an invalid request snapshot
-    /// valid.
+    /// captured with.
+    ///
+    /// A derived context first reports the failure the context it was derived
+    /// from would have reported, captured before the derivation cleared an
+    /// explicit root or reselected repository and package anchors. A builder
+    /// applied before derivation can correct a setting; one applied to the
+    /// derived context cannot clear the retained failure, because it describes
+    /// the originating request. Derivation therefore cannot make an invalid
+    /// request snapshot valid.
     ///
     /// ## Errors
     ///
+    /// - [`FileReferenceError::RelativeContextDirectory`] when a directory or
+    ///   anchor listed above, or the launch `@` scope's request directory, is
+    ///   relative
     /// - [`FileReferenceError::BaseDirNotRepositoryRoot`] when an explicit
     ///   [`with_base_dir`](Self::with_base_dir) differs from the repository root
     /// - [`FileReferenceError::RepositoryRootNotContainingSource`] when a
@@ -1244,11 +1367,19 @@ impl FileResolutionContext {
     /// - [`FileReferenceError::CwdOutsideBaseDir`] when any other boundary
     ///   tree does not contain a required `cwd`
     pub fn validate(&self) -> Result<(), FileReferenceError> {
+        self.check().map_err(FileReferenceError::from)
+    }
+
+    fn check(&self) -> Result<(), ContextFailure> {
+        if let Some(failure) = &self.inherited_failure {
+            return Err(failure.clone());
+        }
+        self.validate_absolute_anchors()?;
         if let (Some(base_dir), Some(repository_root)) =
             (&self.explicit_base_dir, &self.repository_root)
             && normalize_components(base_dir) != normalize_components(repository_root)
         {
-            return Err(FileReferenceError::BaseDirNotRepositoryRoot {
+            return Err(ContextFailure::BaseDirNotRepositoryRoot {
                 base_dir: base_dir.clone(),
                 repository_root: repository_root.clone(),
             });
@@ -1258,6 +1389,40 @@ impl FileResolutionContext {
         }
         if !self.trusted_external_authoring_cwd && !self.tree.contains(&self.cwd) {
             return Err(self.tree.not_containing(&self.cwd));
+        }
+        Ok(())
+    }
+
+    /// Every directory and tree anchor must be an absolute host path, whether
+    /// or not a later resolution reads it. Trusted derivations are not exempt.
+    /// The launch `@` scope is checked separately: a trusted derivation can
+    /// drop the current repository anchors while that scope keeps them, and
+    /// [`with_launch_magic_scope`](Self::with_launch_magic_scope) replaces it
+    /// wholesale, request directory included.
+    fn validate_absolute_anchors(&self) -> Result<(), ContextFailure> {
+        let scope = &self.launch_magic_scope;
+        let anchors = [
+            (ContextAnchor::RequestDirectory, Some(&self.request_cwd)),
+            (ContextAnchor::RequestDirectory, Some(&scope.request_dir)),
+            (ContextAnchor::WorkingDirectory, Some(&self.cwd)),
+            (ContextAnchor::BaseDir, self.explicit_base_dir.as_ref()),
+            (ContextAnchor::RepositoryRoot, self.repository_root.as_ref()),
+            (ContextAnchor::PackageRoot, self.package_root.as_ref()),
+            (ContextAnchor::PackageArea, self.package_area.as_ref()),
+            (ContextAnchor::RepositoryRoot, scope.repository_root.as_ref()),
+            (ContextAnchor::PackageRoot, scope.package_root.as_ref()),
+            (ContextAnchor::PackageArea, scope.package_area.as_ref()),
+            (ContextAnchor::HomeDir, self.home_dir.as_ref()),
+        ];
+        for (anchor, path) in anchors {
+            if let Some(path) = path
+                && !path.is_absolute()
+            {
+                return Err(ContextFailure::RelativeContextDirectory {
+                    anchor,
+                    path: path.clone(),
+                });
+            }
         }
         Ok(())
     }
@@ -1297,8 +1462,12 @@ pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError>
 /// resolves the profile directory through the OS known-folder API rather than
 /// the frequently-unset `HOME` variable, so `~` and the HOME leg of magic
 /// search stay valid there (D11).
+///
+/// A relative `$HOME` is reported as no home directory: it is not a usable
+/// anchor, and capturing it would make every [`FileResolutionContext::new`]
+/// fail [`validate`](FileResolutionContext::validate).
 pub fn home_dir() -> Option<PathBuf> {
-    dirs::home_dir()
+    dirs::home_dir().filter(|home| home.is_absolute())
 }
 
 /// Snapshot the process environment for `{{VAR}}` interpolation.

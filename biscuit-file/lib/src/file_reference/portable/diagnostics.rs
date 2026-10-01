@@ -18,6 +18,9 @@ use crate::file_reference::{FileReference, FileReferenceError, ResolutionFailure
 /// considered, in order: a searched form can be shadowed from one root and
 /// match from the next, and an environment anchor attempt records each
 /// ineligible variable. When nothing matched, `outcome` is the last rejection.
+/// A probe failure stops the preference: `outcome` is
+/// [`AttemptOutcome::ProbeFailed`], `rejected` keeps the candidates before it,
+/// and evaluation ends with [`PortablePathError::ProbeFailed`].
 #[derive(Debug, Clone)]
 pub struct Attempt {
     pub strategy: PortabilityPreference,
@@ -61,6 +64,11 @@ pub enum AttemptOutcome {
         reference: FileReference,
         resolves_to: PathBuf,
     },
+    /// Looking a generated reference up failed for a reason other than
+    /// absence (for example a regular file where a search root's directory
+    /// should be). Always the attempt's final outcome; evaluation stops with
+    /// [`PortablePathError::ProbeFailed`] carrying the same error.
+    ProbeFailed(ProbeError),
 }
 
 /// Why a preference produced no reference.
@@ -296,8 +304,10 @@ pub enum ConfigurationProblem {
     ContextWithCwd,
     /// `with_ctx` combined with `with_base_dir`; derive the context instead.
     ContextWithBaseDir,
-    /// A `with_cwd` or `with_base_dir` directory that is not an absolute host
-    /// path.
+    /// A directory that is not an absolute host path: a `with_cwd` or
+    /// `with_base_dir` directory, or a context directory or tree anchor that
+    /// [`FileResolutionContext::validate`](crate::FileResolutionContext::validate)
+    /// rejects.
     RelativeDirectory { path: PathBuf },
     /// A `base_dir` inside a repository that is not the repository root.
     BaseDirNotRepositoryRoot {
@@ -336,6 +346,9 @@ impl ConfigurationProblem {
                 base_dir: repository_root.clone(),
                 cwd: source_path.clone(),
             },
+            FileReferenceError::RelativeContextDirectory { path, .. } => {
+                Self::RelativeDirectory { path: path.clone() }
+            }
             other => Self::InvalidContext(ResolutionProblem::from_error(other)),
         }
     }
@@ -394,6 +407,12 @@ pub enum PortablePathError {
     },
     /// Probing the target or a candidate failed for a reason other than
     /// absence; a permission error is never treated as a missing file.
+    ///
+    /// When a preference's candidate failed, the last attempt is that
+    /// preference, with an [`AttemptOutcome::ProbeFailed`] outcome. When the
+    /// target itself could not be probed, no attempt has that outcome: the
+    /// attempts are only those decided without a target (`AuthoredIntent`),
+    /// and empty when the strategy starts with a target preference.
     ProbeFailed {
         target: PathBuf,
         error: ProbeError,
@@ -509,6 +528,13 @@ impl fmt::Display for AttemptOutcome {
                 "`{}` resolves to `{}` instead",
                 reference.raw(),
                 resolves_to.display()
+            ),
+            Self::ProbeFailed(error) => write!(
+                f,
+                "probing `{}` failed ({:?}): {}",
+                error.path.display(),
+                error.kind,
+                error.message
             ),
         }
     }

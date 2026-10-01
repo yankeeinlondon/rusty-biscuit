@@ -9,9 +9,13 @@
 
 mod configuration;
 mod environment;
+mod excess_parent;
 mod inputs;
+mod originating_context;
 mod platform;
+mod probe_failure;
 mod properties;
+mod relative_context;
 mod strategies;
 
 use std::collections::HashMap;

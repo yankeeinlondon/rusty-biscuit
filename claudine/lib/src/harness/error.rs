@@ -484,6 +484,7 @@ fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
         | E::OutsideRepository { .. }
         | E::RepositoryRootNotContainingSource { .. }
         | E::CwdOutsideBaseDir { .. }
+        | E::RelativeContextDirectory { .. }
         | E::BaseDirNotRepositoryRoot { .. }
         | E::BareRepository => "missing_context",
         E::RemoteNotLocal(_) => "unsupported_remote",

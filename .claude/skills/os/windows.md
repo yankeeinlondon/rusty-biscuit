@@ -135,6 +135,14 @@ Compare against that, never against `to_string_lossy()`.
     it. Skip the `\\?\` / `//?/` prefix before looking for `#`, `?`, or `:`.
     Darkmatter's `link_normalization::split_suffix` does; the macOS and Linux
     legs cannot see it. Found 2026-10-01 on `build-win-native`.
+13. **`PathBuf::push` drops `.` and `..` pushed onto a verbatim buffer**, and
+    `collect::<PathBuf>()` pushes, so rebuilding `\\?\C:\a\..\b` from its
+    components yields `\\?\C:\b`, a different directory (under `\\?\` the
+    dots are literal names). A lexical normalizer that must keep them, such
+    as `biscuit-file`'s `normalize_native`, assembles the result as text.
+    Likewise, never write a `..` loop that calls `Vec::pop` on components:
+    it pops the `RootDir` or drive prefix and makes `/../a` relative.
+    Confirmed 2026-10-01 on `build-win-native`.
 
 ## WezTerm on `build-win`
 

@@ -66,6 +66,18 @@ pub enum FileReferenceError {
     #[error("file tree `{base_dir}` does not contain the working directory `{cwd}`")]
     CwdOutsideBaseDir { base_dir: PathBuf, cwd: PathBuf },
 
+    /// A context directory or tree anchor is not an absolute host path.
+    ///
+    /// Probing a relative candidate would read the live process directory, so
+    /// a captured context could resolve differently after that directory
+    /// changes. Environment values and configured magic and vault roots are
+    /// not anchors in this sense and may stay relative.
+    #[error("context {anchor} `{path}` is not an absolute path")]
+    RelativeContextDirectory {
+        anchor: super::ContextAnchor,
+        path: PathBuf,
+    },
+
     /// An explicit tree root disagrees with the supplied repository root.
     /// Inside a repository the tree root is always the repository root.
     #[error(

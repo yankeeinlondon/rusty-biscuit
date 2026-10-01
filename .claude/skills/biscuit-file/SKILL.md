@@ -11,6 +11,7 @@ description: >
 - Read [references/api.md](references/api.md) for full API surface of all types (Toml, Yaml, Json5, Pdf, FileReference, FileType, DataFormat, detect, PdfConfig)
 - Rendering a `Path` as text? Use `biscuit_file::to_portable_string` / `try_portable_string` (unfeatured) — never write another `.replace('\\', "/")`. See [references/api.md](references/api.md#portable-path-text)
 - Comparing paths (`starts_with`, relative route)? Use `biscuit_file::PathIdentity` — the one lexical, lossless, Windows-aware identity. See [references/api.md](references/api.md#path-identity)
+- Context has two directories: `cwd()` (where `./`, `../`, bare start) and `base_dir()` (tree root + relative boundary; read `base_dir_origin()` / `base_dir_is_boundary()`, never compare it with `cwd()`). Reader opt-in: `allow_external_relative()`. See [references/file-references.md](references/file-references.md)
 - Writing a link to a file (portable `./`, `&`, `~`, `{{VAR}}`, absolute)? Use `biscuit_file::PortablePath` — never hand-roll a relative or env-rooted spelling. See [references/api.md](references/api.md#portable-references-portablepath)
 
 - Read [references/architecture.md](references/architecture.md) for module layout, feature flags, and re-exports
@@ -42,7 +43,7 @@ Optimization info: effective when targeted: `biscuit-file`, `biscuit-file lib`, 
   ---|---|---|---|---|---|---|---|---|---|---|---|---|---|
   `lib.rs` | `Toml`, `TomlError`, `TomlSource` | `yaml/mod.rs` | `Yaml`, `YamlError`, `YamlSource` | `json5/mod.rs` | `Json5`, `Json5Error`, `Json5Source` | `json5/format.rs` | `to_json5_pretty`, `to_json5_compact` | `pdf/mod.rs` | `Pdf`, `PdfConfig`, `PdfError` | `pdf/types.rs` | `PdfMarkdown`, `PdfToc`, `PageRange`, etc. |
   `detect.rs` | `FileType`, `detect_file_type`, `detect_file_type_from_bytes` | `format.rs` | `DataFormat` | `error.rs` | `BiscuitFileError` | `file_reference/mod.rs` | `FileReference`, `PathPosition` | `FileReferenceError` |
-  `file_reference/parse.rs` | Parsing logic (internal) | `file_reference/resolve.rs` | Resolution logic (internal) | `file_reference/context.rs` | ResolutionContext (internal) |
+  `file_reference/parse.rs` | Parsing logic (internal) | `file_reference/resolve.rs` | Resolution logic (internal) | `file_reference/context.rs` | `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope` | `file_reference/portable/` | `PortablePath`, `PortableReference`, `PortabilityPreference`, `PortablePathError`, `PathIdentity` |
 
 ## Feature Flags
 

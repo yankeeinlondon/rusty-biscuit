@@ -238,6 +238,59 @@ fn apply<S>(components: &mut Vec<S>, leading_parents: &mut usize, rooted: bool, 
     }
 }
 
+/// Collapse `.` and `..` by the [`PathIdentity`] rules while keeping the native
+/// spelling of the prefix, root, and names.
+///
+/// This is the one native-path normalization behind resolution, context
+/// selection, and containment, so they cannot disagree with identity
+/// comparison: a `..` at a root or drive root is dropped (`/../a` is `/a`), a
+/// relative path keeps its leading `..` hops, and under a Windows `\\?\` prefix
+/// dot segments are literal names and are kept. No verbatim-prefix reduction
+/// happens here.
+pub(crate) fn normalize_native(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let rooted = path.has_root();
+    let mut head: Vec<Component<'_>> = Vec::new();
+    let mut names: Vec<Component<'_>> = Vec::new();
+    let mut leading_parents = 0;
+    let mut verbatim = false;
+    for component in path.components() {
+        let step = match component {
+            Component::Prefix(prefix) => {
+                verbatim = prefix.kind().is_verbatim();
+                head.push(component);
+                Step::Current
+            }
+            Component::RootDir => {
+                head.push(component);
+                Step::Current
+            }
+            // `Path::components` reports `.`/`..` under `\\?\`, but Win32 reads
+            // them there as ordinary directory names.
+            _ if verbatim => Step::Name(component),
+            Component::CurDir => Step::Current,
+            Component::ParentDir => Step::Parent,
+            Component::Normal(_) => Step::Name(component),
+        };
+        apply(&mut names, &mut leading_parents, rooted, step);
+    }
+    // Assembled as text: `PathBuf::push` drops `.`/`..` onto a verbatim
+    // buffer, which would undo the literal names kept above.
+    let mut text = OsString::new();
+    for component in &head {
+        text.push(component.as_os_str());
+    }
+    let tail = std::iter::repeat_n(Component::ParentDir, leading_parents).chain(names);
+    for (index, component) in tail.enumerate() {
+        if index > 0 {
+            text.push(std::path::MAIN_SEPARATOR_STR);
+        }
+        text.push(component.as_os_str());
+    }
+    PathBuf::from(text)
+}
+
 /// Off Windows, [`Path::components`] is faithful and lossless: `/` is the only
 /// separator and `.`/`..` are never literal names.
 #[cfg(not(windows))]

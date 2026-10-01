@@ -520,3 +520,33 @@ fn normal_derivation_reenables_containment_after_trusted_external_derivation() {
         FileReferenceError::CwdOutsideBaseDir { .. }
     ));
 }
+
+/// A relative `$HOME` is not a usable anchor, so it is captured as no home
+/// directory rather than making every ambient context fail validation.
+#[cfg(unix)]
+#[test]
+#[serial_test::serial]
+fn a_relative_home_env_is_captured_as_no_home_directory() {
+    let base = TempDir::new().unwrap();
+    let prior_home = std::env::var_os("HOME");
+    // SAFETY: env mutation is serialized against other tests via `#[serial]`.
+    unsafe { std::env::set_var("HOME", "relative-home") };
+
+    let ambient = biscuit_file::home_dir();
+    let ctx = FileResolutionContext::new(base.path());
+
+    // Restore `HOME` before asserting so a panic cannot leak process state.
+    match prior_home {
+        // SAFETY: see above.
+        Some(prior) => unsafe { std::env::set_var("HOME", prior) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+
+    assert_eq!(ambient, None);
+    assert_eq!(ctx.home_dir(), None);
+    ctx.validate().unwrap();
+    assert!(matches!(
+        FileReference::new("~/cfg.toml").unwrap().resolve_in_context(&ctx),
+        Err(FileReferenceError::MissingHomeContext)
+    ));
+}

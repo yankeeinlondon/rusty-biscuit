@@ -45,7 +45,7 @@ pub use error::FetchError;
 /// callers can register convention magic search roots (e.g. a tool's
 /// `prompts/` directories) around the resolver's intrinsic scope roots.
 pub use context::{
-    BaseDirOrigin, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
+    BaseDirOrigin, ContextAnchor, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
     RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, find_git_root,
     home_dir,
 };
@@ -118,7 +118,7 @@ pub enum RootProvenance {
     /// has no repository.
     ///
     /// Distinct from [`RootProvenance::Source`], which remains the authoring
-    /// base for bare and explicit-relative references: reusing `Source` here
+    /// `cwd` for bare and explicit-relative references: reusing `Source` here
     /// would let `CandidatePlanOrder::AuthoringBaseFirst` boost the wrong
     /// `@` candidate.
     LocalRoot,
@@ -182,8 +182,10 @@ pub enum CandidatePlanOrder {
     /// Preserve the reference kind's normal resolution order.
     #[default]
     Resolution,
-    /// Prefer candidates rooted at the authoring base, preserving the relative
-    /// order of all source and non-source candidates.
+    /// Prefer candidates rooted at the authoring `cwd`
+    /// ([`RootProvenance::Source`]), preserving the relative order of all
+    /// source and non-source candidates. Unrelated to the tree root
+    /// (`base_dir`).
     AuthoringBaseFirst,
 }
 

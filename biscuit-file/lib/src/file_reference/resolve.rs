@@ -8,7 +8,7 @@ use crate::file_reference::context::{
 };
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::parse;
-use crate::file_reference::portable::PathIdentity;
+use crate::file_reference::portable::{PathIdentity, normalize_native};
 use crate::file_reference::{
     CompletionEntryForm, DetailedOutcome, FileReferenceKind, MagicPathList, ParsedReference,
     PartialCompletion, PathTemplate, ProbeDisposition, ProbedCandidate, ReferenceKind,
@@ -328,6 +328,7 @@ fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         | E::UnsupportedUserHome(_)
         | E::RepositoryRootNotContainingSource { .. }
         | E::CwdOutsideBaseDir { .. }
+        | E::RelativeContextDirectory { .. }
         | E::BaseDirNotRepositoryRoot { .. }
         | E::BareRepository
         | E::Git(_) => ResolutionFailure::MissingContext,
@@ -656,10 +657,16 @@ fn resolve_recursive_core(
 
 /// Return the recursive parent filter relative to a traversal root.
 fn recursive_subdir_filter(path: &Path, root: &Path) -> Option<PathBuf> {
-    let parent = path.parent()?;
-    let root_relative = parent.strip_prefix(root).unwrap_or(parent);
-    let normalized = normalize_components(root_relative);
-    (!normalized.as_os_str().is_empty()).then_some(normalized)
+    let parent = normalize_components(path.parent()?);
+    let root = normalize_components(root);
+    let root_relative = parent.strip_prefix(&root).unwrap_or(&parent);
+    // The filter is a suffix of a traversed entry's parent, which never spells
+    // a `..` hop, so a relative reference's leading hops are not part of it.
+    let names: PathBuf = root_relative
+        .components()
+        .skip_while(|component| matches!(component, std::path::Component::ParentDir))
+        .collect();
+    (!names.as_os_str().is_empty()).then_some(names)
 }
 
 /// The containment rule every candidate of this resolution is held to:
@@ -1285,29 +1292,20 @@ fn normalize_absolute(path: &Path, cwd: &Path) -> PathBuf {
     }
 }
 
-/// Resolve `.` and `..` components without touching the filesystem, then reduce
-/// a Windows `\\?\` verbatim path to its legacy spelling.
+/// Collapse `.` and `..` by the shared [`PathIdentity`] rules without touching
+/// the filesystem, then reduce a Windows `\\?\` verbatim path to its legacy
+/// spelling.
 ///
-/// Every lexical path comparison in this module funnels through here, so
-/// stripping the prefix is what lets a verbatim and a legacy spelling of one
+/// Every lexical path comparison in resolution and context selection funnels
+/// through here, so an excess `..` at a root is dropped exactly as identity
+/// comparison drops it, and dot segments under `\\?\` stay literal names.
+/// Stripping the prefix is what lets a verbatim and a legacy spelling of one
 /// directory compare equal -- required for candidate dedupe, repository
-/// containment, and [`diff_paths`]' common-prefix walk. Stripping happens
-/// *after* `.`/`..` collapse because [`dunce::simplified`] refuses to touch a
-/// verbatim path that still carries relative components (Win32 takes those
-/// literally under the prefix).
+/// containment, and [`diff_paths`]' common-prefix walk. [`dunce::simplified`]
+/// keeps the prefix on a verbatim path that carries literal dot segments,
+/// because no legacy spelling names the same directory.
 pub(crate) fn normalize_components(path: &Path) -> PathBuf {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::ParentDir => {
-                components.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => components.push(other),
-        }
-    }
-    let collapsed: PathBuf = components.iter().collect();
-    simplify_root(&collapsed).to_path_buf()
+    simplify_root(&normalize_native(path)).to_path_buf()
 }
 
 /// The containment rule a candidate is checked against.
@@ -1833,6 +1831,17 @@ mod tests {
         assert_eq!(result, PathBuf::from("/a/c/d"));
     }
 
+    #[test]
+    fn normalize_clamps_parent_at_root() {
+        assert_eq!(normalize_components(Path::new("/../a/../../b")), PathBuf::from("/b"));
+        assert_eq!(normalize_components(Path::new("/..")), PathBuf::from("/"));
+    }
+
+    #[test]
+    fn normalize_keeps_leading_parents_of_relative_path() {
+        assert_eq!(normalize_components(Path::new("a/../../b")), PathBuf::from("../b"));
+    }
+
     /// Verbatim spellings must collapse for the dedupe and containment keys,
     /// otherwise one directory reached through two producers (`canonicalize`
     /// vs `gix` discovery) reads as two distinct directories.
@@ -1840,9 +1849,26 @@ mod tests {
     #[test]
     fn normalize_components_reduces_verbatim_paths() {
         assert_eq!(
-            normalize_components(Path::new(r"\\?\C:\a\b\..\c")),
+            normalize_components(Path::new(r"\\?\C:\a\c")),
             normalize_components(Path::new(r"C:\a\c")),
         );
+    }
+
+    /// Under `\\?\`, `..` is a directory name, so the path keeps it and its
+    /// prefix; no legacy spelling names that directory.
+    #[cfg(windows)]
+    #[test]
+    fn normalize_components_keeps_verbatim_dot_segments() {
+        assert_eq!(
+            normalize_components(Path::new(r"\\?\C:\a\b\..\c")),
+            PathBuf::from(r"\\?\C:\a\b\..\c"),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn normalize_clamps_parent_at_drive_root() {
+        assert_eq!(normalize_components(Path::new(r"C:\..\..\a")), PathBuf::from(r"C:\a"));
     }
 
     /// The resolved path and the caller's base routinely come from different

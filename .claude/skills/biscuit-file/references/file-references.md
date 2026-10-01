@@ -87,6 +87,16 @@ replaces the whole environment (it does not merge); non-Unicode variables are
 never captured. Context-owned
 `add_magic_path()` and `add_vault()` configure the roots used by explicit APIs.
 
+Every context directory and tree anchor (request and authoring `cwd`,
+`with_base_dir`, repository/package/package-area roots, captured home, and every
+launch `@` scope directory including a replaced scope's request directory) must
+be absolute. Builders and derivations never fail; `validate()` (run first by every
+resolver entry point and `PortablePath`) returns
+`RelativeContextDirectory { anchor: ContextAnchor, path }`, trusted
+derivations included. Relative env values, magic roots, and vault roots keep
+their own rules and stay supported. `home_dir()` reports a relative `$HOME` as
+`None`.
+
 Use `for_source(source)` for each in-repository nested file-backed document. It
 sets the source and changes the authoring `cwd` to `source.parent()`, while
 preserving process-state inputs while selecting repository/package scopes for
@@ -99,8 +109,12 @@ root has deliberately accepted a document outside the tree. Outside the
 current tree they select a **new** tree for the document (catalog repository >
 containing vault > opening anchor > fallback) and drop the source repository,
 package, and package-area anchors unless a catalog assigns them; the original
-request is still validated against its own tree. No derivation reads ambient
-state or performs discovery. `with_source_path()` records provenance only and
+request is still validated against its own tree. Every derivation also keeps
+the `validate()` failure of the context it came from (captured before a
+trusted derivation drops the explicit root or a catalog replaces package
+anchors), and a builder on the derived context cannot clear it; correct
+settings before deriving. No derivation reads ambient state or performs
+discovery. `with_source_path()` records provenance only and
 does not derive the `cwd`.
 
 **Tree root and boundary.** `base_dir()` is the tree root and
@@ -248,6 +262,7 @@ MissingHomeContext
 OutsideRepository { sigil, reference_cwd }
 RepositoryEscape { sigil, reference, repository_root, escaped_candidate }
 RepositoryRootNotContainingSource { repository_root, source_path }
+RelativeContextDirectory { anchor, path }
 RelativePath { from, to }
 Io { path, source }
 RemoteNotLocal(String)

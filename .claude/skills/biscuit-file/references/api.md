@@ -202,9 +202,13 @@ folds only the drive letter, and never canonicalizes or equates symlink aliases.
 a portable UTF-16 parser (`portable::path_identity::windows`), so its tests run
 on every host; a Windows-only test pins it to std's `Prefix` classification.
 
-The resolver's own containment checks still use `resolve::normalize_components`
-(which collapses `..` even under `\\?\`); `diff_paths` routes through
-`PathIdentity` after that normalization.
+Resolution and context selection normalize native paths through
+`resolve::normalize_components`, which applies the same rules
+(`portable::path_identity::normalize_native` shares `PathIdentity`'s `apply`)
+and then reduces a dot-free verbatim path with `dunce`. Never hand-roll another
+`..`-popping loop: `Vec::pop` on components removes the root, and
+`PathBuf::push` silently collapses `.`/`..` onto a verbatim buffer.
+`diff_paths` routes through `PathIdentity` after that normalization.
 
 Crate-internal: `portable::text::{render_reference, render_absolute}` is the
 generated-reference text seam. It renders through `try_portable_string`, then
@@ -253,10 +257,17 @@ found.findings();    // &[Finding] about the returned reference
   deepest wins, then name order.
 - Errors are `Clone` (`ProbeError` keeps path, `ErrorKind`, OS code); every
   variant has `attempts()` (empty before any preference ran) and `findings()`.
+  A candidate lookup that fails with I/O ends evaluation as `ProbeFailed`, but
+  the failing preference is still the last attempt, with outcome
+  `AttemptOutcome::ProbeFailed(error)` and its earlier `rejected` candidates;
+  a target probe failure has no such attempt.
   The `reference` in `UnresolvableInput`/`NormalizationUnsupported` is boxed.
 - `with_ctx` + `with_cwd`/`with_base_dir` → `InvalidConfiguration`. Without a
   context: capture cwd/home/env once, `find_git_root(cwd)`; `with_base_dir`
   inside a repository must equal its root.
+- A relative directory → `InvalidConfiguration(RelativeDirectory { path })`
+  before any preference runs, from `with_cwd`/`with_base_dir` or from a
+  `with_ctx` context whose `validate()` returns `RelativeContextDirectory`.
 - PortablePath compares paths **lexically**. A caller holding canonical paths
   (`/private/var/…`, `\\?\C:\…`) next to a context opened with another
   spelling must re-spell the target first (Darkmatter's

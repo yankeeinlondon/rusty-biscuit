@@ -371,13 +371,26 @@ impl TargetState {
 enum Check {
     Verified(FileReference),
     Rejected(AttemptOutcome),
+    /// The lookup failed for a reason other than absence; the preference
+    /// tries no further candidate.
+    Failed(ProbeError),
 }
 
-/// Strategy outcomes, or a probe failure that ends evaluation.
-type Outcomes = Result<Vec<AttemptOutcome>, ProbeError>;
+impl Check {
+    /// Whether the preference stops at this candidate: it either matched or
+    /// hit a probe failure.
+    fn ends_attempt(&self) -> bool {
+        !matches!(self, Self::Rejected(_))
+    }
+}
+
+/// One preference's candidate outcomes, in order. A probe failure is the last
+/// outcome, never an early return, so the rejections before it survive into
+/// the attempt the error reports.
+type Outcomes = Vec<AttemptOutcome>;
 
 fn not_applicable(reason: NotApplicable) -> Outcomes {
-    Ok(vec![AttemptOutcome::NotApplicable(reason)])
+    vec![AttemptOutcome::NotApplicable(reason)]
 }
 
 struct Evaluation<'a> {
@@ -401,21 +414,27 @@ impl Evaluation<'_> {
                 }
                 _ => {
                     let target = self.target()?;
-                    match self.target_preference(preference, &target) {
-                        Ok(outcomes) => outcomes,
-                        Err(error) => {
-                            return Err(PortablePathError::ProbeFailed {
-                                target: target.path,
-                                error,
-                                attempts: self.attempts,
-                            });
-                        }
-                    }
+                    self.target_preference(preference, &target)
                 }
             };
             let attempt = Attempt::from_outcomes(preference.clone(), outcomes);
+            let failed = match &attempt.outcome {
+                AttemptOutcome::ProbeFailed(error) => Some(error.clone()),
+                _ => None,
+            };
             let matched = attempt.matched().cloned();
             self.attempts.push(attempt);
+            if let Some(error) = failed {
+                // Every preference's probe failure ends evaluation here, after
+                // its attempt is recorded. Only target preferences probe, so
+                // the target is already established.
+                let target = self.target.take().map_or_else(|| error.path.clone(), |target| target.path);
+                return Err(PortablePathError::ProbeFailed {
+                    target,
+                    error,
+                    attempts: self.attempts,
+                });
+            }
             if let Some(reference) = matched {
                 if !matches!(preference, PortabilityPreference::AuthoredIntent(_))
                     && let Some(finding) = self.target.as_ref().and_then(|target| target.state.finding())
@@ -674,7 +693,7 @@ impl Evaluation<'_> {
             return not_applicable(NotApplicable::RouteShape { parent_hops, names });
         }
         if let Some(authored) = self.authored_route(parent_hops, route.forward(), target) {
-            return Ok(vec![AttemptOutcome::Matched(authored.clone())]);
+            return vec![AttemptOutcome::Matched(authored.clone())];
         }
         let text = match text::render_reference(Lead::Relative { parent_hops }, route.forward()) {
             Ok(text) => text,
@@ -687,7 +706,7 @@ impl Evaluation<'_> {
         } else {
             Cow::Borrowed(&self.ctx)
         };
-        Ok(vec![verify(&text, target, Form::Single, &ctx)?.into_outcome()])
+        vec![verify(&text, target, Form::Single, &ctx).into_outcome()]
     }
 
     /// Minimal churn: a relative reference input already spelled as this
@@ -728,7 +747,7 @@ impl Evaluation<'_> {
             return not_applicable(reason);
         }
         match text::render_reference(Lead::RepositoryRoot, rest) {
-            Ok(text) => Ok(vec![verify(&text, target, Form::Single, &self.ctx)?.into_outcome()]),
+            Ok(text) => vec![verify(&text, target, Form::Single, &self.ctx).into_outcome()],
             Err(rejection) => not_applicable(NotApplicable::UnsafeSpelling(rejection.into())),
         }
     }
@@ -815,11 +834,11 @@ impl Evaluation<'_> {
             if outcomes.is_empty() {
                 outcomes.push(AttemptOutcome::NotApplicable(outside));
             }
-            return Ok(outcomes);
+            return outcomes;
         }
         if let Some(obstacle) = target.state.search_obstacle() {
             outcomes.push(AttemptOutcome::NotApplicable(obstacle));
-            return Ok(outcomes);
+            return outcomes;
         }
         for rest in eligible {
             let text = match text::render_reference(lead, &rest) {
@@ -831,14 +850,14 @@ impl Evaluation<'_> {
                     continue;
                 }
             };
-            let check = verify(&text, target, Form::Search, &self.ctx)?;
-            let verified = matches!(check, Check::Verified(_));
+            let check = verify(&text, target, Form::Search, &self.ctx);
+            let done = check.ends_attempt();
             outcomes.push(check.into_outcome());
-            if verified {
+            if done {
                 break;
             }
         }
-        Ok(outcomes)
+        outcomes
     }
 
     fn env_rooted(&self, target: &Target) -> Outcomes {
@@ -854,10 +873,10 @@ impl Evaluation<'_> {
         for anchor in &evaluation.eligible {
             match text::render_reference(Lead::Env(&anchor.name), &anchor.rest) {
                 Ok(text) => {
-                    let check = verify(&text, target, Form::Single, &self.ctx)?;
-                    let verified = matches!(check, Check::Verified(_));
+                    let check = verify(&text, target, Form::Single, &self.ctx);
+                    let done = check.ends_attempt();
                     outcomes.push(check.into_outcome());
-                    if verified {
+                    if done {
                         break;
                     }
                 }
@@ -866,7 +885,7 @@ impl Evaluation<'_> {
                 )),
             }
         }
-        Ok(outcomes)
+        outcomes
     }
 
     fn home(&self, target: &Target) -> Outcomes {
@@ -877,14 +896,14 @@ impl Evaluation<'_> {
             return not_applicable(NotApplicable::NotUnderHome);
         };
         match text::render_reference(Lead::Home, rest) {
-            Ok(text) => Ok(vec![verify(&text, target, Form::Single, &self.ctx)?.into_outcome()]),
+            Ok(text) => vec![verify(&text, target, Form::Single, &self.ctx).into_outcome()],
             Err(rejection) => not_applicable(NotApplicable::UnsafeSpelling(rejection.into())),
         }
     }
 
     fn absolute(&self, target: &Target) -> Outcomes {
         match text::render_absolute(&target.path) {
-            Ok(text) => Ok(vec![verify(&text, target, Form::Single, &self.ctx)?.into_outcome()]),
+            Ok(text) => vec![verify(&text, target, Form::Single, &self.ctx).into_outcome()],
             Err(rejection) => not_applicable(NotApplicable::UnsafeSpelling(rejection.into())),
         }
     }
@@ -930,16 +949,17 @@ impl Check {
         match self {
             Self::Verified(reference) => AttemptOutcome::Matched(reference),
             Self::Rejected(outcome) => outcome,
+            Self::Failed(error) => AttemptOutcome::ProbeFailed(error),
         }
     }
 }
 
 /// Parse `text` and resolve it in `ctx`, including the boundary and
 /// real-landing checks, and require it to name the target.
-fn verify(text: &str, target: &Target, form: Form, ctx: &FileResolutionContext) -> Result<Check, ProbeError> {
+fn verify(text: &str, target: &Target, form: Form, ctx: &FileResolutionContext) -> Check {
     let Ok(reference) = FileReference::new(text) else {
-        return Ok(Check::Rejected(AttemptOutcome::NotApplicable(
-            NotApplicable::UnsafeSpelling(SpellingProblem::GrammarMismatch),
+        return Check::Rejected(AttemptOutcome::NotApplicable(NotApplicable::UnsafeSpelling(
+            SpellingProblem::GrammarMismatch,
         )));
     };
     let detailed = reference.resolve_detailed(ctx);
@@ -948,13 +968,11 @@ fn verify(text: &str, target: &Target, form: Form, ctx: &FileResolutionContext) 
         DetailedOutcome::Failed(ResolutionFailure::NoMatch) => match (form, detailed.candidates()) {
             (Form::Single, [only]) => resolve::normalize_components(only.candidate().path()),
             _ => {
-                return Ok(Check::Rejected(AttemptOutcome::NotApplicable(
-                    NotApplicable::TargetMissing,
-                )));
+                return Check::Rejected(AttemptOutcome::NotApplicable(NotApplicable::TargetMissing));
             }
         },
         DetailedOutcome::Failed(ResolutionFailure::Io) => {
-            return Err(match resolution_problem(&detailed) {
+            return Check::Failed(match resolution_problem(&detailed) {
                 ResolutionProblem::Probe(error) => error,
                 other => ProbeError {
                     path: target.path.clone(),
@@ -965,18 +983,18 @@ fn verify(text: &str, target: &Target, form: Form, ctx: &FileResolutionContext) 
             });
         }
         DetailedOutcome::Failed(_) => {
-            return Ok(Check::Rejected(AttemptOutcome::NotApplicable(NotApplicable::Rejected(
+            return Check::Rejected(AttemptOutcome::NotApplicable(NotApplicable::Rejected(
                 resolution_problem(&detailed),
-            ))));
+            )));
         }
     };
     if PathIdentity::new(&landed) == target.identity {
-        Ok(Check::Verified(reference))
+        Check::Verified(reference)
     } else {
-        Ok(Check::Rejected(AttemptOutcome::Shadowed {
+        Check::Rejected(AttemptOutcome::Shadowed {
             reference,
             resolves_to: landed,
-        }))
+        })
     }
 }
 

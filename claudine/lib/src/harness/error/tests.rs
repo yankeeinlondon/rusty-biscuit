@@ -344,6 +344,7 @@ mod classification_tests {
                 | E::OutsideRepository { .. }
                 | E::RepositoryRootNotContainingSource { .. }
                 | E::CwdOutsideBaseDir { .. }
+                | E::RelativeContextDirectory { .. }
                 | E::BaseDirNotRepositoryRoot { .. } => "missing_context",
                 E::CurrentDirectory(_)
                 | E::Git(_)
@@ -393,6 +394,10 @@ mod classification_tests {
             FileReferenceError::CwdOutsideBaseDir {
                 base_dir: PathBuf::from("/docs"),
                 cwd: PathBuf::from("/elsewhere"),
+            },
+            FileReferenceError::RelativeContextDirectory {
+                anchor: biscuit_file::ContextAnchor::WorkingDirectory,
+                path: PathBuf::from("docs"),
             },
             FileReferenceError::BaseDirNotRepositoryRoot {
                 base_dir: PathBuf::from("/repo/docs"),
