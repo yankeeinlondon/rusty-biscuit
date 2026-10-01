@@ -333,7 +333,7 @@ pub(crate) fn interpolation_block(
             // the siblings of the expected path against its leaf name. Computed
             // here at render time only — the hot eval loop never touches disk.
             if matches!(diagnostic.kind, FileRefFailure::NotFound) {
-                let expected = diagnostic.base_dir.join(&diagnostic.reference);
+                let expected = diagnostic.cwd.join(&diagnostic.reference);
                 let suggestions = suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS);
                 if !suggestions.is_empty() {
                     let mut hint = String::from("<b>Did you mean?</b>");
@@ -785,7 +785,7 @@ mod tests {
             function: "frontmatter",
             reference: "specs.md".to_string(),
             kind: FileRefFailure::NotFound,
-            base_dir: dir.path().to_path_buf(),
+            cwd: dir.path().to_path_buf(),
             fallback_dir: None,
             source: None,
             caller: None,
@@ -813,7 +813,7 @@ mod tests {
             function: "frontmatter",
             reference: "missing.md".to_string(),
             kind: FileRefFailure::Malformed,
-            base_dir: PathBuf::from("/repo"),
+            cwd: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
             caller: None,
@@ -913,7 +913,7 @@ mod tests {
             function: "frontmatter",
             reference: "features/x/spec.md".to_string(),
             kind: FileRefFailure::NotFound,
-            base_dir: PathBuf::from("/repo"),
+            cwd: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
             caller: None,

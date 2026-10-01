@@ -1517,16 +1517,16 @@ fn file_reference_error(
             candidate_provenance: provenance.candidate_provenance,
         })
     });
-    let (reference, base_dir) = ctx
+    let (reference, cwd) = ctx
         .active_caller_file_provenance
         .as_ref()
         .map(|provenance| (provenance.reference.clone(), provenance.origin.cwd().to_path_buf()))
-        .unwrap_or_else(|| (raw.to_string(), ctx.base_dir.clone()));
+        .unwrap_or_else(|| (raw.to_string(), ctx.cwd.clone()));
     ExpressionError::FileReference(FileReferenceDiagnostic {
         function,
         reference,
         kind,
-        base_dir,
+        cwd,
         fallback_dir: ctx.file_ref_fallback_dir.clone(),
         source: source.map(Arc::new),
         caller,
@@ -1553,7 +1553,7 @@ fn resolve_arg(
     // reference — only repository and authoring-document candidates participate.
     resolve_document_file_ref(
         &file_ref,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.repository_root.as_deref(),
         ctx.package_area.as_deref(),
         &ctx.magic_paths,
@@ -1682,7 +1682,7 @@ pub fn relative_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
     };
     Ok(Value::String(make_portable_relative_in_context(
         &abs,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1733,7 +1733,7 @@ fn resolve_path_shape(
     // shape is the first shared candidate rather than a source-first join.
     resolve_document_file_ref_shape(
         &file_ref,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.repository_root.as_deref(),
         ctx.package_area.as_deref(),
         &ctx.magic_paths,
@@ -1801,7 +1801,7 @@ pub fn is_indexed_file_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("is_indexed_file", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     Ok(Value::Bool(parse_indexed_stem(&stem).is_some()))
 }
@@ -1813,7 +1813,7 @@ pub fn file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     let index = parse_indexed_stem(&stem)
         .map(|i| i.index as i64)
@@ -1829,7 +1829,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("increment_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1849,7 +1849,7 @@ pub fn increment_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .unwrap_or_else(|| PathBuf::from(&new_base));
     Ok(Value::String(make_portable_relative_in_context(
         &out,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1862,7 +1862,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("decrement_file_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let ext = file_extension(&base);
     let stem = file_stem(&base);
     let new_stem = if let Some((base_name, index, width)) = indexed_stem_info(&stem) {
@@ -1882,7 +1882,7 @@ pub fn decrement_file_index_fn(args: &[Value], ctx: &ResolutionContext) -> Resul
         .unwrap_or_else(|| PathBuf::from(&new_base));
     Ok(Value::String(make_portable_relative_in_context(
         &out,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1907,7 +1907,7 @@ fn find_index_endpoint(
     let Some(parent) = input.parent() else {
         return Ok(Value::String(make_portable_relative_in_context(
             &input,
-            &ctx.base_dir,
+            &ctx.cwd,
             ctx.file_resolution_context.as_ref(),
         )));
     };
@@ -1926,7 +1926,7 @@ fn find_index_endpoint(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(Value::String(make_portable_relative_in_context(
                 &input,
-                &ctx.base_dir,
+                &ctx.cwd,
                 ctx.file_resolution_context.as_ref(),
             )));
         }
@@ -1969,7 +1969,7 @@ fn find_index_endpoint(
         .unwrap_or(input);
     Ok(Value::String(make_portable_relative_in_context(
         &chosen,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     )))
 }
@@ -1997,7 +1997,7 @@ pub fn basename_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Exp
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(base))
 }
 
@@ -2009,7 +2009,7 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("basename_without_index", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     let stem = file_stem(&base);
     let ext = file_extension(&base);
     let unindexed = match indexed_stem_info(&stem) {
@@ -2039,7 +2039,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
     // that still resolves when another file name is appended to it.
     let projected = make_portable_relative_in_context(
         &path,
-        &ctx.base_dir,
+        &ctx.cwd,
         ctx.file_resolution_context.as_ref(),
     );
     if Path::new(&projected).is_absolute() {
@@ -2049,7 +2049,7 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
                 .unwrap_or_default(),
         ));
     }
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.is_empty() {
         String::new()
     } else {
@@ -2065,7 +2065,7 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expressi
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("ext", &args[0], ctx)?;
-    let (_, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (_, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(file_extension(&base)))
 }
 
@@ -2077,7 +2077,7 @@ pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
 }
 
@@ -2089,7 +2089,7 @@ pub fn file_trailing_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("file_trailing", &args[0], ctx)?;
-    let (dirs, base) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, base) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(match dirs.last() {
         Some(d) => format!("{d}/{base}"),
         None => base,
@@ -2104,7 +2104,7 @@ pub fn dir_leading_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, 
         return Ok(Value::Null);
     }
     let path = resolve_path_arg("dir_leading", &args[0], ctx)?;
-    let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
+    let (dirs, _) = path_display_components(&path, &ctx.cwd, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.len() <= 1 {
         String::new()
     } else {
@@ -2136,7 +2136,7 @@ pub fn join_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
     Ok(Value::String(
         make_portable_relative_in_context(
             &validated,
-            &ctx.base_dir,
+            &ctx.cwd,
             ctx.file_resolution_context.as_ref(),
         ),
     ))
@@ -2237,7 +2237,7 @@ pub fn link_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Express
             let path = resolve_path_arg("link", &args[0], ctx)?;
             let desc = make_portable_relative_in_context(
                 &path,
-                &ctx.base_dir,
+                &ctx.cwd,
                 ctx.file_resolution_context.as_ref(),
             );
             let dest = portable_destination(&path)?;
@@ -2304,8 +2304,8 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
         Some(snapshot) => snapshot
             .repository_root()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.base_dir.clone()),
-        None => ctx.base_dir.clone(),
+            .unwrap_or_else(|| ctx.cwd.clone()),
+        None => ctx.cwd.clone(),
     };
     let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
@@ -2335,8 +2335,8 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
         Some(snapshot) => snapshot
             .repository_root()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| ctx.base_dir.clone()),
-        None => ctx.base_dir.clone(),
+            .unwrap_or_else(|| ctx.cwd.clone()),
+        None => ctx.cwd.clone(),
     };
     let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
@@ -2517,7 +2517,7 @@ pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, E
     })?;
     let directory = super::resolve_ctx::resolve_document_directory(
         &file_ref,
-        &ctx.base_dir,
+        &ctx.cwd,
         &ctx.magic_paths,
         ctx.file_resolution_context.as_ref(),
     )

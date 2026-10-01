@@ -59,6 +59,55 @@ pub(crate) enum SourceDerivation {
     TrustedExternal,
 }
 
+/// The reference that opened a file source, and the path the opening
+/// document's context resolved it to.
+///
+/// [`ComposeSource::File`] holds the canonical path, which is the source's
+/// identity (cycle detection, caches, the pre-flight graph). The source's
+/// [`FileResolutionContext`](biscuit_file::FileResolutionContext) is derived
+/// from this record instead, so a `~` or `{{VAR}}` anchor survives as the tree
+/// root and the source keeps the spelling of the tree it was resolved in
+/// (macOS `/var` versus `/private/var`).
+#[derive(Debug, Clone)]
+pub(crate) struct SourceOpening {
+    pub(crate) reference: biscuit_file::FileReference,
+    pub(crate) resolved: PathBuf,
+}
+
+// `FileReference` has no `PartialEq`; equal raw text parses to an equal
+// reference.
+impl PartialEq for SourceOpening {
+    fn eq(&self, other: &Self) -> bool {
+        self.reference.raw() == other.reference.raw() && self.resolved == other.resolved
+    }
+}
+
+impl Eq for SourceOpening {}
+
+/// Derives a file source's context from the request snapshot.
+///
+/// The one derivation rule for every Darkmatter surface that resolves a file
+/// source's references. With an opening record the source keeps its opening
+/// anchor and resolved spelling; without one (a root document given as a
+/// path) it is derived from `path`.
+pub(crate) fn source_file_context(
+    snapshot: &biscuit_file::FileResolutionContext,
+    path: &Path,
+    derivation: SourceDerivation,
+    opening: Option<&SourceOpening>,
+) -> biscuit_file::FileResolutionContext {
+    match (opening, derivation) {
+        (Some(opening), SourceDerivation::Ordinary) => {
+            snapshot.for_source_reference(&opening.reference, &opening.resolved)
+        }
+        (Some(opening), SourceDerivation::TrustedExternal) => {
+            snapshot.for_trusted_external_source_reference(&opening.reference, &opening.resolved)
+        }
+        (None, SourceDerivation::Ordinary) => snapshot.for_source(path),
+        (None, SourceDerivation::TrustedExternal) => snapshot.for_trusted_external_source(path),
+    }
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -203,6 +252,10 @@ pub struct ComposeOptions {
 
     /// How the current file source entered this compose run.
     pub(crate) source_derivation: SourceDerivation,
+
+    /// The reference that opened the current file source, when a parent
+    /// document resolved it. Cleared whenever `source` is replaced.
+    pub(crate) source_opening: Option<SourceOpening>,
 
     // ── Shell expansion ────────────────────────────────────────────
     /// Maximum execution time for a single `::shell` command.
@@ -800,6 +853,7 @@ impl ComposeOptions {
             magic_paths: Vec::new(),
             file_resolution_context: None,
             source_derivation: SourceDerivation::Ordinary,
+            source_opening: None,
             shell_timeout: std::time::Duration::from_secs(10),
             shell_timeout_behavior: ShellTimeoutBehavior::Error,
             shell_policy_root: None,
@@ -924,25 +978,33 @@ impl ComposeOptions {
     pub fn with_source_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.source = ComposeSource::File(path.into());
         self.source_derivation = SourceDerivation::Ordinary;
+        self.source_opening = None;
         self
     }
 
     /// Sets a child source that has already passed file-reference resolution.
+    ///
+    /// `opening` is the reference that resolved to `path` and the path it
+    /// resolved to, when the caller has them; the child's context is then
+    /// derived from it (see [`SourceOpening`]).
     #[must_use]
-    pub(crate) fn with_accepted_source_file(mut self, path: impl Into<PathBuf>) -> Self {
+    pub(crate) fn with_accepted_source_file(
+        mut self,
+        path: impl Into<PathBuf>,
+        opening: Option<SourceOpening>,
+    ) -> Self {
         let path = path.into();
         self.source_derivation = self
             .file_resolution_context
             .as_ref()
             .filter(|snapshot| {
-                snapshot.for_source(&path).validate().is_err()
-                    && snapshot
-                        .for_trusted_external_source(&path)
-                        .validate()
-                        .is_ok()
+                let derive = |derivation| source_file_context(snapshot, &path, derivation, opening.as_ref());
+                derive(SourceDerivation::Ordinary).validate().is_err()
+                    && derive(SourceDerivation::TrustedExternal).validate().is_ok()
             })
             .map_or(SourceDerivation::Ordinary, |_| SourceDerivation::TrustedExternal);
         self.source = ComposeSource::File(path);
+        self.source_opening = opening;
         self
     }
 
@@ -950,6 +1012,7 @@ impl ComposeOptions {
     #[must_use]
     pub fn with_source_url(mut self, url: Url) -> Self {
         self.source = ComposeSource::Url(url);
+        self.source_opening = None;
         self
     }
 
@@ -1417,14 +1480,16 @@ impl ComposeOptions {
             magic_paths: self.magic_paths.clone(),
             file_resolution_context: self.file_resolution_context.clone(),
             source_derivation: self.source_derivation,
+            source_opening: self.source_opening.clone(),
         }
     }
 
-    /// The document's base directory: relative and `@` references resolve here.
+    /// The document's directory (`cwd`) when there is no request snapshot:
+    /// relative and `@` references resolve here.
     ///
     /// File sources resolve to the directory the source file lives in; all other
     /// sources (string/stdin) fall back to the current directory.
-    fn resolution_base_dir(&self) -> PathBuf {
+    fn resolution_cwd(&self) -> PathBuf {
         match &self.source {
             ComposeSource::File(path) => path
                 .parent()
@@ -1434,10 +1499,27 @@ impl ComposeOptions {
         }
     }
 
+    /// The current source's context, derived from the request snapshot by
+    /// [`source_file_context`].
+    ///
+    /// A source with no path (a string, stdin, or URL) has no directory of its
+    /// own, so it uses the snapshot unchanged: its `cwd` is the request's.
+    /// Deriving it to `.` would make it depend on the process directory and
+    /// put it outside the request's tree.
+    pub(crate) fn source_file_resolution_context(&self) -> Option<biscuit_file::FileResolutionContext> {
+        let snapshot = self.file_resolution_context.as_ref()?;
+        Some(match &self.source {
+            ComposeSource::File(path) => {
+                source_file_context(snapshot, path, self.source_derivation, self.source_opening.as_ref())
+            }
+            _ => snapshot.clone(),
+        })
+    }
+
     /// Builds the [`ResolutionContext`] used by read-side expression functions
     /// during interpolation.
     ///
-    /// Carries the document's base directory (so relative/`@` references
+    /// Carries the document's directory (so relative/`@` references
     /// resolve where the source lives), the configured magic search paths, and
     /// — only when remote reads are enabled — the run's remote-fetch runtime so
     /// HTTP(S) URL arguments read from the fetch cache rather than disk.
@@ -1447,16 +1529,12 @@ impl ComposeOptions {
         &self,
         remote_fetch: &super::super::remote_fetch::RemoteFetchRuntime,
     ) -> super::super::expression::ResolutionContext {
-        let base_dir = self.resolution_base_dir();
-        let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
-            match (&self.source, self.source_derivation) {
-                (ComposeSource::File(path), SourceDerivation::TrustedExternal) => {
-                    snapshot.for_trusted_external_source(path)
-                }
-                (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
-                _ => snapshot.for_cwd(&base_dir),
-            }
-        });
+        let file_resolution_context = self.source_file_resolution_context();
+        // The derived context decides `cwd`, so expression helpers that compare
+        // it with their own `cwd` see the same spelling.
+        let cwd = file_resolution_context
+            .as_ref()
+            .map_or_else(|| self.resolution_cwd(), |ctx| ctx.cwd().to_path_buf());
         let (repository_root, package_area, home_dir) = match &file_resolution_context {
             Some(ctx) => (
                 ctx.repository_root().map(Path::to_path_buf),
@@ -1465,7 +1543,7 @@ impl ComposeOptions {
             ),
             None => (None, None, dirs::home_dir()),
         };
-        let mut context = super::super::expression::ResolutionContext::new(base_dir);
+        let mut context = super::super::expression::ResolutionContext::new(cwd);
         context.repository_root = repository_root;
         context.package_area = package_area;
         context.magic_paths = self.magic_paths.clone();
@@ -1505,16 +1583,12 @@ impl ComposeOptions {
     /// compose pipeline use this adapter so they retain the same immutable
     /// file-resolution snapshot, source derivation, and magic roots.
     pub fn local_expression_resolution_context(&self) -> super::super::expression::ResolutionContext {
-        let base_dir = self.resolution_base_dir();
-        let file_resolution_context = self.file_resolution_context.as_ref().map(|snapshot| {
-            match (&self.source, self.source_derivation) {
-                (ComposeSource::File(path), SourceDerivation::TrustedExternal) => {
-                    snapshot.for_trusted_external_source(path)
-                }
-                (ComposeSource::File(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
-                _ => snapshot.for_cwd(&base_dir),
-            }
-        });
+        let file_resolution_context = self.source_file_resolution_context();
+        // The derived context decides `cwd`, so expression helpers that compare
+        // it with their own `cwd` see the same spelling.
+        let cwd = file_resolution_context
+            .as_ref()
+            .map_or_else(|| self.resolution_cwd(), |ctx| ctx.cwd().to_path_buf());
         let (repository_root, package_area, home_dir) = match &file_resolution_context {
             Some(ctx) => (
                 ctx.repository_root().map(Path::to_path_buf),
@@ -1523,7 +1597,7 @@ impl ComposeOptions {
             ),
             None => (None, None, dirs::home_dir()),
         };
-        let mut context = super::super::expression::ResolutionContext::new(base_dir);
+        let mut context = super::super::expression::ResolutionContext::new(cwd);
         context.repository_root = repository_root;
         context.package_area = package_area;
         context.magic_paths = self.magic_paths.clone();
@@ -2066,6 +2140,9 @@ pub(crate) struct TransclusionOptions {
 
     /// How the current file source entered the traversal.
     pub(crate) source_derivation: SourceDerivation,
+
+    /// The reference that opened the current file source, if known.
+    pub(crate) source_opening: Option<SourceOpening>,
 }
 
 impl Default for TransclusionOptions {
@@ -2082,6 +2159,7 @@ impl Default for TransclusionOptions {
             magic_paths: Vec::new(),
             file_resolution_context: None,
             source_derivation: SourceDerivation::Ordinary,
+            source_opening: None,
         }
     }
 }
@@ -2472,6 +2550,34 @@ fn encode_file_resolution_context(
     for path in context.vault_roots() {
         enc.path(path);
     }
+
+    // The tree root bounds relative references, so two snapshots that differ
+    // only in it resolve differently.
+    enc.field("base_dir");
+    enc.path(context.base_dir());
+    match context.base_dir_origin() {
+        biscuit_file::BaseDirOrigin::Repository => enc.tag(0),
+        biscuit_file::BaseDirOrigin::Explicit => enc.tag(1),
+        biscuit_file::BaseDirOrigin::Vault => enc.tag(2),
+        biscuit_file::BaseDirOrigin::Home => enc.tag(3),
+        biscuit_file::BaseDirOrigin::Environment { name } => {
+            enc.tag(4);
+            enc.str(name);
+        }
+        biscuit_file::BaseDirOrigin::Fallback => enc.tag(5),
+    }
+    enc.bool(context.external_relative_allowed());
+}
+
+fn encode_source_opening(enc: &mut GraphIdentityEncoder, opening: &Option<SourceOpening>) {
+    match opening {
+        Some(opening) => {
+            enc.tag(1);
+            enc.str(opening.reference.raw());
+            enc.path(&opening.resolved);
+        }
+        None => enc.tag(0),
+    }
 }
 
 impl ComposeOptions {
@@ -2504,6 +2610,7 @@ impl ComposeOptions {
             magic_paths,
             file_resolution_context,
             source_derivation,
+            source_opening,
             shell_timeout,
             shell_timeout_behavior,
             shell_policy_root,
@@ -2691,6 +2798,8 @@ impl ComposeOptions {
             SourceDerivation::Ordinary => 0,
             SourceDerivation::TrustedExternal => 1,
         });
+        enc.field("source_opening");
+        encode_source_opening(&mut enc, source_opening);
 
         enc.field("shell_timeout_ns");
         enc.u128(shell_timeout.as_nanos());
@@ -2979,6 +3088,10 @@ impl ComposeOptions {
             SourceDerivation::Ordinary => 0,
             SourceDerivation::TrustedExternal => 1,
         });
+        // The opening anchor can change the source's tree root, and with it
+        // what the source's relative references resolve to.
+        cenc.field("source_opening");
+        encode_source_opening(&mut cenc, source_opening);
 
         cenc.field("list_spacing");
         cenc.tag(match list_spacing {
@@ -3328,7 +3441,7 @@ mod tests {
         let resolved = [&expression, &frontmatter].map(|ctx| {
             crate::markdown::compose::expression::resolve_ctx::resolve_document_file_ref(
                 &file_ref,
-                &ctx.base_dir,
+                &ctx.cwd,
                 ctx.repository_root.as_deref(),
                 ctx.package_area.as_deref(),
                 &ctx.magic_paths,
@@ -3341,8 +3454,8 @@ mod tests {
             None => unsafe { std::env::remove_var("DARKMATTER_SNAPSHOT_ROOT") },
         }
 
-        assert_eq!(expression.base_dir, nested);
-        assert_eq!(frontmatter.base_dir, nested);
+        assert_eq!(expression.cwd, nested);
+        assert_eq!(frontmatter.cwd, nested);
         for path in resolved {
             assert_eq!(path.as_deref(), Some(target.as_path()));
         }
@@ -3465,6 +3578,40 @@ mod tests {
                 ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect(),
             );
         assert_eq!(id(&a), id(&b));
+    }
+
+    /// The snapshot's tree root and reader opt-in, and the reference that
+    /// opened the source, decide what relative references resolve to, so
+    /// options that differ only in one of them share neither identity.
+    #[test]
+    fn file_tree_and_source_opening_participate_in_graph_and_cache_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let snapshot = || {
+            biscuit_file::FileResolutionContext::from_snapshot(
+                temp.path().join("docs"),
+                None,
+                std::collections::HashMap::new(),
+            )
+        };
+        let base = fixed_opts().with_file_resolution_context(snapshot());
+        let variants = [
+            fixed_opts().with_file_resolution_context(snapshot().with_base_dir(temp.path())),
+            fixed_opts().with_file_resolution_context(snapshot().allow_external_relative()),
+            base.clone().with_accepted_source_file(
+                temp.path().join("docs/a.md"),
+                Some(SourceOpening {
+                    reference: biscuit_file::FileReference::new("./a.md").unwrap(),
+                    resolved: temp.path().join("docs/a.md"),
+                }),
+            ),
+        ];
+        let unopened = base.clone().with_accepted_source_file(temp.path().join("docs/a.md"), None);
+        for variant in &variants {
+            assert_ne!(id(&base), id(variant));
+            assert_ne!(base.compose_cache_fingerprint(), variant.compose_cache_fingerprint());
+        }
+        assert_ne!(id(&unopened), id(&variants[2]));
+        assert_ne!(unopened.compose_cache_fingerprint(), variants[2].compose_cache_fingerprint());
     }
 
     #[test]

@@ -54,7 +54,11 @@ impl Markdown {
             remote_fetch,
         );
         runtime.context_epoch.seed(options.context());
-        runtime.root_source = Some((options.source.clone(), options.source_derivation));
+        runtime.root_source = Some((
+            options.source.clone(),
+            options.source_derivation,
+            options.source_opening.clone(),
+        ));
 
         // Eagerly register discovered remote URLs and start fetching. The two
         // discovery paths gate independently: directive (`::file`/`::code`)

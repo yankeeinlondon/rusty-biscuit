@@ -107,7 +107,7 @@ pub(crate) fn link_resolve_with_edits(
     let mut applied_count = 0;
     let mut edits = Vec::new();
 
-    let base_dir = match &source {
+    let cwd = match &source {
         ComposeSource::File(path) => path.parent(),
         _ => None,
     };
@@ -119,7 +119,7 @@ pub(crate) fn link_resolve_with_edits(
         };
 
         // 2.5 Resolve to absolute path
-        if let Some(abs_path) = resolve_absolute(&raw_target, base_dir, options) {
+        if let Some(abs_path) = resolve_absolute(&raw_target, cwd, options) {
             let Some(abs_path_str) = try_portable_string(&abs_path) else {
                 return Err(MarkdownError::Transform(format!(
                     "link target '{raw_target}' resolves to '{}', which has no faithful portable Markdown destination. CommonMark consumes backslash escapes inside a link destination, so the native Windows spelling would not survive a parse, and leaving the authored target would retarget it once this document is transcluded.",
@@ -158,7 +158,7 @@ pub(crate) fn link_resolve_with_edits(
 
 fn resolve_absolute(
     raw: &str,
-    base_dir: Option<&Path>,
+    cwd: Option<&Path>,
     options: &ComposeOptions,
 ) -> Option<std::path::PathBuf> {
     if raw.starts_with("http://") || raw.starts_with("https://") {
@@ -177,9 +177,12 @@ fn resolve_absolute(
     // live on the context, not on the reference. We intentionally do NOT use
     // resolve_relative here — link resolve's job is to produce absolute paths,
     // not make them relative again.
-    let resolved = if let Some(dir) = base_dir {
-        let resolution_ctx = match options.file_resolution_context.as_ref() {
-            Some(snapshot) => snapshot.for_cwd(dir),
+    let resolved = if let Some(dir) = cwd {
+        // The source's derived context, not `for_cwd(dir)`: `dir` is the
+        // canonical source's parent, which may be spelled differently from
+        // the tree the source was opened in.
+        let resolution_ctx = match options.source_file_resolution_context() {
+            Some(context) => context,
             None => {
                 let snapshot = crate::markdown::compose::capture_file_resolution_context(dir);
                 document_resolution_context(dir, None, &options.magic_paths, Some(&snapshot))

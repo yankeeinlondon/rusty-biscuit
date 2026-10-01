@@ -79,6 +79,12 @@ impl FileRefFailure {
             | E::UnsupportedUserHome(_)
             | E::ForeignAbsolutePath { .. } => FileRefFailure::Malformed,
             E::RemoteNotLocal(_) => FileRefFailure::RemoteNotEnabled,
+            // A relative reference that leaves the tree root, and a document
+            // outside its tree, are understood but yield no usable path, like
+            // their repository counterparts. The typed cause stays in `source`.
+            E::RelativeTreeEscape { .. }
+            | E::CwdOutsideBaseDir { .. }
+            | E::BaseDirNotRepositoryRoot { .. } => FileRefFailure::NotFound,
             _ => FileRefFailure::NotFound,
         }
     }
@@ -123,8 +129,8 @@ pub struct FileReferenceDiagnostic {
     pub reference: String,
     /// The kind of failure (absent vs malformed vs remote-not-enabled).
     pub kind: FileRefFailure,
-    /// The document-relative base directory resolution started from.
-    pub base_dir: PathBuf,
+    /// The document directory (`cwd`) resolution started from.
+    pub cwd: PathBuf,
     /// Launch-area metadata retained by the resolution diagnostic.
     pub fallback_dir: Option<PathBuf>,
     /// The underlying typed cause, when one exists (absent for a clean miss).
@@ -660,7 +666,7 @@ mod tests {
                 function: "frontmatter",
                 reference: "does-not-exist.md".to_string(),
                 kind: FileRefFailure::NotFound,
-                base_dir: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
                 caller: None,
@@ -677,7 +683,7 @@ mod tests {
                 function: "frontmatter",
                 reference: "https://example.com/spec.md".to_string(),
                 kind: FileRefFailure::RemoteNotEnabled,
-                base_dir: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
                 caller: None,
@@ -779,7 +785,7 @@ mod tests {
                 function: "frontmatter",
                 reference: "features/x/spec.md".to_string(),
                 kind: FileRefFailure::NotFound,
-                base_dir: PathBuf::from("/repo"),
+                cwd: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
                 caller: None,

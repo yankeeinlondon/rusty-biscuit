@@ -482,8 +482,12 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
+    /// `@spec.md` from an external document resolves through the unchanged
+    /// launch `@` scope to the request repository, never to the child
+    /// repository's decoy. The external document has no repository of its own,
+    /// so the rewritten value is not repository-relative.
     #[test]
-    fn eager_rewrite_uses_request_repository_instead_of_rediscovering_from_child() {
+    fn eager_rewrite_uses_the_launch_scope_instead_of_rediscovering_from_child() {
         let request_repo = TempDir::new().unwrap();
         let child_repo = TempDir::new().unwrap();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
@@ -493,8 +497,11 @@ mod tests {
         let request_target = request_repo.path().join("spec.md");
         std::fs::write(&request_target, "request").unwrap();
         std::fs::write(child_repo.path().join("spec.md"), "child decoy").unwrap();
+        // No home: on Windows the temp directory is under it, which would
+        // render the value as `~/…` instead of the path asserted below.
         let context = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path())
+            .without_home_dir()
             .for_trusted_external_cwd(&child_base);
         let schema = json!({
             "type": "object",
@@ -513,8 +520,12 @@ mod tests {
             Some(&context),
         );
 
+        assert_eq!(context.repository_root(), None);
         assert!(outcome.changed);
-        assert_eq!(outcome.value["spec"], json!("spec.md"));
+        assert_eq!(
+            outcome.value["spec"],
+            json!(biscuit_file::to_portable_string(&request_target))
+        );
     }
 
     /// Creates a temp directory that looks like a git repository root, with

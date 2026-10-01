@@ -1027,7 +1027,7 @@ fn root_schema_arm_applies(
     let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
     let Ok(validator) = crate::markdown::schemas::validate::build_validator_in_context(
         &wrapped,
-        Some(&document_context.base_dir),
+        Some(&document_context.cwd),
         None,
         document_context.file_resolution_context.as_ref(),
     ) else {

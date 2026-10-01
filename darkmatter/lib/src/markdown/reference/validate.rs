@@ -719,7 +719,7 @@ fn validate_local_path(
                 ComposeSource::File(path) if source != root_source => graph_options
                     .compose
                     .clone()
-                    .with_accepted_source_file(path),
+                    .with_accepted_source_file(path, None),
                 ComposeSource::File(path) => graph_options.compose.clone().with_source_file(path),
                 _ => unreachable!("file source matched above"),
             };

@@ -124,12 +124,12 @@ mod tests {
     fn fixture_with(topology: impl FnOnce(&Path) -> RepoInfo) -> Fixture {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("repo");
-        let base_dir = repo.join("docs");
-        std::fs::create_dir_all(&base_dir).unwrap();
+        let cwd = repo.join("docs");
+        std::fs::create_dir_all(&cwd).unwrap();
         let topology = topology(&repo);
-        let snapshot = biscuit_file::FileResolutionContext::new(&base_dir)
+        let snapshot = biscuit_file::FileResolutionContext::new(&cwd)
             .with_repository_scope_catalog(repository_scope_catalog(&topology, &repo).unwrap());
-        let mut context = ResolutionContext::new(base_dir)
+        let mut context = ResolutionContext::new(cwd)
             .with_repository_root(&repo)
             .with_observations(CapturedObservations::for_test_packages(&repo, &topology));
         context.file_resolution_context = Some(snapshot);
@@ -187,9 +187,37 @@ mod tests {
             json!("../foobar/lib/src/lib.rs"),
             json!("../README.md"),
             json!("../scaffold/new/file.md"),
-            json!("../../outside/foo/lib/src/lib.rs"),
         ] {
             assert_eq!(names(&fixture, where_value.clone()), (json!(""), json!("")), "{where_value}");
+        }
+    }
+
+    /// The repository is the document's tree root, so a relative `where` that
+    /// leaves it is a boundary error, not a miss: the escaping candidate is
+    /// never looked up in the topology.
+    #[test]
+    fn references_leaving_the_repository_tree_are_errors_not_misses() {
+        let fixture = fixture();
+        let reference = "../../outside/foo/lib/src/lib.rs";
+        for name in ["package", "package_area"] {
+            let error = dispatch_fs(name, &[json!(reference)], &fixture.context)
+                .unwrap()
+                .unwrap_err();
+            assert!(
+                matches!(&error, ExpressionError::FileReference(diagnostic)
+                    if diagnostic.function == name
+                        && diagnostic.kind == crate::markdown::compose::expression::FileRefFailure::NotFound
+                        && matches!(
+                            diagnostic.source.as_deref(),
+                            Some(biscuit_file::FileReferenceError::RelativeTreeEscape {
+                                base_dir,
+                                reference: escaping,
+                                ..
+                            }) if *base_dir == fixture.repo && escaping == reference
+                        )),
+                "{error:?}"
+            );
+            assert!(error.is_authoring_fatal());
         }
     }
 

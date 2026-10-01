@@ -17,6 +17,7 @@ mod dasherized_identifier_corpus;
 mod directive_target_analysis;
 mod empty_package_area;
 mod feature_review_incident;
+mod file_tree_roots;
 mod find_files_and_try_frontmatter;
 // Helpers shared by more than one module are declared once, here.
 #[path = "../image_test_support/mod.rs"]

@@ -391,3 +391,55 @@ fn test_compose_html_spaced_attributes() {
         "stdout should not contain unprocessed spaced src, got:\n{stdout}"
     );
 }
+
+/// Through the normal `md compose` path, a document opened as
+/// `{{{NOTES}}}/inbox/…` (which composes to the literal `{{NOTES}}`
+/// file-reference anchor) takes `$NOTES` as its tree root: an in-tree
+/// `../b.md` composes, and a link that leaves `$NOTES` stops the run with the
+/// boundary error instead of reading the file outside it.
+#[test]
+fn compose_env_anchored_child_is_bounded_by_the_variable() {
+    let fixture = CliProcessFixture::named("compose_env_anchored_child_is_bounded_by_the_variable");
+    let root = fixture.workspace_path().join("anchor");
+    let work = root.join("work");
+    let notes = root.join("notes");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(notes.join("inbox")).unwrap();
+    std::fs::write(notes.join("b.md"), "in-tree-content\n").unwrap();
+    std::fs::write(notes.join("inbox/a.md"), "::file ../b.md\n").unwrap();
+    std::fs::write(notes.join("inbox/escape.md"), "::file ../../outside.md\n").unwrap();
+    std::fs::write(root.join("outside.md"), "outside-content\n").unwrap();
+    std::fs::write(work.join("inside.md"), "::file \"{{{NOTES}}}/inbox/a.md\"\n").unwrap();
+    std::fs::write(work.join("escape.md"), "::file \"{{{NOTES}}}/inbox/escape.md\"\n").unwrap();
+    let compose = |document: &str| {
+        fixture
+            .command_builder()
+            .plain_terminal(400, 50)
+            .build()
+            .env("NOTES", &notes)
+            .arg("compose")
+            .arg(work.join(document))
+            .output()
+            .unwrap()
+    };
+
+    let inside = compose("inside.md");
+    let stdout = String::from_utf8_lossy(&inside.stdout);
+    assert!(
+        inside.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&inside.stderr)
+    );
+    assert!(stdout.contains("in-tree-content"), "{stdout}");
+
+    let escape = compose("escape.md");
+    let stdout = String::from_utf8_lossy(&escape.stdout);
+    let stderr = String::from_utf8_lossy(&escape.stderr);
+    let collapsed = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(!escape.status.success(), "stdout: {stdout}");
+    assert!(!stdout.contains("outside-content"), "{stdout}");
+    assert!(
+        collapsed.contains("relative reference `../../outside.md` leaves file tree"),
+        "{collapsed}"
+    );
+}
