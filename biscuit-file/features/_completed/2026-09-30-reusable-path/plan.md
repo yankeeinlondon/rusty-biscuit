@@ -168,6 +168,109 @@ skills_files_updated_during_phase_7:
   - .claude/skills/darkmatter/compose.md
   - .claude/skills/biscuit-file/references/api.md
   - .claude/skills/os/windows.md
+source_files_during_phase_8:
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/operations.rs
+docs_updated_during_phase_8:
+  - biscuit-file/README.md
+  - biscuit-file/docs/topics/file-references.md
+  - darkmatter/lib/README.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/composition/frontmatter-in-pipelining.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/architecture.md
+source_code:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/schemas/detect.rs
+  - darkmatter/lib/src/markdown/schemas/file_match.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/schema/supplied.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/invocation_context/tests.rs
+  - claudine/cli/src/commands/schema_interactive/supplied.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/tests/l1/file_tree.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - claudine/lib/src/harness/error/tests.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/nested.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/tests/l1/file_tree_roots.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/sequence.rs
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/text.rs
+  - biscuit-file/lib/src/file_reference/portable/text/tests.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - biscuit-file/lib/src/file_reference/portable/strategy.rs
+  - biscuit-file/lib/src/file_reference/portable/diagnostics.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/evaluate.rs
+  - biscuit-file/lib/tests/l1/portable_path/mod.rs
+  - biscuit-file/lib/tests/l1/portable_path/configuration.rs
+  - biscuit-file/lib/tests/l1/portable_path/environment.rs
+  - biscuit-file/lib/tests/l1/portable_path/inputs.rs
+  - biscuit-file/lib/tests/l1/portable_path/platform.rs
+  - biscuit-file/lib/tests/l1/portable_path/properties.rs
+  - biscuit-file/lib/tests/l1/portable_path/strategies.rs
+  - darkmatter/lib/src/markdown/compose/type_tests.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/operations.rs
+documentation:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/tech-spec/file-reference-struct.md
+  - darkmatter/docs/transclusion/block-transclusion.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - claudine/docs/topics/composition.md
+  - biscuit-file/README.md
+  - darkmatter/docs/inline/link-normalization.md
+  - darkmatter/docs/darkmatter-compose-pipeline.md
+  - darkmatter/lib/README.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/composition/frontmatter-in-pipelining.md
+completed_phase: 8
+implemented: true
 packages:
   - biscuit-file
   - darkmatter
@@ -688,42 +791,42 @@ Phase 7. Docs tasks are parallel; final validation is sequential.
 
 ### Wave 1: docs and skills (parallel)
 
-- [ ] **biscuit-file docs.** README and `docs/topics/file-references.md`:
+- [x] **biscuit-file docs.** README and `docs/topics/file-references.md`:
   `base_dir` vs `cwd`, origin and precedence, boundary, fallback exception,
   reader opt-in, symlink rule (and "reference rule, not a sandbox"), the
   `PortablePath` guide (examples per rule, a Mermaid diagram of strategy
   evaluation/verification, diagnostics). Written for a reader new to this
   repository; marks nothing "planned" that has landed; never links to or names
   this feature.
-- [ ] **Skills.** `.claude/skills/biscuit-file/**` (SKILL.md, `references/api.md`,
+- [x] **Skills.** `.claude/skills/biscuit-file/**` (SKILL.md, `references/api.md`,
   `file-references.md`, `architecture.md`) with the new types and renamed
   methods; `.claude/skills/darkmatter/**` and `.claude/skills/claudine/**`
   where they cite renamed names or removed options.
-- [ ] **Darkmatter and Claudine docs/examples.**
+- [x] **Darkmatter and Claudine docs/examples.**
   `darkmatter/docs/inline/link-normalization.md` (remove the old defaults),
   other docs listed in the Phase 1 inventory, and every example touched by the
   rename.
-- [ ] **Dependency docs.** Confirm no crate changes; update
+- [x] **Dependency docs.** Confirm no crate changes; update
   `docs/dependencies.md` only if dependencies actually changed.
-- [ ] **Comment drift pass.** Over every symbol whose behavior changed; fix
+- [x] **Comment drift pass.** Over every symbol whose behavior changed; fix
   comments, treat code as correct, record any drift found in the log.
 
 ### Wave 2: final validation (sequential)
 
-- [ ] **Full checks.** `just test`, `just test-l2`, `just lint` in
+- [x] **Full checks.** `just test`, `just test-l2`, `just lint` in
   `biscuit-file`, `darkmatter`, `claudine`; `just ci-local --plan` reviewed for
   surprises (no new gates or cells expected).
-- [ ] **Searches.** No remaining old method names; no `unwrap()`/`expect()` in
+- [x] **Searches.** No remaining old method names; no `unwrap()`/`expect()` in
   new production code; no `${VAR}` / `with_env_path_whitelist` / `PROJECT_ROOT`
   / `DOCS_BASE` leftovers; no docs naming this feature.
-- [ ] **Cross-OS evidence.** Per the `os` skill, record which hosts produced
+- [x] **Cross-OS evidence.** Per the `os` skill, record which hosts produced
   evidence for macOS and Linux, and which Windows/WSL2 cases rely on the
   post-merge legs.
-- [ ] **Implementation log.** Finalize `implementation-log.md` with departures
+- [x] **Implementation log.** Finalize `implementation-log.md` with departures
   from the spec (docs corrected; spec left as decided), the rulings, and
   deliberate behavior changes (in-repository `./../../x.md` now fails; removed
   Darkmatter defaults).
-- [ ] **Hand-off.** Set status to implemented/ready for review. Do **not**
+- [x] **Hand-off.** Set status to implemented/ready for review. Do **not**
   move the feature to `_completed`; do **not** commit unless asked.
 
 **Checkpoint 8 (final):** everything above green; terminal state is

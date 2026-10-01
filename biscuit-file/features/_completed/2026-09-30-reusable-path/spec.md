@@ -1,6 +1,6 @@
 ---
 area: biscuit-file
-status: draft-spec
+status: implemented
 created: 2026-09-30
 $schema:
     status: |-
@@ -25,41 +25,27 @@ $schema:
 reviewed: true
 reviewed_by: "codex/gpt-6.1-sol"
 reviewed_on: "2026-09-30"
-review_iterations: 0
+review_iterations: 3
+completed: true
 human_review: false
+implemented: true
+implemented_by: "claude/opus"
 message_to_agent: |-
-  Phase 7 (consumer migration) is complete; read the "Phase 7" section of
-  implementation-log.md. Points for Phase 8 (docs, skills, final validation):
+  All 8 phases are implemented; the feature is ready for review. Read the
+  "Phase 8" section of implementation-log.md, especially "Final summary for
+  review" (rulings, deliberate behavior changes, departures from this spec).
 
-  - Darkmatter compose finalization (`compose/link_normalization.rs`) now uses
-    `PortablePath::from_path` + `with_ctx(source_link_context(options))` with
-    the default strategy. Inputs are ABSOLUTE destinations only; relative and
-    sigil destinations are left alone (link_resolve already absolutized
-    everything it could). So compose does not preserve authored intent
-    (`^/foo.md` comes back as the strategy's spelling of the same file); this
-    is recorded as a possible follow-up, not a defect of this feature.
-  - An `EnvRootedPath` result is written as `{{{VAR}}}/rest` (interpolation
-    literal) so compose -> recompose is a fixed point. The docs page
-    `darkmatter/docs/inline/link-normalization.md` was already rewritten in
-    Phase 7 (examples, Mermaid, suffixes, warnings); polish, do not revert.
-  - `ComposeOptions::with_env_path_whitelist` / `effective_env_path_whitelist`
-    / `default_env_path_whitelist` and the PROJECT_ROOT / DOCS_BASE defaults
-    are gone; `with_portable_env(names)` + `portable_env()` replace them.
-    Phase 8's leftover search should find none (Phase 7 checked
-    `darkmatter`, `claudine`, `docs`, `.claude/skills`).
-  - Claudine was the skip case: no document-link rewriting (only
-    shell-completion insert text). Nothing in Claudine docs to change.
-  - Windows traps found and recorded in `.claude/skills/os/windows.md`
-    (items 11, 12): a `{{VAR}}` whose value is verbatim `\\?\C:\...` never
-    resolves (interpolation concatenates text), and a suffix splitter must
-    skip the `?` in a `\\?\` prefix.
-  - Pre-existing failures, not from this feature: native Windows still has
-    the 7 Darkmatter L1 failures listed in the Phase 4 log; on Ken's Mac
-    `claudine-cli completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope`
-    fails because it reads the real `~/.claudine/prompts/plan.md` (passes with
-    an isolated HOME).
-  - Still open from earlier phases: `CandidatePlanOrder::AuthoringBaseFirst`
-    is not renamed.
+  - Phase 8 changed only Markdown and two doc comments; no behavior changed.
+  - Pre-existing, not from this feature: on Ken's Mac the claudine-cli test
+    `compose_magic_does_not_emit_a_nested_file_without_its_scope` fails
+    because it reads the real `~/.claudine/prompts/plan.md` (passes with an
+    isolated HOME); native Windows has 7 pre-existing Darkmatter L1 failures
+    (listed in the Phase 4 log); `RUSTDOCFLAGS=-D warnings cargo doc -p
+    biscuit-file` fails on a private link in `yaml/analyze/engine.rs`.
+  - Still open, not blocking: `CandidatePlanOrder::AuthoringBaseFirst` is not
+    renamed (its doc now says "authoring cwd"); keeping authored link intent
+    through Darkmatter compose is a possible follow-up.
+  - Do not move the feature to `_completed`; that is the author's step.
 ---
 
 # Portable Paths

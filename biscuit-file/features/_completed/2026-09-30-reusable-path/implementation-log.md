@@ -165,6 +165,109 @@ skills_files_updated_during_phase_7:
   - .claude/skills/darkmatter/compose.md
   - .claude/skills/biscuit-file/references/api.md
   - .claude/skills/os/windows.md
+source_files_during_phase_8:
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/operations.rs
+docs_updated_during_phase_8:
+  - biscuit-file/README.md
+  - biscuit-file/docs/topics/file-references.md
+  - darkmatter/lib/README.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/composition/frontmatter-in-pipelining.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8:
+  - .claude/skills/biscuit-file/SKILL.md
+  - .claude/skills/biscuit-file/references/architecture.md
+source_code:
+  - biscuit-file/lib/src/file_reference/context.rs
+  - biscuit-file/lib/src/file_reference/mod.rs
+  - biscuit-file/lib/src/file_reference/resolve.rs
+  - biscuit-file/lib/tests/l1/magic_local_roots.rs
+  - biscuit-file/lib/tests/l1/repository_scope_catalog.rs
+  - biscuit-file/lib/tests/l1/resolution_context.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/src/markdown/compose/link_resolve.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/compose/tests/schema.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+  - darkmatter/lib/src/markdown/compose/util.rs
+  - darkmatter/lib/src/markdown/schemas/detect.rs
+  - darkmatter/lib/src/markdown/schemas/file_match.rs
+  - darkmatter/lib/src/markdown/schemas/format.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/rewrite.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/lifecycle/executor.rs
+  - claudine/lib/src/composition/schema/supplied.rs
+  - claudine/lib/src/harness/error.rs
+  - claudine/lib/src/invocation_context/tests.rs
+  - claudine/cli/src/commands/schema_interactive/supplied.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/coordinator_adoption.rs
+  - biscuit-file/lib/src/file_reference/error.rs
+  - biscuit-file/lib/src/lib.rs
+  - biscuit-file/lib/tests/l1/file_tree.rs
+  - biscuit-file/lib/tests/l1/main.rs
+  - claudine/lib/src/harness/error/tests.rs
+  - darkmatter/cli/src/commands/compose.rs
+  - darkmatter/cli/tests/l1/compose_transclusion.rs
+  - darkmatter/lib/src/markdown/compose/expression/error.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+  - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+  - darkmatter/lib/src/markdown/compose/nested.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+  - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+  - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/mod.rs
+  - darkmatter/lib/src/markdown/compose/transclusion/types.rs
+  - darkmatter/lib/src/markdown/errors/blocks.rs
+  - darkmatter/lib/src/markdown/reference/graph.rs
+  - darkmatter/lib/src/markdown/reference/mod.rs
+  - darkmatter/lib/src/markdown/reference/validate.rs
+  - darkmatter/lib/tests/l1/file_tree_roots.rs
+  - darkmatter/lib/tests/l1/main.rs
+  - claudine/lib/src/invocation_context.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/sequence.rs
+  - biscuit-file/lib/src/file_reference/portable/mod.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity.rs
+  - biscuit-file/lib/src/file_reference/portable/path_identity/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/text.rs
+  - biscuit-file/lib/src/file_reference/portable/text/tests.rs
+  - darkmatter/lib/src/markdown/compose/link_normalization.rs
+  - biscuit-file/lib/src/file_reference/portable/strategy.rs
+  - biscuit-file/lib/src/file_reference/portable/diagnostics.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor.rs
+  - biscuit-file/lib/src/file_reference/portable/env_anchor/tests.rs
+  - biscuit-file/lib/src/file_reference/portable/evaluate.rs
+  - biscuit-file/lib/tests/l1/portable_path/mod.rs
+  - biscuit-file/lib/tests/l1/portable_path/configuration.rs
+  - biscuit-file/lib/tests/l1/portable_path/environment.rs
+  - biscuit-file/lib/tests/l1/portable_path/inputs.rs
+  - biscuit-file/lib/tests/l1/portable_path/platform.rs
+  - biscuit-file/lib/tests/l1/portable_path/properties.rs
+  - biscuit-file/lib/tests/l1/portable_path/strategies.rs
+  - darkmatter/lib/src/markdown/compose/type_tests.rs
+  - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+  - darkmatter/lib/src/markdown/compose/pipeline/operations.rs
+documentation:
+  - biscuit-file/docs/topics/file-references.md
+  - biscuit-file/docs/tech-spec/file-reference-struct.md
+  - darkmatter/docs/transclusion/block-transclusion.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - claudine/docs/topics/composition.md
+  - biscuit-file/README.md
+  - darkmatter/docs/inline/link-normalization.md
+  - darkmatter/docs/darkmatter-compose-pipeline.md
+  - darkmatter/lib/README.md
+  - darkmatter/docs/topics/schemas/definition.md
+  - darkmatter/docs/composition/frontmatter-in-pipelining.md
+completed_phase: 8
+implemented: true
 packages:
   - biscuit-file
   - darkmatter
@@ -1662,3 +1765,159 @@ The first `just cross-check darkmatter --os windows` run failed 11 new tests
 - `.claude/skills/biscuit-file/references/api.md`: lexical-comparison and
   verbatim-value notes, consumer pattern.
 - `.claude/skills/os/windows.md`: Path spelling items 11 and 12.
+
+## Phase 8
+
+Documentation, skills, and final validation. Ran in a single agent; no
+subagents (the docs work was small enough that parallel agents would have
+cost more than they saved). No behavior changed in this phase: the two source
+edits are doc comments only.
+
+### Docs and skills
+
+- `biscuit-file/docs/topics/file-references.md`: the `cwd` / `base_dir`,
+  origin, precedence, boundary, fallback, reader opt-in, and symlink sections
+  (including "a rule about references, not a sandbox") were already current
+  from Phases 2–6 and were reviewed, not rewritten. Added a
+  "How a reference is chosen" Mermaid flow for `PortablePath` evaluation and
+  verification, and a diagnostics example (walking `attempts()`). The example
+  was compiled and run as a scratch example (deleted afterwards): with
+  `HOME=/Users/me` it prints `~/notes/x.md via HomeDir` and the skipped
+  preferences, matching the page's claim (R1: no `../../x.md`).
+- `biscuit-file/README.md`: functional-overview bullet and a short
+  "Portable References" section (two-term model, boundary, opt-in, one
+  `PortablePath` example, links into the topic page).
+- Darkmatter: `lib/README.md` still described link normalization as writing
+  `${ENV}` (drift, fixed); `docs/topics/schemas/definition.md` said imports
+  resolve through `resolve_from(base_dir)`, but the code resolves in a context
+  whose `cwd` is the schema file's directory (`schemas/resolve.rs`
+  `resolve_file_reference_in_context`); wording fixed;
+  `docs/composition/frontmatter-in-pipelining.md` linked to
+  `../operations/link-normalization.md`, which does not exist (fixed to
+  `../inline/link-normalization.md`, as Phase 1 suspected).
+  `docs/inline/link-normalization.md` (rewritten in Phase 7) was reviewed and
+  left as is.
+- Claudine: no doc cites renamed names or removed options.
+  `claudine/docs/topics/file-referencing.md` uses `${HOME}` / `${CWD}` in
+  prose, but it is a design-intent document that forbids drift correction
+  without Ken's approval; left untouched.
+- Skills: `.claude/skills/biscuit-file/SKILL.md` (the source-file table now
+  lists `FileResolutionContext`, `BaseDirOrigin`, `LaunchMagicScope`, and the
+  `portable/` module instead of "ResolutionContext (internal)"; a pointer line
+  for the two-term model) and `references/architecture.md` (context types on
+  the `file_reference` row). `references/api.md` and `file-references.md` were
+  already current. `.claude/skills/darkmatter/compose.md` keeps one sentence
+  naming the removed `with_env_path_whitelist` / `PROJECT_ROOT` / `DOCS_BASE`
+  on purpose: it tells an agent reading an older spec that the API is gone.
+  `.claude/skills/claudine/**` has no relevant mentions.
+- Dependencies: no feature commit touched a `Cargo.toml` or `Cargo.lock`
+  (checked commit by commit; the branch-wide manifest diff comes from merged
+  branches). `docs/dependencies.md` unchanged.
+
+### Comment drift found and fixed (code treated as correct)
+
+- `darkmatter/lib/src/markdown/compose/pipeline/operations.rs`
+  `ComposeOperation::LinkNormalization` still said "`${VAR}` for whitelisted
+  environment-relative paths"; now describes the `PortablePath` forms.
+- `biscuit-file/lib/src/file_reference/mod.rs`:
+  `CandidatePlanOrder::AuthoringBaseFirst` and `RootProvenance::LocalRoot`
+  said "authoring base", which now reads like the tree root `base_dir`; both
+  now say the authoring `cwd` (`RootProvenance::Source`). The variant name
+  itself is unchanged (still open, see below).
+- Other "base directory" prose in Darkmatter and Claudine names those crates'
+  own concepts (`ComposeContext` capture directory, terminal image root, hook
+  directory) and is unrelated to `FileResolutionContext::base_dir`; left
+  alone.
+
+### Searches
+
+- Old names (`for_base`, `for_trusted_external_base`, `request_base_dir`,
+  `is_trusted_external_authoring_base`, `with_env_path_whitelist`,
+  `effective_env_path_whitelist`, `default_env_path_whitelist`): none in
+  `biscuit-file`, `darkmatter`, `claudine`, `docs`, or `.claude/skills`
+  outside the one intentional skill sentence above and `features/` specs.
+- `PROJECT_ROOT` / `DOCS_BASE`: only as user-declared variable names in tests,
+  plus `link_normalization::tests::no_variable_is_portable_unless_declared`,
+  which asserts they are no longer built in; the topic page's
+  `{{PROJECT_ROOT}}` is a generic interpolation example.
+- `${VAR}` output: none left (the `operations.rs` comment was the last).
+- `unwrap()` / `expect()`: none in production code added by this feature
+  (`portable/*.rs` above `#[cfg(test)]`, `link_normalization.rs`, and every
+  added line in the feature commits). The one hit is a rustdoc example in
+  `path_identity.rs`.
+- Docs naming the feature: none in any `docs/` tree or README.
+  `.claude/skills/os/build-hosts.md` contains the worktree directory name
+  `<host>--feat-reusable-path` as an example path, which is not a reference
+  to the spec.
+
+### Gates (macOS)
+
+- `biscuit-file`: `just test` 973 passed; `just lint` clean; `just test-l2`
+  "not applicable" stub; `just check-tier-coverage biscuit-file` 0 stranded.
+- `darkmatter`: `just test` 8743 passed, 12 skipped; `just test-l2` 18 + 69 + 3
+  passed; `just lint` clean.
+- `claudine`: `just test` stops at the known environmental failure
+  `claudine-cli completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope`
+  (reads the real `~/.claudine/prompts/plan.md`, see Phase 7). With an
+  isolated `HOME` (and `RUSTUP_HOME`/`CARGO_HOME` pinned) the full suite is
+  8072 passed, 9 skipped. `just test-l2` 277 + 3 passed; `just lint` clean
+  apart from the known `__eh_frame` linker note.
+- Pre-existing, not from this feature: `RUSTDOCFLAGS=-D warnings cargo doc -p
+  biscuit-file` fails on `yaml/analyze/engine.rs:59` (public doc links to the
+  private `report`). The new intra-doc links in `mod.rs` resolve.
+- `just ci-local --plan`: 96 executing cells, 67 of them on the pull-request
+  environments (ubuntu, macOS), so the 60–100 min band. That scope is the
+  whole branch, which carries other merged branches not yet on `main` (968
+  files differ from `main`), not this feature. No `.github/` or `scripts/ci/`
+  file changed, so no new gate or cell kind; the cells this feature adds are
+  the ordinary `biscuit-file`, `darkmatter*`, `claudine*` L1/L2/lint cells and
+  their dependents' check cells.
+
+### Cross-OS evidence
+
+| OS | Evidence | Host |
+| -- | -------- | ---- |
+| macOS | all gates above, final tree | this Mac |
+| Linux | `biscuit-file` 911/911, final tree (Phase 8); `darkmatter` 7169, `darkmatter-cli` 797 (Phase 7) | `build-linux` via `just cross-check` |
+| Windows (native) | `biscuit-file` 916/916 (Phase 6); `darkmatter` normalization + interpolation 30/30 and `darkmatter-cli` `compose_transclusion` 11/11 after the Phase 7 fixes; the 7 pre-existing Darkmatter Windows failures remain | `build-win-native` |
+| WSL2 | not run locally: no WSL-specific code; relies on the nightly leg | — |
+
+Phase 8 changed only comments and Markdown, so the Windows evidence from
+Phases 6 and 7 still applies; full Windows and WSL2 coverage comes from the
+post-merge `main` push (Windows) and nightly (WSL2) legs.
+
+### Final summary for review
+
+**Rulings.** R1–R11 (top of this log) were applied as recorded; all remain
+"provisional" working rulings the author may overturn.
+
+**Deliberate behavior changes.**
+
+- `FileResolutionContext::base_dir()` now means the tree root; the old meaning
+  is `cwd()`. An explicit or bare relative reference that leaves a boundary
+  tree, as written or through a symlink, fails with `RelativeTreeEscape`.
+  An in-repository `./../../x.md` that climbs above the repository root now
+  fails where it used to resolve. `allow_external_relative()` is the reader
+  opt-in.
+- Darkmatter link normalization runs through `PortablePath`:
+  `with_env_path_whitelist` and the built-in `PROJECT_ROOT` / `DOCS_BASE`
+  anchors are removed (`with_portable_env` / `PORTABLE_ENV_VARIABLES`
+  replace them); a same-directory target is now `./x.md`; a deep in-repository
+  target is `&path`; a declared variable is written as `{{{VAR}}}`. Old
+  generated `${VAR}/…` links were never references, so nothing reads them back.
+
+**Departures from the spec** (docs describe the code; the spec is left as
+decided): `Attempt.rejected`; `NotApplicable::RouteShape` and the extra
+reasons and error variants (Phase 6); boxed references in two error arms;
+`MagicPath(Some(filter))` spells from the filter root; Darkmatter compose
+feeds `from_path` with absolute destinations only, so authored intent is not
+kept through compose; no Darkmatter reader opt-in (no cleanup reads escaping
+links); Claudine was the skip case (Phase 7).
+
+**Still open (not blocking review).** `CandidatePlanOrder::AuthoringBaseFirst`
+is not renamed (9 uses across `biscuit-file`, Darkmatter, Claudine); its doc
+now says "authoring `cwd`". Keeping authored intent through Darkmatter compose
+is a possible follow-up.
+
+**Status.** Implementation complete, ready for review. The feature was not
+moved to `_completed` and nothing was committed.
