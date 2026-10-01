@@ -1727,7 +1727,7 @@ impl StackExecutionContext<'_> {
             ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
         })?;
         let document_context = request_context.for_source(self.source_path);
-        let mutation_context = request_context.for_base(self.effect_engine.mutation_root());
+        let mutation_context = request_context.for_cwd(self.effect_engine.mutation_root());
         let resolved = reference
             .resolve_in_context(&document_context)
             .map_err(|error| {

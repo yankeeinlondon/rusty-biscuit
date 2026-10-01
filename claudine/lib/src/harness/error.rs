@@ -81,7 +81,7 @@ impl ResolutionDetail {
             reference: detailed.raw().to_string(),
             kind: detailed.class().kind,
             effective_kind: detailed.effective_kind(),
-            base_dir: detailed.base_dir().to_path_buf(),
+            base_dir: detailed.cwd().to_path_buf(),
             repository_root: detailed.repository_root().map(Path::to_path_buf),
             candidates: detailed.candidates().to_vec(),
             magic_search_roots: Vec::new(),
@@ -483,11 +483,14 @@ fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
         | E::VaultNotConfigured
         | E::OutsideRepository { .. }
         | E::RepositoryRootNotContainingSource { .. }
+        | E::CwdOutsideBaseDir { .. }
+        | E::BaseDirNotRepositoryRoot { .. }
         | E::BareRepository => "missing_context",
         E::RemoteNotLocal(_) => "unsupported_remote",
         E::CurrentDirectory(_)
         | E::Git(_)
         | E::RepositoryEscape { .. }
+        | E::RelativeTreeEscape { .. }
         | E::RelativePath { .. }
         | E::Io { .. } => "permission_io",
         E::InvalidUrl(_) => "invalid_syntax",

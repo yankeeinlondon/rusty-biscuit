@@ -302,7 +302,7 @@ pub(super) fn rebase_caller_file_problems(
 fn caller_no_match_reason(provided: &str, origin: &FileResolutionContext) -> String {
     format!(
         "{NO_MATCH} `{provided}` while resolving from `{}`",
-        origin.base_dir().display(),
+        origin.cwd().display(),
     )
 }
 

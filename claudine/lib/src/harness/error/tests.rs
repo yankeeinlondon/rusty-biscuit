@@ -342,10 +342,13 @@ mod classification_tests {
                 | E::VaultNotConfigured
                 | E::MissingHomeContext
                 | E::OutsideRepository { .. }
-                | E::RepositoryRootNotContainingSource { .. } => "missing_context",
+                | E::RepositoryRootNotContainingSource { .. }
+                | E::CwdOutsideBaseDir { .. }
+                | E::BaseDirNotRepositoryRoot { .. } => "missing_context",
                 E::CurrentDirectory(_)
                 | E::Git(_)
                 | E::RepositoryEscape { .. }
+                | E::RelativeTreeEscape { .. }
                 | E::RelativePath { .. }
                 | E::Io { .. } => "permission_io",
                 E::RemoteNotLocal(_) => "unsupported_remote",
@@ -386,6 +389,19 @@ mod classification_tests {
                 reference: "&escape/spec.md".to_string(),
                 repository_root: PathBuf::from("/repo"),
                 escaped_candidate: PathBuf::from("/outside/spec.md"),
+            },
+            FileReferenceError::CwdOutsideBaseDir {
+                base_dir: PathBuf::from("/docs"),
+                cwd: PathBuf::from("/elsewhere"),
+            },
+            FileReferenceError::BaseDirNotRepositoryRoot {
+                base_dir: PathBuf::from("/repo/docs"),
+                repository_root: PathBuf::from("/repo"),
+            },
+            FileReferenceError::RelativeTreeEscape {
+                base_dir: PathBuf::from("/repo"),
+                candidate: PathBuf::from("/outside.md"),
+                reference: "../../outside.md".to_string(),
             },
             FileReferenceError::RemoteNotLocal("http://x".to_string()),
             FileReferenceError::InvalidUrl("not a URL".to_string()),

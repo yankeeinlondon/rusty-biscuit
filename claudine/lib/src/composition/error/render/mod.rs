@@ -293,7 +293,7 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
         darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { .. } => "malformed",
         _ => "not_found",
     });
-    detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.base_dir()));
+    detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.cwd()));
     detail["source_path"] = json!(caller
         .origin
         .source_path()

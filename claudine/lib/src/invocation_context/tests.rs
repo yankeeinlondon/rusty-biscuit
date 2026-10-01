@@ -63,7 +63,7 @@ fn one_launch_observation_projects_every_existing_context() {
     let environment = invocation.environment_context();
     let after = invocation.work_snapshot();
 
-    assert_eq!(file_resolution.base_dir(), fixture.path());
+    assert_eq!(file_resolution.cwd(), fixture.path());
     // `LaunchContext` canonicalizes every path it projects so search-dir
     // dedup compares one form — in the legacy (dunce-simplified) spelling,
     // never verbatim; the authored roots below are unaffected.
