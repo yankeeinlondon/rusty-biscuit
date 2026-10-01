@@ -128,7 +128,7 @@ However, even in this example, we don't know how expensive the operation is unti
 
 The **finalization** stage is _only_ performed in the root document of the compose operation and does any adjustments on the fully transposed document before passing it back to the caller.
 
-- [Link Normalization](./inline/link-normalization.md) - converts absolute paths back to portable forms (relative, `~/`, or `${ENV}`)
+- [Link Normalization](./inline/link-normalization.md) - converts absolute paths back to portable references (relative, `&`, a declared `{{VAR}}`, or `~/`)
 
 
 ## Rendering

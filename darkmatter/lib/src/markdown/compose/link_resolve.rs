@@ -7,7 +7,7 @@
 
 use super::body_origin::{EditOrigin, TextEdit};
 use crate::markdown::Markdown;
-use crate::markdown::compose::util::document_resolution_context;
+use crate::markdown::compose::util::source_link_context;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
@@ -18,7 +18,7 @@ use crate::markdown::reference::{
     local::{extract_markdown_images, extract_markdown_links},
 };
 use crate::markdown::types::{MarkdownError, MarkdownResult};
-use biscuit_file::try_portable_string;
+use biscuit_file::{FileResolutionContext, try_portable_string};
 use std::path::Path;
 use tracing::trace;
 
@@ -181,12 +181,9 @@ fn resolve_absolute(
         // The source's derived context, not `for_cwd(dir)`: `dir` is the
         // canonical source's parent, which may be spelled differently from
         // the tree the source was opened in.
-        let resolution_ctx = match options.source_file_resolution_context() {
+        let resolution_ctx = match source_link_context(options) {
             Some(context) => context,
-            None => {
-                let snapshot = crate::markdown::compose::capture_file_resolution_context(dir);
-                document_resolution_context(dir, None, &options.magic_paths, Some(&snapshot))
-            }
+            None => FileResolutionContext::new(dir),
         };
         // An existing target resolves to its matched path; a clean miss (a link
         // to a not-yet-created file) is absolutized to the FIRST shared

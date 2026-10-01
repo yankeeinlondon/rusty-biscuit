@@ -86,6 +86,23 @@ pub(crate) fn document_resolution_context(
     ctx
 }
 
+/// The context a document's own links resolve and normalize in.
+///
+/// The request snapshot's derivation for the source when there is a snapshot;
+/// otherwise, for a file source, a context captured from the source's
+/// directory. `None` for a source with neither a snapshot nor a path.
+pub(crate) fn source_link_context(options: &ComposeOptions) -> Option<FileResolutionContext> {
+    if let Some(context) = options.source_file_resolution_context() {
+        return Some(context);
+    }
+    let super::ComposeSource::File(path) = &options.source else {
+        return None;
+    };
+    let dir = path.parent()?;
+    let snapshot = super::capture_file_resolution_context(dir);
+    Some(document_resolution_context(dir, None, &options.magic_paths, Some(&snapshot)))
+}
+
 /// Helper to find target range within content.
 pub(crate) fn find_target_range(
     content: &str,

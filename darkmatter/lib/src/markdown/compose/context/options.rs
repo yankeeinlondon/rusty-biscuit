@@ -495,17 +495,10 @@ pub struct ComposeOptions {
     pub(crate) name_coercion_keys: Vec<String>,
 
     // ── Link normalization ────────────────────────────────────────
-    /// Environment variables that may be used as path-prefix abstractions
-    /// during the Finalization stage's Link Normalization operation.
-    ///
-    /// Acts as a strict allowlist: only variables present in this list (or
-    /// the built-in default set when this list is empty) are considered
-    /// when collapsing absolute paths to portable `${VAR}/...` form.
-    ///
-    /// Defaults to an empty vector; the Link Normalization operation
-    /// applies a built-in default whitelist (`PROJECT_ROOT`, `DOCS_BASE`)
-    /// when this field is empty.
-    pub(crate) env_path_whitelist: Vec<String>,
+    /// Variable names Link Normalization may write as a `{{VAR}}/…` anchor,
+    /// in addition to those the request environment's
+    /// `PORTABLE_ENV_VARIABLES` declares. There is no built-in set.
+    pub(crate) portable_env: std::collections::BTreeSet<String>,
 
     // ── Pre-flight graph reuse ────────────────────────────────────
     /// Optional pre-computed preflight graph to seed block transclusion.
@@ -606,7 +599,7 @@ impl std::fmt::Debug for ComposeOptions {
                     &"None"
                 },
             )
-            .field("env_path_whitelist", &self.env_path_whitelist)
+            .field("portable_env", &self.portable_env)
             .field(
                 "allow_invalid_frontmatter_assignment",
                 &self.allow_invalid_frontmatter_assignment,
@@ -874,7 +867,7 @@ impl ComposeOptions {
             one_off_replace: None,
             interpolate_code_blocks: false,
             shell_strip_ansi: true,
-            env_path_whitelist: Vec::new(),
+            portable_env: std::collections::BTreeSet::new(),
             baseline_schema: None,
             baseline_is_darkmatter_default: false,
             trigger_schemas: false,
@@ -1252,40 +1245,27 @@ impl ComposeOptions {
         self
     }
 
-    /// Sets the strict allowlist of environment variables that the
-    /// Finalization stage may use as path-prefix abstractions.
+    /// Declares environment variables whose value Link Normalization may
+    /// write as a `{{VAR}}/…` anchor, forwarded to
+    /// [`biscuit_file::PortablePath::with_portable_env`].
     ///
-    /// Each entry is the bare variable name (e.g. `"PROJECT_ROOT"`); the
-    /// Link Normalization operation reads the corresponding value from the
-    /// process environment at evaluation time. Passing an empty vector
-    /// restores the built-in default whitelist.
+    /// Names accumulate across calls and are deduplicated; they join the names
+    /// the request environment's `PORTABLE_ENV_VARIABLES` declares. Values
+    /// always come from the request's captured environment. A name that is
+    /// not a valid `{{VAR}}` name is skipped and reported as a warning.
     #[must_use]
-    pub fn with_env_path_whitelist(mut self, paths: Vec<String>) -> Self {
-        self.env_path_whitelist = paths;
+    pub fn with_portable_env<I, S>(mut self, names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.portable_env.extend(names.into_iter().map(Into::into));
         self
     }
 
-    /// Returns the effective environment-variable allowlist used by Link
-    /// Normalization.
-    ///
-    /// When the user-supplied list (`with_env_path_whitelist`) is empty,
-    /// returns the built-in default fallback set (`PROJECT_ROOT`,
-    /// `DOCS_BASE`); otherwise returns the user-supplied list.
-    pub fn effective_env_path_whitelist(&self) -> Vec<String> {
-        if self.env_path_whitelist.is_empty() {
-            Self::default_env_path_whitelist()
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect()
-        } else {
-            self.env_path_whitelist.clone()
-        }
-    }
-
-    /// Returns the built-in default environment-variable allowlist used
-    /// when the caller has not supplied an explicit whitelist.
-    pub const fn default_env_path_whitelist() -> &'static [&'static str] {
-        &["PROJECT_ROOT", "DOCS_BASE"]
+    /// The names declared through [`with_portable_env`](Self::with_portable_env).
+    pub fn portable_env(&self) -> &std::collections::BTreeSet<String> {
+        &self.portable_env
     }
 
     /// Sets shell expansion options from a `ShellExpansionOptions` struct.
@@ -2646,7 +2626,7 @@ impl ComposeOptions {
             schema_phase,
             exclude_keys,
             name_coercion_keys,
-            env_path_whitelist,
+            portable_env,
             preflight_graph,
             remote_fetch,
             file_ref_fallback_dir,
@@ -3012,11 +2992,11 @@ impl ComposeOptions {
         for key in name_coercion_keys {
             enc.str(key);
         }
-        // Ordered vector: preserve order.
-        enc.field("env_path_whitelist");
-        enc.count(env_path_whitelist.len());
-        for entry in env_path_whitelist {
-            enc.str(entry);
+        // Ordered set: iteration is already canonical.
+        enc.field("portable_env");
+        enc.count(portable_env.len());
+        for name in portable_env {
+            enc.str(name);
         }
 
         enc.field("file_ref_fallback_dir");
@@ -3578,6 +3558,13 @@ mod tests {
                 ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect(),
             );
         assert_eq!(id(&a), id(&b));
+
+        // `portable_env` is a set too: declaration order and repeats are not
+        // behavior, but a name is.
+        let c = fixed_opts().with_portable_env(["A", "B"]);
+        let d = fixed_opts().with_portable_env(["B", "A", "B"]);
+        assert_eq!(id(&c), id(&d));
+        assert_ne!(id(&c), id(&fixed_opts().with_portable_env(["A"])));
     }
 
     /// The snapshot's tree root and reader opt-in, and the reference that
@@ -3791,11 +3778,6 @@ mod tests {
             .with_magic_path("/two", biscuit_file::PathPosition::Start)
             .with_magic_path("/one", biscuit_file::PathPosition::Start);
         assert_ne!(id(&a), id(&b));
-
-        // `env_path_whitelist` order is likewise preserved.
-        let c = fixed_opts().with_env_path_whitelist(vec!["A".into(), "B".into()]);
-        let d = fixed_opts().with_env_path_whitelist(vec!["B".into(), "A".into()]);
-        assert_ne!(id(&c), id(&d));
     }
 
     /// The length-prefixed encoding keeps set-element boundaries: a single
@@ -3820,13 +3802,13 @@ mod tests {
         assert_ne!(id(&merged), id(&split));
     }
 
-    /// Same boundary guarantee for the ordered `env_path_whitelist` vector and
+    /// Same boundary guarantee for the `portable_env` set and
     /// the sorted `allowed_hosts` allowlist: a delimiter embedded in one element
     /// stays distinct from that delimiter splitting two elements.
     #[test]
-    fn options_identity_ordered_and_host_element_boundaries_are_injective() {
-        let merged_env = fixed_opts().with_env_path_whitelist(vec!["A,B".into()]);
-        let split_env = fixed_opts().with_env_path_whitelist(vec!["A".into(), "B".into()]);
+    fn options_identity_portable_env_and_host_element_boundaries_are_injective() {
+        let merged_env = fixed_opts().with_portable_env(["A,B"]);
+        let split_env = fixed_opts().with_portable_env(["A", "B"]);
         assert_ne!(id(&merged_env), id(&split_env));
 
         let merged_host = fixed_opts().with_allowed_host("a.example,b.example");
