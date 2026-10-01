@@ -60,6 +60,33 @@ pub enum FileReferenceError {
         source_path: PathBuf,
     },
 
+    /// A non-repository file tree does not contain a required working
+    /// directory. The repository counterpart is
+    /// [`RepositoryRootNotContainingSource`](Self::RepositoryRootNotContainingSource).
+    #[error("file tree `{base_dir}` does not contain the working directory `{cwd}`")]
+    CwdOutsideBaseDir { base_dir: PathBuf, cwd: PathBuf },
+
+    /// An explicit tree root disagrees with the supplied repository root.
+    /// Inside a repository the tree root is always the repository root.
+    #[error(
+        "explicit base directory `{base_dir}` conflicts with repository root `{repository_root}`; inside a repository the base directory must be the repository root"
+    )]
+    BaseDirNotRepositoryRoot {
+        base_dir: PathBuf,
+        repository_root: PathBuf,
+    },
+
+    /// A relative reference leaves the file tree, as written or where it
+    /// really lands through a symlink, junction, or reparse point.
+    #[error(
+        "relative reference `{reference}` leaves file tree `{base_dir}` through candidate `{candidate}`"
+    )]
+    RelativeTreeEscape {
+        base_dir: PathBuf,
+        candidate: PathBuf,
+        reference: String,
+    },
+
     #[error("could not produce a relative path from `{from}` to `{to}`")]
     RelativePath { from: PathBuf, to: PathBuf },
 

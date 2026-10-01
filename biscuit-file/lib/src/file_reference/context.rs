@@ -150,7 +150,7 @@ impl RepositoryScope {
 /// Captured once from the directory a request was launched from: that
 /// directory plus the repository, package, and package-area roots selected
 /// for it. Derivations ([`for_source`](FileResolutionContext::for_source),
-/// [`for_base`](FileResolutionContext::for_base), and the trusted-external
+/// [`for_cwd`](FileResolutionContext::for_cwd), and the trusted-external
 /// forms) preserve this snapshot unchanged, so a nested `@` reference keeps
 /// searching the launch tree even when the authoring source lives in another
 /// repository or an external prompt directory, while `./`, bare, `&`, and `^`
@@ -224,6 +224,109 @@ impl MagicPathRegistration {
     pub fn tier(&self) -> super::MagicPathTier {
         self.tier
     }
+}
+
+/// Where a [`FileResolutionContext`]'s tree root
+/// ([`base_dir`](FileResolutionContext::base_dir)) came from.
+///
+/// Every origin except [`Fallback`](Self::Fallback) is a boundary: a relative
+/// reference may not leave that tree unless the reader opted in with
+/// [`allow_external_relative`](FileResolutionContext::allow_external_relative).
+/// A caller must read the origin rather than compare `base_dir` with `cwd`,
+/// because an explicit root can equal `cwd` and still enforce containment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaseDirOrigin {
+    /// The supplied repository root (directly or through a scope catalog).
+    Repository,
+    /// A root supplied with [`with_base_dir`](FileResolutionContext::with_base_dir).
+    Explicit,
+    /// The deepest configured vault root containing `cwd`.
+    Vault,
+    /// The captured home directory of a `~`-anchored opening reference.
+    Home,
+    /// The captured value of the `{{name}}`-anchored opening reference.
+    Environment { name: String },
+    /// Nothing named the tree, so `base_dir` is `cwd` and enforces no boundary.
+    Fallback,
+}
+
+impl BaseDirOrigin {
+    /// Whether a tree with this origin rejects relative references that leave it.
+    pub fn is_boundary(&self) -> bool {
+        !matches!(self, Self::Fallback)
+    }
+}
+
+/// A selected tree root and its origin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TreeRoot {
+    path: PathBuf,
+    origin: BaseDirOrigin,
+}
+
+impl TreeRoot {
+    fn fallback(cwd: &Path) -> Self {
+        Self {
+            path: cwd.to_path_buf(),
+            origin: BaseDirOrigin::Fallback,
+        }
+    }
+
+    /// Lexical, component-aware containment of `dir` in a boundary tree.
+    /// A fallback tree contains everything.
+    fn contains(&self, dir: &Path) -> bool {
+        !self.origin.is_boundary()
+            || normalize_components(dir).starts_with(normalize_components(&self.path))
+    }
+
+    /// The containment error for a `dir` this tree does not contain.
+    fn not_containing(&self, dir: &Path) -> FileReferenceError {
+        match self.origin {
+            BaseDirOrigin::Repository => FileReferenceError::RepositoryRootNotContainingSource {
+                repository_root: self.path.clone(),
+                source_path: dir.to_path_buf(),
+            },
+            _ => FileReferenceError::CwdOutsideBaseDir {
+                base_dir: self.path.clone(),
+                cwd: dir.to_path_buf(),
+            },
+        }
+    }
+}
+
+/// The tree root an opening reference's `~` or leading `{{VAR}}` anchor
+/// supplies, when it is a captured absolute directory containing
+/// `resolved_source`.
+///
+/// Containment is lexical (ruling R6), which preserves the authored identity
+/// of the anchor. A relative, unset, or foreign-host value supplies nothing.
+fn opening_anchor(
+    reference: &super::FileReference,
+    resolved_source: &Path,
+    home_dir: Option<&Path>,
+    env: &HashMap<String, String>,
+) -> Option<TreeRoot> {
+    use super::{ReferenceKind, TemplateSegment};
+
+    let (path, origin) = match &reference.parsed.kind {
+        ReferenceKind::Home(_) => (home_dir?.to_path_buf(), BaseDirOrigin::Home),
+        // A leading `{{VAR}}` always parses as implicit relative.
+        ReferenceKind::ImplicitRelative(template) => match template.segments.first()? {
+            TemplateSegment::EnvVar(name) => (
+                PathBuf::from(env.get(name)?),
+                BaseDirOrigin::Environment { name: name.clone() },
+            ),
+            TemplateSegment::Literal(_) => return None,
+        },
+        _ => return None,
+    };
+    if !path.is_absolute() {
+        return None;
+    }
+    let path = normalize_components(&path);
+    normalize_components(resolved_source)
+        .starts_with(&path)
+        .then_some(TreeRoot { path, origin })
 }
 
 fn validate_catalog_roots(
@@ -307,6 +410,11 @@ pub(crate) struct ResolutionContext {
     /// reads the local-root anchors from here rather than from the
     /// source-derived anchors above.
     pub launch_magic_scope: Option<LaunchMagicScope>,
+    /// The tree root relative references must stay inside, as written and
+    /// where they land. `None` when no boundary applies: the ambient
+    /// compatibility methods, a fallback tree root, or a reader that opted in
+    /// with [`FileResolutionContext::allow_external_relative`].
+    pub relative_boundary: Option<PathBuf>,
 }
 
 impl ResolutionContext {
@@ -332,21 +440,22 @@ impl ResolutionContext {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         })
     }
 
-    /// Build a context that treats `base` as the working directory, while
+    /// Build a context that treats `cwd` as the working directory, while
     /// still reading HOME and environment variables from the live process
     /// state.
     ///
-    /// If `base` is a relative path, it is joined onto the ambient CWD so
+    /// If `cwd` is a relative path, it is joined onto the ambient CWD so
     /// that repository discovery always operates on an absolute location.
-    pub fn from_base(base: &Path) -> Result<Self, FileReferenceError> {
-        let cwd = if base.is_absolute() {
-            base.to_path_buf()
+    pub fn from_cwd(cwd: &Path) -> Result<Self, FileReferenceError> {
+        let cwd = if cwd.is_absolute() {
+            cwd.to_path_buf()
         } else {
             let ambient = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
-            ambient.join(base)
+            ambient.join(cwd)
         };
         let home_dir = home_dir();
         let env = capture_env();
@@ -360,6 +469,7 @@ impl ResolutionContext {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         })
     }
 
@@ -371,7 +481,7 @@ impl ResolutionContext {
     /// back to a live repository-root walk (D2/D10).
     pub fn from_context(ctx: &FileResolutionContext) -> Self {
         Self {
-            cwd: ctx.base_dir.clone(),
+            cwd: ctx.cwd.clone(),
             home_dir: ctx.home_dir.clone(),
             env: ctx.env.clone(),
             repository_root: ctx.repository_root.clone(),
@@ -379,6 +489,8 @@ impl ResolutionContext {
             package_area: ctx.package_area.clone(),
             allow_ambient_discovery: false,
             launch_magic_scope: Some(ctx.launch_magic_scope.clone()),
+            relative_boundary: (ctx.base_dir_is_boundary() && !ctx.allow_external_relative)
+                .then(|| ctx.tree.path.clone()),
         }
     }
 }
@@ -400,13 +512,24 @@ impl ResolutionContext {
 ///
 /// ## Notes
 ///
-/// `base_dir` is a directory: for a file-backed source, pass the source
-/// file's parent. A supplied `repository_root` is accepted only when it
-/// lexically contains the initial `base_dir` (see [`validate`]). Contexts
-/// derived with [`for_source`](Self::for_source) must remain inside that root.
-/// A caller that deliberately crosses into a configured external trust root
-/// must use [`for_trusted_external_source`](Self::for_trusted_external_source)
-/// or [`for_trusted_external_base`](Self::for_trusted_external_base).
+/// `cwd` is a directory: for a file-backed source, pass the source
+/// file's parent. It is where `./`, `../`, and bare references start.
+///
+/// [`base_dir`](Self::base_dir) is the root of the whole file tree and the
+/// boundary relative references must stay inside. It is selected, in order,
+/// from the supplied repository root, an explicit
+/// [`with_base_dir`](Self::with_base_dir), the deepest configured vault
+/// containing `cwd`, the `~`/`{{VAR}}` anchor of the reference that opened the
+/// document ([`for_source_reference`](Self::for_source_reference)), and
+/// finally `cwd` itself, which is a [`BaseDirOrigin::Fallback`] and enforces
+/// no boundary. `cwd` must stay inside `base_dir` (see [`validate`]).
+///
+/// [`for_source`](Self::for_source) and [`for_cwd`](Self::for_cwd) keep the
+/// tree: a derived document must remain inside it. A caller that deliberately
+/// crosses into a configured external trust root must use
+/// [`for_trusted_external_source`](Self::for_trusted_external_source) or
+/// [`for_trusted_external_cwd`](Self::for_trusted_external_cwd), which select
+/// a new tree for the external document.
 ///
 /// The context also captures an immutable launch `@` scope (see
 /// [`LaunchMagicScope`]): the construction directory plus the repository,
@@ -417,14 +540,14 @@ impl ResolutionContext {
 /// [`with_repository_scope_catalog`](Self::with_repository_scope_catalog),
 /// [`with_package_root`](Self::with_package_root),
 /// [`with_package_area`](Self::with_package_area)) update it, while
-/// `for_source`/`for_base` derivations never do.
+/// derivations never do.
 ///
 /// [`with_repository_root`]: Self::with_repository_root
 /// [`validate`]: Self::validate
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileResolutionContext {
     source_path: Option<PathBuf>,
-    base_dir: PathBuf,
+    cwd: PathBuf,
     repository_root: Option<PathBuf>,
     package_root: Option<PathBuf>,
     package_area: Option<PathBuf>,
@@ -435,12 +558,25 @@ pub struct FileResolutionContext {
     vault_roots: Vec<PathBuf>,
     /// The request boundary whose containment must remain valid across every
     /// derivation, including explicitly trusted external ones.
-    request_base_dir: PathBuf,
-    /// Whether the current authoring base intentionally crosses the request
+    request_cwd: PathBuf,
+    /// Whether the current authoring `cwd` intentionally crosses the request
     /// repository boundary.
-    trusted_external_authoring_base: bool,
+    trusted_external_authoring_cwd: bool,
     /// The immutable launch `@` scope; see the struct documentation.
     launch_magic_scope: LaunchMagicScope,
+    explicit_base_dir: Option<PathBuf>,
+    /// The `~`/`{{VAR}}` tree root supplied by the reference that opened the
+    /// current document, kept so a later builder call can reselect the tree.
+    opening_anchor: Option<TreeRoot>,
+    /// The selected tree root for `cwd`.
+    tree: TreeRoot,
+    /// The tree selected for `request_cwd`. Builders keep it in step with
+    /// `tree` until the first derivation; after that it is frozen, so the
+    /// original request is validated against its own tree independently of
+    /// whatever tree a derived document selected.
+    request_tree: TreeRoot,
+    derived: bool,
+    allow_external_relative: bool,
 }
 
 impl FileResolutionContext {
@@ -452,21 +588,22 @@ impl FileResolutionContext {
     /// the original process-state snapshot.
     #[must_use]
     pub fn from_snapshot(
-        base_dir: impl Into<PathBuf>,
+        cwd: impl Into<PathBuf>,
         home_dir: Option<PathBuf>,
         env: HashMap<String, String>,
     ) -> Self {
-        let base_dir = base_dir.into();
+        let cwd = cwd.into();
         let launch_magic_scope = LaunchMagicScope {
-            request_dir: base_dir.clone(),
+            request_dir: cwd.clone(),
             repository_root: None,
             package_root: None,
             package_area: None,
         };
-        Self {
+        let tree = TreeRoot::fallback(&cwd);
+        let mut context = Self {
             source_path: None,
-            request_base_dir: base_dir.clone(),
-            base_dir,
+            request_cwd: cwd.clone(),
+            cwd,
             repository_root: None,
             package_root: None,
             package_area: None,
@@ -475,109 +612,184 @@ impl FileResolutionContext {
             env,
             magic_paths: MagicPathList::default(),
             vault_roots: Vec::new(),
-            trusted_external_authoring_base: false,
+            trusted_external_authoring_cwd: false,
             launch_magic_scope,
-        }
+            explicit_base_dir: None,
+            opening_anchor: None,
+            request_tree: tree.clone(),
+            tree,
+            derived: false,
+            allow_external_relative: false,
+        };
+        // A captured `VAULT` value can already contain `cwd`.
+        context.reselect_tree();
+        context
     }
 
-    /// Create a context anchored at `base_dir`, snapshotting the ambient
+    /// Create a context anchored at `cwd`, snapshotting the ambient
     /// environment and home directory.
     ///
-    /// `base_dir` should be an absolutized directory. Builder methods layer
+    /// `cwd` should be an absolutized directory. Builder methods layer
     /// the remaining anchors on top.
-    pub fn new(base_dir: impl Into<PathBuf>) -> Self {
-        let base_dir = base_dir.into();
-        let launch_magic_scope = LaunchMagicScope {
-            request_dir: base_dir.clone(),
-            repository_root: None,
-            package_root: None,
-            package_area: None,
-        };
-        Self {
-            source_path: None,
-            request_base_dir: base_dir.clone(),
-            base_dir,
-            repository_root: None,
-            package_root: None,
-            package_area: None,
-            repository_scope_catalog: None,
-            home_dir: home_dir(),
-            env: capture_env(),
-            magic_paths: MagicPathList::default(),
-            vault_roots: Vec::new(),
-            trusted_external_authoring_base: false,
-            launch_magic_scope,
-        }
+    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+        Self::from_snapshot(cwd, home_dir(), capture_env())
     }
 
     /// Derive a document context from this request snapshot.
     ///
-    /// Only the authoring source and its base directory change. Repository,
+    /// Only the authoring source and its `cwd` change. Repository,
     /// package-area, home, environment, magic-root, and vault-root inputs are
     /// cloned from the captured request without reading process state or
-    /// performing discovery. The launch `@` scope
+    /// performing discovery. The tree root, its origin, and the reader opt-in
+    /// carry over unchanged. The launch `@` scope
     /// ([`launch_magic_scope`](Self::launch_magic_scope)) is likewise
     /// preserved verbatim: a nested `@` reference keeps searching the launch
-    /// tree while the source-relative kinds re-anchor on the new base.
+    /// tree while the source-relative kinds re-anchor on the new `cwd`.
     ///
     /// Both the request boundary and the derived source directory must remain
-    /// inside the supplied repository root. Use
+    /// inside the tree root. Use
     /// [`for_trusted_external_source`](Self::for_trusted_external_source) only
-    /// after another policy has accepted an external trust root.
+    /// after another policy has accepted an external trust root. When the tree
+    /// root is a [`BaseDirOrigin::Fallback`] there is no tree to keep, so one
+    /// is selected for the new `cwd` (a containing vault, else `cwd`).
     #[must_use]
     pub fn for_source(&self, source_path: impl Into<PathBuf>) -> Self {
         let source_path = source_path.into();
-        let base_dir = source_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| self.base_dir.clone());
-        let mut derived = self.clone();
-        derived.source_path = Some(source_path);
-        derived.base_dir = base_dir;
-        derived.trusted_external_authoring_base = false;
-        derived.recompute_repository_scopes();
-        derived
+        let cwd = self.source_cwd(&source_path);
+        self.derive(Some(source_path), cwd, None, false)
     }
 
     /// Derive a document context across an explicitly accepted trust boundary.
     ///
-    /// The originating request must still satisfy repository containment, but
-    /// the external source directory may live outside that repository. This is
-    /// intended for documents already accepted through a configured home,
+    /// The originating request must still satisfy its own containment, but
+    /// the external source directory may live outside the current tree. This
+    /// is intended for documents already accepted through a configured home,
     /// magic, or vault root; it does not establish a filesystem sandbox.
+    ///
+    /// When the source is still inside the current tree this behaves like
+    /// [`for_source`](Self::for_source). Otherwise it selects a new tree: the
+    /// repository a scope catalog assigns to the source, else a containing
+    /// vault, else the new `cwd`. Repository, package, and package-area
+    /// anchors no catalog assigns are dropped, an explicit
+    /// [`with_base_dir`](Self::with_base_dir) of the originating tree does not
+    /// carry over, and no repository is discovered. The launch `@` scope is
+    /// unchanged.
     #[must_use]
     pub fn for_trusted_external_source(&self, source_path: impl Into<PathBuf>) -> Self {
-        let mut derived = self.for_source(source_path);
-        derived.trusted_external_authoring_base = true;
-        derived
+        let source_path = source_path.into();
+        let cwd = self.source_cwd(&source_path);
+        self.derive(Some(source_path), cwd, None, true)
     }
 
-    /// Derive a context with a different authoring base but no source file.
+    /// Derive a document context, keeping the `~` or leading `{{VAR}}` anchor
+    /// of the reference that opened it.
     ///
-    /// This is the in-memory-document counterpart to [`for_source`](Self::for_source).
-    /// All request-scoped inputs remain unchanged and no ambient state is read.
-    ///
-    /// Both the request boundary and the new base must remain inside the
-    /// supplied repository root.
+    /// `resolved_source` must already have been accepted by the caller using
+    /// this snapshot; this does not re-resolve `reference` or grant permission
+    /// to open the file. Behaves like [`for_source`](Self::for_source), except
+    /// that when this context has no tree to keep
+    /// ([`BaseDirOrigin::Fallback`]) the anchor can become the tree root. The
+    /// anchor qualifies only when it is a captured absolute home directory or
+    /// environment value that lexically contains `resolved_source`. An anchor
+    /// never replaces a tree that already contains the document.
     #[must_use]
-    pub fn for_base(&self, base_dir: impl Into<PathBuf>) -> Self {
-        let mut derived = self.clone();
-        derived.source_path = None;
-        derived.base_dir = base_dir.into();
-        derived.trusted_external_authoring_base = false;
-        derived.recompute_repository_scopes();
-        derived
+    pub fn for_source_reference(
+        &self,
+        reference: &super::FileReference,
+        resolved_source: impl Into<PathBuf>,
+    ) -> Self {
+        let source_path = resolved_source.into();
+        let cwd = self.source_cwd(&source_path);
+        let anchor = opening_anchor(reference, &source_path, self.home_dir(), &self.env);
+        self.derive(Some(source_path), cwd, anchor, false)
     }
 
-    /// Derive an in-memory document base across an explicitly accepted trust
+    /// The trusted-external counterpart of
+    /// [`for_source_reference`](Self::for_source_reference).
+    ///
+    /// Behaves like
+    /// [`for_trusted_external_source`](Self::for_trusted_external_source),
+    /// with the qualifying opening anchor ranked after a catalog repository
+    /// and a containing vault when the new tree is selected.
+    #[must_use]
+    pub fn for_trusted_external_source_reference(
+        &self,
+        reference: &super::FileReference,
+        resolved_source: impl Into<PathBuf>,
+    ) -> Self {
+        let source_path = resolved_source.into();
+        let cwd = self.source_cwd(&source_path);
+        let anchor = opening_anchor(reference, &source_path, self.home_dir(), &self.env);
+        self.derive(Some(source_path), cwd, anchor, true)
+    }
+
+    /// Derive a context with a different authoring `cwd` but no source file.
+    ///
+    /// This is the in-memory-document counterpart to [`for_source`](Self::for_source),
+    /// with the same tree rules. All request-scoped inputs remain unchanged
+    /// and no ambient state is read.
+    #[must_use]
+    pub fn for_cwd(&self, cwd: impl Into<PathBuf>) -> Self {
+        self.derive(None, cwd.into(), None, false)
+    }
+
+    /// Derive an in-memory document `cwd` across an explicitly accepted trust
     /// boundary.
     ///
-    /// The originating request must still satisfy repository containment. Use
-    /// this only after another policy has accepted the external base.
+    /// The in-memory counterpart to
+    /// [`for_trusted_external_source`](Self::for_trusted_external_source), with
+    /// the same tree rules. Use this only after another policy has accepted
+    /// the external directory.
     #[must_use]
-    pub fn for_trusted_external_base(&self, base_dir: impl Into<PathBuf>) -> Self {
-        let mut derived = self.for_base(base_dir);
-        derived.trusted_external_authoring_base = true;
+    pub fn for_trusted_external_cwd(&self, cwd: impl Into<PathBuf>) -> Self {
+        self.derive(None, cwd.into(), None, true)
+    }
+
+    fn source_cwd(&self, source_path: &Path) -> PathBuf {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.cwd.clone())
+    }
+
+    /// The one derivation rule behind every `for_*` method.
+    fn derive(
+        &self,
+        source_path: Option<PathBuf>,
+        cwd: PathBuf,
+        anchor: Option<TreeRoot>,
+        trusted: bool,
+    ) -> Self {
+        let mut derived = self.clone();
+        derived.source_path = source_path;
+        derived.cwd = cwd;
+        derived.trusted_external_authoring_cwd = trusted;
+        derived.derived = true;
+        let keeps_tree = self.tree.origin.is_boundary();
+        if keeps_tree && (!trusted || self.tree.contains(&derived.cwd)) {
+            // A normal derivation keeps the tree even when the new `cwd` left
+            // it, so `validate` reports the escape instead of a new tree
+            // silently absorbing it.
+            derived.recompute_repository_scopes();
+            return derived;
+        }
+        if trusted {
+            derived.explicit_base_dir = None;
+            derived.opening_anchor = anchor;
+            if derived.repository_scope_catalog.is_some() {
+                derived.recompute_repository_scopes();
+            } else {
+                derived.repository_root = None;
+                derived.package_root = None;
+                derived.package_area = None;
+            }
+        } else {
+            derived.recompute_repository_scopes();
+            if anchor.is_some() {
+                derived.opening_anchor = anchor;
+            }
+        }
+        derived.tree = derived.select_tree();
         derived
     }
 
@@ -597,6 +809,7 @@ impl FileResolutionContext {
     pub fn with_repository_root(mut self, repository_root: impl Into<PathBuf>) -> Self {
         self.repository_root = Some(repository_root.into());
         self.sync_launch_magic_scope();
+        self.reselect_tree();
         self
     }
 
@@ -609,6 +822,33 @@ impl FileResolutionContext {
         self.repository_scope_catalog = Some(catalog);
         self.recompute_repository_scopes();
         self.sync_launch_magic_scope();
+        self.reselect_tree();
+        self
+    }
+
+    /// Supply the root of the file tree outside a repository.
+    ///
+    /// An explicit root outranks a containing vault and an opening-reference
+    /// anchor, and it is a boundary even when it equals `cwd`. Inside a
+    /// repository the tree root is always the repository root: a `dir` equal
+    /// to it is accepted, and any other makes [`validate`](Self::validate)
+    /// fail with [`FileReferenceError::BaseDirNotRepositoryRoot`].
+    #[must_use]
+    pub fn with_base_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.explicit_base_dir = Some(dir.into());
+        self.reselect_tree();
+        self
+    }
+
+    /// Let relative references resolve to targets outside the tree root,
+    /// as written or through a symlink.
+    ///
+    /// Off by default and copied to every derived context. It does not exempt
+    /// an invalid request or document `cwd`, authorize file access, or relax
+    /// the repository-only `&` and `^` sigils.
+    #[must_use]
+    pub fn allow_external_relative(mut self) -> Self {
+        self.allow_external_relative = true;
         self
     }
 
@@ -657,6 +897,8 @@ impl FileResolutionContext {
     #[must_use]
     pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
         self.env = env;
+        // The `VAULT` entry takes part in tree-root selection.
+        self.reselect_tree();
         self
     }
 
@@ -677,9 +919,9 @@ impl FileResolutionContext {
     /// A relative root is interpreted against the captured request directory
     /// (the launch `@` scope's `request_dir`), never against the process
     /// working directory: the joined candidate and the tier test use that
-    /// same absolute spelling. For the ambient `resolve_from(base)` form the
-    /// captured request directory is `base`, so a relative root follows
-    /// `base` rather than the process working directory.
+    /// same absolute spelling. For the ambient `resolve_from(cwd)` form the
+    /// captured request directory is `cwd`, so a relative root follows
+    /// `cwd` rather than the process working directory.
     #[must_use]
     pub fn add_magic_path(self, path: impl Into<PathBuf>, position: super::PathPosition) -> Self {
         self.add_configured_root(path, position, super::MagicPathTier::Inferred)
@@ -721,6 +963,7 @@ impl FileResolutionContext {
     #[must_use]
     pub fn add_vault(mut self, path: impl Into<PathBuf>) -> Self {
         self.vault_roots.push(path.into());
+        self.reselect_tree();
         self
     }
 
@@ -729,9 +972,33 @@ impl FileResolutionContext {
         self.source_path.as_deref()
     }
 
-    /// The base directory references resolve against.
+    /// The working directory relative references resolve against.
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
+    /// The root of the file tree: the boundary relative references stay
+    /// inside. Equal to [`repository_root`](Self::repository_root) inside a
+    /// repository; see the struct notes for how it is selected elsewhere.
     pub fn base_dir(&self) -> &Path {
-        &self.base_dir
+        &self.tree.path
+    }
+
+    /// Where [`base_dir`](Self::base_dir) came from.
+    pub fn base_dir_origin(&self) -> &BaseDirOrigin {
+        &self.tree.origin
+    }
+
+    /// Whether [`base_dir`](Self::base_dir) rejects relative references that
+    /// leave it; `false` only for a [`BaseDirOrigin::Fallback`].
+    pub fn base_dir_is_boundary(&self) -> bool {
+        self.tree.origin.is_boundary()
+    }
+
+    /// Whether [`allow_external_relative`](Self::allow_external_relative)
+    /// was set on this context or one it was derived from.
+    pub fn external_relative_allowed(&self) -> bool {
+        self.allow_external_relative
     }
 
     /// The supplied repository (worktree) root, when one was supplied.
@@ -739,7 +1006,7 @@ impl FileResolutionContext {
         self.repository_root.as_deref()
     }
 
-    /// The selected package root, when the reference base is inside one.
+    /// The selected package root, when `cwd` is inside one.
     pub fn package_root(&self) -> Option<&Path> {
         self.package_root.as_deref()
     }
@@ -761,14 +1028,14 @@ impl FileResolutionContext {
 
     /// The original request directory whose repository containment is retained
     /// across derived document contexts.
-    pub fn request_base_dir(&self) -> &Path {
-        &self.request_base_dir
+    pub fn request_cwd(&self) -> &Path {
+        &self.request_cwd
     }
 
     /// Whether this context intentionally crosses the request repository
     /// boundary for an externally trusted authoring source.
-    pub fn is_trusted_external_authoring_base(&self) -> bool {
-        self.trusted_external_authoring_base
+    pub fn is_trusted_external_authoring_cwd(&self) -> bool {
+        self.trusted_external_authoring_cwd
     }
 
     /// The immutable launch `@` scope captured at construction: the request
@@ -871,17 +1138,79 @@ impl FileResolutionContext {
         let Some(catalog) = &self.repository_scope_catalog else {
             return;
         };
-        let scope = catalog.scope_for(&self.base_dir);
+        let scope = catalog.scope_for(&self.cwd);
         self.repository_root = scope.repository_root;
         self.package_area = scope.package_area_root;
         self.package_root = scope.package_root;
+    }
+
+    /// Select the tree root for `cwd` from the current inputs, in precedence
+    /// order: repository, explicit, deepest containing vault, opening anchor,
+    /// fallback.
+    fn select_tree(&self) -> TreeRoot {
+        if let Some(repository_root) = &self.repository_root {
+            return TreeRoot {
+                path: repository_root.clone(),
+                origin: BaseDirOrigin::Repository,
+            };
+        }
+        if let Some(base_dir) = &self.explicit_base_dir {
+            return TreeRoot {
+                path: base_dir.clone(),
+                origin: BaseDirOrigin::Explicit,
+            };
+        }
+        if let Some(vault) = self.containing_vault() {
+            return TreeRoot {
+                path: vault,
+                origin: BaseDirOrigin::Vault,
+            };
+        }
+        if let Some(anchor) = &self.opening_anchor
+            && anchor.contains(&self.cwd)
+        {
+            return anchor.clone();
+        }
+        TreeRoot::fallback(&self.cwd)
+    }
+
+    /// The deepest vault root containing `cwd`. Configured roots come before
+    /// captured `VAULT` roots, matching the resolver's order, and the first
+    /// root wins a depth tie.
+    fn containing_vault(&self) -> Option<PathBuf> {
+        let cwd = normalize_components(&self.cwd);
+        let captured = self
+            .env
+            .get("VAULT")
+            .map(|value| std::env::split_paths(value).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let mut best: Option<(usize, PathBuf)> = None;
+        for root in self.vault_roots.iter().chain(captured.iter()) {
+            let normalized = normalize_components(root);
+            if !root.is_absolute() || !cwd.starts_with(&normalized) {
+                continue;
+            }
+            let depth = normalized.components().count();
+            if best.as_ref().is_none_or(|(best_depth, _)| depth > *best_depth) {
+                best = Some((depth, root.clone()));
+            }
+        }
+        best.map(|(_, root)| root)
+    }
+
+    /// Reselect the tree after a builder changed a selection input.
+    fn reselect_tree(&mut self) {
+        self.tree = self.select_tree();
+        if !self.derived {
+            self.request_tree = self.tree.clone();
+        }
     }
 
     /// Mirror the current repository/package anchors into the launch `@`
     /// scope.
     ///
     /// Called only by the direct builder methods, never by the
-    /// `for_source`/`for_base` derivations: those re-anchor the
+    /// `for_source`/`for_cwd` derivations: those re-anchor the
     /// source-relative kinds through `recompute_repository_scopes` while the
     /// launch `@` scope stays frozen at what the request captured.
     fn sync_launch_magic_scope(&mut self) {
@@ -890,52 +1219,45 @@ impl FileResolutionContext {
         self.launch_magic_scope.package_area = self.package_area.clone();
     }
 
-    /// Validate repository containment for the request and authoring bases.
+    /// Validate tree containment for the request and authoring `cwd`s.
     ///
     /// Containment is component-aware and lexical after `.`/`..` normalization
-    /// and Windows verbatim-prefix reduction, so a root and a base that name the
+    /// and Windows verbatim-prefix reduction, so a root and a `cwd` that name the
     /// same tree in different spellings still validate. It does **not**
     /// canonicalize through symlinks, so the authored/worktree identity is
     /// preserved. This is a trust check on the caller-provided root, not a
-    /// sandbox boundary. When no repository root is supplied, the context is
-    /// trivially valid.
+    /// sandbox boundary. A [`BaseDirOrigin::Fallback`] tree contains every
+    /// `cwd`.
     ///
-    /// Normal derivations must keep their authoring base inside the repository.
-    /// Trusted-external derivations exempt only the current authoring base; the
-    /// originating request boundary is always checked, so derivation cannot
-    /// make an invalid request snapshot valid.
+    /// Normal derivations must keep their authoring `cwd` inside the tree.
+    /// Trusted-external derivations exempt only the current authoring `cwd`;
+    /// the originating request is always checked against the tree it was
+    /// captured with, so derivation cannot make an invalid request snapshot
+    /// valid.
     ///
     /// ## Errors
     ///
-    /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when a
-    /// repository root is supplied but does not contain a required base.
+    /// - [`FileReferenceError::BaseDirNotRepositoryRoot`] when an explicit
+    ///   [`with_base_dir`](Self::with_base_dir) differs from the repository root
+    /// - [`FileReferenceError::RepositoryRootNotContainingSource`] when a
+    ///   repository tree does not contain a required `cwd`
+    /// - [`FileReferenceError::CwdOutsideBaseDir`] when any other boundary
+    ///   tree does not contain a required `cwd`
     pub fn validate(&self) -> Result<(), FileReferenceError> {
-        if self.repository_scope_catalog.is_some() {
-            if let Some(repo) = &self.repository_root
-                && !normalize_components(&self.base_dir).starts_with(normalize_components(repo))
-            {
-                return Err(FileReferenceError::RepositoryRootNotContainingSource {
-                    repository_root: repo.clone(),
-                    source_path: self.base_dir.clone(),
-                });
-            }
-            return Ok(());
+        if let (Some(base_dir), Some(repository_root)) =
+            (&self.explicit_base_dir, &self.repository_root)
+            && normalize_components(base_dir) != normalize_components(repository_root)
+        {
+            return Err(FileReferenceError::BaseDirNotRepositoryRoot {
+                base_dir: base_dir.clone(),
+                repository_root: repository_root.clone(),
+            });
         }
-        if let Some(repo) = &self.repository_root {
-            let repo_norm = normalize_components(repo);
-            let required_bases = if self.trusted_external_authoring_base {
-                [Some(&self.request_base_dir), None]
-            } else {
-                [Some(&self.request_base_dir), Some(&self.base_dir)]
-            };
-            for base in required_bases.into_iter().flatten() {
-                if !normalize_components(base).starts_with(&repo_norm) {
-                    return Err(FileReferenceError::RepositoryRootNotContainingSource {
-                        repository_root: repo.clone(),
-                        source_path: base.clone(),
-                    });
-                }
-            }
+        if !self.request_tree.contains(&self.request_cwd) {
+            return Err(self.request_tree.not_containing(&self.request_cwd));
+        }
+        if !self.trusted_external_authoring_cwd && !self.tree.contains(&self.cwd) {
+            return Err(self.tree.not_containing(&self.cwd));
         }
         Ok(())
     }
@@ -1031,7 +1353,7 @@ mod tests {
     }
 
     #[test]
-    fn from_base_absolute_path_is_preserved() {
+    fn from_cwd_absolute_path_is_preserved() {
         // Windows has no drive-less absolute path: `/tmp` is *rooted* there but
         // `is_absolute()` is false, so the literal must be selected per platform.
         #[cfg(windows)]
@@ -1039,13 +1361,13 @@ mod tests {
         #[cfg(not(windows))]
         let abs = Path::new("/tmp");
 
-        let ctx = ResolutionContext::from_base(abs).unwrap();
+        let ctx = ResolutionContext::from_cwd(abs).unwrap();
         assert_eq!(ctx.cwd, abs);
     }
 
     #[test]
-    fn from_base_relative_path_is_joined_to_ambient_cwd() {
-        let ctx = ResolutionContext::from_base(Path::new("sub/dir")).unwrap();
+    fn from_cwd_relative_path_is_joined_to_ambient_cwd() {
+        let ctx = ResolutionContext::from_cwd(Path::new("sub/dir")).unwrap();
         assert!(ctx.cwd.is_absolute());
         assert!(ctx.cwd.ends_with("sub/dir"));
     }

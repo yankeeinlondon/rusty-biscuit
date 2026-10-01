@@ -8,6 +8,7 @@
 
 mod completion_round_trip;
 mod detailed_resolution;
+mod file_tree;
 mod finalized_reference_resolution;
 mod implicit_relative;
 mod magic_local_roots;

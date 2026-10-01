@@ -318,6 +318,7 @@ fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         | E::ForeignAbsolutePath { .. }
         | E::UnsupportedScheme { .. }
         | E::RepositoryEscape { .. }
+        | E::RelativeTreeEscape { .. }
         | E::RelativePath { .. } => ResolutionFailure::InvalidReference,
         E::MissingEnvironmentVariable { .. }
         | E::VaultNotConfigured
@@ -325,6 +326,8 @@ fn classify_error(error: &FileReferenceError) -> ResolutionFailure {
         | E::OutsideRepository { .. }
         | E::UnsupportedUserHome(_)
         | E::RepositoryRootNotContainingSource { .. }
+        | E::CwdOutsideBaseDir { .. }
+        | E::BaseDirNotRepositoryRoot { .. }
         | E::BareRepository
         | E::Git(_) => ResolutionFailure::MissingContext,
         E::Io { .. } | E::CurrentDirectory(_) => ResolutionFailure::Io,
@@ -444,14 +447,9 @@ fn resolve_direct_core(
 
     let mut probed: Vec<ProbedCandidate> = Vec::with_capacity(candidates.len());
     for candidate in candidates {
-        if let (Some(sigil), Some(root)) =
-            (repository_sigil(&parsed.kind), repository_root.as_deref())
-            && let Err(error) = validate_repository_containment(
-                sigil,
-                &parsed.authored,
-                candidate.path(),
-                root,
-            )
+        if let Some(boundary) =
+            candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
+            && let Err(error) = validate_containment(boundary, &parsed.authored, candidate.path())
         {
             return CoreResolution {
                 candidates: probed,
@@ -559,19 +557,16 @@ fn resolve_recursive_core(
 
     for root_candidate in &roots {
         let root = root_candidate.path();
-        if let (Some(sigil), Some(repository_root)) =
-            (repository_sigil(&parsed.kind), repository_root.as_deref())
+        if let Some(boundary) =
+            candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
         {
             let authored_candidate = normalize_components(&root.join(interpolated));
-            if let Err(error) = validate_repository_containment(
-                sigil,
-                &parsed.authored,
-                &authored_candidate,
-                repository_root,
-            ) {
+            if let Err(error) =
+                validate_containment(boundary, &parsed.authored, &authored_candidate)
+            {
                 return CoreResolution {
                     candidates: Vec::new(),
-                    repository_root: Some(repository_root.to_path_buf()),
+                    repository_root,
                     effective_kind: Some(effective_kind),
                     outcome: CoreOutcome::Failed(classify_error(&error), error),
                 };
@@ -619,18 +614,13 @@ fn resolve_recursive_core(
             }
 
             let matched = normalize_absolute(entry.path(), &ctx.cwd);
-            if let (Some(sigil), Some(repository_root)) =
-                (repository_sigil(&parsed.kind), repository_root.as_deref())
-                && let Err(error) = validate_repository_containment(
-                    sigil,
-                    &parsed.authored,
-                    &matched,
-                    repository_root,
-                )
+            if let Some(boundary) =
+                candidate_boundary(parsed, anchoring, ctx, repository_root.as_deref())
+                && let Err(error) = validate_containment(boundary, &parsed.authored, &matched)
             {
                 return CoreResolution {
                     candidates: Vec::new(),
-                    repository_root: Some(repository_root.to_path_buf()),
+                    repository_root,
                     effective_kind: Some(effective_kind),
                     outcome: CoreOutcome::Failed(classify_error(&error), error),
                 };
@@ -669,6 +659,21 @@ fn recursive_subdir_filter(path: &Path, root: &Path) -> Option<PathBuf> {
     let root_relative = parent.strip_prefix(root).unwrap_or(parent);
     let normalized = normalize_components(root_relative);
     (!normalized.as_os_str().is_empty()).then_some(normalized)
+}
+
+/// The containment rule every candidate of this resolution is held to:
+/// repository containment for `&`/`^`, the file-tree boundary for an
+/// effective relative reference, and none otherwise.
+fn candidate_boundary<'a>(
+    parsed: &ParsedReference,
+    anchoring: Option<EffectiveAnchoring>,
+    ctx: &'a ResolutionContext,
+    repository_root: Option<&'a Path>,
+) -> Option<Boundary<'a>> {
+    match (repository_sigil(&parsed.kind), repository_root) {
+        (Some(sigil), Some(root)) => Some(Boundary::Repository { sigil, root }),
+        _ => relative_boundary(anchoring, ctx),
+    }
 }
 
 /// Resolve the repository root for a resolution context.
@@ -985,11 +990,11 @@ fn collect_roots(
     }
 }
 
-/// The ordered implicit-relative roots: base/CWD first, then repository root.
+/// The ordered implicit-relative roots: `cwd` first, then repository root.
 ///
-/// When base equals the repository root the two collapse to a single
+/// When `cwd` equals the repository root the two collapse to a single
 /// source-provenance candidate; when no repository root is available
-/// the base is the only candidate. It is the single authority for implicit
+/// `cwd` is the only candidate. It is the single authority for implicit
 /// ordering -- both direct and recursive resolution route through it.
 fn implicit_relative_roots(cwd: &Path, repository_root: Option<&Path>) -> Vec<RootEntry> {
     match repository_root {
@@ -1028,7 +1033,16 @@ fn build_candidates(
     // The local anchoring family uses the effective anchoring computed from the
     // interpolated payload (OQ1 option 2) rather than the authored kind.
     if let Some(anchoring) = anchoring {
-        return Ok(build_anchoring_candidates(anchoring, interpolated, ctx, repository_root));
+        let candidates = build_anchoring_candidates(anchoring, interpolated, ctx, repository_root);
+        // Every relative candidate is checked before any is probed, so an
+        // escaping fallback candidate is an error rather than a reason to
+        // silently stop at (or skip to) another root.
+        if let Some(boundary) = relative_boundary(Some(anchoring), ctx) {
+            for candidate in &candidates {
+                validate_lexical(boundary, &parsed.authored, candidate.path())?;
+            }
+        }
+        return Ok(candidates);
     }
 
     #[cfg(feature = "url")]
@@ -1054,11 +1068,13 @@ fn build_candidates(
         (repository_sigil(&parsed.kind), repository_root)
     {
         for candidate in &candidates {
-            validate_repository_lexical(
-                sigil,
+            validate_lexical(
+                Boundary::Repository {
+                    sigil,
+                    root: repository_root,
+                },
                 &parsed.authored,
                 candidate.path(),
-                repository_root,
             )?;
         }
     }
@@ -1068,8 +1084,8 @@ fn build_candidates(
 /// Build candidates for a local reference from its effective anchoring.
 ///
 /// `Absolute` yields the payload verbatim; `ExplicitRelative` yields exactly one
-/// base-relative candidate with no fallback; `ImplicitRelative` yields the
-/// base-then-repository plan.
+/// `cwd`-relative candidate with no fallback; `ImplicitRelative` yields the
+/// `cwd`-then-repository plan.
 fn build_anchoring_candidates(
     anchoring: EffectiveAnchoring,
     interpolated: &str,
@@ -1121,15 +1137,23 @@ fn build_search_roots(
         })
         .collect();
     let candidates = dedupe_candidates(candidates);
+    if let Some(boundary) = relative_boundary(anchoring, ctx) {
+        for candidate in &candidates {
+            let authored_candidate = normalize_components(&candidate.path().join(interpolated));
+            validate_lexical(boundary, &parsed.authored, &authored_candidate)?;
+        }
+    }
     if let (Some(sigil), Some(repository_root)) =
         (repository_sigil(&parsed.kind), repository_root)
     {
         let authored_candidate = normalize_components(&repository_root.join(interpolated));
-        validate_repository_lexical(
-            sigil,
+        validate_lexical(
+            Boundary::Repository {
+                sigil,
+                root: repository_root,
+            },
             &parsed.authored,
             &authored_candidate,
-            repository_root,
         )?;
     }
     Ok(candidates)
@@ -1285,23 +1309,114 @@ pub(crate) fn normalize_components(path: &Path) -> PathBuf {
     simplify_root(&collapsed).to_path_buf()
 }
 
-fn validate_repository_lexical(
-    sigil: char,
+/// The containment rule a candidate is checked against.
+///
+/// One lexical-then-canonical check serves both: the repository-only `&`/`^`
+/// sigils and the file-tree boundary for effective relative references. Only
+/// the escape error differs.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Boundary<'a> {
+    Repository { sigil: char, root: &'a Path },
+    Tree { base_dir: &'a Path },
+}
+
+impl Boundary<'_> {
+    fn root(&self) -> &Path {
+        match self {
+            Self::Repository { root, .. } => root,
+            Self::Tree { base_dir } => base_dir,
+        }
+    }
+
+    fn escape(&self, reference: &str, candidate: &Path) -> FileReferenceError {
+        let root = normalize_components(self.root());
+        let candidate = normalize_components(candidate);
+        match self {
+            Self::Repository { sigil, .. } => FileReferenceError::RepositoryEscape {
+                sigil: *sigil,
+                reference: reference.to_string(),
+                repository_root: root,
+                escaped_candidate: candidate,
+            },
+            Self::Tree { .. } => FileReferenceError::RelativeTreeEscape {
+                base_dir: root,
+                candidate,
+                reference: reference.to_string(),
+            },
+        }
+    }
+}
+
+/// The boundary an effective anchoring is held to, if any. Only the relative
+/// kinds are; an absolute payload (including an absolute `{{VAR}}`
+/// expansion) never is.
+fn relative_boundary<'a>(
+    anchoring: Option<EffectiveAnchoring>,
+    ctx: &'a ResolutionContext,
+) -> Option<Boundary<'a>> {
+    match anchoring {
+        Some(EffectiveAnchoring::ExplicitRelative | EffectiveAnchoring::ImplicitRelative) => ctx
+            .relative_boundary
+            .as_deref()
+            .map(|base_dir| Boundary::Tree { base_dir }),
+        _ => None,
+    }
+}
+
+fn validate_lexical(
+    boundary: Boundary,
     reference: &str,
     candidate: &Path,
-    repository_root: &Path,
 ) -> Result<(), FileReferenceError> {
-    let repository_root = normalize_components(repository_root);
-    let candidate = normalize_components(candidate);
-    if candidate.starts_with(&repository_root) {
+    if normalize_components(candidate).starts_with(normalize_components(boundary.root())) {
         Ok(())
     } else {
-        Err(FileReferenceError::RepositoryEscape {
-            sigil,
-            reference: reference.to_string(),
-            repository_root,
-            escaped_candidate: candidate,
-        })
+        Err(boundary.escape(reference, candidate))
+    }
+}
+
+/// Enforce lexical and real-landing containment: the candidate must stay
+/// inside the root as written, and the canonical form of the candidate (or of
+/// its deepest existing ancestor, for a target not yet created) must stay
+/// inside the canonical root. A symlink, junction, or reparse point that
+/// leads out is an escape. Like any check-then-open, this is subject to
+/// filesystem changes before a later open; it is a reference rule, not a
+/// sandbox.
+pub(crate) fn validate_containment(
+    boundary: Boundary,
+    reference: &str,
+    candidate: &Path,
+) -> Result<(), FileReferenceError> {
+    validate_lexical(boundary, reference, candidate)?;
+    let root = boundary.root();
+    let canonical_root = match dunce::canonicalize(root) {
+        Ok(canonical) => canonical,
+        // A tree root that does not exist contains no file, so no candidate
+        // inside it can land elsewhere; the lexical check already decided.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && matches!(boundary, Boundary::Tree { .. }) =>
+        {
+            return Ok(());
+        }
+        Err(source) => {
+            return Err(FileReferenceError::Io {
+                path: root.to_path_buf(),
+                source,
+            });
+        }
+    };
+    let existing = deepest_existing_ancestor(candidate)?;
+    let canonical_existing = dunce::canonicalize(&existing).map_err(|source| {
+        FileReferenceError::Io {
+            path: existing.clone(),
+            source,
+        }
+    })?;
+    if canonical_existing.starts_with(&canonical_root) {
+        Ok(())
+    } else {
+        Err(boundary.escape(reference, candidate))
     }
 }
 
@@ -1312,30 +1427,14 @@ pub(crate) fn validate_repository_containment(
     candidate: &Path,
     repository_root: &Path,
 ) -> Result<(), FileReferenceError> {
-    validate_repository_lexical(sigil, reference, candidate, repository_root)?;
-    let canonical_repository = dunce::canonicalize(repository_root).map_err(|source| {
-        FileReferenceError::Io {
-            path: repository_root.to_path_buf(),
-            source,
-        }
-    })?;
-    let existing = deepest_existing_ancestor(candidate)?;
-    let canonical_existing = dunce::canonicalize(&existing).map_err(|source| {
-        FileReferenceError::Io {
-            path: existing.clone(),
-            source,
-        }
-    })?;
-    if canonical_existing.starts_with(&canonical_repository) {
-        Ok(())
-    } else {
-        Err(FileReferenceError::RepositoryEscape {
+    validate_containment(
+        Boundary::Repository {
             sigil,
-            reference: reference.to_string(),
-            repository_root: normalize_components(repository_root),
-            escaped_candidate: normalize_components(candidate),
-        })
-    }
+            root: repository_root,
+        },
+        reference,
+        candidate,
+    )
 }
 
 fn deepest_existing_ancestor(path: &Path) -> Result<PathBuf, FileReferenceError> {
@@ -1343,7 +1442,14 @@ fn deepest_existing_ancestor(path: &Path) -> Result<PathBuf, FileReferenceError>
     while let Some(candidate) = current {
         match std::fs::symlink_metadata(candidate) {
             Ok(_) => return Ok(candidate.to_path_buf()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // A regular file part-way down the path (`ENOTDIR`) means this
+            // path does not exist either; the probe reports that failure.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
                 current = candidate.parent();
             }
             Err(source) => {
@@ -1358,7 +1464,7 @@ fn deepest_existing_ancestor(path: &Path) -> Result<PathBuf, FileReferenceError>
         path: path.to_path_buf(),
         source: std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "no existing ancestor for repository candidate",
+            "no existing ancestor for containment candidate",
         ),
     })
 }
@@ -1410,29 +1516,29 @@ pub(crate) fn diff_paths(target: &Path, base: &Path) -> Option<PathBuf> {
 /// See [`FileReference::complete_partial`] for the public contract.
 pub(crate) fn complete_partial(
     token: &str,
-    base: &Path,
+    cwd: &Path,
 ) -> Result<Option<PartialCompletion>, FileReferenceError> {
     let Some((form, path_part)) = classify_token(token)? else {
         return Ok(None);
     };
 
-    let base_abs = if base.is_absolute() {
-        base.to_path_buf()
+    let cwd_abs = if cwd.is_absolute() {
+        cwd.to_path_buf()
     } else {
         let ambient = std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?;
-        ambient.join(base)
+        ambient.join(cwd)
     };
 
     // Capture home once (via the cross-platform provider) rather than reading
     // it deep inside the root builder.
     let home = home_dir();
-    let repository_root = find_git_root(&base_abs)?;
+    let repository_root = find_git_root(&cwd_abs)?;
     // The ambient completer has no request-configured magic roots; they only
     // reach completion through the context-aware entry point.
     let magic_paths = MagicPathList::default();
     let magic_roots: Vec<PathBuf> = build_magic_chain(&MagicChainInputs {
         repository_root: repository_root.as_deref(),
-        request_dir: &base_abs,
+        request_dir: &cwd_abs,
         package_root: None,
         package_area: None,
         home: home.as_deref(),
@@ -1442,11 +1548,12 @@ pub(crate) fn complete_partial(
     .map(|root| root.path)
     .collect();
     let anchors = CompletionAnchors {
-        base: &base_abs,
+        cwd: &cwd_abs,
         repository_root: repository_root.as_deref(),
         package_root: None,
         package_area: None,
         magic_root_paths: &magic_roots,
+        relative_boundary: None,
     };
 
     Ok(Some(expand_completion(form, path_part, token, &anchors)?))
@@ -1468,17 +1575,19 @@ pub(crate) fn complete_partial_in_context(
     // `@` completion enumerates from the launch `@` scope's chain — the same
     // roots resolution probes — with the typed scope segment appended only
     // after root selection. Completion never re-derives the scope from the
-    // authoring base (ruling 2).
+    // authoring `cwd` (ruling 2).
     let magic_roots: Vec<PathBuf> = magic_root_chain_for_context(ctx)
         .iter()
         .map(|root| root.path().to_path_buf())
         .collect();
     let anchors = CompletionAnchors {
-        base: ctx.base_dir(),
+        cwd: ctx.cwd(),
         repository_root: ctx.repository_root(),
         package_root: ctx.package_root(),
         package_area: ctx.package_area(),
         magic_root_paths: &magic_roots,
+        relative_boundary: (ctx.base_dir_is_boundary() && !ctx.external_relative_allowed())
+            .then(|| ctx.base_dir()),
     };
 
     Ok(Some(expand_completion(form, path_part, token, &anchors)?))
@@ -1494,11 +1603,15 @@ pub(crate) fn complete_partial_in_context(
 /// precedence. `magic_roots` is the prebuilt `@` chain (R3): completion appends
 /// its scope segment only after those roots are selected.
 struct CompletionAnchors<'a> {
-    base: &'a Path,
+    cwd: &'a Path,
     repository_root: Option<&'a Path>,
     package_root: Option<&'a Path>,
     package_area: Option<&'a Path>,
     magic_root_paths: &'a [PathBuf],
+    /// The tree root implicit-relative completion roots must stay inside;
+    /// `None` under the same conditions as
+    /// [`ResolutionContext::relative_boundary`].
+    relative_boundary: Option<&'a Path>,
 }
 
 /// Split a token's path portion, build its roots from the shared anchors, and
@@ -1529,11 +1642,18 @@ fn expand_completion(
         let Some(repository_root) = anchors.repository_root else {
             return Err(FileReferenceError::OutsideRepository {
                 sigil,
-                reference_cwd: anchors.base.to_path_buf(),
+                reference_cwd: anchors.cwd.to_path_buf(),
             });
         };
         for root in &roots {
             validate_repository_containment(sigil, reference, root, repository_root)?;
+        }
+    }
+    if form == CompletionEntryForm::ImplicitRelative
+        && let Some(base_dir) = anchors.relative_boundary
+    {
+        for root in &roots {
+            validate_containment(Boundary::Tree { base_dir }, reference, root)?;
         }
     }
     Ok(make_partial_completion(
@@ -1551,7 +1671,7 @@ fn expand_completion(
 /// same roots execution probes — appending the typed scope segment only
 /// after root selection (R3). `RepositoryRoot` uses only the repository root;
 /// `RepositoryScoped` walks package root, package-area root, then repository
-/// root; `ImplicitRelative` walks the base directory then the repository
+/// root; `ImplicitRelative` walks `cwd` then the repository
 /// root. Lexically duplicate roots collapse, keeping first-seen order.
 fn completion_roots(
     form: CompletionEntryForm,
@@ -1566,7 +1686,7 @@ fn completion_roots(
             }
         }
         CompletionEntryForm::ImplicitRelative => {
-            push_unique(&mut roots, append_scope(anchors.base, scope));
+            push_unique(&mut roots, append_scope(anchors.cwd, scope));
             if let Some(repo) = anchors.repository_root {
                 push_unique(&mut roots, append_scope(repo, scope));
             }
@@ -1771,6 +1891,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::Literal("foo/bar.md".to_string())],
@@ -1792,6 +1913,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let template = PathTemplate {
             segments: vec![
@@ -1814,6 +1936,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let template = PathTemplate {
             segments: vec![TemplateSegment::EnvVar("MISSING".to_string())],
@@ -1862,6 +1985,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let roots =
             collect_roots(&parsed.kind, &MagicPathList::default(), &[], &ctx, None).unwrap();
@@ -1883,6 +2007,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let roots = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap();
         assert_eq!(root_paths(&roots), vec![PathBuf::from("/home/test")]);
@@ -1903,6 +2028,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let err = collect_roots(&parsed, &MagicPathList::default(), &[], &ctx, None).unwrap_err();
         assert!(
@@ -1927,6 +2053,7 @@ mod tests {
             package_area: None,
             allow_ambient_discovery: true,
             launch_magic_scope: None,
+            relative_boundary: None,
         };
         let roots = collect_roots(
             &parsed,

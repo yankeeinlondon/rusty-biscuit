@@ -38,7 +38,7 @@ pub use error::FetchError;
 /// callers can register convention magic search roots (e.g. a tool's
 /// `prompts/` directories) around the resolver's intrinsic scope roots.
 pub use context::{
-    FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
+    BaseDirOrigin, FileResolutionContext, LaunchMagicScope, MagicPathRegistration, PackageAreaFallback,
     RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, find_git_root,
     home_dir,
 };
@@ -52,9 +52,9 @@ pub use context::{
 /// with one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileReferenceKind {
-    /// `./foo`, `../foo` (and their `.\`/`..\` spellings). Pinned to the base.
+    /// `./foo`, `../foo` (and their `.\`/`..\` spellings). Pinned to `cwd`.
     ExplicitRelative,
-    /// A bare path (`foo`, `path/to/foo`) with no base-pinning sigil.
+    /// A bare path (`foo`, `path/to/foo`) with no `cwd`-pinning sigil.
     ImplicitRelative,
     /// A platform-native absolute path.
     Absolute,
@@ -93,11 +93,11 @@ pub struct FileReferenceClass {
 pub enum RootProvenance {
     /// The repository (worktree) root.
     Repository,
-    /// The source document/base directory.
+    /// The source document's directory (`cwd`).
     Source,
-    /// The package root containing the reference base.
+    /// The package root containing `cwd`.
     PackageRoot,
-    /// The package-area root containing the reference base.
+    /// The package-area root containing `cwd`.
     PackageArea,
     /// The user's home directory.
     Home,
@@ -287,7 +287,7 @@ pub enum DetailedOutcome {
 ///
 /// Retains everything the typed error-propagation pipeline needs to render an
 /// ordered, candidate-aware diagnostic without parsing prose: the raw authored
-/// reference, its parsed class, the base/source anchors, the repository root the
+/// reference, its parsed class, the `cwd`/source anchors, the repository root the
 /// search anchored on (when a root was used), every attempted candidate with its
 /// probe disposition, and the underlying [`FileReferenceError`] when one exists.
 ///
@@ -298,7 +298,7 @@ pub struct DetailedResolution {
     raw: String,
     class: FileReferenceClass,
     effective_kind: FileReferenceKind,
-    base_dir: PathBuf,
+    cwd: PathBuf,
     source_path: Option<PathBuf>,
     repository_root: Option<PathBuf>,
     candidates: Vec<ProbedCandidate>,
@@ -329,9 +329,9 @@ impl DetailedResolution {
         self.effective_kind
     }
 
-    /// The base directory references resolved against.
-    pub fn base_dir(&self) -> &Path {
-        &self.base_dir
+    /// The working directory relative references resolved against.
+    pub fn cwd(&self) -> &Path {
+        &self.cwd
     }
 
     /// The source document/file, when one was supplied on the context.
@@ -407,7 +407,7 @@ pub enum CompletionEntryForm {
     RepositoryRoot,
     /// `^`-prefixed path searched through package, area, and repository roots.
     RepositoryScoped,
-    /// Bare implicit-relative path. Roots are the caller-provided base
+    /// Bare implicit-relative path. Roots are the caller-provided working
     /// directory and the enclosing git root (in that order, when distinct).
     ImplicitRelative,
 }
@@ -602,7 +602,7 @@ impl FileReference {
     ///
     /// For the ambient [`resolve`](Self::resolve) form a relative root is
     /// interpreted against the process working directory; for
-    /// [`resolve_from`](Self::resolve_from) it is interpreted against `base`
+    /// [`resolve_from`](Self::resolve_from) it is interpreted against `cwd`
     /// rather than the process working directory. See
     /// [`FileResolutionContext::add_magic_path`] for the full tier contract.
     pub fn add_magic_path(mut self, path: impl Into<PathBuf>, position: PathPosition) -> Self {
@@ -642,7 +642,7 @@ impl FileReference {
         resolve::resolve(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
     }
 
-    /// Resolve the reference treating `base` as the working directory.
+    /// Resolve the reference treating `cwd` as the working directory.
     ///
     /// This overrides the ambient process CWD used for relative, `@` (magic),
     /// `&` (repository-root), and `^` (repository-scoped) lookups. Use this
@@ -663,15 +663,15 @@ impl FileReference {
     ///
     /// Returns an error if resolution requires state that cannot be
     /// determined (e.g. missing environment variable, vault not configured).
-    pub fn resolve_from(&self, base: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
-        let ctx = context::ResolutionContext::from_base(base)?;
+    pub fn resolve_from(&self, cwd: &Path) -> Result<Option<PathBuf>, FileReferenceError> {
+        let ctx = context::ResolutionContext::from_cwd(cwd)?;
         resolve::resolve(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
     }
 
     /// Resolve the reference against an explicit [`FileResolutionContext`].
     ///
     /// Unlike [`resolve`] and [`resolve_from`], this reads **no** ambient
-    /// process state during candidate construction: the base directory, home
+    /// process state during candidate construction: the working directory, home
     /// directory, environment snapshot, repository root, and magic/vault roots
     /// all come from the context. This is the document-backed resolution entry
     /// point that Claudine and Darkmatter drive with a `sniff`-discovered
@@ -690,7 +690,7 @@ impl FileReference {
     /// ## Errors
     ///
     /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when a
-    /// caller-supplied repository root does not contain the base, and typed
+    /// caller-supplied repository root does not contain the `cwd`, and typed
     /// missing-context errors (e.g. [`FileReferenceError::MissingHomeContext`])
     /// when a required anchor is absent.
     ///
@@ -721,7 +721,7 @@ impl FileReference {
     /// [`resolve_in_context`]: Self::resolve_in_context
     pub fn resolve_detailed(&self, ctx: &FileResolutionContext) -> DetailedResolution {
         let class = self.class();
-        let base_dir = ctx.base_dir().to_path_buf();
+        let cwd = ctx.cwd().to_path_buf();
         let source_path = ctx.source_path().map(Path::to_path_buf);
 
         if let Err(error) = ctx.validate() {
@@ -731,7 +731,7 @@ impl FileReference {
                 // Validation fails before any interpolation, so the authored
                 // kind is the effective kind.
                 effective_kind: class.kind,
-                base_dir,
+                cwd,
                 source_path,
                 repository_root: ctx.repository_root().map(Path::to_path_buf),
                 candidates: Vec::new(),
@@ -754,7 +754,7 @@ impl FileReference {
             raw: self.raw.clone(),
             class,
             effective_kind,
-            base_dir,
+            cwd,
             source_path,
             repository_root: core.repository_root,
             candidates: core.candidates,
@@ -839,7 +839,7 @@ impl FileReference {
     /// Expand a partial completion token into its implied roots and segments.
     ///
     /// Given a (possibly incomplete) reference string like `@prompts/p` and
-    /// a base directory, returns the absolute roots a completion consumer
+    /// a working directory, returns the absolute roots a completion consumer
     /// should enumerate, the active segment (partial filename after the
     /// last `/`), and the prefix the shell will insert in front of each
     /// candidate.
@@ -855,13 +855,13 @@ impl FileReference {
     ///   last `/`. Everything up to and including that `/` is the
     ///   "scope", which is appended to each implied root.
     /// - Magic form: local configured prepends, package root, package-area
-    ///   root, local root (repository root, or the base directory when there
+    ///   root, local root (repository root, or the working directory when there
     ///   is no repository), local configured appends, user configured
     ///   prepends, home, then user configured appends.
     /// - Repository root: the repository root only.
     /// - Repository scoped: package root, package-area root, then repository
     ///   root.
-    /// - Implicit relative: base first, then repository root.
+    /// - Implicit relative: `cwd` first, then repository root.
     ///
     /// Markdown filtering, ranking, and typed-length policy are not
     /// applied here -- they are the caller's responsibility.
@@ -875,21 +875,21 @@ impl FileReference {
     ///
     /// Returns [`FileReferenceError::InvalidSyntax`] when a direct or recursive
     /// magic token remains rooted after the documented `@` or `@/` sigil.
-    /// Also returns an error if the caller passes a relative `base` and the
+    /// Also returns an error if the caller passes a relative `cwd` and the
     /// ambient CWD cannot be read, or if git discovery itself fails. A missing
     /// git repository is **not** an error.
     pub fn complete_partial(
         token: &str,
-        base: &Path,
+        cwd: &Path,
     ) -> Result<Option<PartialCompletion>, FileReferenceError> {
-        resolve::complete_partial(token, base)
+        resolve::complete_partial(token, cwd)
     }
 
     /// Expand a partial completion token against an explicit
     /// [`FileResolutionContext`], reading no ambient process state.
     ///
     /// This is the document-backed counterpart to [`complete_partial`]: instead
-    /// of discovering the repository root and home directory live from `base`,
+    /// of discovering the repository root and home directory live from `cwd`,
     /// it consumes the captured repository root, home directory, and configured
     /// magic roots the context supplies. Completion and execution therefore
     /// share one candidate builder and one context, so a value emitted here
@@ -908,7 +908,7 @@ impl FileReference {
     /// ## Errors
     ///
     /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when the
-    /// context's repository root does not contain its base directory.
+    /// context's repository root does not contain its `cwd`.
     /// Returns [`FileReferenceError::InvalidSyntax`] when a direct or recursive
     /// magic token remains rooted after the documented `@` or `@/` sigil.
     ///
@@ -945,14 +945,14 @@ impl FileReference {
             None => return Ok(None),
         };
 
-        let base_dir = match base {
+        let from_dir = match base {
             Some(b) => b.to_path_buf(),
             None => std::env::current_dir().map_err(FileReferenceError::CurrentDirectory)?,
         };
 
-        let relative = resolve::diff_paths(&resolved, &base_dir).ok_or_else(|| {
+        let relative = resolve::diff_paths(&resolved, &from_dir).ok_or_else(|| {
             FileReferenceError::RelativePath {
-                from: base_dir,
+                from: from_dir,
                 to: resolved.clone(),
             }
         })?;

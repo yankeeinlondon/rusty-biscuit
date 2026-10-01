@@ -36,8 +36,8 @@ fn abs(tail: &str) -> PathBuf {
 }
 
 /// A synthetic request context: no ambient reads, no filesystem.
-fn snapshot(base_dir: &Path, home: &Path) -> FileResolutionContext {
-    FileResolutionContext::from_snapshot(base_dir, Some(home.to_path_buf()), HashMap::new())
+fn snapshot(cwd: &Path, home: &Path) -> FileResolutionContext {
+    FileResolutionContext::from_snapshot(cwd, Some(home.to_path_buf()), HashMap::new())
 }
 
 fn plan_paths(reference: &str, ctx: &FileResolutionContext) -> Vec<PathBuf> {

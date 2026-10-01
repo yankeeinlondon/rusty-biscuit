@@ -263,7 +263,7 @@ fn context_accessors_reflect_builders() {
         .with_source_path(base.join("router.md"))
         .with_package_area(repo.path().join("area"));
 
-    assert_eq!(ctx.base_dir(), base.as_path());
+    assert_eq!(ctx.cwd(), base.as_path());
     assert_eq!(ctx.repository_root(), Some(repo.path()));
     assert_eq!(ctx.source_path(), Some(base.join("router.md").as_path()));
     assert_eq!(ctx.package_area(), Some(repo.path().join("area").as_path()));
@@ -340,7 +340,7 @@ fn derived_source_preserves_request_snapshot_after_ambient_mutation() {
         None => unsafe { std::env::remove_var("SNAPSHOT_ROOT") },
     }
 
-    assert_eq!(child.base_dir(), nested.as_path());
+    assert_eq!(child.cwd(), nested.as_path());
     assert_eq!(child.source_path(), Some(nested.join("child.md").as_path()));
     assert_eq!(child.repository_root(), request.repository_root());
     assert_eq!(child.package_area(), request.package_area());
@@ -369,15 +369,17 @@ fn external_source_requires_explicit_trust() {
         FileReferenceError::RepositoryRootNotContainingSource { .. }
     ));
 
+    // The external document gets its own tree: no catalog contains it, so the
+    // launch repository is no longer a fallback root for bare references.
     let child = request.for_trusted_external_source(external.path().join("prompt.md"));
     child.validate().unwrap();
+    assert_eq!(child.repository_root(), None);
     assert_eq!(
         FileReference::new("shared.md")
             .unwrap()
             .resolve_in_context(&child)
-            .unwrap()
-            .as_deref(),
-        Some(repo.path().join("shared.md").as_path()),
+            .unwrap(),
+        None,
     );
     assert_eq!(
         FileReference::new("./local.md")
@@ -418,7 +420,7 @@ fn invalid_request_root_cannot_be_laundered_via_for_source() {
 }
 
 #[test]
-fn invalid_request_root_cannot_be_laundered_via_for_base_or_trusted_external_derivation() {
+fn invalid_request_root_cannot_be_laundered_via_for_cwd_or_trusted_external_derivation() {
     let repo = TempDir::new().unwrap();
     let unrelated_base = TempDir::new().unwrap();
     let external = TempDir::new().unwrap();
@@ -426,9 +428,9 @@ fn invalid_request_root_cannot_be_laundered_via_for_base_or_trusted_external_der
         FileResolutionContext::new(unrelated_base.path()).with_repository_root(repo.path());
 
     for derived in [
-        request.for_base(repo.path()),
+        request.for_cwd(repo.path()),
         request.for_trusted_external_source(external.path().join("child.md")),
-        request.for_trusted_external_base(external.path()),
+        request.for_trusted_external_cwd(external.path()),
     ] {
         assert!(matches!(
             derived.validate().unwrap_err(),
@@ -476,31 +478,45 @@ fn valid_request_supports_in_repo_and_explicit_trusted_external_derivations() {
         request.for_trusted_external_source(external_dir.path().join("prompt.md"));
     external.validate().unwrap();
     request
-        .for_trusted_external_base(external_dir.path())
+        .for_trusted_external_cwd(external_dir.path())
         .validate()
         .unwrap();
 
-    let shared = FileReference::new("shared.md")
-        .unwrap()
-        .resolve_in_context(&external)
-        .unwrap();
-    assert_eq!(shared.as_deref(), Some(repo.path().join("shared.md").as_path()));
+    // An in-repository trusted derivation keeps the repository tree; an
+    // external one does not.
+    let trusted_in_repo = request.for_trusted_external_source(repo.path().join("child.md"));
+    trusted_in_repo.validate().unwrap();
+    assert_eq!(trusted_in_repo.repository_root(), Some(repo.path()));
+    let shared = FileReference::new("shared.md").unwrap();
+    assert_eq!(
+        shared.resolve_in_context(&trusted_in_repo).unwrap().as_deref(),
+        Some(repo.path().join("shared.md").as_path()),
+    );
+    assert_eq!(shared.resolve_in_context(&external).unwrap(), None);
 }
 
 #[test]
 fn normal_derivation_reenables_containment_after_trusted_external_derivation() {
+    // The trusted derivation selects the external document's own tree (the
+    // vault containing it); a normal derivation must then stay inside that
+    // tree.
     let repo = TempDir::new().unwrap();
     let launch = repo.path().join("docs");
     let external = TempDir::new().unwrap();
+    let vault = external.path().join("vault");
     fs::create_dir_all(&launch).unwrap();
-    let request = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+    let request = FileResolutionContext::new(&launch)
+        .with_repository_root(repo.path())
+        .add_vault(&vault);
 
-    let trusted = request.for_trusted_external_source(external.path().join("a.md"));
+    let trusted = request.for_trusted_external_source(vault.join("a.md"));
     trusted.validate().unwrap();
+    assert_eq!(trusted.base_dir(), vault.as_path());
 
+    trusted.for_source(vault.join("notes/b.md")).validate().unwrap();
     let nested = trusted.for_source(external.path().join("b.md"));
     assert!(matches!(
         nested.validate().unwrap_err(),
-        FileReferenceError::RepositoryRootNotContainingSource { .. }
+        FileReferenceError::CwdOutsideBaseDir { .. }
     ));
 }
