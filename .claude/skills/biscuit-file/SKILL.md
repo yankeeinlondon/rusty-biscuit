@@ -1,7 +1,7 @@
 ---
 name: biscuit-file
 description: >
-  Expert knowledge for the biscuit-file Rust library and CLI (`bf`) providing format conversion (TOML/YAML/JSON/JSON5), PDF extraction, file type detection, and file reference resolution. Use when working in the `biscuit-file/` package area, using biscuit-file types (Toml, Yaml, Json5, Pdf, FileReference, FileResolutionContext, BaseDirOrigin, PathPosition, MagicPathTier, LaunchMagicScope, FileType, DataFormat, FileReferenceError), adding the biscuit-file dependency, implementing file resolution, resolving file references, converting between data formats, extracting PDF content, reading markdown frontmatter, or detecting file types.
+  Expert knowledge for the biscuit-file Rust library and CLI (`bf`) providing format conversion (TOML/YAML/JSON/JSON5), PDF extraction, file type detection, and file reference resolution. Use when working in the `biscuit-file/` package area, using biscuit-file types (Toml, Yaml, Json5, Pdf, FileReference, FileResolutionContext, PortablePath, PortabilityPreference, PortablePathError, BaseDirOrigin, PathPosition, MagicPathTier, LaunchMagicScope, FileType, DataFormat, FileReferenceError), adding the biscuit-file dependency, implementing file resolution, resolving file references, writing portable links or cleaning up relative links, converting between data formats, extracting PDF content, reading markdown frontmatter, or detecting file types.
 ---
 
 - Read [references/format-conversion.md](references/format-conversion.md) when converting between TOML, YAML, JSON, JSON5, or PDF formats
@@ -11,6 +11,7 @@ description: >
 - Read [references/api.md](references/api.md) for full API surface of all types (Toml, Yaml, Json5, Pdf, FileReference, FileType, DataFormat, detect, PdfConfig)
 - Rendering a `Path` as text? Use `biscuit_file::to_portable_string` / `try_portable_string` (unfeatured) — never write another `.replace('\\', "/")`. See [references/api.md](references/api.md#portable-path-text)
 - Comparing paths (`starts_with`, relative route)? Use `biscuit_file::PathIdentity` — the one lexical, lossless, Windows-aware identity. See [references/api.md](references/api.md#path-identity)
+- Writing a link to a file (portable `./`, `&`, `~`, `{{VAR}}`, absolute)? Use `biscuit_file::PortablePath` — never hand-roll a relative or env-rooted spelling. See [references/api.md](references/api.md#portable-references-portablepath)
 
 - Read [references/architecture.md](references/architecture.md) for module layout, feature flags, and re-exports
 

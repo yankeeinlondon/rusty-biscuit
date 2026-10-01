@@ -213,6 +213,62 @@ re-parses and rejects `Unrenderable` (non-Unicode), `ChangesComponents` (Unix
 `GrammarMismatch` (`{{…}}` in a name, a leading sigil in a bare name), and
 `NoPortableSpelling`.
 
+## Portable References: `PortablePath`
+Source: `biscuit-file/lib/src/file_reference/portable/{evaluate,strategy,env_anchor,diagnostics}.rs` (feature `file-reference`)
+
+```rust
+use biscuit_file::{FileReference, PortabilityPreference as P, PortablePath, PortablePathError};
+
+let found = PortablePath::from_path("/repo/foo.md")          // or ::from_reference(FileReference)
+    .with_ctx(&ctx)                                          // clone; no discovery, no live reads
+    .with_portable_env(["CONFIG_DIR"])                       // names only; values from ctx env
+    .with_strategy(P::DEFAULT_STRATEGY.iter().cloned())      // replace; [] matches nothing
+    .file_reference()?;                                      // does real work (resolve + verify)
+found.reference();   // &FileReference (also AsRef / into_reference())
+found.strategy();    // &P that matched; P::AbsolutePath => caller warns
+found.attempts();    // &[Attempt { strategy, outcome, rejected }], one per preference tried
+found.findings();    // &[Finding] about the returned reference
+```
+
+- Default: `AuthoredIntent(ALL)`, `SameDirRelative`, `ChildDir`, `PeerDir`,
+  `ImmediateParentDir`, `RepoRoot(None)`, `EnvRootedPath`, `HomeDir`,
+  `AbsolutePath`. Opt-in: `ParentDir`, `ExternalRelativePath` (verified with
+  `allow_external_relative()`), `RepoMultiPath(filter)` (`^`), `MagicPath(filter)`
+  (`@`; a filter must name an `@` root and spellings come from it).
+- Filters are eligibility only (`RepoRoot(Some("docs"))` still writes `&docs/x.md`);
+  bad syntax is `InvalidConfiguration(InvalidFilter)` before any preference runs.
+- Reference inputs: intent forms (`~ @ ^ & vault:`, URL, `%`, leading portable
+  `{{VAR}}`) are kept by `AuthoredIntent`; position forms are resolved
+  (`resolve_detailed`) and rewritten. Minimal churn keeps `./x.md` / bare `x.md`
+  already in the chosen form; results are fixed points. A multi-candidate miss,
+  boundary escape, missing anchor, or probe failure is `UnresolvableInput`
+  (caller keeps the link); URL/`%` without `AuthoredIntent` is
+  `NormalizationUnsupported`.
+- Every candidate is rendered through the crate-internal `text` seam and
+  verified by resolving it in the same context; `@`/`^` need an existing file
+  found first (`Shadowed` otherwise), single-location forms may be missing.
+- Portable names: `PORTABLE_ENV_VARIABLES` (comma list in the evaluation's env)
+  ∪ `with_portable_env`; invalid names → `Finding::InvalidPortableVariableName`.
+  Value must be host-absolute and a whole-component prefix (`EnvAnchorProblem`);
+  deepest wins, then name order.
+- Errors are `Clone` (`ProbeError` keeps path, `ErrorKind`, OS code); every
+  variant has `attempts()` (empty before any preference ran) and `findings()`.
+  The `reference` in `UnresolvableInput`/`NormalizationUnsupported` is boxed.
+- `with_ctx` + `with_cwd`/`with_base_dir` → `InvalidConfiguration`. Without a
+  context: capture cwd/home/env once, `find_git_root(cwd)`; `with_base_dir`
+  inside a repository must equal its root.
+- PortablePath compares paths **lexically**. A caller holding canonical paths
+  (`/private/var/…`, `\\?\C:\…`) next to a context opened with another
+  spelling must re-spell the target first (Darkmatter's
+  `link_normalization::in_context_spelling`). A Windows variable whose value is
+  verbatim (`\\?\C:\…`) never anchors `{{VAR}}/…`: interpolation
+  concatenates text, so verification rejects it (`os` skill, windows.md).
+- Consumer pattern (Darkmatter compose finalization): split `#frag`/`?q`/`:line`
+  off the parsed destination (skip a `\\?\` prefix's `?`), `from_path` +
+  `with_ctx(&source_ctx)`, reattach the suffix; keep the destination and warn
+  on any error. Darkmatter writes an `EnvRootedPath` result as `{{{VAR}}}/…`
+  so recomposing its output is stable.
+
 ## File Detection
 Source: `biscuit-file/lib/src/detect.rs`
 

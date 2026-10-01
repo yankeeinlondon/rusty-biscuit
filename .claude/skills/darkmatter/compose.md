@@ -87,10 +87,15 @@ the compose pipeline.
 
 **Finalization** (root-only serial):
 
-- **Link Normalization** - Converts absolute path links back into portable forms:
-    - **Same-repo**: Paths inside the same git repository are made relative to the document
-    - **Home-dir**: Paths under the user's home directory use the `~/` prefix
-    - **ENV-var**: Paths under whitelisted environment variables (e.g. `PROJECT_ROOT`) use `${VAR}/` prefix
+- **Link Normalization** - Converts absolute link destinations back into portable
+  references through `biscuit_file::PortablePath` (default strategy, root document's
+  context): nearby relative (`./x`, `../peer/x`), `&repo/path`, a declared `{{VAR}}`
+  (written as the literal `{{{VAR}}}` so recompose is stable), `~/`, else the absolute
+  path is kept. `#frag` / `?q` / `:line` suffixes are split and reattached. No variable
+  is portable by default: declare names with `PORTABLE_ENV_VARIABLES` or
+  `ComposeOptions::with_portable_env` (the old `with_env_path_whitelist` and its
+  `PROJECT_ROOT` / `DOCS_BASE` defaults are gone). See
+  `darkmatter/docs/inline/link-normalization.md`.
 
 ## API
 
