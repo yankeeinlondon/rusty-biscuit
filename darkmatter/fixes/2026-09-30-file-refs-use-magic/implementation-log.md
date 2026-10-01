@@ -19,6 +19,124 @@ skills_files_updated_during_phase_1:
 packages:
     - darkmatter
     - darkmatter-cli
+    - biscuit-file
+    - sniff
+source_files_during_phase_2:
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/lib/benches/compose_pipeline.rs
+    - darkmatter/lib/benches/compose_schema_transclusion.rs
+    - darkmatter/lib/benches/phase6_interpolation.rs
+    - darkmatter/lib/benches/reference_graph.rs
+    - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/agent.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/lib/src/markdown/compose/context/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/context/request.rs
+    - darkmatter/lib/src/markdown/compose/context/runtime.rs
+    - darkmatter/lib/src/markdown/compose/expression/lint.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/icmp.rs
+    - darkmatter/lib/src/markdown/compose/tests/identity.rs
+    - darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+    - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/tests/shell.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+    - darkmatter/lib/src/markdown/compose/type_tests.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/reference/file_tree/mod.rs
+    - darkmatter/lib/src/markdown/reference/graph.rs
+    - darkmatter/lib/src/markdown/reference/mod.rs
+    - darkmatter/lib/src/markdown/reference/types.rs
+    - darkmatter/lib/src/markdown/reference/validate.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/tests/l1/ambient_ctx_capture.rs
+    - darkmatter/lib/tests/l1/array_rendering_json.rs
+    - darkmatter/lib/tests/l1/backslash_escape_spans.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/compose_phase6.rs
+    - darkmatter/lib/tests/l1/compose_reuse_phase5.rs
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - darkmatter/lib/tests/l1/dasherized_identifier_compose.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/lib/tests/l1/declined_path_transclusion.rs
+    - darkmatter/lib/tests/l1/disclosure_transclusion_integration.rs
+    - darkmatter/lib/tests/l1/empty_package_area.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/file_tree_roots.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/frontmatter_surface_projection.rs
+    - darkmatter/lib/tests/l1/git_context_integration.rs
+    - darkmatter/lib/tests/l1/interpolation_literal_pipeline.rs
+    - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/missing_ctx_capture.rs
+    - darkmatter/lib/tests/l1/nested_composition.rs
+    - darkmatter/lib/tests/l1/persistent_cache_disabled.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/preflight_child_state_parity.rs
+    - darkmatter/lib/tests/l1/preflight_repository_sigils.rs
+    - darkmatter/lib/tests/l1/reference_integration.rs
+    - darkmatter/lib/tests/l1/request_context_builder.rs
+    - darkmatter/lib/tests/l1/request_context_epoch.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/set_overlay_integration.rs
+    - darkmatter/lib/tests/l1/shell_block_integration.rs
+    - darkmatter/lib/tests/l1/shell_expansion_coordinates.rs
+    - darkmatter/lib/tests/l1/shell_probe_preflight.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+    - darkmatter/lib/tests/l1/ternary_integration.rs
+    - darkmatter/lib/tests/l1/transcluded_shell_failure.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/url_root_identity.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+    - darkmatter/lib/tests/request_support/mod.rs
+    - sniff/lib/src/filesystem/repo/glob.rs
+    - sniff/lib/src/filesystem/repo/manifest_index.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+docs_updated_during_phase_2:
+    - darkmatter/lib/README.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/text-replacement.md
+    - darkmatter/docs/inline/preflight-checks.md
+    - biscuit-file/docs/topics/file-references.md
+    - sniff/docs/sniff-library-architecture.md
+docs_created_during_phase_2:
+    - darkmatter/docs/topics/compose-requests.md
+skills_files_updated_during_phase_2:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/biscuit-file/references/file-references.md
+    - .claude/skills/sniff/remote-and-repository.md
 ---
 
 # Implementation Log for 2026-09-30-file-refs-use-magic (8 phases)
@@ -189,3 +307,278 @@ with the worktree build exits 0 and prints 88 lines with no unresolved
 
 The Input Robustness Matrix does not apply (R15): no file-format reader was
 added or changed.
+
+## Phase 2
+
+### Wave 3
+
+#### biscuit-file accessor (subagent)
+
+- `FileReferenceError::resolution_failure()` (`biscuit-file/lib/src/file_reference/resolve.rs`)
+  delegates to the private `classify_error`, which stays the one place the
+  classification is decided.
+- **Departure from the plan:** the plan asks for one test per
+  `ResolutionFailure` variant. `classify_error` never returns `NoMatch` (a
+  no-match is a result, not an error), so there is no input for it. Four
+  variant tests plus `resolution_failure_never_no_match` were added instead:
+  `resolution_failure_invalid_reference`, `resolution_failure_missing_context`,
+  `resolution_failure_io`, `resolution_failure_unsupported_remote`.
+- Also made public (not in the plan): `biscuit_file::capture_env()`, the
+  environment reader `FileResolutionContext::new` uses. `RequestSnapshot::from_process()`
+  needs it so R2's "same helpers" holds (non-UTF-8 variables skipped,
+  `USERPROFILE` via `home_dir()`). Documented in
+  `biscuit-file/docs/topics/file-references.md` and the `biscuit-file` skill.
+- `just test` (1016 passed) and `just lint` in `biscuit-file/`: exit 0.
+
+#### sniff manifest list (subagent)
+
+- `sniff::filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES` replaces the private
+  `MANIFEST_FILES` in `glob.rs`; the membership check in `manifest_index.rs`
+  (~691) uses it.
+- **Departure:** the two `manifest_index.rs` sites at ~459 and ~501 map each
+  name to a `ManifestKind` with a `match` on literals and cannot be written
+  over a slice. They were left, and
+  `manifest_index::tests::manifest_index_recognizes_every_package_manifest_file_name`
+  keeps the ~501 copy in step with the constant (the ~459 walker copy is not
+  covered). `glob::tests::package_manifest_file_names_are_pinned` pins the
+  contents and order.
+- `just test` (3121 passed, 32 skipped) and `just lint` in `sniff/`: exit 0.
+
+#### `RequestSnapshot` and `ContextBuildError`
+
+New module `darkmatter/lib/src/markdown/compose/context/request.rs`,
+re-exported from `darkmatter::markdown::compose`:
+
+- `RequestSnapshot::new(dir)` (no home, empty environment), `from_process()`
+  (returns `io::Result`; the current-directory read can fail),
+  `with_home`, `with_env`, `with_magic_root`, `with_magic_root_tier`
+  (Claudine's `~/.claudine` roots need `MagicPathTier::User`; R2 named only
+  the inferred form), `with_opening_reference`, `at_request_dir` (keeps home,
+  environment, and roots; drops the opening reference, which was resolved for
+  the old directory), and accessors.
+- `ContextBuildError::{Discovery, Invalid}` with `request_dir()` and
+  `resolution_failure()`. **Ruling made here:** a discovery failure classifies
+  as `MissingContext`, the class biscuit-file gives its own `Git` errors, so
+  the two never disagree.
+
+### Wave 4
+
+#### Builder
+
+`build_resolution_context(&RequestSnapshot)` follows R3: `from_snapshot`,
+discovery, scope catalog (which also syncs the launch `@` scope), the
+snapshot's extra roots, `for_source_reference` for an opening reference,
+`validate()`, then one `tracing::debug!` with `request_dir`, `base_dir`, and
+`base_dir_origin`.
+
+- Discovery runs through the same `Repo`-group capture `ctx.repo*` uses
+  (`capture_runtime_context_for_groups`), so the observation can be shared.
+  With only that group requested, the capture's sole `git` diagnostic is the
+  discovery failure, which becomes `ContextBuildError::Discovery`. A relative
+  request directory skips discovery (validation rejects it with a typed error
+  instead of discovering from the process directory).
+- A topology-walk failure under a found repository still degrades to "no
+  packages", as before. Only the Git discovery itself is an error.
+- `capture_file_resolution_context` and its helper are deleted, with the
+  re-exports. Its library callers (`schemas/clean.rs`, `util.rs`
+  `source_link_context`'s fallback, tests) and the CLI's
+  `schema validate` / `schema triggers` now call the builder.
+- Magic paths: `ComposeOptions::magic_paths`, `with_magic_path`, and
+  `TransclusionOptions::magic_paths` are deleted (R3). The cache and graph
+  identities already encode the context's tier-aware registrations, so their
+  explicit `magic_paths` fields were dropped and the identity tests now vary
+  the context's roots. `ResolutionContext::magic_paths` (expression side) and
+  `document_resolution_context`'s parameter are kept for the no-context
+  fallback, which Phase 5 removes; every caller now passes `&[]`.
+
+#### `ComposeRequest`
+
+- `ComposeRequest { options, context }`. `prepare(options, &snapshot)` and
+  `with_context(options, context)` (which validates) both return
+  `Result<_, ContextBuildError>`. `options()`, `context()`, and
+  `map_options()` (for settings decided after preparation, such as
+  pre-flight's approval set) are public; `root_options()` (options with the
+  context attached) is crate-private.
+- `prepare` keeps "one discovery per request" (the `lazy_roots` tests pin
+  it): a `ComposeOptions::new()` context that captured only date/time is
+  re-anchored on the request directory (`ComposeContext::with_anchor`); the
+  request's existing observation is reused when it contains the request
+  directory; otherwise the builder's discovery is installed as the request's
+  observation (`CurrentAuthority::adopt_ambient_repository`) when the request
+  observes its own repository from that directory.
+- `ensure_file_resolution_context`, `prepare_root`, and `prepared_root` are
+  deleted. `establish_repository_observation` became the module-private
+  (`pub(super)`) `establish_request_repository`, called only by
+  `ComposeOptions::for_document` and `ComposeRequest`.
+- `ComposeOptions::with_file_resolution_context` is now `pub(crate)`: outside
+  the crate the only way to attach a context is `ComposeRequest`. The internal
+  `Option` field stays until Phase 5, which already lists
+  `file_resolution_context()` and `source_file_resolution_context`.
+  **Departure from R4's wording** ("`ComposeOptions` loses its `Option`
+  context field"): the field is now internal transport between a request and
+  its derived child options; Phase 5 makes it required.
+- Public entry points on `&ComposeRequest`: `Markdown::compose_with`,
+  `compose_preflight`, `compose_preflight_approvals`, `collect_shell_commands`,
+  `collect_shell_commands_with_graph`, `collect_frontmatter_shell_commands`,
+  `transclusions_with_options`, `ReferenceGraphOptions::with_compose`,
+  `shell_expansion::execute_directive`, and `execute_resolved_shell_values`.
+  `Markdown::compose()` and `compose_mut()` are deleted.
+- Not moved, recorded as departures: `normalize_links` is `pub` inside the
+  crate-private `link_normalization` module and `link_resolve` is
+  `#[cfg(test)]`; neither is reachable from outside the crate, and both run on
+  derived child options inside the pipeline. `validate_pre_approved` is
+  `pub(crate)` and also runs on child options (`nested.rs`); it now calls the
+  internal `collect_effects` / `frontmatter_shell_commands`.
+- Internal inline passes that compose over derived options (pre-flight's
+  inline pass, reference-graph content preparation) use the new crate-private
+  `Markdown::compose_with_options`, and `ReferenceGraphOptions::from_compose_options`
+  replaces their `with_compose` calls. `run_compose_pipeline(&ComposeRequest)`
+  delegates to `run_root_pipeline(options)`.
+- Added `ComposeOptions::source()` (public getter) so test helpers outside the
+  crate can choose a request directory.
+
+#### `ctx.*` from the request
+
+- `ComposeRequest` aligns the `ComposeContext` environment with the request
+  context's (`align_context_environment`), so `{{ env.X }}`, `ctx.agent`, and
+  `ctx.model` read the snapshot. Extension never overwrites the environment
+  (`extend_missing_with` keeps `inner.env`), so later group captures keep it.
+- `ResolutionContext::agent()` falls back to the request context's `AGENT`
+  before the process.
+- Home on the request path already came from the context
+  (`options.rs` `expression_resolution_context`), so no change was needed
+  there; the `dirs::home_dir()` fallbacks now run only without a context.
+- **Residue left for Phase 5** (its "anything left in `runtime.rs`" item):
+  `ComposeContext::capture()` / `capture_minimal()` still read the current
+  directory and environment, and `capture/mod.rs`'s capture still calls
+  `std::env::vars()`. On a request path the environment is replaced and a
+  minimal context re-anchored, so neither reaches `ctx.*`; non-request users
+  (DMLS validation, `local_expression_resolution_context` without a context)
+  still depend on them.
+- **Not changed, recorded:** `conditions.rs:379` (`env.*`) belongs to the
+  standalone `evaluate_condition_against(data, work_dir)` shortcut API, which
+  has no request. It is not on the compose path. Phase 5/6 must classify it.
+- `capture/agent.rs`: the two `populate_agent` tests now pass an environment
+  map instead of mutating the process environment. The third
+  (`capture_runtime_context_includes_agent_group`) still mutates it under
+  `serial_test`.
+
+#### Migrating darkmatter's tests
+
+- About 900 call sites in `darkmatter/lib` were moved with a balanced-paren
+  rewrite onto two helpers that reproduce the request directory the deleted
+  fallback chose (a file source's directory, else the context's absolute
+  anchor, else the process directory), with process home and the options'
+  own context environment:
+  - unit tests: `crate::markdown::compose::test_request(options)`
+    (`context/request.rs` `test_support`), which keeps a context the options
+    already hold through `with_context`;
+  - integration tests: `crate::request_support::{request, request_at}`
+    (`lib/tests/request_support/mod.rs`, declared in `l1/main.rs`).
+- Tests whose subject is the context moved to `ComposeRequest::with_context`
+  (`file_tree_roots`, `link_interpolation_integration`,
+  `reference_integration::reference_options`, `unknown_identifier_warning`).
+- Behavior surfaced by the migration, now asserted rather than masked: a
+  reference graph whose request directory is in this repository rejects a
+  document in a temp directory (`RepositoryRootNotContainingSource`) instead
+  of silently re-anchoring on the document. Graph tests now anchor the
+  request at their fixture (`request_at`).
+- `schema_validation::undecided_root_union_resolves_a_caller_file_from_the_launch_area`
+  now prepares its request at the launch directory, which is what it tests.
+- `transclusion::resolver::resolves_magic_path_prepended` no longer changes
+  the process directory; it builds its context from a snapshot root.
+- `test_compose_mut_modifies_in_place` was deleted with `compose_mut`.
+- Benches and the level2 terminal support were moved to `ComposeRequest`.
+- `lib/tests/l1/declined_path_transclusion.rs` is `#[cfg(windows)]`; macOS
+  never compiled it. The Windows cross-check caught it.
+
+#### New tests
+
+| Requirement | Test |
+|---|---|
+| `new()` reads nothing from the process | `context::request::tests::a_new_snapshot_reads_nothing_from_the_process` |
+| `at_request_dir` keeps home, env, roots; drops the opening | `context::request::tests::at_request_dir_keeps_home_environment_and_roots_but_not_the_opening` |
+| One `debug` event naming request dir and `base_dir` origin (scoped `tracing_test` subscriber) | `context::request::tests::a_successful_build_emits_one_debug_event` |
+| A failed build emits none | `context::request::tests::a_failed_build_emits_no_debug_event` |
+| AC 6 (a): relative request directory rejected, by builder and `prepare` | `request_context_builder::a_relative_request_directory_is_rejected` |
+| AC 6 (b): opening reference through `~` and `{{VAR}}` outside the repository rejected; control builds | `request_context_builder::an_opening_reference_outside_the_request_repository_is_rejected` |
+| (b) negative control: no repository, same opening builds | `request_context_builder::an_opening_reference_builds_when_the_request_has_no_repository` |
+| R11 (c): corrupt `.git/config` is `Discovery`, `MissingContext`; repair builds | `request_context_builder::a_corrupt_git_config_is_a_discovery_error_until_repaired` |
+| Magic-path finding: a snapshot root resolves `@` in the context and through `compose_with`; without it, nothing | `request_context_builder::a_snapshot_magic_root_resolves_an_at_reference` |
+| `{{ env.X }}`, `ctx.agent`, and a `{{X}}` file reference read the snapshot while the process lacks `X` | `request_context_builder::an_expression_and_a_file_reference_read_the_same_snapshot_environment` |
+| A transclusion's `{{X}}` target reads the snapshot | `request_context_builder::a_transcluded_variable_reference_reads_the_snapshot_environment` |
+| `with_context` validates | `request_context_builder::with_context_rejects_an_invalid_context` |
+| One discovery per request survives preparation | existing `compose::tests::lazy_roots::ambient_repository::*` (unchanged, passing) |
+| Incident 1 stays fixed | existing `preflight_repository_sigils::*` (now through `request_support`) and `compose_transclusion::test_compose_repository_sigils_from_a_nested_document` |
+
+The Input Robustness Matrix does not apply (R15).
+
+#### `md` CLI (compile bridge only; Phase 3 Track A owns the redesign)
+
+- `md compose`: with `--set`, the request is `with_context` over the
+  document context it already derived; without `--set` it is `prepare` at the
+  document's directory (the launch directory for stdin) with
+  `RequestSnapshot::from_process()`. That reproduces the deleted fallback.
+  Validation, pre-flight, and compose share the request, and pre-flight's
+  approvals are applied with `map_options`.
+- `schema validate` / `schema triggers` find their trigger boundary through
+  the builder. In `schema validate` a build failure is reported as the file's
+  `ParseError` outcome (no better outcome exists yet).
+- `from_process()` is called inside `compose.rs`, not once in `main`; Phase 3
+  moves it.
+
+#### Docs and skills
+
+- New `darkmatter/docs/topics/compose-requests.md` (snapshot, builder steps,
+  failure table, one environment per request, Mermaid flow).
+- `darkmatter/docs/topics/magic-paths.md` rewritten for snapshot roots; the
+  Claudine example is marked **planned** (Claudine still builds its own
+  context until Phase 3).
+- Stale `compose_with(options)` / `.compose()` examples fixed in
+  `darkmatter/lib/README.md`, `docs/topics/schemas/definition.md`,
+  `docs/inline/text-replacement.md`, `docs/inline/preflight-checks.md`.
+- `darkmatter` skill (`SKILL.md`, `compose.md`) describes `ComposeRequest`,
+  the test helpers, and `compose_with_options`; `prepare_root` is gone.
+
+#### Gates
+
+- `just test` (darkmatter: lib, cli, dmls): 8757 passed, 12 skipped, exit 0.
+- `just lint` (darkmatter): exit 0.
+- `cargo test --doc -p darkmatter`: 189 passed, 1 failed. The failure,
+  `compose::expression::evaluate` (calls an undefined `evaluate_expr`), is
+  pre-existing; the file was not touched. Four stale doctests this phase broke
+  were fixed. Doctests are not part of `just test`.
+- `just cross-check darkmatter --os windows` (filtered to the new and changed
+  tests): first run failed to compile `declined_path_transclusion.rs`
+  (Windows-only), then three new tests failed on verbatim `\\?\` spellings
+  from `canonicalize`. Fixed with `biscuit_file::canonicalize_simplified` and
+  portable `{{VAR}}` values; final run 12/12 passed. Linux: 18/18 passed.
+  (The `just` wrapper mangles `-E '…(…)…'`; plain substring filters through
+  `./scripts/cross-check.sh` work.)
+- Not done: the full darkmatter suite on Windows/Linux (Phase 8).
+
+#### Downstream compile errors (Phase 3's input)
+
+messenger, messenger-cli, and claudine-gen still compile. `claudine` does
+not, so `claudine-cli` is not checked yet. Per R16, Phase 2 cannot stand
+alone, so Phases 2 and 3 land as one commit. `cargo check -p claudine
+--all-targets` errors (rustc stops at these; more will follow in
+`claudine-cli`):
+
+- lib: `composition/lifecycle/executor.rs:337,344`, `composition/mod.rs:213`,
+  `composition/preflight.rs:82,139`,
+  `composition/prepare.rs:341,567,678,883,929`,
+  `system_prompt/prepare.rs:173,198`. All are
+  `with_file_resolution_context` (now crate-private) or an entry point that
+  now takes `&ComposeRequest`.
+- lib tests: `composition/preflight/tests.rs:324,384,431`,
+  `composition/runtime_state/tests.rs:251`, `composition/sequence/tests.rs:761`,
+  `invocation_context/tests.rs:306` (`capture_file_resolution_context`).
+
+#### Re-verification (2026-10-01)
+
+A second Phase 2 run found every Phase 2 task already checked and the work
+present in the tree, so nothing was re-implemented. Gates re-run on macOS:
+`just test` in `darkmatter/` gave 8757 passed and 12 skipped, and `just lint`
+exited 0. The plan, log, and spec frontmatter were already complete, so they
+were left unchanged.

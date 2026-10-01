@@ -39,32 +39,44 @@ reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    Phase 1 is complete (implementation only; nothing is committed). Incident 1
-    is fixed with a deliberately minimal change: `ComposeOptions::prepare_root`
-    (`pub(crate)`, `compose/context/options.rs`) runs `extend_context_for`,
-    `establish_repository_observation`, and `ensure_file_resolution_context`.
-    The pipeline calls it, and pre-flight calls the cloning form
-    `prepared_root` at the top of `collect_effects` and
-    `collect_frontmatter_shell_commands`. Those two sites cover every public
-    pre-flight entry. Phase 2 replaces all of this with `ComposeRequest`.
-    The Phase 1 regression tests are
-    `darkmatter/lib/tests/l1/preflight_repository_sigils.rs` and
-    `darkmatter/cli/tests/l1/compose_transclusion.rs::test_compose_repository_sigils_from_a_nested_document`;
-    keep them passing as the signatures change. The spike results that change
-    later phases are written into the plan as R11 and under R6:
-    (1) The only discovery **error** found is a syntactically corrupt
-    `.git/config`. A broken `.git` file, a missing gitdir, and an unreadable
-    `.git` all read as "no repository". So in Phase 4, DMLS must see a
-    `.git/config` change to drop a failed cache entry, or the repair will
-    never be noticed.
-    (2) A `#[path]` include alone does not satisfy `source-inputs`. Each
-    declaring test must also spell the shared file with an `include_str!`
-    inside the test function (Phases 6 and 7).
-    (3) Several claudine-cli `compose_*` L1 modules are `#[cfg(unix)]`; the
-    Phase 7 runner must not inherit that gate.
+    Phase 2 is complete (implementation only; nothing is committed). Read the
+    "Phase 2" section of implementation-log.md first; the points that shape
+    Phase 3 are:
+    (1) Claudine does not compile against the new API (sites listed under
+    "Downstream compile errors"); messenger and claudine-gen still compile.
+    Per R16, Phases 2 and 3 must land as one commit.
+    (2) The public API: `RequestSnapshot` (new / from_process -> io::Result /
+    with_home / with_env / with_magic_root / with_magic_root_tier /
+    with_opening_reference / at_request_dir), `build_resolution_context`,
+    `ContextBuildError` (Discovery and Invalid, both `MissingContext`), and
+    `ComposeRequest::{prepare, with_context, options, context, map_options}`.
+    Every entry point (compose_with, compose_preflight*, collect_*,
+    transclusions_with_options, ReferenceGraphOptions::with_compose,
+    execute_directive, execute_resolved_shell_values) takes `&ComposeRequest`.
+    `ComposeOptions::with_file_resolution_context` is crate-private and
+    `with_magic_path` is gone: Claudine's prompt roots become snapshot roots
+    (`with_magic_root_tier(.., MagicPathTier::User)` for `~/.claudine`).
+    Use `map_options` to add pre-flight's approval set to a prepared request.
+    (3) `md compose` has only a compile bridge: `from_process()` is called in
+    compose.rs, `--set` uses `with_context` over the derived document context,
+    and other runs `prepare` at the document's directory (the old fallback).
+    Track A replaces this with the builder-built launch context, always
+    attached, and threads one snapshot from `main`. `schema validate` maps a
+    build error to its `ParseError` outcome for now.
+    (4) A reference graph whose request directory lies in another repository
+    than the document now fails with RepositoryRootNotContainingSource rather
+    than silently re-anchoring; `md graph` / FileTree::from_markdown must build
+    its request at the right directory.
+    (5) Residue for Phase 5: ComposeContext::capture/capture_minimal and the
+    capture env read still touch the process (overridden on request paths);
+    conditions.rs env.* is the standalone evaluate_condition_against API.
+    (6) Windows: `std::fs::canonicalize` gives `\\?\` spellings; use
+    biscuit_file::canonicalize_simplified and to_portable_string for `{{VAR}}`
+    values in tests. cfg(windows) test modules are not compiled on macOS
+    (declined_path_transclusion.rs bit this phase). `just cross-check` mangles
+    `-E '(...)'`; call ./scripts/cross-check.sh with substring filters.
     R5 (the `md` failure row) and R7 (`current_env` stays live) are still open
-    for the author to overturn before Phase 2. Nothing in Phase 1 depended on
-    them.
+    for the author to overturn; nothing in Phase 2 depended on them.
 ---
 
 # File References Resolve From One Prepared Context
