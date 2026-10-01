@@ -32,7 +32,7 @@ fn attached_globals_resolve_through_lookup() {
     use darkmatter::markdown::compose::expression::{
         EvaluationLookup, evaluate, is_truthy, parse,
     };
-    use darkmatter::markdown::compose::subtree::LayeredLookup;
+    use darkmatter::markdown::compose::subtree::layered_session;
     use darkmatter::markdown::compose::{ComposeContext, EffectiveStateBuilder};
 
     let key = "CLAUDINE_TEST_LOOP_CONTROL_LATE_BIND";
@@ -45,7 +45,7 @@ fn attached_globals_resolve_through_lookup() {
         .build()
         .unwrap();
     let globals = lifecycle_injected_globals(None, Some(&timing));
-    let lookup = LayeredLookup::new(&state, &globals, None);
+    let lookup = layered_session(&state, globals, None, None).expect("the globals associate");
 
     let when = parse(&format!("current_env.{key} == 'ready'")).expect("parses");
     let fired = is_truthy(&evaluate(&when, &lookup).expect("evaluates"));

@@ -1,20 +1,22 @@
-//! Subtree compose with an injectable layered lookup (DM2).
+//! Subtree compose over a host binding session (DM2).
 //!
 //! Exposes a public entry point that interpolates a frontmatter *subtree*
-//! (a JSON value) through the same interpolation core as main compose, driven
-//! by a caller-supplied layered lookup. This is the primitive Claudine uses
-//! for both event-time resolution (C2) and early-binding shell resolution (C3).
+//! (a JSON value) through the same interpolation core as main compose. This is
+//! the primitive Claudine uses for both event-time resolution (C2) and
+//! early-binding shell resolution (C3).
 //!
-//! ## Layered Lookup
+//! ## Bindings
 //!
-//! [`LayeredLookup`] layers caller-injected named globals
-//! ([`InjectedGlobal`]) over Darkmatter's own seed state
-//! (`ctx`/`env`/`doc` + read-side functions via [`ResolutionContext`]).
-//! Injected globals may be **eager** (a precomputed value) or **lazy** (a
-//! closure evaluated on first access and memoized, so it sees the state at the
-//! point of first reference exactly as `ctx` is at compose time). The API
-//! takes arbitrary named globals — not three hardcoded names — so future
-//! late-binding globals need no further Darkmatter change.
+//! Each [`SubtreeCompose::compose`] call associates one
+//! [`EvaluationSession`]: the caller's runtime globals ([`RuntimeBinding`]:
+//! eager, lazy, or unavailable) over Darkmatter's own seed state
+//! (`ctx`/`env`/`doc`/`current`/`current_env` + read-side functions via
+//! [`ResolutionContext`]). A root resolves as a reserved namespace, then a
+//! registered global, then a document property; an absent document property is
+//! `null`. A caller that declares its globals in a [`BindingView`] gets the
+//! view's checks (every declared global supplied, no contradiction); without a
+//! view each supplied global is simply available. A reserved namespace name is
+//! never a valid global.
 //!
 //! ## Resolution Semantics
 //!
@@ -22,46 +24,37 @@
 //! byte-for-byte: the subtree compose reuses [`Evaluator`]/[`interpolate_value`]
 //! so a lifecycle string interpolated at event-time produces the same typed /
 //! substituted result as the same string with the same data at compose-time.
-//! Strictness is an **orthogonal** mode flag (see [`SubtreeStrictness`]): it
-//! changes what happens on *failure* (typed error vs lenient empty), not how a
-//! successful resolution is typed or substituted.
 //!
 //! ## Expression Failures
 //!
-//! Full-document composition always treats a `{{ … }}` that cannot be parsed
-//! or evaluated as an authoring error, whatever `fail_fast` says. This module
-//! is the one public exception: an explicit [`SubtreeStrictness::Lenient`]
-//! call keeps its best-effort contract and degrades a malformed span instead
-//! of failing. That leniency covers expression failures only. It is not the
-//! same thing as the recoverable, non-expression stage failures (TOC linking,
-//! non-structural transclusion) that `fail_fast = false` downgrades.
+//! Like full-document composition, subtree compose fails on any `{{ … }}` that
+//! cannot be parsed or evaluated: a malformed span, an unknown function, a
+//! rejected argument, or a read of an unavailable global. That is ordinary
+//! error propagation; an absent document property is not a failure.
 //!
 //! [`ResolutionContext`]: super::expression::ResolutionContext
 //! [`Evaluator`]: super::interpolation::Evaluator
 //! [`interpolate_value`]: super::interpolation::interpolate_value
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde_json::Value;
 
 use super::context::effective_state::EffectiveState;
 use super::expression::{
-    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, parse,
+    Availability, BindingError, BindingView, EvaluationSession, ExpressionError,
+    ResolutionContext, RuntimeBinding, ScopeId,
 };
 use super::interpolation::{Evaluator, ExpressionFailurePolicy, interpolate_value};
-use crate::markdown::types::MarkdownError;
+use crate::markdown::types::{MarkdownError, SourceRef};
 
-/// A caller-injected named global available to subtree compose (DM2).
+/// A caller-supplied runtime global that owns its provider.
 ///
-/// Layers over Darkmatter's own seed state (`ctx`/`env`/`doc` + read-side
-/// functions via [`ResolutionContext`]). Eager globals carry a precomputed
-/// value; lazy globals carry a closure that runs on first access and is
-/// memoized, so it sees the state at the point of first reference exactly as
-/// `ctx` is at compose time.
-///
-/// The API takes arbitrary named globals — not three hardcoded names — so
-/// future late-binding globals need no further Darkmatter change.
+/// Eager globals carry a precomputed value; lazy globals carry a closure that
+/// runs on first read and is cached for the session, so it sees the state at
+/// the point of first reference exactly as `ctx` is at compose time; an
+/// unavailable global fails every read with its reason.
 ///
 /// ## Examples
 ///
@@ -72,253 +65,62 @@ use crate::markdown::types::MarkdownError;
 /// let eager = InjectedGlobal::eager(json!({"msg": "boom"}));
 /// let lazy = InjectedGlobal::lazy(|| json!({"phase": 2}));
 /// ```
-///
-/// [`ResolutionContext`]: super::expression::ResolutionContext
-#[derive(Clone)]
-pub enum InjectedGlobal {
-    /// A value computed before subtree compose was called.
-    Eager(Value),
+pub type InjectedGlobal = RuntimeBinding<'static>;
 
-    /// A closure evaluated on first access within a subtree-compose call.
-    ///
-    /// Memoized per [`LayeredLookup`] instance: the closure runs at most once
-    /// per subtree compose, only when its name is referenced — never eagerly
-    /// at subtree-compose entry.
-    Lazy(Arc<dyn Fn() -> Value + Send + Sync>),
-}
+/// The scope of the view synthesized for a caller that declares none.
+const UNDECLARED_SCOPE: &str = "darkmatter.subtree";
 
-impl InjectedGlobal {
-    /// Creates an eager global from a precomputed value.
-    pub fn eager(value: Value) -> Self {
-        Self::Eager(value)
-    }
-
-    /// Creates a lazy global from a closure.
-    ///
-    /// The closure runs on first access (via `{{ name }}` or `{{ name.path }}`)
-    /// during subtree compose and is memoized, so subsequent references within
-    /// the same subtree compose reuse the cached value.
-    pub fn lazy<F>(f: F) -> Self
-    where
-        F: Fn() -> Value + Send + Sync + 'static,
-    {
-        Self::Lazy(Arc::new(f))
-    }
-}
-
-impl std::fmt::Debug for InjectedGlobal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Eager(v) => f.debug_tuple("Eager").field(v).finish(),
-            Self::Lazy(_) => f.debug_tuple("Lazy").field(&"Fn(..)").finish(),
-        }
-    }
-}
-
-/// Strictness mode for subtree compose (DM2).
+/// Associates one evaluation session: `globals` over `base`, checked against
+/// `view`.
 ///
-/// Orthogonal to resolution semantics: it changes what happens on *failure*
-/// (typed error vs lenient empty), not how a successful resolution is typed or
-/// substituted.
+/// Without a view, one is synthesized in which each supplied global is
+/// available (or unavailable with its own reason), so only the root checks
+/// apply: a reserved namespace or dotted name is still rejected. The session
+/// is the lookup for one direct evaluation or one subtree composition; each
+/// lazy global runs at most once in it.
 ///
-/// ## When to use which
+/// ## Errors
 ///
-/// - **Strict** — Claudine uses strict mode for lifecycle communication/action
-///   text so parse failures, fatal evaluation failures, and unresolved roots
-///   become typed errors before any side effect is dispatched.
-/// - **Lenient** — best-effort interpolation of a data tree, where a broken
-///   span must not stop the caller. Document composition never uses it: its
-///   body and frontmatter stages fail on any malformed or unevaluatable
-///   expression.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SubtreeStrictness {
-    /// Lenient: malformed spans and unknown roots produce a degraded/empty
-    /// string. Unknown functions remain fatal (they can never resolve, so
-    /// leaving the literal `{{ … }}` text would leak downstream).
-    #[default]
-    Lenient,
-
-    /// Strict: malformed spans, unknown functions, and unknown roots return a
-    /// typed error instead of a degraded string.
-    ///
-    /// A reference whose root is a *known* surface — a declared frontmatter
-    /// key, `ctx`/`env`/`doc`, or an in-scope injected global — that resolves
-    /// to `null`/empty still renders empty. Strictness targets *unknown* roots
-    /// and malformed/illegal expressions only.
-    Strict,
-}
-
-/// A lookup that layers caller-injected named globals over Darkmatter's own
-/// seed state (DM2).
-///
-/// Injected globals take precedence over (shadow) frontmatter keys with the
-/// same root name; resolution then falls back to the base [`EffectiveState`]
-/// (`ctx.*`, `env.*`, `doc.*`, frontmatter keys, read-side functions via the
-/// optional [`ResolutionContext`]).
-///
-/// The reserved roots are the one exception: `current` and `current_env` are
-/// resolved by the base state before the injected map is consulted, so an
-/// injected global of either name is unreachable (spec R30–R33).
-///
-/// Lazy globals are memoized per `LayeredLookup` instance: the closure runs at
-/// most once and only when its name is referenced — never eagerly at
-/// subtree-compose entry.
-///
-/// [`ResolutionContext`]: super::expression::ResolutionContext
-pub struct LayeredLookup<'a> {
-    state: &'a EffectiveState,
-    globals: &'a HashMap<String, InjectedGlobal>,
-    cache: Mutex<HashMap<String, Value>>,
+/// Any [`BindingError`] configuration variant from
+/// [`BindingView`] construction or [`EvaluationSession::associate`].
+pub fn layered_session<'a>(
+    base: &'a EffectiveState,
+    globals: HashMap<String, RuntimeBinding<'a>>,
+    view: Option<Arc<BindingView>>,
     resolution_context: Option<ResolutionContext>,
+) -> Result<EvaluationSession<'a>, BindingError> {
+    let view = match view {
+        Some(view) => view,
+        None => Arc::new(undeclared_view(&globals)?),
+    };
+    let session = EvaluationSession::associate(view, base, globals)?;
+    Ok(match resolution_context {
+        Some(context) => session.with_resolution_context(context),
+        None => session,
+    })
 }
 
-impl<'a> std::fmt::Debug for LayeredLookup<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LayeredLookup")
-            .field("state", &self.state)
-            .field("globals", &self.globals)
-            .field("resolution_context", &self.resolution_context)
-            .finish()
-    }
-}
-
-impl<'a> LayeredLookup<'a> {
-    /// Creates a new layered lookup.
-    ///
-    /// ## Arguments
-    ///
-    /// - `state` — the base seed state (frontmatter + `ctx.*` + `env.*` +
-    ///   `doc.*`).
-    /// - `globals` — caller-injected named globals layered over `state`.
-    /// - `resolution_context` — enables read-side expression functions
-    ///   (`file_exists`, `frontmatter`, `absolute`, …). Pass `None` for
-    ///   context-free callers.
-    pub fn new(
-        state: &'a EffectiveState,
-        globals: &'a HashMap<String, InjectedGlobal>,
-        resolution_context: Option<ResolutionContext>,
-    ) -> Self {
-        Self {
-            state,
-            globals,
-            cache: Mutex::new(HashMap::new()),
-            resolution_context,
-        }
-    }
-
-    /// Resolves an injected global value (eager or memoized lazy).
-    ///
-    /// Lazy globals are memoized: the closure runs at most once per
-    /// `LayeredLookup` instance.
-    fn resolve_global(&self, name: &str, global: &InjectedGlobal) -> Option<Value> {
-        match global {
-            InjectedGlobal::Eager(v) => Some(v.clone()),
-            InjectedGlobal::Lazy(f) => {
-                let mut cache = self.cache.lock().ok()?;
-                if let Some(cached) = cache.get(name) {
-                    return Some(cached.clone());
-                }
-                let value = f();
-                cache.insert(name.to_string(), value.clone());
-                Some(value)
-            }
-        }
-    }
-}
-
-impl<'a> EvaluationLookup for LayeredLookup<'a> {
-    fn get(&self, path: &str) -> Option<Value> {
-        let root = path.split('.').next().unwrap_or(path);
-        if !is_reserved_root(root)
-            && let Some(global) = self.globals.get(root)
-        {
-            let value = self.resolve_global(root, global)?;
-            if path == root {
-                return Some(value);
-            }
-            return walk_dotted_path(&value, &path[root.len()..]);
-        }
-        self.state.get(path)
-    }
-
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        let root = path.split('.').next().unwrap_or(path);
-        if !is_reserved_root(root) && self.globals.contains_key(root) {
-            return Ok(self.get(path));
-        }
-        self.state.get_checked(path)
-    }
-
-    fn get_string(&self, path: &str) -> String {
-        match self.get(path) {
-            None | Some(Value::Null) => String::new(),
-            Some(Value::String(s)) => s,
-            Some(Value::Number(n)) => n.to_string(),
-            Some(Value::Bool(b)) => b.to_string(),
-            Some(v) => v.to_string(),
-        }
-    }
-
-    fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.resolution_context.clone()
-    }
-
-    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
-        // Borrowed path (Finding 12) — avoids cloning the context per read-side
-        // function call during subtree evaluation.
-        self.resolution_context.as_ref()
-    }
-
-    fn is_valid_context_variable(&self, name: &str) -> bool {
-        self.state.is_valid_context_variable(name)
-    }
-
-    fn context_variable_names(&self) -> &[&'static str] {
-        self.state.context_variable_names()
-    }
-
-    fn is_known_variable_root(&self, root: &str) -> bool {
-        if self.globals.contains_key(root) {
-            return true;
-        }
-        if root == "ctx" || root == "env" || root == "doc" || is_reserved_root(root) {
-            return true;
-        }
-        self.state.data().contains_key(root)
-    }
-
-    fn begin_expression_scope(&self) {
-        self.state.begin_expression_scope();
-    }
-}
-
-/// Whether `root` is a lazy reserved root no injected global may shadow.
-fn is_reserved_root(root: &str) -> bool {
-    crate::markdown::compose::context::CurrentScope::is_reserved_root(root)
-}
-
-/// Walks a dotted path (`.a.b` or `a.b`) through a JSON value.
-fn walk_dotted_path(value: &Value, path: &str) -> Option<Value> {
-    let trimmed = path.strip_prefix('.').unwrap_or(path);
-    let mut current = value;
-    for segment in trimmed.split('.') {
-        if segment.is_empty() {
-            continue;
-        }
-        current = match current {
-            Value::Object(map) => map.get(segment)?,
-            _ => return None,
-        };
-    }
-    Some(current.clone())
+/// The view for a caller that declares nothing: every supplied global as it
+/// was supplied.
+fn undeclared_view(globals: &HashMap<String, RuntimeBinding<'_>>) -> Result<BindingView, BindingError> {
+    globals
+        .iter()
+        .fold(BindingView::builder(ScopeId::new(UNDECLARED_SCOPE)), |builder, (root, binding)| {
+            let availability = match binding {
+                RuntimeBinding::Unavailable(reason) => Availability::Unavailable(reason.clone()),
+                RuntimeBinding::Eager(_) | RuntimeBinding::Lazy(_) => Availability::Available,
+            };
+            builder.declare(root.clone(), "caller-supplied global", availability)
+        })
+        .build()
 }
 
 /// Builder for subtree compose (DM2).
 ///
 /// Interpolates a frontmatter subtree (a JSON value) through the same
-/// interpolation core as main compose, driven by a caller-supplied layered
-/// lookup. Reuses [`Evaluator`]/[`interpolate_value`] so whole-value typing and
-/// mixed-string *resolution* rules match main compose byte-for-byte.
+/// interpolation core as main compose, against one [`EvaluationSession`]. Reuses
+/// [`Evaluator`]/[`interpolate_value`] so whole-value typing and mixed-string
+/// *resolution* rules match main compose byte-for-byte.
 ///
 /// ## Examples
 ///
@@ -337,7 +139,6 @@ fn walk_dotted_path(value: &Value, path: &str) -> Option<Value> {
 ///
 /// let result = SubtreeCompose::new(&json!("phase {{phase}} failed: {{err.msg}}"), &state)
 ///     .with_global("err", InjectedGlobal::eager(json!({"msg": "boom"})))
-///     .strict()
 ///     .compose()
 ///     .unwrap();
 /// assert_eq!(result, json!("phase 2 failed: boom"));
@@ -349,49 +150,41 @@ fn walk_dotted_path(value: &Value, path: &str) -> Option<Value> {
 pub struct SubtreeCompose<'a> {
     value: &'a Value,
     base: &'a EffectiveState,
-    globals: HashMap<String, InjectedGlobal>,
-    strictness: SubtreeStrictness,
+    globals: HashMap<String, RuntimeBinding<'a>>,
+    view: Option<Arc<BindingView>>,
     resolution_context: Option<ResolutionContext>,
 }
 
 impl<'a> SubtreeCompose<'a> {
-    /// Creates a new subtree-compose builder with no injected globals and
-    /// default (lenient) strictness.
+    /// Creates a new subtree-compose builder with no globals and no view.
     pub fn new(value: &'a Value, base: &'a EffectiveState) -> Self {
         Self {
             value,
             base,
             globals: HashMap::new(),
-            strictness: SubtreeStrictness::default(),
+            view: None,
             resolution_context: None,
         }
     }
 
-    /// Adds a single injected global.
+    /// Adds a single runtime global.
     #[must_use]
-    pub fn with_global(mut self, name: impl Into<String>, global: InjectedGlobal) -> Self {
+    pub fn with_global(mut self, name: impl Into<String>, global: RuntimeBinding<'a>) -> Self {
         self.globals.insert(name.into(), global);
         self
     }
 
-    /// Replaces the injected-globals map.
+    /// Replaces the runtime-globals map.
     #[must_use]
-    pub fn with_globals(mut self, globals: HashMap<String, InjectedGlobal>) -> Self {
+    pub fn with_globals(mut self, globals: HashMap<String, RuntimeBinding<'a>>) -> Self {
         self.globals = globals;
         self
     }
 
-    /// Sets the strictness mode (default: lenient).
+    /// Checks the globals against `view` at association.
     #[must_use]
-    pub fn with_strictness(mut self, strictness: SubtreeStrictness) -> Self {
-        self.strictness = strictness;
-        self
-    }
-
-    /// Shortcut for `with_strictness(SubtreeStrictness::Strict)`.
-    #[must_use]
-    pub fn strict(mut self) -> Self {
-        self.strictness = SubtreeStrictness::Strict;
+    pub fn with_binding_view(mut self, view: Arc<BindingView>) -> Self {
+        self.view = Some(view);
         self
     }
 
@@ -410,31 +203,28 @@ impl<'a> SubtreeCompose<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns [`MarkdownError::Transform`] when:
-    /// - strict mode rejects a malformed span, unknown function, or unknown
-    ///   root;
-    /// - a whole-value `{{ expr }}` fails to parse or evaluate (fatal in both
-    ///   lenient and strict modes);
-    /// - an unknown function is referenced (fatal in both modes).
+    /// [`MarkdownError::Interpolation`] whose typed cause is
+    /// [`ExpressionError::Binding`] when the globals fail association, before
+    /// anything is evaluated; otherwise the error of the first span that fails
+    /// to parse or evaluate.
     ///
-    /// [`MarkdownError::Transform`]: crate::markdown::types::MarkdownError::Transform
+    /// [`MarkdownError::Interpolation`]: crate::markdown::types::MarkdownError::Interpolation
     pub fn compose(self) -> Result<Value, MarkdownError> {
-        let lookup = LayeredLookup::new(self.base, &self.globals, self.resolution_context);
-        compose_subtree_impl(self.value, &lookup, self.strictness)
+        let session =
+            layered_session(self.base, self.globals, self.view, self.resolution_context)
+                .map_err(association_error)?;
+        compose_subtree_impl(self.value, &session)
     }
 }
 
-/// Convenience entry point: composes a subtree with the given injected globals
-/// and strictness.
+/// Convenience entry point: composes a subtree with the given globals.
 ///
-/// Equivalent to `SubtreeCompose::new(value, base).with_globals(globals).with_strictness(strictness).compose()`.
+/// Equivalent to `SubtreeCompose::new(value, base).with_globals(globals).compose()`.
 ///
 /// ## Examples
 ///
 /// ```
-/// use darkmatter::markdown::compose::subtree::{
-///     compose_subtree, InjectedGlobal, SubtreeStrictness,
-/// };
+/// use darkmatter::markdown::compose::subtree::{compose_subtree, InjectedGlobal};
 /// use darkmatter::markdown::compose::EffectiveStateBuilder;
 /// use serde_json::json;
 /// use std::collections::HashMap;
@@ -447,45 +237,48 @@ impl<'a> SubtreeCompose<'a> {
 /// let mut globals = HashMap::new();
 /// globals.insert("err".to_string(), InjectedGlobal::eager(json!({"msg": "boom"})));
 ///
-/// let result = compose_subtree(
-///     &json!("phase {{phase}} failed: {{err.msg}}"),
-///     &state,
-///     globals,
-///     SubtreeStrictness::Strict,
-/// ).unwrap();
+/// let result = compose_subtree(&json!("phase {{phase}} failed: {{err.msg}}"), &state, globals)
+///     .unwrap();
 /// assert_eq!(result, json!("phase 2 failed: boom"));
 /// ```
-pub fn compose_subtree(
-    value: &Value,
-    base: &EffectiveState,
-    globals: HashMap<String, InjectedGlobal>,
-    strictness: SubtreeStrictness,
+pub fn compose_subtree<'a>(
+    value: &'a Value,
+    base: &'a EffectiveState,
+    globals: HashMap<String, RuntimeBinding<'a>>,
 ) -> Result<Value, MarkdownError> {
-    SubtreeCompose::new(value, base)
-        .with_globals(globals)
-        .with_strictness(strictness)
-        .compose()
+    SubtreeCompose::new(value, base).with_globals(globals).compose()
+}
+
+/// A failed association, carried on the typed interpolation channel so a
+/// caller downcasts the same [`BindingError`] it would get from evaluation.
+fn association_error(error: BindingError) -> MarkdownError {
+    let root = error.root().to_string();
+    MarkdownError::Interpolation {
+        key: None,
+        expression: root.clone(),
+        source: Box::new(SourceRef::Effective {
+            rendered: root,
+            origin_key: None,
+        }),
+        cause: Box::new(ExpressionError::Binding(Box::new(error))),
+    }
 }
 
 /// Recursive subtree interpolation driver.
-fn compose_subtree_impl(
-    value: &Value,
-    lookup: &LayeredLookup<'_>,
-    strictness: SubtreeStrictness,
-) -> Result<Value, MarkdownError> {
+fn compose_subtree_impl(value: &Value, session: &EvaluationSession<'_>) -> Result<Value, MarkdownError> {
     match value {
-        Value::String(s) => compose_string(s, lookup, strictness),
+        Value::String(s) => compose_string(s, session),
         Value::Array(arr) => {
             let mut out = Vec::with_capacity(arr.len());
             for item in arr {
-                out.push(compose_subtree_impl(item, lookup, strictness)?);
+                out.push(compose_subtree_impl(item, session)?);
             }
             Ok(Value::Array(out))
         }
         Value::Object(obj) => {
             let mut out = serde_json::Map::with_capacity(obj.len());
             for (k, v) in obj {
-                out.insert(k.clone(), compose_subtree_impl(v, lookup, strictness)?);
+                out.insert(k.clone(), compose_subtree_impl(v, session)?);
             }
             Ok(Value::Object(out))
         }
@@ -495,123 +288,11 @@ fn compose_subtree_impl(
 }
 
 /// Interpolates a single string value through the shared interpolation core.
-fn compose_string(
-    s: &str,
-    lookup: &LayeredLookup<'_>,
-    strictness: SubtreeStrictness,
-) -> Result<Value, MarkdownError> {
-    if matches!(strictness, SubtreeStrictness::Strict) {
-        validate_strict_roots(s, lookup)?;
-    }
-    let policy = match strictness {
-        SubtreeStrictness::Strict => ExpressionFailurePolicy::Strict,
-        SubtreeStrictness::Lenient => ExpressionFailurePolicy::Lenient,
-    };
-    let evaluator = Evaluator::new(lookup);
+fn compose_string(s: &str, session: &EvaluationSession<'_>) -> Result<Value, MarkdownError> {
+    let evaluator = Evaluator::new(session);
     let (resolved, _count, _warnings) =
-        interpolate_value(s, &evaluator, policy, "subtree-compose")?;
+        interpolate_value(s, &evaluator, ExpressionFailurePolicy::Strict, "subtree-compose")?;
     Ok(resolved)
-}
-
-/// Strict-mode pre-pass: parses every `{{ }}` span and rejects unknown roots.
-///
-/// A whole-value parse failure is already fatal in `interpolate_value`; this
-/// pass surfaces mixed-string parse failures (which lenient mode would degrade
-/// to warnings) and unknown-root references (which lenient mode resolves to
-/// empty) as typed errors.
-///
-/// Root collection follows expression short-circuit semantics (see
-/// [`collect_variable_roots`]), so a root that `evaluate` would never reach —
-/// inside a `||` fallback or an unchosen ternary branch — is not rejected. This
-/// keeps the documented `{{ maybe || 'default' }}` migration path valid in
-/// strict mode.
-fn validate_strict_roots(s: &str, lookup: &LayeredLookup<'_>) -> Result<(), MarkdownError> {
-    for loc in ExpressionFinder::find_all_plain(s) {
-        let expr = parse(&loc.expression).map_err(|e| {
-            MarkdownError::Transform(format!(
-                "subtree-compose strict mode: failed to parse '{{{{ {} }}}}': {e}",
-                loc.expression
-            ))
-        })?;
-        let mut roots = Vec::new();
-        collect_variable_roots(&expr, &mut roots);
-        for root in roots {
-            if !lookup.is_known_variable_root(&root) {
-                return Err(MarkdownError::Transform(format!(
-                    "subtree-compose strict mode: unknown root '{root}' in \
-                     '{{{{ {} }}}}'",
-                    loc.expression
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Walks an `Expr` AST pushing the first dotted segment of every `Variable`
-/// node's path onto `roots`.
-///
-/// Unlike the frontmatter dependency walker, this does not skip `ctx.*` or
-/// `env.*`: their root (`ctx`, `env`) is a known namespace, and strict-mode
-/// checks the *root* only (a `ctx.typo` has a known root and is allowed; a
-/// future claudine-side scan polices the `typo` segment).
-///
-/// The walk follows expression-evaluation (short-circuit) semantics so the
-/// strict pre-pass mirrors what `evaluate` actually reaches at runtime — the
-/// same tolerance claudine's `find_undefined_top_level_variable` applies:
-///
-/// - `Expr::Fallback { .. }` is fully tolerant — no roots inside a fallback
-///   subtree are collected. The `||` construct exists precisely to tolerate an
-///   undefined/optional operand (`{{ maybe || 'default' }}`), so a miss inside
-///   it is intentional, not a leak.
-/// - `Expr::Ternary` descends into `condition` only — the condition is always
-///   evaluated, but the branches intentionally tolerate undefined operands.
-/// - Every other node (variable, unary, paren, member access, comparison,
-///   binary, index, function-call args) is descended, so an unknown root buried
-///   in e.g. `parent_dir(missing)` is still rejected.
-fn collect_variable_roots(expr: &Expr, roots: &mut Vec<String>) {
-    match expr {
-        Expr::Variable(path) => {
-            let root = path.split('.').next().unwrap_or(path);
-            if !root.is_empty() {
-                roots.push(root.to_string());
-            }
-        }
-        Expr::StringLiteral(_)
-        | Expr::NumberLiteral(_)
-        | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_variable_roots(inner, roots),
-        Expr::Fallback { .. } => {}
-        Expr::Ternary { condition, .. } => {
-            collect_variable_roots(condition, roots);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_variable_roots(left, roots);
-            collect_variable_roots(right, roots);
-        }
-        Expr::Index { base, index } => {
-            collect_variable_roots(base, roots);
-            collect_variable_roots(index, roots);
-        }
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                collect_variable_roots(arg, roots);
-            }
-        }
-        Expr::ArrayLiteral(items) => {
-            for item in items {
-                collect_variable_roots(item, roots);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_variable_roots(value, roots);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -619,9 +300,7 @@ mod tests {
     use super::*;
     use crate::markdown::compose::EffectiveStateBuilder;
     use serde_json::json;
-    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
 
     fn state_with(fm: Vec<(&str, Value)>) -> EffectiveState {
         let fm: HashMap<String, Value> = fm
@@ -651,7 +330,6 @@ mod tests {
             &json!("phase {{phase}} failed: {{err.msg}}"),
             &state,
             globals,
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!("phase 2 failed: boom"));
@@ -669,7 +347,6 @@ mod tests {
             &json!("today is {{snapshot.today}}"),
             &state,
             globals,
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!("today is 2026-06-24"));
@@ -684,7 +361,6 @@ mod tests {
             &json!("{{phase}}"),
             &state,
             globals,
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!(99));
@@ -705,7 +381,6 @@ mod tests {
             &json!("artifact={{config.artifact.path}} phase={{phase}}"),
             &state,
             HashMap::new(),
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!("artifact=/tmp/out phase=3"));
@@ -721,7 +396,6 @@ mod tests {
             &json!("{{flag}}"),
             &state,
             HashMap::new(),
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, Value::Bool(false));
@@ -735,7 +409,6 @@ mod tests {
             &json!("flag={{flag}}"),
             &state,
             HashMap::new(),
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!("flag=true"));
@@ -761,7 +434,6 @@ mod tests {
             &json!("no reference here"),
             &state,
             globals,
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!("no reference here"));
@@ -786,7 +458,6 @@ mod tests {
             &json!("{{snapshot.phase}} then {{snapshot.phase}}"),
             &state,
             globals,
-            SubtreeStrictness::Lenient,
         )
         .unwrap();
         assert_eq!(result, json!("7 then 7"));
@@ -797,176 +468,125 @@ mod tests {
         );
     }
 
-    // ── DM2: strict mode ────────────────────────────────────────────────
+    // ── Failures and absence ───────────────────────────────────────────
 
     #[test]
-    fn dm2_strict_rejects_unknown_root() {
+    fn an_absent_property_is_null_whole_value_and_empty_in_a_mixed_string() {
         let state = state_with(vec![("phase", json!(2))]);
-        let result = compose_subtree(
-            &json!("{{spec_fil}}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("unknown root") && err.contains("spec_fil"),
-            "error should name the unknown root: {err}"
-        );
+        let whole = compose_subtree(&json!("{{spec_fil}}"), &state, HashMap::new()).unwrap();
+        assert_eq!(whole, Value::Null);
+        let mixed = compose_subtree(&json!("spec=[{{spec_fil}}]"), &state, HashMap::new()).unwrap();
+        assert_eq!(mixed, json!("spec=[]"));
+        let fallback =
+            compose_subtree(&json!("{{ missing || 'default' }}"), &state, HashMap::new()).unwrap();
+        assert_eq!(fallback, json!("default"));
+        let ternary =
+            compose_subtree(&json!("{{ missing ? 'a' : 'b' }}"), &state, HashMap::new()).unwrap();
+        assert_eq!(ternary, json!("b"));
     }
 
     #[test]
-    fn dm2_strict_known_but_empty_renders_empty() {
-        let state = state_with(vec![("spec_file", json!(null))]);
-        let result = compose_subtree(
-            &json!("spec={{spec_file}}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        )
-        .unwrap();
-        assert_eq!(result, json!("spec="));
-    }
-
-    #[test]
-    fn dm2_strict_rejects_malformed_span() {
+    fn a_bare_name_never_reads_ctx() {
         let state = state_with(vec![]);
-        let result = compose_subtree(
-            &json!("{{ > broken }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("failed to parse"),
-            "error should be a parse failure: {err}"
-        );
+        let bare = compose_subtree(&json!("[{{today}}]"), &state, HashMap::new()).unwrap();
+        assert_eq!(bare, json!("[]"));
+        let namespaced = compose_subtree(&json!("{{ctx.today}}"), &state, HashMap::new()).unwrap();
+        assert!(namespaced.as_str().is_some_and(|today| !today.is_empty()), "{namespaced}");
     }
 
     #[test]
-    fn dm2_strict_rejects_unknown_function() {
+    fn malformed_spans_and_unknown_functions_fail_in_any_position() {
         let state = state_with(vec![("phase", json!(2))]);
-        let result = compose_subtree(
-            &json!("{{ bogus_fn(phase) }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("Unknown function") || err.to_lowercase().contains("bogus_fn"),
-            "error should name the unknown function: {err}"
-        );
+        for input in ["{{ > broken }}", "bad={{ > broken }}", "{{ bogus_fn(phase) }}", "x {{ bogus_fn(phase) }}"] {
+            let error = compose_subtree(&json!(input), &state, HashMap::new())
+                .expect_err(input);
+            assert!(
+                matches!(error, MarkdownError::Interpolation { .. }),
+                "{input}: expected a typed interpolation error, got {error:?}"
+            );
+        }
     }
 
     #[test]
-    fn dm2_strict_allows_known_root_resolving_empty() {
-        // A declared frontmatter key referenced through doc. namespace is
-        // known even when it resolves empty.
-        let state = state_with(vec![("phase", json!(2))]);
-        let result = compose_subtree(
-            &json!("{{ phase }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        )
-        .unwrap();
-        assert_eq!(result, json!(2));
+    fn an_unavailable_global_fails_and_never_reads_the_document() {
+        use crate::markdown::compose::expression::{UnavailabilityReason, BindingError};
+
+        let state = state_with(vec![("group", json!("document"))]);
+        let error = SubtreeCompose::new(&json!("{{ group || 'x' }}"), &state)
+            .with_global("group", InjectedGlobal::unavailable(UnavailabilityReason::new("host.outside-group")))
+            .compose()
+            .expect_err("an unavailable global is a typed error");
+        let MarkdownError::Interpolation { cause, .. } = &error else {
+            panic!("expected an interpolation error, got {error:?}");
+        };
+        assert!(matches!(
+            cause.as_ref(),
+            ExpressionError::Binding(binding) if matches!(binding.as_ref(), BindingError::Unavailable(_))
+        ));
+        let document = SubtreeCompose::new(&json!("{{ doc.group }}"), &state)
+            .with_global("group", InjectedGlobal::unavailable(UnavailabilityReason::new("host.outside-group")))
+            .compose()
+            .unwrap();
+        assert_eq!(document, json!("document"));
     }
 
     #[test]
-    fn dm2_strict_accepts_fallback_for_unknown_optional_root() {
-        // The `||` construct is the documented migration path for an unknown
-        // optional name: strict mode must accept it and resolve to the fallback.
+    fn a_reserved_root_cannot_be_registered_and_no_provider_runs() {
+        use crate::markdown::compose::expression::BindingError;
+
         let state = state_with(vec![]);
-        let result = compose_subtree(
-            &json!("{{ missing || 'default' }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        )
-        .unwrap();
-        assert_eq!(result, json!("default"));
+        for reserved in ["doc", "ctx", "env", "current", "current_env"] {
+            let error = SubtreeCompose::new(&json!("{{ x }}"), &state)
+                .with_global(reserved, InjectedGlobal::lazy(|| panic!("never evaluated")))
+                .compose()
+                .expect_err(reserved);
+            let MarkdownError::Interpolation { cause, .. } = &error else {
+                panic!("expected an interpolation error, got {error:?}");
+            };
+            assert!(
+                matches!(
+                    cause.as_ref(),
+                    ExpressionError::Binding(binding)
+                        if matches!(binding.as_ref(), BindingError::ReservedName { root } if root == reserved)
+                ),
+                "{reserved}: {cause:?}"
+            );
+        }
     }
 
     #[test]
-    fn dm2_strict_accepts_ternary_unknown_in_unchosen_branch() {
-        // Known truthy condition picks the then-branch; an unknown root in the
-        // unchosen else-branch is tolerated (the branches are never both run).
-        let state = state_with(vec![("phase", json!(2))]);
-        let result = compose_subtree(
-            &json!("{{ phase ? 'has-phase' : missing_else }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        )
-        .unwrap();
-        assert_eq!(result, json!("has-phase"));
-    }
+    fn a_declared_view_is_enforced_at_association() {
+        use crate::markdown::compose::expression::BindingError;
 
-    #[test]
-    fn dm2_strict_rejects_unknown_root_in_ternary_condition() {
-        // The condition is always evaluated, so an unknown root there is still
-        // a leak and must be rejected.
         let state = state_with(vec![]);
-        let result = compose_subtree(
-            &json!("{{ unknown_cond ? 'a' : 'b' }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
+        let view = Arc::new(
+            BindingView::builder(ScopeId::new("test.scope"))
+                .declare("err", "the error", Availability::Available)
+                .declare("timing", "the timing", Availability::Available)
+                .build()
+                .unwrap(),
         );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("unknown root") && err.contains("unknown_cond"),
-            "ternary condition root must still be rejected: {err}"
-        );
-    }
+        let error = SubtreeCompose::new(&json!("{{ 1 }}"), &state)
+            .with_binding_view(view.clone())
+            .with_global("err", InjectedGlobal::eager(json!(null)))
+            .compose()
+            .expect_err("timing is declared but omitted");
+        let MarkdownError::Interpolation { cause, .. } = &error else {
+            panic!("expected an interpolation error, got {error:?}");
+        };
+        assert!(matches!(
+            cause.as_ref(),
+            ExpressionError::Binding(binding)
+                if matches!(binding.as_ref(), BindingError::OmittedDeclaredGlobal { root, .. } if root == "timing")
+        ));
 
-    #[test]
-    fn dm2_strict_rejects_unknown_root_in_function_arg() {
-        // Function-call args are still descended: an unknown root buried in
-        // `parent_dir(missing_thing)` is not fallback/ternary-guarded.
-        let state = state_with(vec![]);
-        let result = compose_subtree(
-            &json!("{{ parent_dir(missing_thing) }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Strict,
-        );
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("unknown root") && err.contains("missing_thing"),
-            "function-call arg root must still be rejected: {err}"
-        );
-    }
-
-    #[test]
-    fn dm2_lenient_tolerates_unknown_root() {
-        let state = state_with(vec![]);
-        let result = compose_subtree(
-            &json!("value={{unknown_thing}}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Lenient,
-        )
-        .unwrap();
-        assert_eq!(result, json!("value="));
-    }
-
-    #[test]
-    fn dm2_lenient_tolerates_malformed_span_in_mixed_string() {
-        let state = state_with(vec![]);
-        let result = compose_subtree(
-            &json!("bad={{ > broken }}"),
-            &state,
-            HashMap::new(),
-            SubtreeStrictness::Lenient,
-        )
-        .unwrap();
-        // Lenient: the malformed span degrades to its original text.
-        let out = result.as_str().unwrap();
-        assert!(out.starts_with("bad="));
+        let resolved = SubtreeCompose::new(&json!("{{ err }}|{{ timing.ms }}"), &state)
+            .with_binding_view(view)
+            .with_global("err", InjectedGlobal::eager(json!(null)))
+            .with_global("timing", InjectedGlobal::eager(json!({"ms": 5})))
+            .compose()
+            .unwrap();
+        assert_eq!(resolved, json!("|5"));
     }
 
     // ── DM2: subtree (object/array) recursion ────────────────────────────
@@ -987,7 +607,7 @@ mod tests {
             },
             "tags": ["{{err.msg}}", "{{phase}}"]
         });
-        let result = compose_subtree(&input, &state, globals, SubtreeStrictness::Strict).unwrap();
+        let result = compose_subtree(&input, &state, globals).unwrap();
         assert_eq!(
             result,
             json!({
@@ -1010,7 +630,7 @@ mod tests {
             "active": true,
             "missing": null
         });
-        let result = compose_subtree(&input, &state, HashMap::new(), SubtreeStrictness::Strict)
+        let result = compose_subtree(&input, &state, HashMap::new())
             .unwrap();
         assert_eq!(result, input);
     }
@@ -1022,7 +642,6 @@ mod tests {
         let state = state_with(vec![("phase", json!(2))]);
         let result = SubtreeCompose::new(&json!("{{phase}}"), &state)
             .with_global("err", InjectedGlobal::eager(json!({"msg": "x"})))
-            .strict()
             .compose()
             .unwrap();
         assert_eq!(result, json!(2));

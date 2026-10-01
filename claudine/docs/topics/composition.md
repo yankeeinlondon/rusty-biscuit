@@ -776,7 +776,7 @@ Two semantic differences are deliberate and keep the two renderers separate rath
 | Error on a malformed/invalid template | Contextual `CompositionError::InvalidAction` carrying iteration + action index (`InvalidAction at iteration N, action M of K`) | Generic `MarkdownError::Transform` |
 | Unknown variable root in a mixed string (e.g. `"x={{typo}}"`) | Lenient → resolves empty (`"x="`), matching loop **condition** evaluation | Strict / fail-closed → typed error before any side effect dispatches |
 
-Both keep a mixed string such as `"{{a}}{{b}}"` (with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the result is never re-parsed as JSON. The loop renderer's leniency serves state mutation (a loop action writes frontmatter, where an empty result is the natural outcome and mirrors `while`/`until` evaluation), while DM2 strict mode serves side-effect dispatch (a lifecycle message must never reach Discord/TTS/stderr carrying an unresolved reference). Both engines are held to the shared matrix so the overlap cannot silently drift.
+Both keep a mixed string such as `"{{a}}{{b}}"` (with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the result is never re-parsed as JSON. The loop renderer's leniency serves state mutation (a loop action writes frontmatter, where an empty result is the natural outcome and mirrors `while`/`until` evaluation), while DM2 serves side-effect dispatch (a malformed span or unknown function fails before a lifecycle message reaches Discord/TTS/stderr; an absent property is `null` and renders empty, as it does in the loop renderer). Both engines are held to the shared matrix so the overlap cannot silently drift.
 
 ### Loop Execution
 

@@ -89,7 +89,7 @@ This is the consistent rule used everywhere else: a value is literal text and `{
 Lifecycle strings keep their authored `{{{ … }}}` spans through the prepare stage — Darkmatter defers the seven lifecycle keys from compose-time resolution (DM1, `ComposeOptions::with_exclude_keys`) — and Claudine re-interpolates each property/action string through Darkmatter (DM2, `SubtreeCompose`; the same composition engine, no second interpolator — the bespoke `lifecycle_executor::interpolate` + `LifecycleLookup` runtime path was removed) just-in-time, immediately before it is used:
 
 - **Communication and action bodies** (`say`, `message`, `notify`, `stderr`, `info`, side-effect args, …) resolve at the instant the event fires, against the live document state plus the in-scope late-binding globals. Resolution is **just-in-time**, not a single snapshot: a `set_frontmatter` run by stack action #1 is visible to action #2 in the same event's stack.
-- **Resolution fails closed.** A malformed expression, an unknown function, an unknown root (a typo), or a late-binding global used outside its legal event fails the event with a typed error *before any side effect is dispatched* — a lifecycle string never silently renders empty for these cases. A *known* surface (a declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding global) that resolves to `null`/empty still renders empty, as today. To tolerate an *unknown* optional name, opt in with explicit fallback syntax: `{{ maybe || '' }}`.
+- **Resolution fails closed on real expression failures.** A malformed expression, an unknown function, or a late-binding global used outside its legal event (for example bare `group` outside a group) fails the event with a typed error *before any side effect is dispatched*. A bare name that is none of those is a document property: when nothing supplies it, it is `null` and renders empty. A name in a `stack` entry's `when:` or action that the frontmatter does not define is still refused (`LifecycleUndefinedVariable`); **planned:** that check is removed, so a stack reference to an absent property is `null` too.
 - **An evaluation error halts the run on every phase.** This fail-closed raise is an *expression-layer* error (a crashed `when:` guard or interpolation), distinct from a side-effect dispatch failure (below). It is carried as the typed `CompositionError::LifecycleEvaluationError` and surfaced to stderr as a styled error **at the point of error — before the catch events (`failure`/`finalize`) fire — and exactly once**, so the original crash is visible ahead of any catch-event output rather than buried beneath it. The run exits non-zero. On terminal-phase events (`success`/`failure`/`finalize`/`loop`) it does **not** retroactively fire `failure` (the provider already ran) but does fire `finalize` once with the error exposed as the `err` global, so an author can catch it. If a catch event *itself* raises a new evaluation error, that later crash is the surfaced (and exit-determining) one. A raise inside `finalize` itself surfaces and halts without re-entering `finalize`. A `when:` that evaluates cleanly to `false` is *not* a raise — it just skips its item, unchanged.
 
 ### The `shell` exception
@@ -832,12 +832,13 @@ success:
 
 The same holds for a `set:` value, a `proxy` `with:` value, a side-effect argument, and a shell command: a pre-flight-resolved command runs its approved bytes as they stand. The one exception is a `with:` value for a lifecycle key (see [Passing values with `with:`](flow-control-reference.md#passing-values-with-with)).
 
-What is still checked is the syntax **you** wrote. Every `{{ … }}` span in an authored lifecycle string must resolve when the event fires. Lifecycle evaluation is strict, so an unknown root or a malformed expression fails the event before any side effect dispatches, whether the span is the whole value or sits inside other text ([`LifecycleUndefinedVariable`](#lifecycleundefinedvariable)). The check never looks inside what a span returned, so an agent's words cannot trip it:
+What is still checked is the syntax **you** wrote. Every `{{ … }}` span in an authored lifecycle string is evaluated when the event fires, and a malformed expression or an unknown function fails the event before any side effect dispatches, whether the span is the whole value or sits inside other text. An absent document property is not a failure: it is `null`. The check never looks inside what a span returned, so an agent's words cannot trip it:
 
 | Value | Result |
 |-------|--------|
-| `info: "{{ spec_fil }}"` (authored typo) | fails: unknown root |
-| `info: "done: {{ spec_fil }}"` (authored typo in text) | fails: unknown root |
+| `info: "{{ spec_fil }}"` (absent property) | prints an empty line |
+| `info: "done: {{ spec_fil }}"` (absent property in text) | prints `done: ` |
+| `info: "{{ 1 + }}"` (malformed) | fails before dispatch |
 | `info: "{{ note }}"` where `note` is `see {{ title }}` | prints `see {{ title }}` |
 
 Ordinary frontmatter and the body, which compose before the run, keep Darkmatter's rules: an unresolved whole value is an error, while an unresolved span in mixed text leaves the span in place with a warning. See [Whole-Value Frontmatter Expansion Is Executable State](../composition.md#whole-value-frontmatter-expansion-is-executable-state).
@@ -856,11 +857,13 @@ This also means these effects cannot write a template into a file. An authored `
 
 ### `LifecycleUndefinedVariable`
 
-A reference to a genuinely-unknown root — a typo such as `{{spec_fil}}` for `{{spec_file}}` — fails the event closed at event-time via Darkmatter's strict mode. A *known* root that resolves to empty (`{{spec_file}}` when the key is legitimately absent) renders empty and does not error. To tolerate an unknown optional name, use explicit fallback syntax: `{{ maybe || '' }}`.
+A `stack` entry's `when:` or action names a bare variable that the composed frontmatter does not define, such as `{{spec_fil}}` for `{{spec_file}}`. Top-level communication fields are not checked this way: there an absent property is `null` and renders empty. **Planned:** this error is removed, and a stack reference to an absent property is `null` as well.
 
 ```yaml
 success:
-  stderr: "Done: {{undefined_kee}}"  # ERROR at event-time: unknown root (typo)
+  stack:
+    - when: "undefined_kee"   # ERROR: LifecycleUndefinedVariable
+      action: stop
 ```
 
 ### `LifecycleErrNotAvailable`

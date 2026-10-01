@@ -11,16 +11,17 @@
 //!
 //! [`overlap_cases`] enumerates the syntax both engines support and asserts they
 //! produce the *same* value from the *same* input and state. The `divergence_*`
-//! tests pin the two documented, intentional differences that keep the loop
-//! renderer separate; `mixed_string_stays_a_string_in_both_engines` pins a
-//! former third one that no longer exists. See `docs/topics/flow-control/looping.md`
+//! test pins the documented, intentional difference that keeps the loop
+//! renderer separate (its error type); `mixed_string_stays_a_string_in_both_engines`
+//! and `an_absent_root_is_empty_in_both_engines` pin two former differences
+//! that no longer exist. See `docs/topics/flow-control/looping.md`
 //! (§"When templates inside action values are rendered") and
 //! `docs/topics/composition.md` (§"Loop vs lifecycle interpolation") for the
 //! rationale.
 
 use std::collections::HashMap;
 
-use darkmatter::markdown::compose::subtree::{SubtreeCompose, SubtreeStrictness};
+use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, EffectiveState, EffectiveStateBuilder};
 use darkmatter::markdown::MarkdownError;
 use serde_json::{Map, Value, json};
@@ -47,17 +48,14 @@ fn loop_render(value: &Value, frontmatter: &Map<String, Value>) -> Result<Value,
 }
 
 /// Render `value` through the lifecycle DM2 substrate against the same
-/// frontmatter and the given strictness. Lifecycle text runs in `Strict`.
+/// frontmatter.
 fn dm2_render(
     value: &Value,
     frontmatter: &Map<String, Value>,
-    strictness: SubtreeStrictness,
     context: &ComposeContext,
 ) -> Result<Value, MarkdownError> {
     let state = effective_state(frontmatter, context);
-    SubtreeCompose::new(value, &state)
-        .with_strictness(strictness)
-        .compose()
+    SubtreeCompose::new(value, &state).compose()
 }
 
 fn effective_state(
@@ -207,14 +205,7 @@ fn loop_and_lifecycle_agree_on_shared_syntax() {
             case.name
         );
 
-        // Lifecycle text runs in strict mode; every overlap case uses only
-        // known roots, so strict and lenient resolve identically here.
-        let dm2_result = dm2_render(
-            &case.input,
-            &case.frontmatter,
-            SubtreeStrictness::Strict,
-            &context,
-        )
+        let dm2_result = dm2_render(&case.input, &case.frontmatter, &context)
         .unwrap_or_else(|error| panic!("DM2 engine failed for `{}`: {error}", case.name));
         assert_eq!(
             dm2_result, case.expected,
@@ -241,61 +232,34 @@ fn mixed_string_stays_a_string_in_both_engines() {
         "the loop keeps the concatenated `12` as a string"
     );
 
-    let dm2_strict = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    )
-    .expect("DM2 renders");
+    let dm2_result = dm2_render(&input, &frontmatter, &context).expect("DM2 renders");
     assert_eq!(
-        dm2_strict,
+        dm2_result,
         json!("12"),
         "DM2 keeps the mixed string as a string"
     );
-    let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
-            .expect("DM2 renders");
-    assert_eq!(dm2_lenient, json!("12"), "DM2 mode does not change typing");
 }
 
-/// Divergence 1 — an unknown root in a mixed string is lenient in the loop
-/// renderer (resolves empty, matching loop condition evaluation) but fails
-/// closed in lifecycle DM2 strict mode (no side effect dispatches with an
-/// unresolved reference).
+/// An absent root in a mixed string renders empty in both engines: it is an
+/// absent document property, which is `null`, not an error. (DM2 strict mode
+/// used to reject it; strict mode no longer exists.)
 #[test]
-fn divergence_unknown_root_strictness() {
+fn an_absent_root_is_empty_in_both_engines() {
     let input = json!("x={{typo}}");
     let frontmatter = obj(json!({}));
     let context = prepared_context();
 
-    let loop_result = loop_render(&input, &frontmatter).expect("loop tolerates unknown root");
-    assert_eq!(loop_result, json!("x="), "loop resolves the unknown root empty");
+    let loop_result = loop_render(&input, &frontmatter).expect("loop renders");
+    assert_eq!(loop_result, json!("x="), "loop resolves the absent root empty");
 
-    // Lifecycle strict fails closed on the unknown root.
-    let dm2_strict = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    );
-    let error = dm2_strict.expect_err("DM2 strict rejects the unknown root");
-    assert!(
-        error.to_string().contains("unknown root") && error.to_string().contains("typo"),
-        "DM2 strict names the unknown root: {error}"
-    );
-
-    // DM2 lenient matches the loop's tolerant behavior.
-    let dm2_lenient =
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context)
-            .expect("DM2 lenient renders");
-    assert_eq!(dm2_lenient, json!("x="), "DM2 lenient matches the loop engine");
+    let dm2_result = dm2_render(&input, &frontmatter, &context).expect("DM2 renders");
+    assert_eq!(dm2_result, json!("x="), "DM2 resolves the absent root empty");
 }
 
 /// Both engines fail closed on a malformed expression — the shared invariant —
 /// but with the error type each surface needs: the loop renderer's contextual
 /// `LoopActionExpressionInvalid` (carrying iteration/action index plus the typed
-/// parse cause) and DM2's `Transform`.
+/// parse cause) and DM2's typed `Interpolation`.
 #[test]
 fn divergence_malformed_expression_both_fail_closed() {
     let input = json!("{{ >bad }}");
@@ -311,20 +275,9 @@ fn divergence_malformed_expression_both_fail_closed() {
         "loop surfaces a contextual LoopActionExpressionInvalid: {loop_error}"
     );
 
-    let dm2_error = dm2_render(
-        &input,
-        &frontmatter,
-        SubtreeStrictness::Strict,
-        &context,
-    )
-        .expect_err("DM2 strict fails closed");
+    let dm2_error = dm2_render(&input, &frontmatter, &context).expect_err("DM2 fails closed");
     assert!(
-        matches!(dm2_error, MarkdownError::Transform(_)),
-        "DM2 surfaces a Transform error: {dm2_error}"
-    );
-    // Fail-closed on a malformed whole-value span holds in lenient mode too.
-    assert!(
-        dm2_render(&input, &frontmatter, SubtreeStrictness::Lenient, &context).is_err(),
-        "a malformed whole-value span is fatal in both DM2 modes"
+        matches!(dm2_error, MarkdownError::Interpolation { .. }),
+        "DM2 surfaces a typed Interpolation error: {dm2_error}"
     );
 }

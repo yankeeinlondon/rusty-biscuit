@@ -32,8 +32,8 @@
 
 use super::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use super::expression::{
-    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, doc_namespace,
-    parse,
+    EvaluationLookup, Expr, ExpressionError, ExpressionFinder, ResolutionContext, ResolvedBinding,
+    doc_namespace, parse,
 };
 use super::interpolation::{
     Evaluator, ExpressionFailurePolicy, LocatedInterpolationError, convert_literals,
@@ -134,18 +134,23 @@ impl EvaluationLookup for FrontmatterSeedState {
             return doc_namespace::resolve_doc_namespace_in_map(path, &self.data);
         }
 
-        // ctx.* prefix
+        // The `ctx` and `env` namespaces, their exact roots included, so a
+        // frontmatter key of either name is reachable only as `doc.<name>`.
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.context.get_effective(ctx_key);
         }
-
-        // env.* prefix
+        if path == "ctx" {
+            return Some(Value::Object(self.context.values().clone()));
+        }
         if let Some(env_key) = path.strip_prefix("env.") {
             return self
                 .context
                 .env()
                 .get(env_key)
                 .map(|v| Value::String(v.clone()));
+        }
+        if path == "env" {
+            return Some(self.context.env_value());
         }
 
         // Dotted nested path in seed data
@@ -160,34 +165,24 @@ impl EvaluationLookup for FrontmatterSeedState {
         self.data.get(path).cloned()
     }
 
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        if let Some(resolved) = self.current.resolve(path, &self.context) {
-            return resolved;
-        }
-        match path.strip_prefix("ctx.") {
-            Some(ctx_key) => self.context.classify_ctx_key(ctx_key).into_checked(|| self.context.get_effective(ctx_key)),
-            None => Ok(self.get(path)),
-        }
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        let value = if let Some(resolved) = self.current.resolve(path, &self.context) {
+            resolved?
+        } else {
+            match path.strip_prefix("ctx.") {
+                Some(ctx_key) => self
+                    .context
+                    .classify_ctx_key(ctx_key)
+                    .into_checked(|| self.context.get_effective(ctx_key))?,
+                None => self.get(path),
+            }
+        };
+        Ok(ResolvedBinding::classify(path, value))
     }
 
-    fn get_string(&self, path: &str) -> String {
-        let value = self.get(path);
-        if let Some(resolved) = &value
-            && let Some(name) = super::context::effective_state::coerce_named_object(
-                path,
-                resolved,
-                &self.name_coercion_keys,
-            )
-        {
-            return name;
-        }
-        match value {
-            None | Some(Value::Null) => String::new(),
-            Some(Value::String(s)) => s,
-            Some(Value::Number(n)) => n.to_string(),
-            Some(Value::Bool(b)) => b.to_string(),
-            Some(v) => v.to_string(),
-        }
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        super::context::effective_state::coerce_named_object(path, value, &self.name_coercion_keys)
+            .unwrap_or_else(|| super::expression::default_format(value))
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
@@ -220,16 +215,6 @@ impl EvaluationLookup for FrontmatterSeedState {
         static NAMES: LazyLock<Vec<&'static str>> =
             LazyLock::new(|| CONTEXT_VARIABLE_DESCRIPTORS.iter().map(|d| d.name).collect());
         NAMES.as_slice()
-    }
-
-    /// Known to this pass: a reserved namespace, a key resolved so far, or a
-    /// bare runtime-context name. Pass 1 runs before schema validation and
-    /// shell expansion, so an unknown root here is only a candidate; the
-    /// document pipeline reconciles it against the final state and schema.
-    fn is_known_variable_root(&self, root: &str) -> bool {
-        super::expression::absence::is_reserved_root(root)
-            || self.data.contains_key(root)
-            || self.is_valid_context_variable(root)
     }
 
     fn begin_expression_scope(&self) {

@@ -13,6 +13,7 @@ mod frontmatter;
 mod icmp;
 mod identity;
 mod lazy_roots;
+mod lookup_parity;
 mod preflight;
 mod provider_network;
 mod rendering;

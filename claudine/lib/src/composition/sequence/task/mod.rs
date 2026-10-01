@@ -908,9 +908,20 @@ impl TaskExecution<'_> {
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
         );
-        SubtreeCompose::new(value, self.state)
-            .with_resolution_context(resolution)
-            .strict()
+        let compose = SubtreeCompose::new(value, self.state).with_resolution_context(resolution);
+        // A group member's state carries its scope as data; outside a group
+        // the root is unavailable, so no group's variables leak into a later
+        // step.
+        let in_group = self
+            .overlay
+            .and_then(Value::as_object)
+            .is_some_and(|overlay| overlay.contains_key(group::GROUP_SCOPE_KEY));
+        let compose = if in_group {
+            compose
+        } else {
+            compose.with_global("group", super::super::lifecycle::context::outside_group_global())
+        };
+        compose
             .compose()
             .map_err(|error: MarkdownError| CompositionError::SequenceTaskValueResolution {
                 task: self.label(),

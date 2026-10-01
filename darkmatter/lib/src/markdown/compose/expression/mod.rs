@@ -66,6 +66,7 @@
 
 pub(crate) mod absence;
 pub mod ast;
+pub mod binding;
 pub mod catalog;
 pub mod ctx;
 pub(crate) mod doc_namespace;
@@ -76,11 +77,17 @@ pub mod lexer;
 pub mod lint;
 pub(crate) mod path_projection;
 pub mod parser;
+pub mod prepared;
 pub mod resolve_ctx;
 pub mod semantics;
 
 pub use absence::{StaticVariableRead, is_statically_known_root, static_variable_reads};
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
+pub use binding::{
+    Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
+    GlobalDeclaration, LazyProvider, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
+    UnavailabilityReason, UnavailableBinding, is_reserved_namespace,
+};
 pub use catalog::{
     expression_function_descriptors, generate_expression_function_table, reserved_root_descriptors,
     DataType, ExpressionFunctionDescriptor, ParamRefinement, ParamType, ReservedRootDescriptor,
@@ -103,6 +110,10 @@ pub use lexer::{
 };
 pub use parser::{
     ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,
+};
+pub use prepared::{
+    AuthoredMode, PreparationError, PreparedExpression, PreparedValue, ValidationDiagnostic,
+    evaluate_prepared, prepare_value, validate_prepared,
 };
 
 use absence::{AbsenceScope, MissingRootObserver};
@@ -197,19 +208,41 @@ pub trait EvaluationLookup {
     /// - `None` when the path does not resolve
     fn get(&self, path: &str) -> Option<Value>;
 
-    /// Looks up a value by dotted path on the evaluator's error channel.
+    /// Resolves a dotted path on the evaluator's error channel, classifying
+    /// it as a document property, a reserved namespace, or a host global.
     ///
-    /// Expression evaluation reads variables through this method. The default
-    /// delegates to [`get`](Self::get) and never fails. Composition lookups
-    /// override it so a known `ctx.*` variable with no captured value surfaces
-    /// as [`ExpressionError::ContextNotCaptured`] or
-    /// [`ExpressionError::ContextProjectionInvariant`] instead of `None`.
+    /// Expression evaluation and interpolation read every variable through
+    /// this method. The default wraps [`get`](Self::get) as a
+    /// [`ResolvedBinding::Document`] and never fails; it declares no globals.
+    /// Composition lookups override it so a known `ctx.*` variable with no
+    /// captured value surfaces as [`ExpressionError::ContextNotCaptured`] or
+    /// [`ExpressionError::ContextProjectionInvariant`], and an
+    /// [`EvaluationSession`] fails a read of an unavailable global with
+    /// [`ExpressionError::Binding`].
     ///
     /// ## Errors
     ///
-    /// Only overriding implementations fail, and only for `ctx.*` reads.
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        Ok(self.get(path))
+    /// Only overriding implementations fail.
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        Ok(ResolvedBinding::Document {
+            value: self.get(path),
+        })
+    }
+
+    /// The binding view this lookup was associated against; `None` for a
+    /// lookup that declares no globals.
+    fn binding_view(&self) -> Option<&BindingView> {
+        None
+    }
+
+    /// Formats a value already obtained from [`resolve`](Self::resolve) for
+    /// string interpolation, so the interpolator never looks `path` up twice.
+    ///
+    /// The default renders `null` as empty, strings verbatim, numbers and
+    /// booleans with `to_string`, and arrays and objects as JSON. Lookups with
+    /// configured name coercion override it.
+    fn format_resolved(&self, _path: &str, value: &Value) -> String {
+        default_format(value)
     }
 
     /// Looks up a value by path, coercing to a string.
@@ -219,13 +252,9 @@ pub trait EvaluationLookup {
     /// - The string representation of the value when the path resolves
     /// - An empty string when the path does not resolve or the value is null
     fn get_string(&self, path: &str) -> String {
-        match self.get(path) {
-            None | Some(Value::Null) => String::new(),
-            Some(Value::String(s)) => s,
-            Some(Value::Number(n)) => n.to_string(),
-            Some(Value::Bool(b)) => b.to_string(),
-            Some(v) => v.to_string(),
-        }
+        self.get(path)
+            .map(|value| self.format_resolved(path, &value))
+            .unwrap_or_default()
     }
 
     /// Returns the resolution context for read-side filesystem, document, and
@@ -280,28 +309,6 @@ pub trait EvaluationLookup {
         &[]
     }
 
-    /// Returns `true` when `root` is a known variable root for this lookup.
-    ///
-    /// `root` is the first dotted segment of a variable path (so `err.msg`
-    /// contributes `err`, `ctx.today` contributes `ctx`). Strict-mode subtree
-    /// compose ([`compose_subtree`](crate::markdown::compose::subtree::compose_subtree)
-    /// with [`SubtreeStrictness::Strict`]) rejects a reference whose root is
-    /// *not* known; a known root that resolves to `null`/empty still renders
-    /// empty.
-    ///
-    /// Full-document composition asks the same question of its own lookups to
-    /// decide the `dm.expression.unknown_identifier` warning: a root is known
-    /// when present in the state, even as `null` or `""`, or reserved.
-    ///
-    /// The default `true` preserves existing lenient behavior for lookups that
-    /// do not participate in strict-mode subtree compose, and keeps third-party
-    /// lookups free of unknown-identifier warnings.
-    ///
-    /// [`SubtreeStrictness::Strict`]: crate::markdown::compose::subtree::SubtreeStrictness::Strict
-    fn is_known_variable_root(&self, _root: &str) -> bool {
-        true
-    }
-
     /// Opens a new expression-evaluation scope.
     ///
     /// The lazy reserved roots (`current`, `current_env`) memoize **per
@@ -311,6 +318,17 @@ pub trait EvaluationLookup {
     /// evaluates one parsed expression calls this first; the default is a no-op
     /// for lookups that hold no lazy roots.
     fn begin_expression_scope(&self) {}
+}
+
+/// The default [`EvaluationLookup::format_resolved`] rendering.
+pub(crate) fn default_format(value: &Value) -> String {
+    match value {
+        Value::Null => String::new(),
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Checks if a JSON value is truthy.
@@ -420,7 +438,7 @@ pub fn scalar_string(value: &Value) -> String {
 ///     data: [("name".to_string(), json!("Alice"))].into(),
 /// };
 /// let expr = Expr::Variable("name".to_string());
-/// assert_eq!(evaluate_expr(&expr, &lookup).unwrap(), json!("Alice"));
+/// assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 /// ```
 pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, ExpressionError> {
     // One call is one expression evaluation, which is the memo scope the lazy
@@ -445,20 +463,26 @@ pub(crate) fn evaluate_observed<L: EvaluationLookup, O: MissingRootObserver>(
     evaluate_expr(expr, lookup, AbsenceScope::default(), observer)
 }
 
-/// Reports a read of `path` that found no value, unless `scope` handles its
-/// absence or `lookup` knows the root. O(1): it runs only on a miss, and the
-/// known-root check is a lookup's key probe.
-pub(crate) fn observe_missing<L: EvaluationLookup, O: MissingRootObserver>(
+/// Reports a document-property read of `path` that found no value, unless
+/// `scope` handles its absence or the root is reserved. Only a
+/// [`ResolvedBinding::Document`] read is a candidate: a namespace or a global
+/// is never an undeclared property. Whether the property is declared anywhere
+/// is decided once per document, against the final state and schema
+/// (`unknown_identifiers::reconcile`).
+pub(crate) fn observe_missing<O: MissingRootObserver>(
     path: &str,
+    binding: &ResolvedBinding,
     scope: AbsenceScope<'_>,
-    lookup: &L,
     observer: &mut O,
 ) {
-    if !O::OBSERVES || scope.handles(path) {
+    if !O::OBSERVES
+        || !matches!(binding, ResolvedBinding::Document { value: None })
+        || scope.handles(path)
+    {
         return;
     }
     let root = absence::root_of(path);
-    if !lookup.is_known_variable_root(root) {
+    if !absence::is_reserved_root(root) {
         observer.missing_root(root);
     }
 }
@@ -474,11 +498,9 @@ fn evaluate_expr<L: EvaluationLookup, O: MissingRootObserver>(
     let operand = scope.operand();
     match expr {
         Expr::Variable(path) => {
-            let value = lookup.get_checked(path)?;
-            if value.is_none() {
-                observe_missing(path, scope, lookup, observer);
-            }
-            Ok(value.unwrap_or(Value::Null))
+            let binding = lookup.resolve(path)?;
+            observe_missing(path, &binding, scope, observer);
+            Ok(binding.into_value().unwrap_or(Value::Null))
         }
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
         Expr::NumberLiteral(n) => {
@@ -715,7 +737,7 @@ fn is_arity_error(message: &str) -> bool {
 
 /// Returns a plain-text error for an unrecognized function name, with a fuzzy
 /// did-you-mean suggestion when one exists.
-fn unknown_function_error(name: &str) -> ExpressionError {
+pub(crate) fn unknown_function_error(name: &str) -> ExpressionError {
     let mut text = format!("{UNKNOWN_FUNCTION_PREFIX} {name}");
     if let Some(suggestion) = suggest(expression_function_descriptors(), name, 1).first() {
         text.push_str("\n\nDid you mean:\n  ");

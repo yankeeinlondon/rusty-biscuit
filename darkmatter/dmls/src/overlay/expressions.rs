@@ -1226,7 +1226,6 @@ mod tests {
             "is_null(maybe)",
             "isEmpty(maybe)",
             "ok ? known : null",
-            "repo",
             "current.cwd",
             "doc.anything-at-all",
             "ctx.nope",
@@ -1236,6 +1235,8 @@ mod tests {
             assert!(found.is_empty(), "{source}: {found:?}");
         }
         assert_eq!(generic("is_empty(lower(nested))", &[]), [pair("nested", "nested")]);
+        // A bare runtime-context name is a document property, never `ctx.repo`.
+        assert_eq!(generic("repo", &[]), [pair("repo", "repo")]);
     }
 
     #[test]

@@ -4,8 +4,9 @@
 //! `fail_fast` says, with a typed error carrying its source path and the exact
 //! authored span of the failing `{{ … }}`.
 //!
-//! The lenient best-effort surfaces keep their contracts:
-//! `compose_subtree(..., Lenient)` and the public condition API.
+//! Subtree compose follows the same rule: it fails on a real expression
+//! failure and never on an absent property. The public condition API keeps
+//! returning failures to its caller.
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -14,7 +15,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::compose::conditions::evaluate_condition;
 use darkmatter::markdown::compose::expression::{ExpressionError, evaluate, parse_condition};
 use darkmatter::markdown::compose::shell_expansion::ShellExpansionOptions;
-use darkmatter::markdown::compose::subtree::{SubtreeStrictness, compose_subtree};
+use darkmatter::markdown::compose::subtree::compose_subtree;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOperation, ComposeOptions, EffectiveStateBuilder};
 use darkmatter::markdown::{Markdown, MarkdownError, SourceRef};
 use serde_json::json;
@@ -438,27 +439,54 @@ fn shell_ternary_condition_and_branch_failures_stay_fatal() {
     }
 }
 
-// ── Lenient contracts outside full-document composition ─────────────────────
+// ── Subtree compose: real failures only ─────────────────────────────────────
 
-/// `compose_subtree(..., Lenient)` is best-effort data interpolation and is
-/// unchanged; `Strict` stays strict.
+/// Subtree compose fails on exactly what full-document composition fails on —
+/// a malformed span, an unknown function, a rejected argument, a failed file
+/// read — in a whole value or a mixed string. An absent property is never
+/// one of them: it is `null`, which a mixed string renders empty.
 #[test]
-fn subtree_strictness_keeps_its_contract() {
+fn subtree_compose_fails_on_real_expression_failures_only() {
+    let dir = TempDir::new().unwrap();
     let state = EffectiveStateBuilder::new()
         .with_frontmatter([("name".to_string(), json!("x"))].into())
+        .with_context(ComposeContext::capture_for_content(dir.path(), ""))
         .build()
         .unwrap();
+    let compose = |text: &str| {
+        darkmatter::markdown::compose::subtree::SubtreeCompose::new(&json!(text), &state)
+            .with_resolution_context(darkmatter::markdown::compose::expression::ResolutionContext::new(
+                dir.path().to_path_buf(),
+            ))
+            .compose()
+    };
 
-    for (value, preserved) in [
-        (json!("{{ name }} {{ > broken }}"), "x {{ > broken }}"),
-        (json!("{{ name }} {{ min(1) }}"), "x {{ min(1) }}"),
+    for failing in [
+        "{{ > broken }}",
+        "{{ name }} {{ > broken }}",
+        "{{ bogus_fn(name) }}",
+        "{{ name }} {{ bogus_fn(name) }}",
+        "{{ min(1) }}",
+        "{{ name }} {{ min(1) }}",
+        "{{ frontmatter('missing.md', 'title') }}",
     ] {
-        let lenient = compose_subtree(&value, &state, HashMap::new(), SubtreeStrictness::Lenient)
-            .expect("the lenient subtree keeps going past a bad span");
-        assert_eq!(lenient, json!(preserved));
-        compose_subtree(&value, &state, HashMap::new(), SubtreeStrictness::Strict)
-            .expect_err("the strict subtree rejects a bad span");
+        let error = compose(failing).expect_err(failing);
+        assert!(matches!(error, MarkdownError::Interpolation { .. }), "{failing}: {error:?}");
     }
+
+    for (absent, expected) in [
+        ("{{ missing }}", json!(null)),
+        ("{{ doc.missing }}", json!(null)),
+        ("[{{ missing }}]", json!("[]")),
+        ("{{ missing ? 'yes' : 'no' }}", json!("no")),
+        ("{{ missing || 'fallback' }}", json!("fallback")),
+        ("{{ name || 'fallback' }}", json!("x")),
+    ] {
+        assert_eq!(compose(absent).expect(absent), expected, "{absent}");
+    }
+
+    // The convenience entry point is the same compose.
+    assert!(compose_subtree(&json!("{{ 1 + }}"), &state, HashMap::new()).is_err());
 }
 
 /// The public condition API returns failures to the caller, which owns their

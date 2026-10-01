@@ -86,11 +86,12 @@ The principles worth carrying around:
   into `and(…)` / `or(…)` calls in the AST.
 - **Failure is fatal.** An expression that cannot be parsed or evaluated aborts
   composition with an error naming the source line, on every surface.
-- **A missing value is not a failure, but an unknown name warns.** A reference
-  that resolves to nothing renders empty. When no frontmatter key, caller
-  input, or schema property defines its root, composition warns once with
-  `dm.expression.unknown_identifier`, unless the expression handles the
-  absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
+- **An absent property is `null`, not a failure.** A bare name that is not a
+  reserved namespace or a host global is a document property; when nothing
+  supplies it, it evaluates to `null` and renders empty. When no frontmatter
+  key, caller input, or schema property declares its root, composition adds
+  the advisory `dm.expression.undeclared_property` once, unless the expression
+  handles the absence (`x || "d"`, `x ? … : …`, `is_null(x)`). See
   [Interpolation § Missing Variables](../inline/interpolation.md#missing-variables).
 
 Full detail lives under [Parsing](./parsing/index.md):
@@ -107,10 +108,20 @@ Expressions evaluate against Darkmatter's effective state, which can include:
 - runtime context values under `ctx.*`
 - environment variables under `env.*`
 
-When an unprefixed key is not found in frontmatter or inherited state,
-Darkmatter falls back to `ctx.<key>`. So `repo` resolves to `ctx.repo`. The
-reserved `doc` namespace is intercepted **before** this fallback, so bare `doc`
-always means the frontmatter object and never falls back to `ctx.doc`.
+An unprefixed name is a document property and nothing else: when frontmatter
+and inherited state do not hold it, it is absent (`null`). It never falls back
+to `ctx`, so `repo` and `ctx.repo` are different names. The reserved namespaces
+(`doc`, `ctx`, `env`, `current`, `current_env`) are resolved first, exact roots
+included, so bare `env` is the environment even when the frontmatter has an
+`env` key; that key is reachable as `doc.env`.
+
+```markdown
+---
+title: Notes
+---
+{{ repo }}      <!-- absent: renders empty -->
+{{ ctx.repo }}  <!-- the repository name -->
+```
 
 An expression is evaluated once, where it is written. Whatever it returns is
 **data**: if a value, a file read, or a shell command yields text that contains
@@ -975,7 +986,8 @@ This shortcut resolves variables in the same order as the compose pipeline:
 2. Top-level and nested paths against the provided `data`.
 3. `env.*` against the system environment.
 4. `ctx.*` via lazy runtime context capture.
-5. Unprefixed missing keys fall back to `ctx.*` (same as `EffectiveState`).
+
+A missing unprefixed key is absent (`null`); it never reads `ctx.*`.
 
 The `work_dir` argument supplies the resolution context, so the
 [read-side functions](#read-side-functions) (`file_exists`, `absolute`,
@@ -1019,10 +1031,13 @@ let expr = Expr::Variable("name".to_string());
 assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 ```
 
-`evaluate` reads variables through `EvaluationLookup::get_checked`. Its default
-wraps `get` and never fails, so a custom lookup needs only `get`. Darkmatter's
-own lookups override it, so composition never evaluates a cataloged `ctx.*`
-variable to a silent `null`:
+`evaluate` reads variables through `EvaluationLookup::resolve`, which returns a
+`ResolvedBinding`: a document property, a reserved-namespace path, or a host
+global. Its default wraps `get` as a document property and never fails, so a
+custom lookup needs only `get`. Interpolation renders the resolved value with
+`EvaluationLookup::format_resolved` and never looks the path up a second time.
+Darkmatter's own lookups override `resolve`, so composition never evaluates a
+cataloged `ctx.*` variable to a silent `null`:
 
 - If the request's context never captured the variable's group, evaluation
   fails with `ExpressionError::ContextNotCaptured`. Composition never captures
@@ -1042,6 +1057,77 @@ a real value and raises nothing. Unknown `ctx.*` names keep the
 unknown-variable warning path. A caller finds either error through
 `MarkdownError::missing_runtime_context`, which walks the typed cause chain of
 condition, `$()` ternary, and interpolation errors.
+
+### Host Bindings
+
+A host that adds its own globals to expressions (for example an `err` value
+that exists only while handling a failure) declares them in a `BindingView` and
+evaluates through an `EvaluationSession`. A root then resolves in this order:
+reserved namespace (`doc`, `ctx`, `env`, `current`, `current_env`), registered
+global, document property. A registered global shadows a document property of
+the same name, and `doc.<name>` still reads the document.
+
+```rust
+use std::sync::Arc;
+use darkmatter::markdown::compose::EffectiveStateBuilder;
+use darkmatter::markdown::compose::expression::{
+    AuthoredMode, Availability, BindingView, EvaluationSession, RuntimeBinding, ScopeId,
+    UnavailabilityReason, evaluate_prepared, prepare_value, validate_prepared,
+};
+use serde_json::json;
+
+let view = Arc::new(
+    BindingView::builder(ScopeId::new("start"))
+        .declare("err", "The failure being handled.",
+            Availability::Unavailable(UnavailabilityReason::new("host.no-error")))
+        .build()?,
+);
+let document = EffectiveStateBuilder::new().build()?;
+let session = EvaluationSession::associate(
+    view.clone(),
+    &document,
+    [("err".to_string(), RuntimeBinding::unavailable(UnavailabilityReason::new("host.no-error")))],
+)?;
+
+let prepared = prepare_value(&json!("{{ ok ? 'fine' : err.message }}"), AuthoredMode::InterpolatedValue)?;
+assert_eq!(validate_prepared(&prepared, &view).len(), 1); // `err` in the unchosen branch
+let failure = evaluate_prepared(&prepared, &session);     // fails only if that branch runs
+```
+
+- **Available** globals always have a value, possibly `null`; a missing member
+  is `null` inside the global, never a document fallback.
+- **Unavailable** globals fail every read with `ExpressionError::Binding`,
+  carrying the host's namespaced reason code. A `||` fallback does not hide it.
+- **Execution-dependent** globals are decided at invocation: passive validation
+  skips them, and association requires an explicit available or unavailable
+  entry.
+
+`EvaluationSession::associate` checks the whole registration before anything
+runs. It rejects a reserved name, a dotted root, a duplicate, an undeclared
+global, a declared global with no entry, and an entry that contradicts its
+declaration. A lazy global (`RuntimeBinding::lazy`) runs at most once per
+session, on first read, and caches a `null` result too.
+
+`prepare_value` parses every expression in a value without evaluating it.
+`validate_prepared` reports unavailable globals and unknown functions in every
+branch, and runs no provider. `evaluate_prepared` evaluates through a session
+and fails on any parse or evaluation error.
+
+Subtree compose (`SubtreeCompose`, `compose_subtree`) associates one session
+per `compose` call. Pass the view with `with_binding_view` to have the globals
+checked against it. Without a view, each supplied global is simply available,
+or unavailable with its own reason, and only the root checks apply, so a global
+named `current` still fails. `subtree::layered_session` builds the same session
+for a direct `evaluate`.
+
+```rust
+use darkmatter::markdown::compose::subtree::{InjectedGlobal, SubtreeCompose};
+
+let rendered = SubtreeCompose::new(&json!("{{ err.msg }}: {{ missing }}"), &document)
+    .with_global("err", InjectedGlobal::eager(json!({ "msg": "boom" })))
+    .compose()?;
+assert_eq!(rendered, json!("boom: ")); // an absent property renders empty
+```
 
 ### Lazy `ctx.*` Resolution
 

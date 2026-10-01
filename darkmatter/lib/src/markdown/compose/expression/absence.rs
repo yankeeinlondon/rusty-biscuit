@@ -21,8 +21,8 @@
 //! The runtime evaluator applies these rules while it evaluates, so a warning
 //! also requires evaluation reachability: an unchosen branch or a
 //! short-circuited fallback is never read and never warns. This deliberately
-//! differs from `collect_variable_roots` (subtree strict mode) and from the
-//! exhaustive `ctx.*` typo walk, which both keep their own semantics.
+//! differs from the exhaustive `ctx.*` typo walk, which keeps its own
+//! semantics.
 //!
 //! Static consumers (DMLS) cannot know which branch runs, so
 //! [`static_variable_reads`] applies the same structural rules to every
@@ -248,21 +248,18 @@ pub(crate) fn is_reserved_root(root: &str) -> bool {
 }
 
 /// Whether `root` is known whatever the document holds: a reserved root (see
-/// [`is_reserved_root`]) or a bare runtime-context name such as `repo`, which
-/// the runtime's known-root check also accepts. Static consumers (DMLS) add
+/// [`is_reserved_root`]). A bare runtime-context name such as `repo` is not: it
+/// is a document property, never `ctx.repo`. Static consumers (DMLS) add
 /// frontmatter and schema membership themselves.
 pub fn is_statically_known_root(root: &str) -> bool {
     is_reserved_root(root)
-        || crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS
-            .iter()
-            .any(|descriptor| descriptor.name == root)
 }
 
 /// Receives each evaluated variable read that found no value, is not handled
-/// by its [`AbsenceScope`], and whose root the lookup does not know.
+/// by its [`AbsenceScope`], and that resolved as an absent document property.
 pub(crate) trait MissingRootObserver {
     /// `false` only for the no-op observer, so unobserved evaluation skips the
-    /// known-root check entirely.
+    /// classification check entirely.
     const OBSERVES: bool = true;
 
     fn missing_root(&mut self, root: &str);
@@ -399,9 +396,6 @@ mod tests {
             fn get(&self, _path: &str) -> Option<serde_json::Value> {
                 None
             }
-            fn is_known_variable_root(&self, _root: &str) -> bool {
-                false
-            }
         }
 
         let mut runtime_warnings = 0;
@@ -441,11 +435,11 @@ mod tests {
     }
 
     #[test]
-    fn statically_known_roots_match_the_runtime_reserved_and_context_names() {
-        for root in ["ctx", "env", "doc", "current", "current_env", "null", "repo", "today"] {
+    fn statically_known_roots_are_exactly_the_reserved_roots() {
+        for root in ["ctx", "env", "doc", "current", "current_env", "null"] {
             assert!(is_statically_known_root(root), "{root}");
         }
-        for root in ["spec-name", "colour", "nul"] {
+        for root in ["spec-name", "colour", "nul", "repo", "today", "branch"] {
             assert!(!is_statically_known_root(root), "{root}");
         }
     }

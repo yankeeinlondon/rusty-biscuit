@@ -1,17 +1,20 @@
 //! Turns one document's unknown-root candidates into
-//! `dm.expression.unknown_identifier` warnings (spec Requirement 4).
+//! `dm.expression.undeclared_property` advisories.
 //!
-//! Every runtime surface records a candidate when an evaluated read finds no
-//! value, no absence construct handles it, and the surface's lookup does not
-//! know the root. Frontmatter interpolation pass 1 runs before schema
-//! validation and shell expansion, so a candidate is not yet a verdict. Each
-//! document's pipeline calls [`reconcile`] once, after every stage has run and
-//! before its report merges into a parent's: a root known to the final
-//! effective state or declared by the effective schema is dropped, and each
-//! remaining root warns once for the document.
+//! An undeclared property is valid: it evaluates to `null` unless something
+//! supplies it at runtime. The advisory only tells the author that nothing in
+//! the document declares it.
+//!
+//! Every runtime surface records a candidate when an evaluated read resolves
+//! as an absent document property (never a namespace or a global) and no
+//! absence construct handles it. Frontmatter interpolation pass 1 runs before
+//! schema validation and shell expansion, so a candidate is not yet a verdict.
+//! Each document's pipeline calls [`reconcile`] once, after every stage has
+//! run and before its report merges into a parent's: a root that is a key of
+//! the final effective state or declared by the effective schema is dropped,
+//! and each remaining root is reported once for the document.
 
 use super::context::report::{CandidateLocus, UnknownRootCandidate};
-use super::expression::EvaluationLookup;
 use super::schema_validation::PreparedSchemas;
 use super::shell_expansion::types::frontmatter_key_line;
 use super::util::abbreviate_path;
@@ -20,9 +23,11 @@ use crate::markdown::Markdown;
 
 /// Reconciles `report`'s candidates for `markdown` into warnings.
 ///
-/// Known roots are those of the final effective state (frontmatter, `--set`,
-/// caller files, inherited parent state) and any caller input record, even
-/// one whose value never reached the state.
+/// Declared roots are the keys of the final effective state (frontmatter,
+/// `--set`, caller files, inherited parent state), any caller input record
+/// (even one whose value never reached the state), and the effective schema's
+/// top-level properties. A runtime-context name such as `branch` is not a
+/// declaration: a bare name is a document property, never `ctx.branch`.
 ///
 /// A non-terminal discovery pass (preflight command collection) composes
 /// without page blocks, so it reads roots that the real run may never reach;
@@ -41,7 +46,7 @@ pub(crate) fn reconcile(
     let unknown: Vec<UnknownRootCandidate> = candidates
         .into_iter()
         .filter(|candidate| {
-            !state.is_known_variable_root(&candidate.root)
+            !state.data().contains_key(&candidate.root)
                 && !options.caller_input_records().contains_key(&candidate.root)
         })
         .collect();
@@ -76,7 +81,7 @@ pub(crate) fn reconcile(
             CandidateLocus::BodyLine(_) | CandidateLocus::Document => (None, None),
         };
         let message = message(&candidate.root, display.as_deref(), line, key);
-        report.add_warning(ComposeWarning::unknown_identifier(
+        report.add_warning(ComposeWarning::undeclared_property(
             candidate.stage,
             message,
             &candidate.root,
@@ -86,7 +91,7 @@ pub(crate) fn reconcile(
     }
 }
 
-/// Locates a directive whose `when=` read an unknown root, given its
+/// Locates a directive whose `when=` read an undeclared root, given its
 /// one-based `body_line` in the document's current (possibly rewritten) body.
 ///
 /// The line is claimed only when provable: the authored file has the same
@@ -123,13 +128,14 @@ pub(crate) fn unique_authored_line(loaded: &str, text: &str) -> Option<usize> {
     }
 }
 
-/// The warning text. The CLI renders only a warning's message, so the location
-/// is part of it. Messages are Prose markup (both `md` and Claudine render them
-/// through `Prose`), so every author-controlled part is escaped: a path such as
-/// `prompts/_add/_workflow.md` would otherwise lose its underscores to emphasis.
+/// The advisory text. The CLI renders only a warning's message, so the
+/// location is part of it. Messages are Prose markup (both `md` and Claudine
+/// render them through `Prose`), so every author-controlled part outside a code
+/// span is escaped: a path such as `prompts/_add/_workflow.md` would otherwise
+/// lose its underscores to emphasis. The root is an identifier, which a code
+/// span shows verbatim.
 fn message(root: &str, document: Option<&str>, line: Option<usize>, key: Option<&str>) -> String {
     use biscuit_terminal::components::prose::Prose;
-    let root = Prose::escape_text(root);
     let document = document.map(Prose::escape_text);
     let document = document.as_deref();
     let key = key.map(Prose::escape_text);
@@ -144,8 +150,8 @@ fn message(root: &str, document: Option<&str>, line: Option<usize>, key: Option<
         location.push_str(&format!(" (frontmatter key '{key}')"));
     }
     format!(
-        "unknown identifier '{root}'{location}: no frontmatter key, caller input, or schema \
-         property defines it, so it resolves to null"
+        "`{root}`{location} is an undeclared document property (unknown type; `null` unless \
+         supplied at runtime)"
     )
 }
 
@@ -165,22 +171,22 @@ mod tests {
     fn message_names_the_root_and_the_most_precise_location() {
         assert_eq!(
             message("spec-name", Some("prompts/a.md"), Some(12), None),
-            "unknown identifier 'spec-name' at prompts/a.md:12: no frontmatter key, caller \
-             input, or schema property defines it, so it resolves to null"
+            "`spec-name` at prompts/a.md:12 is an undeclared document property (unknown type; \
+             `null` unless supplied at runtime)"
         );
-        assert!(message("x", Some("a.md"), None, None).contains("'x' in a.md:"));
+        assert!(message("x", Some("a.md"), None, None).starts_with("`x` in a.md is "));
         assert!(
             message("x", Some("a.md"), Some(3), Some("label"))
-                .contains("'x' at a.md:3 (frontmatter key 'label'):")
+                .starts_with("`x` at a.md:3 (frontmatter key 'label') is ")
         );
-        assert!(message("x", None, Some(3), None).contains("'x' at line 3:"));
-        assert!(message("x", None, None, None).starts_with("unknown identifier 'x': "));
+        assert!(message("x", None, Some(3), None).starts_with("`x` at line 3 is "));
+        assert!(message("x", None, None, None).starts_with("`x` is an undeclared document property"));
     }
 
     #[test]
     fn message_escapes_author_controlled_markup() {
         let text = message("a_b", Some("prompts/_add/_workflow.md"), Some(2), Some("k_y"));
-        assert!(text.starts_with(r"unknown identifier 'a\_b' at prompts/\_add/\_workflow.md:2"), "{text}");
+        assert!(text.starts_with(r"`a_b` at prompts/\_add/\_workflow.md:2"), "{text}");
         assert!(text.contains(r"(frontmatter key 'k\_y')"), "{text}");
     }
 }

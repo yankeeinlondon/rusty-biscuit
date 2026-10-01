@@ -6813,6 +6813,8 @@ fn unknown_identifier_fires_in_every_operand_position_at_warning_severity() {
         (span_on(OPERAND_DOC, "B3:", "fn_arg"), "darkmatter.compose"),
         (span_on(OPERAND_DOC, "B4:", "rhs_var"), "darkmatter.compose"),
         (span_on(OPERAND_DOC, "B5:", "nested"), "darkmatter.compose"),
+        // A bare runtime-context name is a document property, never `ctx.repo`.
+        (span_on(OPERAND_DOC, "S2:", "repo"), "darkmatter.compose"),
         (span_on(OPERAND_DOC, "D1:", "foo--bar"), "darkmatter.compose"),
         (span_on(OPERAND_DOC, "D2:", "a- b"), "darkmatter.compose"),
         (span_on(OPERAND_DOC, "D3:", "iteration"), "darkmatter.compose"),

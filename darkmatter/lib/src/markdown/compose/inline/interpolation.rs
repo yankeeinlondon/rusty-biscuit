@@ -7,7 +7,9 @@ use super::super::body_origin::{BodyOrigin, BodyProvenance};
 use super::super::directive_targets::rewrite_directive_targets;
 use super::super::interpolation;
 use super::super::shell_expansion;
-use super::super::expression::{EvaluationLookup, ExpressionError, ResolutionContext};
+use super::super::expression::{
+    BindingView, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding,
+};
 use super::super::context::report::CandidateLocus;
 use super::super::{ComposeOptions, ComposeReport, EffectiveState};
 use serde_json::Value;
@@ -160,16 +162,39 @@ struct DeferrableLookup<'a> {
     defer_not_captured: bool,
 }
 
+/// A [`DeferrableLookup`] for the lookup parity inventory
+/// (`compose::tests::lookup_parity`).
+#[cfg(test)]
+pub(crate) fn deferrable_lookup_for_tests<'a>(
+    state: &'a crate::markdown::compose::EffectiveState,
+    resolution_context: ResolutionContext,
+) -> impl EvaluationLookup + 'a {
+    DeferrableLookup {
+        inner: state::ResolvingLookup::new(state, resolution_context),
+        defer_not_captured: true,
+    }
+}
+
 impl EvaluationLookup for DeferrableLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
         self.inner.get(path)
     }
 
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        match self.inner.get_checked(path) {
-            Err(ExpressionError::ContextNotCaptured { .. }) if self.defer_not_captured => Ok(None),
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        match self.inner.resolve(path) {
+            Err(ExpressionError::ContextNotCaptured { .. }) if self.defer_not_captured => {
+                Ok(ResolvedBinding::classify(path, None))
+            }
             other => other,
         }
+    }
+
+    fn binding_view(&self) -> Option<&BindingView> {
+        self.inner.binding_view()
+    }
+
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        self.inner.format_resolved(path, value)
     }
 
     fn get_string(&self, path: &str) -> String {
@@ -190,10 +215,6 @@ impl EvaluationLookup for DeferrableLookup<'_> {
 
     fn context_variable_names(&self) -> &[&'static str] {
         self.inner.context_variable_names()
-    }
-
-    fn is_known_variable_root(&self, root: &str) -> bool {
-        self.inner.is_known_variable_root(root)
     }
 
     fn begin_expression_scope(&self) {

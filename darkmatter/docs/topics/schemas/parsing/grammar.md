@@ -145,7 +145,7 @@ reports two diagnostics over that AST:
 | Diagnostic code | Severity | Fires on |
 | --- | --- | --- |
 | `dm.expression.malformed` | Warning | a `ParseError`, ranged from the error position to the end of the interpolation |
-| `dm.expression.unknown_identifier` | Warning | a variable whose root matches no frontmatter key, schema property, reserved namespace, or runtime context name |
+| `dm.expression.unknown_identifier` | Warning | a variable whose root matches no frontmatter key, schema property, or reserved namespace (a runtime-context name such as `repo` is a document property, not `ctx.repo`) |
 
 The unknown-identifier check visits **every** variable in the expression, each
 at its own span: a bare variable, the root of a member or index chain, a binary
@@ -165,5 +165,6 @@ rewrites it to a reference the grammar can read, such as `doc['foo--bar']`.
 
 These editor diagnostics are the earliest place an authoring mistake surfaces.
 They are not the last: a malformed or unevaluatable expression also fails
-composition on every surface, and an unknown identifier also warns at compose
-time — see [index.md § Failure handling](./index.md#failure-handling).
+composition on every surface, and an undeclared property also raises the
+`dm.expression.undeclared_property` advisory at compose time — see
+[index.md § Failure handling](./index.md#failure-handling).

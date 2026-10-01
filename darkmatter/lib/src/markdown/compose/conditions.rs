@@ -13,7 +13,8 @@
 
 use super::expression::absence::MissingRootObserver;
 use super::expression::{
-    CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, doc_namespace, evaluate,
+    CtxLookup, EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, doc_namespace,
+    evaluate,
     evaluate_observed, is_truthy,
     parse_condition,
 };
@@ -313,7 +314,7 @@ pub fn evaluate_condition_against(
 /// Lookup implementation for the shortcut API that resolves variables
 /// against plain JSON data, environment variables, and lazily-captured
 /// runtime context.
-struct ShortcutLookup<'a> {
+pub(crate) struct ShortcutLookup<'a> {
     /// Plain data payload for top-level and nested lookups.
     data: &'a Value,
     /// Lazy-capturing `ctx.*` resolver.
@@ -324,7 +325,7 @@ struct ShortcutLookup<'a> {
 }
 
 impl<'a> ShortcutLookup<'a> {
-    fn new(data: &'a Value, work_dir: &'a Path) -> Self {
+    pub(crate) fn new(data: &'a Value, work_dir: &'a Path) -> Self {
         Self {
             data,
             ctx: CtxLookup::new(work_dir),
@@ -363,42 +364,35 @@ impl<'a> ShortcutLookup<'a> {
 
 impl EvaluationLookup for ShortcutLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        // Reserved `doc` namespace, intercepted before the bare-name `ctx.*`
-        // fallback so a missing `doc.*` never collapses into `ctx.*`.
+        // Reserved namespaces first, their exact roots included, so no data
+        // key can shadow `doc`, `ctx`, or `env`.
         if doc_namespace::is_doc_namespace(path) {
             return doc_namespace::resolve_doc_namespace(path, self.data);
         }
-
-        // Handle ctx.* prefixes with lazy capture
         if path == "ctx" || path.starts_with("ctx.") {
             return self.ctx.resolve_ctx(path);
         }
-
-        // Handle env.* prefixes
         if let Some(env_key) = path.strip_prefix("env.") {
             return std::env::var(env_key).ok().map(Value::String);
         }
-
-        // Try plain data lookup first
-        if let Some(value) = self.get_from_data(path) {
-            return Some(value);
+        if path == "env" {
+            return Some(Value::Object(
+                std::env::vars().map(|(key, value)| (key, Value::String(value))).collect(),
+            ));
         }
 
-        // Fall back to ctx.* (same behavior as EffectiveState)
-        self.get(&format!("ctx.{path}"))
+        // Everything else is a data property; a missing one never falls
+        // through to `ctx`.
+        self.get_from_data(path)
     }
 
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        if doc_namespace::is_doc_namespace(path) || path.starts_with("env.") {
-            return Ok(self.get(path));
-        }
-        if path == "ctx" || path.starts_with("ctx.") {
-            return self.ctx.resolve_ctx_checked(path);
-        }
-        match self.get_from_data(path) {
-            Some(value) => Ok(Some(value)),
-            None => self.ctx.resolve_ctx_checked(&format!("ctx.{path}")),
-        }
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        let value = if path == "ctx" || path.starts_with("ctx.") {
+            self.ctx.resolve_ctx_checked(path)?
+        } else {
+            self.get(path)
+        };
+        Ok(ResolvedBinding::classify(path, value))
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
@@ -424,7 +418,7 @@ mod tests {
         let lookup = ShortcutLookup::new(&data, Path::new("."));
         lookup.ctx.mark_captured_without_projection(super::super::context::capture::ContextGroup::Os);
 
-        for expression in ["ctx.os == 'macos'", "os"] {
+        for expression in ["ctx.os == 'macos'", "ctx.os"] {
             let parsed = parse_condition(expression).unwrap();
             assert!(
                 matches!(
@@ -858,13 +852,22 @@ mod tests {
         // The result depends on the actual date, but it should evaluate without error
     }
 
+    /// A bare name is a data property only (R3): `year` is absent even though
+    /// `ctx.year` resolves, and `ctx`/`env` are namespaces even when the data
+    /// holds keys of those names.
     #[test]
-    fn shortcut_unprefixed_fallback_to_ctx() {
-        let data = json!({});
-        // When a key is not in data, fall back to ctx.* (same as EffectiveState)
-        // We test with a datetime key since it's always available
-        let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
-        assert!(result.is_ok());
+    fn shortcut_bare_name_never_reads_ctx() {
+        let dir = std::path::Path::new(".");
+        assert!(!evaluate_condition_against("year", &json!({}), dir).unwrap());
+        assert!(evaluate_condition_against("ctx.year > 2000", &json!({}), dir).unwrap());
+        assert!(evaluate_condition_against("year == 1", &json!({ "year": 1 }), dir).unwrap());
+
+        let shadowing = json!({ "ctx": "data", "env": "data" });
+        let lookup = ShortcutLookup::new(&shadowing, dir);
+        assert!(lookup.get("env").is_some_and(|env| env.is_object()));
+        assert_ne!(lookup.get("ctx"), Some(json!("data")));
+        assert_eq!(lookup.get("doc.ctx"), Some(json!("data")));
+        assert_eq!(lookup.get("doc.env"), Some(json!("data")));
     }
 
     #[test]

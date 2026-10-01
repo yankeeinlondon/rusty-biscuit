@@ -5,7 +5,7 @@
 //! This type was extracted from [`ShortcutLookup`](super::conditions::ShortcutLookup)
 //! so that `ctx.*` resolution can be composed on top of any other lookup.
 
-use super::{EvaluationLookup, ExpressionError};
+use super::{EvaluationLookup, ExpressionError, ResolvedBinding};
 use crate::markdown::compose::context::checked::CtxLookupOutcome;
 use serde_json::Value;
 use std::cell::RefCell;
@@ -114,11 +114,13 @@ impl<'a> EvaluationLookup for CtxLookup<'a> {
         None
     }
 
-    fn get_checked(&self, path: &str) -> Result<Option<Value>, ExpressionError> {
-        if path == "ctx" || path.starts_with("ctx.") {
-            return self.resolve_ctx_checked(path);
-        }
-        Ok(None)
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        let value = if path == "ctx" || path.starts_with("ctx.") {
+            self.resolve_ctx_checked(path)?
+        } else {
+            None
+        };
+        Ok(ResolvedBinding::classify(path, value))
     }
 }
 
@@ -197,7 +199,7 @@ mod tests {
         lookup.mark_captured_without_projection(ContextGroup::Os);
 
         assert!(matches!(
-            lookup.get_checked("ctx.os"),
+            lookup.resolve("ctx.os").map(ResolvedBinding::into_value),
             Err(ExpressionError::ContextProjectionInvariant { ref key, group: ContextGroup::Os })
                 if key == "os"
         ));
@@ -217,12 +219,12 @@ mod tests {
     fn checked_resolution_captures_only_the_groups_it_reaches() {
         let lookup = CtxLookup::new(Path::new("."));
 
-        assert!(lookup.get_checked("ctx.zzz").unwrap().is_none());
-        assert!(lookup.get_checked("ctx").unwrap().is_none());
-        assert!(lookup.get_checked("env.HOME").unwrap().is_none());
+        assert!(lookup.resolve("ctx.zzz").map(ResolvedBinding::into_value).unwrap().is_none());
+        assert!(lookup.resolve("ctx").map(ResolvedBinding::into_value).unwrap().is_none());
+        assert!(lookup.resolve("env.HOME").map(ResolvedBinding::into_value).unwrap().is_none());
         assert!(lookup.captured_groups().is_empty(), "unknown keys capture nothing");
 
-        assert!(lookup.get_checked("ctx.today").unwrap().is_some());
+        assert!(lookup.resolve("ctx.today").map(ResolvedBinding::into_value).unwrap().is_some());
         assert_eq!(lookup.captured_groups(), vec![ContextGroup::DateTime]);
     }
 

@@ -477,7 +477,6 @@ fn resolve_shell_command_expr(
     let value = serde_json::Value::String(raw.clone());
     let resolved = SubtreeCompose::new(&value, state)
         .with_resolution_context(resolution_ctx.clone())
-        .strict()
         .compose()
         .map_err(|e| CompositionError::LifecycleShellResolution {
             source_path: source_path.to_path_buf(),

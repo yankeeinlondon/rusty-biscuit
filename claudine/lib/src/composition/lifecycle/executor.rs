@@ -49,9 +49,9 @@ use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectEngine;
 use darkmatter::markdown::compose::expression::{
-    Expr, ExpressionFinder, ResolutionContext, evaluate, is_truthy, scalar_string,
+    Expr, ExpressionError, ExpressionFinder, ResolutionContext, evaluate, is_truthy, scalar_string,
 };
-use darkmatter::markdown::compose::subtree::{InjectedGlobal, LayeredLookup, SubtreeCompose};
+use darkmatter::markdown::compose::subtree::{InjectedGlobal, SubtreeCompose, layered_session};
 use darkmatter::markdown::compose::{
     ComposeContext, ComposeOptions, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
     ResolvedShellValue, execute_resolved_shell_values,
@@ -909,12 +909,11 @@ impl StackExecutionContext<'_> {
     /// Darkmatter's subtree compose and layered lookup.
     fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
         let mut globals = lifecycle_injected_globals(self.err, self.timing);
-        if let Some(variables) = self.group {
-            globals.insert(
-                "group".to_string(),
-                InjectedGlobal::eager(Value::Object(variables.clone())),
-            );
-        }
+        let group = match self.group {
+            Some(variables) => InjectedGlobal::eager(Value::Object(variables.clone())),
+            None => super::context::outside_group_global(),
+        };
+        globals.insert("group".to_string(), group);
         globals
     }
 
@@ -992,19 +991,20 @@ impl StackExecutionContext<'_> {
         let hint = ctx_scan_hint(expr);
         let state = self.build_state(fm, &hint);
         let globals = self.injected_globals();
-        let lookup = LayeredLookup::new(&state, &globals, Some(self.resolution_context()));
+        let lookup = layered_session(&state, globals, None, Some(self.resolution_context()))
+            .map_err(|error| {
+                LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))
+            })?;
         evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
     }
 
     /// Interpolate a string's `{{ … }}` spans at event-time through Darkmatter's
-    /// subtree compose (DM2) in **strict** mode, preserving whole-value typing.
+    /// subtree compose (DM2), preserving whole-value typing.
     ///
-    /// Strict mode fails closed (C4): a malformed span, unknown function, or
-    /// unknown root (a typo / genuinely-undefined variable) returns an error
-    /// instead of degrading to empty, so a lifecycle side effect never renders
-    /// silently-empty operational text. A reference whose root is *known* — a
-    /// declared frontmatter key, `ctx`/`env`/`doc`, or an in-scope late-binding
-    /// global — that resolves to `null`/empty still renders empty.
+    /// Subtree compose fails closed (C4): a malformed span or unknown function
+    /// returns an error instead of degrading to empty. An absent document
+    /// property renders as `null`/empty; undefined lifecycle variables are
+    /// rejected earlier, by the stack's own variable scan.
     ///
     /// `s` is authored text and is scanned exactly once. Whatever the spans
     /// insert is data: a frontmatter value or file content that itself holds
@@ -1020,7 +1020,6 @@ impl StackExecutionContext<'_> {
         SubtreeCompose::new(&value, &state)
             .with_globals(globals)
             .with_resolution_context(self.resolution_context())
-            .strict()
             .compose()
             .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
     }

@@ -41,6 +41,7 @@
 use std::collections::HashMap;
 use std::error::Error as StdError;
 
+use darkmatter::markdown::compose::expression::UnavailabilityReason;
 use darkmatter::markdown::compose::subtree::InjectedGlobal;
 use serde_json::Value;
 
@@ -496,6 +497,14 @@ pub fn lifecycle_injected_globals(
         );
     }
     globals
+}
+
+/// The `group` entry for a scope with no established group: every bare read
+/// fails with `claudine.outside-group`, so a group's variables cannot leak into
+/// a later step or event and a same-named document property is never read
+/// instead (`doc.group` still reads the document).
+pub(crate) fn outside_group_global() -> InjectedGlobal {
+    InjectedGlobal::unavailable(UnavailabilityReason::new("claudine.outside-group"))
 }
 
 #[cfg(test)]

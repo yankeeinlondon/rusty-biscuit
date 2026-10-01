@@ -941,7 +941,6 @@ impl<'a> Loader<'a> {
 
         let composed = SubtreeCompose::new(&Value::String(raw.to_string()), state)
             .with_resolution_context(resolution_ctx)
-            .strict()
             .compose()
             .map_err(|e| CompositionError::SequenceShellResolution {
                 command: raw.to_string(),

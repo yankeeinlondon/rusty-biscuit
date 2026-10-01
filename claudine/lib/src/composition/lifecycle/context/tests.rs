@@ -610,7 +610,6 @@ fn the_removed_current_ctx_nesting_is_rejected() {
     let state = state_with_current(json!({}), scripted_authority(&provider));
     let error = SubtreeCompose::new(&json!("{{current.ctx.branch}}"), &state)
         .with_globals(lifecycle_injected_globals(None, None))
-        .strict()
         .compose()
         .expect_err("`current.ctx.*` was removed by the clean break (R33)");
     let rendered = error.to_string();
@@ -652,14 +651,13 @@ fn timing_from_instants_omits_total_ms_without_run_start() {
 ///
 /// Since the clean break (spec R31–R33) that surface is Darkmatter's reserved
 /// `current_env` root, which rereads the live process environment at reference
-/// time. Resolved here through DM2's layered lookup with the lifecycle globals
-/// attached, which also proves the injected `current` global no longer shadows
-/// a reserved root.
+/// time. Resolved here through a DM2 layered session with the lifecycle
+/// globals attached; a global can never be registered under a reserved root.
 #[test]
 #[serial_test::serial(env_lifecycle_current)]
 fn when_clause_reacts_to_env_changed_after_prepare() {
     use darkmatter::markdown::compose::expression::{evaluate, is_truthy, parse};
-    use darkmatter::markdown::compose::subtree::LayeredLookup;
+    use darkmatter::markdown::compose::subtree::layered_session;
 
     let key = "CLAUDINE_TEST_LATE_BINDING_MYVAR";
     // SAFETY: serialized via #[serial]; no other thread reads this var.
@@ -668,7 +666,7 @@ fn when_clause_reacts_to_env_changed_after_prepare() {
     unsafe { std::env::set_var(key, "old") };
     let base = state(json!({}));
     let globals = lifecycle_injected_globals(None, None);
-    let lookup = LayeredLookup::new(&base, &globals, None);
+    let lookup = layered_session(&base, globals, None, None).expect("the globals associate");
     let expr = parse(&format!("current_env.{key} == 'x'")).expect("parses");
 
     assert!(
