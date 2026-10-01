@@ -1,11 +1,24 @@
 //! Portable references: the most portable verified spelling of a target.
 //!
-//! This module holds the shared path identity ([`PathIdentity`]) and the
-//! crate-internal seam that turns generated references into text.
+//! [`PortablePath`] evaluates an ordered [`PortabilityPreference`] strategy
+//! against a target, verifies each candidate with the resolver in one
+//! prepared [`FileResolutionContext`](crate::FileResolutionContext), and
+//! reports every attempt as typed data. [`PathIdentity`] is the shared
+//! lexical identity behind every prefix test and relative route; the
+//! crate-internal `text` seam turns generated references into text.
 
+mod diagnostics;
+mod env_anchor;
+mod evaluate;
 mod path_identity;
-// Consumed by `PortablePath` evaluation; until that lands only the tests call it.
-#[cfg_attr(not(test), expect(dead_code, reason = "consumed by PortablePath evaluation"))]
+mod strategy;
 mod text;
 
+pub use diagnostics::{
+    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
+    InvalidTarget, NotApplicable, PortablePathError, ProbeError, ResolutionProblem, SpellingProblem,
+};
+pub use env_anchor::PORTABLE_ENV_VARIABLES;
+pub use evaluate::{PortablePath, PortableReference};
 pub use path_identity::{PathIdentity, RelativeRoute};
+pub use strategy::{IntentForms, PortabilityPreference};

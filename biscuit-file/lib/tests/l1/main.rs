@@ -13,6 +13,7 @@ mod finalized_reference_resolution;
 mod implicit_relative;
 mod magic_local_roots;
 mod parse_count;
+mod portable_path;
 mod precedence_flip;
 mod reference_grammar;
 mod repository_scope_catalog;

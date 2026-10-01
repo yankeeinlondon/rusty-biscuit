@@ -31,7 +31,12 @@ mod resolve;
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
-pub use portable::{PathIdentity, RelativeRoute};
+pub use portable::{
+    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
+    IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PathIdentity,
+    PortabilityPreference, PortablePath, PortablePathError, PortableReference, ProbeError,
+    RelativeRoute, ResolutionProblem, SpellingProblem,
+};
 
 #[cfg(feature = "fetch")]
 pub use error::FetchError;

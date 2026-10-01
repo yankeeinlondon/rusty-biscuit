@@ -975,6 +975,160 @@ file-tree boundary) keep their existing normalization, which collapses `..`
 even under a Windows `\\?\` prefix and then canonicalizes; see
 [Trust boundaries and containment](#trust-boundaries-and-containment).
 
+## Portable References: `PortablePath`
+
+`PortablePath` answers "how should I write a link to this file so it keeps
+working when the document, the repository, or the host changes?" Give it an
+absolute path or an authored `FileReference`; it returns the most portable
+reference that verifiably resolves back to the same file.
+
+```rust,no_run
+use biscuit_file::{FileReference, FileResolutionContext, PortabilityPreference, PortablePath};
+
+// The document being written lives in <repo>/apps/web/docs.
+let ctx = FileResolutionContext::new("/work/repo/apps/web/docs")
+    .with_repository_root("/work/repo");
+
+// A path input: the strategy picks the form.
+let found = PortablePath::from_path("/work/repo/foo.md").with_ctx(&ctx).file_reference()?;
+assert_eq!(found.reference().raw(), "&foo.md");
+assert_eq!(found.strategy(), &PortabilityPreference::RepoRoot(None));
+
+// A reference input: anchors the author chose are kept, positions are cleaned.
+let kept = PortablePath::from_reference(FileReference::new("^/foo.md")?).with_ctx(&ctx).file_reference()?;
+assert_eq!(kept.reference().raw(), "^/foo.md");
+let cleaned = PortablePath::from_reference(FileReference::new("../../../foo.md")?)
+    .with_ctx(&ctx)
+    .file_reference()?;
+assert_eq!(cleaned.reference().raw(), "&foo.md");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+### The strategy
+
+A strategy is an ordered list of `PortabilityPreference`s. Each is tried in
+turn; the first whose reference verifies wins. The default:
+
+| # | Preference | Writes | Applies when |
+| - | ---------- | ------ | ------------ |
+| 1 | `AuthoredIntent(IntentForms::ALL)` | the input, unchanged | a reference input is `~`, `@`, `^`, `&`, `vault:`, a URL, a `%` search, or starts with a portable `{{VAR}}` |
+| 2 | `SameDirRelative` | `./x.md` (`./` for `cwd` itself) | the target's parent is `cwd` |
+| 3 | `ChildDir` | `./a/b/x.md` | the target is below a subdirectory of `cwd` |
+| 4 | `PeerDir` | `../sibling/x.md` | one hop up, then down |
+| 5 | `ImmediateParentDir` | `../x.md` | the target's parent is `cwd`'s parent |
+| 6 | `RepoRoot(None)` | `&path/x.md` | the context has a repository containing the target |
+| 7 | `EnvRootedPath` | `{{NAME}}/x.md` | a [portable variable](#portable-environment-variables) is an absolute prefix |
+| 8 | `HomeDir` | `~/x.md` | the target is under the home directory |
+| 9 | `AbsolutePath` | the absolute path | always; the caller's cue to warn |
+
+The relative preferences only write a route that stays inside the file tree
+(`base_dir`). Under a [fallback tree](#the-file-tree-base_dir-and-the-relative-boundary),
+which is just `cwd`, any upward route counts as leaving the tree.
+
+Not in the default, available with `with_strategy`:
+
+- `ParentDir`: any in-tree route that goes up (`../../x.md`). Without it, a
+  deep-parent target outside a repository falls through to the anchored forms:
+  from `notes/a/b`, `notes/x.md` becomes `~/notes/x.md` or an absolute path,
+  not `../../x.md`.
+- `ExternalRelativePath`: a route that leaves the tree. Readers of such links
+  must opt in with `allow_external_relative()`; `PortablePath` verifies the
+  link that way.
+- `RepoMultiPath(filter)` (`^`) and `MagicPath(filter)` (`@`): searched forms.
+  They are used only when the target exists and the lookup finds that very
+  file; a spelling that finds another file first is recorded as `Shadowed`
+  and the next root is tried.
+
+The optional string on `RepoRoot`, `RepoMultiPath`, and `MagicPath` is an
+eligibility filter, never a new root: `RepoRoot(Some("docs"))` only considers
+targets below `<repo>/docs` and still writes `&docs/x.md`. A `MagicPath`
+filter is a reference such as `~/.claudine/prompts` that must name one of the
+context's `@` search roots; results are spelled from that root (`@x.md`).
+
+Where `AuthoredIntent` sits matters: first means "never touch an author's
+sigil"; after `SameDirRelative` means "keep sigils unless `./x` reaches the
+same file"; absent means "normalize everything" (URLs and `%` searches are
+then refused with `NormalizationUnsupported`, never rewritten).
+
+### Reference inputs
+
+| Input | Treatment |
+| ----- | --------- |
+| intent forms (above) | kept exactly as written, with findings for problems |
+| `./`, `../`, bare, absolute, a non-portable `{{VAR}}` | resolved to one target, then run through the strategy |
+
+- A link already in the chosen form is returned as written: `foo.md` and
+  `./foo.md` both stay when the lookup finds `foo.md` next to the document. A
+  bare link that only resolves through the repository-root fallback is not a
+  same-directory link and is rewritten.
+- Running the result back through `PortablePath` returns it unchanged.
+- A single-location input that names a missing file still has a target
+  (`../../new.md` can become `&new.md`). A search with no match (`missing.md`
+  with two candidate roots, `@missing.md` when not kept), a boundary escape, a
+  missing anchor, or an I/O failure gives `UnresolvableInput`; keep the link
+  as authored and report the finding.
+- `PortablePath` takes a path only. A link layer splits `#fragment`, `?query`,
+  or `:line` off first and puts it back on the result.
+
+### Verification
+
+Every candidate is parsed back with `FileReference` and resolved in the same
+context, including the boundary and its symlink check:
+
+- single-location forms (`./`, `../`, `&`, `~`, absolute, an absolute
+  `{{VAR}}`) may name a file that does not exist yet;
+- searched forms (`@`, `^`) need the file to exist and be the lookup's first
+  match;
+- a target reached through a symlink that leads out of the tree cannot be
+  written relative; it falls through to a later preference.
+
+A generated spelling is refused when its text would not read back as the same
+names: a Unix name containing `\`, `{{…}}` inside a name, a non-Unicode name
+(`UnrenderableTarget`, even with `AbsolutePath`). A name starting with a sigil
+is protected by `./` (`./@notes.md`).
+
+### Portable environment variables
+
+A variable is portable when it is declared, either in
+`PORTABLE_ENV_VARIABLES` (comma-separated, read from the context's captured
+environment) or with `.with_portable_env(["CONFIG_DIR"])`. Invalid names are
+skipped and reported as `InvalidPortableVariableName`. Only a value that is an
+absolute path on this host and a whole-component prefix of the target can
+anchor it; the deepest anchor wins, then name order.
+
+```text
+CONFIG_DIR=/opt/config, target /opt/config/x.json  →  {{CONFIG_DIR}}/x.json
+CONFIG_DIR=../shared                                →  not eligible (NotAbsolute)
+CONFIG_DIR=/opt/conf                                →  not eligible (NotAPrefix)
+```
+
+### Builders and captured state
+
+- `with_ctx(&ctx)` evaluates against a clone of the context: no discovery and
+  no live reads. Reuse one context for a batch of links.
+- Without a context, `PortablePath` captures the working directory (or
+  `with_cwd`), home, and environment once, and discovers the repository from
+  `cwd`. `with_base_dir` names a non-repository tree; inside a repository it
+  must equal the repository root.
+- `with_ctx` together with `with_cwd` or `with_base_dir` is an
+  `InvalidConfiguration`: derive the context instead.
+
+### Diagnostics
+
+`file_reference()` returns `Result<PortableReference, PortablePathError>`.
+Both sides carry the attempts:
+
+- `attempts()`: one `Attempt` per preference tried, with its `outcome`
+  (`Matched`, `NotApplicable(reason)`, or `Shadowed`) and any earlier
+  `rejected` candidates, such as each ineligible environment variable;
+- `findings()`: problems with the returned reference (`TargetMissing`,
+  `TargetNotFile`, `NonPortableVariable`, `ResolutionFailed(..)`, …);
+- `PortablePathError` variants: `NoStrategyMatched`, `InvalidTarget`,
+  `UnresolvableInput`, `NormalizationUnsupported`, `InvalidConfiguration`,
+  `UnrenderableTarget`, `ProbeFailed`, `CwdUnavailable`,
+  `RepositoryDiscoveryFailed`. Errors are `Clone`; a filesystem failure is kept
+  as path, `ErrorKind`, and OS code, and is never reported as a missing file.
+
 ## Feature Flag
 
 File-reference support is gated behind the default `file-reference` feature,

@@ -169,6 +169,14 @@ pub use self::file_reference::{
     RelativeRoute, RootProvenance, find_git_root, home_dir,
 };
 
+#[cfg(feature = "file-reference")]
+pub use self::file_reference::{
+    Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
+    IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PortabilityPreference,
+    PortablePath, PortablePathError, PortableReference, ProbeError, ResolutionProblem,
+    SpellingProblem,
+};
+
 #[cfg(feature = "url")]
 pub use self::file_reference::Resolved;
 

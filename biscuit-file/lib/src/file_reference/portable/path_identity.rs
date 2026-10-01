@@ -97,7 +97,6 @@ impl PathIdentity {
 
     /// Whether the path has no root and no leading `..` hops: plain names
     /// below wherever it is read from.
-    #[cfg_attr(not(test), expect(dead_code, reason = "consumed by PortablePath evaluation"))]
     pub(crate) fn is_unanchored(&self) -> bool {
         self.root.is_empty() && !self.rooted && self.leading_parents == 0
     }

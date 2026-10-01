@@ -73,7 +73,8 @@ impl Lead<'_> {
             }
         };
         match self {
-            Self::Relative { parent_hops: 0 } => joined("./"),
+            // `./` rather than `.`: the spelling of a target equal to `cwd`.
+            Self::Relative { parent_hops: 0 } => format!("./{tail}"),
             Self::Relative { parent_hops } => joined(&"../".repeat(parent_hops)),
             Self::Bare => tail.to_string(),
             Self::Home => joined("~/"),

@@ -15,7 +15,7 @@ fn each_lead_spells_its_reference_form() {
     let cases: &[(Lead<'_>, &[&str], &str)] = &[
         (Lead::Relative { parent_hops: 0 }, &["guide.md"], "./guide.md"),
         (Lead::Relative { parent_hops: 2 }, &["assets", "logo.png"], "../../assets/logo.png"),
-        (Lead::Relative { parent_hops: 0 }, &[], "."),
+        (Lead::Relative { parent_hops: 0 }, &[], "./"),
         (Lead::Relative { parent_hops: 2 }, &[], "../.."),
         (Lead::Bare, &["docs", "x.md"], "docs/x.md"),
         (Lead::Home, &["notes", "x.md"], "~/notes/x.md"),
