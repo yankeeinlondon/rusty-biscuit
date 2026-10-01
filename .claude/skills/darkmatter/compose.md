@@ -1115,7 +1115,7 @@ darkmatter/lib/src/
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
     │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution
-    │   └── resolve_ctx.rs   # ResolutionContext (base_dir, magic paths, remote)
+    │   └── resolve_ctx.rs   # ResolutionContext (cwd, base_dir() tree root, magic paths, remote)
     └── interpolation/
         ├── mod.rs       # Module exports
         ├── lexer.rs     # Expression finder

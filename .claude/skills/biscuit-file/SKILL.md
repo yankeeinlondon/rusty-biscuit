@@ -10,6 +10,7 @@ description: >
 - Read [references/detect.md](references/detect.md) when using file type detection (`detect_file_type`, `detect_file_type_from_bytes`, `FileType`)
 - Read [references/api.md](references/api.md) for full API surface of all types (Toml, Yaml, Json5, Pdf, FileReference, FileType, DataFormat, detect, PdfConfig)
 - Rendering a `Path` as text? Use `biscuit_file::to_portable_string` / `try_portable_string` (unfeatured) — never write another `.replace('\\', "/")`. See [references/api.md](references/api.md#portable-path-text)
+- Comparing paths (`starts_with`, relative route)? Use `biscuit_file::PathIdentity` — the one lexical, lossless, Windows-aware identity. See [references/api.md](references/api.md#path-identity)
 
 - Read [references/architecture.md](references/architecture.md) for module layout, feature flags, and re-exports
 

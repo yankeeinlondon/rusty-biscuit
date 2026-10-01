@@ -175,9 +175,43 @@ No lexical `.`/`..` collapse happens; `dunce`'s refusal is authoritative.
 Lossy by design: non-Unicode data becomes U+FFFD (`Path::to_string_lossy`), and
 on Unix a literal `\` in a filename renders as `/`.
 
-Never use rendered text as a path-identity key — build a comparison
-representation instead. A short root can simplify while its long descendant
-cannot.
+Never use rendered text as a path-identity key — use `PathIdentity` (below).
+A short root can simplify while its long descendant cannot.
+
+## Path Identity
+Source: `biscuit-file/lib/src/file_reference/portable/path_identity.rs` (feature `file-reference`)
+
+```rust
+use std::path::Path;
+use biscuit_file::{PathIdentity, RelativeRoute};
+
+let root = PathIdentity::new(Path::new("/opt/config"));
+PathIdentity::new(Path::new("/opt/config-old/a")).starts_with(&root); // false: whole components
+let target = PathIdentity::new(Path::new("/repo/assets/logo.png"));
+let route: Option<RelativeRoute> = target.relative_from(&PathIdentity::new(Path::new("/repo/docs")));
+// route.parent_hops() == 1, route.forward() == ["assets", "logo.png"]; None across drives/shares
+```
+
+The single prefix/relative-route implementation (Darkmatter's link
+normalization uses it; never write another `ComparisonKey`). Lexical and
+lossless: collapses `.`/`..` on ordinary paths (never above a root; a relative
+path keeps leading `..`), keeps `.`/`..` literal under `\\?\`, equates a
+verbatim drive/share with its legacy spelling (even when too long for `dunce`),
+folds only the drive letter, and never canonicalizes or equates symlink aliases.
+`relative_from(dir)` always treats `dir` as a directory. The Windows grammar is
+a portable UTF-16 parser (`portable::path_identity::windows`), so its tests run
+on every host; a Windows-only test pins it to std's `Prefix` classification.
+
+The resolver's own containment checks still use `resolve::normalize_components`
+(which collapses `..` even under `\\?\`); `diff_paths` routes through
+`PathIdentity` after that normalization.
+
+Crate-internal: `portable::text::{render_reference, render_absolute}` is the
+generated-reference text seam. It renders through `try_portable_string`, then
+re-parses and rejects `Unrenderable` (non-Unicode), `ChangesComponents` (Unix
+`\`, literal verbatim dots, Windows names that change without `\\?\`),
+`GrammarMismatch` (`{{…}}` in a name, a leading sigil in a bare name), and
+`NoPortableSpelling`.
 
 ## File Detection
 Source: `biscuit-file/lib/src/detect.rs`
