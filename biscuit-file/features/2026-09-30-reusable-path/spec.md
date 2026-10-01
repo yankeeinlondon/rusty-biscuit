@@ -26,6 +26,31 @@ reviewed: true
 reviewed_by: "codex/gpt-6.1-sol"
 reviewed_on: "2026-09-30"
 review_iterations: 0
+human_review: false
+message_to_agent: |-
+  Phase 1 (rulings, audits, baseline) is complete; it changed no source code.
+  Read the "Rulings" and "Phase 1" sections of implementation-log.md before
+  starting Phase 2. Key points:
+
+  - R1-R11 were adopted as the plan recommended, as *provisional* working
+    rulings (non-interactive session, plan has yolo: true). None gates Phase 2.
+  - Every FileResolutionContext constructor / for_base argument in the repo is
+    a document (cwd) directory; there is no tree-root intent anywhere, so the
+    Phase 2 rename is purely mechanical.
+  - messenger/lib/src/research/load.rs is a genuine FileResolutionContext
+    consumer; the plan listed messenger as unrelated. Compile it in Phase 2.
+  - Do NOT rename every `.base_dir()` by text search: claudine's SourceContext
+    and ResolutionDetail also have base_dir() methods. The log lists exactly
+    which call sites belong to FileResolutionContext / DetailedResolution.
+  - Names the plan's rename table omits: is_trusted_external_authoring_base()
+    (+ field), internal ResolutionContext::from_base, CompletionAnchors.base,
+    and cwd-meaning parameter names on resolve_from / complete_partial /
+    resolve_relative. Decide and log how they are handled.
+  - Baseline: one pre-existing claudine L1 failure
+    (completion::composition::tests::compose_magic_does_not_emit_a_nested_file_without_its_scope),
+    caused by the host's real ~/.claudine/prompts/plan.md leaking into the
+    test. claudine's `just test` fails fast; use `just test --no-fail-fast`
+    to compare counts (8071 run / 8070 passed / 1 failed / 9 skipped).
 ---
 
 # Portable Paths
