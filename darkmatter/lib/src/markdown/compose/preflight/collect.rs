@@ -164,6 +164,9 @@ pub fn collect_shell_commands_with_graph(
 /// `ping` records its target, timeout, and attempt count and answers `null`.
 /// A probe inside `as_markdown` content is found the same way, because that
 /// content is walked as a child of the document that named it.
+///
+/// Every public collection entry reaches the walk through here, so this is
+/// where the root's options are prepared as the pipeline prepares them.
 pub(crate) fn collect_effects(
     markdown: &Markdown,
     options: &ComposeOptions,
@@ -173,6 +176,7 @@ pub(crate) fn collect_effects(
     DeferredCapabilities,
     super::PreflightGraphNode,
 )> {
+    let options = &options.prepared_root(markdown);
     let mut seen = HashSet::new();
     let mut entries = Vec::new();
     let mut icmp = Vec::new();
@@ -232,6 +236,7 @@ pub fn collect_frontmatter_shell_commands(
     markdown: &Markdown,
     options: &ComposeOptions,
 ) -> MarkdownResult<Vec<ShellCommandEntry>> {
+    let options = &options.prepared_root(markdown);
     let source_file = match &options.source {
         ComposeSource::File(p) => p.clone(),
         ComposeSource::Url(u) => PathBuf::from(u.as_str()),

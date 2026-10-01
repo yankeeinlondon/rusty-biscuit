@@ -37,6 +37,11 @@ execution-time gate degrades to a pure membership check: the command is already
 approved, so it runs with no prompt — this run or any later loop iteration with
 flipped conditions. A dead-branch command is **approved but never executed**.
 
+Collection resolves every transclusion target the way composition does, from
+the same repository-aware context, so a `::file &README.md` or
+`::file ^docs/guide.md` reaches the same file in both, whatever directory `md`
+was launched from.
+
 Collection walks each transcluded child with the inputs composition gives it:
 the parent's composed values as inherited defaults, the directive's `set.*`
 overlay on top, and the same replace settings. So a partial's

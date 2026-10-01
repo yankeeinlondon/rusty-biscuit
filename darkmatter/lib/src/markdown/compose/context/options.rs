@@ -740,14 +740,36 @@ impl ComposeOptions {
         std::borrow::Cow::Owned(extended)
     }
 
+    /// Prepares these options to process `document` as a request root.
+    ///
+    /// Extends the context for the groups `document` names, fixes the
+    /// repository observation, and captures the file-resolution context. Both
+    /// root entries call it: the compose pipeline and pre-flight discovery,
+    /// which runs first. Pre-flight resolves the same transclusion targets the
+    /// pipeline does, so without this it would resolve `&` and `^` with no
+    /// repository root.
+    pub(crate) fn prepare_root(&mut self, document: &crate::markdown::Markdown) {
+        self.extend_context_for(document);
+        self.establish_repository_observation();
+        self.ensure_file_resolution_context();
+    }
+
+    /// These options after [`prepare_root`](Self::prepare_root), for a root
+    /// entry that borrows its caller's options.
+    pub(crate) fn prepared_root(&self, document: &crate::markdown::Markdown) -> Self {
+        let mut prepared = self.clone();
+        prepared.prepare_root(document);
+        prepared
+    }
+
     /// Fixes the request's repository observation (decision D3).
     ///
     /// Only a [`DarkmatterOwned`] request without an embedder-supplied
     /// refresh provider observes the repository itself; see
     /// [`CurrentAuthority::establish_ambient_repository`].
     /// [`for_document`](Self::for_document) calls this at request creation.
-    /// The root pipeline entry calls it again as the fallback for a request
-    /// built through [`new`](Self::new) or
+    /// [`prepare_root`](Self::prepare_root) calls it again as the fallback for
+    /// a request built through [`new`](Self::new) or
     /// [`new_with_context`](Self::new_with_context), where it is a no-op once
     /// established. A child pipeline never calls it: a descendant must find
     /// the observation already fixed, never establish it late.

@@ -33,13 +33,9 @@ impl Markdown {
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
         // result seeds the request epoch every transcluded source extends.
-        options.extend_context_for(self);
-        // `ComposeOptions::for_document` fixed the repository observation at
-        // request creation; a request built through an older constructor
-        // reaches its first boundary here. Either way it is fixed before any
-        // stage of the root runs, so no descendant can establish it late.
-        options.establish_repository_observation();
-        options.ensure_file_resolution_context();
+        // The repository observation is fixed before any stage of the root
+        // runs, so no descendant can establish it late.
+        options.prepare_root(self);
 
         // Reuse the caller-supplied shared runtime when present (so a pre-flight
         // walk and this pass fetch each URL once); otherwise build one whose

@@ -286,8 +286,9 @@ file changes rather than discovering the repository a second time.
   eager `Repo` capture, or one discovery at the anchor. `for_document` is the
   request boundary: it fixes that observation at creation, before validation,
   pre-flight, or compose run. A request built through `new()` or
-  `new_with_context(..).with_context_authority(DarkmatterOwned)` is fixed by
-  the root pipeline entry instead, unconditionally — not gated on whether the
+  `new_with_context(..).with_context_authority(DarkmatterOwned)` is fixed at
+  the root entry instead (`ComposeOptions::prepare_root`, which both the root
+  pipeline and pre-flight collection call), unconditionally — not gated on whether the
   root plans a `current.repo*` read, because a transcluded child may be the
   only reader and a child pipeline never establishes request state. The
   provider never discovers. `ComposeOptions::with_current_provider` installs

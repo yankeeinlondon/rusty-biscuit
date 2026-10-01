@@ -442,3 +442,52 @@ fn compose_env_anchored_child_is_bounded_by_the_variable() {
         "{collapsed}"
     );
 }
+
+/// `md compose` launched from a package directory resolves `&` and `^` in a
+/// document two directories down.
+///
+/// The CLI runs pre-flight before the compose pipeline. When only the
+/// pipeline prepared the repository-aware context, pre-flight's resolver had
+/// no repository root and every `&`/`^` target failed with "requires a
+/// repository containing reference CWD". The `^pkg/...` directive is the
+/// shape of the original report (`^claudine/docs/cli/index.md` from
+/// `claudine/`).
+#[test]
+fn test_compose_repository_sigils_from_a_nested_document() {
+    let fixture = CliProcessFixture::named("test_compose_repository_sigils_from_a_nested_document");
+    let repo = fixture.workspace_path().join("repo");
+    assert!(fixture.initialize_repository_at(&repo));
+    let launch_dir = repo.join("pkg");
+    for (relative, content) in [
+        ("amp-target.md", "AMP-TARGET-BODY\n"),
+        ("caret-target.md", "CARET-TARGET-BODY\n"),
+        ("pkg/docs/cli/index.md", "CLI-INDEX-BODY\n"),
+        (
+            "pkg/docs/guide/doc.md",
+            "# Guide\n\n::file &amp-target.md\n\n::file ^caret-target.md\n\n::file ^pkg/docs/cli/index.md\n",
+        ),
+    ] {
+        common::write(&repo.join(relative), content);
+    }
+
+    let output = fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
+        .arg("compose")
+        .arg("docs/guide/doc.md")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "compose must succeed\nstdout:\n{stdout}\nstderr:\n{stderr}");
+    for body in ["AMP-TARGET-BODY", "CARET-TARGET-BODY", "CLI-INDEX-BODY"] {
+        assert!(stdout.contains(body), "missing {body} in stdout:\n{stdout}");
+    }
+    assert!(!stdout.contains("::file"), "a directive leaked into stdout:\n{stdout}");
+    assert!(
+        !stderr.contains("requires a repository containing reference CWD"),
+        "stderr:\n{stderr}"
+    );
+}

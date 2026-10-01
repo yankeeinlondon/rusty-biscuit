@@ -81,6 +81,12 @@ The root compose pipeline is ordered:
 11. Inline cleanup and optional fixed-width reflow.
 12. Root-only link normalization.
 
+Pre-flight collection (`compose_preflight`, `collect_*`) runs before this
+pipeline and is a root entry too: both prepare their options through
+`ComposeOptions::prepare_root` (context extension, repository observation,
+file-resolution context). A new root entry that skips it resolves `&`/`^`
+with no repository root.
+
 Keep this order stable. Whole-value `{{ ... }}` and `$(...)` values are
 executable state: they must resolve or fail, never leak as literal syntax.
 Demand-driven context capture must observe only referenced `ctx.*` groups.

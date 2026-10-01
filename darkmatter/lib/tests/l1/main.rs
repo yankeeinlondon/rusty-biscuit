@@ -93,6 +93,7 @@ mod shell_block_integration;
 mod shell_expansion_coordinates;
 mod shell_result_values;
 mod preflight_child_state_parity;
+mod preflight_repository_sigils;
 mod shell_probe_preflight;
 mod span_compat;
 mod style_features_baseline;
