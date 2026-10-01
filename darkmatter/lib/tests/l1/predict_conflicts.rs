@@ -465,7 +465,7 @@ Shell: {{ shell_result }}
             ComposeOperation::FrontmatterShellExpansion,
             ComposeOperation::Interpolation,
         ]);
-    let (composed, report) = document.compose_with(options).expect("compose Git expression");
+    let (composed, report) = document.compose_with(&crate::request_support::request(options)).expect("compose Git expression");
 
     assert!(report.warnings.is_empty(), "unexpected warnings: {report:?}");
     assert_eq!(

@@ -11,7 +11,7 @@ use crate::io::{load_markdown, resolve_file_path};
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 use std::path::PathBuf;
 use tracing::{info, instrument};
 
@@ -356,12 +356,32 @@ pub fn run_compose(
         override_map.insert(key, value);
     }
 
-    if !override_map.is_empty() {
+    // With `--set`, the request resolves through the document context derived
+    // above; otherwise it is built at the document's directory (the launch
+    // directory for stdin), as before requests were prepared explicitly.
+    let attached_context = if override_map.is_empty() {
+        None
+    } else {
         options = options
-            .with_file_resolution_context(file_resolution_context)
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::Value::Object(override_map));
-    }
+        Some(file_resolution_context)
+    };
+    let request_snapshot = RequestSnapshot::from_process()
+        .wrap_err("Failed to capture the request")?
+        .at_request_dir(
+            resolved_input
+                .as_deref()
+                .and_then(std::path::Path::parent)
+                .map_or_else(|| launch_dir.clone(), std::path::Path::to_path_buf),
+        );
+    let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
+        match &attached_context {
+            Some(context) => ComposeRequest::with_context(options, context.clone()),
+            None => ComposeRequest::prepare(options, &request_snapshot),
+        }
+        .wrap_err("Failed to prepare the compose request")
+    };
 
     // ── Reference validation ───────────────────────────────────────────
     // Validate before composing so broken references are caught early.
@@ -375,7 +395,7 @@ pub fn run_compose(
         };
 
         let val_options = ReferenceValidationOptions::with_graph(
-            ReferenceGraphOptions::with_compose(options.clone()),
+            ReferenceGraphOptions::with_compose(&prepare_request(options.clone())?),
         );
 
         match md.validate_references(val_options) {
@@ -483,13 +503,14 @@ pub fn run_compose(
     // not once per stage. Must follow the remote-read-config and cache-root
     // wiring above so the shared runtime inherits both.
     options = options.with_shared_remote_fetch();
+    let mut request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command
         // that *could* run under any document state, routed through the same
         // pre-flight collector that authorization uses.
-        let preflight = md.compose_preflight(&options)?;
+        let preflight = md.compose_preflight(&request)?;
         print_shell_command_report(&preflight.entries);
         print_icmp_effect_report(&preflight.icmp_probes);
         drop(options_ctx_ref);
@@ -507,11 +528,12 @@ pub fn run_compose(
     // is disabled (nothing to approve) and the per-`::shell` per-shell-block
     // stages never need to gate against an approval set.
     use darkmatter::markdown::compose::ComposeOperation;
+    let options = request.options();
     if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
         || options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
     {
-        match md.compose_preflight_approvals(&options, preflight_handler.clone()) {
+        match md.compose_preflight_approvals(&request, preflight_handler.clone()) {
             Ok(approvals) => {
                 if cli.verbose > 0 {
                     eprintln!(
@@ -524,9 +546,11 @@ pub fn run_compose(
                 // Reuse the graph the preflight walk already resolved so the
                 // transclusion stage skips a redundant target-resolution pass
                 // (v2 design "reuse the collection walk").
-                options = options
-                    .with_pre_approved_commands(approvals.pre_approved_commands)
-                    .with_preflight_graph(approvals.preflight_graph);
+                request = request.map_options(|options| {
+                    options
+                        .with_pre_approved_commands(approvals.pre_approved_commands)
+                        .with_preflight_graph(approvals.preflight_graph)
+                });
             }
             Err(e) => {
                 return Err(preflight_approval_error(e));
@@ -534,7 +558,7 @@ pub fn run_compose(
         }
     }
 
-    let (composed, report) = md.compose_with(options).map_err(|e| {
+    let (composed, report) = md.compose_with(&request).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
 

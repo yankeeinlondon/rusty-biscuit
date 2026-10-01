@@ -45,7 +45,7 @@ fn options_with_reference_resolution_context(
     let context = crate::markdown::compose::document_resolution_context(
         base_dir,
         Some(source_path),
-        &options.magic_paths,
+        &[],
         None,
     );
     options.clone().with_file_resolution_context(context)
@@ -73,7 +73,7 @@ fn resolve_transclusion_target(
         None => crate::markdown::compose::document_resolution_context(
             base_dir,
             Some(source_path),
-            &options.magic_paths,
+            &[],
             None,
         ),
     };
@@ -185,24 +185,27 @@ impl Markdown {
     /// For recursive traversal, use [`transclusion_graph()`](Self::transclusion_graph).
     ///
     /// This compatibility facade captures ambient resolution state when called.
-    /// Request-scoped consumers should use [`transclusions_with_options`](Self::transclusions_with_options)
-    /// and supply `ComposeOptions::with_file_resolution_context`.
+    /// Request-scoped consumers should use [`transclusions_with_options`](Self::transclusions_with_options).
     pub fn transclusions(&self) -> MarkdownResult<Vec<TransclusionRef>> {
         let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
         let options = options_with_reference_resolution_context(&source, &ComposeOptions::default());
-        self.transclusions_with_options(&options)
+        self.transclusions_in(&options)
     }
 
-    /// Returns local transclusion references using the supplied resolution policy.
+    /// Returns local transclusion references resolved through `request`.
     ///
-    /// A host-provided `ComposeOptions::file_resolution_context` is reused for
-    /// every target, so later CWD, HOME, or environment changes cannot alter the
-    /// result. Invalid references and I/O failures are returned; only a typed
-    /// no-match produces `resolved_target: None`.
+    /// The request's context is reused for every target, so later CWD, HOME,
+    /// or environment changes cannot alter the result. Invalid references and
+    /// I/O failures are returned; only a typed no-match produces
+    /// `resolved_target: None`.
     pub fn transclusions_with_options(
         &self,
-        options: &ComposeOptions,
+        request: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<Vec<TransclusionRef>> {
+        self.transclusions_in(&request.root_options())
+    }
+
+    fn transclusions_in(&self, options: &ComposeOptions) -> MarkdownResult<Vec<TransclusionRef>> {
         let source = self.source().clone().unwrap_or(ComposeSource::Unknown);
         let mut refs = Vec::new();
 

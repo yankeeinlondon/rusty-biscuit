@@ -7,10 +7,10 @@ fn test_frontmatter_interpolation_spec_example() {
     let content = "---\nbase: /path/to/something\nspec: \"{{base}}/spec.md\"\nplan: \"{{base}}/plan.md\"\n---\nThe spec is located at: {{spec}}\nThe plan is located at: {{plan}}";
     let md: Markdown = content.into();
     let (composed, report) = md
-        .compose_with(ComposeOptions::new().only(&[
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::Interpolation,
-        ]))
+        ])))
         .unwrap();
 
     assert_eq!(report.frontmatter_interpolations_applied, 2);
@@ -32,12 +32,12 @@ fn test_frontmatter_interpolation_with_set_overrides() {
     let md: Markdown = content.into();
     let (composed, report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
                 ])
-                .with_set_overrides(serde_json::json!({"base": "/override"})),
+                .with_set_overrides(serde_json::json!({"base": "/override"}))),
         )
         .unwrap();
 
@@ -80,12 +80,12 @@ fn compose_reports_eager_spec_path_before_derived_nulls_mask_it() {
     let md = Markdown::try_from_content(std::fs::read_to_string(&prompt_path).unwrap()).unwrap();
     let err = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .with_source_file(&prompt_path)
                 .with_file_ref_fallback_dir(dir.path())
                 .with_set_overrides(serde_json::json!({
                     "spec": "reviews/2026-06-30-replace-expression/spec.md",
-                })),
+                }))),
         )
         .expect_err("the stale reviews/ spec path should fail schema validation");
 
@@ -110,7 +110,7 @@ fn test_frontmatter_interpolation_arrays_and_objects() {
     let content = "---\nbase: /root\npaths:\n  - \"{{base}}/a\"\n  - \"{{base}}/b\"\nmeta:\n  home: \"{{base}}/home\"\n---\n";
     let md: Markdown = content.into();
     let (_, report) = md
-        .compose_with(ComposeOptions::new().only(&[ComposeOperation::FrontmatterInterpolation]))
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[ComposeOperation::FrontmatterInterpolation])))
         .unwrap();
 
     assert!(report.frontmatter_interpolations_applied >= 3);
@@ -122,9 +122,9 @@ fn test_frontmatter_interpolation_disabled() {
     let md: Markdown = content.into();
     let (composed, report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .disable(ComposeOperation::FrontmatterInterpolation)
-                .only(&[ComposeOperation::Interpolation]),
+                .only(&[ComposeOperation::Interpolation])),
         )
         .unwrap();
 
@@ -142,10 +142,10 @@ fn test_frontmatter_interpolation_body_still_skips_fenced_code() {
         "---\nname: World\n---\nHello {{ name }}! Code: `{{ name }}`\n\n```\n{{ name }}\n```";
     let md: Markdown = content.into();
     let (composed, _) = md
-        .compose_with(ComposeOptions::new().only(&[
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::Interpolation,
-        ]))
+        ])))
         .unwrap();
 
     assert!(composed.content().contains("Hello World!"));
@@ -158,10 +158,10 @@ fn test_frontmatter_interpolation_report_counted_separately() {
     let content = "---\nbase: /path\nspec: \"{{base}}/spec.md\"\n---\nHello {{ spec }}!";
     let md: Markdown = content.into();
     let (_, report) = md
-        .compose_with(ComposeOptions::new().only(&[
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::Interpolation,
-        ]))
+        ])))
         .unwrap();
 
     assert_eq!(report.frontmatter_interpolations_applied, 1);
@@ -217,7 +217,7 @@ fn bare_sidecar_composes_with_one_typed_warning_in_one_validation_pass() {
     let md = Markdown::try_from(document_path.as_path()).unwrap();
 
     let (composed, report) = md
-        .compose_with(ComposeOptions::new().with_source_file(&document_path))
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&document_path)))
         .unwrap();
 
     assert_eq!(composed.content(), "Body unchanged.\n");
@@ -248,9 +248,9 @@ fn bare_sidecar_composes_unchanged_with_one_typed_warning_across_two_passes() {
 
     let (composed, report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .with_source_file(&document_path)
-                .with_trigger_schemas(true),
+                .with_trigger_schemas(true)),
         )
         .unwrap();
 
@@ -290,7 +290,7 @@ fn schema_advisory_is_not_duplicated_when_transclusion_reports_merge() {
     let md = Markdown::try_from(root_path.as_path()).unwrap();
 
     let (composed, report) = md
-        .compose_with(ComposeOptions::new().with_source_file(&root_path))
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
         .unwrap();
 
     assert_eq!(composed.content(), "Child body.\n");
@@ -327,7 +327,7 @@ fn transcluded_schema_advisory_uses_root_document_as_consumer() {
     let md = Markdown::try_from(root_path.as_path()).unwrap();
 
     let (_, report) = md
-        .compose_with(ComposeOptions::new().with_source_file(&root_path))
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root_path)))
         .unwrap();
 
     let warning = report
@@ -353,9 +353,9 @@ fn dm1_excluded_key_survives_raw_through_compose() {
     let md: Markdown = content.into();
     let (composed, report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[ComposeOperation::FrontmatterInterpolation])
-                .with_exclude_keys(["failure"]),
+                .with_exclude_keys(["failure"])),
         )
         .unwrap();
 
@@ -384,9 +384,9 @@ fn dm1_non_excluded_key_resolves_through_compose() {
     let md: Markdown = content.into();
     let (composed, report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[ComposeOperation::FrontmatterInterpolation])
-                .with_exclude_keys(["failure"]),
+                .with_exclude_keys(["failure"])),
         )
         .unwrap();
 
@@ -410,20 +410,20 @@ fn dm1_empty_exclude_set_is_byte_identical_to_default() {
     let md2: Markdown = content.into();
 
     let (composed_default, _) = md1
-        .compose_with(ComposeOptions::new().only(&[
+        .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[
             ComposeOperation::FrontmatterInterpolation,
             ComposeOperation::Interpolation,
-        ]))
+        ])))
         .unwrap();
 
     let (composed_excluded, report) = md2
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
                 ])
-                .with_exclude_keys(std::iter::empty::<&str>()),
+                .with_exclude_keys(std::iter::empty::<&str>())),
         )
         .unwrap();
 
@@ -448,9 +448,9 @@ fn dm1a_composed_key_referencing_deferred_fails_through_compose() {
         body\n";
     let md: Markdown = content.into();
     let result = md.compose_with(
-        ComposeOptions::new()
+        &crate::markdown::compose::test_request(ComposeOptions::new()
             .only(&[ComposeOperation::FrontmatterInterpolation])
-            .with_exclude_keys(["failure"]),
+            .with_exclude_keys(["failure"])),
     );
 
     let err = result.unwrap_err();
@@ -786,14 +786,14 @@ fn test_frontmatter_interpolation_nested_external_state() {
     let md: Markdown = content.into();
     let (composed, report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .with_external_state(serde_json::json!({
                     "meta": {"base": "/root", "author": "Parent"}
                 }))
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
-                ]),
+                ])),
         )
         .unwrap();
 
@@ -823,11 +823,11 @@ fn test_external_state_deep_merge_preserves_frontmatter_values() {
     let md: Markdown = content.into();
     let (composed, _) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .with_external_state(serde_json::json!({
                     "config": {"theme": "light", "lang": "en"}
                 }))
-                .only(&[ComposeOperation::Interpolation]),
+                .only(&[ComposeOperation::Interpolation])),
         )
         .unwrap();
 
@@ -860,7 +860,7 @@ fn test_child_frontmatter_interpolation_from_parent_state() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         composed.content().contains("Spec: /docs/spec.md"),
@@ -886,7 +886,7 @@ fn test_interpolated_prologue_path() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         composed.content().contains("Prologue content"),
@@ -911,7 +911,7 @@ fn test_interpolated_epilogue_path() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         composed.content().contains("Epilogue content"),
@@ -933,7 +933,7 @@ fn test_page_block_uses_interpolated_frontmatter() {
         ComposeOperation::FrontmatterInterpolation,
         ComposeOperation::PageBlocks,
     ]);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         composed.content().contains("Visible"),
@@ -953,7 +953,7 @@ fn test_page_block_false_from_interpolated_frontmatter() {
         ComposeOperation::FrontmatterInterpolation,
         ComposeOperation::PageBlocks,
     ]);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         !composed.content().contains("Hidden"),
@@ -971,13 +971,13 @@ fn name_coercion_renders_name_in_inline_body_context() {
     let md: Markdown = content.into();
     let (composed, _report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
                 ])
                 .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))
-                .with_name_coercion_keys(vec!["state".to_string()]),
+                .with_name_coercion_keys(vec!["state".to_string()])),
         )
         .unwrap();
 
@@ -996,12 +996,12 @@ fn name_coercion_is_opt_in_body_renders_json_without_keys() {
     let md: Markdown = content.into();
     let (composed, _report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[
                     ComposeOperation::FrontmatterInterpolation,
                     ComposeOperation::Interpolation,
                 ])
-                .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}})),
+                .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))),
         )
         .unwrap();
 
@@ -1025,10 +1025,10 @@ fn name_coercion_whole_value_frontmatter_span_keeps_object() {
     let md: Markdown = content.into();
     let (composed, _report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[ComposeOperation::FrontmatterInterpolation])
                 .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))
-                .with_name_coercion_keys(vec!["state".to_string()]),
+                .with_name_coercion_keys(vec!["state".to_string()])),
         )
         .unwrap();
 
@@ -1047,10 +1047,10 @@ fn name_coercion_inline_frontmatter_value_coerces() {
     let md: Markdown = content.into();
     let (composed, _report) = md
         .compose_with(
-            ComposeOptions::new()
+            &crate::markdown::compose::test_request(ComposeOptions::new()
                 .only(&[ComposeOperation::FrontmatterInterpolation])
                 .with_set_overrides(serde_json::json!({"state": {"name": "alpha", "index": 1}}))
-                .with_name_coercion_keys(vec!["state".to_string()]),
+                .with_name_coercion_keys(vec!["state".to_string()])),
         )
         .unwrap();
 

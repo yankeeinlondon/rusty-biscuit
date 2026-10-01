@@ -179,7 +179,7 @@ fn resolve_file_reference(
         None => document_resolution_context(
             &cwd,
             source_file_path(source).as_deref(),
-            &options.magic_paths,
+            &[],
             None,
         ),
     };
@@ -408,9 +408,10 @@ mod tests {
 
         let mut options = default_options();
         options.file_resolution_context = Some(
-            crate::markdown::compose::capture_file_resolution_context(
-                source_path.parent().expect("source parent"),
-            ),
+            crate::markdown::compose::build_resolution_context(
+                &crate::markdown::compose::RequestSnapshot::new(source_path.parent().expect("source parent")),
+            )
+            .unwrap(),
         );
         let resolved = resolve_path(
             "^shared.md",
@@ -462,7 +463,10 @@ mod tests {
 
         let mut options = default_options();
         options.file_resolution_context = Some(
-            crate::markdown::compose::capture_file_resolution_context(&nested),
+            crate::markdown::compose::build_resolution_context(
+                &crate::markdown::compose::RequestSnapshot::new(&nested),
+            )
+            .unwrap(),
         );
 
         let resolved = resolve_path(
@@ -548,8 +552,9 @@ mod tests {
         }
     }
 
+    /// A request snapshot's extra `@` root reaches a transclusion: the
+    /// builder is the one place magic roots enter a context.
     #[test]
-    #[serial]
     fn resolves_magic_path_prepended() {
         let dir = tempdir().unwrap();
         let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -564,15 +569,13 @@ mod tests {
         let source_path = root.join("root.md");
         std::fs::write(&source_path, "# root").unwrap();
 
-        // Initialize a git repo so FileReference works
         gix::init(&root).unwrap();
 
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
-
+        let snapshot = crate::markdown::compose::RequestSnapshot::new(&root)
+            .with_magic_root(&magic_dir, biscuit_file::PathPosition::Start);
         let mut opts = default_options();
-        opts.magic_paths
-            .push((magic_dir.clone(), biscuit_file::PathPosition::Start));
+        opts.file_resolution_context =
+            Some(crate::markdown::compose::build_resolution_context(&snapshot).unwrap());
 
         let resolved = resolve_path(
             "@/special.md",
@@ -581,11 +584,9 @@ mod tests {
             &ComposeSource::File(source_path),
             1,
             dummy_ctx("# root"),
-        );
+        )
+        .unwrap();
 
-        std::env::set_current_dir(&original_dir).unwrap();
-
-        let resolved = resolved.unwrap();
         assert_eq!(resolved, std::fs::canonicalize(&target_path).unwrap());
     }
 

@@ -40,7 +40,7 @@ use super::{
     ValidationProblemCode, ValidationReport, validate,
 };
 use crate::markdown::Markdown;
-use crate::markdown::compose::capture_file_resolution_context;
+use crate::markdown::compose::{RequestSnapshot, build_resolution_context};
 
 /// The baseline-schema choice for a clean run (decision D7).
 ///
@@ -152,13 +152,12 @@ impl CleanSchemaConfig {
         };
         if self.trigger_schemas
             && let Some(path) = document_path
-            && let Some(boundary) = capture_file_resolution_context(
-                path.parent().unwrap_or(path),
-            )
-                .repository_root()
-                .map(Path::to_path_buf)
         {
-            builder = builder.with_trigger_discovery(path, boundary)?;
+            let context = build_resolution_context(&RequestSnapshot::new(path.parent().unwrap_or(path)))
+                .map_err(|error| SchemaError::TriggerMatch { message: error.to_string() })?;
+            if let Some(boundary) = context.repository_root() {
+                builder = builder.with_trigger_discovery(path, boundary)?;
+            }
         }
         Ok(CleanSchemaContext {
             schemas: builder,

@@ -15,13 +15,13 @@ pub(crate) mod format;
 pub mod merge;
 pub(crate) mod options;
 pub(crate) mod report;
+pub(crate) mod request;
 mod repository_scope;
 pub(crate) mod runtime;
 
 pub use authority::{ContextAuthority, ContextExtension};
 pub use catalog::{context_variable_descriptors, ContextValueType, ContextVariableDescriptor};
 pub use capture::{ContextCaptureEvidence, ContextGroup, ContextRequirements, DeferredCapabilities};
-pub use capture::capture_file_resolution_context;
 pub use current::{CurrentAuthority, CurrentProvider, CurrentRefresh};
 pub(crate) use current::CurrentScope;
 pub use diagnostics::ContextMergeDiagnostic;

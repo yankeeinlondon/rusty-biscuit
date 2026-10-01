@@ -34,7 +34,7 @@ fn test_end_to_end_link_interpolation() {
     ]);
 
     let md = Markdown::try_from(root_file.as_path()).unwrap();
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     let content = composed.content();
 
     // In the final composed document (which is anchored at root.md), the path to the asset
@@ -67,7 +67,7 @@ fn test_home_dir_interpolation() {
         ComposeOperation::LinkResolve,
         ComposeOperation::LinkNormalization,
     ]);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     assert!(
         composed.content().contains("~/integration_test_home.txt"),
         "Content was: {}",
@@ -99,16 +99,16 @@ fn test_env_var_interpolation() {
         .without_home_dir()
         .with_env(env);
     let options = |operations: &[ComposeOperation]| {
-        ComposeOptions::new()
+        let options = ComposeOptions::new()
             .with_source_file(elsewhere.join("doc.md"))
             .with_portable_env(["PROJECT_ROOT_INTEGRATION"])
-            .with_file_resolution_context(snapshot.clone())
-            .only(operations)
+            .only(operations);
+        darkmatter::markdown::compose::ComposeRequest::with_context(options, snapshot.clone()).unwrap()
     };
     let content = format!("[config]({})", biscuit_file::to_portable_string(&target));
 
     let (composed, _) = Markdown::new(&content)
-        .compose_with(options(&[
+        .compose_with(&options(&[
             ComposeOperation::LinkResolve,
             ComposeOperation::LinkNormalization,
         ]))
@@ -119,7 +119,7 @@ fn test_env_var_interpolation() {
     );
 
     let (recomposed, _) = Markdown::new(composed.content())
-        .compose_with(options(ComposeOperation::default_order()))
+        .compose_with(&options(ComposeOperation::default_order()))
         .unwrap();
     assert_eq!(recomposed.content().trim_end(), composed.content());
 }
@@ -144,7 +144,7 @@ fn test_child_no_normalization() {
         ComposeOperation::BlockTransclusion,
     ]);
     let md = Markdown::try_from(root_file.as_path()).unwrap();
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
 
     let abs_path = std::fs::canonicalize(&target_file).unwrap();
     let abs_path_str = abs_path.to_string_lossy();

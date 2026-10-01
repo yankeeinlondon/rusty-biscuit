@@ -121,13 +121,13 @@ fn compose(
         .with_shell_timeout(timeout)
         .with_allow_shell_timeout(allow_timeout);
     let approved = document
-        .compose_preflight(&options)
+        .compose_preflight(&crate::request_support::request(options.clone()))
         .map_err(|error| error.to_string())?
         .approval_set()
         .into_iter()
         .collect();
     document
-        .compose_with(options.with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
         .map(|(composed, _report)| composed.content().to_string())
         .map_err(|error| error.to_string())
 }

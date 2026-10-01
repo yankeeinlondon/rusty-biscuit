@@ -22,7 +22,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::shell_expansion::policy::{
     check_builtin_blacklist, check_user_blacklist, check_whitelist,
 };
@@ -73,8 +72,8 @@ impl Markdown {
     ///
     /// The v2 design places this stage between schema validation and
     /// any shell execution (design step 4): the caller (CLI, Claudine,
-    /// …) is expected to compute the approval set once, then call
-    /// `compose_with(options.with_pre_approved_commands(set))`. The
+    /// …) is expected to compute the approval set once, then compose with
+    /// `request.map_options(|options| options.with_pre_approved_commands(set))`. The
     /// in-stage approval flow is reserved as a fallback for callers
     /// that opt into per-directive prompting directly.
     ///
@@ -90,10 +89,11 @@ impl Markdown {
     /// - Collection, policy-file, or pre-flight failures.
     pub fn compose_preflight_approvals(
         &self,
-        options: &ComposeOptions,
+        request: &crate::markdown::compose::ComposeRequest,
         approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
     ) -> Result<ComposePreflightApprovals, ShellExpansionError> {
-        let report = self.compose_preflight(options).map_err(|e| match e {
+        let options = request.options();
+        let report = self.compose_preflight(request).map_err(|e| match e {
             crate::markdown::types::MarkdownError::ShellExpansion(inner) => *inner,
             // Preserve the rich error (transform parse, ctx merge, schema
             // validation, remote fetch, …) so the caller renders its styled
@@ -326,7 +326,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let err = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .expect_err("body command denial must surface as a ShellExpansionError");
         assert!(
             matches!(err, ShellExpansionError::Denied { .. }),
@@ -362,7 +362,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let approvals = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .expect("preflight should succeed with an approving handler");
         assert_eq!(approvals.stats.total_discovered, 2);
         assert_eq!(approvals.stats.user_approved, 2);
@@ -374,7 +374,7 @@ mod lifecycle_tests {
         // is a pure membership check, so no handler call is made.
         let compose_options = build_options(temp.path())
             .with_pre_approved_commands(approvals.pre_approved_commands);
-        let (composed, report) = md.compose_with(compose_options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(compose_options)).unwrap();
         assert!(composed.content().contains("first"));
         assert!(composed.content().contains("second"));
         // Handler count stays at 2 (the pre-flight batch) — the in-stage
@@ -397,7 +397,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let approvals = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .unwrap();
 
         assert_eq!(approvals.stats.already_whitelisted, 1);
@@ -417,7 +417,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let err = md
-            .compose_preflight_approvals(&options, None)
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), None)
             .expect_err("no handler and no whitelist must surface ApprovalRequired");
         assert!(
             matches!(err, ShellExpansionError::ApprovalRequired { .. }),
@@ -437,7 +437,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let err = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .expect_err("builtin-blacklisted command must be rejected");
         assert!(
             matches!(err, ShellExpansionError::Blacklisted { .. }),
@@ -463,7 +463,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let err = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .expect_err("user-blacklisted command must be rejected");
         assert!(
             matches!(err, ShellExpansionError::Blacklisted { ref reason, .. } if reason == "user blacklist"),
@@ -483,7 +483,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let err = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .expect_err("BlacklistPersist must abort the lifecycle");
         assert!(
             matches!(err, ShellExpansionError::Blacklisted { ref reason, .. } if reason == "user blacklisted"),
@@ -502,7 +502,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let approvals = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .unwrap();
         assert!(approvals.pre_approved_commands.contains("echo accept-me"));
     }
@@ -520,7 +520,7 @@ mod lifecycle_tests {
 
         let options = build_options(temp.path());
         let approvals = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .unwrap();
 
         let seen: Vec<String> = handler
@@ -573,7 +573,7 @@ mod lifecycle_tests {
 
         let handler = Arc::new(RecordingHandler::new(ShellApprovalDecision::AllowOnce));
         let approvals = md
-            .compose_preflight_approvals(&options, Some(handler.clone()))
+            .compose_preflight_approvals(&crate::markdown::compose::test_request(options.clone()), Some(handler.clone()))
             .unwrap();
 
         // The lifecycle surfaced the graph with the child edge.
@@ -589,12 +589,12 @@ mod lifecycle_tests {
             .clone()
             .with_pre_approved_commands(approvals.pre_approved_commands.clone())
             .with_preflight_graph(approvals.preflight_graph.clone());
-        let (with_graph, _) = md.compose_with(graph_options).unwrap();
+        let (with_graph, _) = md.compose_with(&crate::markdown::compose::test_request(graph_options)).unwrap();
 
         // Baseline: same approvals, no graph.
         let baseline_options =
             options.with_pre_approved_commands(approvals.pre_approved_commands);
-        let (baseline, _) = md.compose_with(baseline_options).unwrap();
+        let (baseline, _) = md.compose_with(&crate::markdown::compose::test_request(baseline_options)).unwrap();
 
         assert_eq!(
             with_graph.content(),

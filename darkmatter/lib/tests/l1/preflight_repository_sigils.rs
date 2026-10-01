@@ -97,7 +97,7 @@ fn compose_preflight_resolves_repository_sigils_from_a_nested_document() {
     let md = markdown(&fixture);
     for (row, options) in option_rows(&fixture) {
         let report = md
-            .compose_preflight(&options)
+            .compose_preflight(&crate::request_support::request(options.clone()))
             .unwrap_or_else(|error| panic!("{row}: preflight failed: {error}"));
 
         let approval: HashSet<String> = report.approval_set().into_iter().collect();
@@ -127,7 +127,7 @@ fn collect_shell_commands_resolves_repository_sigils_from_a_nested_document() {
     let fixture = fixture();
     let md = markdown(&fixture);
     for (row, options) in option_rows(&fixture) {
-        let entries = collect_shell_commands(&md, &options)
+        let entries = collect_shell_commands(&md, &crate::request_support::request(options.clone()))
             .unwrap_or_else(|error| panic!("{row}: collection failed: {error}"));
         let collected: Vec<&str> = entries.iter().map(|entry| entry.normalized.as_str()).collect();
         assert_eq!(collected, EXPECTED_COMMANDS, "{row}");
@@ -150,7 +150,7 @@ fn compose_preflight_approvals_resolves_repository_sigils_from_a_nested_document
     for (row, options) in option_rows(&fixture) {
         let options = options.with_shell_policy_root(policy.path());
         let approvals = md
-            .compose_preflight_approvals(&options, Some(Arc::new(AllowAll)))
+            .compose_preflight_approvals(&crate::request_support::request(options.clone()), Some(Arc::new(AllowAll)))
             .unwrap_or_else(|error| panic!("{row}: approvals failed: {error}"));
         let expected: HashSet<String> = EXPECTED_COMMANDS.iter().map(ToString::to_string).collect();
         assert_eq!(approvals.pre_approved_commands, expected, "{row}");
@@ -167,7 +167,7 @@ fn compose_preflight_reports_a_missing_repository_target_as_not_found() {
     let md = markdown(&fixture);
     for (row, options) in option_rows(&fixture) {
         let error = md
-            .compose_preflight(&options)
+            .compose_preflight(&crate::request_support::request(options.clone()))
             .expect_err("a missing `&` target must fail pre-flight")
             .to_string();
         assert!(

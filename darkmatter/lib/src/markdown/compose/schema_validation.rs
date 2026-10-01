@@ -2681,7 +2681,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(resolved.to_string_lossy())),
@@ -2721,7 +2721,7 @@ mod tests {
                 .with_file_ref_fallback_dir(&launch_repo)
                 .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-            let (composed, _) = md.compose_with(options).unwrap();
+            let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("spec"),
                 Some(&serde_json::json!(resolved.to_string_lossy())),
@@ -2750,7 +2750,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "specs": ["first.md", "second.md"] }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("specs"),
             Some(&serde_json::json!([
@@ -2784,7 +2784,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "label": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("label"),
             Some(&serde_json::json!("spec.md")),
@@ -2806,7 +2806,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(launch_dir.join("spec.md").to_string_lossy())),
@@ -2833,7 +2833,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!(repo.path().join("spec.md").to_string_lossy())),
@@ -2858,7 +2858,7 @@ mod tests {
                 "selected": "union.md",
             }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("specs"),
             Some(&serde_json::json!([
@@ -2885,7 +2885,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "kind": "file", "spec": "spec.md" }));
         let (file_result, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(file_options)
+            .compose_with(&crate::markdown::compose::test_request(file_options))
             .unwrap();
         assert_eq!(
             file_result.frontmatter().as_map().get("spec"),
@@ -2897,7 +2897,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "kind": "label", "spec": "spec.md" }));
         let (label_result, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(label_options)
+            .compose_with(&crate::markdown::compose::test_request(label_options))
             .unwrap();
         assert_eq!(
             label_result.frontmatter().as_map().get("spec"),
@@ -2922,8 +2922,15 @@ mod tests {
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "fixes/x/spec.md" }));
+        // The caller's value resolves from the launch area: the request
+        // directory, not the document's.
+        let request = crate::markdown::compose::ComposeRequest::prepare(
+            options,
+            &crate::markdown::compose::RequestSnapshot::new(&launch_dir),
+        )
+        .unwrap();
         let (composed, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(options)
+            .compose_with(&request)
             .unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
@@ -2955,7 +2962,7 @@ mod tests {
             .with_file_ref_fallback_dir(&repo)
             .with_set_overrides(serde_json::json!({ "spec": absolute }));
         let (composed, _) = md_with_schema_and_source(schema, &doc_path)
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
@@ -2975,7 +2982,7 @@ mod tests {
                 .with_file_ref_fallback_dir(dir.path())
                 .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
             let (composed, _) = md_with_schema_and_source(&schema, &doc_path)
-                .compose_with(options)
+                .compose_with(&crate::markdown::compose::test_request(options))
                 .unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("spec"),
@@ -2995,7 +3002,7 @@ mod tests {
             .with_file_ref_fallback_dir(dir.path())
             .with_set_overrides(serde_json::json!({ "spec": "%spec.md" }));
 
-        let error = md.compose_with(options).unwrap_err();
+        let error = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(matches!(
             &error,
             MarkdownError::SchemaValidationFailed { problems, .. }
@@ -3017,7 +3024,7 @@ mod tests {
             .with_file_ref_fallback_dir(dir.path())
             .with_set_overrides(serde_json::json!({ "spec": "https://example.com/spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("https://example.com/spec.md")),
@@ -3035,7 +3042,7 @@ mod tests {
             .with_set_overrides(serde_json::json!({ "spec": "!spec.md" }));
 
         assert!(matches!(
-            md.compose_with(options).unwrap_err(),
+            md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err(),
             MarkdownError::SchemaValidationFailed { .. }
         ));
     }
@@ -3064,7 +3071,7 @@ mod tests {
                 .with_file_resolution_context(context.clone())
                 .with_file_ref_fallback_dir(&launch_dir)
                 .with_set_overrides(serde_json::json!({ "spec": provided }));
-            let error = md.compose_with(options).unwrap_err();
+            let error = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
             assert!(matches!(
                 &error,
                 MarkdownError::SchemaValidationFailed { problems, .. }
@@ -3093,7 +3100,7 @@ mod tests {
                 .with_source_file(&doc_path)
                 .with_file_ref_fallback_dir(&origin_dir)
                 .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
-            let (composed, _) = md.compose_with(options).unwrap();
+            let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
             assert_eq!(
                 composed.frontmatter().as_map().get("spec"),
                 Some(&serde_json::json!(origin_dir.join("spec.md").to_string_lossy())),
@@ -3142,7 +3149,7 @@ mod tests {
                 "label": "ordinary",
             }));
 
-        let (composed, _) = md.compose_with(options.clone()).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
         let effective = composed.frontmatter().as_map();
 
         assert_eq!(
@@ -3173,8 +3180,8 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (first, _) = md.compose_with(options.clone()).unwrap();
-        let (second, _) = first.compose_with(options.clone()).unwrap();
+        let (first, _) = md.compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
+        let (second, _) = first.compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
         let expected = serde_json::json!(launch_dir.join("spec.md").to_string_lossy());
         assert_eq!(first.frontmatter().as_map().get("spec"), Some(&expected));
         assert_eq!(second.frontmatter().as_map().get("spec"), Some(&expected));
@@ -3205,7 +3212,7 @@ mod tests {
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(composed.content(), "caller sibling\n");
         assert_eq!(
             composed.frontmatter().as_map().get("spec"),

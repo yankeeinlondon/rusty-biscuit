@@ -81,11 +81,21 @@ The root compose pipeline is ordered:
 11. Inline cleanup and optional fixed-width reflow.
 12. Root-only link normalization.
 
-Pre-flight collection (`compose_preflight`, `collect_*`) runs before this
-pipeline and is a root entry too: both prepare their options through
-`ComposeOptions::prepare_root` (context extension, repository observation,
-file-resolution context). A new root entry that skips it resolves `&`/`^`
-with no repository root.
+Every entry point that resolves file references takes a `ComposeRequest`:
+`compose_with`, `compose_preflight*`, the `collect_*` functions,
+`transclusions_with_options`, `ReferenceGraphOptions::with_compose`,
+`execute_directive`, and `execute_resolved_shell_values`. A request is
+`ComposeRequest::prepare(options, &RequestSnapshot)` (which builds the context
+through `build_resolution_context`) or `ComposeRequest::with_context(options,
+built_or_derived_context)`. Preparation fixes the repository observation and
+reuses it for the builder (one discovery per request), re-anchors a
+`ComposeOptions::new()` context on the request directory, and makes `ctx.env`
+the context's environment. Magic roots enter only through
+`RequestSnapshot::with_magic_root*`; `ComposeOptions` has no magic paths and no
+public context setter. Only binaries call `RequestSnapshot::from_process()`.
+Unit tests use `crate::markdown::compose::test_request(options)`;
+`lib/tests/l1` uses `crate::request_support::{request, request_at}`. Internal
+inline passes over derived options use `Markdown::compose_with_options`.
 
 Keep this order stable. Whole-value `{{ ... }}` and `$(...)` values are
 executable state: they must resolve or fail, never leak as literal syntax.

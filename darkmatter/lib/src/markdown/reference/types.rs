@@ -795,8 +795,9 @@ pub struct ReferenceGraphOptions {
 impl Default for ReferenceGraphOptions {
     /// Creates default options, which eagerly captures runtime context.
     ///
-    /// Prefer `ReferenceGraphOptions::with_compose()` when a
-    /// `ComposeOptions` (with its captured context) is already available.
+    /// Prefer `ReferenceGraphOptions::with_compose()` when a prepared
+    /// [`ComposeRequest`](crate::markdown::compose::ComposeRequest) is already
+    /// available.
     fn default() -> Self {
         Self {
             compose: ComposeOptions::default(),
@@ -805,9 +806,14 @@ impl Default for ReferenceGraphOptions {
 }
 
 impl ReferenceGraphOptions {
-    /// Creates options that share the compose options (and their captured
-    /// context) instead of triggering a new capture.
-    pub fn with_compose(compose: ComposeOptions) -> Self {
+    /// Creates options that resolve through `request`'s options and context
+    /// instead of triggering a new capture.
+    pub fn with_compose(request: &crate::markdown::compose::ComposeRequest) -> Self {
+        Self { compose: request.root_options() }
+    }
+
+    /// Options over compose options a reference walk already holds.
+    pub(crate) fn from_compose_options(compose: ComposeOptions) -> Self {
         Self { compose }
     }
 }

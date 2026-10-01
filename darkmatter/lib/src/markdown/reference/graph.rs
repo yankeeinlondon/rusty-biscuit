@@ -79,7 +79,7 @@ fn build_graph_inner(
         ComposeSource::Url(url) => compose.with_source_url(url.clone()),
         ComposeSource::Unknown => compose,
     };
-    let options = ReferenceGraphOptions::with_compose(compose);
+    let options = ReferenceGraphOptions::from_compose_options(compose);
     let options = &options;
     let mut runtime = ReferenceAnalysisRuntime {
         transclusion: TransclusionRuntime::new(options.compose.max_transclusion_depth),
@@ -259,7 +259,7 @@ fn accepted_child_options(
     path: &std::path::Path,
     opening: Option<crate::markdown::compose::context::options::SourceOpening>,
 ) -> ReferenceGraphOptions {
-    ReferenceGraphOptions::with_compose(
+    ReferenceGraphOptions::from_compose_options(
         options
             .compose
             .clone()
@@ -903,7 +903,7 @@ pub(super) fn prepare_content_for_validation(
             accepted_child_options(options, path, None)
         }
         ComposeSource::Url(url) if options.compose.source != *source => {
-            ReferenceGraphOptions::with_compose(
+            ReferenceGraphOptions::from_compose_options(
                 options.compose.clone().with_source_url(url.clone()),
             )
         }
@@ -932,7 +932,7 @@ fn prepare_content(
         ComposeOperation::ShellExpansion,
     ]);
 
-    let (result, report) = md.compose_with(inline_pre_options)?;
+    let (result, report) = md.compose_with_options(inline_pre_options)?;
     Ok((result.content().to_string(), report.body_data))
 }
 
@@ -1136,7 +1136,7 @@ mod tests {
         .add_magic_path(magic, biscuit_file::PathPosition::Start);
         let prior = std::env::var_os("HOME");
         // SAFETY: the test is serialized while process-global state is changed.
-        let options = ReferenceGraphOptions::with_compose(
+        let options = ReferenceGraphOptions::from_compose_options(
             ComposeOptions::new().with_file_resolution_context(snapshot),
         );
         let ambient = tempfile::tempdir().unwrap();
@@ -1248,10 +1248,10 @@ mod tests {
         let compose = ComposeOptions::new()
             .with_source_file(&root_path)
             .with_file_resolution_context(snapshot);
-        let graph_options = ReferenceGraphOptions::with_compose(compose.clone());
+        let graph_options = ReferenceGraphOptions::from_compose_options(compose.clone());
         let root_md = Markdown::try_from(root_path.as_path()).unwrap();
 
-        let (composed, _) = root_md.compose_with(compose.clone()).unwrap();
+        let (composed, _) = root_md.compose_with(&crate::markdown::compose::test_request(compose.clone())).unwrap();
         assert!(composed.content().contains("External child"));
         assert!(composed.content().contains("External grandchild"));
 
@@ -1279,7 +1279,7 @@ mod tests {
 
         let child_md = Markdown::try_from(child_path.as_path()).unwrap();
         let ordinary_external = compose.with_source_file(&child_path);
-        assert!(child_md.transclusions_with_options(&ordinary_external).is_err());
+        assert!(child_md.transclusions_with_options(&crate::markdown::compose::test_request(ordinary_external.clone())).is_err());
     }
 
     #[test]
@@ -1675,10 +1675,10 @@ mod tests {
         let compose_b = compose_for("2000");
 
         let graph_a = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose_a.clone()))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose_a.clone()))
             .unwrap();
         let graph_b = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose_b.clone()))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose_b.clone()))
             .unwrap();
 
         // The graphs differ in *contents*, not merely in provenance: each root
@@ -1698,7 +1698,7 @@ mod tests {
         let report = md
             .validate_references_with_graph(
                 &graph_a,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_a,
                 )),
             )
@@ -1709,7 +1709,7 @@ mod tests {
         let err = md
             .validate_references_with_graph(
                 &graph_a,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_b,
                 )),
             )
@@ -1751,12 +1751,12 @@ mod tests {
         let compose_included = compose_for(4096);
 
         let graph_excluded = md
-            .reference_graph(ReferenceGraphOptions::with_compose(
+            .reference_graph(ReferenceGraphOptions::from_compose_options(
                 compose_excluded.clone(),
             ))
             .unwrap();
         let graph_included = md
-            .reference_graph(ReferenceGraphOptions::with_compose(
+            .reference_graph(ReferenceGraphOptions::from_compose_options(
                 compose_included.clone(),
             ))
             .unwrap();
@@ -1789,7 +1789,7 @@ mod tests {
         ] {
             md.validate_references_with_graph(
                 graph,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose,
                 )),
             )
@@ -1801,7 +1801,7 @@ mod tests {
         let err = md
             .validate_references_with_graph(
                 &graph_included,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_excluded,
                 )),
             )
@@ -1814,7 +1814,7 @@ mod tests {
         let err = md
             .validate_references_with_graph(
                 &graph_excluded,
-                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(
+                ReferenceValidationOptions::with_graph(ReferenceGraphOptions::from_compose_options(
                     compose_included,
                 )),
             )
@@ -1866,7 +1866,7 @@ mod tests {
         );
 
         let graph = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose))
             .unwrap();
         // Building the graph moved and dropped the build options, and provenance
         // captured only a `Weak`: the runtime is back to a single owner.
@@ -1922,7 +1922,7 @@ mod tests {
         );
 
         let graph = md
-            .reference_graph(ReferenceGraphOptions::with_compose(compose))
+            .reference_graph(ReferenceGraphOptions::from_compose_options(compose))
             .unwrap();
         // Graph construction consumed and dropped the build options and captured
         // only a `Weak`, so the count is back to the external handle alone.

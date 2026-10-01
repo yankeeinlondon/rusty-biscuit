@@ -1342,13 +1342,18 @@ mod tests {
         let md = Markdown::new("[Text Replacement](@darkmatter/docs/inline/text-replacement.md)")
             .with_source(ComposeSource::File(source_path));
 
-        // Configure the magic path: @darkmatter → <tmp>/darkmatter
-        let mut options = ReferenceValidationOptions::default();
-        options
-            .graph
-            .compose
-            .magic_paths
-            .push((root.to_path_buf(), PathPosition::Start));
+        // Configure the magic path through the request snapshot:
+        // @darkmatter → <tmp>/darkmatter
+        let snapshot = crate::markdown::compose::RequestSnapshot::new(&source_dir)
+            .with_magic_root(root, PathPosition::Start);
+        let request = crate::markdown::compose::ComposeRequest::prepare(
+            crate::markdown::compose::ComposeOptions::new(),
+            &snapshot,
+        )
+        .unwrap();
+        let options = ReferenceValidationOptions::with_graph(
+            crate::markdown::reference::ReferenceGraphOptions::with_compose(&request),
+        );
 
         // CWD is whatever the test runner uses — NOT source_dir.
         // This is the exact scenario that was broken before the fix.

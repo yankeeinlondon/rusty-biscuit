@@ -139,13 +139,24 @@ fn validate_one(
         Err(err) => return FileOutcome::ParseError(err.to_string()),
     };
 
+    let discovery_context = if no_trigger_schemas {
+        None
+    } else {
+        match darkmatter::markdown::compose::build_resolution_context(
+            &darkmatter::markdown::compose::RequestSnapshot::new(
+                discovery_path.parent().unwrap_or(&discovery_path),
+            ),
+        ) {
+            Ok(context) => Some(context),
+            Err(err) => return FileOutcome::ParseError(err.to_string()),
+        }
+    };
     let api = if no_trigger_schemas {
         api.clone()
-    } else if let Some(boundary) = darkmatter::markdown::compose::capture_file_resolution_context(
-        discovery_path.parent().unwrap_or(&discovery_path),
-    )
-    .repository_root()
-    .map(Path::to_path_buf)
+    } else if let Some(boundary) = discovery_context
+        .as_ref()
+        .and_then(|context| context.repository_root())
+        .map(Path::to_path_buf)
     {
         match api
             .clone()

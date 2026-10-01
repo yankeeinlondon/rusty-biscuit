@@ -328,20 +328,27 @@ mod tests {
         assert_ne!(k1, k2);
     }
 
+    /// Options whose file-resolution context registers `roots`, in order.
+    fn with_magic_roots(roots: &[(&str, biscuit_file::PathPosition)]) -> ComposeOptions {
+        let context = roots.iter().fold(
+            biscuit_file::FileResolutionContext::from_snapshot("/request", None, Default::default()),
+            |context, (root, position)| context.add_magic_path(*root, *position),
+        );
+        ComposeOptions::new().with_file_resolution_context(context)
+    }
+
     #[test]
     fn options_hash_sensitive_to_magic_paths() {
-        let base = ComposeOptions::new();
-        let with_magic = ComposeOptions::new()
-            .with_magic_path("/custom/root", biscuit_file::PathPosition::Start);
+        let base = with_magic_roots(&[]);
+        let with_magic = with_magic_roots(&[("/custom/root", biscuit_file::PathPosition::Start)]);
 
         assert_ne!(options_hash(&base), options_hash(&with_magic));
     }
 
     #[test]
     fn options_hash_sensitive_to_magic_path_position() {
-        let start =
-            ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::Start);
-        let end = ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::End);
+        let start = with_magic_roots(&[("/path", biscuit_file::PathPosition::Start)]);
+        let end = with_magic_roots(&[("/path", biscuit_file::PathPosition::End)]);
 
         assert_ne!(options_hash(&start), options_hash(&end));
     }
@@ -503,15 +510,16 @@ mod tests {
         assert_ne!(options_hash(&empty_state), options_hash(&empty_overrides));
     }
 
-    /// The length-prefixed encoding keeps `magic_paths` element boundaries: a
+    /// The length-prefixed encoding keeps magic-root element boundaries: a
     /// single path spelled with the historical `,` separator must not hash the
     /// same as two separate paths. The old comma-join collapsed both.
     #[test]
     fn options_hash_magic_path_element_boundaries_are_injective() {
-        let merged = ComposeOptions::new().with_magic_path("/a,/b", biscuit_file::PathPosition::Start);
-        let split = ComposeOptions::new()
-            .with_magic_path("/a", biscuit_file::PathPosition::Start)
-            .with_magic_path("/b", biscuit_file::PathPosition::Start);
+        let merged = with_magic_roots(&[("/a,/b", biscuit_file::PathPosition::Start)]);
+        let split = with_magic_roots(&[
+            ("/a", biscuit_file::PathPosition::Start),
+            ("/b", biscuit_file::PathPosition::Start),
+        ]);
         assert_ne!(options_hash(&merged), options_hash(&split));
     }
 

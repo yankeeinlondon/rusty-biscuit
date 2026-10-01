@@ -28,13 +28,13 @@ fn options(provider: Arc<dyn crate::markdown::compose::CurrentProvider>) -> Comp
 
 fn compose(document: &str, options: ComposeOptions) -> (Markdown, ComposeReport) {
     Markdown::from(document)
-        .compose_with(options)
+        .compose_with(&crate::markdown::compose::test_request(options))
         .unwrap_or_else(|error| panic!("compose must succeed: {error}"))
 }
 
 fn compose_error(document: &str, options: ComposeOptions) -> MarkdownError {
     Markdown::from(document)
-        .compose_with(options)
+        .compose_with(&crate::markdown::compose::test_request(options))
         .expect_err("compose must fail")
 }
 
@@ -293,7 +293,7 @@ fn preflight_plans_the_lazy_reads_without_observing_them() {
             .into();
 
     let report = document
-        .compose_preflight(&options(provider.clone()))
+        .compose_preflight(&crate::markdown::compose::test_request(options(provider.clone())))
         .expect("preflight must succeed");
 
     assert_eq!(report.deferred_context.current_keys().collect::<Vec<_>>(), ["branch"]);
@@ -584,10 +584,10 @@ mod ambient_repository {
         use crate::markdown::reference::ReferenceGraphOptions;
         use crate::markdown::reference::validate::ReferenceValidationOptions;
         let validation = markdown
-            .validate_references(ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(options.clone())))
+            .validate_references(ReferenceValidationOptions::with_graph(ReferenceGraphOptions::with_compose(&crate::markdown::compose::test_request(options.clone()))))
             .unwrap();
         assert!(validation.issues.is_empty(), "{:?}", validation.issues);
-        let preflight = markdown.compose_preflight(&options).unwrap();
+        let preflight = markdown.compose_preflight(&crate::markdown::compose::test_request(options.clone())).unwrap();
         assert_eq!(preflight.deferred_context.current_keys().count(), 3, "{:?}", preflight.deferred_context);
         let (composed, report) = compose(document, options.clone());
         let (again, _) = compose(document, options);

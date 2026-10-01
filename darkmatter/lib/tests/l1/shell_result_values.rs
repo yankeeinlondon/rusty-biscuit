@@ -131,13 +131,13 @@ impl Repo {
             .with_shell_timeout(timeout)
             .with_allow_shell_timeout(allow_timeout);
         let approved = document
-            .compose_preflight(&options)
+            .compose_preflight(&crate::request_support::request(options.clone()))
             .map_err(|error| error.to_string())?
             .approval_set()
             .into_iter()
             .collect();
         let (composed, _report) = document
-            .compose_with(options.with_pre_approved_commands(approved))
+            .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
             .map_err(|error: MarkdownError| error.to_string())?;
         Ok(Value::Object(
             composed
@@ -412,8 +412,8 @@ fn a_transcluded_document_reads_a_result_and_shares_the_cache() {
         .with_source_file(&path)
         .with_shell_policy_root(repo.path())
         .with_shell_timeout(std::time::Duration::from_secs(60));
-    let approved = document.compose_preflight(&options).unwrap().approval_set().into_iter().collect();
-    let (composed, _) = document.compose_with(options.with_pre_approved_commands(approved)).unwrap();
+    let approved = document.compose_preflight(&crate::request_support::request(options.clone())).unwrap().approval_set().into_iter().collect();
+    let (composed, _) = document.compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved))).unwrap();
     assert!(composed.content().contains("clean=true"), "{}", composed.content());
     assert_eq!(repo.runs("included"), 1, "the root and the partial share one run");
 }
@@ -542,7 +542,7 @@ mod resolved_values {
         let results = execute_resolved_shell_values(
             &[&value],
             state(&[("target", json!("nope"))]),
-            &options(&repo, &[&value]),
+            &crate::request_support::request(options(&repo, &[&value])),
         )
         .unwrap();
         assert_eq!(results, [("v".to_string(), json!(true))]);
@@ -560,7 +560,7 @@ mod resolved_values {
         let options = options(&repo, &[&value]);
         for (flag, code) in [(true, 128), (false, 0)] {
             let results =
-                execute_resolved_shell_values(&[&value], state(&[("flag", json!(flag))]), &options)
+                execute_resolved_shell_values(&[&value], state(&[("flag", json!(flag))]), &crate::request_support::request(options.clone()))
                     .unwrap();
             assert_eq!(results[0].1, json!(code), "flag={flag}");
         }
@@ -574,9 +574,9 @@ mod resolved_values {
         let second = resolve(&repo, &authored, &authored, &[]);
         let options = options(&repo, &[&first]);
 
-        execute_resolved_shell_values(&[&first, &second], HashMap::new(), &options).unwrap();
+        execute_resolved_shell_values(&[&first, &second], HashMap::new(), &crate::request_support::request(options.clone())).unwrap();
         assert_eq!(repo.runs("runs"), 1, "values in one execution share a run");
-        execute_resolved_shell_values(&[&first], HashMap::new(), &options).unwrap();
+        execute_resolved_shell_values(&[&first], HashMap::new(), &crate::request_support::request(options.clone())).unwrap();
         assert_eq!(repo.runs("runs"), 2, "a later execution runs the command again");
     }
 
@@ -587,7 +587,7 @@ mod resolved_values {
         let options = ComposeOptions::new()
             .with_source_file(repo.path().join("doc.md"))
             .with_pre_approved_commands(HashSet::new());
-        let error = execute_resolved_shell_values(&[&value], HashMap::new(), &options).unwrap_err();
+        let error = execute_resolved_shell_values(&[&value], HashMap::new(), &crate::request_support::request(options.clone())).unwrap_err();
         assert!(error.to_string().contains("not pre-approved"), "{error}");
     }
 

@@ -1546,7 +1546,7 @@ The stage is **not** part of the `ComposeOperation` enum — it cannot be exclud
 ### Library API
 
 ```rust
-use darkmatter::markdown::compose::ComposeOptions;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use darkmatter::markdown::schemas::SimplifiedSchema;
 
 let baseline: SimplifiedSchema = /* ... */;
@@ -1554,7 +1554,9 @@ let baseline: SimplifiedSchema = /* ... */;
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);
 
-let (composed, report) = md.compose_with(options)?;
+// `snapshot` is the request's `RequestSnapshot` (see ../compose-requests.md).
+let request = ComposeRequest::prepare(options, &snapshot)?;
+let (composed, report) = md.compose_with(&request)?;
 ```
 
 `with_baseline_schema` accepts a pre-built `SimplifiedSchema` (not a file path). When both baseline and document `$schema` declare the same property, the **document wins** — matching the existing `schemas::resolve::merge` rule.

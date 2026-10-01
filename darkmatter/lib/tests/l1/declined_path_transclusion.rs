@@ -51,16 +51,16 @@ fn write_documents(verbatim_parent: &Path, name: &str) -> PathBuf {
 
 fn compose(root: &Path) -> Result<(Markdown, ComposeReport), MarkdownError> {
     let md = Markdown::try_from(root).unwrap();
-    md.compose_with(ComposeOptions::new().with_source_file(root).only(&OPERATIONS))
+    md.compose_with(&crate::request_support::request(ComposeOptions::new().with_source_file(root).only(&OPERATIONS)))
 }
 
 fn compose_fail_fast(root: &Path) -> Result<(Markdown, ComposeReport), MarkdownError> {
     let md = Markdown::try_from(root).unwrap();
     md.compose_with(
-        ComposeOptions::new()
+        &crate::request_support::request(ComposeOptions::new()
             .with_source_file(root)
             .with_fail_fast(true)
-            .only(&OPERATIONS),
+            .only(&OPERATIONS)),
     )
 }
 

@@ -28,14 +28,21 @@ use tracing::{info, instrument, trace};
 
 impl Markdown {
     /// Internal pipeline runner.
-    pub(crate) fn run_compose_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+    pub(crate) fn run_compose_pipeline(&mut self, request: &super::ComposeRequest) -> MarkdownResult<ComposeReport> {
+        self.run_root_pipeline(request.root_options())
+    }
+
+    /// Runs the pipeline as a root over options a root already holds: a
+    /// request's root options, or options derived from them for an inline
+    /// pass (pre-flight discovery, reference-graph content preparation).
+    pub(crate) fn run_root_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
         // A constructor has no document, so `ComposeOptions::new` captures no
         // discovered `ctx.*` group. This is the first point that has both: an
         // extendable context grows to the groups this document names, and the
         // result seeds the request epoch every transcluded source extends.
-        // The repository observation is fixed before any stage of the root
-        // runs, so no descendant can establish it late.
-        options.prepare_root(self);
+        // The repository observation was fixed when the request was prepared,
+        // so no descendant can establish it late.
+        options.extend_context_for(self);
 
         // Reuse the caller-supplied shared runtime when present (so a pre-flight
         // walk and this pass fetch each URL once); otherwise build one whose

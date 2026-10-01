@@ -354,7 +354,7 @@ mod tests {
             .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
             .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
-        let (result, report) = md.compose_with(options).unwrap();
+        let (result, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         // Directive should remain in content when stage is disabled
         assert!(result.content.contains("::toc-linking"));
         assert_eq!(report.toc_links_generated, 0);
@@ -377,7 +377,7 @@ mod tests {
             .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
             .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
-        let (_, report) = md.compose_with(options).unwrap();
+        let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(report.toc_links_generated > 0);
         assert!(report.has_changes());
         assert!(report.summary().contains("toc-link"));
@@ -646,7 +646,7 @@ mod tests {
             .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
             .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
-        let (result, report) = md.compose_with(options).unwrap();
+        let (result, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(report.toc_links_generated, 2);
 
         let mut root_count = 0usize;

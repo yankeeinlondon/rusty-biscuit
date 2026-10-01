@@ -121,7 +121,7 @@ impl Drop for CwdGuard {
 fn compose_ambient(content: &str) -> String {
     let md: Markdown = content.into();
     let (composed, _report) = md
-        .compose_with(ComposeOptions::new())
+        .compose_with(&crate::request_support::request(ComposeOptions::new()))
         .expect("compose must succeed");
     composed.content().trim().to_string()
 }
@@ -130,7 +130,7 @@ fn compose_full_capture(content: &str) -> String {
     let md: Markdown = content.into();
     let options = ComposeOptions::new_with_context(ComposeContext::capture());
     let (composed, _report) = md
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .expect("compose must succeed");
     composed.content().trim().to_string()
 }
@@ -152,7 +152,7 @@ fn render_every_variable(options: ComposeOptions) -> HashMap<String, String> {
         .join(" ");
 
     let md: Markdown = document.as_str().into();
-    let (composed, _report) = md.compose_with(options).expect("compose must succeed");
+    let (composed, _report) = md.compose_with(&crate::request_support::request(options)).expect("compose must succeed");
     let content = composed.content().to_string();
 
     content
@@ -274,7 +274,7 @@ fn caller_supplied_minimal_context_fails_instead_of_rendering_uncaptured_groups_
     let md: Markdown = REGRESSION_INPUT.into();
     let options = ComposeOptions::new_with_context(ComposeContext::capture_minimal());
     let error = md
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .expect_err("an uncaptured group must fail composition");
 
     assert!(
@@ -310,7 +310,7 @@ fn ambient_child_first_reference_renders_the_full_capture_value() {
 
     let compose = |options: ComposeOptions| {
         let md = Markdown::try_from(root.as_path()).expect("root loads");
-        md.compose_with(options.with_source_file(root.clone()))
+        md.compose_with(&crate::request_support::request(options.with_source_file(root.clone())))
             .map(|(composed, _report)| composed.content().to_string())
     };
     let os_of = |output: &str, prefix: &str| {

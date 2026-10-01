@@ -57,42 +57,24 @@ mod tests {
         result
     }
 
-    #[test]
-    #[serial_test::serial(env_agent_model)]
-    fn populate_agent_uses_env_values_with_trim() {
-        with_env_var("AGENT", Some("  claude  "), || {
-            with_env_var("MODEL", Some("  sonnet-4  "), || {
-                let mut values = Map::new();
-                populate_agent(&std::env::vars().collect(), &mut values);
-                assert_eq!(
-                    values.get("agent"),
-                    Some(&Value::String("claude".to_string()))
-                );
-                assert_eq!(
-                    values.get("model"),
-                    Some(&Value::String("sonnet-4".to_string()))
-                );
-            })
-        });
+    fn environment(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()
     }
 
     #[test]
-    #[serial_test::serial(env_agent_model)]
+    fn populate_agent_uses_env_values_with_trim() {
+        let mut values = Map::new();
+        populate_agent(&environment(&[("AGENT", "  claude  "), ("MODEL", "  sonnet-4  ")]), &mut values);
+        assert_eq!(values.get("agent"), Some(&Value::String("claude".to_string())));
+        assert_eq!(values.get("model"), Some(&Value::String("sonnet-4".to_string())));
+    }
+
+    #[test]
     fn populate_agent_defaults_when_missing_or_empty() {
-        with_env_var("AGENT", None, || {
-            with_env_var("MODEL", Some("   "), || {
-                let mut values = Map::new();
-                populate_agent(&std::env::vars().collect(), &mut values);
-                assert_eq!(
-                    values.get("agent"),
-                    Some(&Value::String("unknown".to_string()))
-                );
-                assert_eq!(
-                    values.get("model"),
-                    Some(&Value::String("default".to_string()))
-                );
-            })
-        });
+        let mut values = Map::new();
+        populate_agent(&environment(&[("MODEL", "   ")]), &mut values);
+        assert_eq!(values.get("agent"), Some(&Value::String("unknown".to_string())));
+        assert_eq!(values.get("model"), Some(&Value::String("default".to_string())));
     }
 
     #[test]

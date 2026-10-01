@@ -181,7 +181,7 @@ impl FileTree {
         let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let compose =
             ComposeOptions::new_with_context(ComposeContext::capture_for_document(&base_dir, &md));
-        let graph_options = ReferenceGraphOptions::with_compose(compose);
+        let graph_options = ReferenceGraphOptions::from_compose_options(compose);
         let validation_options = ReferenceValidationOptions::with_graph(graph_options.clone());
         Self {
             md,

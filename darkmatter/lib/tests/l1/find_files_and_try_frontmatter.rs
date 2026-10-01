@@ -43,7 +43,7 @@ fn value(dir: &Path, expression: &str) -> Result<Value, String> {
     std::fs::write(&path, format!("---\nv: '{yaml}'\n---\nBody\n")).expect("write probe");
     let document = Markdown::try_from(path.as_path()).map_err(|error| error.to_string())?;
     let (composed, _report) = document
-        .compose_with(ComposeOptions::new().with_source_file(&path))
+        .compose_with(&crate::request_support::request(ComposeOptions::new().with_source_file(&path)))
         .map_err(|error| error.to_string())?;
     Ok(composed.frontmatter().as_map().get("v").cloned().unwrap_or(Value::Null))
 }

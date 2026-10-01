@@ -334,51 +334,6 @@ use super::pipeline::operations::COMPOSE_OPERATION_DESCRIPTORS;
     }
 
     #[test]
-    fn with_magic_path_accumulates_entries() {
-        use biscuit_file::PathPosition;
-
-        let options = ComposeOptions::new()
-            .with_magic_path("/project/.claudine", PathPosition::Start)
-            .with_magic_path("/home/user/.claudine", PathPosition::Start)
-            .with_magic_path("/fallback", PathPosition::End);
-
-        assert_eq!(options.magic_paths.len(), 3);
-        assert_eq!(
-            options.magic_paths[0].0,
-            PathBuf::from("/project/.claudine")
-        );
-        assert_eq!(options.magic_paths[0].1, PathPosition::Start);
-        assert_eq!(
-            options.magic_paths[1].0,
-            PathBuf::from("/home/user/.claudine")
-        );
-        assert_eq!(options.magic_paths[1].1, PathPosition::Start);
-        assert_eq!(options.magic_paths[2].0, PathBuf::from("/fallback"));
-        assert_eq!(options.magic_paths[2].1, PathPosition::End);
-    }
-
-    #[test]
-    fn magic_paths_appear_in_transclusion_options() {
-        use biscuit_file::PathPosition;
-
-        let options = ComposeOptions::new().with_magic_path("/custom/root", PathPosition::Start);
-
-        let transclusion = options.transclusion_options();
-        assert_eq!(transclusion.magic_paths.len(), 1);
-        assert_eq!(transclusion.magic_paths[0].0, PathBuf::from("/custom/root"));
-        assert_eq!(transclusion.magic_paths[0].1, PathPosition::Start);
-    }
-
-    #[test]
-    fn magic_paths_default_empty() {
-        let options = ComposeOptions::new();
-        assert!(options.magic_paths.is_empty());
-
-        let transclusion = options.transclusion_options();
-        assert!(transclusion.magic_paths.is_empty());
-    }
-
-    #[test]
     fn perf_disabled_by_default() {
         let options = ComposeOptions::new();
         assert!(!options.perf_enabled);

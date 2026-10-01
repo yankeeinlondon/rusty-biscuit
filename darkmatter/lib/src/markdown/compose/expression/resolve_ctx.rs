@@ -255,13 +255,18 @@ impl ResolutionContext {
     /// Returns the executing agent name.
     ///
     /// Uses the captured `ctx.agent` value when available; otherwise reads
-    /// `AGENT` from the environment with the same trim-and-default rules.
+    /// `AGENT` from the request context's environment (the process
+    /// environment only when there is no request context) with the same
+    /// trim-and-default rules.
     pub(crate) fn agent(&self) -> String {
         if let Some(Value::String(s)) = self.ctx_value("agent") {
             return s.clone();
         }
-        std::env::var("AGENT")
-            .ok()
+        let agent = match &self.file_resolution_context {
+            Some(context) => context.env().get("AGENT").cloned(),
+            None => std::env::var("AGENT").ok(),
+        };
+        agent
             .map(|s| s.trim_ascii().to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string())

@@ -717,7 +717,10 @@ mod tests {
         std::fs::write(&package_target, "package").unwrap();
 
         let base = member.join("docs");
-        let context = crate::markdown::compose::capture_file_resolution_context(&base);
+        let context = crate::markdown::compose::build_resolution_context(
+            &crate::markdown::compose::RequestSnapshot::new(&base),
+        )
+        .unwrap();
         assert_eq!(
             std::fs::canonicalize(
                 resolve_file_reference_in_context(

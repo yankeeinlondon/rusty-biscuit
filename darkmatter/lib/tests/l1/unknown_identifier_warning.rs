@@ -57,9 +57,13 @@ fn options(dir: &Path, path: &Path) -> ComposeOptions {
 }
 
 fn compose(path: &Path, options: ComposeOptions) -> (String, ComposeReport) {
+    compose_request(path, &crate::request_support::request(options))
+}
+
+fn compose_request(path: &Path, request: &darkmatter::markdown::compose::ComposeRequest) -> (String, ComposeReport) {
     let (composed, report) = Markdown::try_from(path)
         .expect("document loads")
-        .compose_with(options)
+        .compose_with(request)
         .expect("an unknown identifier never fails composition");
     (composed.content().trim_end().to_string(), report)
 }
@@ -142,7 +146,7 @@ fn a_declared_required_root_fails_with_the_schema_message_only() {
 
     let error = Markdown::try_from(path.as_path())
         .unwrap()
-        .compose_with(options(dir.path(), &path))
+        .compose_with(&crate::request_support::request(options(dir.path(), &path)))
         .expect_err("an unset required property fails schema validation");
 
     let MarkdownError::SchemaValidationFailed { problems, .. } = &error else {
@@ -321,11 +325,10 @@ fn a_matched_trigger_schema_property_is_known() {
         let context = biscuit_file::FileResolutionContext::new(repo.path())
             .with_repository_root(repo.path())
             .with_source_path(&path);
-        let options = options(repo.path(), &path)
-            .with_file_resolution_context(context)
-            .with_trigger_schemas(triggers);
+        let options = options(repo.path(), &path).with_trigger_schemas(triggers);
+        let request = darkmatter::markdown::compose::ComposeRequest::with_context(options, context).unwrap();
 
-        let (content, report) = compose(&path, options);
+        let (content, report) = compose_request(&path, &request);
 
         assert_eq!(content, "[]");
         assert_eq!(warned_roots(&report), expected, "triggers={triggers}: {:?}", report.warnings);

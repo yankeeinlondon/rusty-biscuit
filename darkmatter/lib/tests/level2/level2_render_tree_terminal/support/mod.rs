@@ -965,7 +965,13 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let (composed, _report) = md
-        .compose_with(ComposeOptions::new().with_source_file(&root))
+        .compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::prepare(
+                ComposeOptions::new().with_source_file(&root),
+                &darkmatter::markdown::compose::RequestSnapshot::new(root.parent().unwrap()),
+            )
+            .unwrap(),
+        )
         .expect("compose ::file-links");
 
     // `TerminalOptions` is `#[non_exhaustive]`; build from the default and force

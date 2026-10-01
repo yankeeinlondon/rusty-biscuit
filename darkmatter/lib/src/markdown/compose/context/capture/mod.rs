@@ -56,29 +56,6 @@ pub(crate) use datetime::populate_datetime;
 #[cfg(test)]
 pub(crate) use snapshot::{GIT_DISCOVERY_COUNT, REPOSITORY_DISCOVERY_COUNT};
 
-fn capture_repository_scope_catalog(
-    base_dir: &Path,
-) -> Option<biscuit_file::RepositoryScopeCatalog> {
-    let capture = snapshot::ContextCapture::new(
-        base_dir,
-        &[ContextGroup::Repo],
-        Ok(base_dir.to_path_buf()),
-    );
-    super::repository_scope::RepositoryObservation {
-        root: capture.repo_root,
-        info: capture.repo_info,
-    }
-    .scope_catalog()
-}
-
-pub fn capture_file_resolution_context(base_dir: &Path) -> biscuit_file::FileResolutionContext {
-    let mut context = biscuit_file::FileResolutionContext::new(base_dir);
-    if let Some(catalog) = capture_repository_scope_catalog(base_dir) {
-        context = context.with_repository_scope_catalog(catalog);
-    }
-    context
-}
-
 /// Capture all runtime context variables for the given base directory.
 pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
     capture_runtime_context_for_requirements(base_dir, &ContextRequirements::all())

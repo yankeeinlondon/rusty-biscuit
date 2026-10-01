@@ -127,6 +127,6 @@ fn suggestion_metadata_neither_restricts_validation_nor_blocks_composition() {
     let report = schemas.validate(&document).expect("validator construction succeeds");
     assert!(report.valid, "unlisted document values remain valid: {:?}", report.problems);
 
-    let (composed, _) = document.compose().expect("composition remains permissive");
+    let (composed, _) = document.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("composition remains permissive");
     assert!(composed.as_string().contains("color: purple"));
 }

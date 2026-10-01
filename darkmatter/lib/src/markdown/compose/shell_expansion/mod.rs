@@ -158,7 +158,7 @@ impl DirectiveExecutionResult {
 /// ```no_run
 /// use biscuit_terminal::errors::SourceContext;
 /// use darkmatter::markdown::compose::shell_expansion::{execute_directive, types::{ErrorHandling, ShellCommandOrigin, ShellDirective, ShellExpansionRuntime, ShellPolicyPaths}};
-/// use darkmatter::markdown::compose::ComposeOptions;
+/// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
 /// use std::path::PathBuf;
 ///
 /// let ctx = SourceContext::new(PathBuf::from("/t"), PathBuf::from("t"), "");
@@ -175,22 +175,22 @@ impl DirectiveExecutionResult {
 ///     pipeline: None,
 ///     ctx,
 /// };
-/// let options = ComposeOptions::new();
+/// let request = ComposeRequest::prepare(ComposeOptions::new(), &RequestSnapshot::new(std::env::temp_dir())).unwrap();
 /// let policy_paths = ShellPolicyPaths {
 ///     whitelist: PathBuf::from("/tmp/whitelist"),
 ///     blacklist: PathBuf::from("/tmp/blacklist"),
 /// };
 /// let mut runtime = ShellExpansionRuntime::new();
-/// // let output = execute_directive(&directive, &options, &policy_paths, &mut runtime).unwrap();
+/// // let output = execute_directive(&directive, &request, &policy_paths, &mut runtime).unwrap();
 /// ```
 pub fn execute_directive(
     directive: &ShellDirective,
-    options: &ComposeOptions,
+    request: &crate::markdown::compose::ComposeRequest,
     policy_paths: &ShellPolicyPaths,
     shell_runtime: &mut ShellExpansionRuntime,
 ) -> Result<String, ShellExpansionError> {
     Ok(
-        execute_directive_detailed(directive, options, policy_paths, shell_runtime)?
+        execute_directive_detailed(directive, &request.root_options(), policy_paths, shell_runtime)?
             .combined_output(),
     )
 }
@@ -942,7 +942,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert!(composed.content().contains("hello"));
         assert!(!composed.content().contains("::shell"));
@@ -964,7 +964,7 @@ mod integration_tests {
                 })),
                 ..Default::default()
             });
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         composed.content().to_string()
     }
 
@@ -982,7 +982,7 @@ mod integration_tests {
                 })),
                 ..Default::default()
             });
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         (composed.content().to_string(), report)
     }
 
@@ -1045,7 +1045,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         let err = result.expect_err(
             "the `&&` chain must fail (exit 1) instead of reusing the `||` chain's cached success",
         );
@@ -1072,7 +1072,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         let body = composed.content();
         // The first directive suppresses `echo visible` (> /dev/null) and only
         // emits `echo cached`. The second directive emits `echo cached` too.
@@ -1129,7 +1129,7 @@ mod integration_tests {
                 })),
                 ..Default::default()
             });
-        let _ = md.compose_with(options).unwrap();
+        let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(
             !sentinel.exists(),
             "dead-branch command must not execute under condition-aware execution"
@@ -1266,7 +1266,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert!(composed.content().contains("after"));
         assert_eq!(report.warnings.len(), 1);
@@ -1296,7 +1296,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         // Only the "outside" directive should be replaced
         assert!(composed.content().contains("outside"));
@@ -1320,7 +1320,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("dangerous"));
@@ -1340,7 +1340,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("Approval required"));
@@ -1363,7 +1363,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert!(composed.content().contains("hello"));
         assert_eq!(report.shell_expansions_applied, 1);
@@ -1386,7 +1386,7 @@ mod integration_tests {
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert!(composed.content().contains("hello"));
         assert!(composed.content().contains("world"));
@@ -1418,7 +1418,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         // The {{ name }} should be interpolated to "world" before shell execution
         assert!(composed.content().contains("world"));
@@ -1450,7 +1450,7 @@ name: world
 
         let (composed, report) = Markdown::try_from(root.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
 
         assert_eq!(handler.approvals(), 1);
@@ -1483,7 +1483,7 @@ name: world
 
         let (composed, report) = Markdown::try_from(root.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
 
         assert_eq!(handler.approvals(), 1);
@@ -1516,7 +1516,7 @@ name: world
 
         let (_composed, report) = Markdown::try_from(root.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
 
         assert_eq!(handler.approvals(), 2);
@@ -1551,7 +1551,7 @@ name: world
 
         let (composed, _report) = Markdown::try_from(root.as_path())
             .unwrap()
-            .compose_with(options)
+            .compose_with(&crate::markdown::compose::test_request(options))
             .unwrap();
 
         assert_eq!(
@@ -1587,7 +1587,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert_eq!(
             handler.approvals(),
@@ -1626,7 +1626,7 @@ name: world
                 ..Default::default()
             });
 
-        let (_composed, _report) = md.compose_with(options).unwrap();
+        let (_composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert_eq!(
             handler.approvals(),
@@ -1699,7 +1699,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert_eq!(
             handler.approvals(),
@@ -1747,7 +1747,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("hello"));
     }
 
@@ -1774,7 +1774,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("hello"));
         assert_eq!(report.shell_expansions_applied, 1);
     }
@@ -1796,7 +1796,7 @@ name: world
                 ..Default::default()
             });
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(err.to_string().contains("denied") || err.to_string().contains("Denied"));
     }
 
@@ -1822,7 +1822,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         // Both directives produced their output.
         assert!(composed.content().contains("allowed"));
@@ -1856,7 +1856,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("ok"));
 
         let whitelist =
@@ -1888,7 +1888,7 @@ name: world
                 ..Default::default()
             });
 
-        let _ = md.compose_with(options).unwrap();
+        let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let whitelist =
             std::fs::read_to_string(temp_dir.path().join(".darkmatter-shell-whitelist")).unwrap();
@@ -1919,7 +1919,7 @@ name: world
                 ..Default::default()
             });
 
-        let _ = md.compose_with(options).unwrap();
+        let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let requests = handler.requests();
         assert_eq!(requests.len(), 1);
@@ -1950,7 +1950,7 @@ name: world
                 ..Default::default()
             });
 
-        let _ = md.compose_with(options).unwrap();
+        let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let requests = handler.requests();
         assert_eq!(requests.len(), 1);
@@ -1974,7 +1974,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("hello"));
 
         let whitelist =
@@ -1999,7 +1999,7 @@ name: world
                 ..Default::default()
             });
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("blacklist"));
 
         let blacklist =
@@ -2024,7 +2024,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(!composed.content().contains("::shell"));
         assert!(composed.content().contains("After"));
         assert_eq!(report.shell_expansions_applied, 1);
@@ -2047,7 +2047,7 @@ name: world
                 ..Default::default()
             });
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(err.to_string().contains("Blacklisted") || err.to_string().contains("dangerous"));
     }
 
@@ -2068,7 +2068,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("fallback"));
         assert!(!composed.content().contains("::shell"));
         assert!(composed.content().contains("After"));
@@ -2092,7 +2092,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("success"));
         assert!(!composed.content().contains("fallback"));
     }
@@ -2119,7 +2119,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("caught 42"));
     }
 
@@ -2145,7 +2145,7 @@ name: world
                 ..Default::default()
             });
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(result.is_err());
     }
 
@@ -2172,7 +2172,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("caught"));
     }
 
@@ -2193,7 +2193,7 @@ name: world
                 ..Default::default()
             });
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         // The enrichment should appear in the error chain
         assert!(err.to_string().contains("failed") || err.to_string().contains("exit"));
     }
@@ -2220,7 +2220,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("warnings found"));
     }
 
@@ -2247,7 +2247,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("non-fatal"));
     }
 
@@ -2265,7 +2265,7 @@ name: world
             .with_pre_approved_commands(approved);
 
         // No approval handler, no whitelist — should succeed via pre-approved set
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("hello"));
         assert!(composed.content().contains("world"));
         assert_eq!(report.shell_expansions_applied, 2);
@@ -2285,7 +2285,7 @@ name: world
             .only(&[ComposeOperation::ShellExpansion])
             .with_pre_approved_commands(approved);
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("not pre-approved"), "got: {msg}");
         assert!(msg.contains("echo sneaky"), "got: {msg}");
@@ -2356,7 +2356,7 @@ name: world
                 ..Default::default()
             });
 
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("Approval required") || msg.contains("approval"),
@@ -2383,7 +2383,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("ok"));
         assert_eq!(report.shell_approvals_used, 0);
     }
@@ -2407,7 +2407,7 @@ name: world
                 ..Default::default()
             });
 
-        let _ = md.compose_with(options).unwrap();
+        let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let requests = handler.requests();
         assert_eq!(requests.len(), 1);
@@ -2438,7 +2438,7 @@ name: world
                 ..Default::default()
             });
 
-        let _ = md.compose_with(options).unwrap();
+        let _ = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let requests = handler.requests();
         assert_eq!(requests.len(), 1);
@@ -2465,7 +2465,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("first"));
         assert!(composed.content().contains("second"));
     }
@@ -2489,7 +2489,7 @@ name: world
             });
 
         // No `||` recovery, so the chain should fail
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(result.is_err());
     }
 
@@ -2510,7 +2510,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("recovered"));
     }
 
@@ -2531,7 +2531,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("primary"));
         assert!(!composed.content().contains("fallback"));
     }
@@ -2553,7 +2553,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("tail"));
         assert!(!composed.content().contains("middle"));
     }
@@ -2575,7 +2575,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(!composed.content().contains("silenced"));
         assert!(composed.content().contains("Before"));
         assert!(composed.content().contains("After"));
@@ -2602,7 +2602,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("OUT"));
         assert!(!composed.content().contains("ERR"));
     }
@@ -2629,7 +2629,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(composed.content().contains("OUT"));
         assert!(composed.content().contains("ERR"));
     }
@@ -2657,7 +2657,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         // The merged stream must contain ERR before OUT in source order.
         let body = composed.content();
         let err_pos = body.find("ERR").expect("expected ERR in merged output");
@@ -2690,7 +2690,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         let body = composed.content();
         let a_pos = body.find('A').expect("expected A in merged output");
         let b_pos = body.find('B').expect("expected B in merged output");
@@ -2718,7 +2718,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         // body-shell contract concatenates stdout + stderr, so the line is
         // still present even after redirection
         assert!(composed.content().contains("routed"));
@@ -2748,7 +2748,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         let body = composed.content();
         assert!(body.contains("Before"));
         assert!(body.contains("After"));
@@ -2785,7 +2785,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         let body = composed.content();
         assert!(
             !body.contains("OUT"),
@@ -2818,7 +2818,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         let body = composed.content();
         assert!(body.contains("Before"));
         assert!(body.contains("After"));
@@ -2848,7 +2848,7 @@ name: world
                 ..Default::default()
             });
 
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         let body = composed.content();
         assert!(body.contains("Before"));
         assert!(body.contains("After"));
@@ -2873,7 +2873,7 @@ name: world
                 ..Default::default()
             });
 
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(

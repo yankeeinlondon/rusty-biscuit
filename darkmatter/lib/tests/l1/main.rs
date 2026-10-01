@@ -24,6 +24,8 @@ mod find_files_and_try_frontmatter;
 mod image_test_support;
 #[path = "../layout_matrix_support/mod.rs"]
 mod layout_matrix_support;
+#[path = "../request_support/mod.rs"]
+mod request_support;
 
 mod ambient_ctx_capture;
 mod array_rendering_json;
@@ -73,6 +75,7 @@ mod predict_conflicts;
 mod prelude_exports;
 mod prose_wrap_parity;
 mod reference_integration;
+mod request_context_builder;
 mod render_comparison;
 mod render_invariants;
 mod render_tree_hr_snapshots;

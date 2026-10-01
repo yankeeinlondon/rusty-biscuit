@@ -58,7 +58,7 @@ fn optional_array_item_const<'a>(schema: &'a Value, prop: &str) -> &'a Value {
 /// Compose an in-memory document and read back one coerced frontmatter value.
 fn compose_value(doc: &str, key: &str) -> Value {
     let md: Markdown = doc.into();
-    let (composed, _) = md.compose().expect("compose must succeed");
+    let (composed, _) = md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("compose must succeed");
     composed
         .frontmatter()
         .get::<Value>(key)

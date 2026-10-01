@@ -307,6 +307,20 @@ impl CurrentAuthority {
         let _ = self.ambient_repository.set(repository);
     }
 
+    /// Establishes the request's repository observation from a discovery the
+    /// request already made (the context builder's), so the request still
+    /// discovers its repository once. A no-op once established.
+    pub(crate) fn adopt_ambient_repository(
+        &self,
+        values: Map<String, Value>,
+        observation: Option<Arc<RepositoryObservation>>,
+    ) {
+        if self.discovering {
+            return;
+        }
+        let _ = self.ambient_repository.set(AmbientRepository { values, observation });
+    }
+
     /// The request's repository observation, once established.
     pub(crate) fn ambient_repository(&self) -> Option<&AmbientRepository> {
         self.ambient_repository.get()

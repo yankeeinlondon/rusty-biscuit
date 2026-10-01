@@ -177,7 +177,7 @@ fn semantic_carriers_are_validation_and_compose_no_ops() {
         "validation is read-only"
     );
 
-    let (composed, _) = original.compose().expect("normal compose path");
+    let (composed, _) = original.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).expect("normal compose path");
     assert_eq!(composed.frontmatter().as_map(), &before);
 }
 

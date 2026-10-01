@@ -410,6 +410,13 @@ impl ComposeContext {
         &self.inner.anchor
     }
 
+    /// This snapshot anchored on `anchor`, for a snapshot whose captured
+    /// groups do not depend on where it was anchored.
+    pub(crate) fn with_anchor(mut self, anchor: &std::path::Path) -> Self {
+        std::sync::Arc::make_mut(&mut self.inner).anchor = anchor.to_path_buf();
+        self
+    }
+
     /// The groups of `required` this snapshot did not capture.
     pub fn missing_requirements(&self, required: &ContextRequirements) -> ContextRequirements {
         let missing = required
