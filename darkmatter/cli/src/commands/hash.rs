@@ -1,6 +1,7 @@
 //! `md hash` subcommand implementation.
 
 use crate::io::{load_markdown, load_markdown_text};
+use crate::request::MdRequest;
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{
@@ -33,6 +34,7 @@ pub fn run_hash(
     save: bool,
     diff: bool,
     strict: bool,
+    request: &MdRequest,
 ) -> Result<()> {
     let options = resolve_hash_options(kind, body, frontmatter, strict);
 
@@ -46,12 +48,12 @@ pub fn run_hash(
     if save {
         let input_path = input
             .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
-        let (resolved, source, md) = load_markdown_text(input_path)?;
+        let (resolved, source, md) = load_markdown_text(input_path, request)?;
         let stored = parse_stored_hash(&md, &options)?;
         return run_hash_save(&md, &source, &resolved, stored.as_ref(), &options);
     }
 
-    let md = load_markdown(input)?;
+    let md = load_markdown(input, request)?;
     let stored = parse_stored_hash(&md, &options)?;
 
     if diff {

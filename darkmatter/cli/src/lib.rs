@@ -11,6 +11,7 @@ pub mod artifact;
 pub mod commands;
 pub mod io;
 pub mod render;
+pub mod request;
 pub mod style_claims;
 
 // Re-export CLI types for programmatic access

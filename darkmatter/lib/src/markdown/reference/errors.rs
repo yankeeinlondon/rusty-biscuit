@@ -211,6 +211,21 @@ pub enum ReferenceError {
     Url(#[from] url::ParseError),
 }
 
+impl ReferenceError {
+    /// The file-reference failure class, when a file reference raised this
+    /// error (directly or through a wrapped transclusion error).
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        match self {
+            Self::FileReference(source) => Some(source.resolution_failure()),
+            Self::Compose(inner) => match inner.as_ref() {
+                crate::markdown::MarkdownError::Transclusion(inner) => inner.resolution_failure(),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 impl From<crate::markdown::MarkdownError> for ReferenceError {
     fn from(err: crate::markdown::MarkdownError) -> Self {
         Self::Compose(Box::new(err))
@@ -299,7 +314,10 @@ impl biscuit_terminal::errors::BlockError for ReferenceError {
 
             ReferenceError::FileReference(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("ReferenceError", "file reference failure"))
-                .body(source.to_string())
+                .body(vec![
+                    Prose::new(source.to_string()),
+                    crate::markdown::errors::resolution_failure_row(source.resolution_failure()),
+                ])
                 .hint("Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped."),
 
             ReferenceError::Io(source) => StatusBlock::new(StatusState::Error)

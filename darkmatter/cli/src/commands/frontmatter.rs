@@ -2,6 +2,7 @@
 
 use crate::args::Cli;
 use crate::io::{load_markdown, resolve_file_path};
+use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use std::path::PathBuf;
 use tracing::instrument;
@@ -16,8 +17,9 @@ pub fn run_get(
     toml: bool,
     raw: bool,
     compact: bool,
+    request: &MdRequest,
 ) -> Result<()> {
-    let md = load_markdown(Some(input))?;
+    let md = load_markdown(Some(input), request)?;
     let fm = md.frontmatter();
 
     let value = if props.len() == 1 {
@@ -52,7 +54,13 @@ pub fn run_get(
 /// source file. With `--save` the file is updated in place and nothing is
 /// printed.
 #[instrument(skip_all)]
-pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Result<()> {
+pub fn run_set(
+    input: &PathBuf,
+    prop: &str,
+    raw_value: &str,
+    save: bool,
+    request: &MdRequest,
+) -> Result<()> {
     let is_stdin = input.to_str() == Some("-");
 
     if save && is_stdin {
@@ -61,7 +69,7 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
         ));
     }
 
-    let mut md = load_markdown(Some(input))?;
+    let mut md = load_markdown(Some(input), request)?;
 
     let value: serde_json::Value = serde_json::from_str(raw_value)
         .unwrap_or_else(|_| serde_json::Value::String(raw_value.to_string()));
@@ -70,7 +78,7 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
         .map_err(|e| eyre!("Failed to set frontmatter property: {e}"))?;
 
     if save {
-        let resolved = resolve_file_path(input)?;
+        let resolved = resolve_file_path(input, request.launch_context()?)?;
         std::fs::write(&resolved, md.as_string())
             .wrap_err_with(|| format!("Failed to write to {:?}", resolved))?;
     } else {
@@ -86,9 +94,15 @@ pub fn run_set(input: &PathBuf, prop: &str, raw_value: &str, save: bool) -> Resu
 /// With `-v`, prints a human-readable summary. With `--json`, outputs
 /// structured JSON.
 #[instrument(skip_all)]
-pub fn run_rm(input: &PathBuf, props: &[String], json: bool, cli: &Cli) -> Result<()> {
-    let resolved = resolve_file_path(input)?;
-    let mut md = load_markdown(Some(input))?;
+pub fn run_rm(
+    input: &PathBuf,
+    props: &[String],
+    json: bool,
+    cli: &Cli,
+    request: &MdRequest,
+) -> Result<()> {
+    let resolved = resolve_file_path(input, request.launch_context()?)?;
+    let mut md = load_markdown(Some(input), request)?;
     let fm = md.frontmatter_mut().as_map_mut();
 
     let mut removed = Vec::new();
@@ -244,41 +258,30 @@ fn format_raw(value: &serde_json::Value) -> String {
 
 /// Open a file in the user's preferred editor, blocking until the editor exits.
 ///
-/// Resolves the file path using biscuit-file's `FileReference` system. Creates the
-/// file if it doesn't exist. After the editor exits, validates that the file exists
+/// Resolves the file path using biscuit-file's `FileReference` system in the
+/// request's launch context; a reference that matches no file names a new file
+/// relative to the launch directory. Creates the file if it doesn't exist. After the editor exits, validates that the file exists
 /// and is non-empty (after trimming whitespace). Prints the fully qualified path on
 /// success.
-pub fn run_edit(raw_file: &str) -> Result<()> {
+pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
     use biscuit_file::FileReference;
 
     // --- Resolve the file path ---
     let path = match FileReference::new(raw_file) {
         Ok(file_ref) => {
             let resolved = file_ref
-                .resolve()
+                .resolve_in_context(&request.launch_context()?.clone().allow_external_relative())
                 .wrap_err("Failed to resolve file reference")?;
             match resolved {
                 Some(p) => p,
-                None => {
-                    // FileReference couldn't resolve it — treat raw input as a
-                    // relative path (may not exist yet, which is fine).
-                    std::env::current_dir()
-                        .wrap_err("Failed to get current directory")?
-                        .join(raw_file)
-                }
+                // No match: the raw input names a new file relative to the
+                // launch directory (it may not exist yet, which is fine).
+                None => request.launch_dir().join(raw_file),
             }
         }
-        Err(_) => {
-            // Not a valid file reference syntax — treat as plain path.
-            let p = PathBuf::from(raw_file);
-            if p.is_absolute() {
-                p
-            } else {
-                std::env::current_dir()
-                    .wrap_err("Failed to get current directory")?
-                    .join(raw_file)
-            }
-        }
+        // Not a valid file reference syntax — treat as plain path. `join`
+        // keeps an absolute path as is.
+        Err(_) => request.launch_dir().join(raw_file),
     };
 
     // Ensure parent directory exists

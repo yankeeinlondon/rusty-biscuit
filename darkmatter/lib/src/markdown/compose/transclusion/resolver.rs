@@ -184,12 +184,9 @@ fn resolve_file_reference(
         ),
     };
 
-    let path = file_ref.resolve_in_context(&resolution_ctx)?.ok_or_else(|| {
-        TransclusionError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("File not found: {raw_target}"),
-        ))
-    })?;
+    let path = file_ref
+        .resolve_in_context(&resolution_ctx)?
+        .ok_or_else(|| TransclusionError::target_not_found(raw_target))?;
     // Canonicalize only for transclusion identity (macOS `/var` versus
     // `/private/var`); the child's own context keeps `path`'s spelling, which
     // is the one its tree root uses.

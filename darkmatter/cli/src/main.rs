@@ -4,13 +4,15 @@ use biscuit_terminal::errors::as_block_error as as_terminal_block_error;
 use biscuit_terminal::terminal::Terminal;
 use clap::{CommandFactory, Parser};
 use clap_complete::CompleteEnv;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Context, Result};
 use darkmatter::markdown::errors::as_block_error as as_darkmatter_block_error;
 use darkmatter::markdown::highlighting::{ColorMode, ThemePair};
 use darkmatter_cli::Cli;
+use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
     CleanOptions, run_clean, run_render, run_subcommand, validate_subcommand_usage,
 };
+use darkmatter_cli::request::MdRequest;
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -75,7 +77,9 @@ fn main() {
         // (it is a documented stub); the call here is intentional to leave room for
         // future extension without adding a hard dependency.
         let block = e.chain().find_map(|cause| {
-            as_darkmatter_block_error(cause).or_else(|| as_terminal_block_error(cause))
+            as_darkmatter_block_error(cause)
+                .or_else(|| darkmatter_cli::io::as_block_error(cause))
+                .or_else(|| as_terminal_block_error(cause))
         });
 
         if let Some(block) = block {
@@ -142,9 +146,15 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    // The one read of the process's directory, home, and environment for
+    // file resolution; every route resolves against this snapshot.
+    let request = MdRequest::new(
+        RequestSnapshot::from_process().wrap_err("Failed to capture the current directory")?,
+    );
+
     if let Some(command) = cli.command.clone() {
         validate_subcommand_usage(&cli)?;
-        run_subcommand(command, &cli)?;
+        run_subcommand(command, &cli, &request)?;
         return Ok(());
     }
 
@@ -154,7 +164,7 @@ fn run() -> Result<()> {
             verbose: cli.verbose > 0,
             ..CleanOptions::default()
         };
-        run_clean(cli.input.as_ref(), &options)?;
+        run_clean(cli.input.as_ref(), &options, &request)?;
         return Ok(());
     }
 
@@ -165,7 +175,7 @@ fn run() -> Result<()> {
     }
 
     // Run as implicit render using top-level args
-    run_render(cli.input.as_ref(), cli.output, cli.show, None, &cli)?;
+    run_render(cli.input.as_ref(), cli.output, cli.show, None, &cli, &request)?;
 
     Ok(())
 }

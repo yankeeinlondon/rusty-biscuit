@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use biscuit_file::{
     FileReference, FileReferenceError, FileResolutionContext, MagicPathTier, PathPosition,
-    ResolutionFailure,
+    RepositoryScopeCatalog, ResolutionFailure,
 };
 
 use super::ContextMergeDiagnostic;
@@ -263,13 +263,38 @@ pub(crate) fn build_with_observation(
     snapshot: &RequestSnapshot,
     observation: Option<&RepositoryObservation>,
 ) -> Result<FileResolutionContext, ContextBuildError> {
+    build_resolution_context_with_catalog(
+        snapshot,
+        observation.and_then(RepositoryObservation::scope_catalog),
+    )
+}
+
+/// [`build_resolution_context`] for a caller that has already discovered the
+/// repository containing the request directory.
+///
+/// For an embedder that keeps its own repository observations (Claudine's
+/// invocation cache), so one request does not discover the same repository
+/// twice. Every step except discovery is the builder's. `catalog` must be the
+/// scope catalog of the repository that contains the snapshot's request
+/// directory, or `None` when there is no repository; a catalog for another
+/// repository fails validation like any other misplaced anchor.
+///
+/// ## Errors
+///
+/// [`ContextBuildError::Invalid`] when the built context fails
+/// [`validate`](FileResolutionContext::validate). No discovery runs, so this
+/// never returns [`ContextBuildError::Discovery`].
+pub fn build_resolution_context_with_catalog(
+    snapshot: &RequestSnapshot,
+    catalog: Option<RepositoryScopeCatalog>,
+) -> Result<FileResolutionContext, ContextBuildError> {
     let dir = snapshot.request_dir();
     let mut context = FileResolutionContext::from_snapshot(
         dir,
         snapshot.home().map(Path::to_path_buf),
         snapshot.env().clone(),
     );
-    if let Some(catalog) = observation.and_then(RepositoryObservation::scope_catalog) {
+    if let Some(catalog) = catalog {
         context = context.with_repository_scope_catalog(catalog);
     }
     for (path, position, tier) in snapshot.magic_roots() {
@@ -410,6 +435,18 @@ impl ComposeRequest {
     /// The request's file-resolution context.
     pub fn context(&self) -> &FileResolutionContext {
         &self.context
+    }
+
+    /// The local-only expression context for the request's source, resolving
+    /// file references through the request's context.
+    ///
+    /// For hosts that evaluate document-authored expressions outside the
+    /// compose pipeline (Claudine's lifecycle and sequence expressions); see
+    /// [`ComposeOptions::local_expression_resolution_context`].
+    pub fn local_expression_resolution_context(
+        &self,
+    ) -> crate::markdown::compose::expression::ResolutionContext {
+        self.root_options().local_expression_resolution_context()
     }
 
     /// The options with the request's context attached, as a root phase runs

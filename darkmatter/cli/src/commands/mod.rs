@@ -2,6 +2,7 @@
 
 use crate::args::{Cli, Command as CliCommand, OutputFormat, SchemaTarget};
 use crate::io::load_markdown;
+use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
@@ -54,7 +55,7 @@ pub fn validate_subcommand_usage(cli: &Cli) -> Result<()> {
 }
 
 #[instrument(skip_all)]
-pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
+pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Result<()> {
     match command {
         CliCommand::Render {
             input,
@@ -62,7 +63,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             show,
             indent,
         } => {
-            run_render(input.as_ref(), output, show, indent, cli)?;
+            run_render(input.as_ref(), output, show, indent, cli, request)?;
         }
         CliCommand::Clean {
             input,
@@ -93,7 +94,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                     no_trigger_schemas,
                 },
             };
-            run_clean(input.as_ref(), &options)?;
+            run_clean(input.as_ref(), &options, request)?;
         }
         CliCommand::Compose {
             args,
@@ -164,10 +165,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 remote_config,
                 cache_root.as_ref(),
                 cli,
+                request,
             )?;
         }
         CliCommand::Toc { input, json } => {
-            let md = load_markdown(input.as_ref())?;
+            let md = load_markdown(input.as_ref(), request)?;
             let toc = md.toc();
 
             if json {
@@ -188,9 +190,9 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             updated,
             json,
         } => {
-            let base_md = load_markdown(Some(&base))
+            let base_md = load_markdown(Some(&base), request)
                 .wrap_err_with(|| format!("Failed to read base file: {:?}", base))?;
-            let updated_md = load_markdown(Some(&updated))
+            let updated_md = load_markdown(Some(&updated), request)
                 .wrap_err_with(|| format!("Failed to read updated file: {:?}", updated))?;
             let delta = base_md.delta(&updated_md);
 
@@ -218,7 +220,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             raw,
             compact,
         } => {
-            run_get(&input, &props, json5, yaml, toml, raw, compact)?;
+            run_get(&input, &props, json5, yaml, toml, raw, compact, request)?;
         }
         CliCommand::Set {
             input,
@@ -226,13 +228,13 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             value,
             save,
         } => {
-            run_set(&input, &prop, &value, save)?;
+            run_set(&input, &prop, &value, save, request)?;
         }
         CliCommand::Rm { input, props, json } => {
-            run_rm(&input, &props, json, cli)?;
+            run_rm(&input, &props, json, cli, request)?;
         }
         CliCommand::Edit { file } => {
-            run_edit(&file)?;
+            run_edit(&file, request)?;
         }
         CliCommand::Hash {
             input,
@@ -251,10 +253,11 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 save,
                 diff,
                 strict,
+                request,
             )?;
         }
         CliCommand::Validate { target } => {
-            validate::run_validate(target)?;
+            validate::run_validate(target, request)?;
         }
         CliCommand::Graph {
             input,
@@ -262,7 +265,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             validate,
             json,
         } => {
-            graph::run_graph(&input, follow, validate, json)?;
+            graph::run_graph(&input, follow, validate, json, request)?;
         }
         CliCommand::CodeBlock {
             input,
@@ -286,6 +289,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                 highlight.as_deref(),
                 output,
                 cli,
+                request,
             )?;
         }
         CliCommand::Schema { target } => match target {
@@ -302,6 +306,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
                     format,
                     quiet,
                     no_trigger_schemas,
+                    request,
                 )?;
             }
             SchemaTarget::Detect {
@@ -314,7 +319,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli) -> Result<()> {
             SchemaTarget::About => {
                 schema::run_about(cli.verbose > 0, cli.code_block.into())?;
             }
-            SchemaTarget::Triggers { file } => schema::run_triggers(&file)?,
+            SchemaTarget::Triggers { file } => schema::run_triggers(&file, request)?,
         },
     }
 

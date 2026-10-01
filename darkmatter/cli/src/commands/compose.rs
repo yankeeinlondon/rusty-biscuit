@@ -8,10 +8,11 @@ use crate::artifact::{
     open_output_artifact,
 };
 use crate::io::{load_markdown, resolve_file_path};
+use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
-use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use std::path::PathBuf;
 use tracing::{info, instrument};
 
@@ -173,6 +174,7 @@ pub fn run_compose(
     remote_config: darkmatter::markdown::compose::RemoteReadConfig,
     cache_root: Option<&PathBuf>,
     cli: &Cli,
+    request: &MdRequest,
 ) -> Result<()> {
     info!("starting compose pipeline");
     use biscuit_terminal::terminal::Terminal;
@@ -190,33 +192,7 @@ pub fn run_compose(
     // cwd/env/attached streams within one process still detect afresh.
     let term_cell: std::cell::OnceCell<Terminal> = std::cell::OnceCell::new();
 
-    let launch_dir = std::env::current_dir().wrap_err("Failed to capture launch directory")?;
-    let launch_repository = sniff::filesystem::git::GitRepo::discover(&launch_dir)
-        .ok()
-        .flatten()
-        .map(|repo| repo.repo_root().to_path_buf());
-    let launch_repo_structure = launch_repository
-        .as_deref()
-        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let launch_package_area = launch_repo_structure.as_ref().and_then(|repo| {
-        repo.package_area_label_for_dir(&launch_dir).map(|area| {
-            if area.is_empty() {
-                repo.root.clone()
-            } else {
-                repo.root.join(area.as_ref())
-            }
-        })
-    });
-    let mut launch_file_resolution_context =
-        biscuit_file::FileResolutionContext::new(launch_dir.clone());
-    if let Some(repository_root) = launch_repository {
-        launch_file_resolution_context =
-            launch_file_resolution_context.with_repository_root(repository_root);
-    }
-    if let Some(package_area) = launch_package_area {
-        launch_file_resolution_context =
-            launch_file_resolution_context.with_package_area(package_area);
-    }
+    let launch_dir = request.launch_dir().to_path_buf();
 
     // Resolve the input path once through FileReference (handles @-prefixed paths)
     // and reuse for both loading and source_file/policy_root.
@@ -224,7 +200,7 @@ pub fn run_compose(
     let resolved_input = if let Some(path) = input
         && path.to_str() != Some("-")
     {
-        Some(resolve_file_path(path)?)
+        Some(resolve_file_path(path, request.launch_context()?)?)
     } else {
         None
     };
@@ -235,7 +211,7 @@ pub fn run_compose(
         Markdown::try_from(resolved.as_path())
             .wrap_err_with(|| format!("Failed to load file: {:?}", resolved))?
     } else {
-        load_markdown(None)?
+        load_markdown(None, request)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
     // The input as authored, so a quoted `~/…` or `{{VAR}}/…` argument can
@@ -243,66 +219,13 @@ pub fn run_compose(
     // the shell and carries no anchor).
     let input_reference =
         input.and_then(|path| biscuit_file::FileReference::new(&path.to_string_lossy()).ok());
-    let file_resolution_context = resolved_input.as_ref().map_or_else(
-        || launch_file_resolution_context.clone(),
-        |resolved| {
-            let document_context = match &input_reference {
-                Some(reference) => launch_file_resolution_context.for_source_reference(reference, resolved),
-                None => launch_file_resolution_context.for_source(resolved),
-            };
-            if document_context.validate().is_ok() {
-                document_context
-            } else {
-                let source_repository = resolved.parent().and_then(|source_dir| {
-                    sniff::filesystem::git::GitRepo::discover(source_dir)
-                        .ok()
-                        .flatten()
-                        .map(|repo| repo.repo_root().to_path_buf())
-                        .or_else(|| {
-                            darkmatter::markdown::compose::find_git_root_from(source_dir)
-                        })
-                });
-                let source_repo_structure = source_repository.as_deref().and_then(|root| {
-                    sniff::filesystem::repo::detect_repo_structure(root)
-                        .ok()
-                        .flatten()
-                });
-                let source_package_area = source_repo_structure.as_ref().and_then(|repo| {
-                    resolved.parent().and_then(|source_dir| {
-                        repo.package_area_label_for_dir(source_dir).map(|area| {
-                            if area.is_empty() {
-                                repo.root.clone()
-                            } else {
-                                repo.root.join(area.as_ref())
-                            }
-                        })
-                    })
-                });
-                let mut external_context = biscuit_file::FileResolutionContext::from_snapshot(
-                    resolved
-                        .parent()
-                        .map(std::path::Path::to_path_buf)
-                        .unwrap_or_else(|| launch_dir.clone()),
-                    launch_file_resolution_context
-                        .home_dir()
-                        .map(std::path::Path::to_path_buf),
-                    launch_file_resolution_context.env().clone(),
-                );
-                if let Some(repository_root) = source_repository {
-                    external_context = external_context.with_repository_root(repository_root);
-                }
-                if let Some(package_area) = source_package_area {
-                    external_context = external_context.with_package_area(package_area);
-                }
-                match &input_reference {
-                    Some(reference) => {
-                        external_context.for_trusted_external_source_reference(reference, resolved)
-                    }
-                    None => external_context.for_trusted_external_source(resolved),
-                }
-            }
-        },
-    );
+    // One context for validation, pre-flight, and compose: the document's own
+    // (derived from the launch context, or built at the document when it lies
+    // in another repository), or the launch context itself for stdin.
+    let file_resolution_context = match &resolved_input {
+        Some(resolved) => request.document_context(input_reference.as_ref(), resolved)?,
+        None => request.launch_context()?.clone(),
+    };
 
     // The request boundary (D3): one demand-driven context capture for the
     // document plus the request's repository observation, both anchored on the
@@ -319,7 +242,7 @@ pub fn run_compose(
     // interpolation inside transclusion targets (e.g., `::file @{{ctx.pkg}}/{{plan}}`)
     // can resolve user-provided variables during the validation pass.
     let opts_start = perf.then(Instant::now);
-    options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema)?;
+    options = apply_compose_baseline_schema(options, baseline_schema, no_baseline_schema, request)?;
     options = options.with_trigger_schemas(!no_trigger_schemas);
 
     // Parse --state as JSON or JSON5
@@ -356,31 +279,14 @@ pub fn run_compose(
         override_map.insert(key, value);
     }
 
-    // With `--set`, the request resolves through the document context derived
-    // above; otherwise it is built at the document's directory (the launch
-    // directory for stdin), as before requests were prepared explicitly.
-    let attached_context = if override_map.is_empty() {
-        None
-    } else {
+    if !override_map.is_empty() {
         options = options
             .with_file_ref_fallback_dir(&launch_dir)
             .with_set_overrides(serde_json::Value::Object(override_map));
-        Some(file_resolution_context)
-    };
-    let request_snapshot = RequestSnapshot::from_process()
-        .wrap_err("Failed to capture the request")?
-        .at_request_dir(
-            resolved_input
-                .as_deref()
-                .and_then(std::path::Path::parent)
-                .map_or_else(|| launch_dir.clone(), std::path::Path::to_path_buf),
-        );
+    }
     let prepare_request = |options: ComposeOptions| -> Result<ComposeRequest> {
-        match &attached_context {
-            Some(context) => ComposeRequest::with_context(options, context.clone()),
-            None => ComposeRequest::prepare(options, &request_snapshot),
-        }
-        .wrap_err("Failed to prepare the compose request")
+        ComposeRequest::with_context(options, file_resolution_context.clone())
+            .wrap_err("Failed to prepare the compose request")
     };
 
     // ── Reference validation ───────────────────────────────────────────
@@ -503,14 +409,14 @@ pub fn run_compose(
     // not once per stage. Must follow the remote-read-config and cache-root
     // wiring above so the shared runtime inherits both.
     options = options.with_shared_remote_fetch();
-    let mut request = prepare_request(options)?;
+    let mut compose_request = prepare_request(options)?;
     let build_options_dur = opts_start.map(|s| s.elapsed()).unwrap_or_default();
 
     if shell_report {
         // `--shell` reports condition-blind approval candidates: every command
         // that *could* run under any document state, routed through the same
         // pre-flight collector that authorization uses.
-        let preflight = md.compose_preflight(&request)?;
+        let preflight = md.compose_preflight(&compose_request)?;
         print_shell_command_report(&preflight.entries);
         print_icmp_effect_report(&preflight.icmp_probes);
         drop(options_ctx_ref);
@@ -528,12 +434,12 @@ pub fn run_compose(
     // is disabled (nothing to approve) and the per-`::shell` per-shell-block
     // stages never need to gate against an approval set.
     use darkmatter::markdown::compose::ComposeOperation;
-    let options = request.options();
+    let options = compose_request.options();
     if options.is_enabled(ComposeOperation::ShellExpansion)
         || options.is_enabled(ComposeOperation::ShellBlocks)
         || options.is_enabled(ComposeOperation::FrontmatterShellExpansion)
     {
-        match md.compose_preflight_approvals(&request, preflight_handler.clone()) {
+        match md.compose_preflight_approvals(&compose_request, preflight_handler.clone()) {
             Ok(approvals) => {
                 if cli.verbose > 0 {
                     eprintln!(
@@ -546,7 +452,7 @@ pub fn run_compose(
                 // Reuse the graph the preflight walk already resolved so the
                 // transclusion stage skips a redundant target-resolution pass
                 // (v2 design "reuse the collection walk").
-                request = request.map_options(|options| {
+                compose_request = compose_request.map_options(|options| {
                     options
                         .with_pre_approved_commands(approvals.pre_approved_commands)
                         .with_preflight_graph(approvals.preflight_graph)
@@ -558,7 +464,7 @@ pub fn run_compose(
         }
     }
 
-    let (composed, report) = md.compose_with(&request).map_err(|e| {
+    let (composed, report) = md.compose_with(&compose_request).map_err(|e| {
         use darkmatter::markdown::MarkdownError::ShellExpansion;
         use darkmatter::markdown::compose::ShellExpansionError;
 
@@ -769,13 +675,14 @@ fn apply_compose_baseline_schema(
     options: ComposeOptions,
     baseline_schema: Option<&PathBuf>,
     no_baseline_schema: bool,
+    request: &MdRequest,
 ) -> Result<ComposeOptions> {
     if no_baseline_schema {
         return Ok(options);
     }
 
     if let Some(path) = baseline_schema {
-        let resolved = resolve_file_path(path)?;
+        let resolved = resolve_file_path(path, request.launch_context()?)?;
         let raw = std::fs::read_to_string(&resolved)
             .wrap_err_with(|| format!("Failed to read baseline schema: {}", resolved.display()))?;
         let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&raw).wrap_err_with(|| {

@@ -73,6 +73,7 @@ pub struct CleanSchemaConfig {
     baseline: CleanBaselineSchema,
     schema_override: Option<Value>,
     trigger_schemas: bool,
+    file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 }
 
 impl CleanSchemaConfig {
@@ -84,7 +85,20 @@ impl CleanSchemaConfig {
             baseline: CleanBaselineSchema::Default,
             schema_override: None,
             trigger_schemas: true,
+            file_resolution_context: None,
         }
+    }
+
+    /// Resolves the document's schema references, and finds its trigger
+    /// boundary, through `context` (the document's context, built by the
+    /// caller's request) instead of building one at the document's directory.
+    #[must_use]
+    pub fn with_file_resolution_context(
+        mut self,
+        context: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        self.file_resolution_context = Some(context);
+        self
     }
 
     /// Replaces the default baseline with a caller-parsed SimplifiedSchema
@@ -135,8 +149,10 @@ impl CleanSchemaConfig {
     /// `document_path` is the resolved Markdown file path when the input is
     /// file-backed; trigger discovery is silently inert without it (stdin
     /// parity with compose's non-file sources). Discovery walks from the
-    /// document to the repository root captured at this command boundary.
-    /// At most one context is built per clean invocation.
+    /// document to the repository root of the context supplied with
+    /// [`with_file_resolution_context`](Self::with_file_resolution_context),
+    /// or else of one built at the document's directory. At most one context
+    /// is built per clean invocation.
     ///
     /// ## Errors
     ///
@@ -150,11 +166,17 @@ impl CleanSchemaConfig {
             CleanBaselineSchema::Schema(schema) => builder.with_baseline(schema.clone())?,
             CleanBaselineSchema::File(path) => builder.with_baseline_from_file(path)?,
         };
+        if let Some(context) = &self.file_resolution_context {
+            builder = builder.with_file_resolution_context(context.clone());
+        }
         if self.trigger_schemas
             && let Some(path) = document_path
         {
-            let context = build_resolution_context(&RequestSnapshot::new(path.parent().unwrap_or(path)))
-                .map_err(|error| SchemaError::TriggerMatch { message: error.to_string() })?;
+            let context = match &self.file_resolution_context {
+                Some(context) => context.clone(),
+                None => build_resolution_context(&RequestSnapshot::new(path.parent().unwrap_or(path)))
+                    .map_err(|error| SchemaError::TriggerMatch { message: error.to_string() })?,
+            };
             if let Some(boundary) = context.repository_root() {
                 builder = builder.with_trigger_discovery(path, boundary)?;
             }

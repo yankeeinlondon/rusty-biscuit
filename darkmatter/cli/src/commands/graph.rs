@@ -1,18 +1,41 @@
 //! `md graph` subcommand implementation.
 
 use crate::io::resolve_file_path;
+use crate::request::MdRequest;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Context, Result, eyre};
+use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
+use darkmatter::markdown::reference::ReferenceGraphOptions;
 use darkmatter::markdown::reference::file_tree::FileTree;
 use std::path::PathBuf;
 use tracing::instrument;
 
 #[instrument(skip_all)]
-pub(crate) fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: bool) -> Result<()> {
-    let resolved = resolve_file_path(input)?;
-    let mut tree = FileTree::new(&resolved).map_err(|e| eyre!("{e}"))?;
+pub(crate) fn run_graph(
+    input: &PathBuf,
+    follow: bool,
+    validate: bool,
+    json: bool,
+    request: &MdRequest,
+) -> Result<()> {
+    let resolved = resolve_file_path(input, request.launch_context()?)?;
+    // The graph resolves through the document's own context: one derived from
+    // the launch context, or built at the document for a document in another
+    // repository (a launch-anchored request rejects such a document).
+    let opening = biscuit_file::FileReference::new(&input.to_string_lossy()).ok();
+    let context = request.document_context(opening.as_ref(), &resolved)?;
+    let md = Markdown::try_from(resolved.as_path())
+        .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
+    let graph_request = ComposeRequest::with_context(
+        ComposeOptions::for_document(request.launch_dir(), &md),
+        context,
+    )
+    .wrap_err("Failed to prepare the reference graph request")?;
+    let mut tree = FileTree::from_markdown(md)
+        .graph_options(ReferenceGraphOptions::with_compose(&graph_request));
 
     if follow {
         tree = tree.follow_transclusions();

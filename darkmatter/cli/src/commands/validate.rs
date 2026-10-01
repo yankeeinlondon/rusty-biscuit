@@ -1,14 +1,16 @@
 //! `md validate` subcommand implementation.
 
 use crate::args::{GraphFormat, ValidateOutputFormat, ValidateTarget};
+use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
 use darkmatter::markdown::reference::ReferenceGraphOptions;
 use darkmatter::markdown::reference::validate::ReferenceValidationOptions;
 use tracing::{info, instrument};
 
 #[instrument(skip_all, fields(command = "validate"))]
-pub(crate) fn run_validate(target: ValidateTarget) -> Result<()> {
+pub(crate) fn run_validate(target: ValidateTarget, request: &MdRequest) -> Result<()> {
     info!("starting reference validation");
 
     match target {
@@ -22,12 +24,20 @@ pub(crate) fn run_validate(target: ValidateTarget) -> Result<()> {
             show_all,
             graph,
         } => {
-            let md = Markdown::try_from(input.as_path())
+            // `join` keeps an absolute input as is.
+            let document = request.launch_dir().join(&input);
+            let md = Markdown::try_from(document.as_path())
                 .wrap_err_with(|| format!("Failed to load {}", input.display()))?;
+            let context = request.document_context(None, &document)?;
+            let validation_request = ComposeRequest::with_context(
+                ComposeOptions::for_document(request.launch_dir(), &md),
+                context,
+            )
+            .wrap_err("Failed to prepare the validation request")?;
 
             // If --graph requested, print graph and exit
             if let Some(graph_format) = graph {
-                let graph_options = ReferenceGraphOptions::default();
+                let graph_options = ReferenceGraphOptions::with_compose(&validation_request);
                 let ref_graph = md
                     .reference_graph(graph_options)
                     .wrap_err("Failed to build reference graph")?;
@@ -40,7 +50,7 @@ pub(crate) fn run_validate(target: ValidateTarget) -> Result<()> {
             }
 
             let options = ReferenceValidationOptions {
-                graph: ReferenceGraphOptions::default(),
+                graph: ReferenceGraphOptions::with_compose(&validation_request),
                 validate_remote: remote,
                 remote_timeout: std::time::Duration::from_secs(timeout),
                 validate_fragments: fragments,

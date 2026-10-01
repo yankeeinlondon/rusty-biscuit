@@ -223,7 +223,13 @@ impl biscuit_terminal::components::renderable::TerminalRenderable for Validation
                     )
                 };
 
-                list.add(Prose::new(item_text));
+                list.add(Prose::new(match issue.resolution_failure() {
+                    Some(failure) => format!(
+                        "{item_text}\n\n<dim>failure:</dim> {}",
+                        crate::markdown::errors::resolution_failure_name(failure)
+                    ),
+                    None => item_text,
+                }));
             }
 
             out.push_str(&list.render(term));
@@ -260,6 +266,22 @@ pub struct ReferenceIssue {
     pub reference_id: String,
     /// Where the reference was found.
     pub origin: ReferenceOrigin,
+}
+
+impl ReferenceIssue {
+    /// The file-reference failure class behind this issue, when it has one.
+    ///
+    /// A [`ReferenceIssueCode::MissingLocalTarget`] is a local path that
+    /// resolved through its file reference to no file, so it is
+    /// [`ResolutionFailure::NoMatch`](biscuit_file::ResolutionFailure::NoMatch).
+    /// A resolution *error* is not an issue: validation returns it as a
+    /// [`ReferenceError`](super::ReferenceError), which carries its own class.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        match self.code {
+            ReferenceIssueCode::MissingLocalTarget => Some(biscuit_file::ResolutionFailure::NoMatch),
+            _ => None,
+        }
+    }
 }
 
 impl Serialize for ReferenceIssue {

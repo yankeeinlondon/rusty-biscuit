@@ -2,6 +2,7 @@
 
 use crate::args::SchemaValidateFormat;
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
+use crate::request::MdRequest;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
@@ -49,6 +50,7 @@ pub fn run_validate(
     format: SchemaValidateFormat,
     quiet: bool,
     no_trigger_schemas: bool,
+    request: &MdRequest,
 ) -> Result<()> {
     let terminal = Terminal::default();
 
@@ -80,7 +82,7 @@ pub fn run_validate(
     let mut any_validation_failure = false;
 
     for file in &files {
-        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas);
+        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas, request);
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
@@ -129,6 +131,7 @@ fn validate_one(
     file: &Path,
     assignments: &[Assignment],
     no_trigger_schemas: bool,
+    request: &MdRequest,
 ) -> FileOutcome {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
@@ -139,34 +142,23 @@ fn validate_one(
         Err(err) => return FileOutcome::ParseError(err.to_string()),
     };
 
-    let discovery_context = if no_trigger_schemas {
-        None
-    } else {
-        match darkmatter::markdown::compose::build_resolution_context(
-            &darkmatter::markdown::compose::RequestSnapshot::new(
-                discovery_path.parent().unwrap_or(&discovery_path),
-            ),
-        ) {
-            Ok(context) => Some(context),
-            Err(err) => return FileOutcome::ParseError(err.to_string()),
-        }
+    // The document's context resolves its schema `file` values and bounds
+    // trigger discovery. A context that cannot be built has no better outcome
+    // than the file's parse error (exit 3).
+    let document_context = match request.document_context(None, &discovery_path) {
+        Ok(context) => context,
+        Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
     };
-    let api = if no_trigger_schemas {
-        api.clone()
-    } else if let Some(boundary) = discovery_context
-        .as_ref()
-        .and_then(|context| context.repository_root())
-        .map(Path::to_path_buf)
-    {
-        match api
-            .clone()
-            .with_trigger_discovery(&discovery_path, boundary)
-        {
-            Ok(api) => api,
-            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+    let boundary = document_context.repository_root().map(Path::to_path_buf);
+    let api = api.clone().with_file_resolution_context(document_context);
+    let api = match boundary {
+        Some(boundary) if !no_trigger_schemas => {
+            match api.with_trigger_discovery(&discovery_path, boundary) {
+                Ok(api) => api,
+                Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+            }
         }
-    } else {
-        api.clone()
+        _ => api,
     };
 
     if !assignments.is_empty() {

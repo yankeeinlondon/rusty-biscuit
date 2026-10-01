@@ -168,6 +168,7 @@ pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource};
 pub use context::request::{
     ComposeRequest, ContextBuildError, RequestSnapshot, build_resolution_context,
+    build_resolution_context_with_catalog,
 };
 #[cfg(test)]
 pub(crate) use context::request::test_support::request as test_request;
