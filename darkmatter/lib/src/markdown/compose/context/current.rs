@@ -454,11 +454,6 @@ impl CurrentScope {
         None
     }
 
-    /// Whether `root` is one of the two lazy reserved roots.
-    pub(crate) fn is_reserved_root(root: &str) -> bool {
-        root == CURRENT_ROOT || root == CURRENT_ENV_ROOT
-    }
-
     fn resolve_current(
         &self,
         rest: Option<&str>,

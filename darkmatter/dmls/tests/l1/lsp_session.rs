@@ -1938,7 +1938,7 @@ fn schema_declared_property_and_json5_mermaid_have_no_dsl_diagnostics() {
         .filter_map(|diagnostic| diagnostic["code"].as_str())
         .collect();
     assert!(
-        !codes.contains(&"dm.expression.unknown_identifier"),
+        !codes.contains(&"dm.expression.undeclared_property"),
         "schema-declared `spec` must not be flagged: {codes:?}"
     );
     assert!(
@@ -6777,10 +6777,10 @@ fn diagnostic_span(diagnostic: &Value) -> (u64, u64, u64) {
     )
 }
 
-fn unknown_identifier_diagnostics(diagnostics: &[Value]) -> Vec<Value> {
+fn undeclared_property_diagnostics(diagnostics: &[Value]) -> Vec<Value> {
     diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic["code"] == json!("dm.expression.unknown_identifier"))
+        .filter(|diagnostic| diagnostic["code"] == json!("dm.expression.undeclared_property"))
         .cloned()
         .collect()
 }
@@ -6791,11 +6791,11 @@ fn open_operand_doc(fixture: &mut LspFixture<'_>, workspace: &LspWorkspace) -> (
     let uri = url::Url::from_file_path(workspace.path().join("operands.md")).unwrap();
     open(fixture, uri.as_str(), OPERAND_DOC);
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
-    (uri.as_str().to_string(), unknown_identifier_diagnostics(&diagnostics))
+    (uri.as_str().to_string(), undeclared_property_diagnostics(&diagnostics))
 }
 
 #[test]
-fn unknown_identifier_fires_in_every_operand_position_at_warning_severity() {
+fn undeclared_property_fires_in_every_operand_position_at_warning_severity() {
     let workspace = LspWorkspace::new();
     let mut fixture = LspFixture::start(&workspace);
     let (_, unknown) = open_operand_doc(&mut fixture, &workspace);
@@ -6845,7 +6845,7 @@ fn unknown_identifier_fires_in_every_operand_position_at_warning_severity() {
             .map(|diagnostic| diagnostic["message"].as_str().unwrap().to_string())
             .unwrap()
     };
-    assert!(message_at(span_on(OPERAND_DOC, "B1:", "bin_op")).starts_with("`bin_op` matches no frontmatter key"));
+    assert!(message_at(span_on(OPERAND_DOC, "B1:", "bin_op")).starts_with("`bin_op` is an undeclared document property (unknown type; `null` unless supplied at runtime)"));
     assert!(message_at(span_on(OPERAND_DOC, "D1:", "foo--bar")).contains("frontmatter key `foo--bar` exists"));
 
     fixture.shutdown();
@@ -6892,7 +6892,7 @@ fn utf16_span(doc: &str, needle: &str) -> (u64, u64, u64) {
 
 #[test]
 #[ignore = "alias and block-scalar projection are not yet ported onto ScalarProjection; see darkmatter/fixes/2026-09-20-alias-projection-port"]
-fn unknown_identifiers_in_block_and_multi_line_expression_values_warn_at_their_own_ranges() {
+fn undeclared_properties_in_block_and_multi_line_expression_values_warn_at_their_own_ranges() {
     for (name, text) in [
         ("blocks.md", BLOCK_OPERAND_DOC.to_string()),
         ("blocks-crlf.md", BLOCK_OPERAND_DOC.replace('\n', "\r\n")),
@@ -6903,7 +6903,7 @@ fn unknown_identifiers_in_block_and_multi_line_expression_values_warn_at_their_o
         fixture.initialize(vscode_like_initialize_params(workspace.path()));
         let uri = url::Url::from_file_path(workspace.path().join(name)).unwrap();
         open(&fixture, uri.as_str(), &text);
-        let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+        let unknown = undeclared_property_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
 
         let mut actual: Vec<(u64, u64, u64)> = unknown
             .iter()
@@ -6986,7 +6986,7 @@ fn tagged_anchored_and_aliased_expression_values_are_diagnosed_once_where_author
         open(&fixture, uri.as_str(), &text);
         let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
 
-        let unknown = unknown_identifier_diagnostics(&diagnostics);
+        let unknown = undeclared_property_diagnostics(&diagnostics);
         let mut actual: Vec<(u64, u64, u64)> = unknown
             .iter()
             .map(|diagnostic| {
@@ -7064,7 +7064,7 @@ fn an_aliased_dash_separated_key_fix_avoids_the_defining_scalars_quote() {
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("alias-fix.md")).unwrap();
     open(&fixture, uri.as_str(), text);
-    let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+    let unknown = undeclared_property_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
 
     assert_eq!(unknown.len(), 1, "{unknown:#?}");
     assert_eq!(diagnostic_span(&unknown[0]), (5, 11, 19), "inside the anchored scalar: {}", unknown[0]);
@@ -7102,7 +7102,7 @@ fn a_dash_separated_key_behind_an_unprovable_alias_offers_no_fix() {
     fixture.initialize(vscode_like_initialize_params(workspace.path()));
     let uri = url::Url::from_file_path(workspace.path().join("alias-no-fix.md")).unwrap();
     open(&fixture, uri.as_str(), text);
-    let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+    let unknown = undeclared_property_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
 
     assert_eq!(unknown.len(), 1, "{unknown:#?}");
     assert_eq!(diagnostic_span(&unknown[0]), (7, 6, 11), "the alias token: {}", unknown[0]);
@@ -7180,7 +7180,7 @@ fn aliases_are_analyzed_in_the_definition_the_yaml_parser_resolved() {
         fixture.initialize(vscode_like_initialize_params(workspace.path()));
         let uri = url::Url::from_file_path(workspace.path().join(name)).unwrap();
         open(&fixture, uri.as_str(), &text);
-        let unknown = unknown_identifier_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
+        let unknown = undeclared_property_diagnostics(&fixture.wait_for_diagnostics(uri.as_str()));
 
         let mut actual: Vec<(u64, u64, u64)> = unknown
             .iter()
@@ -7284,7 +7284,7 @@ fn dash_separated_key_carries_its_replacement_and_quick_fix() {
 }
 
 #[test]
-fn a_frontmatter_less_document_never_reports_unknown_identifiers() {
+fn a_frontmatter_less_document_never_reports_undeclared_properties() {
     let text = "# No frontmatter\n\n{{ mystery - other }} {{ a ? b : lower(c) }} {{ foo--bar }}\n";
     let workspace = LspWorkspace::new();
     std::fs::write(workspace.path().join("bare.md"), text).unwrap();
@@ -7295,7 +7295,7 @@ fn a_frontmatter_less_document_never_reports_unknown_identifiers() {
 
     let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
     assert!(
-        unknown_identifier_diagnostics(&diagnostics).is_empty(),
+        undeclared_property_diagnostics(&diagnostics).is_empty(),
         "any name could be a `--set` value: {diagnostics:#?}"
     );
 

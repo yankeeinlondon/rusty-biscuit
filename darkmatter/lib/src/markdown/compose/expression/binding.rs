@@ -258,6 +258,18 @@ impl BindingView {
         }
     }
 
+    /// The Darkmatter baseline: the reserved namespaces and no host globals.
+    ///
+    /// The view a static consumer without host descriptors (DMLS) classifies
+    /// against, so every bare root outside the reserved namespaces is a
+    /// document property, exactly as compose resolves it.
+    pub fn baseline() -> Self {
+        Self {
+            scope: ScopeId::new(BASELINE_SCOPE),
+            globals: BTreeMap::new(),
+        }
+    }
+
     pub fn scope(&self) -> &ScopeId {
         &self.scope
     }
@@ -283,7 +295,23 @@ impl BindingView {
             RootClass::Document
         }
     }
+
+    /// Whether a bare `root` reads a document property under this view: it
+    /// [classifies](Self::classify_root) as one and is not the `null` literal.
+    ///
+    /// The grammar has no `null` literal; `null` lexes as a variable that
+    /// resolves to nothing, so it is never an undeclared property. Static
+    /// consumers add frontmatter, schema, and function membership themselves.
+    pub fn names_document_property(&self, root: &str) -> bool {
+        matches!(self.classify_root(root), RootClass::Document) && root != NULL_ROOT
+    }
 }
+
+/// The scope identity of [`BindingView::baseline`].
+const BASELINE_SCOPE: &str = "darkmatter.baseline";
+
+/// The variable spelling authors use as the `null` literal.
+pub(crate) const NULL_ROOT: &str = "null";
 
 /// Collects global declarations for [`BindingView::build`](BindingViewBuilder::build).
 #[derive(Debug)]

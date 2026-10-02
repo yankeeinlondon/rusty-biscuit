@@ -262,37 +262,59 @@ fn scan_leaf(
 /// An `execution-dependent` global is deferred to runtime. Nothing is
 /// evaluated and no provider runs.
 pub fn validate_prepared(prepared: &PreparedValue, view: &BindingView) -> Vec<ValidationDiagnostic> {
+    prepared
+        .expressions
+        .iter()
+        .flat_map(|expression| {
+            validate_expression(&expression.expr, view)
+                .into_iter()
+                .map(|(span, error)| ValidationDiagnostic {
+                    pointer: expression.pointer.clone(),
+                    span: expression.leaf_span(&span),
+                    error: relocate(error, expression.leaf_span(&span)),
+                })
+        })
+        .collect()
+}
+
+/// The [`validate_prepared`] check for one already-parsed expression, for a
+/// static consumer that parses its own text (DMLS): each definitely
+/// unavailable global and unknown function, in every branch, with its span in
+/// `expr`'s text and the typed error evaluation raises.
+pub fn validate_expression(expr: &SpannedExpr, view: &BindingView) -> Vec<(SourceSpan, ExpressionError)> {
     let mut diagnostics = Vec::new();
-    for expression in &prepared.expressions {
-        for read in static_variable_reads(&expression.expr) {
-            if let RootClass::Global(Availability::Unavailable(reason)) = view.classify_root(read.root()) {
-                let span = expression.leaf_span(&read.span);
-                diagnostics.push(ValidationDiagnostic {
-                    pointer: expression.pointer.clone(),
-                    span: span.clone(),
-                    error: ExpressionError::Binding(Box::new(BindingError::Unavailable(Box::new(
-                        UnavailableBinding {
-                            root: read.root().to_string(),
-                            path: read.path.to_string(),
-                            scope: view.scope().clone(),
-                            reason: reason.clone(),
-                            span: Some(span),
-                        },
-                    )))),
-                });
-            }
+    for read in static_variable_reads(expr) {
+        if let RootClass::Global(Availability::Unavailable(reason)) = view.classify_root(read.root()) {
+            diagnostics.push((
+                read.span.clone(),
+                ExpressionError::Binding(Box::new(BindingError::Unavailable(Box::new(
+                    UnavailableBinding {
+                        root: read.root().to_string(),
+                        path: read.path.to_string(),
+                        scope: view.scope().clone(),
+                        reason: reason.clone(),
+                        span: Some(read.span.clone()),
+                    },
+                )))),
+            ));
         }
-        visit_calls(&expression.expr, &mut |name, span| {
-            if !functions::is_dispatchable(name) {
-                diagnostics.push(ValidationDiagnostic {
-                    pointer: expression.pointer.clone(),
-                    span: expression.leaf_span(span),
-                    error: unknown_function_error(name),
-                });
-            }
-        });
     }
+    visit_calls(expr, &mut |name, span| {
+        if !functions::is_dispatchable(name) {
+            diagnostics.push((span.clone(), unknown_function_error(name)));
+        }
+    });
     diagnostics
+}
+
+/// Points an unavailable-global error's span at `span` (the leaf range).
+fn relocate(mut error: ExpressionError, span: SourceSpan) -> ExpressionError {
+    if let ExpressionError::Binding(binding) = &mut error
+        && let BindingError::Unavailable(unavailable) = binding.as_mut()
+    {
+        unavailable.span = Some(span);
+    }
+    error
 }
 
 /// Calls `visit` for every function call in `expr`, in every branch.

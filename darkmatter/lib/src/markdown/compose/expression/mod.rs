@@ -81,7 +81,7 @@ pub mod prepared;
 pub mod resolve_ctx;
 pub mod semantics;
 
-pub use absence::{StaticVariableRead, is_statically_known_root, static_variable_reads};
+pub use absence::{StaticVariableRead, static_variable_reads};
 pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use binding::{
     Availability, BindingError, BindingView, BindingViewBuilder, EvaluationSession,
@@ -113,7 +113,7 @@ pub use parser::{
 };
 pub use prepared::{
     AuthoredMode, PreparationError, PreparedExpression, PreparedValue, ValidationDiagnostic,
-    evaluate_prepared, prepare_value, validate_prepared,
+    evaluate_prepared, prepare_value, validate_expression, validate_prepared,
 };
 
 use absence::{AbsenceScope, MissingRootObserver};

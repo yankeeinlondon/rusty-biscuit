@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use darkmatter::markdown::MarkdownError;
 use darkmatter::markdown::compose::expression::{
     AuthoredMode, Availability, BindingError, BindingView, EvaluationLookup, EvaluationSession,
-    ExpressionError, ParseMode, ResolvedBinding, RuntimeBinding, ScopeId, UnavailabilityReason,
+    ExpressionError, ParseMode, ResolvedBinding, RootClass, RuntimeBinding, ScopeId,
+    UnavailabilityReason,
     evaluate, evaluate_prepared, parse, prepare_value, reserved_root_descriptors,
     validate_prepared,
 };
@@ -233,6 +234,30 @@ mod resolution {
         assert_eq!(GetOnly.resolve("other").unwrap(), ResolvedBinding::Document { value: None });
         assert!(GetOnly.binding_view().is_none());
         assert_eq!(GetOnly.get_string("name"), "Alice");
+    }
+
+    /// The baseline view a static consumer without host descriptors uses: the
+    /// reserved namespaces come from the catalog, `null` is the literal, and
+    /// every other bare root — a context-variable name or a lifecycle global
+    /// included — is a document property. A host view keeps its globals.
+    #[test]
+    fn the_baseline_view_reads_every_unreserved_root_as_a_document_property() {
+        let baseline = BindingView::baseline();
+        assert_eq!(baseline.globals().count(), 0);
+        for root in reserved_root_descriptors() {
+            assert_eq!(baseline.classify_root(root.name), RootClass::Namespace, "{}", root.name);
+            assert!(!baseline.names_document_property(root.name), "{}", root.name);
+        }
+        assert!(!baseline.names_document_property("null"));
+        for root in ["title", "repo", "today", "err", "timing", "group", "spec_name"] {
+            assert_eq!(baseline.classify_root(root), RootClass::Document, "{root}");
+            assert!(baseline.names_document_property(root), "{root}");
+        }
+
+        let host = lifecycle_view();
+        assert!(!host.names_document_property("err"));
+        assert!(!host.names_document_property("group"));
+        assert!(host.names_document_property("title"));
     }
 }
 

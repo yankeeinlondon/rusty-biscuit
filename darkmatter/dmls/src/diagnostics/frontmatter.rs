@@ -590,8 +590,10 @@ fn problem_range(ast: &FrontmatterAst, sm: &SourceMap, problem: &ValidationProbl
 
 /// Expression-typed frontmatter value diagnostics: `dm.expression.malformed`
 /// (`ERROR`) for a value the expression grammar rejects,
-/// `dm.expression.unknown_identifier` (`WARNING`) for each unhandled
-/// identifier, in any operand position, that names nothing DMLS can resolve,
+/// `dm.expression.undeclared_property` (`WARNING`) for each unhandled
+/// identifier, in any operand position, that is an undeclared document property,
+/// `dm.expression.unknown_function` (`ERROR`) for each call to a function
+/// outside Darkmatter's catalog,
 /// and `dm.expression.nested_span_in_literal` for a lifecycle predicate. All
 /// carry source `darkmatter.frontmatter`; ranges go through the scalar
 /// projection, exact (YAML quotes excluded) for untagged single-line plain or
@@ -678,6 +680,18 @@ fn expression_diagnostics(
             }
             Ok(parsed) => {
                 settled.insert(expression_span);
+                for (name, span) in crate::overlay::expressions::unknown_function_calls(&parsed, expression) {
+                    let doc_span = value.project(span).unwrap_or_else(|| value.expression_span());
+                    if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
+                        out.push(diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            source::FRONTMATTER,
+                            code::EXPRESSION_UNKNOWN_FUNCTION,
+                            crate::overlay::expressions::unknown_function_message(&name),
+                        ));
+                    }
+                }
                 let Some(known_roots) = &known_roots else {
                     continue;
                 };
@@ -689,15 +703,6 @@ fn expression_diagnostics(
                 );
                 let first = out.len();
                 for finding in findings {
-                    // Beneath a lifecycle event a late-binding root (`err`,
-                    // `timing`, `current`) is legitimate and resolves at
-                    // dispatch, so it is not unknown there.
-                    if let crate::overlay::expressions::UnknownIdentifierFinding::Identifier { root, .. } = &finding
-                        && nested_span::lifecycle::is_beneath_event(&path)
-                        && nested_span::lifecycle::LATE_BINDING_ROOTS.contains(&root.as_str())
-                    {
-                        continue;
-                    }
                     let span = crate::providers::dsl::finding_span(&finding);
                     // A block, tagged, or multi-line value has no decoded-to-
                     // authored map, so its findings land on the whole scalar
@@ -715,7 +720,7 @@ fn expression_diagnostics(
                         without_fix(finding)
                     };
                     if let Some(range) = ctx.source_map.byte_range_to_lsp(doc_span) {
-                        let diagnostic = crate::providers::dsl::unknown_identifier_diagnostic(
+                        let diagnostic = crate::providers::dsl::undeclared_property_diagnostic(
                             range,
                             source::FRONTMATTER,
                             &finding,
@@ -761,15 +766,15 @@ fn yaml_quote(ctx: &DocumentContext, value: &ExpressionValue<'_>) -> Option<char
 }
 
 fn without_fix(
-    finding: crate::overlay::expressions::UnknownIdentifierFinding,
-) -> crate::overlay::expressions::UnknownIdentifierFinding {
+    finding: crate::overlay::expressions::UndeclaredPropertyFinding,
+) -> crate::overlay::expressions::UndeclaredPropertyFinding {
     match finding {
-        crate::overlay::expressions::UnknownIdentifierFinding::DashSeparatedKey {
+        crate::overlay::expressions::UndeclaredPropertyFinding::DashSeparatedKey {
             authored,
             key,
             span,
             ..
-        } => crate::overlay::expressions::UnknownIdentifierFinding::DashSeparatedKey {
+        } => crate::overlay::expressions::UndeclaredPropertyFinding::DashSeparatedKey {
             authored,
             key,
             span,
@@ -1380,7 +1385,7 @@ mod tests {
         diagnostics_for(&text, |diagnostics| {
             let unknown: Vec<&Diagnostic> = diagnostics
                 .iter()
-                .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNKNOWN_IDENTIFIER))
+                .filter(|diagnostic| code_of(diagnostic) == Some(code::EXPRESSION_UNDECLARED_PROPERTY))
                 .collect();
             assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
             assert_eq!(unknown[0].source.as_deref(), Some(source::FRONTMATTER));
@@ -1392,7 +1397,7 @@ mod tests {
     fn native_scalar_coercion_produces_no_expression_false_diagnostics() {
         // A native boolean is coerced to a canonical expression string at compose
         // time, so `when: true` is valid — no type mismatch, no malformed, no
-        // unknown-identifier squiggle.
+        // undeclared-property squiggle.
         let text = expression_doc("when: true");
         diagnostics_for(&text, |diagnostics| {
             assert!(
@@ -1400,7 +1405,7 @@ mod tests {
                     let code = code_of(diagnostic);
                     code != Some(code::SCHEMA_TYPE_MISMATCH)
                         && code != Some(code::EXPRESSION_MALFORMED)
-                        && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                        && code != Some(code::EXPRESSION_UNDECLARED_PROPERTY)
                 }),
                 "native scalar must not produce false diagnostics: {diagnostics:#?}"
             );
@@ -1443,7 +1448,7 @@ mod tests {
                 diagnostics.iter().all(|diagnostic| {
                     let code = code_of(diagnostic);
                     code != Some(code::EXPRESSION_MALFORMED)
-                        && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                        && code != Some(code::EXPRESSION_UNDECLARED_PROPERTY)
                         && code != Some(code::SCHEMA_CONSTRAINT)
                         && code != Some(code::SCHEMA_TYPE_MISMATCH)
                 }),
@@ -1759,7 +1764,7 @@ mod tests {
                     diagnostics.iter().all(|diagnostic| {
                         let code = code_of(diagnostic);
                         code != Some(code::EXPRESSION_MALFORMED)
-                            && code != Some(code::EXPRESSION_UNKNOWN_IDENTIFIER)
+                            && code != Some(code::EXPRESSION_UNDECLARED_PROPERTY)
                     }),
                     "a valid expression under a mixed union is clean (expression_first={expression_first}): {diagnostics:#?}"
                 );

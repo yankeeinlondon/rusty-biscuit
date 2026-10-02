@@ -70,10 +70,10 @@ fn ladder_separates_schema_typed_frontmatter_from_body_inference() {
             found,
             vec![
                 (code::EXPRESSION_MALFORMED.to_string(), DiagnosticSeverity::WARNING, "body"),
-                (code::EXPRESSION_UNKNOWN_IDENTIFIER.to_string(), DiagnosticSeverity::WARNING, "body"),
+                (code::EXPRESSION_UNDECLARED_PROPERTY.to_string(), DiagnosticSeverity::WARNING, "body"),
                 (code::EXPRESSION_MALFORMED.to_string(), DiagnosticSeverity::ERROR, "frontmatter"),
                 (
-                    code::EXPRESSION_UNKNOWN_IDENTIFIER.to_string(),
+                    code::EXPRESSION_UNDECLARED_PROPERTY.to_string(),
                     DiagnosticSeverity::WARNING,
                     "frontmatter"
                 ),

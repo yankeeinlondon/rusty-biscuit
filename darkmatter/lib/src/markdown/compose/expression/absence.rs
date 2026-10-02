@@ -236,23 +236,11 @@ pub(crate) fn root_of(path: &str) -> &str {
     path.split('.').next().unwrap_or(path)
 }
 
-/// Whether `root` is known whatever the state holds: the reserved namespaces
-/// `ctx`, `env`, `doc`, the lazy `current` / `current_env` roots, and `null`.
-///
-/// The grammar has no `null` literal; `null` lexes as a variable that resolves
-/// to nothing, and shipped prompts use it as the literal
-/// (`{{ ok ? path : null }}`). Reading it is never a typo.
+/// Whether `root` is known whatever the state holds: a reserved namespace
+/// ([`is_reserved_namespace`](super::binding::is_reserved_namespace)) or the
+/// `null` literal, which shipped prompts use as such (`{{ ok ? path : null }}`).
 pub(crate) fn is_reserved_root(root: &str) -> bool {
-    matches!(root, "ctx" | "env" | "doc" | "null")
-        || crate::markdown::compose::context::CurrentScope::is_reserved_root(root)
-}
-
-/// Whether `root` is known whatever the document holds: a reserved root (see
-/// [`is_reserved_root`]). A bare runtime-context name such as `repo` is not: it
-/// is a document property, never `ctx.repo`. Static consumers (DMLS) add
-/// frontmatter and schema membership themselves.
-pub fn is_statically_known_root(root: &str) -> bool {
-    is_reserved_root(root)
+    super::binding::is_reserved_namespace(root) || root == super::binding::NULL_ROOT
 }
 
 /// Receives each evaluated variable read that found no value, is not handled
@@ -435,12 +423,12 @@ mod tests {
     }
 
     #[test]
-    fn statically_known_roots_are_exactly_the_reserved_roots() {
+    fn reserved_roots_are_the_catalog_namespaces_and_null() {
         for root in ["ctx", "env", "doc", "current", "current_env", "null"] {
-            assert!(is_statically_known_root(root), "{root}");
+            assert!(is_reserved_root(root), "{root}");
         }
         for root in ["spec-name", "colour", "nul", "repo", "today", "branch"] {
-            assert!(!is_statically_known_root(root), "{root}");
+            assert!(!is_reserved_root(root), "{root}");
         }
     }
 
