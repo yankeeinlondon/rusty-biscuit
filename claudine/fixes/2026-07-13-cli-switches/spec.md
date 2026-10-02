@@ -27,10 +27,7 @@ lands, the code still uses the original rule, described under
 The rest of this spec states the contract and describes only the work that
 remains. [Remaining work](#remaining-work) lists the gaps, and
 [Acceptance criteria](#acceptance-criteria) records which criteria already
-pass. `plan.md` still applies to R1–R7 but predates R9 and treats R8 as
-reporting-only, so it needs new phases for R8/R9 before they are executed. Its Phase 1 audit is
-answered by this status section, and most of its Phase 2 partition tasks are
-done (see the criteria table).
+pass.
 
 ## Problem
 
@@ -106,13 +103,19 @@ supplies those types.
    a newer provider release, or a typo) take the next token if it is a bare
    word, and nothing otherwise. A `key=value` after one is a setter (rule 3).
    The INFO notice names the switch as unrecognized (R3/R8).
-6. **Values that start with `-` are never taken from the next token.** They
+6. **Provider switches are looked up as whole tokens.** Claudine does not
+   split a provider short-switch cluster (`-abc`) or an attached value
+   (`-cfoo`). A token whose leading switch name matches a researched switch,
+   with the rest attached (`-cfoo`, `--config=x`), is that switch with a
+   self-contained value and takes nothing from the next token. Any other token
+   is unrecognized (rule 5).
+7. **Values that start with `-` are never taken from the next token.** They
    must be attached: `--temperature=-0.5`.
-7. **A bare word that no switch takes is a Claudine positional** and goes
+8. **A bare word that no switch takes is a Claudine positional** and goes
    into the `argv` frontmatter property (see
    [Positional arguments](#positional-arguments-argv)). Provider operands
    therefore still need an explicit `--`.
-8. **`--` and file order are unchanged.** An authored `--` after the file is
+9. **`--` and file order are unchanged.** An authored `--` after the file is
    consumed and starts an opaque tail that is never classified. An unowned
    switch or a `--` before the file is an error with ordering guidance.
 
@@ -187,33 +190,52 @@ It uses the same file resolver as composition, not a second one.
 When rule 4 finds an ambiguous token:
 
 - if Interactive Mode is allowed (the same conditions as missing-property
-  prompting), Claudine asks which agent is intended, uses that provider's
-  types to decide, and runs with that provider;
+  prompting), Claudine asks which agent is intended and uses that provider's
+  types to decide who owns the token. The answer decides **ownership only**.
+  It does not select the provider for the run, a `sequence` step, or a proxy
+  target; each still resolves its own provider. A provider that disagrees
+  with the decision is caught by the
+  [resolved-provider check](#resolved-provider-check);
 - otherwise it fails before launch with an `ambiguous provider argument`
   error. The error names the switch, says which providers type it
   differently, and tells the user to name the provider or to put the agent
   arguments after `--`.
 
-#### A switch left without its value
+#### Resolved-provider check
 
-A switch can end up without its required value. For example, the schema
-declares `phase`, so in `--codex -c phase=2` rule 2 takes `phase=2` and leaves
-Codex's `-c` empty. A trailing `-c` at the end of the line has the same
-problem. Claudine never lets the provider take the wrong token in that case.
+Ownership with several candidates is decided against a union of types, so the
+provider that finally runs can disagree with it in two ways:
 
-If the switch requires a value for **every** candidate provider, ownership
-fails before launch with an error naming the switch and the setter that took
-its place. If some candidate accepts it with no value, ownership succeeds, and
-the check runs again against the resolved provider before each spawn
-(including each `sequence` step). It fails there if that provider requires a
-value.
+- **Missing value.** A switch that provider types as taking a value got none.
+  For example, the schema declares `phase`, so in `--codex -c phase=2` rule 2
+  takes `phase=2` and leaves Codex's `-c` empty. A trailing `-c` at the end of
+  the line has the same problem.
+- **Extra value.** A switch that provider types as taking nothing was given
+  one. For example, `-c model_reasoning_effort=low` with no provider named
+  forwards the value because Codex takes a string. If the run resolves to
+  Claude, where `-c` takes nothing, Claude would receive a stray operand.
+
+Either way Claudine fails before the spawn with an error naming the switch,
+the token, and the resolved provider. It never lets a provider take the wrong
+token or receive a stray one.
+
+When the check runs:
+
+- **During ownership,** if the mismatch holds for **every** candidate (for
+  example a switch that takes a value for all of them gets none).
+- **During preflight,** for every launch whose provider can be known before
+  anything runs: the command itself, and each `sequence` step whose provider
+  resolves statically. A sequence therefore fails before step 1, not after
+  step 2.
+- **Before each spawn,** for a provider known only at launch time (a retry,
+  a proxy target, a resume, or a step whose provider is decided at runtime).
 
 #### Current partition (replaced by R9)
 
 Until R9 lands, `partition_composition_tail` uses the original rule: the first
 unowned switch after the file starts an implicit agent tail, and every
 non-Claudine token after it is forwarded, setter-shaped tokens included. Rules
-1 and 8 above already hold. That rule causes the lost-setter bug, and R9
+1 and 9 above already hold. That rule causes the lost-setter bug, and R9
 replaces it.
 
 ### Launch threading
@@ -328,10 +350,15 @@ Required:
 
 - Completion's cursor scan uses `OwnedFlags::for_composition`, the partition's
   surface, so the two cannot drift. Delete the list and the stale comment.
-- Composition completion never fails while the cursor is inside an implicit
-  tail. Claudine suggestions stop after an authored `--`. File and setter
-  completion before the tail are unchanged. Completing provider switches stays
-  out of scope.
+- Completion classifies the tokens before the cursor with the same
+  ownership function as the partition (R9), including R8 types and the
+  file's `$schema` and `agent`. Until R9 lands it uses the current partition.
+- Completion never fails. When ownership cannot decide (an ambiguous token,
+  an unreadable file, a missing-value or extra-value error), it offers no
+  suggestions instead of erroring or prompting.
+- Claudine suggestions stop after an authored `--`. File and setter
+  completion keep working wherever a setter or positional can appear.
+  Completing provider switches stays out of scope.
 
 ### R5. Direct wrappers share reporting
 
@@ -416,9 +443,12 @@ rules. This depends on R8 data.
   identification stays as it is today: the first bare non-setter token, which
   must come before any provider switch.
 - The candidate set, union types, ambiguity prompt or error, and
-  missing-value checks are as specified in the contract. The per-spawn
-  missing-value check uses the resolved provider for each launch, retry,
-  proxy target, resume, and `sequence` step.
+  resolved-provider check are as specified in the contract. The check runs
+  at ownership, at preflight (including every statically resolvable
+  `sequence` step), and before each spawn whose provider is known only at
+  launch.
+- Ownership is one shared function. The partition and completion (R4) both
+  call it; neither keeps its own rules.
 - The owned surface stays `OwnedFlags::for_composition`. Switch types come
   only from the R8 lookup; there is no handwritten list.
 - The ownership result keeps the R6 typed tail descriptor.
@@ -461,15 +491,14 @@ R9 lands. Each remaining item updates those pages in the
 change that lands it: resume carry-over (R1), correlated errors (R2), notice
 scope and wording (R3), completion behavior (`docs/topics/completions/`, R4),
 direct-wrapper parity in the CLI reference (R5), and type-aware ownership with
-its ambiguity and missing-value errors (R9). R9 also documents the `argv`
+its ambiguity and resolved-provider errors (R9). R9 also documents the `argv`
 property in `composition.md` (Positional Arguments) and
 `frontmatter-properties.md`. Until R8 lands, no page promises
 switch recognition.
 
 ## Acceptance criteria
 
-The numbering matches the original spec, and `plan.md`'s traceability table
-uses these numbers.
+The numbering matches the original spec.
 
 | # | Criterion | Status |
 | --- | --- | --- |
@@ -484,7 +513,7 @@ uses these numbers.
 | 9 | INFO reveals no values. Debug, dry-run, metadata, and correlated surfaces reveal no unredacted secret | Open: binary proof (R7), correlated surface (R2) |
 | 10 | A fixture-backed native rejection produces one correlated error. Auth, timeout, interruption, API, and ambiguous failures are not misattributed | Open (R2) |
 | 11 | Direct wrappers share the tail descriptor, notice, classification, and reporting, with no child-argv change | Open (R5) |
-| 12 | Completion never fails inside the tail, stops Claudine suggestions after `--`, and keeps pre-tail file/setter completion | Open (R4) |
+| 12 | Completion uses the shared ownership function, never fails (offering nothing when ownership cannot decide), stops Claudine suggestions after `--`, and keeps file/setter completion | Open (R4) |
 | 13 | No synthetic separator can be mistaken for an authored boundary. Rule 3 is retired | Done |
 | 14 | Generated metadata recognizes Codex `-c` as `--config` with type `string`, enriches the message, and rejects alias/type drift | Open (R8) |
 | 15 | A non-UTF-8 tail token is refused with a targeted error, never rewritten | Open (R6) |
@@ -492,7 +521,8 @@ uses these numbers.
 | 17 | `-c model_reasoning_effort=low phase=2` forwards `-c model_reasoning_effort=low` and applies `phase=2`, both with `--codex` and with no provider named | Open (R9) |
 | 18 | A variadic switch takes tokens up to the next switch and never takes a `key=value` that is not its first value | Open (R9) |
 | 19 | The candidate set narrows to the CLI provider, then frontmatter `agent`, then all providers. A single candidate uses only its own types | Open (R9) |
-| 20 | An ambiguous "none or string" bare word prompts for the agent in Interactive Mode, and otherwise fails with a targeted error | Open (R9) |
-| 21 | A switch left without a required value fails before launch for all candidates, or before the spawn of a resolved provider that requires one. The provider never takes the wrong token | Open (R9) |
+| 20 | An ambiguous "none or string" bare word prompts for the agent in Interactive Mode, and otherwise fails with a targeted error. The answer decides ownership only and never selects a provider | Open (R9) |
+| 21 | A resolved provider that would get a missing value or an extra value fails before spawn. The check runs at ownership when it holds for every candidate, at preflight for every statically known launch and `sequence` step, and before each spawn otherwise | Open (R9) |
 | 22 | An unrecognized switch takes a following bare word, never a `key=value`, and the notice names it as unrecognized | Open (R8, R9) |
 | 23 | Leftover bare words become the `argv` frontmatter array in order, excluding the file and anything after `--`. They override an authored `argv`. An `argv=…` setter or `--set` key is always an error. A second bare word is no longer a multiple-file error | Open (R9) |
+| 24 | Provider switches are looked up as whole tokens: an attached value (`-cfoo`, `--config=x`) is self-contained, and an unknown cluster is unrecognized, never split | Open (R8, R9) |
