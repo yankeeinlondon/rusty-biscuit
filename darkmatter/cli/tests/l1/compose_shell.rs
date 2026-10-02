@@ -39,10 +39,9 @@ fn test_compose_with_blacklisted_command_fails() {
 fn test_compose_stdin_unapproved_command_fails_with_guidance() {
     let fixture =
         CliProcessFixture::named("test_compose_stdin_unapproved_command_fails_with_guidance");
-    // Policy paths anchor on the launch context (repository root, then home,
-    // then the compose base dir) on every platform; with HOME pointed at the
-    // tempdir and no enclosing repository, the guidance names the tempdir —
-    // Windows included, now that the fallback no longer consults USERPROFILE.
+    // `md` anchors a stdin document's shell policy in the launch directory,
+    // as it anchors a file's beside the file, on every platform: pre-flight
+    // and execution name the same file, never the user's home.
     let whitelist_path = fixture.cwd().join(".darkmatter-shell-whitelist");
 
     fixture

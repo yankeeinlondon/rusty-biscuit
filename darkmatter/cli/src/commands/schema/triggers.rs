@@ -21,7 +21,7 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
         .repository_root()
         .map(Path::to_path_buf)
         .ok_or_else(|| eyre!("no repository boundary found for `{}`", file.display()))?;
-    let api = DarkmatterSchemas::new().with_trigger_discovery(&document_path, &boundary)?;
+    let api = DarkmatterSchemas::new(context.clone()).with_trigger_discovery(&document_path, &boundary)?;
     let registry = api
         .trigger_registry()
         .expect("trigger discovery always installs a registry");

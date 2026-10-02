@@ -314,7 +314,7 @@ pub fn run_subcommand(command: CliCommand, cli: &Cli, request: &MdRequest) -> Re
                 format,
                 merge,
             } => {
-                schema::run_detect(&files, format, merge)?;
+                schema::run_detect(&files, format, merge, request)?;
             }
             SchemaTarget::About => {
                 schema::run_about(cli.verbose > 0, cli.code_block.into())?;

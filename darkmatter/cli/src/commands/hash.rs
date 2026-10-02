@@ -26,6 +26,7 @@ use tracing::instrument;
 /// bare-hash only: `--save`, `--diff`, and the `structured`/`detailed` kinds are
 /// rejected with a usage error.
 #[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_hash(
     input: Option<&PathBuf>,
     kind: Option<MdHashKind>,

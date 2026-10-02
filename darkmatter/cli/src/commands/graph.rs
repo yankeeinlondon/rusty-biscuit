@@ -8,14 +8,13 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
-use darkmatter::markdown::reference::ReferenceGraphOptions;
 use darkmatter::markdown::reference::file_tree::FileTree;
-use std::path::PathBuf;
+use std::path::Path;
 use tracing::instrument;
 
 #[instrument(skip_all)]
 pub(crate) fn run_graph(
-    input: &PathBuf,
+    input: &Path,
     follow: bool,
     validate: bool,
     json: bool,
@@ -34,8 +33,7 @@ pub(crate) fn run_graph(
         context,
     )
     .wrap_err("Failed to prepare the reference graph request")?;
-    let mut tree = FileTree::from_markdown(md)
-        .graph_options(ReferenceGraphOptions::with_compose(&graph_request));
+    let mut tree = FileTree::from_markdown(md, &graph_request);
 
     if follow {
         tree = tree.follow_transclusions();

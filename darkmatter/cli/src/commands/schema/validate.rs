@@ -69,7 +69,7 @@ pub fn run_validate(
         std::process::exit(64);
     }
 
-    let api = match load_api(schema) {
+    let api = match load_api(schema, request) {
         Ok(api) => api,
         Err(err) => {
             emit_schema_error(&err);
@@ -110,14 +110,19 @@ pub fn run_validate(
     Ok(())
 }
 
-/// Builds the [`DarkmatterSchemas`] entry point, applying the CLI baseline
-/// flag or `BASELINE_SCHEMA` env var fallback.
-fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
+/// Builds the [`DarkmatterSchemas`] entry point at the launch context,
+/// applying the CLI baseline flag or the snapshot's `BASELINE_SCHEMA`
+/// fallback. Each file re-anchors it on its own context.
+fn load_api(schema: Option<&Path>, request: &MdRequest) -> Result<DarkmatterSchemas, SchemaError> {
     let baseline_path = schema
         .map(PathBuf::from)
-        .or_else(|| std::env::var(BASELINE_SCHEMA_ENV).ok().map(PathBuf::from));
+        .or_else(|| request.snapshot().env().get(BASELINE_SCHEMA_ENV).map(PathBuf::from));
 
-    let api = DarkmatterSchemas::new();
+    let context = request.launch_context().map_err(|error| SchemaError::Baseline {
+        message: format!("{error:#}"),
+        source: None,
+    })?;
+    let api = DarkmatterSchemas::new(context.clone());
     match baseline_path {
         Some(path) => api.with_baseline_from_file(path),
         None => Ok(api),

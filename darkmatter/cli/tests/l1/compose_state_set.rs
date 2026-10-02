@@ -222,18 +222,30 @@ fn test_compose_shorthand_empty_key_errors() {
         .stderr(predicate::str::contains("Invalid setter '=value'"));
 }
 
+/// A token whose key starts with a digit is not a setter: it is the input
+/// argument, which resolves to no file and fails as a file-reference error
+/// carrying its `failure` class row.
 #[test]
 fn test_compose_shorthand_numeric_leading_key_is_treated_as_input_path() {
+    use darkmatter::testing::strip_ansi_codes;
+
     let fixture = CliProcessFixture::named(
         "test_compose_shorthand_numeric_leading_key_is_treated_as_input_path",
     );
-    fixture
+    let output = fixture
         .command()
         .args(["compose", "9key=value"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("Failed to load"))
-        .stderr(predicate::str::contains("9key=value"));
+        .output()
+        .expect("md compose should run");
+
+    assert!(!output.status.success(), "expected a failure exit status");
+    // The error block styles its rows even without color support.
+    let stderr = strip_ansi_codes(&String::from_utf8_lossy(&output.stderr));
+    assert!(
+        stderr.contains("The argument 9key=value did not resolve to a file."),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("failure: no-match"), "stderr: {stderr}");
 }
 
 #[test]

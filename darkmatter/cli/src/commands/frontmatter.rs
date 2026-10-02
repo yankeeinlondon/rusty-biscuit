@@ -9,6 +9,7 @@ use tracing::instrument;
 
 /// Get frontmatter properties from a markdown document.
 #[instrument(skip_all)]
+#[allow(clippy::too_many_arguments)]
 pub fn run_get(
     input: &PathBuf,
     props: &[String],

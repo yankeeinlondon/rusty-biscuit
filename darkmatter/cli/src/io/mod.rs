@@ -10,7 +10,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::errors::resolution_failure_row;
 use std::io::{self, IsTerminal, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Loads markdown from a file path or stdin.
 ///
@@ -45,7 +45,7 @@ pub fn load_markdown(path: Option<&PathBuf>, request: &MdRequest) -> Result<Mark
 /// authored formatting. The returned [`Markdown`] is parsed from the same text
 /// returned to the caller.
 pub fn load_markdown_text(
-    path: &PathBuf,
+    path: &Path,
     request: &MdRequest,
 ) -> Result<(PathBuf, String, Markdown)> {
     if path.to_str() == Some("-") {
@@ -74,11 +74,11 @@ pub fn load_markdown_text(
 ///
 /// Returns a [`DocumentArgumentError`] carrying the failure class when the
 /// reference fails to resolve or matches no file.
-pub fn resolve_file_path(raw_path: &PathBuf, context: &FileResolutionContext) -> Result<PathBuf> {
+pub fn resolve_file_path(raw_path: &Path, context: &FileResolutionContext) -> Result<PathBuf> {
     let raw = raw_path.to_string_lossy();
     let Ok(reference) = FileReference::new(&raw) else {
         // Not a valid file reference syntax — treat as plain path
-        return Ok(raw_path.clone());
+        return Ok(raw_path.to_path_buf());
     };
     let argument_context = context.clone().allow_external_relative();
     match reference.resolve_in_context(&argument_context) {

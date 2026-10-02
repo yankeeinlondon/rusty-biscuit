@@ -7,6 +7,8 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{DetectOptions, detect_schema, schema_to_yaml, to_json_schema};
+
+use crate::request::MdRequest;
 use std::path::{Path, PathBuf};
 
 /// Run `md schema detect`.
@@ -15,7 +17,13 @@ use std::path::{Path, PathBuf};
 /// frontmatter cannot be parsed (matching the validate convention), and
 /// `2` when conversion to JSON Schema fails (only possible with
 /// `--format json`).
-pub fn run_detect(files: &[PathBuf], format: SchemaDetectFormat, merge: bool) -> Result<()> {
+pub fn run_detect(
+    files: &[PathBuf],
+    format: SchemaDetectFormat,
+    merge: bool,
+    request: &MdRequest,
+) -> Result<()> {
+    let context = request.launch_context()?;
     let terminal = Terminal::default();
     let mut docs: Vec<Markdown> = Vec::with_capacity(files.len());
     let mut any_parse_error = false;
@@ -36,12 +44,12 @@ pub fn run_detect(files: &[PathBuf], format: SchemaDetectFormat, merge: bool) ->
 
     if merge || docs.len() <= 1 {
         let refs: Vec<&Markdown> = docs.iter().collect();
-        let schema = detect_schema(&refs, DetectOptions { merge });
+        let schema = detect_schema(&refs, DetectOptions { merge }, context);
         emit_schema(format, files, &schema);
     } else {
         // Without --merge, emit one schema per file with a header comment.
         for (file, md) in files.iter().zip(docs.iter()) {
-            let schema = detect_schema(&[md], DetectOptions { merge: false });
+            let schema = detect_schema(&[md], DetectOptions { merge: false }, context);
             print_header(format, file);
             emit_schema(format, std::slice::from_ref(file), &schema);
         }

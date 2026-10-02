@@ -663,12 +663,12 @@ fn resolve_schema_context(
     document_path: Option<&Path>,
     request: &DocumentRequest<'_>,
 ) -> Result<CleanSchemaContext> {
-    let mut config = CleanSchemaConfig::new();
-    if let Some(path) = document_path {
-        config = config.with_file_resolution_context(
-            request.request.document_context(request.opening, path)?,
-        );
-    }
+    // A file resolves through its own context; stdin through the launch one.
+    let context = match document_path {
+        Some(path) => request.request.document_context(request.opening, path)?,
+        None => request.request.launch_context()?.clone(),
+    };
+    let mut config = CleanSchemaConfig::new(context);
 
     if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
         config = config.without_baseline_schema();

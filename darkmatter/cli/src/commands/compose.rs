@@ -13,7 +13,7 @@ use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::cleanup::ListSpacingMode;
 use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{info, instrument};
 
 /// Resolved allow flags for compose validation.
@@ -366,11 +366,16 @@ pub fn run_compose(
         timeout: timeout_secs
             .map(std::time::Duration::from_secs)
             .unwrap_or(std::time::Duration::from_secs(10)),
-        policy_root: resolved_input.as_ref().and_then(|p| {
-            p.parent()
+        // Shell policy lives beside the document, or in the launch directory
+        // for stdin, so pre-flight and execution read the same files and a
+        // stdin run never falls through to the user's home.
+        policy_root: Some(
+            resolved_input
+                .as_ref()
+                .and_then(|p| p.parent())
                 .filter(|parent| !parent.as_os_str().is_empty())
-                .map(|parent| parent.to_path_buf())
-        }),
+                .map_or_else(|| launch_dir.clone(), Path::to_path_buf),
+        ),
         approval_handler: None,
         ..Default::default()
     };

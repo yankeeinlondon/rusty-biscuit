@@ -62,17 +62,22 @@ impl MdRequest {
     /// The context a document at `resolved`, opened as `opening`, resolves its
     /// own references against.
     ///
-    /// A document inside the launch tree derives from the launch context
+    /// A document inside the launch repository derives from the launch context
     /// (`for_source_reference` / `for_source`), so it keeps the launch
-    /// repository's package catalog and `@` scope. A document the launch tree
-    /// does not contain (another repository, or outside any repository) gets a
-    /// context built at its own directory and derived as a trusted external
-    /// source, keeping this request's home and environment.
+    /// repository's package catalog and `@` scope. Any other document gets a
+    /// context built at its own directory, keeping this request's home and
+    /// environment: when that build finds a repository (the launch directory
+    /// is in another repository, or in none) the document derives from it as a
+    /// trusted external source, so its links, `&` references, and trigger
+    /// schemas see its own repository. A document in no repository, outside
+    /// the launch repository, also derives as a trusted external source; one
+    /// in no repository launched from no repository keeps the launch
+    /// derivation.
     ///
     /// ## Errors
     ///
     /// Returns the builder's error for the launch directory or, for a document
-    /// outside the launch tree, for the document's directory.
+    /// outside the launch repository, for the document's directory.
     pub fn document_context(
         &self,
         opening: Option<&FileReference>,
@@ -83,7 +88,8 @@ impl MdRequest {
             Some(reference) => launch.for_source_reference(reference, resolved),
             None => launch.for_source(resolved),
         };
-        if derived.validate().is_ok() {
+        let derived_is_valid = derived.validate().is_ok();
+        if derived_is_valid && launch.repository_root().is_some() {
             return Ok(derived);
         }
         let source_dir = resolved.parent().unwrap_or(self.launch_dir());
@@ -91,6 +97,12 @@ impl MdRequest {
             .wrap_err_with(|| {
                 format!("Failed to prepare file resolution for {}", resolved.display())
             })?;
+        // A launch directory outside every repository derives any document
+        // without complaint, but its fallback tree knows no repository; only
+        // the document's own discovery can tell whether one contains it.
+        if derived_is_valid && external.repository_root().is_none() {
+            return Ok(derived);
+        }
         Ok(match opening {
             Some(reference) => external.for_trusted_external_source_reference(reference, resolved),
             None => external.for_trusted_external_source(resolved),
