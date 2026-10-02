@@ -4,6 +4,11 @@ created: 2026-10-01
 phase: 1
 agent: claude/sonnet
 yolo: "true"
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+packages: []
 ---
 
 # Plan: A shorthand setter after a provider switch is applied, not forwarded
@@ -118,13 +123,13 @@ Defaults apply unless the author rules otherwise; record each in a new
 
 Run once, now, one host, quick sample. No re-checks in later phases.
 
-- [ ] **Spike A: dependency state.** Read `2026-07-13-cli-switches/plan.md`,
+- [x] **Spike A: dependency state.** Read `2026-07-13-cli-switches/plan.md`,
   its `implementation-log.md` if present, and `git log` for `cli/src/argv/` and
   the generated `lib/src/provider/*/data.rs` to determine which of R8 (metadata,
   lookup) and R9 (ownership function, resolved-provider check, `argv`
   positionals, ambiguity) have landed. Record in the log, with the exact
   function names this plan's tasks must call. Informs ruling 1 and Phase 3.
-- [ ] **Spike B: fake-provider fixtures.** In `cli/tests/l1/cli_process_fixture.rs`
+- [x] **Spike B: fake-provider fixtures.** In `cli/tests/l1/cli_process_fixture.rs`
   and the existing compose-binary tests, confirm `CliProcessFixture` can stand up
   fake `codex` and `claude` providers that record their exact argv, and that
   `--dry-run` reports the stderr "Provider args" row without any provider
@@ -134,12 +139,12 @@ Run once, now, one host, quick sample. No re-checks in later phases.
 
 - [x] **Record rulings.** Write rulings 1-8 (author answers or accepted defaults)
   into `implementation-log.md`.
-- [ ] **Run the spikes.** Record each finding in a few lines; a finding that
+- [x] **Run the spikes.** Record each finding in a few lines; a finding that
   contradicts the spec is a ruling for the author, not a silent divergence.
-- [ ] **Baseline.** From `claudine/`, run `just test` and `just lint`; record
+- [x] **Baseline.** From `claudine/`, run `just test` and `just lint`; record
   pre-existing failures (the worktree has uncommitted changes in unrelated
   files) so they are not attributed to this work.
-- [ ] **Locate guards.** Confirm the existing tests this fix must preserve and
+- [x] **Locate guards.** Confirm the existing tests this fix must preserve and
   note what each protects: `reported_command_forwards_config_switch`,
   `setter_before_tail_stays_with_claudine`, `owned_flag_after_tail_is_reclaimed`,
   `explicit_separator_forwards_opaque_tail`, `switch_before_file_errors`,

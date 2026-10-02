@@ -32,6 +32,36 @@ review_iterations: 0
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-01
+human_review: false
+message_to_agent: |-
+    Phase 1 finding: the dependency 2026-07-13-cli-switches has fully landed R8
+    and R9 on this branch, so the headline defect is ALREADY FIXED. The spec's
+    reproduction renders "Phase 2" in both orderings and "Provider args" is only
+    `-c model_reasoning_effort="medium"`. Ruling 1's blocker is resolved; Phase 3
+    is not blocked. Read `## Phase 1` in implementation-log.md first.
+
+    Consequences for Phase 2 ("red regression suite"):
+    - Most ownership-table rows will be GREEN when written. Record which rows are
+      green-on-arrival versus red in the log rather than forcing reds. Expected
+      red: the missing-value error for `--codex -c phase=2` (declared `phase`)
+      does not name `phase`, and its guidance says "Name the provider" instead of
+      "supply a separate provider value" (TailMismatch has no setter-key field;
+      the shared ESCAPE suffix in lib/src/composition/ownership.rs).
+    - Controlled switch metadata (ruling 2) is only reachable inside the
+      `claudine` lib crate: the private `SwitchSource` trait + `own_in`/`check_in`,
+      with `struct Fixed` in lib/src/composition/ownership/tests.rs. Put the
+      table-driven controlled-metadata cases there; CLI partition tests in
+      cli/src/argv/partition/tests.rs can only use the real compiled catalog.
+    - Do not duplicate the dependency's existing cases; extend
+      lib/src/composition/ownership/tests.rs, cli/src/argv/partition/tests.rs and
+      cli/tests/l1/provider_tail_ownership.rs, which already cover several rows.
+    - The plan's guard `reported_command_forwards_config_switch` (and three other
+      named partition tests) no longer exist; the log maps each to its successor.
+    - Phase 3 must also de-duplicate the setter key grammar: lib
+      `composition::setter_key` and cli `parse_compose_setter` disagree on an
+      empty key (`=v`).
+    - The dependency is still in its own review cycle with uncommitted changes in
+      this worktree; avoid unrelated edits in its files.
 ---
 
 # A shorthand setter after a provider switch is forwarded to the agent
