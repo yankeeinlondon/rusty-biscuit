@@ -245,7 +245,7 @@ pub(crate) fn discover_repository(dir: &Path) -> Result<RepositoryDiscovery, Con
         return Ok(RepositoryDiscovery { values: serde_json::Map::new(), observation: None });
     }
     let (values, diagnostics, _, _, observations) =
-        capture_runtime_context_for_groups(dir, &[ContextGroup::Repo]);
+        capture_runtime_context_for_groups(dir, &[ContextGroup::Repo], &std::collections::HashMap::new());
     // With only the `Repo` group requested, the sole `git` diagnostic the
     // capture raises is the discovery failure itself.
     if let Some(detail) = diagnostics.into_iter().find_map(|diagnostic| match diagnostic {
@@ -431,6 +431,7 @@ impl ComposeRequest {
 
     fn assemble(mut options: ComposeOptions, context: FileResolutionContext) -> Self {
         options.align_context_environment(context.env());
+        options.admit_source_in(&context);
         Self { options, context }
     }
 
@@ -640,8 +641,9 @@ pub(crate) mod test_support {
     /// A request for unit tests that preserves the request directory the
     /// pre-`ComposeRequest` pipeline chose: a file source's directory, else
     /// the context's anchor, else the process directory. Home comes from the
-    /// process and the environment from the options' own context, so `ctx.*`
-    /// is unchanged.
+    /// process and the environment from the options' own context (empty
+    /// unless the test put values there), so no test sees the process
+    /// environment by accident.
     pub(crate) fn request(options: ComposeOptions) -> ComposeRequest {
         let dir = legacy_request_dir(&options);
         let snapshot = RequestSnapshot::new(dir)

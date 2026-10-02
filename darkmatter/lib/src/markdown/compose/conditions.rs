@@ -329,7 +329,7 @@ impl<'a> ShortcutLookup<'a> {
     fn new(data: &'a Value, context: &'a biscuit_file::FileResolutionContext) -> Self {
         Self {
             data,
-            ctx: CtxLookup::new(context.cwd()),
+            ctx: CtxLookup::new(context.cwd(), context.env()),
             // Local-only: `absolute`/`relative`/`file_exists`/… need the
             // context but no remote runtime.
             resolution_context: ResolutionContext::new(context.clone()),

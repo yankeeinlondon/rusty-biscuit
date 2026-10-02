@@ -279,6 +279,9 @@ harness = false
 # drives WezTerm only (tmux is the CLI's backend); a backend declared here
 # that no lib test executes fails backend-proof.
 [package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/context_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
 tiers = ["L1", "L2", "browser"]
 features = ["terminal-tests", "browser-tests", "effects-instrumentation"]
 local-features = ["effects-instrumentation"]

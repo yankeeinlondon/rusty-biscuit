@@ -58,7 +58,8 @@ pub(crate) fn reconcile(
         ComposeSource::Url(url) => Some(std::path::PathBuf::from(url.to_string())),
         ComposeSource::Unknown => None,
     };
-    let display = document.as_deref().map(abbreviate_path);
+    let home = options.resolution_context().home_dir();
+    let display = document.as_deref().map(|path| abbreviate_path(path, home));
     let source = markdown.full_source_context_for_errors();
 
     for candidate in unknown {

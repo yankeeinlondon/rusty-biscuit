@@ -150,7 +150,10 @@ pub(crate) fn prepare_schemas(
         source: Some(Box::new(source)),
     };
 
-    let mut schemas = DarkmatterSchemas::new(options.resolution_context().clone());
+    // The source's own context: a child opened through `~`, or a source
+    // outside the request's tree, resolves its `file` values in the tree it
+    // was opened in, as its transclusions do.
+    let mut schemas = DarkmatterSchemas::new(options.source_file_resolution_context());
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
     }
@@ -1152,7 +1155,7 @@ fn resolve_caller_file_value(
                 ));
             }
             if reference.class().kind == biscuit_file::FileReferenceKind::Url {
-                let target = reference.resolve_target().map_err(|err| {
+                let target = reference.resolve_target_in_context(context).map_err(|err| {
                     failure(
                         format!("could not classify remote file reference `{raw}`: {err}"),
                         FileReferenceDiagnostic::ResolutionFailed {
@@ -3212,6 +3215,28 @@ mod tests {
             options.set_overrides.as_ref().unwrap()["spec"],
             serde_json::json!("spec.md"),
             "the input layer keeps the caller's raw value for a fresh epoch",
+        );
+    }
+
+    /// A caller's lazy remote `file` value takes its `{{VAR}}` host from the
+    /// request's environment, never the process's.
+    #[test]
+    fn caller_remote_file_value_interpolates_from_the_request_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let variable = "DM_CALLER_REMOTE_HOST_PROBE";
+        assert!(std::env::var_os(variable).is_none(), "the process must not define {variable}");
+        let mut context = crate::markdown::compose::ComposeContext::capture_minimal();
+        context.env_mut().insert(variable.to_string(), "docs.example.com".to_string());
+        let options = ComposeOptions::new_with_context(context)
+            .with_source_file(&doc_path)
+            .with_set_overrides(serde_json::json!({ "spec": format!("https://{{{{{variable}}}}}/guide.md") }));
+
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("https://docs.example.com/guide.md")),
         );
     }
 

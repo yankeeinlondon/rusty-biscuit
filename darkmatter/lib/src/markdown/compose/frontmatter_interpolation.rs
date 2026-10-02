@@ -1710,12 +1710,11 @@ mod tests {
 
         #[test]
         fn env_resolves() {
-            // fixed_for_testing has empty env, so use a live context
-            let ctx = ComposeContext::capture_for_dir(&std::env::current_dir().unwrap());
+            // A context's environment is whatever its request supplied.
+            let mut ctx = test_context();
+            ctx.env_mut().insert("HOME".to_string(), "/home/me".to_string());
             let state = FrontmatterSeedState::new(HashMap::new(), ctx);
-            // env should have HOME on any unix system
-            let result = state.get("env.HOME");
-            assert!(result.is_some());
+            assert_eq!(state.get("env.HOME"), Some(json!("/home/me")));
         }
 
         #[test]

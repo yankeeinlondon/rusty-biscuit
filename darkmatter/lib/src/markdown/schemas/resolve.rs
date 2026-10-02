@@ -326,32 +326,26 @@ fn is_bare_name(file_ref: &FileReference) -> bool {
 /// resolved path of the first root that contains a file matching `name`, or
 /// `None` when no root has it.
 ///
-/// Each root gets an explicit context derived from the request snapshot with no
-/// repository or package anchor. The parsed implicit-relative reference
-/// therefore has exactly one candidate per iteration, so the loop's advertised
-/// nearest-first ordering decides the winner without reading ambient state.
+/// Each root is tried with the name spelled as an explicit `./name`, resolved
+/// in the request context derived onto that root. An explicit relative
+/// reference has exactly one candidate, the root's own entry, so the loop's
+/// advertised nearest-first ordering decides the winner. The derivation keeps
+/// the request's home and environment and reads no ambient state; it crosses
+/// the trust boundary because a schema root (configuration, `~`) may lie
+/// outside the request's repository.
 fn try_bare_name_in_roots(
     file_ref: &FileReference,
     schema_roots: &[PathBuf],
     request_context: &FileResolutionContext,
 ) -> Result<Option<PathBuf>, SchemaError> {
-    let captured = request_context;
+    let unresolved = |source| SchemaError::Unresolved {
+        reference: file_ref.raw().to_string(),
+        source,
+    };
+    let explicit = FileReference::new(&format!("./{}", file_ref.raw())).map_err(unresolved)?;
     for root in schema_roots {
-        // Omit repository/package anchors so this implicit bare name has one
-        // candidate: the selected schema root. HOME and environment still come
-        // from the immutable request snapshot, with no ambient reads.
-        let root_context = FileResolutionContext::from_snapshot(
-            root,
-            captured.home_dir().map(Path::to_path_buf),
-            captured.env().clone(),
-        );
-        if let Some(path) = file_ref
-            .resolve_in_context(&root_context)
-            .map_err(|source| SchemaError::Unresolved {
-                reference: file_ref.raw().to_string(),
-                source,
-            })?
-        {
+        let root_context = request_context.for_trusted_external_cwd(root);
+        if let Some(path) = explicit.resolve_in_context(&root_context).map_err(unresolved)? {
             return Ok(Some(path));
         }
     }

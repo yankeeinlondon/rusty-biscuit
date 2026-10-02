@@ -17,9 +17,9 @@ use tracing::trace;
 ///
 /// Tries to make the path relative to the git repo root discovered by
 /// walking up from the file's parent directory. Falls back to `~/…` when
-/// the path is under the user's home directory, or the absolute path
-/// otherwise.
-pub(crate) fn abbreviate_path(path: &Path) -> String {
+/// the path is under `home` (the request's home directory), or the absolute
+/// path otherwise.
+pub(crate) fn abbreviate_path(path: &Path, home: Option<&Path>) -> String {
     // Try git repo root first (walk up looking for .git)
     if let Some(root) = find_git_root_from(path)
         && let Ok(rel) = path.strip_prefix(&root)
@@ -28,8 +28,8 @@ pub(crate) fn abbreviate_path(path: &Path) -> String {
     }
 
     // Fall back to ~/… for paths under HOME
-    if let Some(home) = dirs::home_dir()
-        && let Ok(rel) = path.strip_prefix(&home)
+    if let Some(home) = home
+        && let Ok(rel) = path.strip_prefix(home)
     {
         return format!("~/{}", rel.display());
     }

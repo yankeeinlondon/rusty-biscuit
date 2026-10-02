@@ -17,15 +17,18 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct CtxLookup<'a> {
     work_dir: &'a Path,
+    environment: &'a HashMap<String, String>,
     cache: RefCell<HashMap<String, Value>>,
     captured: RefCell<HashSet<super::super::context::capture::ContextGroup>>,
 }
 
 impl<'a> CtxLookup<'a> {
-    /// Creates a new `CtxLookup` for the given working directory.
-    pub fn new(work_dir: &'a Path) -> Self {
+    /// Creates a new `CtxLookup` for the given working directory and request
+    /// environment (the source of the `Agent` group's `agent`/`model`).
+    pub fn new(work_dir: &'a Path, environment: &'a HashMap<String, String>) -> Self {
         Self {
             work_dir,
+            environment,
             cache: RefCell::new(HashMap::new()),
             captured: RefCell::new(HashSet::new()),
         }
@@ -79,6 +82,7 @@ impl<'a> CtxLookup<'a> {
             super::super::context::capture::capture_runtime_context_for_groups(
                 self.work_dir,
                 &[group],
+                self.environment,
             );
 
         let mut cache = self.cache.borrow_mut();
@@ -129,7 +133,8 @@ mod tests {
 
     #[test]
     fn ctx_lookup_returns_none_for_non_ctx_paths() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         assert!(lookup.get("foo").is_none());
         assert!(lookup.get("env.HOME").is_none());
         assert!(lookup.get("git.branch").is_none());
@@ -137,7 +142,8 @@ mod tests {
 
     #[test]
     fn ctx_lookup_resolves_today() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         let value = lookup.get("ctx.today");
         assert!(value.is_some(), "ctx.today should resolve to a value");
         if let Some(Value::String(s)) = value {
@@ -158,7 +164,8 @@ mod tests {
 
     #[test]
     fn ctx_lookup_caches_repeated_lookups() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         // First call triggers capture
         let _ = lookup.get("ctx.today");
         let captured_after_first = lookup.captured_groups().len();
@@ -175,7 +182,8 @@ mod tests {
 
     #[test]
     fn ctx_lookup_unknown_ctx_key_returns_none() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         assert!(
             lookup.get("ctx.zzz").is_none(),
             "Unknown ctx key should return None"
@@ -184,7 +192,8 @@ mod tests {
 
     #[test]
     fn ctx_lookup_bare_ctx_returns_none() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         assert!(
             lookup.get("ctx").is_none(),
             "Bare 'ctx' token should return None"
@@ -193,7 +202,8 @@ mod tests {
 
     #[test]
     fn a_capture_missing_a_cataloged_key_is_an_internal_invariant() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         lookup.mark_captured_without_projection(ContextGroup::Os);
 
         assert!(matches!(
@@ -215,7 +225,8 @@ mod tests {
 
     #[test]
     fn checked_resolution_captures_only_the_groups_it_reaches() {
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::new();
+        let lookup = CtxLookup::new(Path::new("."), &environment);
 
         assert!(lookup.get_checked("ctx.zzz").unwrap().is_none());
         assert!(lookup.get_checked("ctx").unwrap().is_none());
@@ -226,19 +237,16 @@ mod tests {
         assert_eq!(lookup.captured_groups(), vec![ContextGroup::DateTime]);
     }
 
-    /// `ctx.agent` and `ctx.model` resolve lazily and capture only the Agent
-    /// group, without pulling in repo, OS, or hardware probes.
+    /// `ctx.agent` and `ctx.model` resolve lazily from the lookup's
+    /// environment and capture only the Agent group, without pulling in repo,
+    /// OS, or hardware probes.
     #[test]
-    #[serial_test::serial(env_agent_model)]
     fn ctx_lookup_resolves_agent_and_model() {
-        let previous = std::env::var("AGENT").ok();
-        let previous_model = std::env::var("MODEL").ok();
-        unsafe {
-            std::env::set_var("AGENT", "opencode");
-            std::env::set_var("MODEL", "glm-5.2");
-        }
-
-        let lookup = CtxLookup::new(Path::new("."));
+        let environment = HashMap::from([
+            ("AGENT".to_string(), "opencode".to_string()),
+            ("MODEL".to_string(), "glm-5.2".to_string()),
+        ]);
+        let lookup = CtxLookup::new(Path::new("."), &environment);
         assert_eq!(lookup.get("ctx.agent"), Some(Value::String("opencode".to_string())));
         assert_eq!(lookup.get("ctx.model"), Some(Value::String("glm-5.2".to_string())));
 
@@ -250,16 +258,5 @@ mod tests {
             captured
         );
         assert!(captured.contains(&ContextGroup::Agent));
-
-        unsafe {
-            match previous {
-                Some(v) => std::env::set_var("AGENT", v),
-                None => std::env::remove_var("AGENT"),
-            }
-            match previous_model {
-                Some(v) => std::env::set_var("MODEL", v),
-                None => std::env::remove_var("MODEL"),
-            }
-        }
     }
 }

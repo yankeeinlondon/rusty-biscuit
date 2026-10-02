@@ -480,6 +480,7 @@ fn cache_key(
     effective: &ShellDirective,
     shell_opts: &ShellExpansionOptions,
     source: &crate::markdown::compose::ComposeSource,
+    context: &biscuit_file::FileResolutionContext,
 ) -> String {
     let mut key = String::new();
     if let Some(ref pipeline) = effective.pipeline {
@@ -505,7 +506,7 @@ fn cache_key(
     // key names the directory, so it uses the canonical spelling when there is
     // one. A directory that cannot be canonicalized keeps its spelling, which
     // can only cost a second run, never share one wrongly.
-    let working_dir = executor::resolve_working_directory(shell_opts, source);
+    let working_dir = executor::resolve_working_directory(shell_opts, source, context);
     let working_dir = std::fs::canonicalize(&working_dir).unwrap_or(working_dir);
     key.push_str(&format!(
         "\u{0}{}\u{0}{}\u{0}{}\u{0}{:?}",
@@ -576,7 +577,9 @@ pub(crate) fn execute_prepared_outcome(
     shell_runtime: &ShellExpansionRuntime,
 ) -> Result<DirectiveOutcome, ShellExpansionError> {
     let shell_opts = options.shell_options();
-    let run = || executor::execute_directive_outcome(&prepared.effective, &shell_opts, &options.source);
+    let run = || {
+        executor::execute_directive_outcome(&prepared.effective, &shell_opts, &options.source, options.resolution_context())
+    };
     if prepared.effective.no_cache {
         return Ok(DirectiveOutcome {
             outcome: run()?,
@@ -585,7 +588,7 @@ pub(crate) fn execute_prepared_outcome(
         });
     }
 
-    let key = cache_key(&prepared.effective, &shell_opts, &options.source);
+    let key = cache_key(&prepared.effective, &shell_opts, &options.source, options.resolution_context());
     let (outcome, fresh) = shell_runtime.cached_outcome(&key, run)?;
     // Warnings from the original execution (e.g. a timeout fallback) belong to
     // that occurrence and are not replayed; a one-shot discoverability warning

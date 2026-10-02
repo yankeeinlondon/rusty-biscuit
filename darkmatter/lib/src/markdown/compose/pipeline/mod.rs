@@ -451,7 +451,7 @@ impl Markdown {
 
             // Convert ctx diagnostics to compose warnings
             let source_display = match &options.source {
-                ComposeSource::File(p) => abbreviate_path(p),
+                ComposeSource::File(p) => abbreviate_path(p, options.resolution_context().home_dir()),
                 ComposeSource::Url(u) => u.to_string(),
                 ComposeSource::Unknown => "unknown".to_string(),
             };

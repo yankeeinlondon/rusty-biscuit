@@ -198,9 +198,10 @@ fn resolve_absolute(
             Err(_) => None,
         }
     } else {
-        // Bare-API path with no document base: only an existing target can be
-        // absolutized; a miss has no candidate anchor without a base.
-        file_ref.resolve().ok().flatten()
+        // A source with no document base (a string document) resolves from
+        // the request directory: only an existing target can be absolutized;
+        // a miss has no candidate anchor without a base.
+        file_ref.resolve_in_context(options.resolution_context()).ok().flatten()
     };
 
     let resolved = resolved?;
