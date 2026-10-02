@@ -470,11 +470,102 @@ fn inline_compose_never_persists_argv() {
 
 // ── Help needs no file (criterion 27) ──
 
+/// The grouped root help screen's usage line.
+const ROOT_HELP: &str = "Usage: claudine <command> [options]";
+
+/// Exit code, stdout, and stderr (both flattened) of `claudine args`.
+fn run_for_help(fixture: &CliProcessFixture, args: &[&str]) -> (i32, String, String) {
+    let output = fixture.command().args(args).output().unwrap();
+    (
+        output.status.code().unwrap_or(-1),
+        flat(&strip_ansi(&String::from_utf8_lossy(&output.stdout))),
+        flat(&strip_ansi(&String::from_utf8_lossy(&output.stderr))),
+    )
+}
+
+/// Every Claudine help form on a composition command shows help and exits 0
+/// whether the file is omitted, absent, or present but unreadable — a help
+/// request is answered before the file requirement and never opens the file.
+/// A `--help` after the authored `--` belongs to the provider, so that run is
+/// an ordinary missing-document failure.
 #[test]
 fn help_opens_no_composition_file() {
     let fixture = CliProcessFixture::named("own-help");
+    let launch_dir = stub(&fixture, "codex", "exit 0");
+    let unreadable = doc(&fixture, "unreadable.md", "---\nagent: codex\n---\nBody\n");
+    fs::set_permissions(&unreadable, std::os::unix::fs::PermissionsExt::from_mode(0o000)).unwrap();
+
     for subcommand in ["compose", "inline-compose", "sequence"] {
-        let (code, stderr) = run(&fixture, &[subcommand, "missing.md", "-c", "x", "--help"]);
-        assert_eq!(code, 0, "{subcommand}: {stderr}");
+        let help_forms: [Vec<&str>; 11] = [
+            vec![subcommand, "--help"],
+            vec![subcommand, "-h"],
+            vec!["--help", subcommand],
+            vec!["-h", subcommand],
+            vec!["--plain", "--debug", "info", "--help", subcommand],
+            vec![subcommand, "missing.md", "--help"],
+            vec![subcommand, "--help", "missing.md"],
+            vec![subcommand, "missing.md", "-c", "x", "--help"],
+            vec![subcommand, &unreadable, "--help"],
+            vec![subcommand, &unreadable, "--codex", "-h"],
+            vec!["--help", subcommand, &unreadable],
+        ];
+        for args in help_forms {
+            let (code, stdout, stderr) = run_for_help(&fixture, &args);
+            assert_eq!(code, 0, "{args:?}: {stderr}");
+            assert!(stdout.contains(ROOT_HELP), "{args:?} showed no help: {stdout}");
+        }
+
+        let (code, stdout, stderr) = run_for_help(&fixture, &[subcommand, "missing.md", "--", "--help"]);
+        assert_eq!(code, 1, "{subcommand} missing.md -- --help: {stderr}");
+        assert!(!stdout.contains(ROOT_HELP), "help after `--` is the provider's: {stdout}");
+        assert!(stderr.contains("CompositionError"), "{stderr}");
+    }
+    assert!(launches(&launch_dir).is_empty(), "a help request launched a provider");
+}
+
+/// The sibling help surfaces: every direct wrapper keeps its own help, a root
+/// help request outranks any subcommand's required arguments, and nested
+/// administrative subcommands accept `--help`/`-h` without their required
+/// arguments.
+#[test]
+fn help_needs_no_required_argument_on_any_command() {
+    let fixture = CliProcessFixture::named("own-help-siblings");
+
+    for wrapper in [
+        "claude", "codex", "gemini", "goose", "kimi", "opencode", "qwen", "kilo", "pi", "antigravity",
+    ] {
+        let (code, stdout, stderr) = run_for_help(&fixture, &[wrapper, "--help"]);
+        assert_eq!(code, 0, "{wrapper} --help: {stderr}");
+        assert!(stdout.contains(&format!("Usage: claudine {wrapper} ")), "{wrapper}: {stdout}");
+    }
+
+    for root_form in [
+        &["--help", "completions"][..],
+        &["--help", "budget"],
+        &["--help", "budget", "grant"],
+        &["-h", "mcp", "alias"],
+        &["--help", "handle"],
+        &["--help", "hooks"],
+        &["--help", "claude"],
+    ] {
+        let (code, stdout, stderr) = run_for_help(&fixture, root_form);
+        assert_eq!(code, 0, "{root_form:?}: {stderr}");
+        assert!(stdout.contains(ROOT_HELP), "{root_form:?}: {stdout}");
+    }
+
+    for (args, usage) in [
+        (&["hooks", "--help"][..], "Usage: claudine hooks"),
+        (&["providers", "--help"], "Usage: claudine providers"),
+        (&["actions", "--help"], "Usage: claudine actions"),
+        (&["completions", "--help"], "Usage: claudine completions"),
+        (&["budget", "--help"], "Usage: claudine budget"),
+        (&["budget", "grant", "--help"], "Usage: claudine budget grant"),
+        (&["budget", "init", "-h"], "Usage: claudine budget init"),
+        (&["mcp", "alias", "--help"], "Usage: claudine mcp alias"),
+        (&["logs", "sessions", "-h"], "Usage: claudine logs sessions"),
+    ] {
+        let (code, stdout, stderr) = run_for_help(&fixture, args);
+        assert_eq!(code, 0, "{args:?}: {stderr}");
+        assert!(stdout.contains(usage), "{args:?}: {stdout}");
     }
 }

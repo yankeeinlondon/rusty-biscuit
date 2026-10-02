@@ -20,10 +20,10 @@ use crate::argv::{COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_inde
 ///
 /// Hoisting `--help` / `-h` to position 1 converts the same argv into a
 /// root-help invocation, which `main.rs` catches and forwards to
-/// [`crate::commands::help::run`]. The rest of the argv still parses
-/// cleanly under clap (compose accepts the remaining positionals), but
-/// `cli.help == true` short-circuits into the grouped help screen before
-/// any subcommand runs.
+/// [`crate::commands::help::run`] before any subcommand runs. The rest of
+/// the argv need not satisfy the subcommand: `parse_cli_from` answers a root
+/// help request even when clap reports a missing required argument, so
+/// `claudine compose --help` needs no file.
 ///
 /// No-ops when:
 ///

@@ -146,7 +146,15 @@ Several properties of the clap surface shape the pre-parser's rules:
 - `Cli` sets `disable_help_flag = true` and declares its own non-global
   `help: bool`. Composition subcommands therefore never inherit a
   functional `--help` handler. Rule 4 exists precisely to route
-  `--help` / `-h` into the root handler on those subcommands.
+  `--help` / `-h` into the root handler on those subcommands. Because that
+  root `help` is an ordinary Boolean, clap would validate the subcommand's
+  required arguments before reporting it; `parse_cli_from` therefore answers
+  a root help request even when that validation fails, so
+  `claudine compose --help` needs no file.
+- Every other subcommand, at every depth (`budget grant`, `mcp alias`),
+  gets an injected `--help` / `-h` of clap's own help action, which clap
+  handles before required-argument validation. Direct wrappers keep their
+  own help screen instead.
 - `ComposeArgs`, `InlineComposeArgs`, and `SequenceArgs` each expose a
   greedy multi-value positional (`#[arg(num_args = 1..)]`) that collects
   files plus `key=value` setters in any order. The ownership partition

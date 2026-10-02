@@ -144,7 +144,12 @@ subcommand and the first literal `--` for an exact `--help` or `-h`
 token and hoisting it to argv position 1, before the subcommand. The
 resulting argv short-circuits into Claudine's custom help handler (via
 `cli.help == true` in `main.rs`) regardless of what else appears on the
-command line.
+command line — including when the rest does not satisfy the subcommand. A
+root help request is answered before clap's required-argument check, so
+`claudine compose --help` shows help and exits 0 without a file, exactly as
+`claudine compose missing.md --help` does without opening `missing.md`. The
+same holds for `claudine --help <command>` on any command with required
+arguments, such as `claudine --help completions`.
 
 **Before**
 
@@ -164,10 +169,11 @@ claudine -h compose
 
 Rule 4 hoists `--help` out of the composition argv before the ownership
 partition runs, so the partition never treats `--help` as an agent-tail token.
-It is gated to composition subcommands only — wrapper subcommands
-(`claudine claude --help`) intentionally forward `--help` to the child
-CLI, and non-composition subcommands already have working `--help`
-support.
+It is gated to composition subcommands only. Wrapper subcommands
+(`claudine claude --help`) show Claudine's own wrapper help, and
+non-composition subcommands already have working `--help` support. To
+send `--help` to the provider, put it after `--`
+(`claudine claude -- --help`).
 
 Rule 4 does not fire when:
 
@@ -604,3 +610,9 @@ checks the notice and the non-UTF-8 refusal.
 [`provider_tail_notice.rs`](../../cli/tests/l1/provider_tail_notice.rs) covers
 the notice, its deduplication across sequence steps and parallel tasks,
 redaction, and non-UTF-8 refusal on both launch paths.
+The ambiguity question is proved in a real terminal by
+[`level2_ownership_prompt_capture.rs`](../../cli/tests/level2/level2_ownership_prompt_capture.rs)
+(`just test-l2 ownership_prompt_capture`): for `compose`, `inline-compose`,
+and `sequence` it reads the drawn question and both choices back from tmux,
+answers each way, and checks that choosing Codex forwards `-c foo` while
+choosing Claude leaves the actual Codex launch refused for a missing value.

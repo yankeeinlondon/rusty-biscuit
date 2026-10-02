@@ -89,10 +89,10 @@ async fn ensure_config_exists() -> Result<()> {
 /// `clap::Command` so we can:
 ///
 /// - Inject `--help`/`-h` (an `ArgAction::Help`) on every non-wrapper
-///   subcommand. The root `Cli` sets `disable_help_flag = true` for custom
-///   help routing, and clap propagates that disable through to subcommands,
-///   so without injection `claudine <subcmd> --help` errors with
-///   `unexpected argument '--help'`.
+///   subcommand, nested ones included. The root `Cli` sets
+///   `disable_help_flag = true` for custom help routing, and clap propagates
+///   that disable through to subcommands, so without injection
+///   `claudine <subcmd> --help` errors with `unexpected argument '--help'`.
 /// - Mark each wrapper subcommand with `ignore_errors(true)` so unknown
 ///   flags destined for the wrapped agent CLI flow into the `passthrough`
 ///   bucket instead of aborting with a clap error.
@@ -105,6 +105,8 @@ async fn ensure_config_exists() -> Result<()> {
 /// On `try_get_matches_from`:
 ///
 /// - `Ok` → build `Cli` from matches.
+/// - `Err(_)` with a root help request → the grouped help, via
+///   [`root_help_request`]; help never waits on a required argument.
 /// - `Err(DisplayHelp | DisplayVersion | DisplayHelpOnMissingArgumentOrSubcommand)`
 ///   → call `err.exit()` so the injected `ArgAction::Help` prints clap's
 ///   per-subcommand help screen and exits (matching `Cli::parse_from`'s
@@ -132,16 +134,48 @@ fn parse_cli_from(argv: &[OsString]) -> Cli {
         }
     }
 
-    match cmd.try_get_matches_from(argv.iter().cloned()) {
+    match cmd.clone().try_get_matches_from(argv.iter().cloned()) {
         Ok(matches) => Cli::from_arg_matches(&matches)
             .unwrap_or_else(|_| Cli::parse_from(argv.iter().cloned())),
-        Err(err) => match err.kind() {
-            ErrorKind::DisplayHelp
-            | ErrorKind::DisplayVersion
-            | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => err.exit(),
-            _ => Cli::parse_from(argv.iter().cloned()),
-        },
+        Err(err) => {
+            if let Some(cli) = root_help_request(cmd, argv) {
+                return cli;
+            }
+            match err.kind() {
+                ErrorKind::DisplayHelp
+                | ErrorKind::DisplayVersion
+                | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => err.exit(),
+                _ => Cli::parse_from(argv.iter().cloned()),
+            }
+        }
     }
+}
+
+/// The root help request in `argv`, read without subcommand validation.
+///
+/// The root `help` is a plain Boolean so the grouped help screen can render
+/// it, which means clap only reports it after validating the selected
+/// subcommand. Rule 4 hoists a composition `--help` to the root, so
+/// `claudine compose --help` (no file) would otherwise fail on the missing
+/// required file before help could display. A root help request outranks every
+/// subcommand validation error; the global presentation options are kept so
+/// `--plain` and `--debug` still apply to the help screen.
+fn root_help_request(cmd: clap::Command, argv: &[OsString]) -> Option<Cli> {
+    let matches = cmd
+        .ignore_errors(true)
+        .try_get_matches_from(argv.iter().cloned())
+        .ok()?;
+    matches.get_flag("help").then(|| Cli {
+        verbose: matches.get_count("verbose"),
+        debug: matches
+            .try_get_one::<args::DebugLevel>("debug")
+            .ok()
+            .flatten()
+            .copied(),
+        plain: matches.get_flag("plain"),
+        help: true,
+        command: None,
+    })
 }
 
 /// Subcommand names that must NOT receive an `ArgAction::Help` injection.
@@ -154,15 +188,16 @@ fn skip_help_injection(name: &str) -> bool {
 }
 
 /// Add `--help`/`-h` (an `ArgAction::Help`) to every subcommand for which
-/// [`skip_help_injection`] returns `false`.
+/// [`skip_help_injection`] returns `false`, and to every subcommand nested
+/// beneath one (`budget grant`, `mcp alias`, …).
 ///
 /// This is necessary because the root `Cli` sets `disable_help_flag = true`
 /// (so the custom grouped help can fire on `claudine` / `claudine --help`),
-/// and clap propagates that setting to subcommands. Without re-injection,
-/// `claudine <subcmd> --help` errors with `unexpected argument '--help'`.
+/// and clap propagates that setting to subcommands at every depth. Without
+/// re-injection, `claudine <subcmd> --help` errors with
+/// `unexpected argument '--help'`. Clap acts on an `ArgAction::Help` before
+/// it validates required arguments, so `budget grant --help` needs no ledger.
 fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
-    use clap::{Arg, ArgAction};
-
     let names: Vec<String> = cmd
         .get_subcommands()
         .filter(|sub| !skip_help_injection(sub.get_name()))
@@ -172,16 +207,22 @@ fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
     for name in names {
         if let Some(sub) = cmd.find_subcommand_mut(&name) {
             let owned = std::mem::replace(sub, clap::Command::new("__placeholder__"));
-            let injected = owned.arg(
-                Arg::new("help")
-                    .short('h')
-                    .long("help")
-                    .action(ArgAction::Help)
-                    .help("Print help"),
-            );
-            let _ = std::mem::replace(sub, injected);
+            let _ = std::mem::replace(sub, with_help_flag(owned));
         }
     }
+}
+
+fn with_help_flag(cmd: clap::Command) -> clap::Command {
+    use clap::{Arg, ArgAction};
+
+    cmd.arg(
+        Arg::new("help")
+            .short('h')
+            .long("help")
+            .action(ArgAction::Help)
+            .help("Print help"),
+    )
+    .mut_subcommands(with_help_flag)
 }
 
 fn main() -> Result<()> {
@@ -469,4 +510,19 @@ async fn dispatch(
         Commands::Errors(args) => commands::errors::run(args),
     };
     result.map(|()| 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::CommandFactory;
+
+    /// Clap checks a command's definition lazily, only for the subcommand an
+    /// argv selects; this walks the whole tree so an injected `-h` that
+    /// collides with a nested subcommand's own short flag fails here.
+    #[test]
+    fn injected_help_flags_are_valid_on_every_subcommand() {
+        let mut cmd = <super::Cli as CommandFactory>::command();
+        super::inject_subcommand_help_flag(&mut cmd);
+        cmd.debug_assert();
+    }
 }

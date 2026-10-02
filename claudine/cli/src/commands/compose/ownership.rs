@@ -17,6 +17,7 @@ use std::path::Path;
 
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable as _;
+use biscuit_terminal::utils::layout::WordWrap;
 use biscuit_tui::prelude::*;
 use claudine::composition::{
     OwnershipCandidate, OwnershipError, ProviderTail, ResolvedCompositionSource, SchemaParameters,
@@ -134,7 +135,8 @@ fn ask_which_agent(ambiguous: &claudine::composition::ownership::AmbiguousSwitch
          (This decides how the arguments are read, not which agent runs.)",
         ambiguous.switch
     );
-    log::message(&Prose::new(intro).render(&log::terminal()));
+    // Unwrapped, the terminal breaks the question mid-word.
+    log::message(&Prose::new(intro).with_word_wrap(WordWrap::WrapProse(None, None)).render(&log::terminal()));
     let options: Vec<ChoiceOption<Provider>> = ambiguous
         .readings
         .iter()
