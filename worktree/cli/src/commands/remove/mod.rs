@@ -35,7 +35,9 @@ use worktree::remove::safety::{
     BranchSafety, NoPrSource, PrSource, Reconfirmation, SafetyInput, SniffPrSource, Tier, assess,
     reconfirm,
 };
-use worktree::remove::{Inventory, collect_inventory, remove_local_branch, remove_worktree};
+use worktree::remove::{
+    Inventory, check_no_processes, collect_inventory, remove_local_branch, remove_worktree,
+};
 use worktree::remove::included::classify_included;
 use worktree::worktree::{WorktreeEntry, default_branch, find_worktree, parse_worktree_list};
 
@@ -219,6 +221,10 @@ pub fn run(name: &str, flags: Flags) -> Result<(), WorktreeError> {
             super::go::wrapper_setup_help()
         )));
     }
+
+    // Checked again right before git deletes anything; this one only spares
+    // the user a report and questions that end in this refusal.
+    check_no_processes(&entry.path)?;
 
     let mut facts = Facts::local(&base, entry)?;
     facts.assess(flags.force_remote);

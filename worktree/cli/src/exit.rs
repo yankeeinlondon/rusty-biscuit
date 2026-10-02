@@ -18,7 +18,7 @@ pub fn exit_code(error: &WorktreeError) -> i32 {
     match error {
         WorktreeError::Cancelled => SUCCESS,
         WorktreeError::RefusedToLoseWork(_) => REFUSED_TO_LOSE_WORK,
-        WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse(_) => {
+        WorktreeError::BlockedByEnvironment(_) | WorktreeError::DirectoryInUse { .. } => {
             BLOCKED_BY_ENVIRONMENT
         }
         _ => FAILURE,
@@ -41,7 +41,10 @@ mod tests {
             4
         );
         assert_eq!(
-            exit_code(&WorktreeError::DirectoryInUse("C:\\wt\\feat-x".into())),
+            exit_code(&WorktreeError::DirectoryInUse {
+                path: "C:\\wt\\feat-x".into(),
+                processes: Vec::new(),
+            }),
             4
         );
     }
