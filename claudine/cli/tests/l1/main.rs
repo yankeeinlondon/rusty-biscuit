@@ -91,6 +91,8 @@ mod level1_provider_overlay_home;
 #[cfg(unix)]
 mod level1_provider_picker_pty;
 #[cfg(unix)]
+mod level1_ownership_prompt_pty;
+#[cfg(unix)]
 mod level1_pty_wrapper_summary;
 #[cfg(unix)]
 mod level1_review_router_partial_pty;
@@ -126,6 +128,7 @@ mod protect_cli;
 mod provider_error_finalize;
 mod provider_tail_launch;
 mod provider_tail_notice;
+mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
 // Spawns the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.

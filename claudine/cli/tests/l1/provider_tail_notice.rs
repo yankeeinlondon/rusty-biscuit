@@ -115,11 +115,10 @@ fn compose_implicit_tail_notice_names_switches_and_forwards_tokens_unchanged() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     let notices = notice_lines(&stderr);
     assert_eq!(notices.len(), 1, "stderr:\n{stderr}");
+    // Codex's `-c` is researched as accepting an attached value, so
+    // `-csecretvalue` is named by its switch alone.
     assert!(
-        notices[0].contains(
-            "Forwarding provider arguments to Codex: -c, --api-key, a short switch with \
-             attached text (not shown)"
-        ),
+        notices[0].contains("Forwarding provider arguments to Codex: -c, --api-key, -c"),
         "{notices:?}"
     );
     for hidden in ["model_reasoning_effort", SECRET, "secretvalue", "recogni"] {
@@ -287,7 +286,8 @@ fn each_forwarded_switch_is_explained_from_the_compiled_catalog() {
     let flat = flattened(&stderr);
     assert!(flat.contains("-c is Codex's --config switch ("), "{flat}");
     assert!(flat.contains(unrecognized), "{flat}");
-    assert!(!flat.contains("x=y"), "{flat}");
+    // `AGENT_PARAMS` lists non-secret values by design; the notice never does.
+    assert!(notice_lines(&stderr).iter().all(|notice| !notice.contains("x=y")), "{stderr}");
     assert_eq!(occurrences(&launches(&log)[0], &["-c", "x=y", "--frobnicate"]), 1);
 
     // Quiet output drops the explanations with the notice.
@@ -430,9 +430,11 @@ fn composition_refuses_a_non_utf8_tail_token_without_launching() {
         let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
 
         assert!(!output.status.success(), "stderr:\n{stderr}");
-        // `-c` is forwarded argument 1 either way; the bad token is 2.
+        // `-c` is argument 1 after the file; the bad token is 2, or 3
+        // after an authored `--`.
+        let position = if explicit { 3 } else { 2 };
         assert!(
-            stderr.contains("provider argument 2 "),
+            stderr.contains(&format!("argument {position} after the composition file")),
             "explicit={explicit} stderr:\n{stderr}"
         );
         assert!(stderr.contains("not valid UTF-8"), "stderr:\n{stderr}");

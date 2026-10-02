@@ -252,7 +252,8 @@ fn a_resume_carries_the_tail_exactly_once() {
 /// Each step of a sequence whose steps launch different providers gets the
 /// same tail, and each provider gets its own notice. Sequence steps share the
 /// sequence's `agent`, so step `b` reaches Claude by handing off to a document
-/// that names it.
+/// that names it. `--add-dir` takes one value for Codex and a list for Claude,
+/// so the one value it was given is right for both.
 #[test]
 fn each_step_of_a_multi_provider_sequence_carries_the_tail_once() {
     let fixture = CliProcessFixture::named("tail-launch-multi");
@@ -271,17 +272,49 @@ fn each_step_of_a_multi_provider_sequence_carries_the_tail_once() {
         "---\nagent: codex\nsequence:\n  - name: a\n    prompt: a.md\n  - name: b\n    prompt: b.md\n---\nBody\n",
     );
 
-    let (code, _, stderr) = run(&fixture, &["sequence", &seq, "-c", "x=y"]);
+    let (code, _, stderr) = run(&fixture, &["sequence", &seq, "--add-dir", "x"]);
 
     assert_eq!(code, 0, "stderr:\n{stderr}");
     let launches = launches(&log);
     assert_eq!(launches.len(), 2, "{launches:?}");
     assert_eq!((launches[0][0].as_str(), launches[1][0].as_str()), ("codex", "claude"));
     for launch in &launches {
-        assert_eq!(occurrences(launch, &["-c", "x=y"]), 1, "{launches:?}");
+        assert_eq!(occurrences(launch, &["--add-dir", "x"]), 1, "{launches:?}");
     }
-    assert_eq!(count(&stderr, "Forwarding provider arguments to Codex: -c"), 1, "{stderr}");
-    assert_eq!(count(&stderr, "Forwarding provider arguments to Claude: -c"), 1, "{stderr}");
+    assert_eq!(count(&stderr, "Forwarding provider arguments to Codex: --add-dir"), 1, "{stderr}");
+    assert_eq!(count(&stderr, "Forwarding provider arguments to Claude: --add-dir"), 1, "{stderr}");
+}
+
+/// A step that hands off to a provider whose researched types reject the
+/// tail fails before that provider is spawned: Codex takes `-c x=y`, Claude's
+/// `-c` takes no value.
+#[test]
+fn a_proxy_to_a_provider_that_types_the_tail_differently_fails_before_its_spawn() {
+    let fixture = CliProcessFixture::named("tail-launch-multi-mismatch");
+    let log = stub(&fixture, "codex", "exit 0");
+    stub(&fixture, "claude", "exit 0");
+    doc(&fixture, "a.md", "---\ntitle: a\n---\nTask A\n");
+    doc(
+        &fixture,
+        "b.md",
+        "---\ninitialize:\n  stack:\n    - action: {proxy: './b-claude.md'}\n---\nTask B\n",
+    );
+    doc(&fixture, "b-claude.md", "---\nagent: claude\n---\nTask B on Claude\n");
+    let seq = doc(
+        &fixture,
+        "seq.md",
+        "---\nagent: codex\nsequence:\n  - name: a\n    prompt: a.md\n  - name: b\n    prompt: b.md\n---\nBody\n",
+    );
+
+    let (code, _, stderr) = run(&fixture, &["sequence", &seq, "-c", "x=y"]);
+
+    assert_ne!(code, 0, "stderr:\n{stderr}");
+    let launches = launches(&log);
+    assert_eq!(launches.len(), 1, "Claude must never be spawned: {launches:?}");
+    assert_eq!(launches[0][0], "codex");
+    let flat = flat(&stderr);
+    assert!(flat.contains("`-c` takes no further value for Claude"), "{stderr}");
+    assert!(!flat.contains("likely caused by the forwarded arguments"), "not a native exit: {stderr}");
 }
 
 // ── Secrets (criteria 9, 28) ──
