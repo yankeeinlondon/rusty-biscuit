@@ -59,8 +59,37 @@ impl SwitchContext {
         }
     }
 
+    /// The context of a resume launch: the words of the profile's resume
+    /// entrypoint (`exec resume` for Codex), without the session id or any
+    /// flag. The catalog answers a resume entrypoint separately.
+    pub(crate) fn for_resume(provider: Provider, entrypoint_args: &[String], session_id: &str) -> Self {
+        let command_path = entrypoint_args
+            .iter()
+            .take_while(|arg| !arg.starts_with('-'))
+            .filter(|arg| *arg != session_id)
+            .cloned()
+            .collect();
+        Self {
+            provider,
+            command_path,
+        }
+    }
+
     fn path(&self) -> Vec<&str> {
         self.command_path.iter().map(String::as_str).collect()
+    }
+
+    /// Check `tail`'s implicit switch assignments against this provider and
+    /// command path (the resolved-provider check). Explicit tails, and a
+    /// direct wrapper's tail, carry no assignments and always pass.
+    ///
+    /// ## Errors
+    ///
+    /// The [`claudine::composition::TailMismatch`] the researched types
+    /// establish; it fails before the spawn and never reaches the native-exit
+    /// report.
+    pub(crate) fn check(&self, tail: &ProviderTail) -> Result<(), claudine::composition::TailMismatch> {
+        claudine::composition::check_launch_tail(tail, self.provider, &self.path())
     }
 
     /// The command path as a reader names it.
@@ -287,7 +316,12 @@ fn switch_explanations(context: &SwitchContext, tail: &ProviderTail) -> Vec<Stri
 /// `; `), without its full stop and with a leading capital lowered unless it
 /// starts an acronym, so it reads inside parentheses.
 fn first_sentence(description: &str) -> String {
-    let sentence = description.split([". ", "; "]).next().unwrap_or(description).trim();
+    let end = [". ", "; "]
+        .iter()
+        .filter_map(|stop| description.find(stop))
+        .min()
+        .unwrap_or(description.len());
+    let sentence = description[..end].trim();
     let sentence = sentence.strip_suffix('.').unwrap_or(sentence);
     let mut chars = sentence.chars();
     match (chars.next(), chars.next()) {
