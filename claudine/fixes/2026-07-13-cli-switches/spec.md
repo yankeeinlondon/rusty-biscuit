@@ -108,9 +108,10 @@ supplies those types.
    The INFO notice names the switch as unrecognized (R3/R8).
 6. **Values that start with `-` are never taken from the next token.** They
    must be attached: `--temperature=-0.5`.
-7. **A bare word that no switch takes is a Claudine positional.** Today
-   Claudine accepts only the file, so a second bare word keeps clap's
-   multiple-file error. Bare provider operands need an explicit `--`.
+7. **A bare word that no switch takes is a Claudine positional** and goes
+   into the `argv` frontmatter property (see
+   [Positional arguments](#positional-arguments-argv)). Provider operands
+   therefore still need an explicit `--`.
 8. **`--` and file order are unchanged.** An authored `--` after the file is
    consumed and starts an opaque tail that is never classified. An unowned
    switch or a `--` before the file is an error with ordering guidance.
@@ -130,6 +131,38 @@ claudine compose plan.md -c model_reasoning_effort=low phase=2
 # --add-dir is variadic for Claude: a and b are forwarded, x=y is a setter.
 claudine compose plan.md --claude --add-dir a b x=y
 ```
+
+#### Positional arguments (`argv`)
+
+Every bare word left over after the composition file, Claudine switches and
+their values, setters, and provider switches and their values is a positional
+argument. Claudine sets them, in original order, as the `argv` frontmatter
+property:
+
+```sh
+claudine compose plan.md alpha --codex -c x=y beta phase=2
+# argv: ["alpha", "beta"]   phase: 2   provider tail: -c x=y
+```
+
+```markdown
+Arguments: {{ argv }}
+```
+
+- `argv` is an array of strings. Values are not JSON5-parsed the way setter
+  values are.
+- The composition file is not in `argv`, and neither is anything after an
+  authored `--`.
+- With at least one positional, `argv` overrides an authored `argv` the same
+  way a setter does. With none, an authored `argv` is left alone.
+- `argv` is reserved for positionals: it can never be set as a named
+  parameter. An `argv=…` setter, or a `--set` object containing `argv`, is
+  always an error, whether or not positionals are given. The error says to
+  pass the values as bare words instead.
+- For `sequence`, `argv` is applied to every step, like any caller setter.
+- This replaces the multiple-file error for a second bare word.
+
+This is the starting point. Declaring positional parameters (names, types,
+arity) is left to a later spec.
 
 #### Candidate providers
 
@@ -391,9 +424,16 @@ rules. This depends on R8 data.
 - The ownership result keeps the R6 typed tail descriptor.
 - Update `looks_like_setter`'s doc comment: setter shape alone no longer
   decides ownership. Rules 2 and 3 do.
+- Collect leftover bare words into `argv` in
+  `parse_composition_positionals` (`cli/src/commands/compose/setters.rs`),
+  which today rejects a second bare word as a second file. Remove that error.
+  It comes from this parser, not from clap, despite the partition's comment
+  calling it "clap's existing multiple-file diagnostic".
 
 ## Out of scope
 
+- Declaring positional parameters beyond the `argv` array (names, types,
+  arity, schema integration). A later spec covers it.
 - Validating, rewriting, normalizing, or expanding provider switches.
 - Bare provider operands without `--`.
 - Changing which switches Claudine owns.
@@ -421,7 +461,9 @@ R9 lands. Each remaining item updates those pages in the
 change that lands it: resume carry-over (R1), correlated errors (R2), notice
 scope and wording (R3), completion behavior (`docs/topics/completions/`, R4),
 direct-wrapper parity in the CLI reference (R5), and type-aware ownership with
-its ambiguity and missing-value errors (R9). Until R8 lands, no page promises
+its ambiguity and missing-value errors (R9). R9 also documents the `argv`
+property in `composition.md` (Positional Arguments) and
+`frontmatter-properties.md`. Until R8 lands, no page promises
 switch recognition.
 
 ## Acceptance criteria
@@ -436,7 +478,7 @@ uses these numbers.
 | 3 | `compose --unknown <file>` fails with file-before-tail guidance | Done |
 | 4 | A shorthand setter is applied wherever it appears, unless rule 3 gives it to the string switch directly before it | Revised 2026-10-01. Open (R9). Today a setter after tail start is forwarded |
 | 5 | A Claudine flag before `--` stays Claudine's even after the first provider switch. The same spelling after `--` is forwarded | Done (unit) |
-| 6 | Bare provider operands require `--`. The multiple-file diagnostic remains | Done |
+| 6 | Bare provider operands require `--` | Done |
 | 7 | The exact tail survives sequence steps, retries, proxy runs, and **resume**. Multi-provider sequences classify messages per provider without changing argv | Open: resume (R1), coverage (R7) |
 | 8 | INFO is emitted once per distinct provider/tail pair **per command**, is suppressed by `--quiet`/`--silent`, and reports explicit tails as a unit | Open: scope and wording (R3) |
 | 9 | INFO reveals no values. Debug, dry-run, metadata, and correlated surfaces reveal no unredacted secret | Open: binary proof (R7), correlated surface (R2) |
@@ -453,3 +495,4 @@ uses these numbers.
 | 20 | An ambiguous "none or string" bare word prompts for the agent in Interactive Mode, and otherwise fails with a targeted error | Open (R9) |
 | 21 | A switch left without a required value fails before launch for all candidates, or before the spawn of a resolved provider that requires one. The provider never takes the wrong token | Open (R9) |
 | 22 | An unrecognized switch takes a following bare word, never a `key=value`, and the notice names it as unrecognized | Open (R8, R9) |
+| 23 | Leftover bare words become the `argv` frontmatter array in order, excluding the file and anything after `--`. They override an authored `argv`. An `argv=…` setter or `--set` key is always an error. A second bare word is no longer a multiple-file error | Open (R9) |
