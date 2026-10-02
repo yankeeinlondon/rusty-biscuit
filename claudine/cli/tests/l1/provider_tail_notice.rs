@@ -296,6 +296,55 @@ fn each_forwarded_switch_is_explained_from_the_compiled_catalog() {
     assert!(!flattened(&stderr).contains("--config switch"), "{stderr}");
 }
 
+/// Install a fake `opencode` that records its arguments the way
+/// [`recording_codex`] does.
+#[cfg(unix)]
+fn recording_opencode(fixture: &CliProcessFixture) -> std::path::PathBuf {
+    let dir = fixture.home().join("opencode-launches");
+    fs::create_dir_all(&dir).unwrap();
+    write_executable(
+        &fixture.bin_dir().join("opencode"),
+        &format!(
+            "#!/bin/sh\n\
+             for arg in \"$@\"; do printf '%s\\037' \"$arg\"; done > '{dir}/launch-'$$\n\
+             exit 0\n",
+            dir = dir.display()
+        ),
+    );
+    dir
+}
+
+/// OpenCode's compiled record for `--get-yargs-completions` declares its
+/// type unknown, so the notice explains it as unrecognized at the `run`
+/// entrypoint, never as a known OpenCode switch, and the child still
+/// receives it unchanged.
+#[cfg(unix)]
+#[test]
+fn a_switch_whose_record_is_typed_unknown_is_not_called_known() {
+    let fixture = CliProcessFixture::named("tail-notice-unknown-type");
+    let log = recording_opencode(&fixture);
+    let file = prompt_file(&fixture);
+    let unrecognized = "--get-yargs-completions: Claudine's compiled OpenCode switch catalog has \
+                        no established type for it at its `run` command; Claudine forwards it anyway.";
+
+    let output = fixture
+        .command()
+        .env("OPENCODE_MODEL", "test/model")
+        .args(["compose", "--opencode", &file, "--get-yargs-completions", "foo"])
+        .output()
+        .unwrap();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
+    let flat = flattened(&stderr);
+    assert!(flat.contains(unrecognized), "{flat}");
+    for claim in ["is one of OpenCode's switches", "OpenCode switch (", "a OpenCode", "reject"] {
+        assert!(!flat.contains(claim), "{claim}: {flat}");
+    }
+    let launches = launches(&log);
+    assert_eq!(launches.len(), 1, "{launches:?}");
+    assert_eq!(occurrences(&launches[0], &["--get-yargs-completions", "foo"]), 1, "{launches:?}");
+}
+
 #[cfg(unix)]
 #[test]
 fn direct_wrapper_announces_the_shared_notice() {
@@ -456,38 +505,4 @@ fn direct_wrapper_also_refuses_non_utf8_passthrough() {
     assert!(!output.status.success());
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(stderr.to_lowercase().contains("utf-8"), "stderr:\n{stderr}");
-}
-
-#[test]
-fn review_probe_secret_surfaces() {
-    let secret = "sk-proj-reviewsecret0123456789";
-    let fixture = CliProcessFixture::named("review-secret-surfaces");
-    let dir = recording_codex(&fixture);
-    let file = prompt_file(&fixture);
-    let inline = fixture.cwd().join("inline.md");
-    fs::write(&inline, "---\nprompt: Say hello\n---\nBody\n").unwrap();
-    let seq = fixture.cwd().join("seq.md");
-    fs::write(&seq, "---\nsequence:\n  - prompt: plan.md\n---\nBody\n").unwrap();
-    let envfile = fixture.cwd().join("params.txt");
-    for command in ["compose", "inline-compose", "sequence", "codex"] {
-        let input = match command { "inline-compose" => inline.to_str().unwrap(), "sequence" => seq.to_str().unwrap(), "codex" => "hello", _ => &file };
-        for shape in [format!("api_key={secret}"), format!("--config={secret}"), format!("-c{secret}"), format!("--token={secret}")] {
-            let tail: Vec<&str> = if shape.starts_with("api_key") { vec!["-c", &shape] } else { vec![&shape] };
-            let mut args = vec![command, input];
-            if command != "codex" {args.push("--codex");}
-            args.extend(&tail);
-            let mut dry = args.clone(); dry.insert(1, "--dry-run");
-            let (code, text) = run(&fixture, &dry);
-            eprintln!("REVIEW dry {command} {shape}: code={code} leak={}", text.contains(secret));
-            for reject in [false, true] {
-                let behavior = if reject {format!("printf \"error: unexpected argument '--config' found: {secret}\\n\" >&2\nexit 2")} else {"exit 0".to_string()};
-                write_executable(&fixture.bin_dir().join("codex"), &format!("#!/bin/sh\nprintf '%s' \"$AGENT_PARAMS\" > '{}'\nfor arg in \"$@\"; do printf '%s\\037' \"$arg\"; done > '{}/review-argv'\n{behavior}\n", envfile.display(), dir.display()));
-                let output = fixture.command().env("RUST_LOG", "claudine=debug").args(&args).output().unwrap();
-                let text = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-                let params = fs::read_to_string(&envfile).unwrap_or_default();
-                let argv = fs::read_to_string(dir.join("review-argv")).unwrap_or_default();
-                eprintln!("REVIEW launch {command} {shape} reject={reject}: code={:?} stderrleak={} paramsleak={} childsecret={} correlated={}", output.status.code(), text.contains(secret), params.contains(secret), argv.contains(secret), text.contains("likely caused by"));
-            }
-        }
-    }
 }

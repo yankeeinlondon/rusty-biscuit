@@ -687,7 +687,7 @@ fn display_value(switch: &str, value: &str) -> String {
     if crate::secrets::is_sensitive_key_name(switch.trim_start_matches('-')) {
         return crate::secrets::MASK.to_string();
     }
-    crate::secrets::mask_secrets(value)
+    crate::secrets::mask_argument_token(value)
         .chars()
         .flat_map(|ch| {
             let escaped: Vec<char> = if ch.is_control() {

@@ -5,7 +5,9 @@
 //! provider switch takes is the provider's, not a setter or positional. The
 //! completer asks the same question of the same code, with the word under the
 //! cursor as the last argument, so it never offers a setter where execution
-//! would forward the word to the agent.
+//! would forward the word to the agent. A flag at the cursor is offered only
+//! when the words before it read cleanly: a new switch cannot repair an
+//! error earlier on the line.
 //!
 //! Completion never fails and never prompts. Anything ownership cannot decide
 //! (an ambiguous word, an unreadable file or `$schema`, a line execution would
@@ -35,24 +37,52 @@ use crate::completion::scopes::ScopeContext;
 /// a composition command. `false` when the word belongs to the provider or
 /// ownership cannot decide.
 pub(super) fn cursor_is_claudines(argv: &[String], current_index: usize) -> bool {
-    let mut line: Vec<OsString> = argv.iter().take(current_index).map(OsString::from).collect();
-    line.push(OsString::from(argv.get(current_index).map(String::as_str).unwrap_or("")));
-    let Ok((claudine_argv, arguments)) = partition_composition_tail(normalize_for_completion(line)) else {
+    let cursor = argv.get(current_index).map(String::as_str).unwrap_or("");
+    let Some((claudine_argv, arguments)) = partition(argv, current_index, Some(cursor)) else {
         return false;
     };
-    if arguments.opaque().is_some() {
-        return false;
-    }
     match arguments.arguments().last() {
         None | Some(CallerArgument::ClaudineOption) => true,
         Some(CallerArgument::Token(_)) => {
-            owner(&claudine_argv, &arguments) == Some(ArgumentOwner::Claudine)
+            last_owner(&claudine_argv, &arguments) == Ok(Some(ArgumentOwner::Claudine))
         }
     }
 }
 
-/// Who owns the last of `arguments`; `None` when ownership cannot decide.
-fn owner(claudine_argv: &[OsString], arguments: &ArgumentsAfterFile) -> Option<ArgumentOwner> {
+/// Whether the words before `current_index` read without an ownership error,
+/// so a flag may be offered at the cursor.
+///
+/// The partial flag under the cursor is left out: it may become a Claudine
+/// option, and judging it as a forwarded switch would refuse every flag
+/// after a provider argument.
+pub(super) fn committed_arguments_are_owned(argv: &[String], current_index: usize) -> bool {
+    partition(argv, current_index, None)
+        .is_some_and(|(claudine_argv, arguments)| last_owner(&claudine_argv, &arguments).is_ok())
+}
+
+/// The line up to `current_index`, followed by `cursor` when given, split
+/// into Claudine's argv and the arguments after the file. `None` when the
+/// line cannot be partitioned or crosses an authored `--`.
+fn partition(
+    argv: &[String],
+    current_index: usize,
+    cursor: Option<&str>,
+) -> Option<(Vec<OsString>, ArgumentsAfterFile)> {
+    let mut line: Vec<OsString> = argv.iter().take(current_index).map(OsString::from).collect();
+    line.extend(cursor.map(OsString::from));
+    let (claudine_argv, arguments) = partition_composition_tail(normalize_for_completion(line)).ok()?;
+    arguments.opaque().is_none().then_some((claudine_argv, arguments))
+}
+
+/// Ownership cannot decide the line.
+#[derive(Debug, PartialEq, Eq)]
+struct Undecided;
+
+/// Who owns the last of `arguments` (`None` when there is none).
+fn last_owner(
+    claudine_argv: &[OsString],
+    arguments: &ArgumentsAfterFile,
+) -> Result<Option<ArgumentOwner>, Undecided> {
     let tokens: Vec<&str> = arguments
         .arguments()
         .iter()
@@ -64,24 +94,24 @@ fn owner(claudine_argv: &[OsString], arguments: &ArgumentsAfterFile) -> Option<A
     // With no forwarded switch every word is Claudine's (or a reserved-name
     // error), whatever the file says, so the file is not read.
     if !tokens.iter().any(|token| token.starts_with('-') && *token != "-") {
-        return owner_of_last_argument(arguments, &SchemaParameters::NoSchema, &[]).ok()?;
+        return owner_of_last_argument(arguments, &SchemaParameters::NoSchema, &[]).map_err(|_| Undecided);
     }
 
-    let cli = Cli::try_parse_from(claudine_argv).ok()?;
-    let (shared, words) = match cli.command? {
-        Commands::Compose(args) => (args.shared, args.args),
-        Commands::InlineCompose(args) => (args.shared, args.args),
-        Commands::Sequence(args) => (args.shared, args.args),
-        _ => return None,
+    let cli = Cli::try_parse_from(claudine_argv).map_err(|_| Undecided)?;
+    let (shared, words) = match cli.command {
+        Some(Commands::Compose(args)) => (args.shared, args.args),
+        Some(Commands::InlineCompose(args)) => (args.shared, args.args),
+        Some(Commands::Sequence(args)) => (args.shared, args.args),
+        _ => return Err(Undecided),
     };
-    let file = words.iter().find(|word| setter_key(word).is_none())?;
-    let source = authored_source(file, &ScopeContext::discover())?;
+    let file = words.iter().find(|word| setter_key(word).is_none()).ok_or(Undecided)?;
+    let source = authored_source(file, &ScopeContext::discover()).ok_or(Undecided)?;
     let schema = if tokens.iter().any(|token| setter_key(token).is_some()) {
-        authored_schema_parameters(&source, None, None).ok()?
+        authored_schema_parameters(&source, None, None).map_err(|_| Undecided)?
     } else {
         SchemaParameters::NoSchema
     };
-    owner_of_last_argument(arguments, &schema, &candidates(&shared, &source)).ok()?
+    owner_of_last_argument(arguments, &schema, &candidates(&shared, &source)).map_err(|_| Undecided)
 }
 
 /// The composition file as authored, resolved the way the setter completers

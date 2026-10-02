@@ -160,7 +160,7 @@ fn codex_dash_c_is_explained_from_the_compiled_catalog() {
         explanations[0]
     );
     assert!(
-        explanations[1].starts_with("--config is a Codex switch (")
+        explanations[1].starts_with("--config is one of Codex's switches (")
             && explanations[1].ends_with("); forwarding to Codex."),
         "{}",
         explanations[1]
@@ -228,4 +228,85 @@ fn a_description_reads_inside_parentheses() {
     );
     assert_eq!(first_sentence("x"), "x");
     assert_eq!(display_safe("<b>x</b>\u{1b}[31m"), Prose::escape_text("<b>x</b>[31m"));
+}
+
+fn unrecognized(switch: &str, provider: Provider, place: &str) -> String {
+    format!(
+        "{switch}: Claudine's compiled {provider} switch catalog has no established type for it \
+         at {place}; Claudine forwards it anyway."
+    )
+}
+
+/// OpenCode's global completion-protocol switch has a compiled record that
+/// declares its type unknown. A record establishes a type only through its
+/// value, so the switch is explained like one with no record at all.
+#[test]
+fn a_record_typed_unknown_is_explained_as_unrecognized() {
+    let opencode = context(Provider::OpenCode);
+    assert_eq!(opencode.command_path, strings(&["run"]));
+    let SwitchLookup::Known(record) = lookup_switch(Provider::OpenCode, &["run"], "--get-yargs-completions") else {
+        panic!("the compiled OpenCode catalog no longer records --get-yargs-completions globally");
+    };
+    assert_eq!(record.value, SwitchValue::Unknown);
+
+    let explanations = switch_explanations(&opencode, &implicit(&["--get-yargs-completions", "foo"]));
+    assert_eq!(
+        explanations,
+        vec![unrecognized("--get-yargs-completions", Provider::OpenCode, "its `run` command")]
+    );
+    assert!(!explanations[0].contains("reject") && !explanations[0].contains("is one of"));
+}
+
+/// The absent-record control reads exactly as the unknown-type record does.
+#[test]
+fn an_absent_record_reads_like_an_unknown_type() {
+    for provider in [Provider::OpenCode, Provider::Kilo] {
+        let explanations = switch_explanations(&context(provider), &implicit(&["--new-unresearched-switch", "foo"]));
+        assert_eq!(
+            explanations,
+            vec![unrecognized("--new-unresearched-switch", provider, "its `run` command")]
+        );
+    }
+}
+
+/// `--models` is recorded (typed unknown) only at `stats`, so at `run` it has
+/// no record; at `stats` its record still takes the unknown-type branch.
+#[test]
+fn models_is_unrecognized_at_run_and_at_stats() {
+    for provider in [Provider::OpenCode, Provider::Kilo] {
+        assert_eq!(lookup_switch(provider, &["run"], "--models"), SwitchLookup::NotInCatalog);
+        let run = switch_explanations(&context(provider), &implicit(&["--models", "foo"]));
+        assert_eq!(run, vec![unrecognized("--models", provider, "its `run` command")]);
+
+        let SwitchLookup::Known(record) = lookup_switch(provider, &["stats"], "--models") else {
+            panic!("the compiled {provider} catalog no longer records --models at stats");
+        };
+        assert_eq!(record.value, SwitchValue::Unknown);
+        let stats = SwitchContext {
+            provider,
+            command_path: strings(&["stats"]),
+        };
+        let explanations = switch_explanations(&stats, &implicit(&["--models", "foo"]));
+        assert_eq!(explanations, vec![unrecognized("--models", provider, "its `stats` command")]);
+    }
+}
+
+/// A researched switch named by its canonical spelling reads without an
+/// article, so a provider name starting with a vowel stays grammatical.
+#[test]
+fn a_known_canonical_switch_reads_without_an_article() {
+    let opencode = context(Provider::OpenCode);
+    let SwitchLookup::Known(model) = lookup_switch(Provider::OpenCode, &["run"], "--model") else {
+        panic!("the compiled OpenCode catalog does not establish --model at run");
+    };
+    assert_ne!(model.value, SwitchValue::Unknown);
+    let explanations = switch_explanations(&opencode, &implicit(&["--model", "x/y"]));
+    assert_eq!(explanations.len(), 1);
+    assert!(
+        explanations[0].starts_with("--model is one of OpenCode's switches (")
+            && explanations[0].ends_with("); forwarding to OpenCode."),
+        "{}",
+        explanations[0]
+    );
+    assert!(!explanations[0].contains("a OpenCode"));
 }

@@ -236,6 +236,46 @@ fn unknown_is_never_none() {
     assert_eq!(owned.tail.launch_args(), s(&["--get-yargs-completions", "foo"]));
 }
 
+/// Every reader of a compiled record typed unknown (OpenCode's global
+/// `--get-yargs-completions`, OpenCode's and Kilo's `--models` at `stats`)
+/// treats it as having no record: ownership applies rule 5 (one bare word,
+/// never a setter), the resolved-provider check leaves it to the provider,
+/// and completion reads the next word as the provider's.
+#[test]
+fn a_record_typed_unknown_is_unrecognized_for_every_reader() {
+    let records: &[(Provider, &[&str], &str)] = &[
+        (Provider::OpenCode, &["run"], "--get-yargs-completions"),
+        (Provider::OpenCode, &["stats"], "--models"),
+        (Provider::Kilo, &["stats"], "--models"),
+    ];
+    for (provider, path, switch) in records {
+        let matched = match_switch_token(*provider, path, switch).expect("compiled record");
+        assert_eq!(matched.switch.value, SwitchValue::Unknown, "{provider} {switch}");
+        let candidates = vec![candidate_at(*provider, path)];
+
+        let owned = own(&[switch, "k=v", "foo"], &SchemaParameters::NoSchema, &candidates);
+        assert_eq!(owned.tail.launch_args(), s(&[switch]), "{provider} {switch}");
+        assert_eq!(owned.claudine, s(&["k=v", "foo"]), "{provider} {switch}");
+
+        let owned = own(&[switch, "a", "b"], &SchemaParameters::NoSchema, &candidates);
+        assert_eq!(owned.tail.launch_args(), s(&[switch, "a"]), "{provider} {switch}");
+        for tail in [&owned.tail, &own(&[switch], &SchemaParameters::NoSchema, &candidates).tail] {
+            assert_eq!(check_launch_tail(tail, *provider, path), Ok(()), "{provider} {switch}");
+        }
+
+        assert_eq!(
+            last_owner(&[switch, "fo"], &SchemaParameters::NoSchema, &candidates).unwrap(),
+            Some(ArgumentOwner::Provider),
+            "{provider} {switch}"
+        );
+        assert_eq!(
+            last_owner(&[switch, "k=v"], &SchemaParameters::NoSchema, &candidates).unwrap(),
+            Some(ArgumentOwner::Claudine),
+            "{provider} {switch}"
+        );
+    }
+}
+
 // ── Rule 5: unrecognized switches ──
 
 #[test]
@@ -408,6 +448,8 @@ fn a_mismatch_never_shows_a_recognized_secret() {
     assert!(!rendered.contains(secret), "{rendered}");
     assert!(display_value("--api-key", "plain") == crate::secrets::MASK);
     assert_eq!(display_value("-c", "a\u{1b}[31mb"), "a\\u{1b}[31mb");
+    // A short credential the catalog shapes would miss is still an argument secret.
+    assert_eq!(display_value("-c", "endpoint=sk-short"), "endpoint=****");
 }
 
 #[test]

@@ -154,8 +154,11 @@ pub fn report_prompt_property(has_prompt: bool, is_non_empty: bool, term: &Termi
 }
 
 /// Emit a terminal unhandled failure banner.
+///
+/// `message` is plain text — often a provider's own diagnostic — and is shown
+/// exactly as written, so a masked secret (`****`) is not read as emphasis.
 pub fn report_unhandled_failure(message: &str, term: &Terminal) {
-    emit_status(message, StatusState::Error, term);
+    emit_status(&prose_escape(message), StatusState::Error, term);
 }
 
 #[cfg(test)]

@@ -170,6 +170,49 @@ fn sensitive_arg_values_returns_each_masked_original_value() {
     );
 }
 
+/// Credentials inside an otherwise ordinary token: a configuration
+/// assignment value, a long attached value, and a short attached value,
+/// beside the sensitive-flag forms.
+#[test]
+fn redact_sensitive_args_masks_embedded_and_attached_credentials() {
+    let secret = "sk-proj-reviewsecret0123456789";
+    let args = vec![
+        "-c".to_string(),
+        format!("api_key={secret}"),
+        format!("--config={secret}"),
+        "--config=sk-short".to_string(),
+        format!("-c{secret}"),
+        format!("--token={secret}"),
+        "--api-key".to_string(),
+        secret.to_string(),
+        "-c".to_string(),
+        "model_reasoning_effort=high".to_string(),
+    ];
+
+    let redacted = redact_sensitive_args(&args);
+
+    assert_eq!(
+        redacted,
+        vec![
+            "-c",
+            "api_key=****",
+            "--config=****",
+            "--config=****",
+            "-c****",
+            "--token=****",
+            "--api-key",
+            "****",
+            "-c",
+            "model_reasoning_effort=high",
+        ]
+    );
+    assert!(redacted.iter().all(|arg| !arg.contains(secret)));
+    assert_eq!(
+        sensitive_arg_values(&args),
+        vec![secret, secret, "sk-short", secret, secret, secret]
+    );
+}
+
 #[test]
 fn redact_sensitive_args_masks_every_shared_credential_prefix() {
     let args: Vec<String> = ["ghs_abc", "github_pat_abc", "xoxa-abc", "gho_abc", "skip-this", "ghost"]

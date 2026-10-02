@@ -172,15 +172,80 @@ fn completion_reads_ownership_without_writing_anything() {
     assert_eq!(tree(ws.path()), before);
 }
 
+/// What a completion line must offer.
+#[derive(Debug, Clone, Copy)]
+enum Offer {
+    Nothing,
+    Exactly(&'static [&'static str]),
+    Includes(&'static str),
+}
+
+/// The words before the cursor and what each makes of a line.
+struct Preceding {
+    label: &'static str,
+    words: &'static [&'static str],
+    valid: bool,
+}
+
+const PRECEDING: [Preceding; 3] = [
+    // `phase` is declared, so `phase=2` is a setter and `-c` has no value.
+    Preceding { label: "missing value", words: &["--codex", "-c", "phase=2"], valid: false },
+    // No provider and no `agent`: Claude's `-c` takes nothing, Codex's a string.
+    Preceding { label: "ambiguous", words: &["-c", "low"], valid: false },
+    Preceding { label: "valid", words: &["--codex", "-c", "low"], valid: true },
+];
+
+/// A cursor shape: the words appended after the preceding ones, and what a
+/// valid line offers there.
+struct Cursor {
+    label: &'static str,
+    words: &'static [&'static str],
+    on_valid_line: Offer,
+}
+
+const CURSORS: [Cursor; 6] = [
+    Cursor { label: "flag", words: &["--mod"], on_valid_line: Offer::Includes("--model") },
+    Cursor { label: "setter", words: &["mode="], on_valid_line: Offer::Exactly(&["mode='fast'", "mode='slow'"]) },
+    Cursor { label: "bare word", words: &["ph"], on_valid_line: Offer::Exactly(&["phase="]) },
+    Cursor { label: "provider value", words: &["-c", "ph"], on_valid_line: Offer::Nothing },
+    Cursor { label: "flag after --", words: &["--", "--mod"], on_valid_line: Offer::Nothing },
+    Cursor { label: "word after --", words: &["--", "ph"], on_valid_line: Offer::Nothing },
+];
+
 #[test]
-fn review_probe_completion_sweep() {
-    let ws = TestWorkspace::named("review-completion-sweep");
+fn an_error_before_the_cursor_offers_nothing_whatever_the_cursor_shape() {
+    let ws = TestWorkspace::named("complete-ownership-matrix");
     plan(ws.path(), "");
     for command in ["compose", "inline-compose", "sequence"] {
-        for tail in [vec!["--codex", "-c", "phase=2", "ph"], vec!["--codex", "-c", "phase=2", "--mod"], vec!["-c", "low", "--mod"], vec!["--codex", "-c", "low", "--mod"]] {
-            let mut args = vec![command, "prompts/plan.md"];
-            args.extend(tail);
-            eprintln!("REVIEW {:?} => {:?}", args, run_complete(ws.path(), &args));
+        for preceding in &PRECEDING {
+            for cursor in &CURSORS {
+                let mut argv = vec![command, "prompts/plan.md"];
+                argv.extend_from_slice(preceding.words);
+                argv.extend_from_slice(cursor.words);
+                let got = run_complete(ws.path(), &argv);
+                let expected = if preceding.valid { cursor.on_valid_line } else { Offer::Nothing };
+                let context = format!("{command} / {} / {} cursor: {argv:?} => {got:?}", preceding.label, cursor.label);
+                match expected {
+                    Offer::Nothing => assert!(got.is_empty(), "{context}"),
+                    Offer::Exactly(want) => assert_eq!(got, want, "{context}"),
+                    Offer::Includes(want) => assert!(got.iter().any(|c| c == want), "{context}"),
+                }
+            }
         }
+    }
+}
+
+#[test]
+fn a_flag_before_the_file_or_after_a_clean_switch_still_completes() {
+    let ws = TestWorkspace::named("complete-ownership-flag-controls");
+    plan(ws.path(), "");
+    for command in ["compose", "inline-compose", "sequence"] {
+        // Before the file there are no arguments for ownership to read.
+        let got = run_complete(ws.path(), &[command, "--cod"]);
+        assert!(got.iter().any(|c| c == "--codex"), "{command}: {got:?}");
+        // A partial provider-selection flag after a forwarded switch is not
+        // judged as an unrecognized provider argument.
+        let got = run_complete(ws.path(), &[command, "prompts/plan.md", "--codex", "-c", "low", "--cl"]);
+        assert!(got.iter().any(|c| c == "--claude"), "{command}: {got:?}");
     }
 }

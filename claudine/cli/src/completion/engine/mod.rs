@@ -21,8 +21,10 @@
 //!
 //! After the composition file, a slot is completed only when type-aware
 //! ownership says the word under the cursor is Claudine's
-//! ([`ownership::cursor_is_claudines`]); a word a provider switch takes, a
-//! line ownership rejects, and anything after an authored `--` get nothing.
+//! ([`ownership::cursor_is_claudines`]), and a flag only when the words
+//! before it read cleanly ([`ownership::committed_arguments_are_owned`]); a
+//! word a provider switch takes, a line ownership rejects, and anything after
+//! an authored `--` get nothing.
 //!
 //! Remaining slots (wrapper flag values, administrative subcommands, etc.)
 //! emit zero candidates so the shell's native file / flag completion takes
@@ -182,14 +184,20 @@ pub(crate) fn run_with_context(
 ) -> Vec<String> {
     let target = classify_completion_target(argv, current_index);
     // After the composition file, a word an open provider switch takes is the
-    // agent's, and a line ownership cannot read offers nothing.
-    if matches!(
-        target,
+    // agent's, and a line ownership cannot read offers nothing. The root menu
+    // and the file slot precede the arguments ownership reads.
+    let owned = match target {
         CompletionTarget::SetterValue { .. }
-            | CompletionTarget::SetterName { .. }
-            | CompletionTarget::Other
-    ) && !ownership::cursor_is_claudines(argv, current_index)
-    {
+        | CompletionTarget::SetterName { .. }
+        | CompletionTarget::Other => ownership::cursor_is_claudines(argv, current_index),
+        CompletionTarget::CompositionProviderFlag { .. } => {
+            ownership::committed_arguments_are_owned(argv, current_index)
+        }
+        CompletionTarget::Root(_)
+        | CompletionTarget::CompositionPositional { .. }
+        | CompletionTarget::Declined => true,
+    };
+    if !owned {
         return Vec::new();
     }
     match target {

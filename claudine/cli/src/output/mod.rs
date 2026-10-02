@@ -290,7 +290,7 @@ pub(crate) fn log_wrapper_env_details(
         for (key, value) in &env_plan.added {
             items.push(RenderableTerminalContent::from(Prose::new(format!(
                 "<green>{key}</green><dim>={}</dim>",
-                summarize_value(key, value)
+                Prose::escape_text(&summarize_value(key, value))
             ))));
         }
 
@@ -350,7 +350,7 @@ pub(crate) fn log_dry_run(
     log::message(
         &Prose::new(format!(
             "<bold>Command:</bold> <dim>{}</dim>",
-            cmd_parts.join(" ")
+            Prose::escape_text(&cmd_parts.join(" "))
         ))
         .render(term),
     );
@@ -370,7 +370,8 @@ pub(crate) fn log_dry_run(
     }
     for (key, value) in &env_plan.added {
         items.push(RenderableTerminalContent::from(Prose::new(format!(
-            "<green>{key}</green><dim>={value}</dim>"
+            "<green>{key}</green><dim>={}</dim>",
+            Prose::escape_text(value)
         ))));
     }
     if items.is_empty() {

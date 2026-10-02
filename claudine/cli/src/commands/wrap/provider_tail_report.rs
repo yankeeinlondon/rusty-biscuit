@@ -11,7 +11,8 @@
 //! Below the notice, each implicit switch is explained from the compiled
 //! switch catalog ([`claudine::provider::lookup_switch`]) at the command path
 //! the launch uses: what a researched switch is, or that the catalog
-//! establishes nothing for it there and Claudine forwards it anyway. The
+//! establishes no type for it there (no record, or a record typed unknown)
+//! and Claudine forwards it anyway. The
 //! explanation never claims the provider will reject a switch.
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -20,7 +21,7 @@ use biscuit_terminal::components::status::{Status, StatusState};
 use biscuit_terminal::prelude::TerminalRenderable as _;
 use biscuit_terminal::terminal::Terminal;
 use claudine::composition::{ProviderTail, ProviderTailNotices};
-use claudine::provider::{Provider, SwitchLookup, lookup_switch, match_switch_token};
+use claudine::provider::{Provider, SwitchLookup, SwitchValue, lookup_switch, match_switch_token};
 
 use crate::commands::wrap::env::{redact_sensitive_args, sensitive_arg_values};
 use crate::commands::wrap::profile::WrapperProfile;
@@ -278,7 +279,8 @@ fn display_name(token: &str, context: Option<&SwitchContext>) -> String {
 }
 
 /// One sentence per distinct implicit switch, in order, saying what the
-/// compiled catalog establishes about it at `context`'s command path.
+/// compiled catalog establishes about it at `context`'s command path. A
+/// record whose type is unknown gets the same sentence as no record.
 fn switch_explanations(context: &SwitchContext, tail: &ProviderTail) -> Vec<String> {
     let provider = context.provider;
     let path = context.path();
@@ -291,16 +293,18 @@ fn switch_explanations(context: &SwitchContext, tail: &ProviderTail) -> Vec<Stri
         }
         let shown = display_safe(&name);
         let explanation = match lookup_switch(provider, &path, &name) {
-            SwitchLookup::Known(switch) => {
+            // A record typed `Unknown` establishes nothing, so it reads like an
+            // absent one, as it does for ownership (rule 5).
+            SwitchLookup::Known(switch) if switch.value != SwitchValue::Unknown => {
                 let what = display_safe(&first_sentence(switch.description));
                 if name == switch.flag {
-                    format!("{shown} is a {provider} switch ({what}); forwarding to {provider}.")
+                    format!("{shown} is one of {provider}'s switches ({what}); forwarding to {provider}.")
                 } else {
                     let flag = display_safe(switch.flag);
                     format!("{shown} is {provider}'s {flag} switch ({what}); forwarding to {provider}.")
                 }
             }
-            SwitchLookup::NotInCatalog | SwitchLookup::CatalogGap { .. } => format!(
+            SwitchLookup::Known(_) | SwitchLookup::NotInCatalog | SwitchLookup::CatalogGap { .. } => format!(
                 "{shown}: Claudine's compiled {provider} switch catalog has no established type \
                  for it at {}; Claudine forwards it anyway.",
                 context.where_phrase()

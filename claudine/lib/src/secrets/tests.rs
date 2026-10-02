@@ -233,3 +233,27 @@ fn sensitive_key_names_cover_payload_and_environment_spellings() {
         assert!(!is_sensitive_key_name(key), "{key}");
     }
 }
+
+#[test]
+fn argument_tokens_mask_embedded_and_attached_credentials() {
+    let cases = [
+        ("api_key=sk-proj-reviewsecret0123456789", "api_key=****"),
+        ("--config=sk-proj-reviewsecret0123456789", "--config=****"),
+        ("--config=sk-short", "--config=****"),
+        ("model=gh_ordinary", "model=gh_ordinary"),
+        ("ghp_bare", "****"),
+        ("model_reasoning_effort=high", "model_reasoning_effort=high"),
+        ("--model", "--model"),
+    ];
+    for (token, masked) in cases {
+        assert_eq!(mask_argument_token(token), masked, "token {token:?}");
+    }
+}
+
+#[test]
+fn argument_secret_spans_locate_the_original_value() {
+    let token = "--config=sk-proj-reviewsecret0123456789";
+    let spans = find_argument_secret_spans(token);
+    assert_eq!(spans, vec![9..token.len()]);
+    assert_eq!(&token[spans[0].clone()], "sk-proj-reviewsecret0123456789");
+}

@@ -358,8 +358,10 @@ cursor (`claudine::composition::owner_of_last_argument`, called from
 `cli/src/completion/engine/ownership.rs`). It normalizes and partitions the
 words before the cursor exactly as a run would, reads the file's literal
 `agent` and `$schema` only when a provider switch follows the file, and
-offers nothing for a word the agent owns or a line ownership rejects. It never
-prompts. See
+offers nothing for a word the agent owns or a line ownership rejects. A flag
+at the cursor is judged by the words before it, so `--codex -c phase=2
+--mod<TAB>` offers nothing while `--codex -c low --mod<TAB>` offers
+`--model`. It never prompts. See
 [Shell Completions → Provider arguments after the composition file](completions/shell-completions.md#provider-arguments-after-the-composition-file).
 
 ```text
@@ -457,8 +459,10 @@ composition and the direct wrappers (`claudine codex …`) print it:
   compiled catalog, looked up at the command path the launch uses (`exec`
   for a non-interactive Codex run; see
   [Provider Metadata → Looking a switch up](provider-metadata.md#looking-a-switch-up)).
-  A researched switch says what it is; anything else says the catalog has
-  nothing for it there and that Claudine forwards it anyway, without claiming
+  A switch whose record establishes a value type says what it is; anything
+  else (no record there, or a record that declares its type unknown, such as
+  OpenCode's `--get-yargs-completions`) says the catalog has no established
+  type for it there and that Claudine forwards it anyway, without claiming
   the provider will reject it:
 
   ```text
@@ -479,13 +483,25 @@ composition and the direct wrappers (`claudine codex …`) print it:
 
 Every surface that shows argument values passes them through the shared
 `redact_sensitive_args` policy first: the composition `--dry-run` "Provider
-args" row, the direct-wrapper `--dry-run` command line, the debug trace of the
-provider argv, and `AGENT_PARAMS`. The policy masks the value after a
-secret-named switch (`--api-key ****`, `--token=****`), any token that starts
-with a known credential prefix, and such a credential attached to a short
-switch (`-csk-…` becomes `-c****`). Redaction is by shape and switch name, so
-an ordinary attached value such as `-cfoo` is shown as typed. The child still
-receives the original tokens.
+args" row, the direct-wrapper `--dry-run` command line and environment list,
+the debug trace of the provider argv, the warning about a flag after `--`, and
+`AGENT_PARAMS`. The policy masks the value after a secret-named switch
+(`--api-key ****`, `--token=****`) and a credential attached to a short switch
+(`-csk-…` becomes `-c****`). Every other token keeps only what the shared
+argument recognizer (`claudine::secrets::mask_argument_token`) leaves visible,
+so a credential embedded in an ordinary token is masked too:
+
+```text
+typed:    -c api_key=sk-proj-abc… --config=sk-proj-abc… ghp_abc…
+shown:    -c api_key=****        --config=****          ****
+```
+
+That recognizer masks a whole token or an `=` value starting with a known
+credential prefix, and anything the shared catalog recognizes inside the
+token, such as the value of a secret-named assignment. Redaction is by shape
+and name, so an ordinary value such as `-cfoo` or
+`-c model_reasoning_effort=high` is shown as typed. The child still receives
+the original tokens.
 
 ### Resume and the tail
 

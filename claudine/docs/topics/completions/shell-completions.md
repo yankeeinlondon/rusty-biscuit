@@ -651,6 +651,9 @@ What you can expect, with a `plan.md` whose `$schema` declares `phase`
 | `compose plan.md --codex -c ph<TAB>` | nothing | an unfinished value of `-c`, not a setter name |
 | `compose plan.md --codex -c phase=2 ph<TAB>` | nothing | `phase=2` is a declared parameter, so `-c` has no value and the command would fail |
 | `compose plan.md -c low ph<TAB>` | nothing | no agent named: Claude's `-c` takes nothing and Codex's takes a value, so `low` is ambiguous |
+| `compose plan.md --codex -c low --mod<TAB>` | `--model` | the words before the flag read cleanly |
+| `compose plan.md --codex -c phase=2 --mod<TAB>` | nothing | `-c` still has no value; a new flag cannot repair it |
+| `compose plan.md -c low --mod<TAB>` | nothing | `low` is ambiguous, whatever the cursor shape |
 | `compose plan.md -- ph<TAB>` | nothing | everything after `--` is forwarded to the agent untouched |
 
 The rules:
@@ -667,7 +670,12 @@ The rules:
   missing value the provider requires, a `$schema` that cannot be read
   when a provider switch makes it matter, or an `argv=` setter. Completion
   never prompts (an interactive run asks which agent the arguments are for;
-  completion does not) and never reports an error.
+  completion does not) and never reports an error. This holds for every
+  cursor shape: a setter, a bare word, or a flag.
+- **A flag is judged by the words before it.** A partial flag such as
+  `--mod` may become a Claudine option, so it is not itself read as a
+  forwarded switch; the words before it must read cleanly for any flag to
+  be offered.
 - **Nothing after an authored `--`.** No setter, file, or flag candidates,
   and no clap fallback either, for composition and wrapper commands alike.
 - **No provider switch, no file read.** Without a forwarded switch every
@@ -690,7 +698,7 @@ flowchart TD
     C -->|no| S["slot completer (file, setter, flag)"]
     C -->|yes| D{"a Claudine option or its value?"}
     D -->|yes| S
-    D -->|no| E{"any provider switch after the file?"}
+    D -->|"no (a flag: judge the words before it)"| E{"any provider switch after the file?"}
     E -->|no| F["ownership without reading the file"]
     E -->|yes| G["read the file's agent and literal $schema"]
     G -->|unreadable| N
@@ -1068,6 +1076,10 @@ flowchart TD
     D -->|Root| E["root_menu::render"]
     D -->|CompositionPositional| F["composition::run"]
     D -->|SetterValue / SetterName / Other| O{"engine/ownership.rs: Claudine's word?"}
+    D -->|CompositionProviderFlag| P{"engine/ownership.rs: words before the flag read cleanly?"}
+    P -->|no| H2
+    P -->|yes| H3["--provider switches + clap flags"]
+    H3 --> M
     O -->|no| H2["emit nothing"]
     O -->|yes, SetterValue| G["setter_value::run"]
     O -->|yes, Other| H["clap fallback or nothing → shell fallback"]
@@ -1084,7 +1096,7 @@ flowchart TD
 | Module | Role |
 |---|---|
 | [`engine/mod.rs`](../../../cli/src/completion/engine/mod.rs) | Entry point; classifies the cursor slot and dispatches. |
-| [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's. |
+| [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's, and, for a flag at the cursor, whether the words before it read cleanly. |
 | [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
 | [`composition/mod.rs`](../../../cli/src/completion/composition/mod.rs) | Shared compose/inline-compose/sequence pipeline. |
 | [`setter_value.rs`](../../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |

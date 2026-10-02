@@ -382,6 +382,141 @@ fn secrets_reach_the_child_and_no_display_surface() {
     }
 }
 
+const EMBEDDED: &str = "sk-proj-embeddedsecret0123456789";
+const LONG_ATTACHED: &str = "sk-proj-longattached0123456789";
+const SHORT_ATTACHED: &str = "sk-proj-shortattached012345678";
+const FLAG_ATTACHED: &str = "sk-proj-flagattached0123456789";
+const FLAG_SEPARATE: &str = "sk-proj-flagseparate0123456789";
+
+/// A credential inside an otherwise ordinary token — a configuration
+/// assignment value or a long attached value — is masked like the shapes the
+/// sensitive-flag and short-attachment rules cover, on every surface of all
+/// three composition commands and the direct wrapper, while the child gets
+/// the original tokens.
+#[test]
+fn embedded_credentials_reach_the_child_and_no_display_surface() {
+    let assignment = format!("api_key={EMBEDDED}");
+    let long = format!("--config={LONG_ATTACHED}");
+    let short = format!("-c{SHORT_ATTACHED}");
+    let token = format!("--token={FLAG_ATTACHED}");
+    let composition_tail = [
+        "-c",
+        assignment.as_str(),
+        long.as_str(),
+        short.as_str(),
+        token.as_str(),
+        "--api-key",
+        FLAG_SEPARATE,
+    ];
+    // The direct wrapper reads a separate word as its prompt, so its
+    // sensitive flag carries the value attached.
+    let api_key = format!("--api-key={FLAG_SEPARATE}");
+    let direct_tail = [
+        "-c",
+        assignment.as_str(),
+        long.as_str(),
+        short.as_str(),
+        token.as_str(),
+        api_key.as_str(),
+    ];
+    let secrets = [EMBEDDED, LONG_ATTACHED, SHORT_ATTACHED, FLAG_ATTACHED, FLAG_SEPARATE];
+
+    for command in ["compose", "inline-compose", "sequence", "codex"] {
+        let fixture = CliProcessFixture::named(&format!("tail-embedded-{command}"));
+        let body = fixture.cwd().join("inline.md");
+        let log = stub(
+            &fixture,
+            "codex",
+            &format!("printf '\\nAgent wrote this.\\n' >> '{}'\nexit 0", body.display()),
+        );
+        let target = match command {
+            "compose" => doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n"),
+            "inline-compose" => doc(&fixture, "inline.md", "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n"),
+            "sequence" => {
+                doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n");
+                doc(&fixture, "seq.md", "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n")
+            }
+            _ => "do the thing".to_string(),
+        };
+        let tail: &[&str] = if command == "codex" { &direct_tail } else { &composition_tail };
+        let with = |extra: &[&str]| {
+            let mut args = vec![command];
+            args.extend(extra);
+            if command == "codex" {
+                args.extend(tail);
+                args.push(target.as_str());
+            } else {
+                args.extend([target.as_str(), "--codex"]);
+                args.extend(tail);
+            }
+            args.into_iter().map(str::to_owned).collect::<Vec<_>>()
+        };
+
+        let output = fixture.command().args(with(&["--dry-run"])).output().unwrap();
+        let dry_run = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{command} dry run:\n{dry_run}");
+        // The dry-run table wraps cells anywhere and the direct command line
+        // is shell-quoted, so compare without whitespace, borders, or quotes.
+        let compact: String = dry_run
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && !matches!(ch, '│' | '\''))
+            .collect();
+        let shown_masked = if command == "codex" { "--api-key=****" } else { "--api-key****" };
+        for masked in ["-capi_key=****", "--config=****", "-c****", "--token=****", shown_masked] {
+            assert!(compact.contains(masked), "{command} dry run lacks {masked}:\n{dry_run}");
+        }
+
+        let output = fixture
+            .command()
+            .env("RUST_LOG", "claudine=debug")
+            .args(with(&[]))
+            .output()
+            .unwrap();
+        let launched = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{command} launch:\n{launched}");
+
+        for (surface, text) in [("dry run", &dry_run), ("notice/debug", &launched)] {
+            for secret in secrets {
+                assert!(!text.contains(secret), "{command}: {secret} leaked on {surface}:\n{text}");
+            }
+        }
+        let params = fs::read_to_string(log.join("params-0")).unwrap();
+        assert!(params.contains("api_key=****"), "{command} AGENT_PARAMS: {params}");
+        for secret in secrets {
+            assert!(!params.contains(secret), "{command}: {secret} leaked into AGENT_PARAMS: {params}");
+        }
+        let launches = launches(&log);
+        assert_eq!(launches.len(), 1, "{command}: {launches:?}");
+        assert_eq!(occurrences(&launches[0], tail), 1, "{command}: the child gets the tail unchanged: {launches:?}");
+    }
+}
+
+/// A provider diagnostic that echoes an embedded or attached credential,
+/// with or without its flag, is masked in the correlated report.
+#[test]
+fn a_correlated_report_masks_echoed_embedded_credentials() {
+    let fixture = CliProcessFixture::named("tail-embedded-report");
+    stub(
+        &fixture,
+        "goose",
+        &format!(
+            "echo \"error: unexpected argument '--config' found; value {LONG_ATTACHED}; key hunter2hunter2\" >&2\nexit 2"
+        ),
+    );
+    let file = doc(&fixture, "plan.md", "---\ntitle: plan\n---\nPlan body\n");
+    let long = format!("--config={LONG_ATTACHED}");
+
+    let (code, _, stderr) = run(
+        &fixture,
+        &["compose", "--goose", "--quiet", &file, &long, "--profile=api_key=hunter2hunter2"],
+    );
+
+    assert_eq!(code, 2, "stderr:\n{stderr}");
+    assert_eq!(count(&stderr, CORRELATED), 1, "{stderr}");
+    assert!(count(&stderr, "value ****; key ****") >= 1, "masked, not dropped:\n{stderr}");
+    assert!(!stderr.contains(LONG_ATTACHED) && !stderr.contains("hunter2hunter2"), "{stderr}");
+}
+
 // ── Correlated reports (criteria 10, 28) ──
 
 /// `text` with status-block gutters removed and whitespace collapsed, so a
