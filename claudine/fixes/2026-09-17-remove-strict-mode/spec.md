@@ -28,37 +28,27 @@ clarified_by: codex/gpt-6-astra
 reviewed_by: claude/fable
 reviewed_on: 2026-09-19
 review_iterations: 0
-implemented: false
+implemented: true
 implemented_by: claude/opus
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |-
-    Phases 4, 5, and 6 are done; read `## Phase 4` through `## Phase 6` of implementation-log.md.
-    What Phase 7 builds on:
-    (1) Claudine's lifecycle catalog is `claudine::composition::lifecycle::bindings`
-    (`LifecycleScope`, `binding_view`, `runtime_bindings`). An absent property is `null` on every
-    lifecycle surface. Bare `err` in initialize/start/success/loop fails preparation; bare `group`
-    outside a group fails at event time.
-    (2) DMLS classifies through Darkmatter (`BindingView::baseline()`, `names_document_property`) and
-    reports unknown functions as the ERROR `dm.expression.unknown_function`. The advisory code is
-    `dm.expression.undeclared_property`. DMLS docs and the darkmatter skill's `dmls.md` already
-    describe this.
-    (3) Phase 6 removed the `|| false` legality guards from `prompts/implement.md` and `prompts/review.md`,
-    and rewrote the `_prompt.md` guidance (absent is `null`; a fallback chooses a default). The
-    regression is `claudine/cli/tests/l1/shipped_prompts.rs::shipped_implement_router_reads_absent_optional_inputs_unguarded`;
-    the router hash pin is refreshed. Phase 7 docs still to rewrite per the Phase 1 audit:
-    `claudine/docs/topics/flow-control/lifecycle.md` (lines ~92, 611-612, 835-839, 859: fallback advice,
-    "strict mode", undeclared `{{agent}}`/`{{branch}}`) and `flow-control-reference.md:127` ("unknown root").
-    (4) NOT fixed, outside R8: `prompts/_agent-skills.md` calls `skill_description(i)` and
-    `local_skill_description(...)`, which are not Darkmatter functions. If the author decides on a fix,
-    update `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md` too and re-bless with
-    `DMLS_BLESS_MAPPING_CORPUS=1` (the bless run fails on purpose; re-run without it).
-    (5) Still standing: optional rename of `compose/unknown_identifiers.rs` and the `unknown_identifier*`
-    test files; the Phase 4 DRY follow-ups (the loop renderer ignores `{{{ … }}}`;
-    `LifecycleShellResolution.source` is always `Some`).
-    (6) Use absolute paths for `cd`: `cd claudine` from inside `claudine/` resolves through zsh CDPATH
-    to the main checkout (/Volumes/coding/personal/rusty-biscuit). Changed files may appear staged
-    without any `git add`; leave the index as found.
+    All seven phases are implemented; the implementation log's `## Phase 7` has the DRY audit, the
+    acceptance evidence map (criteria 1-17 and 19), and the departures (NR-2..NR-5, catalog in Rust,
+    DMLS unknown-function error). Status: implementation complete, ready for review.
+    Open follow-ups, none blocking this fix:
+    (1) `prompts/_agent-skills.md` calls `skill_description(i)` and `local_skill_description(...)`,
+    which are not Darkmatter functions (found by DMLS in Phase 5). If fixed, update the DMLS corpus copy
+    `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md` and re-bless with
+    `DMLS_BLESS_MAPPING_CORPUS=1`.
+    (2) The loop action renderer (`looping::actions::render_action_value`) does not honor `{{{ … }}}`;
+    route it through `prepare_value`/`evaluate_prepared` like the sequence renderer.
+    (3) `LifecycleShellResolution.source` is always `Some`; it can become non-optional.
+    (4) `sequence/preflight/shape.rs::first_target_identity_root` still walks the AST for target
+    identity (`ctx.agent`/`ctx.model`/`env.AGENT`/`env.MODEL`, dynamic `ctx[...]`); it could be expressed
+    over Darkmatter's `static_variable_reads` if that reports dynamic index reads.
+    (5) Optional rename of `compose/unknown_identifiers.rs` and the `unknown_identifier*` test files.
+    Use absolute paths for `cd` (zsh CDPATH resolves `cd claudine` to the main checkout).
 ---
 
 # Remove Strict Mode and Centralize Expression Binding

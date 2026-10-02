@@ -1,7 +1,7 @@
 ---
 total_phases: 7
 created: 2026-10-01
-phase: 6
+phase: 7
 agent: claude/opus
 yolo: "true"
 source_files_during_phase_1: []
@@ -206,6 +206,184 @@ packages:
     - dmls
     - claudine
     - claudine-cli
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/lsp/features.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/subtree.rs
+    - darkmatter/lib/tests/l1/binding_contract.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/context/runtime.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+    - darkmatter/lib/tests/l1/absent_property_contract.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__performance-review.md
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/brainstorm.md
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/authored_text_rendering.rs
+    - prompts/_reviews/performance-review.md
+    - prompts/brainstorm.md
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/validation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/diagnostics/snapshot/tests.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/undeclared_property.rs
+    - prompts/implement.md
+    - prompts/review.md
+    - prompts/_prompt.md
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - claudine/lib/src/composition/schema/tests.rs
+documentation:
+    - claudine/docs/rollout-strategy.md
+    - claudine/fixes/2026-09-17-remove-strict-mode/design.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/parsing/index.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/parsing/lexing.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/composition.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - claudine/docs/topics/flow-control/looping.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - .claude/skills/darkmatter/dmls.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 7
+implemented: true
 ---
 
 # Remove Strict Mode and Centralize Expression Binding — Implementation Plan
@@ -866,7 +1044,7 @@ Wave 15 waits for everything.
 
 ### Wave 14 — documentation and skills (parallel; disjoint files)
 
-- [ ] **Darkmatter docs** (R9)
+- [x] **Darkmatter docs** (R9)
   - Update the expression and interpolation docs (`darkmatter/docs/inline/interpolation.md`,
     the expression topic pages, `darkmatter/docs/lsp/features.md`, and
     `darkmatter/docs/topics/schemas/dmls-schema-support.md`):
@@ -882,7 +1060,7 @@ Wave 15 waits for everything.
     registered global, available or unavailable, then document property). The
     pages are written for a developer new to the repository.
   - Update the `.claude/skills/darkmatter` snapshot to match.
-- [ ] **Claudine docs and skill** (R9)
+- [x] **Claudine docs and skill** (R9)
   - Update `claudine/docs/topics/composition.md`,
     `topics/flow-control/lifecycle.md`, and
     `topics/flow-control/flow-control-reference.md`:
@@ -895,7 +1073,7 @@ Wave 15 waits for everything.
   - Update `.claude/skills/claudine/SKILL.md` (the "strict, fail-closed"
     wording in the Lifecycle stacks row) and add a `timeline.md` entry.
   - Historical specs and completed logs are not edited.
-- [ ] **Stale-wording sweep**
+- [x] **Stale-wording sweep**
   - Search `darkmatter/` and `claudine/` docs, READMEs, rustdoc, and skills
     for "strict mode", "unknown root", "strict()", and "SubtreeStrictness" in
     the expression sense. Many hits are unrelated style or schema strictness;
@@ -905,25 +1083,25 @@ Wave 15 waits for everything.
 
 ### Wave 15 — audits and gates (serial)
 
-- [ ] **DRY seam audit** (acceptance criterion 14)
+- [x] **DRY seam audit** (acceptance criterion 14)
   - Check the [DRY table](migration-inventory.md#dry-and-ownership-audit)
     against the final code, adjusted for the re-scope. There is no envelope,
     and descriptors exist only in Rust.
   - Record in the implementation log each retained duplication with its
     owner reason, and each consolidation made.
-- [ ] **Acceptance evidence map**
+- [x] **Acceptance evidence map**
   - In the implementation log, map acceptance criteria 1–17 and 19 to the
     test or source scan that proves each one.
   - Record departures from the spec or design (for example the NR-3 widening,
     NR-4, and NR-5) as departures. Correct the docs; leave the spec unchanged.
-- [ ] **Final gates**
+- [x] **Final gates**
   - Run `just test` and `just lint` in `darkmatter/` and `claudine/`, plus
     `just test-l2` in both areas where an existing L2 suite covers lifecycle,
     composition, or subtree interpolation.
   - Review `just ci-local --plan` before any push. Do not add a CI cell.
   - Changed Rust must stay portable across macOS, Linux, Windows, and WSL2.
     No `#[cfg]` paths are expected; if any are added, load the `os` skill.
-- [ ] **Hand-off**
+- [x] **Hand-off**
   - Set the implementation log to "implementation complete, ready for review".
   - Do not edit the spec's `status`/`implemented` fields unless the author's
     workflow asks for it, and do not move the fix to `_completed`.

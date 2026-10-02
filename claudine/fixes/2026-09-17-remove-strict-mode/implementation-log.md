@@ -205,6 +205,184 @@ packages:
     - dmls
     - claudine
     - claudine-cli
+source_files_during_phase_7:
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+docs_updated_during_phase_7:
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - darkmatter/docs/lsp/features.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - darkmatter/lib/src/markdown/compose/expression/binding.rs
+    - darkmatter/lib/src/markdown/compose/expression/prepared.rs
+    - darkmatter/lib/src/markdown/compose/expression/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs
+    - darkmatter/lib/src/markdown/compose/subtree.rs
+    - darkmatter/lib/tests/l1/binding_contract.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/src/markdown/compose/expression/absence.rs
+    - darkmatter/lib/src/markdown/compose/context/runtime.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/rewrite.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/compose/tests/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/lookup_parity.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+    - darkmatter/lib/tests/l1/absent_property_contract.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/cli/tests/l1/compose_unknown_identifiers.rs
+    - darkmatter/cli/tests/l1/compose_schema.rs
+    - darkmatter/dmls/src/overlay/expressions.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/_reviews__performance-review.md
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/brainstorm.md
+    - claudine/lib/src/composition/lifecycle/executor.rs
+    - claudine/lib/src/composition/lifecycle/context.rs
+    - claudine/lib/src/composition/lifecycle/context/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/event_time_interpolation.rs
+    - claudine/lib/src/composition/preflight.rs
+    - claudine/lib/src/composition/sequence/preflight/mod.rs
+    - claudine/lib/src/composition/sequence/task/mod.rs
+    - claudine/lib/src/composition/interpolation_conformance.rs
+    - claudine/lib/tests/l1/main.rs
+    - claudine/lib/tests/l1/strict_mode_provenance_spike.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+    - claudine/cli/tests/l1/agent_text_is_data.rs
+    - claudine/cli/tests/l1/authored_text_rendering.rs
+    - prompts/_reviews/performance-review.md
+    - prompts/brainstorm.md
+    - claudine/lib/src/composition/lifecycle/bindings.rs
+    - claudine/lib/src/composition/lifecycle/bindings/tests.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/binding_contract.rs
+    - claudine/lib/src/composition/lifecycle/action_shape.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/action_dispatch.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/conditions_control.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/filesystem_lookup.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/proxy_with_evaluation.rs
+    - claudine/lib/src/composition/lifecycle/executor/tests/runtime_set.rs
+    - claudine/lib/src/composition/lifecycle/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/diagnostics.rs
+    - claudine/lib/src/composition/lifecycle/tests/guard_runtime.rs
+    - claudine/lib/src/composition/lifecycle/tests/mod.rs
+    - claudine/lib/src/composition/lifecycle/tests/nested_span.rs
+    - claudine/lib/src/composition/lifecycle/tests/validation.rs
+    - claudine/lib/src/composition/lifecycle/validate.rs
+    - claudine/lib/src/composition/error/mod.rs
+    - claudine/lib/src/composition/error/render/lifecycle.rs
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/lib/src/composition/error/tests.rs
+    - claudine/lib/src/composition/looping/actions.rs
+    - claudine/lib/src/composition/looping/engine.rs
+    - claudine/lib/src/composition/looping/engine/tests/lifecycle_control.rs
+    - claudine/lib/src/composition/looping/expression.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/prepare/tests.rs
+    - claudine/lib/src/composition/reserved.rs
+    - claudine/lib/src/composition/sequence/expr.rs
+    - claudine/lib/src/composition/sequence/preflight/shape.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/diagnostics/snapshot/tests.rs
+    - claudine/lib/tests/l1/agent_errors_fleet.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/preflight.rs
+    - claudine/cli/src/commands/wrap/composition/staged_boot.rs
+    - claudine/cli/src/commands/wrap/composition/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/lifecycle_events.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/lifecycle_ordering.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/terminal_evaluation.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/error_walker/tests.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/handoff_owners.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - darkmatter/dmls/src/diagnostics/nested_span.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/no_side_effects.rs
+    - darkmatter/dmls/tests/l1/undeclared_property.rs
+    - prompts/implement.md
+    - prompts/review.md
+    - prompts/_prompt.md
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+    - darkmatter/lib/src/markdown/compose/directive_targets.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - claudine/lib/src/composition/schema/tests.rs
+documentation:
+    - claudine/docs/rollout-strategy.md
+    - claudine/fixes/2026-09-17-remove-strict-mode/design.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/schemas/parsing/index.md
+    - darkmatter/docs/topics/schemas/parsing/grammar.md
+    - darkmatter/docs/topics/schemas/parsing/lexing.md
+    - darkmatter/docs/inline/interpolation.md
+    - darkmatter/docs/inline/fm-interpolation.md
+    - claudine/docs/topics/flow-control/lifecycle.md
+    - claudine/docs/topics/flow-control/flow-control-reference.md
+    - claudine/docs/topics/composition.md
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - claudine/docs/topics/flow-control/looping.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - .claude/skills/darkmatter/dmls.md
+    - claudine/docs/topics/flow-control/sequences.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 7
+implemented: true
 ---
 
 # Implementation Log for 2026-09-17-remove-strict-mode (7 phases)
@@ -1068,3 +1246,150 @@ any `git add` from this session, as in Phase 5. The index was left as found.
 
 Checkpoint 6 is met: `claudine` `just test` passes with the new regression and
 the refreshed pin, and acceptance criterion 11 holds.
+
+## Phase 7
+
+Phase 7 brings the docs and skills onto the one contract (R9), sweeps stale
+wording from rustdoc and test comments, audits the Darkmatter–Claudine seam for
+duplication (acceptance criterion 14), maps every in-scope acceptance criterion
+to its evidence, and runs the final gates.
+
+### What changed
+
+| Area | Files | Change |
+|---|---|---|
+| Darkmatter expression topic | `darkmatter/docs/topics/darkmatter-expressions.md` | Mermaid diagram of root resolution (reserved namespace → host global, available or unavailable → document property, absent → `null` + advisory); "absent needs no `\|\|` to be legal, a fallback chooses a default"; an "Errors" table of what fails composition (malformed, unknown function, rejected argument / failed read, unavailable host global) versus what evaluates normally (absent property, missing member, `null` in text, escaped span) |
+| Darkmatter inline pages | `darkmatter/docs/inline/interpolation.md`, `darkmatter/docs/inline/fm-interpolation.md` | Failures section names unavailable host globals and links Host Bindings; "Undefined variables" → "An absent document property" |
+| DMLS feature table | `darkmatter/docs/lsp/features.md` | Three "unknown root"/"unknown identifiers" cells → "undeclared document property (advisory)" |
+| Claudine lifecycle | `claudine/docs/topics/flow-control/lifecycle.md` | Availability table gains the sequence-wide approval row; new paragraph: explicit `null` `err` in `finalize`/teardown, `group` (and `outputs`) unavailable at sequence-wide approval; the wrong sentence "a value is literal text and `{{{ … }}}` is how you opt into the expression engine" now states the ordinary escape semantics; "Unrelated undeclared roots still fail strict evaluation" → "Any other absent property reads as `null` too"; the positional-action example used `{{agent}}`/`{{branch}}`, which relied on the removed `ctx` fallback, and now reads `ctx.agent`/`ctx.branch` |
+| Claudine sequences / composition | `claudine/docs/topics/flow-control/sequences.md`, `claudine/docs/topics/composition.md` | Sequence approval refuses `err`/`timing`/`group` (even for a group member) and setup/teardown run the approved bytes; "Undefined variables remain lenient" → absent property is `null` and needs no fallback |
+| Skills | `.claude/skills/darkmatter/SKILL.md`, `.claude/skills/darkmatter/compose.md`, `.claude/skills/claudine/architecture.md`, `.claude/skills/claudine/timeline.md` | Darkmatter skill: host-binding paragraph (view → associate → passive validate → evaluate; no strict mode, no root-membership hook); two stale `compose_subtree(..., Lenient)` references removed (subtree compose takes no policy since Phase 3). Claudine architecture names the catalog instead of "has no strict mode". Timeline: new `2026-10` entry for this fix (its `hash:` re-derived with `md hash`; the old pin matched the old content) |
+| Rustdoc / test comments (comment-only) | `darkmatter/lib/src/markdown/compose/{pipeline/mod.rs, unknown_identifiers.rs, context/report.rs, inline/interpolation.rs, frontmatter_interpolation.rs, interpolation/evaluator.rs, expression/absence.rs, conditions.rs, frontmatter_shell_expansion.rs}`, `claudine/lib/src/composition/sequence/task/tests.rs`, `claudine/lib/src/composition/schema/tests.rs` (assertion message), `claudine/cli/tests/l1/wrap_compose_validation.rs` | "unknown root" → "undeclared property" / "absent property" vocabulary; "Under DM2 strict mode" → "Under DM2"; the group-leak test's doc names the `claudine.outside-group` error it now gets |
+| DRY consolidation (behavior) | `darkmatter/lib/src/markdown/compose/directive_targets.rs`, `darkmatter/lib/tests/l1/directive_target_analysis.rs` | See the audit below |
+
+Left alone on purpose: every "strict" hit about style (`--strict-style`),
+schemas (`schema.strict`, DMLS `missing_required`), hashing (`md hash --strict`),
+transclusion `fail_fast`, `ExpressionFailurePolicy::Strict`, and research docs.
+Historical specs, completed logs, reviews, and `claudine/docs/rollout-strategy.md`'s
+history tables keep their wording (R9). Two open Darkmatter feature drafts
+(`2026-09-16-expression-type-system`, `2026-09-21-schema-enhancements`) still
+name the removed symbols; they are specs, not current docs.
+
+### DRY seam audit (acceptance criterion 14)
+
+The [DRY table](migration-inventory.md#dry-and-ownership-audit) checked against
+the final code. Re-scope adjustments: there is no provenance envelope (NR-2),
+the Claudine catalog is Rust (`lifecycle/bindings.rs`), not YAML, and the
+schema-assembly and generated-definition rows are R11/R12, out of scope.
+
+**Consolidation made in this phase.**
+`directive_targets::expression_path` (nullable directive-target analysis) kept
+its own reserved-root literal, `"null" | "doc" | "ctx" | "env"`, which had
+drifted from the catalog: a bare `current` or `current_env` target was
+classified as a document property, so a schema-declared `current: file` made
+the namespace look like a nullable document target. It now calls
+`absence::is_reserved_root` (derived from `reserved_root_descriptors()` plus the
+`null` literal). Test:
+`darkmatter/lib/tests/l1/directive_target_analysis.rs::a_reserved_namespace_root_is_never_a_document_target`
+(all five namespaces and `null` are `Unknown` while `doc.<name>` stays
+nullable). Mutation-checked: restoring the old literal fails it on `current`.
+
+| Concern | Single authority (final code) | Retained caller work and its owner reason |
+|---|---|---|
+| Reserved namespaces | Darkmatter `binding::is_reserved_namespace` over `reserved_root_descriptors()`; `absence::is_reserved_root` adds `null` | None left: Phase 5 replaced `absence`'s own literal and `CurrentScope::is_reserved_root`, this phase `directive_targets`. DMLS reads `BindingView::baseline()` |
+| Lifecycle-global names and availability | Claudine `lifecycle/bindings.rs` (`binding_view`, `runtime_bindings`, `approval_diagnostics`) per `LifecycleScope` | None. Deleted along the way: `LATE_BINDING_ROOTS` (Claudine and DMLS), `SHELL_UNAVAILABLE_ROOTS`, `LIFECYCLE_COMM_FIELDS`, `shape::first_unavailable_root`/`root_in_expr`, `preflight::late_binding_root_in_expr`, `outside_group_global`, `lifecycle_injected_globals`. A source scan finds the three names only in `bindings.rs` |
+| Bare-name precedence / state lookup | Darkmatter `ResolvedBinding::classify` and `EvaluationSession` | Claudine's three lookups (`LoopExpressionLookup`, `SourceExpressionLookup`, `SizedLookup`) keep their own document layering (loop state over frontmatter; sequence item over frontmatter). That layering is Claudine policy; each classifies through Darkmatter and resolves reserved namespaces first. `dispatch/expression.rs`'s two hook-event lookups serve hook `when=` over event metadata, not documents; they read no bare `ctx` and inherit the trait defaults |
+| Effective-state and resolution-context construction | Darkmatter `EffectiveStateBuilder`, `ResolutionContext` | Each Claudine surface builds its state from the snapshot it owns (live frontmatter at event time, the approval snapshot at preflight, the task overlay at sequence time). The timing differs by surface, so one builder would erase capture timing (spec: "without erasing lifecycle context or capture timing") |
+| Lazy values and memoization | Darkmatter `EvaluationSession` lazy cache (once per session) | `CurrentAuthority::memoized` per lifecycle event is Claudine's choice of memo scope (`current` once per event), layered on Darkmatter's mechanism |
+| Parsing, evaluation, whole-value typing, mixed strings | Darkmatter parser/evaluator, `prepare_value`/`validate_prepared`/`evaluate_prepared`, `SubtreeCompose` | Sequence `expr.rs` moved onto `prepare_value`/`evaluate_prepared` in Phase 4. **Retained:** the loop action renderer (`looping::actions::render_action_value`) still walks spans itself and does not honor `{{{ … }}}`. Loop actions are outside this fix (NR-8); recorded as a follow-up |
+| The four production `SubtreeCompose` sites and the direct `evaluate` | `executor.rs` (event time), `preflight.rs` (lifecycle shell approval), `sequence/preflight/mod.rs` (sequence approval), `sequence/task/mod.rs` (task values); `executor::eval_expr` via `layered_session` | All five take `(view, globals)` from `runtime_bindings(scope, ..)`, so they cannot disagree on globals. What differs is the state and scope each owns (above) |
+| Prepare-time, shell-preflight, sequence-preflight, event-time checks | `validate_prepared` against the scope's `BindingView` (prepare time through `validate_no_err_in_no_error_events`; approval through `approval_diagnostics`); runtime through the session | **Retained:** `approval_diagnostics` refuses `current`/`current_env` by reading Darkmatter's `static_variable_reads` (a namespace cannot be declared in a view, NR-3); this is a Claudine policy over Darkmatter's analysis, not a walk. `shape::first_target_identity_root` still walks the AST for `ctx.agent`/`ctx.model`/`env.AGENT`/`env.MODEL` and dynamic `ctx[...]`/`env[...]` indexes. It enforces target identity at graph approval, not lifecycle-global availability, so AC 7 does not cover it. Possible follow-up: express it over `static_variable_reads` if Darkmatter reports dynamic index reads |
+| Surviving-span checks | None: deleted (Phase 4) | `reject_control_plane_template` refuses template text in a `proxy.with` value for a *lifecycle key* of the target. It is a feature restriction (R5 keeps those), not a check on successful output |
+| DMLS descriptors vs runtime | DMLS classifies through `BindingView::baseline()` and `validate_expression` | No Claudine descriptors reach DMLS (R7c out of scope), so a host global such as `err` is an undeclared-property advisory in the editor. Accepted gap, documented in `darkmatter/docs/lsp/features.md` |
+| Errors | Typed Darkmatter cause (`ExpressionError`, `MarkdownError`, `BindingError`) | Claudine adds event/action/document context as `LifecycleCause` on `LifecycleErrorInfo::cause` and as `#[source]`; `err` JSON is a projection. The wrapping layers add context, not a second classification |
+
+### Acceptance evidence map
+
+| AC | Evidence |
+|---|---|
+| 1 | Source scan (Definition of Success `rg`) returns nothing in `darkmatter/` or `claudine/` source; the public API no longer has `SubtreeStrictness`, `.strict()`, `with_strictness`, the `compose_subtree` strictness argument, `validate_strict_roots`, or `is_known_variable_root` (Phase 3) |
+| 2 | `binding_contract::registration::every_reserved_root_is_rejected_before_any_provider_runs`, `subtree.rs::a_reserved_root_cannot_be_registered_and_no_provider_runs`, `binding_contract::resolution::a_global_shadows_a_document_property_of_the_same_name`, `::doc_prefixed_reserved_names_read_document_data`, `absent_property_contract::an_exact_namespace_root_is_never_a_document_property`, and (this phase) `directive_target_analysis::a_reserved_namespace_root_is_never_a_document_target`. **Departure:** NR-3 widens the refused names to all five reserved roots |
+| 3 | `absent_property_contract::an_absent_property_is_a_null_whole_value`, `::an_absent_property_is_empty_in_a_mixed_string`, `::an_absent_property_takes_the_falsy_branch_and_the_fallback`; Claudine `binding_contract::an_absent_property_in_*` (three tests); `interpolation_conformance.rs::every_engine_agrees_on_missing_properties_and_escapes` |
+| 4 | `compose/tests/lookup_parity.rs` (inventory of every lookup + probe, mutation-checked), `absent_property_contract::a_missing_bare_property_does_not_resolve_from_ctx`, `checked.rs::a_bare_name_never_reads_the_ctx_namespace`, `subtree.rs::a_bare_name_never_reads_ctx` |
+| 5 | Source scan: `first_undefined_stack_variable`, `validate_no_undefined_lifecycle_variables`, `LifecycleUndefinedVariable` absent; the old closed-world tests were removed or converted (Phase 4) |
+| 6 | `binding_contract::resolution::available_null_unavailable_and_absent_property_are_distinct`; Claudine `bindings/tests.rs::runtime_resolution_follows_the_matrix_and_never_reads_the_document` |
+| 7 | `lifecycle/bindings.rs` is the only declaration; the DRY scan above finds no other list. `bindings/tests.rs::passive_validation_follows_the_matrix_in_an_inactive_branch`. The remaining Claudine AST walk (`first_target_identity_root`) enforces target identity, not lifecycle globals |
+| 8 | `binding_contract::passive_validation::*` (Darkmatter: inactive branch, execution-dependent deferral, unknown functions, no provider run); Claudine `binding_contract::malformed_expressions_and_unknown_functions_halt_before_side_effects`, `::an_unavailable_global_fails_with_its_reason_and_never_reads_the_document`, `::successful_output_containing_braces_is_delivered_as_data`; `absent_property_contract::every_escape_form_is_inert` |
+| 9 | `binding_contract::set_and_proxy_with_stay_atomic_when_a_null_member_precedes_a_failure`, `proxy_with_evaluation::evaluation_is_atomic_across_the_whole_mapping`, `sequence/task/tests.rs::byte_parity::*` (mutation-checked), `prepare/tests.rs::lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_the_document` |
+| 10 | DMLS `undeclared_property::*` (four tests, including the no-separate-catalog source scan), `lsp_session::undeclared_property_fires_in_every_operand_position_at_warning_severity`, `mapping_only_corpus` |
+| 11 | `claudine/cli/tests/l1/shipped_prompts.rs::shipped_implement_router_reads_absent_optional_inputs_unguarded`; `shipped_prompt_route_drift::*` (refreshed pin) |
+| 12 | This phase's sweep: current docs and the Darkmatter/Claudine skills carry no strict-mode guidance and no "guard optional inputs" advice (`prompts/_prompt.md` rewritten in Phase 6). Remaining "strict" hits are style/schema/hash strictness |
+| 13 | `design.md` and `design-contracts.md` hold the binding API decisions (D1, D2, D4, D7, D8, D21; C1, C2, C9); `design-review-1.md`/`-2.md` record their review; the Phase 1 rulings were raised as `human_review_items` and cleared before Phase 2. `migration-inventory.md` lists 21 implementations; Phase 1's refresh found 23 compiled plus two rustdoc examples, each given a disposition in its Phase 3 checklist, and Phase 3's `lookup_parity` test keeps the Darkmatter inventory current |
+| 14 | The DRY audit above |
+| 15 | Gates below |
+| 16 | Claudine `binding_contract::the_typed_darkmatter_cause_survives_every_library_wrapper` |
+| 17 | `interpolation_conformance.rs::every_engine_agrees_on_missing_properties_and_escapes`, `binding_contract::event_time_values_follow_the_shared_missing_property_table`; the executor has no post-evaluation check (source: `reject_surviving_spans` gone) |
+| 19 | `claudine/cli/tests/l1/compose_schema_cli.rs::a_required_property_violation_stops_before_lifecycle_actions_under_existing_recovery_policy`, `absent_property_contract::a_required_property_violation_still_blocks`; the `initialize` prohibition tests unchanged and green |
+
+### Departures from the spec and design
+
+The spec is a snapshot and is left unchanged; the docs describe what was built.
+
+- **NR-3 (AC 2):** registration refuses every root in
+  `reserved_root_descriptors()` (`doc`, `ctx`, `env`, `current`,
+  `current_env`), not only `doc`/`ctx`/`env`.
+- **NR-4:** the global is `timing`, not `tracking`.
+- **NR-5:** one resolution channel, `EvaluationLookup::resolve` (evolved from
+  `get_checked`), rather than a second trait method.
+- **NR-2:** plain `serde_json::Value`, no `ValueEnvelope`.
+- **`EvaluationSession::associate`** instead of a separate
+  `BindingEnvironment` type; no `PreparationContext` parameter; no prepared
+  identity check (Phase 2).
+- **`LayeredLookup` deleted** and replaced by `subtree::layered_session`
+  (Phase 3).
+- **Catalog in Rust,** not the YAML catalog the original DRY table named
+  (re-scope).
+- **DMLS reports unknown functions** through a new `dm.expression.unknown_function`
+  error it did not have before, and host globals are advisories in the editor
+  (R7c out of scope) (Phase 5).
+- **Two extra approval walkers removed** in Phase 4 beyond the plan's list; the
+  target-identity walk is kept (above).
+
+### Requirement-to-test mapping (this phase)
+
+| Requirement | Test(s) | Level / target |
+|---|---|---|
+| A bare reserved namespace (`doc`, `ctx`, `env`, `current`, `current_env`) or `null` is never a nullable document directive target, even when the schema declares that name; `doc.<name>` still is | `darkmatter/lib/tests/l1/directive_target_analysis.rs::a_reserved_namespace_root_is_never_a_document_target` (mutation-checked against the old literal) | Darkmatter L1 (`l1` binary; the file was already declared in `tests/l1/main.rs`; no tier marker) |
+| Docs/skills (R9, AC 12) | Source sweep above; Mermaid diagram rendered with `mmdc` (headless, no window) | — |
+| Skill files that tests read | `test-toolkit` `ci_workflow_contracts` (the plan's narrowed cell for `.claude/skills/claudine/architecture.md` and 7 more) | `test-toolkit` L1: 163 passed |
+
+All other edits are comments and docs, with no behavior change. Input
+Robustness Matrix: not applicable, because no file-format or configuration
+reader changed.
+
+### Gates
+
+| Area | Recipe | Result |
+|---|---|---|
+| `darkmatter/` | `just test` | 8774 passed (Phase 5: 8773 + 1 new), 12 skipped (baseline skips) |
+| `darkmatter/` | `just lint` | exit 0 |
+| `darkmatter/` | `just test-l2` | 18 + 69 + 3 passed |
+| `claudine/` | `just test` | 8068 passed, 9 skipped (baseline skips) |
+| `claudine/` | `just lint` | exit 0. The only warning is the existing macOS linker notice `__eh_frame section too large`, which is unrelated |
+| `claudine/` | `just test-l2` | 277 + 3 passed |
+| `test-toolkit` | `cargo nextest run -p test-toolkit --test ci_workflow_contracts` | 163 passed |
+| repository | `just ci-local --plan` | Reviewed. It covers the whole branch against `main`, and this phase adds no CI cell. The new skill edits schedule the existing narrowed `test-toolkit` L1 cell, which passes locally (above) |
+
+No pre-existing or unrelated failures. Cross-OS: the one behavior change is a
+string comparison against a catalog, with no `#[cfg]`, path, or process code,
+so no `just cross-check` was run. CI covers the other environments.
+
+### Phase 7 outcome
+
+Checkpoint 7 is met. Every gate is green, the acceptance map covers criteria
+1–17 and 19, and docs and skills use one vocabulary. Acceptance criteria 12
+(no strict-mode or fallback-legality guidance), 13 (design record and
+inventory), 14 (DRY audit), and 15 (gates) hold.
+
+**Status: implementation complete, ready for review.** The spec stays in
+`fixes/`; the author moves it to `_completed` after review.
