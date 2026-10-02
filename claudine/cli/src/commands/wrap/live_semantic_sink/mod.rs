@@ -324,7 +324,7 @@ impl LiveSemanticSink {
         task_gutter: Option<String>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
-        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
+        let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env, crate::request::snapshot()) {
             Ok(runtime) => runtime,
             Err(error) => {
                 tracing::warn!(%provider, "failed to preload wrapper runtime config: {error}");

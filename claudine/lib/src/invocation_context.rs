@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use biscuit_file::{FileResolutionContext, LaunchMagicScope, home_dir};
+use biscuit_file::{FileResolutionContext, LaunchMagicScope, PackageAreaFallback, RepositoryScopeCatalog};
 use sniff::filesystem::{FilesystemObservation, GitRepositoryIdentity};
 use sniff::filesystem::docs::MarkdownMeta;
 use sniff::filesystem::git::{FileChange, GitInfo, RecentCommits};
@@ -18,7 +18,10 @@ use sniff::request::{
     DetectionPlan, FilesystemRequest, GitMetadataRequest, GitRequest, HardwareRequest, OsRequest, RepoRequest,
 };
 
-use darkmatter::markdown::compose::{CurrentProvider, CurrentRefresh};
+use darkmatter::markdown::compose::{
+    ContextBuildError, CurrentProvider, CurrentRefresh, RequestSnapshot,
+    build_resolution_context_with_catalog,
+};
 
 use crate::composition::{
     LaunchWorkspaceContext, with_prompt_magic_roots,
@@ -33,9 +36,9 @@ use crate::system_prompt::LaunchContext;
 /// Failure to establish immutable invocation inputs.
 #[derive(Debug, thiserror::Error)]
 pub enum InvocationContextError {
-    /// The launch working directory could not be captured.
-    #[error("failed to capture the launch working directory: {0}")]
-    CurrentDirectory(#[source] std::io::Error),
+    /// The launch or source file-resolution context could not be built.
+    #[error(transparent)]
+    ResolutionContext(#[from] ContextBuildError),
     /// A resolved source does not have an authoring directory.
     #[error("resolved source path has no parent directory: {0}")]
     SourceWithoutParent(PathBuf),
@@ -619,10 +622,16 @@ pub struct HomeBaseline {
 }
 
 impl HomeBaseline {
-    /// Capture the ambient home state of the current process.
-    pub fn capture() -> Self {
+    /// Capture the home state of the current process, resolved as `snapshot`
+    /// resolves it.
+    ///
+    /// The resolved home is the request snapshot's, so `~` and every child
+    /// projection agree. The raw variables are read from the process because
+    /// a child must reproduce them byte for byte, which the snapshot's UTF-8
+    /// view cannot.
+    pub fn capture(snapshot: &RequestSnapshot) -> Self {
         Self {
-            resolved: home_dir(),
+            resolved: snapshot.home().map(Path::to_path_buf),
             variables: HOME_VARIABLES.map(std::env::var_os),
         }
     }
@@ -734,6 +743,7 @@ impl EnvBaseline {
 #[derive(Debug)]
 struct InvocationInner {
     launch_cwd: PathBuf,
+    snapshot: RequestSnapshot,
     home_baseline: HomeBaseline,
     env_baseline: EnvBaseline,
     environment: HashMap<String, String>,
@@ -918,15 +928,25 @@ impl InvocationContext {
         }
     }
 
-    /// Capture a composition invocation from the ambient launch directory.
-    pub fn capture() -> Result<Self, InvocationContextError> {
-        let cwd = std::env::current_dir().map_err(InvocationContextError::CurrentDirectory)?;
-        Ok(Self::capture_at(&cwd))
+    /// Capture a composition invocation launched at the snapshot's request
+    /// directory.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`InvocationContextError::ResolutionContext`] when the launch
+    /// file-resolution context cannot be built.
+    pub fn capture(snapshot: &RequestSnapshot) -> Result<Self, InvocationContextError> {
+        Self::capture_inner(snapshot, GitRequest::summary(), true)
     }
 
-    /// Capture a composition invocation at an explicit launch directory.
-    pub fn capture_at(cwd: &Path) -> Self {
-        Self::capture_inner(cwd, GitRequest::summary(), true)
+    /// Capture a composition invocation launched at `cwd`, keeping the
+    /// snapshot's home and environment.
+    ///
+    /// ## Errors
+    ///
+    /// As [`capture`](Self::capture).
+    pub fn capture_at(snapshot: &RequestSnapshot, cwd: &Path) -> Result<Self, InvocationContextError> {
+        Self::capture(&snapshot.at_request_dir(absolutize(snapshot, cwd)))
     }
 
     /// Capture direct-wrapper startup evidence.
@@ -934,8 +954,17 @@ impl InvocationContext {
     /// Promptless root wrappers retain Git identity but omit topology. A later
     /// source that needs package evidence initializes the same entry's
     /// topology cell instead of discovering Git again.
-    pub fn capture_for_wrapper(cwd: &Path, capture_git_status: bool) -> Self {
-        let cwd = absolutize(cwd);
+    ///
+    /// ## Errors
+    ///
+    /// As [`capture`](Self::capture).
+    pub fn capture_for_wrapper(
+        snapshot: &RequestSnapshot,
+        cwd: &Path,
+        capture_git_status: bool,
+    ) -> Result<Self, InvocationContextError> {
+        let snapshot = snapshot.at_request_dir(absolutize(snapshot, cwd));
+        let cwd = snapshot.request_dir().to_path_buf();
         let request = if capture_git_status {
             GitRequest::summary()
         } else {
@@ -948,32 +977,31 @@ impl InvocationContext {
                 .ok()
                 .flatten()
                 .is_some_and(|identity| paths_equivalent(identity.repo_root(), &cwd));
-        Self::capture_with_observation(&cwd, request, !promptless_at_repo_root, observation)
+        Self::capture_with_observation(&snapshot, request, !promptless_at_repo_root, observation)
     }
 
-    fn capture_inner(cwd: &Path, git_request: GitRequest, include_topology: bool) -> Self {
-        let cwd = absolutize(cwd);
-        let observation = FilesystemObservation::discover(&cwd);
-        Self::capture_with_observation(&cwd, git_request, include_topology, observation)
+    fn capture_inner(
+        snapshot: &RequestSnapshot,
+        git_request: GitRequest,
+        include_topology: bool,
+    ) -> Result<Self, InvocationContextError> {
+        let observation = FilesystemObservation::discover(snapshot.request_dir());
+        Self::capture_with_observation(snapshot, git_request, include_topology, observation)
     }
 
     fn capture_with_observation(
-        cwd: &Path,
+        snapshot: &RequestSnapshot,
         git_request: GitRequest,
         include_topology: bool,
         observation: FilesystemObservation,
-    ) -> Self {
-        let cwd = absolutize(cwd);
-        // The lossy map is projected from the raw baseline rather than captured
-        // separately: `std::env::vars()` panics on a non-UTF-8 variable, and two
-        // independent reads could disagree if the environment moved between them.
+    ) -> Result<Self, InvocationContextError> {
+        let cwd = snapshot.request_dir().to_path_buf();
+        // `ctx.*`, `env.*`, and file references read the snapshot's
+        // environment. The raw baseline is kept beside it only for child
+        // processes, which must reproduce values no UTF-8 view survives.
         let env_baseline = EnvBaseline::capture();
-        let environment = env_baseline
-            .iter()
-            .filter_map(|(key, value)| Some((key.to_str()?.to_string(), value.to_str()?.to_string())))
-            .collect::<HashMap<_, _>>();
-        let home_baseline = HomeBaseline::capture();
-        let home_dir = home_baseline.resolved().map(Path::to_path_buf);
+        let environment = snapshot.env().clone();
+        let home_baseline = HomeBaseline::capture(snapshot);
         let work = InvocationWork::default();
         work.git_root_discoveries.fetch_add(1, Ordering::Relaxed);
 
@@ -985,16 +1013,13 @@ impl InvocationContext {
             &work,
         );
 
-        let launch_repository_root = launch_repository.repo_root();
         let launch_file_resolution = build_file_resolution_context(
-            &cwd,
+            snapshot,
             None,
-            home_dir,
-            environment.clone(),
-            launch_repository_root,
+            launch_repository.repo_root(),
             launch_repository.repo_info(),
             None,
-        );
+        )?;
 
         let mut cache = RepositoryCache::default();
         if let Some(identity) = launch_repository.identity.as_ref() {
@@ -1008,9 +1033,10 @@ impl InvocationContext {
                 .insert(canonical_key(&cwd), launch_repository.clone());
         }
 
-        Self {
+        Ok(Self {
             inner: Arc::new(InvocationInner {
                 launch_cwd: cwd,
+                snapshot: snapshot.clone(),
                 home_baseline,
                 env_baseline,
                 environment,
@@ -1023,7 +1049,7 @@ impl InvocationContext {
                 gpus: OnceLock::new(),
                 work,
             }),
-        }
+        })
     }
 
     pub fn launch_cwd(&self) -> &Path {
@@ -1050,6 +1076,16 @@ impl InvocationContext {
 
     pub fn environment(&self) -> &HashMap<String, String> {
         &self.inner.environment
+    }
+
+    /// The request snapshot this invocation was captured from, anchored at
+    /// the launch directory.
+    ///
+    /// A context for a directory in another repository is built from this
+    /// snapshot ([`RequestSnapshot::at_request_dir`]), so it keeps the
+    /// invocation's home and environment.
+    pub fn request_snapshot(&self) -> &RequestSnapshot {
+        &self.inner.snapshot
     }
 
     pub fn launch_file_resolution_context(&self) -> &FileResolutionContext {
@@ -1133,14 +1169,12 @@ impl InvocationContext {
             .repo_root()
             .map(|root| repo_root_in_base_spelling(&base_dir, root));
         let file_resolution = build_file_resolution_context(
-            &base_dir,
+            &self.inner.snapshot.at_request_dir(&base_dir),
             Some(&source_path),
-            self.inner.home_baseline.resolved().map(Path::to_path_buf),
-            self.inner.environment.clone(),
             repository_root.as_deref(),
             entry.repo_info(),
             Some(self.inner.launch_file_resolution.launch_magic_scope()),
-        );
+        )?;
         let package_area_root = file_resolution.package_area().map(Path::to_path_buf);
         let package_root = file_resolution.package_root().map(Path::to_path_buf);
 
@@ -2107,40 +2141,35 @@ fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'s
     }
 }
 
-/// Build a file-resolution context, registering Claudine's prompt
-/// conventions.
+/// Build a file-resolution context through Darkmatter's builder, registering
+/// Claudine's prompt conventions as the snapshot's extra `@` roots.
+///
+/// `snapshot` is anchored at the context's request directory. The repository
+/// comes from the invocation's own observation cache, so the builder does not
+/// discover it again.
 ///
 /// `launch_scope` is `None` for the launch context itself, whose scope the
-/// context captures naturally from `base_dir` and the supplied repository.
-/// A context rebuilt around a source in another repository or an external
-/// prompt directory passes the launch context's captured scope instead: the
-/// conventions are registered against the launch local root and the snapshot
-/// is seeded last, so `@` keeps searching the launch tree (ruling 2 of
-/// 2026-09-23-local-before-home) while `./`, bare, `&`, and `^` references
-/// keep the source anchors built above.
-fn build_file_resolution_context(
-    base_dir: &Path,
+/// builder captures naturally from the request directory and the supplied
+/// repository. A context rebuilt around a source in another repository or an
+/// external prompt directory passes the launch context's captured scope
+/// instead: the conventions are registered against the launch local root and
+/// the scope is restored last, so `@` keeps searching the launch tree
+/// (ruling 2 of 2026-09-23-local-before-home) while `./`, bare, `&`, and `^`
+/// references keep the source anchors.
+pub(crate) fn build_file_resolution_context(
+    snapshot: &RequestSnapshot,
     source_path: Option<&Path>,
-    home_dir: Option<PathBuf>,
-    environment: HashMap<String, String>,
     repository_root: Option<&Path>,
     repo_info: Option<&RepoInfo>,
     launch_scope: Option<&LaunchMagicScope>,
-) -> FileResolutionContext {
-    let mut context = FileResolutionContext::from_snapshot(base_dir, home_dir, environment);
-    if let Some(source_path) = source_path {
-        context = context.with_source_path(source_path);
-    }
-    if let (Some(repository_root), Some(repo_info)) = (repository_root, repo_info) {
-        let catalog = darkmatter::markdown::compose::repository_scope_catalog(
-            repo_info,
-            repository_root,
-        )
-        .expect("retained repository topology must project to valid absolute scopes");
-        context = context.with_repository_scope_catalog(catalog);
-    } else if let Some(repository_root) = repository_root {
-        context = context.with_repository_root(repository_root);
-    }
+) -> Result<FileResolutionContext, ContextBuildError> {
+    let base_dir = snapshot.request_dir();
+    let catalog = repository_root.map(|root| match repo_info {
+        Some(repo_info) => darkmatter::markdown::compose::repository_scope_catalog(repo_info, root)
+            .expect("retained repository topology must project to valid absolute scopes"),
+        None => RepositoryScopeCatalog::new(root, Vec::new(), Vec::new(), PackageAreaFallback::None)
+            .expect("a discovered repository root is absolute"),
+    });
     let (local_root, package_area_root, package_root) = match launch_scope {
         Some(scope) => (
             scope.local_root().to_path_buf(),
@@ -2148,26 +2177,29 @@ fn build_file_resolution_context(
             scope.package_root().map(Path::to_path_buf),
         ),
         None => {
-            let local_root = repository_root
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| base_dir.to_path_buf());
-            let package_area_root = context.package_area().map(Path::to_path_buf);
-            let package_root = context.package_root().map(Path::to_path_buf);
-            (local_root, package_area_root, package_root)
+            let scope = catalog.as_ref().map(|catalog| catalog.scope_for(base_dir));
+            (
+                repository_root.unwrap_or(base_dir).to_path_buf(),
+                scope.as_ref().and_then(|scope| scope.package_area_root()).map(Path::to_path_buf),
+                scope.as_ref().and_then(|scope| scope.package_root()).map(Path::to_path_buf),
+            )
         }
     };
-    let home_dir = context.home_dir().map(Path::to_path_buf);
-    let context = with_prompt_magic_roots(
-        context,
+    let snapshot = with_prompt_magic_roots(
+        snapshot.clone(),
         &local_root,
         package_area_root.as_deref(),
         package_root.as_deref(),
-        home_dir.as_deref(),
+        snapshot.home(),
     );
-    match launch_scope {
-        Some(scope) => context.with_launch_magic_scope(scope.clone()),
-        None => context,
+    let mut context = build_resolution_context_with_catalog(&snapshot, catalog)?;
+    if let Some(source_path) = source_path {
+        context = context.with_source_path(source_path);
     }
+    if let Some(scope) = launch_scope {
+        context = context.with_launch_magic_scope(scope.clone());
+    }
+    Ok(context)
 }
 
 /// Whether a `.git` boundary separates a directory from its enclosing root.
@@ -2227,13 +2259,12 @@ fn canonical_key(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn absolutize(path: &Path) -> PathBuf {
+/// `path` made absolute against the snapshot's request directory.
+fn absolutize(snapshot: &RequestSnapshot, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(path))
-            .unwrap_or_else(|_| path.to_path_buf())
+        snapshot.request_dir().join(path)
     }
 }
 

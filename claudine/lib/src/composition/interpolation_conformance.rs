@@ -33,7 +33,7 @@ use super::LoopAction;
 /// `frontmatter`, returning the stored value.
 fn loop_render(value: &Value, frontmatter: &Map<String, Value>) -> Result<Value, CompositionError> {
     let ambient = LoopAmbient::new(1, true, false, "", 0);
-    let lookup = LoopExpressionLookup::new(frontmatter, &ambient);
+    let lookup = LoopExpressionLookup::new(frontmatter, &ambient, crate::test_support::process_context(), std::path::Path::new("prompt.md"));
     let mut stage = ActionStaging::new(&Map::new(), 1, 1);
     stage.apply_action(
         &LoopAction::Set {

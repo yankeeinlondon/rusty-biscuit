@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeRequest};
 use darkmatter::markdown::hash::MdHashKind;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
@@ -61,7 +61,10 @@ pub use service::{
 };
 
 /// Options for composition preparation.
-#[derive(Debug, Default, Clone)]
+///
+/// Built with [`PrepareOptions::new`], which takes the request's required
+/// file-resolution context; every other field starts empty.
+#[derive(Debug, Clone)]
 pub struct PrepareOptions {
     /// Request owner used for invocation-local composition work accounting.
     ///
@@ -141,9 +144,9 @@ pub struct PrepareOptions {
     /// default) preserves the legacy ambient-CWD behavior for library-only
     /// callers and tests.
     pub file_ref_fallback_dir: Option<PathBuf>,
-    /// Immutable request-scoped file-resolution snapshot shared with
-    /// Darkmatter and retained across harness re-materialization.
-    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// The request's file-resolution context, shared with Darkmatter and
+    /// retained across harness re-materialization.
+    pub file_resolution_context: biscuit_file::FileResolutionContext,
     /// Frontmatter keys whose object values render their `name` field in inline
     /// string context (`{{state}}` → the name). Sequence preparation sets this
     /// to the reserved overlay keys (`state`/`previous`/`next`); every other
@@ -171,6 +174,30 @@ pub struct PrepareOptions {
 }
 
 impl PrepareOptions {
+    /// Options that prepare against `file_resolution_context`, with every
+    /// other setting empty.
+    pub fn new(file_resolution_context: biscuit_file::FileResolutionContext) -> Self {
+        Self {
+            invocation_context: None,
+            document_epoch: None,
+            set_overrides: None,
+            data_override_keys: Default::default(),
+            proxy_overlay: Default::default(),
+            caller_input_records: Default::default(),
+            pre_approved_commands: None,
+            env_overrides: BTreeMap::new(),
+            perf_enabled: false,
+            source_repo_root: None,
+            shell_working_directory: None,
+            prepared_context: None,
+            file_ref_fallback_dir: None,
+            file_resolution_context,
+            name_coercion_keys: Vec::new(),
+            allow_empty_body: false,
+            defer_schema_verdict: false,
+        }
+    }
+
     /// The overrides with the origin of each key.
     pub fn layered_overrides(&self) -> super::runtime_state::LayeredOverrides {
         super::runtime_state::LayeredOverrides::from_parts(
@@ -337,12 +364,17 @@ fn canonical_compose_options(
     if let Some(fallback) = options.file_ref_fallback_dir.clone() {
         compose_opts = compose_opts.with_file_ref_fallback_dir(fallback);
     }
-    if let Some(context) = options.file_resolution_context.clone() {
-        compose_opts = compose_opts.with_file_resolution_context(context);
-    }
     compose_opts
         .with_deferred_schema_verdict(options.defer_schema_verdict)
         .with_schema_phase(schema_phase)
+}
+
+/// `compose_opts` prepared against the options' file-resolution context.
+fn prepared_request(
+    compose_opts: ComposeOptions,
+    options: &PrepareOptions,
+) -> Result<ComposeRequest, CompositionError> {
+    Ok(super::compose_request(compose_opts, options.file_resolution_context.clone())?)
 }
 
 /// Resolve the document's `$schema` once for this preparation so it can be
@@ -359,10 +391,10 @@ fn resolve_launch_schema(
     if !source.markdown.frontmatter().as_map().contains_key("$schema") {
         return Ok(None);
     }
-    match super::schema::load_effective_schema_in_context(
+    match super::schema::load_effective_schema(
         source,
         options.file_ref_fallback_dir.as_deref(),
-        options.file_resolution_context.as_ref(),
+        &options.file_resolution_context,
     ) {
         Ok(effective) => Ok(effective.map(|effective| LaunchSchema {
             effective,
@@ -458,39 +490,17 @@ pub fn approve_document_shell(
         crate::invocation_context::PreparedContextConsumer::Preflight,
     );
     let ctx = derive_compose_context(source, options);
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options, None);
+    let compose_request = prepared_request(
+        canonical_compose_options(&source.resolved_path, &ctx, options, None),
+        options,
+    )?;
     super::resolve_shell_approvals(
         Some(&source.markdown),
-        Some(&compose_opts),
+        Some(&compose_request),
         approval_options,
         None,
         None,
     )
-}
-
-/// Walk up from a file path to find the nearest `.git` directory.
-fn find_git_root_from_path(path: &Path) -> Option<PathBuf> {
-    let start = if path.is_file() { path.parent()? } else { path };
-    let mut dir = start;
-    loop {
-        if dir.join(".git").exists() {
-            return Some(dir.to_path_buf());
-        }
-        dir = dir.parent()?;
-    }
-}
-
-fn effective_source_repo_root(
-    configured: Option<PathBuf>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-    source_path: &Path,
-) -> Option<PathBuf> {
-    configured.or_else(|| {
-        file_resolution_context
-            .is_none()
-            .then(|| find_git_root_from_path(source_path))
-            .flatten()
-    })
 }
 
 use super::error::CompositionError;
@@ -555,7 +565,10 @@ pub(super) fn prepare_direct_with_prompt(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, &options, None);
+    let compose_request = prepared_request(
+        canonical_compose_options(&source.resolved_path, &ctx, &options, None),
+        &options,
+    )?;
     // Retain the caller's inputs so a later canonical preparation of this or a
     // proxied document re-applies exactly them.
     let input_layers = super::CallerInputLayers::from_options(&options);
@@ -564,7 +577,7 @@ pub(super) fn prepare_direct_with_prompt(
     }
     let (composed, report) = source
         .markdown
-        .compose_with(compose_opts)
+        .compose_with(&compose_request)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let prompt = match prompt_source {
@@ -591,11 +604,7 @@ pub(super) fn prepare_direct_with_prompt(
     // Resolved after a successful compose so a schema that cannot be prepared
     // keeps surfacing through the composer's own typed failure.
     let launch_schema = resolve_launch_schema(source, &options, None)?;
-    let source_repo_root = effective_source_repo_root(
-        options.source_repo_root,
-        options.file_resolution_context.as_ref(),
-        &source.resolved_path,
-    );
+    let source_repo_root = options.source_repo_root.clone();
 
     Ok(PreparedComposition {
         mode: CompositionMode::ChainedDocument,
@@ -664,18 +673,16 @@ pub fn prepare_inline(
     }
     // Retain the composed context so pre-flight shell resolution (C3) can build
     // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
-    let compose_opts = canonical_compose_options(
-        &source.resolved_path,
-        &ctx,
+    let compose_request = prepared_request(
+        canonical_compose_options(&source.resolved_path, &ctx, &options, Some(SchemaPhase::Launch)),
         &options,
-        Some(SchemaPhase::Launch),
-    );
+    )?;
     let input_layers = super::CallerInputLayers::from_options(&options);
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
     let (composed, report) = temp_md
-        .compose_with(compose_opts)
+        .compose_with(&compose_request)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
 
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
@@ -692,11 +699,7 @@ pub fn prepare_inline(
     }
 
     let launch_schema = resolve_launch_schema(source, &options, Some(SchemaPhase::Launch))?;
-    let source_repo_root = effective_source_repo_root(
-        options.source_repo_root,
-        options.file_resolution_context.as_ref(),
-        &source.resolved_path,
-    );
+    let source_repo_root = options.source_repo_root.clone();
 
     // The agent works on the file: it is told which file, what the schema
     // expects of it, and what it must not touch.
@@ -814,7 +817,7 @@ fn effective_surface(
         effective_frontmatter,
         ctx,
         &source.resolved_path,
-        options.file_resolution_context.as_ref(),
+        &options.file_resolution_context,
         options.file_ref_fallback_dir.as_deref(),
     )?;
     // Lifecycle communication/action strings are deferred by design (C1): they
@@ -839,7 +842,7 @@ fn bootstrap_compose_options(
     source: &ResolvedCompositionSource,
     mode: CompositionMode,
     options: &PrepareOptions,
-) -> (ComposeContext, ComposeOptions) {
+) -> Result<(ComposeContext, ComposeRequest), CompositionError> {
     let mut ctx = derive_compose_context(source, options);
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -853,7 +856,7 @@ fn bootstrap_compose_options(
             .with_deferred_schema_verdict(true)
             .only_frontmatter_surface()
             .with_pre_approved_commands(std::collections::HashSet::new());
-    (ctx, compose_opts)
+    Ok((ctx, prepared_request(compose_opts, options)?))
 }
 
 /// Reject frontmatter `$(...)` commands before initialization, without reading
@@ -877,7 +880,7 @@ pub fn preflight_bootstrap_shell(
         options,
         crate::invocation_context::PreparedContextConsumer::Preflight,
     );
-    let (_ctx, compose_opts) = bootstrap_compose_options(source, mode, options);
+    let (_ctx, compose_opts) = bootstrap_compose_options(source, mode, options)?;
     let Ok(entries) = darkmatter::markdown::compose::collect_frontmatter_shell_commands(
         &source.markdown,
         &compose_opts,
@@ -919,23 +922,19 @@ pub(super) fn compose_bootstrap(
         &options,
         crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
     );
-    let (ctx, compose_opts) = bootstrap_compose_options(source, mode, &options);
+    let (ctx, compose_request) = bootstrap_compose_options(source, mode, &options)?;
     let input_layers = super::CallerInputLayers::from_options(&options);
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
     }
     let (composed, report) = source
         .markdown
-        .compose_with(compose_opts)
+        .compose_with(&compose_request)
         .map_err(|e| map_compose_error(&source.resolved_path, e))?;
     let effective_frontmatter = frontmatter_to_value(composed.frontmatter());
     let (selection_hints, lifecycle) =
         effective_surface(&composed, &effective_frontmatter, &ctx, source, &options)?;
-    let source_repo_root = effective_source_repo_root(
-        options.source_repo_root,
-        options.file_resolution_context.as_ref(),
-        &source.resolved_path,
-    );
+    let source_repo_root = options.source_repo_root.clone();
     Ok(BootstrapPreparation {
         mode,
         entry,

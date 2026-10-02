@@ -139,25 +139,34 @@ impl<'a> EvaluationLookup for EventMetaExpressionLookup<'a> {
 /// templates, matchers, and harness validation deliberately leave `ctx.*`
 /// unresolved.
 ///
-/// The lookup also exposes a [`ResolutionContext`] rooted at `work_dir` so
-/// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
-/// in hook `when=` conditions resolve against the hook's base directory.
+/// The lookup also exposes a [`ResolutionContext`] built at `work_dir` from the
+/// dispatching process's request snapshot, so read-side expression functions
+/// (`file_exists`, `absolute`, `relative`, …) in hook `when=` conditions
+/// resolve against the hook's base directory with the snapshot's home and
+/// environment. It is built on first use: most conditions read no file.
 #[derive(Debug)]
 pub struct EventMetaConditionLookup<'a> {
     inner: EventMetaExpressionLookup<'a>,
     ctx: CtxLookup<'a>,
     base_dir: &'a Path,
+    request: &'a darkmatter::markdown::compose::RequestSnapshot,
 }
 
 impl<'a> EventMetaConditionLookup<'a> {
     /// Wrap an [`EventMeta`] reference and working directory for use with
-    /// Darkmatter's evaluator, including `ctx.*` resolution and a `work_dir`-
-    /// rooted resolution context for read-side functions.
-    pub fn new(meta: &'a EventMeta, work_dir: &'a Path) -> Self {
+    /// Darkmatter's evaluator, including `ctx.*` resolution (from `request`'s
+    /// environment) and a `work_dir`-anchored resolution context for
+    /// read-side functions.
+    pub fn new(
+        meta: &'a EventMeta,
+        work_dir: &'a Path,
+        request: &'a darkmatter::markdown::compose::RequestSnapshot,
+    ) -> Self {
         Self {
             inner: EventMetaExpressionLookup::new(meta),
-            ctx: CtxLookup::new(work_dir),
+            ctx: CtxLookup::new(work_dir, request.env()),
             base_dir: work_dir,
+            request,
         }
     }
 
@@ -175,7 +184,14 @@ impl<'a> EvaluationLookup for EventMetaConditionLookup<'a> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        Some(ResolutionContext::new(self.base_dir.to_path_buf()))
+        // `None` makes a read-side function fail with Darkmatter's
+        // "requires a document resolution context" error.
+        darkmatter::markdown::compose::build_resolution_context(
+            &self.request.at_request_dir(self.base_dir),
+        )
+        .inspect_err(|error| tracing::warn!(%error, "hook condition context could not be built"))
+        .ok()
+        .map(ResolutionContext::new)
     }
 }
 

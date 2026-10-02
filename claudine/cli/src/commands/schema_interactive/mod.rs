@@ -103,10 +103,17 @@ pub fn pre_validate_with_interactive_collection(
     interactive: InteractiveSchemaOptions,
     term: &Terminal,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     defer_schema_verdict: bool,
     mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
-    let first = pre_validate_schema_for_mode(source, set_overrides, file_ref_fallback_dir, mode);
+    let first = pre_validate_schema_for_mode(
+        source,
+        set_overrides,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        mode,
+    );
     let Err(err) = first else {
         return first;
     };
@@ -135,6 +142,7 @@ pub fn pre_validate_with_interactive_collection(
             interactive,
             err,
             file_ref_fallback_dir,
+            file_resolution_context,
         );
     }
 
@@ -162,9 +170,13 @@ pub fn pre_validate_with_interactive_collection(
         });
     }
 
-    if let Ok(Some(report)) =
-        build_schema_status_report_for_mode(source, set_overrides, file_ref_fallback_dir, mode)
-    {
+    if let Ok(Some(report)) = build_schema_status_report_for_mode(
+        source,
+        set_overrides,
+        file_ref_fallback_dir,
+        file_resolution_context,
+        mode,
+    ) {
         render_status_report(&report, term);
     }
 
@@ -181,6 +193,7 @@ pub fn pre_validate_with_interactive_collection(
         source,
         Some(&serde_json::Value::Object(merged)),
         file_ref_fallback_dir,
+        file_resolution_context,
         mode,
     )
 }
@@ -206,6 +219,7 @@ fn resolve_unresolved_file_reference(
     interactive: InteractiveSchemaOptions,
     err: CompositionError,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let CompositionError::UnresolvedFileReference {
         ref property,
@@ -239,6 +253,7 @@ fn resolve_unresolved_file_reference(
         source,
         Some(&serde_json::Value::Object(merged)),
         file_ref_fallback_dir,
+        file_resolution_context,
     )
 }
 
@@ -285,7 +300,7 @@ fn resolve_provided_file_reference(
     let Some(path) = choose_provided_file_reference(property, provided, patterns, &ctx)? else {
         return Ok(None);
     };
-    let value = resolve_file_value(&path)?;
+    let value = resolve_file_value(&path, &ctx)?;
     if is_array {
         Ok(Some(serde_json::Value::Array(vec![value])))
     } else {
@@ -684,13 +699,13 @@ fn collect_file(
         }
         selected
             .into_iter()
-            .map(|d| resolve_file_value(&d.path))
+            .map(|d| resolve_file_value(&d.path, &ctx))
             .collect::<io::Result<Vec<_>>>()?
     } else {
         let selected = choose_one_file(options)?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "no file selected")
         })?;
-        vec![resolve_file_value(&selected.path)?]
+        vec![resolve_file_value(&selected.path, &ctx)?]
     };
 
     if is_array {
@@ -738,11 +753,15 @@ fn path_label(path: &Path, ctx: &ScopeContext) -> String {
     to_portable_string(path)
 }
 
-fn resolve_file_value(path: &Path) -> io::Result<serde_json::Value> {
+/// The chosen candidate as a resolved absolute path, resolved through the
+/// completion directory's context so it means what the run will read.
+fn resolve_file_value(path: &Path, ctx: &ScopeContext) -> io::Result<serde_json::Value> {
+    let context = crate::completion::scopes::file_resolution_context(ctx)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let reference = FileReference::new(path.to_str().unwrap_or(""))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let resolved = reference
-        .resolve()
+        .resolve_in_context(&context)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?
         .ok_or_else(|| {
             io::Error::new(

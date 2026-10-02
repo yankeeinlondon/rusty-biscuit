@@ -65,14 +65,14 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     )
     .unwrap();
     let invocation =
-        claudine::invocation_context::InvocationContext::capture_at(fx._dir.path());
+        claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), fx._dir.path()).unwrap();
     let mut state = prompt_state(&fx.source_path);
     state.source_context = Some(invocation.derive_source(&fx.source_path).unwrap());
     state.invocation_context = Some(invocation.clone());
     state.input_layers.set_overrides = Some(serde_json::json!({ "spec": "spec.md" }));
     state.input_layers.file_ref_fallback_dir = Some(fx._dir.path().to_path_buf());
     state.input_layers.file_resolution_context =
-        Some(invocation.launch_file_resolution_context().clone());
+        invocation.launch_file_resolution_context().clone();
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,

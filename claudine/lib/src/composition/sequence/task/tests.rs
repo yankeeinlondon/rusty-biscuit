@@ -233,6 +233,7 @@ struct Fixture {
     settings: GlobalSettings,
     messaging: RuntimeMessagingSettings,
     source_path: PathBuf,
+    file_resolution_context: biscuit_file::FileResolutionContext,
 }
 
 impl Fixture {
@@ -244,12 +245,12 @@ impl Fixture {
         // walks the *process* CWD's repository topology before either of them
         // runs, which under nextest is the monorepo checkout.
         let resolved = crate::composition::resolve_fixture_source(source)?;
-        let plan = resolve_sequence_plan(&resolved)?.expect("fixture declares a sequence");
+        let plan = resolve_sequence_plan(&resolved, &crate::test_support::context_for(&resolved.resolved_path))?.expect("fixture declares a sequence");
         // Demand-driven: no fixture references `ctx.*`, so the preflight walk is
         // handed a date/time-only context instead of probing git, the repo, the
         // OS, and the hardware once per test.
         let context = ComposeContext::capture_for_content(&PathBuf::from("."), "");
-        let graph = build_preflight_graph_with_context(&plan, &resolved, context.clone())?;
+        let graph = build_preflight_graph_with_context(&plan, &resolved, context.clone(), &crate::test_support::context_for(&resolved.resolved_path))?;
 
         let overlay = build_step_overlay(&plan, 0).as_set_overrides(None);
         let mut frontmatter: Map<String, Value> = resolved
@@ -298,6 +299,7 @@ impl Fixture {
                 repo: None,
             },
             source_path: PathBuf::from(source),
+            file_resolution_context: crate::test_support::context_for(source),
         })
     }
 
@@ -346,7 +348,7 @@ impl Fixture {
             base_dir: None,
             ctx_base_dir: None,
             prepared_context: None,
-            file_resolution_context: None,
+            file_resolution_context: &self.file_resolution_context,
             effect_engine: &self.engine,
             shell_runner: wiring.lifecycle_shell,
             emitter: wiring.recorder,

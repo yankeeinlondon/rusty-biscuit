@@ -225,7 +225,7 @@ fn completion_file_context_uses_projected_intrinsic_scopes_once() {
     let package = tmp.path().join("claudine/cli");
     let ctx = test_ctx(&package);
 
-    let resolution = file_resolution_context(&ctx);
+    let resolution = file_resolution_context(&ctx).unwrap();
     assert_eq!(resolution.package_root(), Some(package.as_path()));
     assert_eq!(
         resolution.package_area(),

@@ -207,7 +207,7 @@ fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
         .unwrap();
 
     // Build interactive options that DENY (default: all false).
@@ -215,7 +215,7 @@ fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false, CompositionMode::ChainedDocument)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -233,7 +233,7 @@ fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allo
         "---\n$schema:\n  cover: 'file(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
         .unwrap();
 
     // Non-TTY options deny prompting, so a missing `file` property must
@@ -243,7 +243,7 @@ fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allo
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false, CompositionMode::ChainedDocument)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -261,20 +261,12 @@ fn pre_validate_with_interactive_succeeds_when_overrides_supply_value() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
         .unwrap();
 
     let overrides = serde_json::json!({ "title": "Plan" });
     let term = Terminal::default();
-    let pre = pre_validate_with_interactive_collection(
-        &source,
-        Some(&overrides),
-        InteractiveSchemaOptions::default(),
-        &term,
-        None,
-        false,
-        CompositionMode::ChainedDocument,
-    )
+    let pre = pre_validate_with_interactive_collection(&source, Some(&overrides), InteractiveSchemaOptions::default(), &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
     .unwrap();
     let fm = pre.set_overrides.unwrap();
     assert_eq!(
@@ -293,7 +285,7 @@ fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
         "---\n$schema:\n  config: 'object(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
         .unwrap();
 
     // Allow interactive so the helper attempts to enter the loop.
@@ -306,7 +298,7 @@ fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
     assert!(interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false, CompositionMode::ChainedDocument)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, &crate::request::test_context(), false, CompositionMode::ChainedDocument)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),
@@ -349,7 +341,7 @@ fn path_label_portably_renders_windows_shaped_segments() {
 fn resolve_file_value_portably_renders_missing_windows_shaped_path() {
     let path = PathBuf::from(r"missing\schema\definitely-not-present.json");
 
-    let error = resolve_file_value(&path).unwrap_err();
+    let error = resolve_file_value(&path, &ScopeContext::discover()).unwrap_err();
 
     assert_eq!(error.kind(), io::ErrorKind::NotFound);
     assert_eq!(

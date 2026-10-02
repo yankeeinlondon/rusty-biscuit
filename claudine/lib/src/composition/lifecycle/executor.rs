@@ -230,6 +230,10 @@ pub enum LifecycleExprError {
     /// the wrong shape.
     #[error("{0}")]
     Prose(String),
+
+    /// The request's file-resolution context failed validation.
+    #[error(transparent)]
+    Context(#[from] darkmatter::markdown::compose::ContextBuildError),
 }
 
 impl LifecycleExprError {
@@ -264,6 +268,14 @@ pub enum ShellRunError {
         /// The underlying spawn/wait failure.
         #[source]
         source: std::io::Error,
+    },
+    /// The request's file-resolution context failed validation, so no value
+    /// could be evaluated against it.
+    #[error("{source}")]
+    Context {
+        /// The builder's validation failure.
+        #[source]
+        source: darkmatter::markdown::compose::ContextBuildError,
     },
 }
 
@@ -303,8 +315,8 @@ pub struct ShellValueRequest<'a> {
     pub source_path: &'a Path,
     /// The early-binding `ctx.*`/`env.*` snapshot.
     pub context: ComposeContext,
-    /// The request's file-resolution snapshot, when there is one.
-    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    /// The request's file-resolution context.
+    pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
 }
 
 /// Runs a `set` action's shell values through Darkmatter in a fresh result
@@ -313,12 +325,13 @@ pub struct ShellValueRequest<'a> {
 ///
 /// Each value's commands are exactly the bytes preflight approved, so they are
 /// its pre-approved set; a lifecycle `shell` action runs its approved bytes on
-/// the same terms. Commands run in the process's working directory, as a
+/// the same terms. Commands run in the request's launch directory, as a
 /// lifecycle `shell` action does.
 ///
 /// ## Errors
 ///
-/// [`ShellRunError::Value`] carrying the first value's Darkmatter failure.
+/// [`ShellRunError::Value`] carrying the first value's Darkmatter failure, or
+/// [`ShellRunError::Context`] when the request's context fails validation.
 pub fn execute_set_shell_values(
     request: &ShellValueRequest<'_>,
 ) -> Result<Vec<(String, Value)>, ShellRunError> {
@@ -327,21 +340,19 @@ pub fn execute_set_shell_values(
         .iter()
         .flat_map(|value| value.commands())
         .collect();
-    let mut options = ComposeOptions::new_with_context(request.context.clone())
+    let options = ComposeOptions::new_with_context(request.context.clone())
         .with_source_file(request.source_path)
-        .with_pre_approved_commands(approved);
-    if let Ok(cwd) = std::env::current_dir() {
-        options = options.with_shell_working_directory(cwd);
-    }
-    if let Some(context) = request.file_resolution_context {
-        options = options.with_file_resolution_context(context.clone());
-    }
+        .with_pre_approved_commands(approved)
+        .with_shell_working_directory(request.file_resolution_context.request_cwd());
+    let compose_request =
+        crate::composition::compose_request(options, request.file_resolution_context.clone())
+            .map_err(|source| ShellRunError::Context { source })?;
     let state = request
         .state
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
-    execute_resolved_shell_values(request.values, state, &options)
+    execute_resolved_shell_values(request.values, state, &compose_request)
         .map_err(|source| ShellRunError::Value { source })
 }
 
@@ -471,8 +482,9 @@ pub struct StackExecutionContext<'a> {
     /// `None`, it falls back to a demand-driven capture rooted at
     /// `ctx_base_dir`/`base_dir`.
     pub prepared_context: Option<&'a ComposeContext>,
-    /// Immutable request snapshot used by document-authored file expressions.
-    pub file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    /// The request's file-resolution context, used by document-authored file
+    /// expressions.
+    pub file_resolution_context: &'a biscuit_file::FileResolutionContext,
     /// Darkmatter side-effect engine.
     pub effect_engine: &'a EffectEngine,
     /// Approved-shell runner.
@@ -925,7 +937,9 @@ impl StackExecutionContext<'_> {
     /// diagnostic metadata; it is not a third resolution candidate. Top-level
     /// CLI references are resolved from launch context before this executor is
     /// entered.
-    fn resolution_context(&self) -> ResolutionContext {
+    fn resolution_context(
+        &self,
+    ) -> Result<ResolutionContext, darkmatter::markdown::compose::ContextBuildError> {
         super::super::document_expression_resolution_context(
             self.source_path,
             self.prepared_context,
@@ -992,7 +1006,7 @@ impl StackExecutionContext<'_> {
         let hint = ctx_scan_hint(expr);
         let state = self.build_state(fm, &hint);
         let globals = self.injected_globals();
-        let lookup = LayeredLookup::new(&state, &globals, Some(self.resolution_context()));
+        let lookup = LayeredLookup::new(&state, &globals, Some(self.resolution_context()?));
         evaluate(expr, &lookup).map_err(|error| LifecycleExprError::Evaluate(Box::new(error)))
     }
 
@@ -1019,7 +1033,7 @@ impl StackExecutionContext<'_> {
         let value = Value::String(s.to_string());
         SubtreeCompose::new(&value, &state)
             .with_globals(globals)
-            .with_resolution_context(self.resolution_context())
+            .with_resolution_context(self.resolution_context()?)
             .strict()
             .compose()
             .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
@@ -1718,11 +1732,8 @@ impl StackExecutionContext<'_> {
     /// mutation root, preserving the effect engine's existing relative
     /// mutation policy; other reference kinds use their first document-scoped
     /// candidate. A later transclusion therefore resolves the same identity.
-    /// Callers without a request snapshot retain the legacy behavior.
     fn resolve_effect_path(&self, verb: &str, raw: &str) -> Result<String, ActionFailure> {
-        let Some(request_context) = self.file_resolution_context else {
-            return Ok(raw.to_string());
-        };
+        let request_context = self.file_resolution_context;
         let reference = FileReference::new(raw).map_err(|error| {
             ActionFailure::Dispatch(LifecycleErrorInfo::from_error_or_action(verb, &error))
         })?;

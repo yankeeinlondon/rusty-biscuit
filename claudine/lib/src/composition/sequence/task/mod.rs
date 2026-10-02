@@ -907,7 +907,7 @@ impl TaskExecution<'_> {
             self.stack.prepared_context,
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
-        );
+        )?;
         SubtreeCompose::new(value, self.state)
             .with_resolution_context(resolution)
             .strict()

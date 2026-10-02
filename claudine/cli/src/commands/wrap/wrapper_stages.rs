@@ -548,10 +548,9 @@ pub(crate) fn run_execution_stage(
     }) = wrapper_harness
     {
         let initial_compose_context = initial_materialized.compose_context.clone();
-        let input_layers = claudine::composition::CallerInputLayers {
-            file_resolution_context: initial_materialized.file_resolution_context.clone(),
-            ..Default::default()
-        };
+        let input_layers = claudine::composition::CallerInputLayers::new(
+            initial_materialized.file_resolution_context.clone(),
+        );
         let mut prompt_state = harness_orch::HarnessPromptState {
             mode: harness_orch::HarnessPromptMode::Passthrough,
             original_ref: source_path.display().to_string(),

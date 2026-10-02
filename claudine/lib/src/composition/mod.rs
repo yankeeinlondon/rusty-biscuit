@@ -62,7 +62,7 @@ pub use coordinator::{
     EvaluatedProxyRequest, HopApproval, HopRejection, InvocationInputs, InvocationInputsDraft,
     LaunchDiscovery, LedgerMut, PreparedDocument, ProviderAttempt, ProxyCommitError, ProxyHandoff,
     ProxyProvenance, ResolvedProxyTarget, RunLedger, SessionCompatibilityKey, SharedRunLedger,
-    SurfacedHandoff, TransitionAbort, TransitionRecord, commit_proxy, commit_proxy_in_context,
+    SurfacedHandoff, TransitionAbort, TransitionRecord, commit_proxy,
 };
 pub use darkmatter::markdown::compose::shell_expansion::{ShellCommandOrigin, ShellExpansionError};
 pub use error::{
@@ -100,7 +100,6 @@ pub use lifecycle_context::{
 pub use lifecycle_control::{
     ControlDispatch, MAX_PROXY_HOPS, compute_backoff_delay, control_budget_for, decide_control,
     parse_delay, proxy_handoff_allowed, proxy_path_identity, resolve_proxy_target,
-    resolve_proxy_target_in_context,
 };
 pub use lifecycle_executor::{
     LifecycleEventOutcome, LifecycleExprError, ShellRunError, ShellRunner, StackControl,
@@ -130,8 +129,9 @@ pub use prepare::{
 #[cfg(test)]
 pub(crate) use resolve::resolve_fixture_source;
 pub use resolve::{
-    build_prompt_reference, capture_file_resolution_context, derive_request_context_for_source,
-    enrich_composition_source_load_error, enrich_composition_source_load_error_in_context,
+    build_prompt_reference, build_prompt_resolution_context, capture_file_resolution_context,
+    derive_request_context_for_source,
+    enrich_composition_source_load_error_in_context,
     is_yaml_source, load_yaml_document, prompt_magic_fallback_roots, prompt_magic_roots,
     reload_composition_source,
     resolve_composition_source, resolve_composition_source_in_context, validate_file_permissions,
@@ -160,7 +160,7 @@ pub use select::{
 pub use sequence::preflight::{
     DiscoveredCommand, GroupExecution, PreflightAction, PreflightGraph, PreflightGroup,
     PreflightStep, PreflightTask, PromptDocument, build_preflight_graph,
-    build_preflight_graph_with_context, build_preflight_graph_with_context_and_resolution,
+    build_preflight_graph_with_context,
     build_preflight_graph_with_invocation, reject_non_sequence_kind,
 };
 pub use sequence::task::{
@@ -186,14 +186,53 @@ pub use types::{
     SharedApprovalCache,
 };
 
-/// Builds Darkmatter's local expression context from the request snapshot for
-/// the document that authored the expression.
+/// Pairs `options` with the request's `file_resolution_context`.
+///
+/// Darkmatter aligns the options' `ctx.*` environment with the context's, so
+/// the variables Claudine layers onto the captured `ctx` for a run (`AGENT`,
+/// `MODEL`, `YOLO`, and other `env_overrides`) are added to the context's
+/// environment first. An expression, `env.*`, and a `{{VAR}}` file reference
+/// then read one environment, and none of the run's variables is lost.
+///
+/// ## Errors
+///
+/// Returns the [`ContextBuildError`](darkmatter::markdown::compose::ContextBuildError)
+/// when `file_resolution_context` fails validation.
+pub fn compose_request(
+    options: darkmatter::markdown::compose::ComposeOptions,
+    file_resolution_context: biscuit_file::FileResolutionContext,
+) -> Result<darkmatter::markdown::compose::ComposeRequest, darkmatter::markdown::compose::ContextBuildError>
+{
+    let layered = options.context().env();
+    let context = if layered
+        .iter()
+        .all(|(key, value)| file_resolution_context.env().get(key) == Some(value))
+    {
+        file_resolution_context
+    } else {
+        let mut env = file_resolution_context.env().clone();
+        env.extend(layered.iter().map(|(key, value)| (key.clone(), value.clone())));
+        file_resolution_context.with_env(env)
+    };
+    darkmatter::markdown::compose::ComposeRequest::with_context(options, context)
+}
+
+/// Builds Darkmatter's local expression context from the request's
+/// file-resolution context for the document that authored the expression.
+///
+/// ## Errors
+///
+/// Returns the [`ContextBuildError`](darkmatter::markdown::compose::ContextBuildError)
+/// when `file_resolution_context` fails validation.
 pub fn document_expression_resolution_context(
     source_path: &Path,
     prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     file_ref_fallback_dir: Option<&Path>,
-) -> darkmatter::markdown::compose::expression::ResolutionContext {
+) -> Result<
+    darkmatter::markdown::compose::expression::ResolutionContext,
+    darkmatter::markdown::compose::ContextBuildError,
+> {
     // The no-snapshot fallback is demand-driven, matching the executor's
     // `early_binding_context`. `ComposeContext::capture` runs the repo-wide
     // sniff scan — git, repo, file changes, languages, docs, OS, hardware, GPU
@@ -204,16 +243,14 @@ pub fn document_expression_resolution_context(
     let context = prepared_context.cloned().unwrap_or_else(|| {
         let base = file_ref_fallback_dir
             .or_else(|| source_path.parent())
-            .unwrap_or_else(|| Path::new("."));
+            .unwrap_or_else(|| file_resolution_context.cwd());
         darkmatter::markdown::compose::ComposeContext::capture_for_content(base, "")
     });
     let mut options = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
         .with_source_file(source_path);
-    if let Some(snapshot) = file_resolution_context {
-        options = options.with_file_resolution_context(snapshot.clone());
-    }
     if let Some(fallback) = file_ref_fallback_dir {
         options = options.with_file_ref_fallback_dir(fallback);
     }
-    options.local_expression_resolution_context()
+    let request = compose_request(options, file_resolution_context.clone())?;
+    Ok(request.local_expression_resolution_context())
 }

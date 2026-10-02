@@ -488,11 +488,13 @@ pub fn build_schema_status_report(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     build_schema_status_report_for_mode(
         source,
         set_overrides,
         file_ref_fallback_dir,
+        file_resolution_context,
         CompositionMode::ChainedDocument,
     )
 }
@@ -509,6 +511,7 @@ pub fn build_schema_status_report_for_mode(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
 ) -> Result<Option<SchemaStatusReport>, CompositionError> {
     let phase = launch_phase_for_mode(mode);
@@ -523,7 +526,7 @@ pub fn build_schema_status_report_for_mode(
         return Ok(None);
     }
 
-    let effective = load_effective_schema(source, file_ref_fallback_dir)?;
+    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context)?;
     let Some(effective) = effective else {
         // Raw JSON Schema (no SimplifiedSchema projection): we can still
         // run validation, but without typed metadata for per-property
@@ -569,7 +572,12 @@ pub fn build_schema_status_report_for_mode(
         )
     })?;
     let caller_resolved =
-        caller_resolved_file_properties(&report.problems, set_overrides, file_ref_fallback_dir);
+        caller_resolved_file_properties(
+            &report.problems,
+            set_overrides,
+            file_ref_fallback_dir,
+            file_resolution_context,
+        );
     report.problems.retain(|problem| {
         matches!(problem.kind, ValidationProblemKind::Missing)
             || !top_level_pointer_segment(&problem.path)

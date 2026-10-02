@@ -69,7 +69,7 @@ pub fn execute_loop_with_lifecycle<E>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     document_epoch: Option<&crate::invocation_context::DocumentEpoch>,
     mut executor: E,
 ) -> Result<LoopExecutionResult, CompositionError>
@@ -290,10 +290,13 @@ where
                 last_exit_code,
             );
             let pre_mutation_lookup =
-                LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
-                    .with_base_dir(base_dir)
+                LoopExpressionLookup::new(
+                    &frontmatter,
+                    &pre_mutation_ambient,
+                    file_resolution_context,
+                    prompt_path,
+                )
                     .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-                    .with_file_resolution_context(file_resolution_context, prompt_path)
                     .with_prepared_context(run_context.as_ref().or(lifecycle_ctx.context));
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
@@ -588,7 +591,7 @@ fn run_loop_gate(
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
     loop_start: std::time::Instant,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
 ) -> Result<LoopGateOutcome, CompositionError> {
     let timing = capture_loop_lifecycle_timing(loop_start);
@@ -704,10 +707,8 @@ fn run_loop_gate(
         ));
     }
 
-    let lookup = LoopExpressionLookup::new(frontmatter, ambient)
-        .with_base_dir(base_dir)
+    let lookup = LoopExpressionLookup::new(frontmatter, ambient, file_resolution_context, prompt_path)
         .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-        .with_file_resolution_context(file_resolution_context, prompt_path)
         .with_prepared_context(lifecycle_ctx.context);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
@@ -744,7 +745,7 @@ fn build_loop_stack_context<'a>(
     shell_runner: &'a dyn ShellRunner,
     emitter: &'a dyn LifecycleEmitter,
     base_dir: Option<&'a Path>,
-    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    file_resolution_context: &'a biscuit_file::FileResolutionContext,
     timing: Option<&'a super::super::lifecycle_context::LifecycleTiming>,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
 ) -> StackExecutionContext<'a> {
@@ -908,10 +909,9 @@ fn should_continue_after_cap(
     resolution: LoopFileResolution<'_>,
 ) -> Result<bool, CompositionError> {
     let ambient = LoopAmbient::new(next_iteration, false, true, last_output, last_exit_code);
-    let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
-        .with_base_dir(resolution.source_path.parent())
-        .with_file_ref_fallback_dir(resolution.fallback_dir)
-        .with_file_resolution_context(resolution.context, resolution.source_path)
+    let lookup =
+        LoopExpressionLookup::new(frontmatter, &ambient, resolution.context, resolution.source_path)
+            .with_file_ref_fallback_dir(resolution.fallback_dir)
         .with_prepared_context(resolution.prepared_context);
     evaluate_condition(&config.condition, &lookup)
 }
@@ -920,7 +920,7 @@ fn should_continue_after_cap(
 struct LoopFileResolution<'a> {
     source_path: &'a Path,
     fallback_dir: Option<&'a Path>,
-    context: Option<&'a biscuit_file::FileResolutionContext>,
+    context: &'a biscuit_file::FileResolutionContext,
     prepared_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 

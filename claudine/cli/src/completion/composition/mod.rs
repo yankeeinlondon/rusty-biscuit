@@ -70,7 +70,11 @@ struct Candidate {
 /// return value means "no matches" — the shell falls back to its default.
 pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) -> Vec<String> {
     let scope_set = scopes::resolve_compose_scopes(ctx, mode);
-    let resolution = scopes::file_resolution_context(ctx);
+    let Ok(resolution) = scopes::file_resolution_context(ctx) else {
+        // Completion is best-effort: without a valid context there is
+        // nothing a runtime resolution would accept either.
+        return Vec::new();
+    };
     // Execution correctly rejects a bare sigil, but completion must still
     // enumerate its roots before the user has typed the first payload byte.
     let completion_token = match partial_token {

@@ -154,7 +154,14 @@ fn render_default_report() {
 /// shape. Synthesizing a placeholder document to fill them would report values
 /// no composition will ever see.
 fn render_values_report() {
-    render_values_report_with(ComposeContext::capture);
+    render_values_report_with(|| {
+        // The host as the request snapshot describes it: its launch directory
+        // and its environment.
+        let snapshot = crate::request::snapshot();
+        let mut context = ComposeContext::capture_for_dir(snapshot.request_dir());
+        *context.env_mut() = snapshot.env().clone();
+        context
+    });
 }
 
 /// Renders the values report from a single injected capture.

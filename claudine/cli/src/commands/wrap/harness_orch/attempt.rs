@@ -212,7 +212,7 @@ pub(crate) fn execute_harness_attempt(
             );
         let stream_result = if let Some(wire_prompt) = launch.wire_prompt.clone() {
             let runtime_context =
-                match claudine::dispatch::DispatchRuntimeContext::load_for_env(env_context) {
+                match claudine::dispatch::DispatchRuntimeContext::load_for_env(env_context, crate::request::snapshot()) {
                     Ok(runtime) => runtime,
                     Err(error) => {
                         tracing::warn!(%provider, "failed to preload wire runtime config: {error}");

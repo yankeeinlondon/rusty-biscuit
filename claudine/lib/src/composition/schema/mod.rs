@@ -406,27 +406,17 @@ pub fn launch_phase_for_mode(mode: CompositionMode) -> Option<SchemaPhase> {
     }
 }
 
-fn load_effective_schema(
-    source: &ResolvedCompositionSource,
-    file_ref_fallback_dir: Option<&std::path::Path>,
-) -> Result<Option<EffectiveSchema>, CompositionError> {
-    load_effective_schema_in_context(source, file_ref_fallback_dir, None)
-}
-
 /// Resolve the document's effective schema under the same launch context the
 /// composer resolves it with, so the retained launch schema and the
 /// compose-time verdict agree on every file reference.
-pub(super) fn load_effective_schema_in_context(
+pub(super) fn load_effective_schema(
     source: &ResolvedCompositionSource,
     file_ref_fallback_dir: Option<&std::path::Path>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<EffectiveSchema>, CompositionError> {
-    let mut schemas = DarkmatterSchemas::new();
+    let mut schemas = DarkmatterSchemas::new(file_resolution_context.clone());
     if let Some(fallback) = file_ref_fallback_dir {
         schemas = schemas.with_file_ref_fallback_dir(fallback);
-    }
-    if let Some(context) = file_resolution_context {
-        schemas = schemas.with_file_resolution_context(context.clone());
     }
     schemas.effective_for(&source.markdown).map_err(|err| {
         // A grammar/convert/shape error is a body-syntax problem (`SchemaParse`);
@@ -503,11 +493,13 @@ pub fn pre_validate_schema(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_schema_for_mode(
         source,
         set_overrides,
         file_ref_fallback_dir,
+        file_resolution_context,
         CompositionMode::ChainedDocument,
     )
 }
@@ -528,6 +520,7 @@ pub fn pre_validate_schema_for_mode(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
@@ -535,6 +528,7 @@ pub fn pre_validate_schema_for_mode(
         set_overrides,
         &std::collections::BTreeSet::new(),
         file_ref_fallback_dir,
+        file_resolution_context,
         mode,
     )
 }
@@ -551,6 +545,7 @@ pub fn pre_validate_layered_for_mode(
     source: &ResolvedCompositionSource,
     overrides: &crate::composition::LayeredOverrides,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
     pre_validate_with_origin(
@@ -558,6 +553,7 @@ pub fn pre_validate_layered_for_mode(
         Some(&overrides.to_value()),
         overrides.data_keys(),
         file_ref_fallback_dir,
+        file_resolution_context,
         mode,
     )
 }
@@ -567,6 +563,7 @@ fn pre_validate_with_origin(
     set_overrides: Option<&serde_json::Value>,
     data_keys: &std::collections::BTreeSet<String>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     mode: CompositionMode,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let phase = launch_phase_for_mode(mode);
@@ -590,9 +587,10 @@ fn pre_validate_with_origin(
         set_overrides.cloned(),
         data_keys,
         file_ref_fallback_dir,
+        file_resolution_context,
     );
 
-    let effective = match load_effective_schema(&source, file_ref_fallback_dir) {
+    let effective = match load_effective_schema(&source, file_ref_fallback_dir, file_resolution_context) {
         Ok(Some(e)) => e,
         Ok(None) => {
             // Raw JSON Schema (no SimplifiedSchema projection): we cannot
@@ -632,7 +630,12 @@ fn pre_validate_with_origin(
     }
 
     let caller_resolved_eager_files =
-        caller_resolved_file_properties(&report.problems, set_overrides.as_ref(), file_ref_fallback_dir);
+        caller_resolved_file_properties(
+            &report.problems,
+            set_overrides.as_ref(),
+            file_ref_fallback_dir,
+            file_resolution_context,
+        );
 
     // Filter problems composition-tolerantly: drop Invalid/Type verdicts
     // whose raw value contains template syntax, because Darkmatter may
@@ -794,6 +797,7 @@ pub fn drop_invalid_optionals(
     source: ResolvedCompositionSource,
     set_overrides: Option<serde_json::Value>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -804,6 +808,7 @@ pub fn drop_invalid_optionals(
         set_overrides,
         &std::collections::BTreeSet::new(),
         file_ref_fallback_dir,
+        file_resolution_context,
     )
 }
 
@@ -814,6 +819,7 @@ fn drop_invalid_optionals_with_origin(
     mut set_overrides: Option<serde_json::Value>,
     data_keys: &std::collections::BTreeSet<String>,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> (
     ResolvedCompositionSource,
     Option<serde_json::Value>,
@@ -829,7 +835,7 @@ fn drop_invalid_optionals_with_origin(
         return (source, set_overrides, dropped);
     }
 
-    let effective = match load_effective_schema(&source, file_ref_fallback_dir) {
+    let effective = match load_effective_schema(&source, file_ref_fallback_dir, file_resolution_context) {
         Ok(Some(e)) => e,
         // No SimplifiedSchema projection (raw JSON Schema or schema load
         // failure) — let the prepare-time validator handle it.
@@ -946,12 +952,16 @@ pub(super) fn caller_resolved_file_properties(
     problems: &[ValidationProblem],
     overrides: Option<&serde_json::Value>,
     launch_area: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> std::collections::HashSet<String> {
     let Some((launch_area, overrides)) =
         launch_area.zip(overrides.and_then(serde_json::Value::as_object))
     else {
         return std::collections::HashSet::new();
     };
+    // The caller launched there, so the launch area is trusted even when the
+    // document's own tree does not contain it.
+    let launch_context = file_resolution_context.for_trusted_external_cwd(launch_area);
     problems
         .iter()
         .filter(|problem| matches!(problem.code, ValidationProblemCode::InvalidFileReference))
@@ -959,18 +969,21 @@ pub(super) fn caller_resolved_file_properties(
         .filter(|property| {
             overrides
                 .get(property)
-                .is_some_and(|value| file_override_resolves_from(value, launch_area))
+                .is_some_and(|value| file_override_resolves_from(value, &launch_context))
         })
         .collect()
 }
 
-fn file_override_resolves_from(value: &serde_json::Value, base: &std::path::Path) -> bool {
+fn file_override_resolves_from(
+    value: &serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+) -> bool {
     match value {
         serde_json::Value::String(raw) => biscuit_file::FileReference::new(raw)
-            .and_then(|reference| reference.resolve_from(base))
+            .and_then(|reference| reference.resolve_in_context(context))
             .is_ok_and(|resolved| resolved.is_some()),
         serde_json::Value::Array(values) => {
-            !values.is_empty() && values.iter().all(|value| file_override_resolves_from(value, base))
+            !values.is_empty() && values.iter().all(|value| file_override_resolves_from(value, context))
         }
         _ => false,
     }

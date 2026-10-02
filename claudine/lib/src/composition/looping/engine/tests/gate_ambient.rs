@@ -111,7 +111,7 @@ fn loop_gate_concerns_read_just_finished_iteration_ambient_on_every_pass() {
         &effect_engine,
         &crate::composition::lifecycle_executor::SystemShellRunner,
         &emitter,
-        None,
+        crate::test_support::process_context(),
         None,
         |ctx, guard| {
             guard.emit_start_once();

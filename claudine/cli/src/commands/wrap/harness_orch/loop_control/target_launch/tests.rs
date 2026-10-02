@@ -263,7 +263,7 @@ fn document_with_tags(
         selection_hints,
         inline_closure_plan: None,
         launch_schema: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::request::test_context(),
         compose_context: None,
         document_epoch: None,
         lifecycle: None,

@@ -122,7 +122,7 @@ fn materialized(frontmatter: serde_json::Value) -> MaterializedHarnessPrompt {
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         launch_schema: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::request::test_context(),
         compose_context: None,
         document_epoch: None,
         live_frontmatter,
@@ -156,7 +156,11 @@ fn unresolvable_commit_error(source_path: &Path) -> claudine::composition::Proxy
             vec![source_path.to_path_buf()],
         ),
     );
-    claudine::composition::commit_proxy(&mut ledger, request, source_path.parent())
+    claudine::composition::commit_proxy(
+        &mut ledger,
+        request,
+        &crate::request::test_context_at(source_path.parent().unwrap()),
+    )
         .expect_err("a target that does not exist cannot be committed")
 }
 
@@ -226,7 +230,9 @@ fn prompt_state(source: &Path) -> HarnessPromptState {
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         suppress_output_commit: false,
         last_final_output: None,
-        input_layers: Default::default(),
+        input_layers: claudine::composition::CallerInputLayers::new(crate::request::test_context_at(
+            source.parent().unwrap(),
+        )),
         entry: claudine::composition::DocumentEntryReason::Direct,
         invocation_context: None,
         epoch_context: None,

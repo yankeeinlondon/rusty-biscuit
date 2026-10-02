@@ -60,11 +60,9 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
     )
     .unwrap();
     let invocation =
-        claudine::invocation_context::InvocationContext::capture_at(directory.path());
+        claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), directory.path()).unwrap();
     let source_context = invocation.derive_source(&source_path).unwrap();
-    let source = claudine::composition::resolve_composition_source(
-        source_path.to_string_lossy().as_ref(),
-    )
+    let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), &crate::request::snapshot())
     .unwrap();
     let shared = shared_args();
     let approval_cache =
@@ -173,11 +171,9 @@ fn template_preflight_resolves_against_document_dir() {
     )
     .unwrap();
 
-    let source = claudine::composition::resolve_composition_source(
-        source_path.to_string_lossy().as_ref(),
-    )
+    let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), &crate::request::snapshot())
     .unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(launch_dir.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), launch_dir.path()).unwrap();
     let overrides = serde_json::json!({ "spec": "spec.md" });
     let approval_options = ShellApprovalOptions {
         policy_root: Some(doc_dir.path().to_path_buf()),
@@ -229,11 +225,9 @@ fn template_preflight_does_not_resolve_launch_only_file() {
     )
     .unwrap();
 
-    let source = claudine::composition::resolve_composition_source(
-        source_path.to_string_lossy().as_ref(),
-    )
+    let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), &crate::request::snapshot())
     .unwrap();
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(launch_dir.path());
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), launch_dir.path()).unwrap();
     let overrides = serde_json::json!({ "spec": "spec.md" });
     let approval_options = ShellApprovalOptions {
         policy_root: Some(doc_dir.path().to_path_buf()),
@@ -330,14 +324,12 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     )
     .unwrap();
 
-    let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &launch_dir).unwrap();
     let materialized_caller = biscuit_file::to_portable_string(&launch_dir.join("caller.md"));
     let source_context = invocation.derive_source(&source_path).unwrap();
-    let source = claudine::composition::resolve_composition_source(
-        source_path.to_string_lossy().as_ref(),
-    )
+    let source = claudine::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), &crate::request::snapshot())
     .unwrap();
-    let pre = claudine::composition::pre_validate_schema(&source, None, Some(&launch_dir))
+    let pre = claudine::composition::pre_validate_schema(&source, None, Some(&launch_dir), &crate::request::test_context())
         .expect("the source-side schema must be selected");
     let env = BTreeMap::from([
         ("AGENT".to_string(), "codex".to_string()),
@@ -397,8 +389,8 @@ mod layering {
             "---\nphase: from-document\nsequence:\n  - alpha\n  - beta\n---\nBody.\n",
         )
         .unwrap();
-        let source = resolve_composition_source(path.to_str().unwrap()).unwrap();
-        resolve_sequence_plan(&source).unwrap().expect("declares a sequence")
+        let source = resolve_composition_source(path.to_str().unwrap(), &crate::request::snapshot()).unwrap();
+        resolve_sequence_plan(&source, &crate::request::test_context()).unwrap().expect("declares a sequence")
     }
 
     fn snapshot(mutations: &[(&str, Value)], outputs: &[&str]) -> RuntimeSnapshot {

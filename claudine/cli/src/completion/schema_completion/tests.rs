@@ -17,7 +17,7 @@ fn seed_repo(root: &Path) {
 
 fn effective_from_doc(doc: &str) -> EffectiveSchema {
     let md: Markdown = doc.into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request::test_context())
         .effective_for(&md)
         .unwrap()
         .expect("effective schema")

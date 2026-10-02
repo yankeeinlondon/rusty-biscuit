@@ -117,6 +117,11 @@ pub enum CompositionError {
         source: biscuit_file::FileReferenceError,
     },
 
+    /// The request's file-resolution context could not be built, so no
+    /// reference could be resolved.
+    #[error(transparent)]
+    ResolutionContext(#[from] darkmatter::markdown::compose::ContextBuildError),
+
     /// A file reference the author wrote in their prompt document could not be
     /// resolved to a usable file.
     ///

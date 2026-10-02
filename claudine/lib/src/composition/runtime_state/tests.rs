@@ -248,7 +248,13 @@ fn apply_to_hands_authored_keys_as_templates_and_data_keys_verbatim() {
     let markdown: darkmatter::markdown::Markdown =
         "---\ntitle: t\n---\n[{{ typed }}] [{{ produced }}]\n".into();
     let (composed, _) = markdown
-        .compose_with(overrides.apply_to(ComposeOptions::new()))
+        .compose_with(
+            &darkmatter::markdown::compose::ComposeRequest::with_context(
+                overrides.apply_to(ComposeOptions::new()),
+                crate::test_support::context(),
+            )
+            .unwrap(),
+        )
         .unwrap();
     assert_eq!(
         composed.content().trim(),

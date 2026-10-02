@@ -98,6 +98,7 @@ pub fn normalize_formal_plan(
     document_path: &Path,
     globals: &Map<String, Value>,
     document_fail_fast: bool,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<SequencePlan, CompositionError> {
     // Shorthand expansion is scoped to the templated case: without a template
     // there is nothing to merge into, and `normalize_plan` reads a bare scalar
@@ -105,7 +106,7 @@ pub fn normalize_formal_plan(
     let items = match keys.template {
         Some(template) => {
             let items = expand_scalar_shorthand(items);
-            apply_template(template, items, globals, invocation_path)?
+            apply_template(template, items, globals, invocation_path, file_resolution_context)?
         }
         None => items,
     };
@@ -113,7 +114,7 @@ pub fn normalize_formal_plan(
     let plan = normalize_plan(&items, source, invocation_path, document_fail_fast)?;
 
     if let Some(schema) = keys.schema {
-        validate_state_schema(&plan, schema, document_path)?;
+        validate_state_schema(&plan, schema, document_path, file_resolution_context)?;
     }
     Ok(plan)
 }
@@ -151,6 +152,7 @@ fn apply_template(
     items: Vec<Value>,
     globals: &Map<String, Value>,
     invocation_path: &Path,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Vec<Value>, CompositionError> {
     for key in template.keys() {
         if reserved::is_reserved_state_key(key) {
@@ -158,15 +160,14 @@ fn apply_template(
         }
     }
 
-    let base_dir = invocation_path.parent().unwrap_or_else(|| Path::new("."));
-
     items
         .into_iter()
         .map(|item| {
             let Some(step_map) = item.as_object() else {
                 return Ok(item);
             };
-            let lookup = SourceExpressionLookup::new(globals, base_dir).with_item(step_map);
+            let lookup = SourceExpressionLookup::new(globals, file_resolution_context, invocation_path)
+                .with_item(step_map);
 
             let mut new_map = step_map.clone();
             for (key, value) in template {
@@ -195,8 +196,11 @@ fn validate_state_schema(
     plan: &SequencePlan,
     schema: &Value,
     document_path: &Path,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
 ) -> Result<(), CompositionError> {
-    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new();
+    let schemas = darkmatter::markdown::schemas::DarkmatterSchemas::new(
+        file_resolution_context.for_source(document_path),
+    );
 
     let load_failure = |source: SequenceLoadCause| CompositionError::SequenceExternalLoad {
         context: biscuit_file::to_portable_string(document_path),

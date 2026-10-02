@@ -9,6 +9,7 @@
 mod agent_errors_fleet;
 mod boundary_lint;
 mod canonical_dispatch;
+mod context_construction_guard;
 mod deprecated_compatibility;
 mod diagnostic_detail_conformance;
 mod kimi_wire;

@@ -659,7 +659,7 @@ fn prepared_composition() -> crate::composition::types::PreparedComposition {
         dropped_optionals: Vec::new(),
         warnings: Vec::new(),
         deferred_lifecycle_keys: Vec::new(),
-        input_layers: Default::default(),
+        input_layers: crate::composition::CallerInputLayers::new(crate::test_support::context()),
         entry: crate::composition::DocumentEntryReason::Direct,
         compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
         document_epoch: None,
@@ -829,7 +829,12 @@ mod commit_records_only_handoffs {
             ledger: &mut RunLedger,
             target: &str,
         ) -> Result<ProxyHandoff, ProxyCommitError> {
-            commit_proxy(ledger, self.request(target), Some(self.root.as_path()))
+            let source = self.path("source.md");
+            commit_proxy(
+                ledger,
+                self.request(target),
+                &crate::test_support::document_context(&source, Some(self.root.as_path())),
+            )
         }
     }
 

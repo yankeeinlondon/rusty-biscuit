@@ -57,9 +57,9 @@ fn direct_and_proxy_entry_prepare_equivalent_documents() {
     let layers = CallerInputLayers {
         set_overrides: Some(serde_json::json!({ "n": 3 })),
         file_ref_fallback_dir: Some(dir.path().to_path_buf()),
-        ..CallerInputLayers::default()
+        ..CallerInputLayers::new(crate::test_support::context())
     };
-    let options = || layers.apply_to(PrepareOptions::default());
+    let options = || layers.apply_to(PrepareOptions::new(crate::test_support::context()));
 
     let direct = prepare(DocumentEntryReason::Direct, &source, options());
     let proxied = prepare(DocumentEntryReason::ProxyTarget, &source, options());
@@ -102,7 +102,7 @@ fn caller_input_layers_round_trip_raw_values_and_origins() {
     }
 
     let round_trip = CallerInputLayers::from_options(
-        &layers.apply_to(PrepareOptions::default()),
+        &layers.apply_to(PrepareOptions::new(crate::test_support::context())),
     );
     assert_eq!(round_trip.set_overrides, layers.set_overrides);
     assert_eq!(round_trip.caller_input_records, layers.caller_input_records);
@@ -117,7 +117,7 @@ fn the_prepared_document_carries_its_entry_reason() {
     let source = source_at(dir.path(), "doc.md", "---\na: 1\n---\nbody\n");
 
     for entry in DocumentEntryReason::ALL {
-        let prepared = prepare(*entry, &source, PrepareOptions::default());
+        let prepared = prepare(*entry, &source, PrepareOptions::new(crate::test_support::context()));
         assert_eq!(prepared.entry, *entry);
         assert_eq!(
             prepared.entry.stages(),
@@ -136,7 +136,7 @@ fn the_prepared_document_stores_the_context_it_composed_against() {
     let source = source_at(dir.path(), "doc.md", "---\na: 1\n---\n{{ ctx.agent }}\n");
     let mut layers = CallerInputLayers {
         file_ref_fallback_dir: Some(dir.path().to_path_buf()),
-        ..CallerInputLayers::default()
+        ..CallerInputLayers::new(crate::test_support::context())
     };
     layers
         .env_overrides
@@ -145,7 +145,7 @@ fn the_prepared_document_stores_the_context_it_composed_against() {
     let prepared = prepare(
         DocumentEntryReason::Direct,
         &source,
-        layers.apply_to(PrepareOptions::default()),
+        layers.apply_to(PrepareOptions::new(crate::test_support::context())),
     );
 
     assert_eq!(prepared.prompt.trim(), "codex");
@@ -181,7 +181,7 @@ fn current_is_not_a_prepare_time_fallback_for_the_stored_context() {
     );
     let mut layers = CallerInputLayers {
         file_ref_fallback_dir: Some(dir.path().to_path_buf()),
-        ..CallerInputLayers::default()
+        ..CallerInputLayers::new(crate::test_support::context())
     };
     layers
         .env_overrides
@@ -190,7 +190,7 @@ fn current_is_not_a_prepare_time_fallback_for_the_stored_context() {
     let prepared = prepare(
         DocumentEntryReason::Direct,
         &source,
-        layers.apply_to(PrepareOptions::default()),
+        layers.apply_to(PrepareOptions::new(crate::test_support::context())),
     );
 
     assert_eq!(
@@ -216,7 +216,7 @@ fn a_supplied_prompt_is_delivered_and_an_empty_body_is_not_an_error() {
         source: &source,
         schema: SchemaStage::Validate,
         prompt_source: PromptSource::Supplied("fix the build".to_string()),
-        options: PrepareOptions::default(),
+        options: PrepareOptions::new(crate::test_support::context()),
     })
     .expect("an empty memory-file body is not an empty prompt");
 
@@ -241,7 +241,7 @@ fn an_empty_composed_body_still_fails_when_it_is_the_prompt() {
         source: &source,
         prompt_source: PromptSource::ComposedBody,
         schema: SchemaStage::Validate,
-        options: PrepareOptions::default(),
+        options: PrepareOptions::new(crate::test_support::context()),
     })
     .expect_err("an empty composed body is an empty prompt");
 
@@ -260,7 +260,7 @@ fn caller_input_layers_round_trip_through_the_assembly_point() {
     let mut layers = CallerInputLayers {
         set_overrides: Some(serde_json::json!({ "spec": "x.md" })),
         file_ref_fallback_dir: Some(PathBuf::from("/launch/area")),
-        ..CallerInputLayers::default()
+        ..CallerInputLayers::new(crate::test_support::context())
     };
     layers
         .env_overrides
@@ -270,7 +270,7 @@ fn caller_input_layers_round_trip_through_the_assembly_point() {
     let options = layers.apply_to(PrepareOptions {
         // A target-specific field the layers must not clobber.
         shell_working_directory: Some(PathBuf::from("/repo")),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     });
 
     assert_eq!(options.set_overrides, layers.set_overrides);
@@ -295,7 +295,7 @@ fn caller_input_layers_round_trip_through_the_assembly_point() {
 /// approvals already in it.
 #[test]
 fn newly_approved_commands_extend_rather_than_replace() {
-    let mut layers = CallerInputLayers::default();
+    let mut layers = CallerInputLayers::new(crate::test_support::context());
     assert!(layers.pre_approved_commands.is_none());
 
     layers.add_approved_commands(Vec::new());
@@ -339,7 +339,7 @@ fn context_derivation_ignores_a_later_process_cwd_change() {
     let options = || PrepareOptions {
         // The caller's launch area — an immutable invocation input.
         file_ref_fallback_dir: Some(area.clone()),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let guard = CwdGuard(std::env::current_dir().unwrap());
@@ -386,7 +386,7 @@ fn a_different_launch_anchor_derives_a_different_context() {
         &source,
         PrepareOptions {
             file_ref_fallback_dir: Some(area.clone()),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     );
     let elsewhere = prepare(
@@ -394,7 +394,7 @@ fn a_different_launch_anchor_derives_a_different_context() {
         &source,
         PrepareOptions {
             file_ref_fallback_dir: Some(dir.path().to_path_buf()),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     );
     drop(guard);
@@ -465,12 +465,10 @@ fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
         ),
     )
     .unwrap();
-    let source = crate::composition::resolve_composition_source(
-        source_path.to_string_lossy().as_ref(),
-    )
+    let source = crate::composition::resolve_composition_source(source_path.to_string_lossy().as_ref(), &crate::test_support::snapshot())
     .unwrap();
 
-    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_dir).unwrap();
     let source_context = invocation.derive_source(&source.resolved_path).unwrap();
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
@@ -489,9 +487,8 @@ fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
                 env_overrides: env_overrides.clone(),
                 prepared_context: Some(context),
                 file_ref_fallback_dir: Some(launch_dir.clone()),
-                file_resolution_context: Some(source_context.file_resolution_context().clone()),
                 invocation_context: Some(invocation.clone()),
-                ..PrepareOptions::default()
+                ..PrepareOptions::new(source_context.file_resolution_context().clone())
             },
         );
 
@@ -562,7 +559,7 @@ fn invalid_required_source(dir: &Path) -> ResolvedCompositionSource {
 fn options_in(dir: &Path) -> PrepareOptions {
     PrepareOptions {
         file_ref_fallback_dir: Some(dir.to_path_buf()),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     }
 }
 
@@ -746,7 +743,7 @@ fn a_deferred_read_withholds_the_verdict_the_validating_read_reaches() {
         source: &source,
         prompt_source: PromptSource::ComposedBody,
         schema: SchemaStage::DeferToStabilizedReread,
-        options: PrepareOptions::default(),
+        options: PrepareOptions::new(crate::test_support::context()),
     })
     .expect("a pre-`initialize` read does not judge the document");
 
@@ -762,7 +759,7 @@ fn a_deferred_read_withholds_the_verdict_the_validating_read_reaches() {
         source: &source,
         prompt_source: PromptSource::ComposedBody,
         schema: SchemaStage::Validate,
-        options: PrepareOptions::default(),
+        options: PrepareOptions::new(crate::test_support::context()),
     })
     .expect_err("the validating read reaches the verdict");
 
@@ -790,7 +787,7 @@ fn a_deferred_read_still_coerces_declared_types() {
         source: &source,
         prompt_source: PromptSource::ComposedBody,
         schema: SchemaStage::DeferToStabilizedReread,
-        options: PrepareOptions::default(),
+        options: PrepareOptions::new(crate::test_support::context()),
     })
     .expect("the missing required `count` is not this read's verdict to reach");
 
@@ -835,11 +832,11 @@ fn a_composed_prompt_resolves_current_through_the_invocation() {
         "doc.md",
         "---\na: 1\n---\nsnapshot=[{{ ctx.branch }}] now=[{{ current.branch }}]\n",
     );
-    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), dir.path()).unwrap();
     let options = PrepareOptions {
         invocation_context: Some(invocation),
         file_ref_fallback_dir: Some(dir.path().to_path_buf()),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let prepared = prepare(DocumentEntryReason::Direct, &source, options);
@@ -906,8 +903,7 @@ fn late_caller_file_verdict_names_the_callers_base_directory() {
             }
             .apply_to(PrepareOptions {
                 // As the CLI does: the document-scoped request context.
-                file_resolution_context: Some(origin.for_source(&source.resolved_path)),
-                ..PrepareOptions::default()
+                ..PrepareOptions::new(origin.for_source(&source.resolved_path))
             })
         };
         let prepare_with = |spec: &str| {

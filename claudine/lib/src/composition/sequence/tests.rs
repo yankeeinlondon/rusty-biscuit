@@ -1,7 +1,16 @@
 use super::*;
 use super::expr::{SourceExpressionLookup, render_interpolated};
 use super::grammar::{SequenceSourceSpec, SourceOperator, classify_source};
-use super::source::{resolve_sequence_reference, resolve_sequence_reference_in_context};
+use super::source::resolve_sequence_reference as resolve_sequence_reference_in_context;
+
+/// [`resolve_sequence_reference_in_context`] through the launch context of a
+/// request started in the referencing document's directory.
+fn resolve_sequence_reference(
+    raw: &str,
+    source_path: &Path,
+) -> Result<std::path::PathBuf, CompositionError> {
+    resolve_sequence_reference_in_context(raw, source_path, &crate::test_support::context_for(source_path))
+}
 use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext};
 use serde_json::Value;
 use crate::composition::error::SequenceLoadCause;
@@ -56,7 +65,7 @@ fn init_git_repo(path: &Path) {
 fn no_sequence_key_returns_none() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Content");
-    let result = resolve_sequence_plan(&source).unwrap();
+    let result = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap();
     assert!(result.is_none());
 }
 
@@ -70,7 +79,7 @@ fn inline_scalar_list_normalizes_correctly() {
         &[("sequence", json!(["one", "two", "three"]))],
         "Prompt: {{state}}",
     );
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(matches!(plan.source, SequenceSource::Inline));
     assert_eq!(plan.steps.len(), 3);
     assert_eq!(plan.steps[0].name, "one");
@@ -96,7 +105,7 @@ fn inline_object_list_requires_name() {
         )],
         "Prompt",
     );
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps.len(), 2);
     assert_eq!(plan.steps[0].name, "one");
     assert_eq!(
@@ -109,7 +118,7 @@ fn inline_object_list_requires_name() {
 fn inline_object_step_missing_name_fails() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("sequence", json!([{"color": "red"}]))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(err, CompositionError::SequenceStepNameMissing { index: 0 }),
         "got: {err}"
@@ -120,7 +129,7 @@ fn inline_object_step_missing_name_fails() {
 fn inline_object_step_name_wrong_type_fails() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("sequence", json!([{"name": 42}]))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -136,7 +145,7 @@ fn inline_object_step_name_wrong_type_fails() {
 fn empty_list_fails() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("sequence", json!([]))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(matches!(err, CompositionError::SequenceEmpty), "got: {err}");
 }
 
@@ -146,7 +155,7 @@ fn empty_list_fails() {
 fn invalid_sequence_type_fails() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("sequence", json!(42))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(err, CompositionError::SequenceInvalid(_)),
         "got: {err}"
@@ -166,7 +175,7 @@ fn fail_fast_false_from_frontmatter() {
         ],
         "Prompt",
     );
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(!plan.document_fail_fast);
 }
 
@@ -187,7 +196,7 @@ fn external_sequence_form_loads() {
         &[("sequence", json!("steps.yaml"))],
         "Prompt: {{state.name}}",
     );
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert!(matches!(plan.source, SequenceSource::External { .. }));
     assert_eq!(plan.steps.len(), 2);
     assert_eq!(plan.steps[0].name, "alpha");
@@ -218,7 +227,7 @@ sequence:
         &[("sequence", json!("agents.yaml"))],
         "Research {{state.name}}",
     );
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps.len(), 2);
     assert_eq!(plan.steps[0].name, "Claude Code");
 
@@ -252,7 +261,7 @@ sequence:
     .unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("items.yaml"))], "Prompt");
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     let summary0 = plan.steps[0]
         .raw_state
         .as_object()
@@ -290,7 +299,7 @@ sequence:
     .unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(err, CompositionError::SequenceReservedTemplateKey(ref k) if k == "state"),
         "got: {err}"
@@ -308,7 +317,7 @@ fn external_template_non_object_fails() {
     .unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("bad.yaml"))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(err, CompositionError::SequenceExternalWrongType(ref msg) if msg.contains("`template`")),
         "got: {err}"
@@ -334,7 +343,7 @@ template:
     .unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("templated.yaml"))], "Prompt");
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps[0].state.extra["desc"], json!("One!"));
 }
 
@@ -349,7 +358,7 @@ fn fail_fast_wrong_type_fails() {
         ],
         "Prompt",
     );
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(err, CompositionError::SequenceInvalid(ref msg) if msg.contains("fail_fast")),
         "got: {err}"
@@ -378,7 +387,7 @@ fn relative_path_resolves_from_source_dir() {
         markdown,
     };
 
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps.len(), 2);
     assert_eq!(plan.steps[0].name, "alpha");
 }
@@ -408,7 +417,7 @@ fn absolute_path_is_honored() {
         markdown,
     };
 
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     assert_eq!(plan.steps.len(), 1);
     assert_eq!(plan.steps[0].name, "one");
 }
@@ -604,7 +613,7 @@ fn external_sequence_reuses_request_snapshot_after_environment_mutation() {
         &source,
         SequenceSourceOptions {
             shell_runner: None,
-            file_resolution_context: Some(&snapshot),
+            file_resolution_context: &snapshot,
         },
     );
     match prior {
@@ -758,7 +767,13 @@ fn rooted_magic_payload_is_rejected_across_file_sequence_and_transclusion_surfac
 
         let markdown: Markdown = format!("::file {raw}\n").into();
         let transclusion_error = markdown
-            .compose_with(ComposeOptions::new().with_source_file(&source_path))
+            .compose_with(
+                &darkmatter::markdown::compose::ComposeRequest::with_context(
+                    ComposeOptions::new().with_source_file(&source_path),
+                    crate::test_support::context_for(&source_path),
+                )
+                .unwrap(),
+            )
             .unwrap_err();
         assert!(matches!(
             transclusion_error,
@@ -816,7 +831,7 @@ fn external_template_non_string_values_are_literal_defaults() {
     .unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("typed.yaml"))], "Prompt");
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
 
     // The typed values survive as themselves, not as rendered strings.
     assert_eq!(plan.steps[0].state.extra["rank"], json!(42));
@@ -840,7 +855,7 @@ fn external_template_applies_to_scalar_shorthand_steps() {
     .unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("scalars.yaml"))], "Prompt");
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
 
     assert_eq!(plan.steps[0].name, "One");
     assert_eq!(plan.steps[0].state.extra["desc"], json!("One!"));
@@ -858,7 +873,7 @@ fn external_malformed_yaml_carries_typed_yaml_cause() {
     fs::write(&yaml_path, "sequence: [unterminated\n").unwrap();
 
     let source = make_source(&dir, &[("sequence", json!("broken.yaml"))], "Prompt");
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -1048,7 +1063,7 @@ fn object_step_extracts_state_and_rejects_reserved_state_key() {
         )],
         "Prompt",
     );
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -1069,7 +1084,7 @@ fn object_step_rejects_two_executables() {
         )],
         "Prompt",
     );
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(err, CompositionError::SequenceExclusiveExecutable { index: 0, .. }),
         "two executable fields must be rejected, got: {err:?}"
@@ -1087,7 +1102,7 @@ fn shell_step_rejects_prompt_only_task_option() {
         )],
         "Prompt",
     );
-    let err = resolve_sequence_plan(&source).unwrap_err();
+    let err = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
     assert!(
         matches!(
             err,
@@ -1109,7 +1124,7 @@ fn single_executable_step_extracts_executable_and_options() {
         )],
         "Prompt",
     );
-    let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
     let step = &plan.steps[0];
     let executable = step.executable.as_ref().expect("executable extracted");
     assert_eq!(executable.field, ExecutableField::Prompt);
@@ -1128,7 +1143,7 @@ fn single_executable_step_extracts_executable_and_options() {
 
 fn render_template(template: &str, fields: serde_json::Map<String, serde_json::Value>) -> Value {
     let globals = serde_json::Map::new();
-    let lookup = SourceExpressionLookup::new(&globals, Path::new(".")).with_item(&fields);
+    let lookup = SourceExpressionLookup::new(&globals, crate::test_support::process_context(), std::path::Path::new("sequence.md")).with_item(&fields);
     render_interpolated(template, &lookup).unwrap()
 }
 
@@ -1179,14 +1194,14 @@ fn item_fields_shadow_document_globals() {
     let mut item = serde_json::Map::new();
     item.insert("color".into(), json!("item-red"));
 
-    let lookup = SourceExpressionLookup::new(&globals, Path::new(".")).with_item(&item);
+    let lookup = SourceExpressionLookup::new(&globals, crate::test_support::process_context(), std::path::Path::new("sequence.md")).with_item(&item);
     assert_eq!(
         render_interpolated("{{ color }}", &lookup).unwrap(),
         json!("item-red")
     );
 
     // Without an item, the global is still visible.
-    let bare = SourceExpressionLookup::new(&globals, Path::new("."));
+    let bare = SourceExpressionLookup::new(&globals, crate::test_support::process_context(), std::path::Path::new("sequence.md"));
     assert_eq!(
         render_interpolated("{{ color }}", &bare).unwrap(),
         json!("global-blue")
@@ -1272,7 +1287,7 @@ mod clean_break {
         fs::write(&yaml_path, "kind: sequence\nlist:\n  - name: one\n").unwrap();
 
         let source = make_source(&dir, &[("sequence", json!("legacy.yaml"))], "Prompt");
-        let error = resolve_sequence_plan(&source).unwrap_err();
+        let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
         assert!(
             matches!(
                 error,
@@ -1307,10 +1322,10 @@ mod clean_break {
             )],
             "Prompt",
         );
-        let plan = resolve_sequence_plan(&source)
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
             .expect("the plan itself is well-formed")
             .expect("the fixture declares a sequence");
-        let error = super::preflight::build_preflight_graph(&plan, &source)
+        let error = super::preflight::build_preflight_graph(&plan, &source, &crate::test_support::context_for(&source.resolved_path))
             .expect_err("a group carrying `loop` must be rejected");
         assert!(
             matches!(
@@ -1564,7 +1579,7 @@ mod source_resolution {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join(file), contents).unwrap();
         let source = make_source(&dir, &[("sequence", json!(sequence))], "Prompt");
-        resolve_sequence_plan(&source).map(|plan| plan.expect("sequence key present"))
+        resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).map(|plan| plan.expect("sequence key present"))
     }
 
     fn names(plan: &SequencePlan) -> Vec<String> {
@@ -1781,7 +1796,7 @@ mod source_resolution {
 
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, &[("sequence", json!([1, 2]))], "Prompt");
-        let error = resolve_sequence_plan(&source).unwrap_err();
+        let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
         assert!(
             matches!(error, CompositionError::SequenceInvalid(_)),
             "an authored numeric step is a typo, got: {error}"
@@ -1856,7 +1871,7 @@ mod dynamic_sources {
     ) -> Result<SequencePlan, CompositionError> {
         let dir = TempDir::new().unwrap();
         let source = make_source(&dir, frontmatter, "Prompt");
-        resolve_sequence_plan(&source).map(|plan| plan.expect("sequence key present"))
+        resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).map(|plan| plan.expect("sequence key present"))
     }
 
     fn names(plan: &SequencePlan) -> Vec<String> {
@@ -2012,7 +2027,7 @@ mod dynamic_sources {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("d.json"), "[]").unwrap();
         let source = make_source(&dir, &[("sequence", json!("d.json"))], "Prompt");
-        let plan = resolve_sequence_plan(&source).unwrap().unwrap();
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap().unwrap();
         assert!(plan.steps.is_empty());
     }
 
@@ -2023,7 +2038,7 @@ mod dynamic_sources {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("s.yaml"), "sequence: []\n").unwrap();
         let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
-        let error = resolve_sequence_plan(&source).unwrap_err();
+        let error = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).unwrap_err();
         assert!(matches!(error, CompositionError::SequenceEmpty), "got: {error}");
     }
 
@@ -2055,7 +2070,7 @@ mod dynamic_sources {
             &source,
             SequenceSourceOptions {
                 shell_runner: Some(&runner),
-                file_resolution_context: None,
+                file_resolution_context: crate::test_support::process_context(),
             },
         )
         .unwrap()
@@ -2084,7 +2099,7 @@ mod dynamic_sources {
             &source,
             SequenceSourceOptions {
                 shell_runner: Some(&runner),
-                file_resolution_context: None,
+                file_resolution_context: crate::test_support::process_context(),
             },
         )
         .unwrap_err();
@@ -2110,7 +2125,7 @@ mod formal_documents {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("s.yaml"), contents).unwrap();
         let source = make_source(&dir, &[("sequence", json!("s.yaml"))], "Prompt");
-        resolve_sequence_plan(&source).map(|plan| plan.expect("sequence key present"))
+        resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path)).map(|plan| plan.expect("sequence key present"))
     }
 
     /// Template values land before generated fields, so a templated key is

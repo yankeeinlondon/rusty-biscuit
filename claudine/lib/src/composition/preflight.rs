@@ -10,7 +10,7 @@ use std::path::Path;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, ResolutionContext, parse};
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveStateBuilder};
+use darkmatter::markdown::compose::{ComposeContext, ComposeRequest, EffectiveStateBuilder};
 
 use crate::composition::error::{CompositionError, ShellApprovalFailure};
 use crate::composition::lifecycle::{
@@ -55,7 +55,8 @@ pub struct PreFlightResult {
 /// * `markdown` — Markdown source for condition-blind template `::shell`
 ///   discovery, which can dereference body includes. For staged live entry,
 ///   pass the stabilized reread after initialization.
-/// * `compose_options` — Darkmatter compose options for the template walker.
+/// * `compose_request` — the prepared Darkmatter request for the template
+///   walker.
 /// * `approval_options` — shell approval policy, handler, and cache.
 /// * `lifecycle` — parsed lifecycle configuration; when present, every
 ///   reachable `action: shell` command (and `on_error` command) across all
@@ -66,7 +67,7 @@ pub struct PreFlightResult {
 ///   commands; ignored when `lifecycle` is `None`.
 pub fn resolve_shell_approvals(
     markdown: Option<&Markdown>,
-    compose_options: Option<&ComposeOptions>,
+    compose_request: Option<&ComposeRequest>,
     approval_options: &ShellApprovalOptions,
     lifecycle: Option<&LifecycleConfig>,
     lifecycle_source_path: Option<&std::path::Path>,
@@ -77,7 +78,7 @@ pub fn resolve_shell_approvals(
     // Darkmatter discovers condition-blind: every command that could run under
     // any document state (including dead branches). Claudine authorizes the
     // union of these plus lifecycle stack commands below.
-    if let (Some(md), Some(opts)) = (markdown, compose_options) {
+    if let (Some(md), Some(opts)) = (markdown, compose_request) {
         let preflight = md
             .compose_preflight(opts)
             .map_err(CompositionError::PreFlightDiscoveryFailed)?;
@@ -124,7 +125,7 @@ pub fn resolve_shell_approvals(
 pub fn resolve_graph_shell_approvals(
     graph: &crate::composition::sequence::preflight::PreflightGraph,
     approval_options: &ShellApprovalOptions,
-    prompt_compose_options: &dyn Fn(&Path) -> ComposeOptions,
+    prompt_compose_request: &dyn Fn(&Path) -> Result<ComposeRequest, CompositionError>,
 ) -> Result<PreFlightResult, CompositionError> {
     let mut all_commands: Vec<(String, std::path::PathBuf, usize)> = Vec::new();
 
@@ -133,7 +134,7 @@ pub fn resolve_graph_shell_approvals(
     }
 
     for document in &graph.prompt_documents {
-        let options = prompt_compose_options(&document.path);
+        let options = prompt_compose_request(&document.path)?;
         let preflight = document
             .markdown
             .compose_preflight(&options)
@@ -323,7 +324,7 @@ pub fn resolve_lifecycle_shell_commands(
     effective_frontmatter: &serde_json::Value,
     context: &ComposeContext,
     source_path: &Path,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     file_ref_fallback_dir: Option<&Path>,
 ) -> Result<(), CompositionError> {
     let frontmatter: HashMap<String, serde_json::Value> = effective_frontmatter
@@ -345,7 +346,7 @@ pub fn resolve_lifecycle_shell_commands(
         Some(context),
         file_resolution_context,
         file_ref_fallback_dir,
-    );
+    )?;
 
     for signal in LifecycleSignal::ALL {
         let event_name = signal.property_name();

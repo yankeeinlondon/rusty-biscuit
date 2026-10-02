@@ -123,7 +123,7 @@ pub(super) fn run_step_task(
         base_dir: Some(task_source_context.base_dir()),
         ctx_base_dir: Some(run.prep_context.launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(&task_context),
-        file_resolution_context: Some(task_source_context.file_resolution_context()),
+        file_resolution_context: task_source_context.file_resolution_context(),
         effect_engine: &engine,
         shell_runner: &SystemShellRunner,
         emitter: &emitter,
@@ -769,7 +769,7 @@ mod tests {
         let origin_path = fixture.origin_path();
         let mut task = fixture.task();
         task.action = side_effect(json!({"stderr": CTX_REF}));
-        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
+        let invocation = InvocationContext::capture_at(crate::request::snapshot(), &fixture.launch_dir).unwrap();
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
         let (source, context, _) = prepare_task_context(&invocation, &task, &env, &RunEvidence::default());
@@ -808,7 +808,7 @@ mod tests {
         task.action = side_effect(json!({
             "stderr": "{{ ctx.repo_root }}|{{ ctx.area }}|{{ ctx.agent }}|{{ ctx.model }}|{{ env.AGENT }}|{{ env.MODEL }}"
         }));
-        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
+        let invocation = InvocationContext::capture_at(crate::request::snapshot(), &fixture.launch_dir).unwrap();
         let env = BTreeMap::from([
             ("AGENT".to_string(), "codex".to_string()),
             ("MODEL".to_string(), "gpt-5".to_string()),
@@ -835,7 +835,7 @@ mod tests {
     #[test]
     fn a_task_with_no_ctx_reference_captures_no_repository_group() {
         let fixture = Fixture::new();
-        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
+        let invocation = InvocationContext::capture_at(crate::request::snapshot(), &fixture.launch_dir).unwrap();
 
         let (_, context, _) =
             prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new(), &RunEvidence::default());
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn every_expression_bearing_field_is_scanned_for_ctx_references() {
         let fixture = Fixture::new();
-        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
+        let invocation = InvocationContext::capture_at(crate::request::snapshot(), &fixture.launch_dir).unwrap();
 
         #[allow(clippy::type_complexity)]
         let cases: Vec<(&str, Box<dyn Fn(&mut PreflightTask)>)> = vec![
@@ -917,7 +917,7 @@ mod tests {
     #[test]
     fn group_variables_and_member_tasks_are_scanned_for_ctx_references() {
         let fixture = Fixture::new();
-        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
+        let invocation = InvocationContext::capture_at(crate::request::snapshot(), &fixture.launch_dir).unwrap();
 
         let group_of = |variables: Map<String, Value>, member: PreflightTask| PreflightAction::Group(
             PreflightGroup {

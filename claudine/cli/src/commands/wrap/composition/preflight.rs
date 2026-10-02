@@ -1,6 +1,6 @@
 //! Composition pre-flight `blocked` / `finalize` lifecycle event helpers.
 //!
-//! [`emit_preflight_blocked_and_finalize_in_context`] routes a pre-flight
+//! [`emit_preflight_blocked_and_finalize`] routes a pre-flight
 //! failure through the stack-aware event runner with the prepared document's
 //! file-resolution snapshot, so a document's `blocked.stack` and
 //! `finalize.stack` side effects fire against their owned context.
@@ -77,14 +77,10 @@ pub(super) enum PreflightBlockedOutcome {
 /// non-zero on the actionable cause. A raise inside `finalize` itself is
 /// surfaced without re-entering `finalize` (the re-entry guard from
 /// Decision #3 / `handle_terminal_evaluation_error`).
-/// Decide which evaluation error surfaces after a pre-flight `blocked` catch
-/// ran its `failure`/`finalize` events, keeping the "already emitted to stderr"
-/// bookkeeping correct (Decision #2).
 ///
-/// The shared runtime router selects the winning event; this adapter renders
-/// that event as a [`CompositionError`] for the pre-flight caller.
+/// The catch stacks resolve file references through the prepared document's
+/// `file_resolution_context`.
 #[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
 pub(super) fn emit_preflight_blocked_and_finalize(
     guard: &mut LifecycleRunGuard<'_>,
     effect_engine: &EffectEngine,
@@ -97,47 +93,7 @@ pub(super) fn emit_preflight_blocked_and_finalize(
     base_dir: Option<&Path>,
     ctx_base_dir: Option<&Path>,
     prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
-    current: Option<darkmatter::markdown::compose::CurrentAuthority>,
-    frontmatter: &serde_json::Map<String, serde_json::Value>,
-    document_start: std::time::Instant,
-    err_info: LifecycleErrorInfo,
-) -> PreflightBlockedOutcome {
-    emit_preflight_blocked_and_finalize_in_context(
-        guard,
-        effect_engine,
-        emitter,
-        settings,
-        messaging,
-        term,
-        source_path,
-        repo_root,
-        base_dir,
-        ctx_base_dir,
-        prepared_context,
-        None,
-        current,
-        frontmatter,
-        document_start,
-        err_info,
-    )
-}
-
-/// Run preflight catch stacks with the prepared document's file-resolution
-/// snapshot.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn emit_preflight_blocked_and_finalize_in_context(
-    guard: &mut LifecycleRunGuard<'_>,
-    effect_engine: &EffectEngine,
-    emitter: &dyn LifecycleEmitter,
-    settings: &GlobalSettings,
-    messaging: &RuntimeMessagingSettings,
-    term: &Terminal,
-    source_path: &Path,
-    repo_root: Option<&Path>,
-    base_dir: Option<&Path>,
-    ctx_base_dir: Option<&Path>,
-    prepared_context: Option<&darkmatter::markdown::compose::ComposeContext>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     current: Option<darkmatter::markdown::compose::CurrentAuthority>,
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     document_start: std::time::Instant,

@@ -176,6 +176,7 @@ pub(super) fn compose_step(
         source,
         set_overrides,
         ctx.launch_area,
+        ctx.file_resolution_context,
         if ctx.inline_mode {
             composition::CompositionMode::InlineFrontmatterPrompt
         } else {
@@ -268,7 +269,6 @@ pub(super) fn step_prepare_options(
         shell_working_directory: Some(ctx.child_cwd.to_path_buf()),
         prepared_context: Some(prepared_context),
         file_ref_fallback_dir: ctx.launch_area.map(Path::to_path_buf),
-        file_resolution_context: Some(ctx.file_resolution_context.clone()),
         caller_input_records: ctx.caller_input_records.clone(),
         name_coercion_keys: composition::sequence::reserved::NAME_COERCION_KEYS
             .iter()
@@ -278,7 +278,7 @@ pub(super) fn step_prepare_options(
         defer_schema_verdict: false,
         invocation_context: Some(ctx.invocation.clone()),
         document_epoch: Some(document_epoch),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(ctx.file_resolution_context.clone())
     }
     .with_layered_overrides(overrides)
 }

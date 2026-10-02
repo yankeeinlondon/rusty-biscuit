@@ -165,7 +165,7 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
                 continue;
             }
         };
-        if let Err(error) = DarkmatterSchemas::new().effective_for(&markdown) {
+        if let Err(error) = DarkmatterSchemas::new(claudine::composition::capture_file_resolution_context(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap()).unwrap()).effective_for(&markdown) {
             errors.push(format!("{} [$schema]: {error}", prompt.display()));
         }
 
@@ -191,7 +191,7 @@ fn shipped_prompt_schemas_project_at_both_phases() {
         let Ok(markdown) = Markdown::try_from(prompt.as_path()) else {
             continue;
         };
-        let Ok(Some(effective)) = DarkmatterSchemas::new().effective_for(&markdown) else {
+        let Ok(Some(effective)) = DarkmatterSchemas::new(claudine::composition::capture_file_resolution_context(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap()).unwrap()).effective_for(&markdown) else {
             continue;
         };
         let empty = Value::Object(serde_json::Map::new());

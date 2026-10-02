@@ -178,7 +178,7 @@ pub(crate) fn run_loop_with_overrides<F>(
     effect_engine: &darkmatter::effects::EffectEngine,
     shell_runner: &dyn claudine::composition::ShellRunner,
     emitter: &dyn claudine::composition::LifecycleEmitter,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     document_epoch: Option<&claudine::invocation_context::DocumentEpoch>,
     mut executor: F,
 ) -> std::result::Result<
@@ -204,10 +204,10 @@ where
     // user's original launch directory. `PWD` is injected onto the child
     // `Command` env map in `build_child_env_with_launch`, so we do not need
     // to mutate the process-global `PWD` here.
-    let launch_cwd = lifecycle_ctx
-        .launch_area
-        .map(std::path::Path::to_path_buf)
-        .or_else(|| std::env::current_dir().ok());
+    let launch_cwd = Some(lifecycle_ctx.launch_area.map_or_else(
+        || crate::request::snapshot().request_dir().to_path_buf(),
+        std::path::Path::to_path_buf,
+    ));
 
     // The Ctrl+C SIGINT handler is installed at the top of the compose
     // subcommand (see `install_user_interrupt_guard`) so it covers the

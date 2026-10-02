@@ -289,7 +289,7 @@ fn run_provider_wrapper_inner(
         )
     })?;
 
-    let cwd = std::env::current_dir()?;
+    let cwd = crate::request::snapshot().request_dir().to_path_buf();
 
     let binary_path = if args.dry_run {
         PathBuf::from(profile.binary())

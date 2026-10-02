@@ -77,15 +77,23 @@ enum WhenOutcome {
 /// `tracing::warn!` so operators can spot a broken condition without
 /// breaking the rest of the binding.
 #[allow(dead_code)]
-fn evaluate_when(when: Option<&str>, meta: &EventMeta) -> WhenOutcome {
-    let work_dir: PathBuf = meta
-        .cwd
+fn evaluate_when(
+    when: Option<&str>,
+    meta: &EventMeta,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
+) -> WhenOutcome {
+    let work_dir = hook_work_dir(meta, request);
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path(), request);
+    evaluate_when_with_lookup(when, &lookup)
+}
+
+/// The directory a hook's `when` conditions resolve against: the event's
+/// working directory, else the request directory of the dispatching process.
+fn hook_work_dir(meta: &EventMeta, request: &darkmatter::markdown::compose::RequestSnapshot) -> PathBuf {
+    meta.cwd
         .as_deref()
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
-    evaluate_when_with_lookup(when, &lookup)
+        .unwrap_or_else(|| request.request_dir().to_path_buf())
 }
 
 /// Evaluate an action's `when` expression using a pre-built [`EventMetaConditionLookup`].
@@ -134,6 +142,7 @@ pub(crate) async fn execute_actions(
     compiled_mappers: Option<&[Option<CompiledMapper>]>,
     meta: &EventMeta,
     config: DispatchConfig<'_>,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
     messaging: &RuntimeMessagingSettings,
     can_block: bool,
     protect_decision: Option<&ProtectDecision>,
@@ -142,12 +151,8 @@ pub(crate) async fn execute_actions(
 
     // Build the composite lookup once so that `ctx.*` captures are cached
     // across all actions in this binding.
-    let work_dir: PathBuf = meta
-        .cwd
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path());
+    let work_dir = hook_work_dir(meta, request);
+    let lookup = EventMetaConditionLookup::new(meta, work_dir.as_path(), request);
 
     for (index, action) in actions.iter().enumerate() {
         // Pre-execution `when` gate. Falsy or invalid conditions skip the

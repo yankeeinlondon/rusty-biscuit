@@ -502,7 +502,7 @@ pub struct EffectiveSelectionHints {
 /// ([`prepare_document`][super::prepare_document]), and only these four layers.
 /// A source-specific value does not belong here: it belongs to the prepared
 /// document, which is rebuilt per target.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CallerInputLayers {
     /// Frontmatter `--set` overrides (JSON object) the caller supplied.
     pub set_overrides: Option<serde_json::Value>,
@@ -513,9 +513,9 @@ pub struct CallerInputLayers {
     pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
     pub file_ref_fallback_dir: Option<PathBuf>,
-    /// Immutable request-scoped resolution inputs captured before the first
+    /// The request's file-resolution context, captured before the first
     /// source is resolved.
-    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    pub file_resolution_context: biscuit_file::FileResolutionContext,
     /// Shell commands approved during the original pre-flight discovery.
     /// Shell commands approved so far in this invocation.
     ///
@@ -534,8 +534,22 @@ pub struct CallerInputLayers {
 }
 
 impl CallerInputLayers {
+    /// Empty layers resolving through `file_resolution_context`.
+    pub fn new(file_resolution_context: biscuit_file::FileResolutionContext) -> Self {
+        Self {
+            set_overrides: None,
+            data_override_keys: Default::default(),
+            caller_input_records: Default::default(),
+            file_ref_fallback_dir: None,
+            file_resolution_context,
+            pre_approved_commands: None,
+            env_overrides: BTreeMap::new(),
+        }
+    }
+
     /// Capture explicit caller overrides without materializing or re-anchoring
-    /// their raw values.
+    /// their raw values. `origin` is the request context they were supplied
+    /// in, and becomes the layers' context.
     pub fn from_caller_overrides(
         set_overrides: Option<serde_json::Value>,
         origin: biscuit_file::FileResolutionContext,
@@ -561,7 +575,7 @@ impl CallerInputLayers {
         Self {
             set_overrides,
             caller_input_records,
-            ..Self::default()
+            ..Self::new(origin)
         }
     }
 

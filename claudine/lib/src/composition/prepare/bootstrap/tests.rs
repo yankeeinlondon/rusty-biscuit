@@ -47,9 +47,9 @@ fn options_in(dir: &Path, phase: u32) -> PrepareOptions {
     CallerInputLayers {
         set_overrides: Some(serde_json::json!({ "spec": SPEC, "phase": phase })),
         file_ref_fallback_dir: Some(dir.to_path_buf()),
-        ..CallerInputLayers::default()
+        ..CallerInputLayers::new(crate::test_support::context())
     }
-    .apply_to(PrepareOptions::default())
+    .apply_to(PrepareOptions::new(crate::test_support::context()))
 }
 
 fn bootstrap(
@@ -252,7 +252,7 @@ fn bootstrap_rejects_shell_actions_even_with_cached_approval() {
         ));
         let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
             pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         }).unwrap_err();
         assert!(matches!(error, CompositionError::LifecycleActionPlacement { ref action, ref event, .. }
             if action == "shell" && event == "initialize"), "{error:?}");
@@ -271,7 +271,7 @@ fn bootstrap_frontmatter_shells_ignore_approval_handlers_and_cached_commands() {
     let gate = approval_options(policy.path(), Some(handler.clone()), &cache);
     let options = PrepareOptions {
         pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let error = preflight_bootstrap_shell(
         &source, CompositionMode::ChainedDocument, &options, &gate,
@@ -299,7 +299,7 @@ fn a_malformed_lifecycle_fails_bootstrap_and_full_preparation_identically() {
     for mode in [CompositionMode::ChainedDocument, CompositionMode::InlineFrontmatterPrompt] {
         let options = || PrepareOptions {
             set_overrides: Some(serde_json::json!({ "prompt": "do it" })),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         };
 
         let staged = bootstrap(mode, &say_conflict, options()).unwrap_err();
@@ -381,7 +381,7 @@ fn bootstrap_always_withholds_the_schema_verdict() {
     );
     let options = || PrepareOptions {
         defer_schema_verdict: false,
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     bootstrap(CompositionMode::ChainedDocument, &source, options())
@@ -399,7 +399,7 @@ fn bootstrap_observes_the_prepared_context_as_frontmatter_only() {
         dir.path(),
         "---\nos: \"{{ ctx.os }}\"\n---\n{{ ctx.os }}\n\n::file ./missing.md\n",
     );
-    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), dir.path()).unwrap();
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
     let document_epoch = invocation.begin_document_epoch();
@@ -412,7 +412,7 @@ fn bootstrap_observes_the_prepared_context_as_frontmatter_only() {
             invocation_context: Some(invocation.clone()),
             document_epoch: Some(document_epoch),
             prepared_context: Some(context),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -442,7 +442,7 @@ fn a_retry_never_takes_a_bootstrap_read() {
         entry: DocumentEntryReason::Retry,
         mode: CompositionMode::ChainedDocument,
         source: &source,
-        options: PrepareOptions::default(),
+        options: PrepareOptions::new(crate::test_support::context()),
     });
 }
 
@@ -453,7 +453,7 @@ fn bootstrap_overrides_cannot_enable_shell_expansion() {
     let error = bootstrap(CompositionMode::ChainedDocument, &source, PrepareOptions {
         set_overrides: Some(serde_json::json!({"stamp": "$(echo ready)"})),
         pre_approved_commands: Some(HashSet::from(["echo ready".to_string()])),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(crate::test_support::context())
     }).unwrap_err();
     assert!(matches!(error, CompositionError::ShellExpansionFailed { .. }), "{error:?}");
 }

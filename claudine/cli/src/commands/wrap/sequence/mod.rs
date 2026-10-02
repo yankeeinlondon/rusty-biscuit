@@ -92,7 +92,10 @@ fn approve_preflight_graph(
     // it. Extending through the invocation instead makes each extension a run
     // of its own, which re-observed the working tree once per prompt document.
     let approval_epoch = invocation.begin_document_epoch();
-    let compose_options = |path: &std::path::Path| {
+    let compose_options = |path: &std::path::Path| -> Result<
+        darkmatter::markdown::compose::ComposeRequest,
+        claudine::composition::CompositionError,
+    > {
         composing.replace(Some(path.to_path_buf()));
         let source_context = invocation
             .derive_source(path)
@@ -110,7 +113,6 @@ fn approve_preflight_graph(
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
             .with_context_authority(approval_epoch.compose_context_authority())
             .with_source_file(path)
-            .with_file_resolution_context(source_context.file_resolution_context().clone())
             .with_deferred_schema_verdict(true)
             // Defer the lifecycle subtree exactly as the per-step template
             // preflight does: this pass exists to discover `::shell`
@@ -121,7 +123,10 @@ fn approve_preflight_graph(
         if let Some(area) = launch_area {
             opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
         }
-        opts
+        Ok(claudine::composition::compose_request(
+            opts,
+            source_context.file_resolution_context().clone(),
+        )?)
     };
 
     let result =

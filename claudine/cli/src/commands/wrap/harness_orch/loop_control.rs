@@ -16,7 +16,7 @@ use claudine::composition::{
     LifecycleCatchExecution, LifecycleCatchProtocol, LifecycleCatchState, ProxyProvenance,
     LifecycleTransitionAbort, LifecycleTransitionDecision, LifecycleTransitionError,
     LifecycleTransitionInput, RunLedger, SharedRunLedger, SurfacedHandoff,
-    commit_proxy, commit_proxy_in_context, decide_lifecycle_transition,
+    commit_proxy, decide_lifecycle_transition,
 };
 use claudine::events::EnvironmentContext;
 use claudine::provider::Provider;
@@ -343,7 +343,6 @@ impl<'a, 'guard> HarnessLoopState<'a, 'guard> {
         {
             coordinator.adopt(
                 request,
-                run.repo_root,
                 run.prompt_state,
                 run.lifecycle_guard,
                 &mut active,
@@ -1167,19 +1166,11 @@ fn surface_or_adopt_terminal_proxy(
     iteration_signals: Option<IterationSummarySignals>,
 ) -> Result<LoopStep> {
     match handoff_ledger {
-        Some(shared) => match prompt_state.file_resolution_context() {
-            Some(context) => commit_proxy_in_context(
-                &mut shared.lock().unwrap(),
-                request,
-                context,
-            ),
-            None => {
-                if let Some(invocation) = prompt_state.invocation_context.as_ref() {
-                    invocation.record_ambient_fallback();
-                }
-                commit_proxy(&mut shared.lock().unwrap(), request, repo_root)
-            }
-        }
+        Some(shared) => commit_proxy(
+            &mut shared.lock().unwrap(),
+            request,
+            prompt_state.file_resolution_context(),
+        )
         .map_or_else(
             |error| Err(route_handoff_failure(
                 lifecycle_guard,
@@ -1331,7 +1322,11 @@ fn bootstrap_blocked(
     .unwrap_or_else(|| eyre!("{error}"))
 }
 
-fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
+/// A materialization with no document content, whose catch stacks resolve
+/// through `file_resolution_context`.
+fn empty_materialized_prompt(
+    file_resolution_context: biscuit_file::FileResolutionContext,
+) -> MaterializedHarnessPrompt {
     MaterializedHarnessPrompt {
         frontmatter: serde_json::Value::Null,
         prompt: String::new(),
@@ -1339,7 +1334,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         selection_hints: claudine::composition::EffectiveSelectionHints::default(),
         inline_closure_plan: None,
         launch_schema: None,
-        file_resolution_context: None,
+        file_resolution_context,
         compose_context: None,
         document_epoch: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
@@ -1388,7 +1383,7 @@ fn preflight_fresh_document_phase(
     });
     if let Err(error) = result {
         let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());
-        let empty = empty_materialized_prompt();
+        let empty = empty_materialized_prompt(prompt_state.file_resolution_context().clone());
         return Err(emit_blocked_finalize_with_err(
             lifecycle_guard,
             &empty,
@@ -1575,7 +1570,7 @@ fn materialize_attempt_prompt_phase(
             }
             Err(other) => other,
         };
-        let empty = empty_materialized_prompt();
+        let empty = empty_materialized_prompt(prompt_state.file_resolution_context().clone());
         match emit_blocked_finalize_with_err(
             lifecycle_guard,
             &empty,

@@ -1012,7 +1012,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     );
     std::fs::write(&file_path, content).unwrap();
 
-    let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
+    let source = resolve_composition_source(file_path.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
 
     let mut approved = HashSet::new();
     approved.insert(approved_command);
@@ -1034,7 +1034,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
             ),
         ),
         file_ref_fallback_dir: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::context(),
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         invocation_context: None,
@@ -1934,12 +1934,9 @@ fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> Composit
     std::fs::create_dir_all(source.parent().unwrap()).unwrap();
     std::fs::write(&source, "x").unwrap();
 
-    let ctx = crate::harness::HarnessResolutionContext {
-        source_path: &source,
-        repo_root: Some(repo),
-        package_area: None,
-    };
-    let source_err = crate::harness::resolve_harness_path(reference, &ctx).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(source.parent().unwrap())
+        .with_repository_root(repo);
+    let source_err = crate::harness::resolve_harness_path(reference, &source, &context).unwrap_err();
 
     CompositionError::InvalidFileReference {
         context: Box::new(FileReferenceContext {
