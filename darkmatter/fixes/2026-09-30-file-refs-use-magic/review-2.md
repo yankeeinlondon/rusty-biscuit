@@ -16,7 +16,9 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: true
 created: 2026-10-01T23:33:22-07:00
 spec: 2026-09-30-file-refs-use-magic/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: darkmatter/fixes/2026-09-30-file-refs-use-magic/log.md
 description: "A **fix** review of `2026-09-30-file-refs-use-magic/spec.md`"
 fix: 2026-09-30-file-refs-use-magic/review-2.md
 previous: 2026-09-30-file-refs-use-magic/review-1.md
