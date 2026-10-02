@@ -11,13 +11,14 @@
 - `dirs` is gated behind `file-reference` and supplies the cross-platform
   home directory for `home_dir` / `~` (home-pinned) references. It replaces a
   bare `$HOME` read, which is not a complete contract on native Windows.
-- `globset` is gated behind `file-reference` and will compile the glob half
-  of a glob reference (a file-reference prefix followed by a glob)
-  (**planned**: no code uses it yet). Darkmatter already depends on the same
-  `0.4` line, so the workspace gains no new crate. Patterns must be built with
-  explicit options, not the crate defaults: `backslash_escape` is off by
-  default on Windows, so a literal `[` or `*` is escaped with character
-  classes (`globset::escape`), which read the same on every OS.
+- `globset` is gated behind `file-reference` and compiles the glob half of a
+  `GlobReference` (a file-reference prefix followed by a glob); only
+  `file_reference/glob/parse.rs` names it. Darkmatter already depends on the
+  same `0.4` line, so the workspace gains no new crate. Patterns are built
+  with explicit options, never the crate defaults: `literal_separator(true)`,
+  case-sensitive, and `backslash_escape(false)` on every OS (the default is on
+  for Unix and off for Windows), so a literal `[` or `*` is escaped with
+  character classes (`globset::escape`), which read the same everywhere.
 - `dunce` is unconditional and reduces a Windows `\\?\` verbatim path to its
   legacy spelling — but only when the legacy spelling is equivalent — at the
   crate's two boundaries:

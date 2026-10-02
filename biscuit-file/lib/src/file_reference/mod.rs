@@ -24,6 +24,7 @@ mod context;
 pub mod error;
 #[cfg(feature = "fetch")]
 pub mod fetch;
+mod glob;
 mod parse;
 mod portable;
 mod resolve;
@@ -31,6 +32,7 @@ mod resolve;
 use std::path::{Path, PathBuf};
 
 pub use error::FileReferenceError;
+pub use glob::{GlobListing, GlobReference, GlobReferenceError, SkippedEntry};
 pub use portable::{
     Attempt, AttemptOutcome, ConfigurationProblem, EnvAnchorProblem, FilterProblem, Finding,
     IntentForms, InvalidTarget, NotApplicable, PORTABLE_ENV_VARIABLES, PathIdentity,
@@ -381,6 +383,21 @@ impl DetailedResolution {
         }
     }
 
+    /// A hint for a literal miss whose text looks like a glob.
+    ///
+    /// A file reference never reads glob syntax, so `docs/*.md` names a file
+    /// called `*.md`. When such a reference matches nothing, a consumer
+    /// appends this hint to its no-match message to point at a glob-accepting
+    /// form. `None` for a match, any other failure, or text without `*`,
+    /// `?`, or `[`.
+    pub fn glob_hint(&self) -> Option<&'static str> {
+        let literal_miss = matches!(
+            self.outcome,
+            DetailedOutcome::Failed(ResolutionFailure::NoMatch)
+        );
+        (literal_miss && self.raw.contains(['*', '?', '['])).then_some(GLOB_HINT)
+    }
+
     /// Project the detailed outcome onto the legacy convenience shape.
     ///
     /// A match yields `Ok(Some(path))`, a no-match yields `Ok(None)`, and every
@@ -399,6 +416,10 @@ impl DetailedResolution {
         }
     }
 }
+
+/// The text [`DetailedResolution::glob_hint`] returns.
+const GLOB_HINT: &str = "`*`, `?`, and `[` are literal in a file reference; \
+    to match a set of files, use a form that accepts a glob reference (for example `::file-links`)";
 
 /// Entry form for a partial completion token.
 ///

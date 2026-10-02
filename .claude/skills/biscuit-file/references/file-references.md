@@ -24,8 +24,10 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 `FileReference::payload()` returns the authored text after `%`, the sigil,
 and its optional `/` (`%@/@x.md` → `@x.md`); diagnostics use it instead of
 trimming prefixes.
-Recursive `%` is a modifier, not another kind. It traverses the same ordered
-roots, does not follow directory symlinks, sorts all matches lexically, and
+Recursive `%` is a modifier, not another kind. It is `GlobReference`'s
+`take_first` on `**/<escaped payload>` under the same ordered roots (an
+absolute payload searches below its own directory), so it returns the most
+local match, not a lexical winner. It does not follow directory symlinks and
 records roots as `ProbeDisposition::SearchRoot`.
 
 Magic consumes exactly the authored `@` or `@/` sigil form. Its remaining

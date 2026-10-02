@@ -10,6 +10,7 @@ mod completion_round_trip;
 mod detailed_resolution;
 mod file_tree;
 mod finalized_reference_resolution;
+mod glob_reference;
 mod implicit_relative;
 mod magic_local_roots;
 mod parse_count;

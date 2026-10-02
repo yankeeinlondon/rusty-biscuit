@@ -360,30 +360,32 @@ whatever the process has. `resolve_target()` is the ambient twin.
 
 ### Recursive Search (`%`)
 
-A leading `%` on any reference kind switches from exact-path checking to
-recursive directory traversal. The same roots the kind would normally *join*
-against become traversal *starting points*:
-
-1. every file under each root is checked against the reference's **filename**
-   (last path component);
-2. if the reference has directory components (`%docs/spec.md`), a match's
-   parent path must additionally *end with* those components;
-3. all matches across all roots are sorted lexicographically and the first is
-   returned.
+A leading `%` turns a reference into a search: it finds the **most local**
+file whose path ends with the payload, below the roots the reference kind
+would otherwise join against. It is the first result of the
+[glob reference](#glob-references-globreference) `**/<payload>` under the
+same prefix, with the payload kept literal:
 
 ```text
-%@README.md         → search every magic root in order, recursively, for "README.md"
-%./config.toml      → search under the working directory for "config.toml"
-%@docs/spec.md      → find any "spec.md" whose parent path ends with "docs"
-%vault:notes.md     → search all vault roots for "notes.md"
+%@README.md       → first match of  @**/README.md
+%./config.toml    → first match of  ./**/config.toml
+%@docs/spec.md    → first match of  @**/docs/spec.md   (a spec.md whose parent ends with docs)
+%vault:notes.md   → first match of  vault:**/notes.md
+%pages/[id].md    → finds a file literally named [id].md
+%/srv/conf/x.md   → first match of  /srv/conf/**/x.md (an absolute payload searches below its directory)
 ```
 
-Recursive references use the same post-interpolation anchoring and root order
-as direct references. Traversal does **not** follow directory symlinks
-(direct exact-path probing does follow a final symlink to its regular-file
-target). In [detailed diagnostics](#diagnostics-resolve_detailed), each
-traversal root is recorded with `ProbeDisposition::SearchRoot` rather than as
-a direct candidate probe.
+"Most local" is the glob's native order: the first root, in the kind's
+precedence order, that holds any match wins, and within it the shallowest
+match. From inside a package, `%^README.md` returns the package's
+`x/y/README.md` before the repository root's `README.md`; later roots are not
+searched once a root has a match.
+
+Recursive references use the same post-interpolation anchoring, roots, and
+boundary checks as direct references, and the search does **not** follow
+directory symlinks. In [detailed diagnostics](#diagnostics-resolve_detailed),
+each root is recorded with `ProbeDisposition::SearchRoot` rather than as a
+direct candidate probe.
 
 ### Environment Variable Interpolation
 
@@ -968,9 +970,10 @@ which belongs to the optional fetching API rather than local resolution.
    metadata error records `Io`, stores `FileReferenceError::Io { path, source }`,
    and stops immediately. A regular file records `Matched` and wins (metadata
    follows symlinks, so a direct symlink to a regular file matches).
-   Recursive resolution traverses the same ordered roots without following
-   directory symlinks, applies the filename and parent-suffix filters, sorts
-   matches lexically across roots, and takes the first.
+   Recursive resolution is `GlobReference::take_first` on `**/<payload>`
+   over the same ordered roots, without following directory symlinks: the
+   shallowest match under the first root that has one (see
+   [Recursive Search](#recursive-search-)).
 
 6. **Normalize.** Resolved local paths are made absolute with `.`/`..`
    normalized lexically by the [path identity](#path-identity) rules (a `..`
@@ -1048,6 +1051,99 @@ A verbatim path without dot segments is then reduced to its legacy spelling,
 so `\\?\C:\repo` and `C:\repo` select the same tree. Containment additionally
 checks where a candidate really lands; see
 [Trust boundaries and containment](#trust-boundaries-and-containment).
+
+## Glob References: `GlobReference`
+
+A `FileReference` names **one** file and never reads glob syntax: `[`, `]`,
+`*`, and `?` are legal file-name characters, so `pages/[id].md` is a literal
+name. When you want **a set** of files, build a `GlobReference`. Each pattern
+is `[!][prefix]glob`: the prefix is any file-reference prefix (`./`, bare,
+`&`, `^`, `@`, `~`, `vault:`, absolute, `{{VAR}}`), and it searches exactly
+the roots that prefix resolves against.
+
+```rust,no_run
+use std::collections::HashMap;
+use biscuit_file::{FileResolutionContext, GlobReference};
+
+let ctx = FileResolutionContext::from_snapshot("/repo/pkg", None, HashMap::new())
+    .with_repository_root("/repo");
+let specs = GlobReference::new(["^**/*spec*.md", "!&**/_completed/**"])?;
+let listing = specs.list_files(&ctx)?;      // every match, most local first
+let first = specs.take_first(&ctx)?;        // the first of that order
+let member = specs.matches("/repo/pkg/x/spec.md".as_ref(), &ctx); // no walk
+let roots = specs.roots(&ctx);              // for callers that walk themselves
+# let _ = (listing, first, member, roots);
+# Ok::<(), biscuit_file::GlobReferenceError>(())
+```
+
+| Call | Returns | Use it for |
+|------|---------|------------|
+| `list_files(&ctx)` | `GlobListing { matches, skipped }` | the whole set, in native order |
+| `take_first(&ctx)` | `Option<PathBuf>` | the single most local match (`%` uses this) |
+| `matches(&path, &ctx)` | `bool` | membership of one path, which need not exist |
+| `roots(&ctx)` | `Vec<PathBuf>` | the positive patterns' roots, in precedence order |
+| `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: bare patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
+| `with_file_name_view()` | `GlobReference` | also match a bare file name at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
+| `escape(text)` | `String` | make text literal: `[id].md` → `[[]id[]].md` |
+
+### Native order: most local first
+
+Every result follows one order:
+
+```mermaid
+flowchart LR
+    A["Roots of the prefix,<br/>most local first<br/>(^: package, area, repository)"] --> B["Under each root:<br/>fewest path components first"]
+    B --> C["Same depth:<br/>compare component by component<br/>(a/x.md before a-b/x.md)"]
+```
+
+A file belongs to the **first root that contains it** and is judged only by
+its path relative to that root. A later root never re-includes a file an
+earlier root excluded: with `["^**/*spec*.md", "!x/**"]` in a package,
+`{package}/x/spec.md` is excluded, even though from the repository root it
+reads `…/pkg/x/spec.md`, which `!x/**` does not match. Two spellings of one
+file (`/var/…` and `/private/var/…` on macOS) are one file.
+
+For example, with `^**/intro.md` launched in package `pkg` of area `area`:
+
+```text
+{pkg}/intro.md, {pkg}/a/b/intro.md, {area}/intro.md, {repo}/intro.md, {repo}/z/intro.md
+```
+
+### Pattern rules
+
+- `!` marks an exclusion and takes its own prefix (`!&**/_completed/**`). At
+  least one pattern must be positive (`NoPositivePattern` otherwise).
+- `*` and `?` never cross `/`; `**` does. Matching is case-sensitive on every
+  OS. `\` is always a literal character, never an escape; write literal text
+  with `GlobReference::escape`. A `{{VAR}}` value is always literal.
+- A pattern with no glob syntax is valid and matches that one path.
+- `%` and `http(s)://` prefixes are rejected (`RejectedPrefix`): a glob is
+  already recursive, and a URL has nothing local to walk.
+- Leading literal directories narrow the search (`^docs/*.md` walks only
+  `docs/` under each root). No filters apply: hidden, ignored, and
+  `_`-prefixed files are matched like any other.
+
+### The relative boundary and symlinks
+
+Bare, `./`, and `../` patterns keep the same
+[relative boundary](#the-file-tree-base_dir-and-the-relative-boundary) as a
+single reference: a search directory outside the tree is a
+`RelativeTreeEscape` error unless the context opted in with
+`allow_external_relative()`. `~`, `@`, absolute, vault, and `{{VAR}}` roots
+are not bound by it; `&` and `^` stay inside the repository.
+
+A search never follows a directory symlink. In a bare, `./`, or `../`
+pattern, a matched **file** symlink whose target lies outside the tree is left
+out of `matches` and reported in `GlobListing::skipped` (link and target), so
+a caller can say why it is missing. A single `FileReference` to that link
+still fails with `RelativeTreeEscape`.
+
+### When a literal reference misses
+
+If a `FileReference` whose text contains `*`, `?`, or `[` finds nothing,
+`DetailedResolution::glob_hint()` returns a hint that the text was read
+literally and a glob-accepting form is needed. Consumers append it to their
+no-match message.
 
 ## Portable References: `PortablePath`
 
