@@ -1,8 +1,9 @@
 //! Pure token-shape predicates for the completion classifier.
 //!
 //! Each function classifies a single argv token by its lexical shape — flag,
-//! value-bearing flag, `name=value` setter, or setter-name partial — with no
-//! dependency on engine state. Several mirror shapes defined in
+//! `name=value` setter, or setter-name partial — with no dependency on engine
+//! state. Which Claudine options take a value comes from the clap definitions
+//! ([`crate::argv::OwnedFlags`]), never from a list here. Several mirror shapes defined in
 //! [`crate::argv`]; they are duplicated here so the classifier stays
 //! self-contained (see the individual notes).
 
@@ -45,33 +46,6 @@ pub(super) fn is_setter_name_partial(token: &str) -> bool {
 
 pub(super) fn is_flag_token(token: &str) -> bool {
     token.starts_with('-') && token != "-" && token != "--"
-}
-
-/// Value-bearing flag surface for composition subcommands. Mirrors
-/// [`crate::argv::COMPOSITION_FLAGS_WITH_VALUE`] but is duplicated here so
-/// the classifier stays self-contained.
-pub(super) fn is_value_bearing_flag(token: &str) -> bool {
-    matches!(
-        token,
-        "--provider"
-            | "--exclude"
-            | "--include"
-            | "--model"
-            | "-m"
-            | "--output"
-            | "-o"
-            | "--append-system-prompt"
-            | "--asp"
-            | "--replace-system-prompt"
-            | "--rsp"
-            | "--timeout"
-            | "-t"
-            | "--operation"
-            | "--op"
-            | "--set"
-            | "--use"
-            | "--fail-fast"
-    )
 }
 
 /// `^[A-Za-z_][A-Za-z0-9_-]*=` — same shape as

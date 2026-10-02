@@ -558,6 +558,14 @@ and a required file value is missing (omitted positional argument or a
 `ChooseMany` chooser. See [Shell Completions](topics/completions/shell-completions.md)
 for details.
 
+**Provider arguments.** After a composition file, `<TAB>` completes a word
+only when type-aware ownership gives it to Claudine: `compose plan.md --codex
+-c <TAB>` offers nothing (the word is `-c`'s value), `compose plan.md --codex
+-c low ph<TAB>` offers `phase=`. An ambiguous word, a line execution would
+reject, or anything after an authored `--` offers nothing; completion never
+prompts. See [Shell Completions → Provider arguments after the composition
+file](topics/completions/shell-completions.md#provider-arguments-after-the-composition-file).
+
 ---
 
 ## `claudine context`

@@ -122,31 +122,6 @@ fn a_token_splits_only_in_researched_attachment_forms() {
     assert_eq!(match_token_in(GAP, &["exec"], "-cx"), None);
 }
 
-/// Candidates keep every provider's answer; they agree only on an equal
-/// value, and unknown never agrees with known.
-#[test]
-fn candidates_keep_each_answer_and_agree_only_on_equal_values() {
-    let union = |arms: Vec<SwitchLookup>| CandidateSwitch {
-        arms: arms
-            .into_iter()
-            .zip([Provider::Codex, Provider::Claude, Provider::Gemini])
-            .map(|(lookup, provider)| (provider, lookup))
-            .collect(),
-    };
-    let config = lookup_in(CATALOG, &[], "-c");
-    let agreed = union(vec![config, config]);
-    assert_eq!(agreed.agreed_value(), Some(SwitchValue::String { optional: false }));
-    assert_eq!(agreed.arms()[1].0, Provider::Claude);
-
-    let mixed = union(vec![config, SwitchLookup::NotInCatalog]);
-    assert_eq!(mixed.agreed_value(), None);
-    assert_eq!(mixed.arms()[1], (Provider::Claude, SwitchLookup::NotInCatalog));
-
-    let unknown = union(vec![SwitchLookup::NotInCatalog, SwitchLookup::CatalogGap { gap: "g" }]);
-    assert_eq!(unknown.agreed_value(), Some(SwitchValue::Unknown));
-    assert_eq!(union(vec![]).agreed_value(), None);
-}
-
 /// The compiled Codex catalog answers per command path: the resume
 /// entrypoint has its own records, so a switch may take a list under `exec`
 /// and one value under `exec resume`.
@@ -161,6 +136,4 @@ fn codex_resume_entrypoint_has_its_own_answers() {
     assert!(matches!(lookup_switch(Provider::Codex, &["exec", "resume"], "--json"), SwitchLookup::Known(_)));
     assert_eq!(lookup_switch(Provider::Codex, &[], "--json"), SwitchLookup::NotInCatalog);
 
-    let candidates = lookup_candidates([(Provider::Codex, &["exec"][..]), (Provider::Codex, &["exec", "resume"][..])], "-i");
-    assert_eq!(candidates.agreed_value(), None, "variadic and scalar disagree");
 }

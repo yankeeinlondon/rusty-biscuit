@@ -204,19 +204,25 @@ assert_eq!(token.spelling, "-c");
 | --- | --- |
 | `lookup_switch(provider, path, spelling)` | `Known(&CliSwitch)`; `NotInCatalog` when the inventory is researched and nothing applies there; `CatalogGap { gap }` when the inventory is a gap |
 | `match_switch_token(provider, path, token)` | The record for a whole token: an exact spelling, `--name=value` for a switch that accepts `equals`, or `-xvalue` for one that accepts `short_attached`; `None` otherwise |
-| `lookup_candidates(candidates, spelling)` | One answer per `(provider, path)` candidate, in order; `agreed_value()` is the value every candidate shares, or `None` when two disagree |
 
 `SwitchLookup::value()` reads anything not established as
 `SwitchValue::Unknown`, never `None`, so an unresearched switch is never
-mistaken for one that takes no value, and a switch known to one candidate but
-not another disagrees.
+mistaken for one that takes no value.
 
-The forwarding notice uses the lookup today: it names `-csecret` as `-c` only
-because Codex's `-c` is researched as `short_attached`, and it explains each
-forwarded switch (see
-[CLI Pre-Parsing → Forwarding notice](argv-normalization.md#forwarding-notice-and-redaction)).
-**Planned:** using the value types to decide which arguments on a composition
-command line belong to the agent.
+Two readers use the lookup:
+
+- **The forwarding notice** names `-csecret` as `-c` only because Codex's `-c`
+  is researched as `short_attached`, and it explains each forwarded switch
+  (see
+  [CLI Pre-Parsing → Forwarding notice](argv-normalization.md#forwarding-notice-and-redaction)).
+- **Type-aware ownership** reads each candidate provider's value type through
+  `match_switch_token` to decide which words after a composition file belong
+  to the agent, and checks them again against the provider that launches
+  (see [Type-aware ownership](argv-normalization.md#type-aware-ownership)).
+  A switch one candidate knows and another does not is read differently by
+  the two, which ownership treats as a disagreement, never as "takes no
+  value". Shell completion asks the same question, so it never offers a
+  setter for a word the agent will receive.
 
 A test in `claudine-cli` fails when a switch table (a `CliSwitch` literal, an
 array of them, or a researched catalog over a literal slice) is written

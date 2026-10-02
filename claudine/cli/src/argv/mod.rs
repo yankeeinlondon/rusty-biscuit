@@ -48,7 +48,7 @@ mod rule1_provider_bool;
 mod rule2_canonicalize;
 mod rule4_help_hoist;
 
-pub(crate) use partition::partition_composition_tail;
+pub(crate) use partition::{OwnedFlags, partition_composition_tail};
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
 pub(crate) use rule4_help_hoist::hoist_composition_help;
@@ -59,7 +59,8 @@ pub(crate) const WRAPPER_SUBCOMMANDS: &[&str] = &[
 ];
 
 /// Composition subcommands that collect positional args plus `key=value`
-/// setters in any order. Rule 3 only fires on these subcommands.
+/// setters in any order. Rules 1 and 4 and the ownership partition fire only
+/// on these subcommands.
 pub(crate) const COMPOSITION_SUBCOMMANDS: &[&str] = &["compose", "inline-compose", "sequence"];
 
 /// Claudine root-level global long flags that consume the following token as
@@ -69,8 +70,8 @@ const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &["--debug"];
 /// Normalize raw argv before clap parses it.
 ///
 /// Applies Rules 1 and 2 left-to-right, stopping at the first literal `--`,
-/// then Rule 3 and Rule 4 on the rewritten argv. See [the module docs](self)
-/// for pass-through guarantees.
+/// then Rule 4 on the rewritten argv. See [the module docs](self) for
+/// pass-through guarantees.
 pub(crate) fn normalize(raw: Vec<OsString>) -> Vec<OsString> {
     normalize_inner(raw, completion_mode_active())
 }
@@ -88,6 +89,13 @@ pub(crate) fn normalize_with_completion(
     completion_active: bool,
 ) -> Vec<OsString> {
     normalize_inner(raw, completion_active)
+}
+
+/// [`normalize`] for the completion engine, which classifies the argv a
+/// shell hands to `claudine __complete` (where `COMPLETE` may be set) the way
+/// a real invocation would be read.
+pub(crate) fn normalize_for_completion(raw: Vec<OsString>) -> Vec<OsString> {
+    normalize_inner(raw, false)
 }
 
 /// Shared core of [`normalize`] and the test-only

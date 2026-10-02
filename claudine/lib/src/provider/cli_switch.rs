@@ -132,42 +132,5 @@ pub(crate) fn match_token_in<'t>(catalog: CliSwitchCatalog, path: &[&str], token
     None
 }
 
-/// One spelling looked up for every provider a command might launch, each at
-/// its own command path, keeping every provider's answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CandidateSwitch {
-    arms: Vec<(Provider, SwitchLookup)>,
-}
-
-impl CandidateSwitch {
-    /// Each candidate provider's answer, in the order the candidates were
-    /// given.
-    pub fn arms(&self) -> &[(Provider, SwitchLookup)] {
-        &self.arms
-    }
-
-    /// The value every candidate agrees on, or `None` when two disagree. An
-    /// unestablished answer counts as [`SwitchValue::Unknown`], so a switch
-    /// known to one candidate and unknown to another disagrees.
-    pub fn agreed_value(&self) -> Option<SwitchValue> {
-        let mut values = self.arms.iter().map(|(_, lookup)| lookup.value());
-        let first = values.next()?;
-        values.all(|value| value == first).then_some(first)
-    }
-}
-
-/// Looks up `spelling` for each `(provider, path)` candidate.
-pub fn lookup_candidates<'p>(
-    candidates: impl IntoIterator<Item = (Provider, &'p [&'p str])>,
-    spelling: &str,
-) -> CandidateSwitch {
-    CandidateSwitch {
-        arms: candidates
-            .into_iter()
-            .map(|(provider, path)| (provider, lookup_switch(provider, path, spelling)))
-            .collect(),
-    }
-}
-
 #[cfg(test)]
 mod tests;

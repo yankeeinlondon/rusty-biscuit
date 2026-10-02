@@ -450,18 +450,76 @@ impl SwitchSource for Fixed {
 
 #[test]
 fn a_variadic_minimum_is_checked_and_an_unknown_minimum_never_fails() {
-    let one = own_in(&Fixed, &after_file(&["--pair", "a"]), &SchemaParameters::NoSchema, &codex());
+    let fixed = |tokens: &[&str]| {
+        own_in(&Fixed, &after_file(tokens), &SchemaParameters::NoSchema, &codex()).map(|(owned, _)| owned)
+    };
+    let one = fixed(&["--pair", "a"]);
     let Err(OwnershipError::Mismatch(mismatch)) = one else { panic!("{one:?}") };
     assert_eq!(mismatch.kind, MismatchKind::TooFewValues { min: 2, given: 1 });
     assert!(mismatch.to_string().contains("at least 2 values"), "{mismatch}");
 
-    let two = own_in(&Fixed, &after_file(&["--pair", "a", "b"]), &SchemaParameters::NoSchema, &codex()).unwrap();
+    let two = fixed(&["--pair", "a", "b"]).unwrap();
     assert_eq!(two.tail.launch_args(), s(&["--pair", "a", "b"]));
     // An attached first value counts and is not extended.
-    let attached = own_in(&Fixed, &after_file(&["--pair=a", "b"]), &SchemaParameters::NoSchema, &codex());
+    let attached = fixed(&["--pair=a", "b"]);
     let Err(OwnershipError::Mismatch(mismatch)) = attached else { panic!("{attached:?}") };
     assert_eq!(mismatch.kind, MismatchKind::TooFewValues { min: 2, given: 1 });
 
-    let none = own_in(&Fixed, &after_file(&["--maybe"]), &SchemaParameters::NoSchema, &codex()).unwrap();
+    let none = fixed(&["--maybe"]).unwrap();
     assert_eq!(none.tail.launch_args(), s(&["--maybe"]));
+}
+
+fn last_owner(
+    tokens: &[&str],
+    schema: &SchemaParameters,
+    candidates: &[OwnershipCandidate],
+) -> Result<Option<ArgumentOwner>, OwnershipError> {
+    owner_of_last_argument(&after_file(tokens), schema, candidates)
+}
+
+#[test]
+fn the_last_argument_owner_follows_the_same_rules_as_ownership() {
+    let phase = SchemaParameters::from_names(["phase"]);
+    let cases: &[(&[&str], &[OwnershipCandidate], Option<ArgumentOwner>)] = &[
+        // A word an open string switch takes is the provider's, even when
+        // it is empty (the cursor sits on an unfinished value).
+        (&["-c", ""], &codex(), Some(ArgumentOwner::Provider)),
+        (&["-c", "mod"], &codex(), Some(ArgumentOwner::Provider)),
+        // A declared parameter directly after the switch is Claudine's.
+        (&["-c", "low", "ph"], &codex(), Some(ArgumentOwner::Claudine)),
+        (&["-c", "x=y", "phase="], &codex(), Some(ArgumentOwner::Claudine)),
+        // A removed Claudine option is nobody's word, and it ends the run:
+        // the word after it is Claudine's.
+        (&["-c", "x=y", "|"], &codex(), None),
+        (&["-c", "x=y", "|", "ph"], &codex(), Some(ArgumentOwner::Claudine)),
+        // No switch: candidates are never consulted.
+        (&["alpha", "ph"], &[], Some(ArgumentOwner::Claudine)),
+        (&[], &[], None),
+    ];
+    for (tokens, candidates, expected) in cases {
+        assert_eq!(last_owner(tokens, &phase, candidates).unwrap(), *expected, "{tokens:?}");
+    }
+}
+
+#[test]
+fn the_last_argument_owner_reports_every_ownership_error() {
+    let phase = SchemaParameters::from_names(["phase"]);
+    // A declared parameter leaves `-c` without a value: terminal, not an
+    // unfinished slot.
+    assert!(matches!(
+        last_owner(&["-c", "phase=2", "ph"], &phase, &codex()),
+        Err(OwnershipError::Mismatch(TailMismatch { kind: MismatchKind::MissingValue, .. }))
+    ));
+    assert!(matches!(
+        last_owner(&["-c", ""], &SchemaParameters::NoSchema, &claude_and_codex()),
+        Err(OwnershipError::Ambiguous(_))
+    ));
+    assert!(matches!(
+        last_owner(&["-c", "x=y"], &SchemaParameters::Unestablished, &codex()),
+        Err(OwnershipError::ContestedSetter { .. })
+    ));
+    assert!(matches!(
+        last_owner(&["argv="], &SchemaParameters::NoSchema, &[]),
+        Err(OwnershipError::ReservedArgv)
+    ));
 }

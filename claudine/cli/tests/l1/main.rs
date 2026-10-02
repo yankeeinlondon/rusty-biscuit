@@ -23,6 +23,7 @@ mod completion_cli;
 mod completion_compose;
 mod completion_contract;
 mod completion_inline_compose;
+mod completion_ownership;
 mod completion_perf;
 mod completion_resolution_round_trip;
 mod completion_sequence;

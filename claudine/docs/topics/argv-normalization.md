@@ -351,6 +351,23 @@ Name the provider (for example `--codex`), or pass provider arguments after `--`
 A scalar-versus-list disagreement (one candidate stops after one value, another
 keeps going) is ambiguous the same way.
 
+### Shell completion reads the same ownership
+
+`claudine __complete` asks the same function who owns the word under the
+cursor (`claudine::composition::owner_of_last_argument`, called from
+`cli/src/completion/engine/ownership.rs`). It normalizes and partitions the
+words before the cursor exactly as a run would, reads the file's literal
+`agent` and `$schema` only when a provider switch follows the file, and
+offers nothing for a word the agent owns or a line ownership rejects. It never
+prompts. See
+[Shell Completions → Provider arguments after the composition file](completions/shell-completions.md#provider-arguments-after-the-composition-file).
+
+```text
+$ claudine compose plan.md --codex -c <TAB>      # nothing: the word is -c's value
+$ claudine compose plan.md --codex -c low ph<TAB>
+phase=
+```
+
 ### The resolved-provider check
 
 Ownership with several candidates reads a union of types, so the provider that
@@ -523,7 +540,9 @@ The normalizer never mutates argv when any of the following hold:
 1. **Completion mode.** `clap_complete::CompleteEnv` signals completion
    through the `COMPLETE` environment variable. When set, argv is
    returned untouched so dynamic completion sees exactly what the shell
-   typed.
+   typed. The `__complete` engine then normalizes the typed words itself
+   (`normalize_for_completion`), so its ownership reading matches a real
+   run.
 2. **Tokens at or after `--`.** The first literal `--` terminates the
    rule scan; everything after it is copied verbatim.
 3. **Non-UTF-8 tokens.** Rules are pattern-based on `&str`; `OsString`

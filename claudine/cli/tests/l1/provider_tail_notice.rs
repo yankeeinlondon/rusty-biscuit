@@ -457,3 +457,37 @@ fn direct_wrapper_also_refuses_non_utf8_passthrough() {
     let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
     assert!(stderr.to_lowercase().contains("utf-8"), "stderr:\n{stderr}");
 }
+
+#[test]
+fn review_probe_secret_surfaces() {
+    let secret = "sk-proj-reviewsecret0123456789";
+    let fixture = CliProcessFixture::named("review-secret-surfaces");
+    let dir = recording_codex(&fixture);
+    let file = prompt_file(&fixture);
+    let inline = fixture.cwd().join("inline.md");
+    fs::write(&inline, "---\nprompt: Say hello\n---\nBody\n").unwrap();
+    let seq = fixture.cwd().join("seq.md");
+    fs::write(&seq, "---\nsequence:\n  - prompt: plan.md\n---\nBody\n").unwrap();
+    let envfile = fixture.cwd().join("params.txt");
+    for command in ["compose", "inline-compose", "sequence", "codex"] {
+        let input = match command { "inline-compose" => inline.to_str().unwrap(), "sequence" => seq.to_str().unwrap(), "codex" => "hello", _ => &file };
+        for shape in [format!("api_key={secret}"), format!("--config={secret}"), format!("-c{secret}"), format!("--token={secret}")] {
+            let tail: Vec<&str> = if shape.starts_with("api_key") { vec!["-c", &shape] } else { vec![&shape] };
+            let mut args = vec![command, input];
+            if command != "codex" {args.push("--codex");}
+            args.extend(&tail);
+            let mut dry = args.clone(); dry.insert(1, "--dry-run");
+            let (code, text) = run(&fixture, &dry);
+            eprintln!("REVIEW dry {command} {shape}: code={code} leak={}", text.contains(secret));
+            for reject in [false, true] {
+                let behavior = if reject {format!("printf \"error: unexpected argument '--config' found: {secret}\\n\" >&2\nexit 2")} else {"exit 0".to_string()};
+                write_executable(&fixture.bin_dir().join("codex"), &format!("#!/bin/sh\nprintf '%s' \"$AGENT_PARAMS\" > '{}'\nfor arg in \"$@\"; do printf '%s\\037' \"$arg\"; done > '{}/review-argv'\n{behavior}\n", envfile.display(), dir.display()));
+                let output = fixture.command().env("RUST_LOG", "claudine=debug").args(&args).output().unwrap();
+                let text = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+                let params = fs::read_to_string(&envfile).unwrap_or_default();
+                let argv = fs::read_to_string(dir.join("review-argv")).unwrap_or_default();
+                eprintln!("REVIEW launch {command} {shape} reject={reject}: code={:?} stderrleak={} paramsleak={} childsecret={} correlated={}", output.status.code(), text.contains(secret), params.contains(secret), argv.contains(secret), text.contains("likely caused by"));
+            }
+        }
+    }
+}

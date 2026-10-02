@@ -429,7 +429,36 @@ pub fn own_arguments(
     schema: &SchemaParameters,
     candidates: &[OwnershipCandidate],
 ) -> Result<OwnedArguments, OwnershipError> {
-    own_in(&CompiledCatalog, arguments, schema, candidates)
+    own_in(&CompiledCatalog, arguments, schema, candidates).map(|(owned, _)| owned)
+}
+
+/// Who owns an argument after the composition file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgumentOwner {
+    /// A setter or a positional (`argv`).
+    Claudine,
+    /// A forwarded switch or one of its values.
+    Provider,
+}
+
+/// Classify `arguments` exactly as [`own_arguments`] does and report who owns
+/// the last one. Completion passes the word under the cursor as that last
+/// argument, so a word an open switch would take reads as the provider's.
+///
+/// `None` when there are no arguments or the last one is a
+/// [`CallerArgument::ClaudineOption`]. With no forwarded switch among the
+/// arguments the candidates are never consulted, so they may be empty.
+///
+/// ## Errors
+///
+/// The same [`OwnershipError`] [`own_arguments`] would return, including a
+/// mismatch the full line has for every candidate.
+pub fn owner_of_last_argument(
+    arguments: &ArgumentsAfterFile,
+    schema: &SchemaParameters,
+    candidates: &[OwnershipCandidate],
+) -> Result<Option<ArgumentOwner>, OwnershipError> {
+    own_in(&CompiledCatalog, arguments, schema, candidates).map(|(_, last)| last)
 }
 
 fn own_in(
@@ -437,16 +466,18 @@ fn own_in(
     arguments: &ArgumentsAfterFile,
     schema: &SchemaParameters,
     candidates: &[OwnershipCandidate],
-) -> Result<OwnedArguments, OwnershipError> {
+) -> Result<(OwnedArguments, Option<ArgumentOwner>), OwnershipError> {
     let mut claudine = Vec::new();
     let mut implicit: Vec<String> = Vec::new();
     let mut assignments: Vec<SwitchAssignment> = Vec::new();
     let mut open: Option<OpenSwitch> = None;
+    let mut last = None;
 
     for argument in &arguments.arguments {
         let token = match argument {
             CallerArgument::ClaudineOption => {
                 open = None;
+                last = None;
                 continue;
             }
             CallerArgument::Token(token) => token,
@@ -469,10 +500,12 @@ fn own_in(
                     });
                 }
                 take(open, &mut implicit, &mut assignments, token);
+                last = Some(ArgumentOwner::Provider);
                 continue;
             }
             open = None;
             claudine.push(token.clone());
+            last = Some(ArgumentOwner::Claudine);
             continue;
         }
 
@@ -489,11 +522,13 @@ fn own_in(
                 arms: candidates.iter().map(|c| Arm::for_token(source, c, token)).collect(),
                 taken: 0,
             });
+            last = Some(ArgumentOwner::Provider);
             continue;
         }
 
         let Some(current) = open.as_mut() else {
             claudine.push(token.clone());
+            last = Some(ArgumentOwner::Claudine);
             continue;
         };
         let readings: Vec<SwitchReading> = current
@@ -507,9 +542,11 @@ fn own_in(
             .collect();
         if readings.iter().all(|reading| reading.takes_word) {
             take(current, &mut implicit, &mut assignments, token);
+            last = Some(ArgumentOwner::Provider);
         } else if readings.iter().all(|reading| !reading.takes_word) {
             open = None;
             claudine.push(token.clone());
+            last = Some(ArgumentOwner::Claudine);
         } else {
             return Err(OwnershipError::Ambiguous(AmbiguousSwitch {
                 switch: current.label.clone(),
@@ -534,7 +571,7 @@ fn own_in(
     if let Some(mismatch) = first_mismatch {
         return Err(OwnershipError::Mismatch(mismatch));
     }
-    Ok(OwnedArguments { claudine, tail })
+    Ok((OwnedArguments { claudine, tail }, last))
 }
 
 fn take(open: &mut OpenSwitch, implicit: &mut Vec<String>, assignments: &mut [SwitchAssignment], token: &str) {

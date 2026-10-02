@@ -85,7 +85,8 @@ pub(crate) fn own_caller_arguments(
 
 /// The command-line provider, else the literal frontmatter `agent`
 /// providers, else every provider; each at its launch's command path.
-fn candidates(shared: &SharedComposeArgs, source: &ResolvedCompositionSource) -> Vec<OwnershipCandidate> {
+/// Shell completion reads the same candidates.
+pub(crate) fn candidates(shared: &SharedComposeArgs, source: &ResolvedCompositionSource) -> Vec<OwnershipCandidate> {
     let frontmatter = source.markdown.frontmatter();
     let hints = parse_selection_hints_from_frontmatter(frontmatter).ok();
     let providers: Vec<Provider> = match shared.explicit_provider() {

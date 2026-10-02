@@ -18,19 +18,19 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1784,
-    "provider_refs": 1963,
+    "sites": 1780,
+    "provider_refs": 1956,
     "by_form": {
-      "direct-ref": 1722,
+      "direct-ref": 1719,
       "eq-comparison": 20,
       "match-provider": 8,
       "matches-macro": 14,
       "ne-comparison": 10,
-      "tuple-array": 10
+      "tuple-array": 9
     },
     "by_dispatch_class": {
-      "conditional": 62,
-      "reference": 1722
+      "conditional": 61,
+      "reference": 1719
     }
   },
   "sites": [
@@ -12915,39 +12915,7 @@
     },
     {
       "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 132,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude",
-        "Codex",
-        "Gemini"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 139,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 143,
-      "form": "direct-ref",
-      "dispatch_class": "reference",
-      "providers": [
-        "Claude"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 155,
+      "line": 130,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -12957,7 +12925,7 @@
     },
     {
       "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 159,
+      "line": 134,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -12967,7 +12935,7 @@
     },
     {
       "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 161,
+      "line": 136,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -12977,19 +12945,9 @@
     },
     {
       "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 162,
+      "line": 137,
       "form": "direct-ref",
       "dispatch_class": "reference",
-      "providers": [
-        "Codex"
-      ],
-      "exempt_candidate": true
-    },
-    {
-      "path": "claudine/lib/src/provider/cli_switch/tests.rs",
-      "line": 164,
-      "form": "tuple-array",
-      "dispatch_class": "conditional",
       "providers": [
         "Codex"
       ],

@@ -185,6 +185,12 @@ impl OwnedFlags {
         self.bool_flags.contains(flag)
     }
 
+    /// Whether `token` is a Claudine option whose value is the next argv
+    /// token (`--model`, `-m`, but not `--model=x` or `-mx`).
+    pub(crate) fn consumes_next(&self, token: &str) -> bool {
+        looks_like_flag(token) && matches!(self.classify(token), Ownership::ConsumesNext)
+    }
+
     /// Classify a flag-shaped token against the owned surface.
     fn classify(&self, token: &str) -> Ownership {
         if let Some(long_body) = token.strip_prefix("--") {

@@ -80,8 +80,8 @@ pub use billing_model::BillingModel;
 pub use cap_policy::CapPolicy;
 pub use cli_sensitivity::CliSensitiveAxes;
 pub use cli_switch::{
-    CandidateSwitch, CliSwitch, CliSwitchCatalog, SwitchAttachment, SwitchLookup, SwitchScope,
-    SwitchToken, SwitchValue, VariadicMin, lookup_candidates, lookup_switch, match_switch_token,
+    CliSwitch, CliSwitchCatalog, SwitchAttachment, SwitchLookup, SwitchScope, SwitchToken,
+    SwitchValue, VariadicMin, lookup_switch, match_switch_token,
 };
 #[cfg(test)]
 pub(crate) use cli_switch::match_token_in;
