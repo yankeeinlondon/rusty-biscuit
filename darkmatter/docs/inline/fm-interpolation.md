@@ -340,8 +340,8 @@ state, not text:
   `serde_json::Value` result is preserved (so `{{ false }}` stays the boolean
   `false`, a numeric expression stays a number, and an array/object result keeps
   its type).
-- Undefined variables are not an error: a whole-value `{{ missing }}` resolves
-  to `null` (and warns as described above).
+- An absent document property is not an error: a whole-value `{{ missing }}`
+  resolves to `null` (and warns as described above).
 
 Mixed text (`"a {{ x }}"`) and strings holding more than one expression
 interpolate to a string instead.

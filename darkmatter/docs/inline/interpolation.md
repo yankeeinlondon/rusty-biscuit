@@ -183,6 +183,11 @@ column, and the expression. Nothing is written to stdout, and the `{{ … }}` ne
 output. `ComposeOptions::with_fail_fast(false)` does not relax this; it governs
 recoverable non-expression stages such as TOC linking.
 
+A host that registers its own globals can also mark one unavailable in a
+given scope; reading it fails the same way, with the host's reason (see
+[Host Bindings](../topics/darkmatter-expressions.md#host-bindings)). `md compose`
+registers none.
+
 A missing *value* is not a failure — see [Missing Variables](#missing-variables).
 
 

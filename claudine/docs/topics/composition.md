@@ -461,9 +461,9 @@ effective frontmatter as raw expansion syntax.
   successfully. A parse failure (e.g. the malformed `spec_path: "{{ dirname(review) + '/spec.md') }}"`)
   or an evaluation failure aborts composition with a precise
   `Interpolation parse failed` / `Interpolation evaluation failed` diagnostic
-  naming the frontmatter key — **even when `fail_fast` is off**. Undefined
-  variables remain lenient: a bare `{{ missing }}` still resolves to `null`
-  rather than aborting.
+  naming the frontmatter key — **even when `fail_fast` is off**. An absent
+  document property is not a failure: a bare `{{ missing }}` resolves to
+  `null`, and no `||` fallback is needed to make it legal.
 - **Whole-value `$(...)` shell expansion** must parse and expand when
   frontmatter shell expansion is enabled. If shell expansion is explicitly
   disabled, the `$(...)` value is deferred unchanged. When enabled, a value

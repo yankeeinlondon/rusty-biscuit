@@ -304,9 +304,13 @@ Before anything runs, Claudine walks the **entire task graph**:
   *including branches that may never run*. Approved bytes are executed bytes.
 
   Resolution is **early-binding only**: `state`, `params`, template values,
-  `doc.*`, `ctx.*`, `env.*`. A shell string referencing `outputs` or a
-  runtime-mutated value is a typed preflight error — route that work through a
-  `prompt` or `side_effect` task instead.
+  `doc.*`, `ctx.*`, `env.*`. A shell string referencing `outputs`, a
+  lifecycle global (`err`, `timing`, `group` — even for a group member's
+  command, since no group is entered yet), or a runtime-mutated value is a
+  typed preflight error — route that work through a `prompt` or `side_effect`
+  task instead. `doc.group` still reads the document. A task's `setup:` and
+  `teardown:` commands run the bytes approved here, even if a `set` changed
+  the value they were built from.
 - **Git working state is observed once for the whole walk.** Static preflight
   is one discovery run: every referenced document (and every file it includes)
   that names a Git fact such as `ctx.staged_files` reads the same observation.

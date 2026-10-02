@@ -90,15 +90,24 @@ prepare-time check and event-time evaluation consult that one declaration:
 | `blocked`, `failure` | the failure | available | inside a group only |
 | `finalize`, task `teardown:` | the failure, or `null` when there is none | available | inside a group only |
 | a `shell` command (approved before any event fires) | unavailable | unavailable | unavailable |
+| a sequence task's commands at sequence-wide approval (primary, `setup:`, `teardown:`, group members) | unavailable | unavailable | unavailable |
 
 Reading an unavailable global is an error that names the global and the
 reason (`claudine.event-has-no-error`, `claudine.outside-group`,
 `claudine.preflight-unavailable`). It never falls back to a document property
 of the same name; write `doc.err` or `doc.group` to read one of those.
 
-A lifecycle property's interpolation resolves against the union of both, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+Two consequences are worth calling out. In `finalize` and a task's
+`teardown:`, `err` is always readable: it is an explicit `null` when the run
+did not fail, so `when: "err"` is simply false. At sequence-wide approval no
+group has been entered yet, so `group` is unavailable there even for a command
+that will run inside a group; a group member reads `group` at event time
+instead. Sequence approval also refuses `outputs`, because no step has
+produced one yet when the whole graph is approved.
 
-This is the consistent rule used everywhere else: a value is literal text and `{{{ … }}}` is how you opt into the expression engine. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
+A lifecycle property's interpolation resolves against the union of the early- and late-binding surfaces, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
+
+Spans follow ordinary Darkmatter rules: `{{ … }}` is evaluated, and `{{{ … }}}` is an escape that renders the literal text `{{ … }}` without evaluating it. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
 
 ## When Lifecycle Properties Interpolate
 
@@ -117,8 +126,8 @@ Lifecycle YAML accepts only `set: {property: value}`; the positional
 API. Mapping-based lifecycle `set` evaluates every value against one pre-write snapshot. Its
 destination keys are declared bindings: an absent destination reads as null,
 while an existing value is retained for evaluation. A whole-value expression
-preserves null; null embedded in text renders empty. Unrelated undeclared roots
-still fail strict evaluation. In a loop, initialization and its catch handlers
+preserves null; null embedded in text renders empty. Any other absent property
+reads as `null` too. In a loop, initialization and its catch handlers
 use the full bootstrap frontmatter, and initialization writes persist in the
 runtime state for subsequent iterations.
 The mapping keeps its authored key order whether it was written in YAML
@@ -618,14 +627,14 @@ failure:
 
 ### Positional actions with interpolation
 
-Action values are literal text; `{{{ … }}}` interpolates a value:
+Action values interpolate `{{ … }}` spans; context values are read through `ctx.*` (a bare `agent` or `branch` is a document property, not context):
 
 ```yaml
 ---
 start:
   stack:
-    - action: { info: "running {{agent}}" }
-    - action: { shell: "git fetch origin {{branch}}" }
+    - action: { info: "running {{ ctx.agent }}" }
+    - action: { shell: "git fetch origin {{ ctx.branch }}" }
 ---
 ```
 

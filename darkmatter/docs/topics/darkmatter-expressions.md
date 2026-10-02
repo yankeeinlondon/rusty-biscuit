@@ -123,6 +123,30 @@ title: Notes
 {{ ctx.repo }}  <!-- the repository name -->
 ```
 
+Every root is classified the same way, in this order. A host such as Claudine
+can register extra globals (see [Host Bindings](#host-bindings)); plain
+`md compose` registers none, so for it every unreserved root is a document
+property.
+
+```mermaid
+flowchart TD
+    R["root name, e.g. err in err.message"] --> N{"reserved namespace?<br/>doc ctx env current current_env"}
+    N -- yes --> NS["read the namespace"]
+    N -- no --> G{"global registered<br/>by the host?"}
+    G -- "yes, available" --> GV["the global's value<br/>(possibly null)"]
+    G -- "yes, unavailable" --> GE["typed error naming the root<br/>and the host's reason"]
+    G -- no --> D{"document property<br/>present?"}
+    D -- yes --> DV["the property's value"]
+    D -- no --> DN["null<br/>(advisory dm.expression.undeclared_property)"]
+```
+
+A missing document property is a valid lookup, not an error, so an optional
+input needs no `||` fallback to be legal: `{{ plan ? 'plan: ' + plan : '' }}`
+renders empty when `plan` is unset. Use a fallback only to choose a default
+(`{{ title || 'Untitled' }}`). Compose reports an unhandled read of a property
+nothing declares as the advisory `dm.expression.undeclared_property`; it is a
+warning and never stops composition.
+
 An expression is evaluated once, where it is written. Whatever it returns is
 **data**: if a value, a file read, or a shell command yields text that contains
 `{{ … }}` or `$( … )`, that text is inserted as written and never evaluated.
@@ -1238,6 +1262,18 @@ Early access content for admins.
 ```
 
 ## Errors and Unsupported Syntax
+
+Executable expressions fail closed on real defects, and only on those:
+
+| Fails composition | Evaluates normally |
+| --- | --- |
+| malformed syntax (`{{ 1 + }}`) | an absent document property (`null`) |
+| an unknown function (`{{ no_such_fn(x) }}`) | a missing member or index (`null`) |
+| a function that rejects its arguments, or a failed file read | `null` inside text (renders empty) |
+| a read of a host global the host marked unavailable | an escaped span (`{{{ x }}}` renders `{{ x }}`) |
+
+Inserted values are data: text an expression returns is never scanned for
+`{{ … }}` again, so it cannot fail a later pass.
 
 Invalid expressions fail composition with a parse or evaluation error that
 includes the source line number. This holds on **every** surface, body
