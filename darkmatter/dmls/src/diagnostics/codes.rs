@@ -131,7 +131,8 @@ pub mod code {
     pub const DIRECTIVE_MALFORMED_OPTION: &str = "dm.directive.malformed_option";
     /// A `::disclosure` triple left structurally malformed.
     pub const DIRECTIVE_MALFORMED_DISCLOSURE: &str = "dm.directive.malformed_disclosure";
-    /// A `::file`/`::code`/prologue/epilogue target that matched no file.
+    /// A `::file`/`::code`/`::toc-linking`/prologue/epilogue target that
+    /// matched no file.
     pub const TRANSCLUSION_BROKEN_PATH: &str = "dm.transclusion.broken_path";
     /// A whole-value directive target that may evaluate to null at runtime.
     pub const TRANSCLUSION_NULLABLE_TARGET: &str = "dm.transclusion.nullable_target";

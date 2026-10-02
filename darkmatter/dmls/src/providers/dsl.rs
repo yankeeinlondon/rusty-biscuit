@@ -281,14 +281,14 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     frontmatter_shell_hover(ctx, offset)
 }
 
-/// Hover describing a directive's semantics and (for transclusion) its resolved
-/// target; for `::shell`, the parsed command and policy verdict.
+/// Hover describing a directive's semantics and (for a file target) its
+/// resolved target; for `::shell`, the parsed command and policy verdict.
 fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let directive = directives::directive_at(ctx.text, offset)?;
     let info = directives::info_for(directive.kind)?;
     let mut lines = vec![format!("**`{}`** — {}", info.keyword, info.summary)];
 
-    if directives::is_transclusion(directive.kind)
+    if directives::has_file_target(directive.kind)
         && let Some(target) = &directive.target
     {
         let path = target.value.split('#').next().unwrap_or(&target.value);
@@ -442,11 +442,11 @@ fn shell_verdict_markdown(command: &str, ctx: &DocumentContext) -> String {
 
 // ── Definition & document links ─────────────────────────────────────────────
 
-/// Definition: transclusion target → file; bare interpolation variable →
-/// frontmatter key.
+/// Definition: transclusion or `::toc-linking` target → file; bare
+/// interpolation variable → frontmatter key.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if let Some(directive) = directives::directive_at(ctx.text, offset)
-        && directives::is_transclusion(directive.kind)
+        && directives::has_file_target(directive.kind)
         && let Some(target) = &directive.target
         && target.span.start <= offset
         && offset <= target.span.end
@@ -479,11 +479,12 @@ fn interpolation_definition(ctx: &DocumentContext, offset: usize) -> Option<Loca
     Some(Location::new(ctx.uri.clone(), range))
 }
 
-/// Document links for `::file`/`::code` targets and `prologue`/`epilogue`.
+/// Document links for `::file`/`::code`/`::toc-linking` targets and
+/// `prologue`/`epilogue`.
 pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
     let mut links = Vec::new();
     for directive in directives::directives(ctx.text) {
-        if !directives::is_transclusion(directive.kind) {
+        if !directives::has_file_target(directive.kind) {
             continue;
         }
         let Some(target) = directive.target else {
@@ -687,7 +688,7 @@ fn disclosure_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Transclusion target warnings and transclusion cycles.
+/// Transclusion and `::toc-linking` target warnings and transclusion cycles.
 fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     let empty_frontmatter = serde_json::Value::Object(serde_json::Map::new());
     let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
@@ -727,7 +728,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 
     for directive in directives::directives(ctx.text) {
-        if !directives::is_transclusion(directive.kind) {
+        if !directives::has_file_target(directive.kind) {
             continue;
         }
         let Some(target) = directive.target else {
@@ -750,7 +751,12 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                 DiagnosticSeverity::WARNING,
                 code::TRANSCLUSION_BROKEN_PATH,
                 source::COMPOSE,
-                format!("broken transclusion: no file matches `{path}`"),
+                match directive.kind {
+                    DirectiveKind::TocLinking => {
+                        format!("broken `::toc-linking` target: no file matches `{path}`")
+                    }
+                    _ => format!("broken transclusion: no file matches `{path}`"),
+                },
             );
             broken.data = Some(resolution_failure_data(failure));
             out.push(broken);
