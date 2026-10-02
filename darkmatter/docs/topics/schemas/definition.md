@@ -492,8 +492,9 @@ Relative paths in an eager check resolve like implicit file references: a bare p
 (`spec.md`, `notes/spec.md`) is tried **from the prompt document's directory first,
 then the repository root**, while an explicit `./`/`../` path resolves from the
 document directory only. This is the same order `$schema` file references and the expression
-path (`file_exists`/`frontmatter`) use. No ambient current working directory is read
-once the resolution context is captured.
+path (`file_exists`/`frontmatter`) use. Every eager check resolves through the request's
+file-resolution context; a document with no path of its own (a string or stdin) resolves
+from that context's directory. No ambient current working directory is read.
 
 `match(globs)` shapes path completion: it decides which candidates a tool offers.
 In a single schema it only suggests paths, so an existing file outside the
@@ -1034,7 +1035,7 @@ Schema. Wrap the properties under a sole root `$schema:` key, or use
 A baseline schema is a SimplifiedSchema or JSON Schema that every validated document inherits. The library exposes:
 
 ```rust
-let api = DarkmatterSchemas::new()
+let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 ```
 
@@ -1386,11 +1387,16 @@ The entry point is `darkmatter::markdown::schemas::DarkmatterSchemas`.
 
 ```rust
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, DetectOptions};
 use std::path::Path;
 
+// Every `$schema` reference and `file` value resolves through a built
+// file-resolution context: there is no constructor without one.
+let context = build_resolution_context(&RequestSnapshot::new("/work/blog"))?;
+
 // Build the API with a baseline.
-let api = DarkmatterSchemas::new()
+let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 
 // Validate a document.
@@ -1417,7 +1423,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 
 | Type                  | Purpose                                                                                                             |
 |-----------------------|---------------------------------------------------------------------------------------------------------------------|
-| `DarkmatterSchemas`   | Top-level entry point. Holds optional baseline and the LRU validator cache.                                         |
+| `DarkmatterSchemas`   | Top-level entry point. Holds the request's file-resolution context, an optional baseline, and the LRU validator cache. |
 | `EffectiveSchema`     | The fully-resolved schema for a document. Carries the SimplifiedSchema projection (when available), the compiled JSON Schema, the validator, and `origins: SchemaOriginMap` (each top-level property's provenance: document, baseline, or referenced file). |
 | `ValidationReport`    | `valid: bool` + `problems: Vec<ValidationProblem>` + `pending: Vec<PendingValue>` (populated only by `validate_with_options`). |
 | `ValidationProblem`   | `path` (JSON pointer), `message`, `kind`, `property`, optional `line` / `column`, optional `arm_index` for root-union failures, optional `description`; plus the span-aware fields `code: ValidationProblemCode`, `instance_path: JsonPointer`, optional `schema_path`, `offending_property`, and `file_reference: Option<FileReferenceDiagnostic>`. |
@@ -1441,8 +1447,8 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `parse_yaml_schema(&serde_yaml_ng::Value)` — parse a YAML value into a `SimplifiedSchema`.
 - `to_json_schema(&SimplifiedSchema)` — lower to Draft 2020-12 JSON Schema (`serde_json::Value`).
 - `EffectiveSchema::validate_for_phase(frontmatter, SchemaPhase)` — validate an already-resolved working instance at `Launch` or `Completion` without mutating it or resolving another schema.
-- `detect_schema(&[&Markdown], DetectOptions)` — multi-file detection entry point.
-- `detect_from_document(&Markdown)` — single-document detection (returns a `SchemaShape`).
+- `detect_schema(&[&Markdown], DetectOptions, &FileResolutionContext)` — multi-file detection entry point; `file` inference resolves through the context derived to each document.
+- `detect_from_document(&Markdown, &FileResolutionContext)` — single-document detection (returns a `SchemaShape`).
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.
@@ -1473,7 +1479,7 @@ Caller tools (for example Claudine) can render their own schema-language reports
 
 ### Validator Cache
 
-`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. A hit also requires the request's whole file-resolution context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
+`ValidatorCache` keys compiled validators by the xxHash (XXH64, via `biscuit-hash`) of the canonicalised JSON Schema bytes plus the schema's base directory, launch-area fallback, and repository anchors, and is bounded by an LRU policy. `validator_for(schema, base_dir, &context)` takes the request's file-resolution context, and a hit requires that whole context to match, so a validator compiled without a repository root never answers for a request that has one (its implicit `dir/file.md` paths would lose the repository-root candidate). `structural_validator_for(schema)` serves validators for callers with no request (coercion probes, example checks): they judge a `file` value by its syntax alone and never read the filesystem. The default cache size is `DEFAULT_CACHE_SIZE` (64) and is configurable via the `DARKMATTER_SCHEMA_CACHE_SIZE` environment variable (`CACHE_SIZE_ENV`). Validating a large corpus reuses compiled validators across files with the same effective schema.
 
 ## Shell-Completion Integration
 

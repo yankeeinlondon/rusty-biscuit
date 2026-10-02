@@ -156,15 +156,19 @@ The following commands will never be allowed:
 
 ### Whitelist and Blacklist Files
 
-Approved commands are stored in a namespaced whitelist file:
+Approved commands are stored in a namespaced whitelist file, and a companion
+blacklist file tracks user-denied commands. `md compose` keeps both beside the
+document, or in the directory `md` was launched from when the document comes
+from stdin:
 
-- `[repo root]/.darkmatter-shell-whitelist` if CWD is a git repo
-- `${HOME}/.darkmatter-shell-whitelist` otherwise
+```text
+docs/guide.md          → docs/.darkmatter-shell-whitelist, docs/.darkmatter-shell-blacklist
+md compose - (in ~/w)  → ~/w/.darkmatter-shell-whitelist,  ~/w/.darkmatter-shell-blacklist
+```
 
-A companion blacklist file tracks user-denied commands:
-
-- `[repo root]/.darkmatter-shell-blacklist` if CWD is a git repo
-- `${HOME}/.darkmatter-shell-blacklist` otherwise
+A library caller that sets no policy root (`ComposeOptions::with_shell_policy_root`)
+gets the request context's repository root, else its home directory, else the
+request directory. Pre-flight and execution read the same files.
 
 ## Interactive Approval
 

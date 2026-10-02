@@ -133,11 +133,17 @@ protocol-focused:
   frontmatter block extraction, single-document reference extraction, and the
   later-phase parsing surfaces).
 - `biscuit-file` (`file-reference` feature, default features off) —
-  file-reference resolution conventions.
+  file-reference resolution conventions, and the Git discovery that keys the
+  per-repository context cache.
 - `biscuit-hash` — xxHash content-hash identity for the Phase 3 invalidation
-  engine (`WorkspaceIndex`).
+  engine (`WorkspaceIndex`) and the rescan's package-manifest fingerprints.
+- `sniff` — `PACKAGE_MANIFEST_FILE_NAMES`, the manifest names DMLS watches so
+  adding a package rebuilds the repository's context. Already compiled through
+  `darkmatter`.
 - `wait-timeout` (test-only) — bounded, cross-platform reaping for the real
   `dmls` stdio subprocess lifecycle test.
+- `tracing-test` (test-only) — scoped log capture for the context-build
+  failure log.
 
 ## DMLS Zed CLI (`darkmatter/dmls/zed-dmls-cli`)
 
