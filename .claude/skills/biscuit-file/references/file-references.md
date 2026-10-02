@@ -280,5 +280,7 @@ is not absolute on the resolving host (`C:\x` on POSIX, `/x` on Windows);
 nothing is translated between operating systems.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
 request `cwd` and normal derived authoring `cwd`s. `RemoteNotLocal`
-means a URL reached a local path API; use the `url`-gated `resolve_target()`
-when the caller accepts `Resolved::Remote`.
+means a URL reached a local path API; use the `url`-gated
+`resolve_target_in_context(&ctx)` (or the ambient `resolve_target()`) when the
+caller accepts `Resolved::Remote`. Only the context form fills a URL's
+`{{VAR}}` from the context's environment.
