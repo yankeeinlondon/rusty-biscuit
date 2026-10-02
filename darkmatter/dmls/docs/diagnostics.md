@@ -99,6 +99,39 @@ feature layer.
 |------|---------|
 | `dm.context.build_failure` | **Error**, at line 0, column 0. The document's file-resolution context could not be built (for example, repository discovery failed on a corrupt `.git/config`), or an untitled buffer's workspace folders do not lie in exactly one repository. No file reference in the document is resolved, including its `$schema`, so no link, transclusion, or schema diagnostic appears beside it. See [File references](./file-references.md#when-a-context-cannot-be-built). |
 
+How the context-failure diagnostic behaves:
+
+- **One per document.** It is the document's only file-reference
+  diagnostic, zero-width at line 0, column 0, however many references the
+  document holds.
+- **The message names the failure.** It gives the failure class and the
+  typed error, whose text names the directory the build was anchored at.
+  When discovery fails, that is the document's own folder, because no
+  repository root could be found:
+
+  ```text
+  file references are not resolved in this document (MissingContext):
+  repository discovery failed at `/work/repo/docs`: …
+  ```
+
+  An untitled buffer's message counts the repositories its workspace
+  folders lie in and lists the folders.
+- **Reference features are skipped.** Document links, go-to-definition,
+  link and transclusion diagnostics, anchor completion for another
+  document, and schema validation, hover, and completion all return nothing
+  for the document, since its `$schema` resolves through the same context. Features that need
+  no path (folding, symbols, expression diagnostics) keep working.
+- **Logged once.** The failed build is logged at `error` level with the
+  directory and class. The failure is cached in place of the context, so it
+  is neither rebuilt nor logged again on later requests.
+- **Clearing it.** The cached failure is dropped, and the diagnostic
+  re-evaluated, on a watched-file event at or below the failing directory
+  or inside the repository's `.git/` (a repaired `.git/config`, say), on any
+  configuration change, or when a save-triggered rescan finds a changed
+  document or package manifest below the failing directory. The rescan
+  does not read `.git/config`, so with an editor that has no file watcher,
+  change a DMLS setting or restart the server after repairing it.
+
 Every diagnostic about a reference that did not resolve (`dm.links.broken_path`,
 `dm.transclusion.broken_path`, `dm.schema.invalid_file_reference`, and
 `dm.context.build_failure`) carries `data: {"resolution_failure": "<Class>"}`,
@@ -172,7 +205,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.directive.unmatched_end` | A `::end-block` closer with no matching opener. |
 | `dm.directive.malformed_option` | An option key a directive family does not recognize. |
 | `dm.directive.malformed_disclosure` | A `::disclosure` triple left structurally malformed. |
-| `dm.transclusion.broken_path` | A `::file` / `::code` / `::toc-linking` / prologue / epilogue target matched no file. |
+| `dm.transclusion.broken_path` | A `::file` / `::code` / `::toc-linking` target matched no file. |
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
@@ -225,9 +258,11 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   same property present, including `file_exists(x)`, truthy `x`, `!!x`,
   successful `x != null` / `x != ''`, parentheses, and conjunctions. Unknown,
   mixed, and statically non-null targets do not receive the warning.
-- `dm.transclusion.broken_path` applies only to concrete local targets.
-  Interpolated targets are excluded because their resolved path is not known
-  statically.
+- `dm.transclusion.broken_path` applies only to concrete local targets of
+  `::file`, `::code`, and `::toc-linking`, resolved through the document's
+  context like every other reference. Interpolated targets, including a
+  `{{VAR}}/file.md` environment path, are excluded because their resolved
+  path is not known statically.
 
 ## `relatedInformation`
 

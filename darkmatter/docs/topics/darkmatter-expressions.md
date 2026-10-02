@@ -259,7 +259,7 @@ namespace.
 | --- | --- | --- |
 | `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
-| `env.*` | process environment variables, from the snapshot frozen at capture | eager |
+| `env.*` | environment variables from the request's snapshot (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
 | `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
 
