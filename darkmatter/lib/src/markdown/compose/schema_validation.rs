@@ -122,8 +122,10 @@ impl CallerProjection {
     }
 }
 
-fn trigger_discovery_boundary(options: &crate::markdown::compose::ComposeRequest, _document_path: &Path) -> Option<PathBuf> {
-    options.resolution_context().repository_root().map(Path::to_path_buf)
+/// Trigger discovery runs only for a request inside a repository; the schema
+/// roots themselves come from the document's own context.
+fn discovers_triggers(options: &crate::markdown::compose::ComposeRequest) -> bool {
+    options.resolution_context().repository_root().is_some()
 }
 
 pub(crate) fn prepare_schemas(
@@ -164,8 +166,8 @@ pub(crate) fn prepare_schemas(
         })?;
     }
     if options.trigger_schemas
-        && let Some(ComposeSource::File(document_path)) = markdown.source()
-        && let Some(boundary) = trigger_discovery_boundary(options, document_path)
+        && let Some(ComposeSource::File(_)) = markdown.source()
+        && discovers_triggers(options)
     {
         schemas = if let Some(registry) = trigger_registry.take() {
             schemas.with_trigger_registry(registry)
@@ -173,7 +175,7 @@ pub(crate) fn prepare_schemas(
             #[cfg(test)]
             TRIGGER_DISCOVERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             schemas
-                .with_trigger_discovery(document_path, boundary)
+                .with_trigger_discovery()
                 .map_err(|err| {
                     prepare_error(format!("trigger schemas could not be prepared: {err}"), err)
                 })?
@@ -1561,30 +1563,23 @@ mod tests {
     }
 
     #[test]
-    fn trigger_discovery_is_passive_and_reuses_request_repository_boundary() {
+    fn trigger_discovery_needs_a_request_repository() {
         let request_repo = tempfile::tempdir().unwrap();
         let nested_repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
         std::fs::create_dir_all(nested_repo.path().join(".git")).unwrap();
-        let document_path = nested_repo.path().join("prompt.md");
         let snapshot = biscuit_file::FileResolutionContext::new(request_repo.path())
             .with_repository_root(request_repo.path());
         let options = crate::markdown::compose::test_request_in(ComposeOptions::new(), snapshot);
-        // A context without a repository root bounds nothing, even when the
-        // document itself sits inside a repository.
+        // A context without a repository root discovers nothing, even when
+        // the document itself sits inside a repository.
         let unbounded = crate::markdown::compose::test_request_in(
             ComposeOptions::new(),
             biscuit_file::FileResolutionContext::new(nested_repo.path()),
         );
 
-        assert_eq!(
-            trigger_discovery_boundary(&options, &document_path).as_deref(),
-            Some(request_repo.path()),
-        );
-        assert_eq!(
-            trigger_discovery_boundary(&unbounded, &document_path).as_deref(),
-            None,
-        );
+        assert!(discovers_triggers(&options));
+        assert!(!discovers_triggers(&unbounded));
     }
 
     #[test]

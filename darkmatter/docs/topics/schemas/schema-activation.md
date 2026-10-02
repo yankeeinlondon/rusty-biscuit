@@ -102,7 +102,7 @@ without falling back to old definitions. A successful refresh restores those
 checks and clears the associated failure.
 
 Failure scope follows discovery scope. A broken automatically discovered package
-rule cannot affect sibling packages. A rule supplied through `SCHEMA_DIR` can
+rule cannot affect sibling packages. A rule supplied through `SCHEMAS_DIR` can
 have workspace-wide applicability. Intentionally removing an optional rule is
 different from losing an import required by a rule that is still active.
 

@@ -71,7 +71,10 @@ helper that resolves it is named so it is not re-derived.
    `/var` symlink) and keeps the raw path on Windows.
 4. **`Path::join("a/b")` keeps the literal `/`.** A native-spelling needle
    built from it has mixed separators and matches nothing. Re-join through
-   `.components().collect::<PathBuf>()` to normalize.
+   `.components().collect::<PathBuf>()` to normalize. A context's
+   `package_root()` from the repository scope catalog arrives this way
+   (`C:\…\cwd\area/pkg`), so a path printed to a user from it needs the same
+   re-join (`darkmatter` schema roots, 2026-10-02).
 5. **Windows temp dirs contain a dot-initial segment (`\.tmpXXXX`).** Any
    Markdown round-trip that resolves CommonMark backslash escapes will eat
    the `\` before `.`, `-`, or `_`. Darkmatter's compose Cleanup phase now

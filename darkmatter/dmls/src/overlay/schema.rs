@@ -976,8 +976,8 @@ pub fn assemble(
     }
 }
 
-/// Selects the trigger-discovery boundary for a document: the nearest
-/// workspace folder containing it.
+/// The nearest workspace folder containing a document, which gates trigger
+/// discovery (the schema roots themselves come from the document's context).
 ///
 /// Documents outside all workspace folders intentionally return `None` and
 /// never discover triggers.

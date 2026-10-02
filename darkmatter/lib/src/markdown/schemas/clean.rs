@@ -139,8 +139,9 @@ impl CleanSchemaConfig {
     ///
     /// `document_path` is the resolved Markdown file path when the input is
     /// file-backed; trigger discovery is silently inert without it (stdin
-    /// parity with compose's non-file sources). Discovery walks from the
-    /// document to the repository root of the configuration's context.
+    /// parity with compose's non-file sources). Discovery searches the
+    /// schema roots of the configuration's context, which is the document's,
+    /// and runs only inside a repository.
     ///
     /// ## Errors
     ///
@@ -155,10 +156,10 @@ impl CleanSchemaConfig {
             CleanBaselineSchema::File(path) => builder.with_baseline_from_file(path)?,
         };
         if self.trigger_schemas
-            && let Some(path) = document_path
-            && let Some(boundary) = self.file_resolution_context.repository_root()
+            && document_path.is_some()
+            && self.file_resolution_context.repository_root().is_some()
         {
-            builder = builder.with_trigger_discovery(path, boundary)?;
+            builder = builder.with_trigger_discovery()?;
         }
         Ok(CleanSchemaContext {
             schemas: builder,

@@ -167,16 +167,15 @@ fn validate_one(
         Ok(context) => context,
         Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
     };
-    let boundary = document_context.repository_root().map(Path::to_path_buf);
+    let in_repository = document_context.repository_root().is_some();
     let api = api.clone().with_file_resolution_context(document_context);
-    let api = match boundary {
-        Some(boundary) if !no_trigger_schemas => {
-            match api.with_trigger_discovery(&discovery_path, boundary) {
-                Ok(api) => api,
-                Err(err) => return FileOutcome::SchemaError(Box::new(err)),
-            }
+    let api = if in_repository && !no_trigger_schemas {
+        match api.with_trigger_discovery() {
+            Ok(api) => api,
+            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
         }
-        _ => api,
+    } else {
+        api
     };
 
     if !assignments.is_empty() {

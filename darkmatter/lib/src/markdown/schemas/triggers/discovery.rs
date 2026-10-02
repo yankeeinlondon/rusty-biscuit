@@ -1,22 +1,22 @@
-//! Schema-root discovery (ancestor walk) and the per-boundary trigger registry.
+//! Trigger discovery in the five schema roots and the per-document trigger
+//! registry.
 //!
-//! Trigger schemas live in `schemas/` directories discovered by an ancestor
-//! walk from the document's directory up through the configured discovery
-//! boundary (inclusive). Every `schemas/` directory on that path is a schema
-//! root, nearest first. The walk never continues past the boundary to the
-//! filesystem root or home directory.
+//! Trigger schemas live in the [schema roots](crate::markdown::schemas::roots):
+//! the document's package, package-area, and tree root `schemas/` folders,
+//! the `SCHEMAS_DIR` folder, and `~/schemas`, most local first. Folders
+//! between the document and those roots are not searched.
 //!
 //! ## Discovery contract
 //!
-//! - Regular `.yaml`/`.yml` files only; directory and file symlinks are never
-//!   followed.
+//! - Regular `.yaml`/`.yml` files only; directory and file symlinks inside a
+//!   root are never followed.
 //! - Within a root, files are ordered by UTF-8 filename bytes (not locale or
 //!   host filesystem collation).
 //! - Two names that collide after case-folding are a load error so a repository
 //!   cannot activate differently on case-sensitive and case-insensitive
 //!   filesystems.
-//! - Nearest root wins by trigger **filename** with no merging; a shadowed file
-//!   is never evaluated.
+//! - The first root wins by trigger **filename** with no merging; a shadowed
+//!   file is never evaluated.
 //! - A file that does not claim `kind: trigger-schema` is silently ignored.
 //! - A file that claims the envelope but is malformed is a hard load error.
 //! - Loading is **transactional**: if any unshadowed opted-in trigger is
@@ -27,12 +27,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use biscuit_file::FileResolutionContext;
+
 use crate::markdown::schemas::errors::SchemaError;
+use crate::markdown::schemas::roots::SchemaRoots;
 
 use super::envelope::{TriggerEnvelope, parse_trigger_envelope_from_str};
-
-/// The directory name that marks a schema root.
-const SCHEMAS_DIR_NAME: &str = "schemas";
 
 /// Valid YAML extensions for trigger-schema files.
 const YAML_EXTENSIONS: &[&str] = &["yaml", "yml"];
@@ -46,29 +46,32 @@ pub struct LoadedTrigger {
     pub source: PathBuf,
     /// The parsed, lint-clean trigger envelope.
     pub envelope: TriggerEnvelope,
+    /// The `cwd` of the trigger's bare and `./` `$path` patterns (see
+    /// [`SearchedRoot::pattern_cwd`](crate::markdown::schemas::roots::SearchedRoot::pattern_cwd)).
+    pub pattern_cwd: PathBuf,
 }
 
-/// A file shadowed by a nearer root's file of the same name.
+/// A file shadowed by an earlier root's file of the same name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShadowedFile {
     /// The shadowed file's path.
     pub path: PathBuf,
-    /// The nearer file that shadowed it.
+    /// The earlier root's file that shadowed it.
     pub shadowed_by: PathBuf,
 }
 
-/// The per-boundary registry of unshadowed, loaded trigger envelopes.
+/// The unshadowed, loaded trigger envelopes for one document.
 ///
-/// Built by [`scan`]. Loading is transactional: if any unshadowed opted-in
-/// trigger is invalid, [`scan`] returns `Err` and no registry is installed.
+/// Built by [`scan`] from the document's context, which the registry keeps:
+/// its `$path` patterns are judged in that context. Loading is
+/// transactional: if any unshadowed opted-in trigger is invalid, [`scan`]
+/// returns `Err` and no registry is installed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TriggerRegistry {
-    /// The discovery boundary these triggers were discovered under.
-    pub boundary: PathBuf,
-    /// All discovered schema root directories (nearest first), for the
+    /// The five schema roots, for bare-name lookup and the
     /// `md schema triggers` trace.
-    pub roots: Vec<PathBuf>,
-    /// The ordered, deduped set of loaded triggers (nearest root first,
+    pub roots: SchemaRoots,
+    /// The ordered, deduped set of loaded triggers (first root first,
     /// filename-lexicographic within a root). Shadowed filenames are absent.
     pub triggers: Vec<LoadedTrigger>,
     /// Resolved payloads parallel to [`triggers`](Self::triggers) — one per
@@ -76,19 +79,24 @@ pub struct TriggerRegistry {
     /// does not resolve payloads twice. Empty for programmatically
     /// constructed registries, which fall back to on-demand resolution.
     pub(crate) payloads: Vec<super::assemble::ResolvedPayload>,
-    /// Files shadowed by a nearer root's file of the same name.
+    /// Files shadowed by an earlier root's file of the same name.
     pub shadowed: Vec<ShadowedFile>,
+    /// The document context the roots were computed in and `$path` patterns
+    /// are judged in.
+    context: FileResolutionContext,
 }
 
 impl TriggerRegistry {
-    /// An empty registry for `boundary` (no roots, no triggers).
-    pub fn empty(boundary: impl Into<PathBuf>) -> Self {
+    /// A registry of `triggers`, with no schema roots, judged in `context`.
+    /// For callers (and tests) that build triggers without discovery.
+    #[must_use]
+    pub fn new(triggers: Vec<LoadedTrigger>, context: FileResolutionContext) -> Self {
         Self {
-            boundary: boundary.into(),
-            roots: Vec::new(),
-            triggers: Vec::new(),
+            roots: SchemaRoots::none(),
+            triggers,
             payloads: Vec::new(),
             shadowed: Vec::new(),
+            context,
         }
     }
 
@@ -96,46 +104,12 @@ impl TriggerRegistry {
     pub fn is_empty(&self) -> bool {
         self.triggers.is_empty()
     }
-}
 
-// ── Ancestor walk ───────────────────────────────────────────────────────────
-
-/// Walks from `document_dir` up through `boundary` (inclusive), collecting
-/// every `schemas/` directory as a root, **nearest first**.
-///
-/// A document directory outside the boundary yields no roots. The walk never
-/// continues past the boundary to the filesystem root or home, even when
-/// boundary discovery failed.
-pub fn schema_roots(document_dir: &Path, boundary: &Path) -> Vec<PathBuf> {
-    if !document_dir.starts_with(boundary) {
-        return Vec::new();
+    /// The document context `$path` patterns are judged in.
+    #[must_use]
+    pub fn context(&self) -> &FileResolutionContext {
+        &self.context
     }
-
-    let mut roots = Vec::new();
-    let mut current = document_dir.to_path_buf();
-    loop {
-        let schemas_dir = current.join(SCHEMAS_DIR_NAME);
-        let is_real_directory = std::fs::symlink_metadata(&schemas_dir)
-            .map(|metadata| {
-                let file_type = metadata.file_type();
-                file_type.is_dir() && !file_type.is_symlink()
-            })
-            .unwrap_or(false);
-        if is_real_directory {
-            roots.push(schemas_dir);
-        }
-        if current == boundary {
-            break;
-        }
-        match current.parent() {
-            Some(parent) => current = parent.to_path_buf(),
-            // Reached the filesystem root without hitting the boundary.
-            // Shouldn't happen after the `starts_with` check, but guard
-            // against an infinite loop regardless.
-            None => break,
-        }
-    }
-    roots
 }
 
 // ── Per-root file enumeration ───────────────────────────────────────────────
@@ -234,101 +208,32 @@ fn check_case_fold_collision(
     Ok(())
 }
 
-// ── Path normalization ──────────────────────────────────────────────────────
-
-/// Lexically splits a path string into segments, handling both `/` and `\`
-/// separators. Empty segments and `.` segments are filtered out.
-fn lexical_segments(path: &str) -> Vec<&str> {
-    path.split(['/', '\\'])
-        .filter(|s| !s.is_empty() && *s != ".")
-        .collect()
-}
-
-/// Normalizes a document path string against a boundary path string into a
-/// boundary-relative, `/`-separated path suitable for `$path` matching.
-///
-/// Both inputs are treated **lexically**: no filesystem access, no symlink
-/// resolution. The output uses `/` separators on every platform. Returns
-/// `None` when the document is not lexically under the boundary, or when a
-/// `..` component would escape it.
-///
-/// Handles both POSIX-style (`/`) and Windows-style (`\`) separators in the
-/// inputs so the same logic is testable on every platform.
-pub fn normalize_relative_path(document: &str, boundary: &str) -> Option<String> {
-    let doc_segments = lexical_segments(document);
-    let boundary_segments = lexical_segments(boundary);
-
-    if doc_segments.len() < boundary_segments.len() {
-        return None;
-    }
-    if doc_segments[..boundary_segments.len()] != boundary_segments[..] {
-        return None;
-    }
-
-    let relative = &doc_segments[boundary_segments.len()..];
-    if relative.contains(&"..") {
-        return None;
-    }
-    if relative.is_empty() {
-        return None;
-    }
-
-    Some(relative.join("/"))
-}
-
-/// Normalizes a `Path` document against a `Path` boundary for `$path`
-/// matching, using the same lexical logic as [`normalize_relative_path`].
-///
-/// Returns `None` when the document is not lexically under the boundary.
-pub fn normalize_path(document: &Path, boundary: &Path) -> Option<String> {
-    normalize_relative_path(&document.to_string_lossy(), &boundary.to_string_lossy())
-}
-
 // ── Full scan ───────────────────────────────────────────────────────────────
 
-/// Performs a full trigger-schema discovery scan for a document under a
-/// boundary.
+/// Performs a full trigger-schema discovery scan for one document.
 ///
-/// Walks ancestor `schemas/` roots, enumerates files, applies filename
-/// shadowing, classifies each unshadowed file, loads trigger envelopes, and
-/// resolves every payload.
+/// Computes the document's [`SchemaRoots`] from `context`, enumerates each
+/// searched root, applies filename shadowing, classifies each unshadowed
+/// file, loads trigger envelopes, and resolves every payload.
+///
+/// `context` must be the document's own context (its `cwd` is the document's
+/// folder): the package and package-area roots are the document's, and the
+/// registry judges `$path` patterns in it.
 ///
 /// Loading is **transactional**: if any unshadowed opted-in trigger file is
 /// malformed or its payload fails to resolve (missing file, cyclic reference,
 /// non-mergeable shape), no registry is installed (an error is returned).
 /// Payload resolution runs regardless of whether any current document matches
 /// the trigger, so a registry is never installed with a known-bad payload.
-///
-/// A document outside the boundary yields an empty registry (not an error).
-/// Payload references resolve through the request's `context`.
-pub fn scan(
-    document: &Path,
-    boundary: &Path,
-    context: &biscuit_file::FileResolutionContext,
-) -> Result<TriggerRegistry, SchemaError> {
-    let document_dir = document
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
+pub fn scan(context: &FileResolutionContext) -> Result<TriggerRegistry, SchemaError> {
+    let roots = SchemaRoots::for_document(context);
 
-    // Ancestor walk.
-    let roots = schema_roots(document_dir, boundary);
-    if roots.is_empty() {
-        return Ok(TriggerRegistry::empty(boundary));
-    }
-
-    // Enumerate each root (nearest first).
-    let mut all_root_files: Vec<Vec<RootFile>> = Vec::with_capacity(roots.len());
-    for root in &roots {
-        all_root_files.push(enumerate_root(root)?);
-    }
-
-    // Apply filename shadowing: nearest root wins by filename.
+    // Apply filename shadowing: the first root wins by filename.
     let mut first_by_name: HashMap<String, PathBuf> = HashMap::new();
-    let mut unshadowed: Vec<RootFile> = Vec::new();
+    let mut unshadowed: Vec<(RootFile, &Path)> = Vec::new();
     let mut shadowed: Vec<ShadowedFile> = Vec::new();
-    for root_files in &all_root_files {
-        for file in root_files {
+    for root in roots.searched() {
+        for file in enumerate_root(&root.path)? {
             if let Some(shadowing_path) = first_by_name.get(&file.name) {
                 shadowed.push(ShadowedFile {
                     path: file.path.clone(),
@@ -336,14 +241,14 @@ pub fn scan(
                 });
             } else {
                 first_by_name.insert(file.name.clone(), file.path.clone());
-                unshadowed.push(file.clone());
+                unshadowed.push((file, &root.pattern_cwd));
             }
         }
     }
 
     // Classify and load each unshadowed file (transactional).
     let mut triggers: Vec<LoadedTrigger> = Vec::new();
-    for file in &unshadowed {
+    for (file, pattern_cwd) in &unshadowed {
         let content = std::fs::read_to_string(&file.path).map_err(|e| SchemaError::Io {
             path: file.path.clone(),
             source: e,
@@ -356,6 +261,7 @@ pub fn scan(
                 triggers.push(LoadedTrigger {
                     source: file.path.clone(),
                     envelope,
+                    pattern_cwd: pattern_cwd.to_path_buf(),
                 });
             }
             Err(source) => {
@@ -372,7 +278,7 @@ pub fn scan(
     // independent of whether any current document matches the trigger.
     let mut payloads = Vec::with_capacity(triggers.len());
     for trigger in &triggers {
-        let payload = super::assemble::resolve_trigger_payload(trigger, &roots, context).map_err(
+        let payload = super::assemble::resolve_trigger_payload(trigger, roots.search_paths(), context).map_err(
             |source| SchemaError::TriggerLoad {
                 path: trigger.source.clone(),
                 source: Box::new(source),
@@ -382,11 +288,11 @@ pub fn scan(
     }
 
     Ok(TriggerRegistry {
-        boundary: boundary.to_path_buf(),
         roots,
         triggers,
         payloads,
         shadowed,
+        context: context.clone(),
     })
 }
 
@@ -398,8 +304,9 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    /// Creates a temp directory pinned as a repo root with a `.git` marker so
-    /// ancestor walks never escape into a shared tempdir.
+    /// Creates a temp directory standing for a repository root; tests pass it
+    /// to the context as the repository, so discovery never reaches a
+    /// shared tempdir.
     fn repo_fixture() -> TempDir {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".git")).unwrap();
@@ -431,86 +338,34 @@ mod tests {
         write_file(&dir.join("payload-b.yaml"), PAYLOAD_B);
     }
 
-    // ── Ancestor walk ───────────────────────────────────────────────────
-
-    #[test]
-    fn ancestor_walk_finds_nearest_first() {
-        let repo = repo_fixture();
-        let root = repo.path();
-        fs::create_dir_all(root.join("pkg/schemas")).unwrap();
-        fs::create_dir_all(root.join("schemas")).unwrap();
-
-        let doc_dir = root.join("pkg/sub");
-        fs::create_dir_all(&doc_dir).unwrap();
-
-        let roots = schema_roots(&doc_dir, root);
-        // Nearest first: pkg/schemas before root/schemas.
-        assert_eq!(roots.len(), 2);
-        assert!(roots[0].ends_with("pkg/schemas"));
-        assert!(roots[1].ends_with("schemas"));
+    /// The context of a document in `doc_dir` inside repository `root`,
+    /// with no home directory and no environment, so no user-level root is
+    /// searched.
+    fn doc_context(doc_dir: &Path, root: &Path) -> biscuit_file::FileResolutionContext {
+        biscuit_file::FileResolutionContext::from_snapshot(doc_dir, None, std::collections::HashMap::new())
+            .with_repository_root(root)
     }
 
-    #[test]
-    fn ancestor_walk_inclusive_boundary() {
-        let repo = repo_fixture();
-        let root = repo.path();
-        fs::create_dir_all(root.join("schemas")).unwrap();
-
-        // Document lives directly in the boundary root.
-        let roots = schema_roots(root, root);
-        assert_eq!(roots.len(), 1);
-        assert!(roots[0].ends_with("schemas"));
-    }
-
-    #[test]
-    fn ancestor_walk_document_outside_boundary_no_roots() {
-        let repo = repo_fixture();
-        let other = repo_fixture();
-
-        let roots = schema_roots(other.path(), repo.path());
-        assert!(roots.is_empty());
-    }
-
-    #[test]
-    fn ancestor_walk_never_past_boundary() {
-        let repo = repo_fixture();
-        let root = repo.path();
-        // A schemas/ dir above the boundary must not be found.
-        let above = root.parent().unwrap();
-        // Only test if above has a schemas dir; skip if not writable.
-        let above_schemas = above.join("schemas");
-        let has_above = above_schemas.is_dir();
-
-        let doc_dir = root.join("pkg");
-        fs::create_dir_all(&doc_dir).unwrap();
-        let roots = schema_roots(&doc_dir, root);
-        // Walk stops at boundary.
-        if has_above {
-            assert!(
-                !roots.iter().any(|r| r == &above_schemas),
-                "walk should not continue past boundary"
-            );
+    /// Scans for a document at `doc` (its folder need not exist). A document
+    /// under `{root}/pkg` belongs to the package `{root}/pkg`.
+    fn scan_for(doc: &Path, root: &Path) -> Result<TriggerRegistry, SchemaError> {
+        let mut context = doc_context(doc.parent().unwrap(), root);
+        if doc.starts_with(root.join("pkg")) {
+            context = context.with_package_root(root.join("pkg"));
         }
-    }
-
-    #[test]
-    fn ancestor_walk_no_schemas_dirs() {
-        let repo = repo_fixture();
-        let doc_dir = repo.path().join("pkg");
-        fs::create_dir_all(&doc_dir).unwrap();
-        let roots = schema_roots(&doc_dir, repo.path());
-        assert!(roots.is_empty());
+        scan(&context)
     }
 
     // ── File enumeration ────────────────────────────────────────────────
 
     #[cfg(any(unix, windows))]
     #[test]
-    fn ancestor_walk_excludes_symlinked_schemas_root() {
+    fn symlinked_tree_schemas_root_is_not_searched() {
         let repo = repo_fixture();
         let external = repo_fixture();
         let external_schemas = external.path().join("schemas");
         fs::create_dir_all(&external_schemas).unwrap();
+        fs::write(external_schemas.join("t.trigger.yaml"), VALID_TRIGGER).unwrap();
 
         let schemas_link = repo.path().join("schemas");
         #[cfg(unix)]
@@ -525,8 +380,9 @@ mod tests {
             panic!("failed to create directory symlink: {error}");
         }
 
-        let roots = schema_roots(repo.path(), repo.path());
-        assert!(roots.is_empty(), "symlinked schema root must be excluded");
+        let registry = scan_for(&repo.path().join("doc.md"), repo.path()).unwrap();
+        assert!(registry.roots.searched().is_empty(), "symlinked schema root must be excluded");
+        assert!(registry.is_empty());
     }
 
     #[test]
@@ -644,68 +500,6 @@ mod tests {
         assert_eq!(files[0].name, "visible.yaml");
     }
 
-    // ── Path normalization ──────────────────────────────────────────────
-
-    #[test]
-    fn normalize_posix_path() {
-        let rel = normalize_relative_path("/repo/pkg/doc.md", "/repo");
-        assert_eq!(rel.as_deref(), Some("pkg/doc.md"));
-    }
-
-    #[test]
-    fn normalize_windows_path() {
-        let rel = normalize_relative_path(r"C:\repo\pkg\doc.md", r"C:\repo");
-        assert_eq!(rel.as_deref(), Some("pkg/doc.md"));
-    }
-
-    #[test]
-    fn normalize_mixed_separators() {
-        let rel = normalize_relative_path(r"C:/repo\pkg/sub\doc.md", r"C:\repo");
-        assert_eq!(rel.as_deref(), Some("pkg/sub/doc.md"));
-    }
-
-    #[test]
-    fn normalize_outside_boundary_is_none() {
-        assert!(normalize_relative_path("/other/doc.md", "/repo").is_none());
-    }
-
-    #[test]
-    fn normalize_dotdot_in_relative_is_none() {
-        // Document path with `..` that resolves outside boundary.
-        assert!(normalize_relative_path("/repo/../other/doc.md", "/repo").is_none());
-    }
-
-    #[test]
-    fn normalize_dot_segments_filtered() {
-        let rel = normalize_relative_path("/repo/./pkg/./doc.md", "/repo");
-        assert_eq!(rel.as_deref(), Some("pkg/doc.md"));
-    }
-
-    #[test]
-    fn normalize_boundary_equals_document_dir_is_none() {
-        // The document *is* the boundary — no relative path.
-        assert!(normalize_relative_path("/repo", "/repo").is_none());
-    }
-
-    #[test]
-    fn normalize_case_sensitive() {
-        // Case-sensitive: different case prefix → not under boundary.
-        assert!(normalize_relative_path("/Repo/doc.md", "/repo").is_none());
-    }
-
-    #[test]
-    fn normalize_path_from_path_objects() {
-        let doc = PathBuf::from("/repo/pkg/doc.md");
-        let boundary = PathBuf::from("/repo");
-        // On macOS/Linux this works directly; on Windows the separators differ
-        // but the function handles both.
-        let rel = normalize_path(&doc, &boundary);
-        // Only assert on platforms where / is the native separator.
-        if cfg!(not(windows)) {
-            assert_eq!(rel.as_deref(), Some("pkg/doc.md"));
-        }
-    }
-
     // ── Shadowing ────────────────────────────────────────────────────────
 
     #[test]
@@ -729,7 +523,7 @@ mod tests {
         write_payloads(&root.join("pkg/schemas"));
 
         let doc = root.join("pkg/sub/doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         assert_eq!(registry.triggers.len(), 1);
         // The nearest root's file won.
         assert!(registry.triggers[0]
@@ -763,7 +557,7 @@ mod tests {
         write_file(&root.join("schemas/payload-b.yaml"), PAYLOAD_B);
 
         let doc = root.join("pkg/sub/doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         assert_eq!(registry.triggers.len(), 2);
         assert!(registry.shadowed.is_empty());
     }
@@ -790,7 +584,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         assert_eq!(registry.triggers.len(), 1);
         assert!(registry.triggers[0]
             .source
@@ -810,7 +604,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = scan_for(&doc, root).unwrap_err();
         assert!(matches!(err, SchemaError::TriggerLoad { .. }));
     }
 
@@ -833,7 +627,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let result = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root));
+        let result = scan_for(&doc, root);
         assert!(result.is_err(), "transactional: no registry on any failure");
     }
 
@@ -849,7 +643,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = scan_for(&doc, root).unwrap_err();
         assert!(matches!(
             err,
             SchemaError::TriggerLoad { ref source, .. }
@@ -882,7 +676,7 @@ mod tests {
         write_payloads(&root.join("pkg/schemas"));
 
         let doc = root.join("pkg/sub/doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         // Two unshadowed triggers (a and b from nearest root).
         assert_eq!(registry.triggers.len(), 2);
         // Order: filename-lexicographic within nearest root.
@@ -894,13 +688,13 @@ mod tests {
             .ends_with("pkg/schemas/b.trigger.yaml"));
         // Root-level a.trigger.yaml is shadowed.
         assert_eq!(registry.shadowed.len(), 1);
-        // Roots discovered nearest first.
-        assert_eq!(registry.roots.len(), 2);
-        assert!(registry.roots[0].ends_with("pkg/schemas"));
+        // Roots searched package first.
+        assert_eq!(registry.roots.search_paths().len(), 2);
+        assert!(registry.roots.search_paths()[0].ends_with("pkg/schemas"));
     }
 
     #[test]
-    fn scan_document_outside_boundary_empty() {
+    fn scan_reads_another_repository_s_roots_never() {
         let repo = repo_fixture();
         let other = repo_fixture();
         fs::create_dir_all(repo.path().join("schemas")).unwrap();
@@ -911,16 +705,28 @@ mod tests {
         .unwrap();
 
         let doc = other.path().join("doc.md");
-        let registry = scan(&doc, repo.path(), &biscuit_file::FileResolutionContext::new(repo.path())).unwrap();
+        let registry = scan_for(&doc, other.path()).unwrap();
         assert!(registry.is_empty());
-        assert!(registry.roots.is_empty());
+        assert!(registry.roots.search_paths().is_empty());
+    }
+
+    #[test]
+    fn scan_skips_in_between_schemas_folders() {
+        let repo = repo_fixture();
+        let root = repo.path();
+        write_file(&root.join("docs/schemas/t.trigger.yaml"), VALID_TRIGGER);
+        write_payloads(&root.join("docs/schemas"));
+
+        let registry = scan_for(&root.join("docs/doc.md"), root).unwrap();
+        assert!(registry.is_empty());
+        assert!(registry.roots.search_paths().is_empty());
     }
 
     #[test]
     fn scan_no_schemas_dirs_empty() {
         let repo = repo_fixture();
         let doc = repo.path().join("doc.md");
-        let registry = scan(&doc, repo.path(), &biscuit_file::FileResolutionContext::new(repo.path())).unwrap();
+        let registry = scan_for(&doc, repo.path()).unwrap();
         assert!(registry.is_empty());
     }
 
@@ -940,7 +746,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         assert_eq!(registry.triggers.len(), 2);
     }
 
@@ -951,9 +757,9 @@ mod tests {
         fs::create_dir_all(root.join("schemas")).unwrap();
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         assert!(registry.is_empty());
-        assert_eq!(registry.roots.len(), 1);
+        assert_eq!(registry.roots.search_paths().len(), 1);
     }
 
     #[test]
@@ -971,7 +777,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
+        let registry = scan_for(&doc, root).unwrap();
         assert_eq!(registry.triggers.len(), 1);
     }
 
@@ -993,7 +799,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = scan_for(&doc, root).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerLoad { .. }),
             "missing payload must be a hard load error: {err:?}"
@@ -1015,7 +821,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
+        let err = scan_for(&doc, root).unwrap_err();
         match err {
             SchemaError::TriggerLoad { source, .. } => {
                 assert!(
@@ -1044,7 +850,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let result = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root));
+        let result = scan_for(&doc, root);
         assert!(
             result.is_err(),
             "a single bad payload must fail the whole scan transactionally"

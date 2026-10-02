@@ -1,8 +1,9 @@
 //! Pure trigger-expression matcher.
 //!
 //! [`matches`] evaluates a [`MatchExpr`] against a parsed frontmatter snapshot
-//! and a normalized document path. It is a **pure function**: no I/O, no
-//! validator compilation, no filesystem access. This makes it viable
+//! and a [`PathSubject`] (the document path and its context). It performs no
+//! I/O beyond what [`GlobReference::matches`] does to judge one known path,
+//! which is lexical, and compiles no validator. This makes it viable
 //! per-keystroke in DMLS and composes with the content-hash effective-schema
 //! cache.
 //!
@@ -20,13 +21,19 @@
 //!
 //! ## `$path` glob matching
 //!
-//! `$path` globs are evaluated against the boundary-relative `/`-separated
-//! path (case-sensitive on every platform). A bare basename glob (no `/`)
-//! matches in any directory (`SKILL.md` ≡ `**/SKILL.md`, gitignore-style).
-//! `!`-prefixed patterns are negations: a path matches when it matches at
-//! least one include pattern and no exclusion.
+//! `$path` patterns are [`GlobReference`] patterns judged with
+//! [`GlobReference::matches`] and the file-name view, as `match()` validation
+//! judges a value: case-sensitive on every OS, nearest root, and a pattern
+//! whose glob names no directory (`SKILL.md`) matches that name at any depth.
+//! A path matches when some positive pattern admits it and no `!` pattern
+//! does. Bare and `./` patterns are read from the trigger's
+//! [`pattern_cwd`](super::LoadedTrigger::pattern_cwd); every other prefix
+//! from the document's context.
 
-use globset::Glob;
+use std::cell::OnceCell;
+use std::path::Path;
+
+use biscuit_file::FileResolutionContext;
 use serde_json::Value;
 
 use crate::markdown::schemas::simplified::{
@@ -34,40 +41,102 @@ use crate::markdown::schemas::simplified::{
     parse_schema_declaration,
 };
 
-use super::grammar::MatchExpr;
+use super::grammar::{MatchExpr, PathGlobs};
 
-/// A compiled glob matcher with its negation flag.
-type CompiledGlob = (bool, globset::GlobMatcher);
-
-thread_local! {
-    /// Per-thread glob-matcher cache keyed by the joined pattern signature.
-    /// Avoids recompiling glob matchers on every per-keystroke evaluation of
-    /// the same trigger registry.
-    static GLOB_CACHE: std::cell::RefCell<Vec<(String, Vec<CompiledGlob>)>> =
-        const { std::cell::RefCell::new(Vec::new()) };
+/// The document a `$path` predicate judges, for one trigger.
+pub struct PathSubject<'a> {
+    document: Option<(&'a Path, &'a FileResolutionContext)>,
+    pattern_cwd: Option<&'a Path>,
+    /// The document context re-anchored on `pattern_cwd`, built on first use.
+    relative_context: OnceCell<FileResolutionContext>,
 }
 
-/// Evaluates `expr` against `frontmatter` and `normalized_path`.
+impl<'a> PathSubject<'a> {
+    /// A subject with no document: every `$path` predicate is defeated.
+    #[must_use]
+    pub fn detached() -> Self {
+        Self {
+            document: None,
+            pattern_cwd: None,
+            relative_context: OnceCell::new(),
+        }
+    }
+
+    /// `document` judged in its own `context`. Bare and `./` patterns are read
+    /// from `context`'s `cwd` until [`with_pattern_cwd`](Self::with_pattern_cwd)
+    /// says otherwise.
+    #[must_use]
+    pub fn new(document: &'a Path, context: &'a FileResolutionContext) -> Self {
+        Self {
+            document: Some((document, context)),
+            pattern_cwd: None,
+            relative_context: OnceCell::new(),
+        }
+    }
+
+    /// Read bare and `./` patterns from `cwd`: the trigger's
+    /// [`pattern_cwd`](super::LoadedTrigger::pattern_cwd).
+    #[must_use]
+    pub fn with_pattern_cwd(mut self, cwd: &'a Path) -> Self {
+        self.pattern_cwd = Some(cwd);
+        self
+    }
+
+    /// The document path, when there is one.
+    #[must_use]
+    pub fn document(&self) -> Option<&Path> {
+        self.document.map(|(path, _)| path)
+    }
+
+    fn admits(&self, globs: &PathGlobs) -> bool {
+        let Some((document, context)) = self.document else {
+            return false;
+        };
+        let mut included = false;
+        for pattern in &globs.compiled {
+            let pattern_context = if pattern.relative {
+                self.relative_context(context)
+            } else {
+                context
+            };
+            if pattern.reference.matches(document, pattern_context) {
+                if pattern.negated {
+                    return false;
+                }
+                included = true;
+            }
+        }
+        included
+    }
+
+    fn relative_context<'s>(&'s self, context: &'s FileResolutionContext) -> &'s FileResolutionContext {
+        match self.pattern_cwd {
+            Some(cwd) => self.relative_context.get_or_init(|| context.for_cwd(cwd)),
+            None => context,
+        }
+    }
+}
+
+/// Evaluates `expr` against `frontmatter` and the document in `subject`.
 ///
-/// Returns `true` when the trigger activates. Side-effect-free by
-/// construction: the signature carries no filesystem, environment, or process
-/// types.
-pub fn matches(expr: &MatchExpr, frontmatter: &Value, normalized_path: &str) -> bool {
+/// Returns `true` when the trigger activates. Side-effect-free: nothing is
+/// written, and a `$path` predicate judges the known path without a walk.
+pub fn matches(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>) -> bool {
     match expr {
-        MatchExpr::All(children) => children.iter().all(|c| matches(c, frontmatter, normalized_path)),
-        MatchExpr::Any(children) => children.iter().any(|c| matches(c, frontmatter, normalized_path)),
-        MatchExpr::None(children) => !children.iter().any(|c| matches(c, frontmatter, normalized_path)),
+        MatchExpr::All(children) => children.iter().all(|c| matches(c, frontmatter, subject)),
+        MatchExpr::Any(children) => children.iter().any(|c| matches(c, frontmatter, subject)),
+        MatchExpr::None(children) => !children.iter().any(|c| matches(c, frontmatter, subject)),
         MatchExpr::MinMatch { count, of } => {
             let met = of
                 .iter()
-                .filter(|c| matches(c, frontmatter, normalized_path))
+                .filter(|c| matches(c, frontmatter, subject))
                 .count();
             met >= *count
         }
         MatchExpr::Property { name, atom } => {
             property_matches(frontmatter, name, atom)
         }
-        MatchExpr::Path(globs) => path_matches(normalized_path, &globs.patterns),
+        MatchExpr::Path(globs) => subject.admits(globs),
     }
 }
 
@@ -76,15 +145,15 @@ pub fn matches(expr: &MatchExpr, frontmatter: &Value, normalized_path: &str) -> 
 pub fn first_defeat(
     expr: &MatchExpr,
     frontmatter: &Value,
-    normalized_path: &str,
+    subject: &PathSubject<'_>,
 ) -> Option<String> {
-    if matches(expr, frontmatter, normalized_path) {
+    if matches(expr, frontmatter, subject) {
         return None;
     }
-    Some(describe_defeat(expr, frontmatter, normalized_path))
+    Some(describe_defeat(expr, frontmatter, subject))
 }
 
-fn describe_defeat(expr: &MatchExpr, frontmatter: &Value, path: &str) -> String {
+fn describe_defeat(expr: &MatchExpr, frontmatter: &Value, subject: &PathSubject<'_>) -> String {
     match expr {
         MatchExpr::Property { name, atom } => {
             let value = frontmatter.get(name);
@@ -97,17 +166,22 @@ fn describe_defeat(expr: &MatchExpr, frontmatter: &Value, path: &str) -> String 
                 Some(v) => format!("`{name}` value `{}` failed a constraint", summarize(v)),
             }
         }
-        MatchExpr::Path(globs) => {
-            format!("path `{path}` does not match globs {}", fmt_globs(&globs.patterns))
-        }
+        MatchExpr::Path(globs) => match subject.document() {
+            Some(path) => format!(
+                "path `{}` does not match globs {}",
+                path.display(),
+                fmt_globs(&globs.patterns)
+            ),
+            None => format!("no document path to match globs {}", fmt_globs(&globs.patterns)),
+        },
         MatchExpr::All(children) => children
             .iter()
-            .find_map(|c| first_defeat(c, frontmatter, path))
+            .find_map(|c| first_defeat(c, frontmatter, subject))
             .unwrap_or_else(|| "all-children".into()),
         MatchExpr::Any(_) => "no any-child matched".into(),
         MatchExpr::None(_) => "a none-child matched".into(),
         MatchExpr::MinMatch { count, of } => {
-            let met = of.iter().filter(|c| matches(c, frontmatter, path)).count();
+            let met = of.iter().filter(|c| matches(c, frontmatter, subject)).count();
             format!("min-match met {met}/{count}")
         }
     }
@@ -407,62 +481,6 @@ fn is_required(atom: &PropertyAtom) -> bool {
     atom.constraints.iter().any(|c| matches!(c, Constraint::Required))
 }
 
-/// Evaluates a `$path` glob list against a normalized path.
-fn path_matches(normalized_path: &str, patterns: &[String]) -> bool {
-    let Some(matchers) = compile_globs(patterns) else {
-        return false;
-    };
-    // A path matches when it matches at least one include pattern and no
-    // exclusion. This is the gitignore-style include/exclude semantics
-    // shared with the `file` type's `match()` constraint.
-    let mut included = false;
-    for (is_negation, matcher) in &matchers {
-        if matcher.is_match(normalized_path) {
-            if *is_negation {
-                return false;
-            }
-            included = true;
-        }
-    }
-    included
-}
-
-/// Compiles a glob list into matchers, applying gitignore-style basename
-/// expansion and preserving `!` negation flags.
-fn compile_globs(patterns: &[String]) -> Option<Vec<CompiledGlob>> {
-    let signature = patterns.join("\n");
-    let cached = GLOB_CACHE.with(|cell| {
-        cell.borrow()
-            .iter()
-            .find(|(sig, _)| sig == &signature)
-            .map(|(_, ms)| ms.clone())
-    });
-    if let Some(ms) = cached {
-        return Some(ms);
-    }
-
-    let mut out = Vec::with_capacity(patterns.len());
-    for raw in patterns {
-        let (is_negation, body) = raw
-            .strip_prefix('!')
-            .map(|b| (true, b))
-            .unwrap_or((false, raw.as_str()));
-        // Bare basename glob (no `/`) matches in any directory.
-        let expanded = if body.contains('/') {
-            body.to_string()
-        } else {
-            format!("**/{body}")
-        };
-        let glob = Glob::new(&expanded).ok()?;
-        out.push((is_negation, glob.compile_matcher()));
-    }
-
-    GLOB_CACHE.with(|cell| {
-        cell.borrow_mut().push((signature, out.clone()));
-    });
-    Some(out)
-}
-
 fn regex_match(pattern: &str, input: &str) -> bool {
     thread_local! {
         static CACHE: std::cell::RefCell<Vec<(String, regex::Regex)>> =
@@ -522,10 +540,10 @@ mod tests {
             prop("b", SimplifiedType::String, vec![]),
         ]);
         let fm = frontmatter(&[("a", json!("x")), ("b", json!("y"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
         // `a` is required but absent → all fails.
         let fm = frontmatter(&[("b", json!("y"))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
@@ -537,9 +555,9 @@ mod tests {
         // `a` present but type-contradicts → defeats; `b` absent → required
         // gate fails → any fails.
         let fm = frontmatter(&[("a", json!(42))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
         let fm = frontmatter(&[("b", json!("y"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
@@ -549,10 +567,10 @@ mod tests {
         ]);
         // `a` present → child holds → none fails.
         let fm = frontmatter(&[("a", json!("x"))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
         // `a` absent → required gate fails → child does not hold → none holds.
         let fm = frontmatter(&[]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
@@ -565,10 +583,10 @@ mod tests {
         ]);
         // `a` present + conforms → child holds → none fails.
         let fm = frontmatter(&[("a", json!("x"))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
         // `a` absent → guard holds → child holds → none fails.
         let fm = frontmatter(&[]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
@@ -582,9 +600,9 @@ mod tests {
             ],
         };
         let fm = frontmatter(&[("a", json!("x")), ("b", json!("y"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
         let fm = frontmatter(&[("a", json!("x"))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
@@ -594,7 +612,7 @@ mod tests {
             prop("tag", SimplifiedType::String, vec![Constraint::Required]),
         ])]);
         let fm = frontmatter(&[("tag", json!("x"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
     }
 
     // ── guard vs gate ────────────────────────────────────────────────────
@@ -603,38 +621,38 @@ mod tests {
     fn guard_absent_passes() {
         let expr = prop("maybe", SimplifiedType::String, vec![]);
         let fm = frontmatter(&[]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
     fn guard_present_contradiction_defeats() {
         let expr = prop("maybe", SimplifiedType::String, vec![]);
         let fm = frontmatter(&[("maybe", json!(42))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
     fn gate_required_absent_defeats() {
         let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
         let fm = frontmatter(&[]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
     fn gate_required_present_conforms() {
         let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
         let fm = frontmatter(&[("must", json!("hi"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
     fn null_treated_as_absent() {
         let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
         let fm = frontmatter(&[("must", Value::Null)]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
 
         let guard = prop("maybe", SimplifiedType::String, vec![]);
-        assert!(matches(&guard, &fm, ""));
+        assert!(matches(&guard, &fm, &PathSubject::detached()));
     }
 
     // ── value predicates ─────────────────────────────────────────────────
@@ -652,9 +670,9 @@ mod tests {
             },
         };
         let fm = frontmatter(&[("kind", json!("prompt"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
         let fm = frontmatter(&[("kind", json!("other"))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     #[test]
@@ -665,48 +683,67 @@ mod tests {
             vec![Constraint::Pattern("^Hello".into())],
         );
         let fm = frontmatter(&[("title", json!("Hello world"))]);
-        assert!(matches(&expr, &fm, ""));
+        assert!(matches(&expr, &fm, &PathSubject::detached()));
         let fm = frontmatter(&[("title", json!("Goodbye"))]);
-        assert!(!matches(&expr, &fm, ""));
+        assert!(!matches(&expr, &fm, &PathSubject::detached()));
     }
 
     // ── $path ────────────────────────────────────────────────────────────
 
+    fn path_expr(patterns: &[&str]) -> MatchExpr {
+        MatchExpr::Path(PathGlobs::new(patterns.iter().map(|p| p.to_string()).collect()).unwrap())
+    }
+
+    /// A repository root and a context for a document inside it.
+    fn repo() -> (tempfile::TempDir, FileResolutionContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = FileResolutionContext::from_snapshot(dir.path(), None, std::collections::HashMap::new())
+            .with_repository_root(dir.path());
+        (dir, ctx)
+    }
+
+    fn path_matches(expr: &MatchExpr, ctx: &FileResolutionContext, document: &Path) -> bool {
+        let doc_ctx = ctx.for_cwd(document.parent().unwrap());
+        matches(expr, &json!({}), &PathSubject::new(document, &doc_ctx).with_pattern_cwd(ctx.cwd()))
+    }
+
     #[test]
     fn path_bare_basename_matches_any_dir() {
-        let expr = MatchExpr::Path(PathGlobs {
-            patterns: vec!["SKILL.md".into()],
-        });
-        assert!(matches(&expr, &json!({}), "docs/SKILL.md"));
-        assert!(matches(&expr, &json!({}), "SKILL.md"));
-        assert!(!matches(&expr, &json!({}), "docs/OTHER.md"));
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["SKILL.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("docs/SKILL.md")));
+        assert!(path_matches(&expr, &ctx, &dir.path().join("SKILL.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("docs/OTHER.md")));
     }
 
     #[test]
     fn path_glob_with_separator() {
-        let expr = MatchExpr::Path(PathGlobs {
-            patterns: vec!["prompts/**/*.md".into()],
-        });
-        assert!(matches(&expr, &json!({}), "prompts/foo/bar.md"));
-        assert!(!matches(&expr, &json!({}), "docs/foo.md"));
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["prompts/**/*.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("prompts/foo/bar.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("docs/foo.md")));
     }
 
     #[test]
     fn path_negation() {
-        let expr = MatchExpr::Path(PathGlobs {
-            patterns: vec!["**/*.md".into(), "!**/_*.md".into()],
-        });
-        assert!(matches(&expr, &json!({}), "docs/foo.md"));
-        assert!(!matches(&expr, &json!({}), "docs/_draft.md"));
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["**/*.md", "!**/_*.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("docs/foo.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("docs/_draft.md")));
     }
 
     #[test]
     fn path_case_sensitive() {
-        let expr = MatchExpr::Path(PathGlobs {
-            patterns: vec!["SKILL.md".into()],
-        });
-        assert!(matches(&expr, &json!({}), "dir/SKILL.md"));
-        assert!(!matches(&expr, &json!({}), "dir/skill.md"));
+        let (dir, ctx) = repo();
+        let expr = path_expr(&["SKILL.md"]);
+        assert!(path_matches(&expr, &ctx, &dir.path().join("dir/SKILL.md")));
+        assert!(!path_matches(&expr, &ctx, &dir.path().join("dir/skill.md")));
+    }
+
+    #[test]
+    fn path_without_a_document_never_matches() {
+        let expr = path_expr(&["**"]);
+        assert!(!matches(&expr, &json!({}), &PathSubject::detached()));
     }
 
     // ── first_defeat ─────────────────────────────────────────────────────
@@ -714,7 +751,7 @@ mod tests {
     #[test]
     fn first_defeat_describes_missing_required() {
         let expr = prop("must", SimplifiedType::String, vec![Constraint::Required]);
-        let defeat = first_defeat(&expr, &frontmatter(&[]), "");
+        let defeat = first_defeat(&expr, &frontmatter(&[]), &PathSubject::detached());
         assert!(defeat.as_deref().unwrap().contains("required"));
     }
 
@@ -728,8 +765,8 @@ mod tests {
             SimplifiedType::Literal,
             vec![Constraint::LiteralValue(json!("spec"))],
         );
-        assert!(matches(&expr, &frontmatter(&[("kind", json!("spec"))]), ""));
-        assert!(!matches(&expr, &frontmatter(&[("kind", json!("other"))]), ""));
+        assert!(matches(&expr, &frontmatter(&[("kind", json!("spec"))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("kind", json!("other"))]), &PathSubject::detached()));
     }
 
     #[test]
@@ -740,9 +777,9 @@ mod tests {
             SimplifiedType::Literal,
             vec![Constraint::LiteralValue(json!(2))],
         );
-        assert!(matches(&expr, &frontmatter(&[("version", json!(2))]), ""));
-        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), ""));
-        assert!(!matches(&expr, &frontmatter(&[("version", json!("2"))]), ""));
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2))]), &PathSubject::detached()));
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("version", json!("2"))]), &PathSubject::detached()));
     }
 
     #[test]
@@ -752,10 +789,10 @@ mod tests {
             SimplifiedType::Literal,
             vec![Constraint::LiteralValue(json!(false))],
         );
-        assert!(matches(&expr, &frontmatter(&[("archived", json!(false))]), ""));
-        assert!(!matches(&expr, &frontmatter(&[("archived", json!(true))]), ""));
+        assert!(matches(&expr, &frontmatter(&[("archived", json!(false))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("archived", json!(true))]), &PathSubject::detached()));
         // Type-sensitive: the string "false" is not the boolean literal.
-        assert!(!matches(&expr, &frontmatter(&[("archived", json!("false"))]), ""));
+        assert!(!matches(&expr, &frontmatter(&[("archived", json!("false"))]), &PathSubject::detached()));
     }
 
     #[test]
@@ -766,9 +803,9 @@ mod tests {
             SimplifiedType::Literal,
             vec![Constraint::LiteralValue(json!("spec"))],
         );
-        assert!(matches(&expr, &frontmatter(&[]), ""));
+        assert!(matches(&expr, &frontmatter(&[]), &PathSubject::detached()));
         // Present-but-wrong still defeats.
-        assert!(!matches(&expr, &frontmatter(&[("kind", json!("plan"))]), ""));
+        assert!(!matches(&expr, &frontmatter(&[("kind", json!("plan"))]), &PathSubject::detached()));
     }
 
     #[test]
@@ -780,7 +817,7 @@ mod tests {
             SimplifiedType::Literal,
             vec![Constraint::LiteralValue(json!(2))],
         );
-        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), ""));
+        assert!(matches(&expr, &frontmatter(&[("version", json!(2.0))]), &PathSubject::detached()));
     }
 
     #[test]
@@ -801,11 +838,11 @@ mod tests {
                 vec![Constraint::LiteralValue(lit.clone())],
             );
             assert!(
-                matches(&expr, &frontmatter(&[("version", lit.clone())]), ""),
+                matches(&expr, &frontmatter(&[("version", lit.clone())]), &PathSubject::detached()),
                 "literal({lit}) must accept {lit}"
             );
             assert!(
-                !matches(&expr, &frontmatter(&[("version", neighbor.clone())]), ""),
+                !matches(&expr, &frontmatter(&[("version", neighbor.clone())]), &PathSubject::detached()),
                 "literal({lit}) must reject f64-colliding neighbor {neighbor}"
             );
         }
@@ -816,7 +853,7 @@ mod tests {
         // `expression` mirrors the content-format string types in triggers: any
         // string is shape-compatible; a non-string defeats.
         let expr = prop("when", SimplifiedType::Expression, vec![]);
-        assert!(matches(&expr, &frontmatter(&[("when", json!("is_agent()"))]), ""));
-        assert!(!matches(&expr, &frontmatter(&[("when", json!(3))]), ""));
+        assert!(matches(&expr, &frontmatter(&[("when", json!("is_agent()"))]), &PathSubject::detached()));
+        assert!(!matches(&expr, &frontmatter(&[("when", json!(3))]), &PathSubject::detached()));
     }
 }

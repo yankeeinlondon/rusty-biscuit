@@ -984,9 +984,9 @@ The resolution rules:
 Path references in `$schema` resolve like implicit file references: a bare path is
 tried **from the document's directory first, then the repository root**, while an explicit
 `./`/`../` reference resolves from the document's directory only. A bare **name**
-(`$schema: claudine.yaml`, no path separator) instead resolves against the configured
-[schema roots](#repository-trigger-schemas) nearest-first. No ambient current working
-directory is read.
+(`$schema: claudine.yaml`, no path separator) instead resolves to the first of the
+five [schema roots](#schema-roots) that holds that file; write `./claudine.yaml` for a
+file beside the document. No ambient current working directory is read.
 
 Remote (`http://` / `https://`) references are **not supported** in v1 and produce a clear `SchemaError::RemoteUnsupported` directing the user to download the schema locally.
 
@@ -1683,9 +1683,9 @@ unless the same baseline is supplied explicitly.
 `md schema about` is the **implementation-bound CLI reference** for this topic. Its contents come from a typed descriptor catalog (`schema_type_descriptors`, `schema_constraint_descriptors`, `schema_shape_descriptors`, `inline_object_rule_descriptors`, `coercion_rule_descriptors`, `validation_behavior_descriptors` in `darkmatter::markdown::schemas`), which library callers can consume to render their own reports. Drift between this prose document and the CLI report is caught by parity tests that pin the descriptor catalog to the implemented `SimplifiedType` and `Constraint` enums.
 ### Repository Trigger Schemas
 
-File-backed CLI and DMLS validation can discover `schemas/` directories from
-the document's directory through an explicit repository or workspace boundary.
-A YAML file opts into activation by declaring `kind: trigger-schema`:
+File-backed CLI and DMLS validation discover trigger schemas in the five
+[schema roots](#schema-roots) of the document being checked. A YAML file in
+one of those folders opts into activation by declaring `kind: trigger-schema`:
 
 ```yaml
 kind: trigger-schema
@@ -1697,11 +1697,84 @@ match:
 $schema: prompt.yaml
 ```
 
-The envelope and payload are separate files. Bare filenames such as
-`prompt.yaml` resolve against discovered schema roots, nearest first; use
+The envelope and payload are separate files. A bare filename such as
+`prompt.yaml` resolves to the first schema root that holds it; use
 `./prompt.yaml` when the intended file is beside the referencing document or
-schema. A trigger filename in a nearer root shadows the same filename in every
-farther root.
+schema. A trigger filename in an earlier root shadows the same filename in
+every later root: the shadowed file is reported by `md schema triggers` and
+never evaluated.
+
+#### Schema roots
+
+Darkmatter and DMLS look for schema files in exactly five folders, searched
+most local first:
+
+| # | Root | Present when | Example |
+|---|------|--------------|---------|
+| 1 | package root | the document is inside a package of a monorepo | `{package}/schemas/` |
+| 2 | package-area root | the document is inside a package area | `claudine/schemas/` |
+| 3 | file tree root | always | `{repo}/schemas/` in a repository |
+| 4 | the folder `SCHEMAS_DIR` names | the variable is set | `$SCHEMAS_DIR/` |
+| 5 | your home folder | always | `~/schemas/` |
+
+```mermaid
+flowchart LR
+    D[document being checked] --> P["1. package root/schemas"]
+    P --> A["2. package-area root/schemas"]
+    A --> T["3. file tree root/schemas"]
+    T --> S["4. $SCHEMAS_DIR (if set)"]
+    S --> H["5. ~/schemas"]
+    H --> R["the first root holding a file name wins"]
+```
+
+- The package and package area are those of the **document**, not of the
+  directory you launched `md` from. Outside a repository the file tree root
+  is the tree the document was opened in (often its own folder).
+- `SCHEMAS_DIR` names the schemas folder **itself**, which can be any folder
+  you choose: with `SCHEMAS_DIR=/opt/team/dm-defs`, files are read from
+  `/opt/team/dm-defs/`, never from `/opt/team/dm-defs/schemas/`. It must be an
+  absolute path; an empty or relative value adds no root and
+  `md schema triggers` reports it as invalid.
+- A folder that does not exist is skipped. A root that names the same folder
+  as an earlier one (say `SCHEMAS_DIR` pointing at `~/schemas`) is searched
+  once, at the earlier position.
+- `schemas/` folders anywhere else, such as `{package}/docs/schemas/`, are
+  not searched.
+- Both values come from the environment the process started with. DMLS reads
+  them when the editor starts the server, so a GUI editor that lacks a shell
+  variable lacks `SCHEMAS_DIR` too; restart the server after changing it.
+
+#### Matching a path with `$path`
+
+`$path` takes one or more [glob references](#files), the same
+patterns `match()` uses, and matches when some positive pattern admits the
+document and no `!` pattern does:
+
+```yaml
+kind: trigger-schema
+match:
+    $path:
+        - "^docs/**"     # docs/ of the document's package, area, or repository
+        - "!**/_*.md"    # but never a file whose name starts with `_`
+$schema: docs.yaml
+```
+
+- A pattern whose glob names no folder (`SKILL.md`, `*.md`) also matches that
+  file name at any depth.
+- A bare or `./` pattern is read from the folder that holds the trigger's
+  `schemas/` folder, so a package trigger's `*.md` matches every Markdown
+  file in the package. A trigger in `SCHEMAS_DIR` or `~/schemas` lives
+  outside your repositories, so its bare patterns are read from the checked
+  document's file tree root: `docs/*.md` there matches `{repo}/docs/x.md`,
+  not `{repo}/pkg/docs/x.md`. Prefer `&`, `^`, or `**/` in user-level
+  triggers; they say which root they mean.
+- `&`, `^`, `~`, and absolute paths are allowed. `~/notes/**` is how a
+  trigger in `~/schemas` applies across all of your notes.
+- `@`, `%`, `vault:`, and a `{{VAR}}` **anywhere** in a pattern are
+  definition errors naming the pattern: whether a schema applies must not
+  depend on the launch directory, vault configuration, or an arbitrary
+  environment variable. So are an invalid glob and a list of only `!`
+  patterns.
 
 Property conditions reuse SimplifiedSchema type expressions. A condition
 without `required` is a guard: absence is allowed, but a present value of the
@@ -1713,17 +1786,27 @@ Stateful or phase-specific constraints (`eager`, imports, `example`,
 
 The match grammar supports freely nested `all`, `any`, `none`, and
 `min-match: { count, of }` combinators. A sequence under `match:` is an outer
-OR of independent arms. `$path` matches the boundary-relative,
-forward-slash-separated, case-sensitive path with gitignore-style globs. Every
-arm must contain a satisfiable presence gate or `$path`; otherwise the vacuous
-arm is a load error.
+OR of independent arms. `$path` is case-sensitive on every OS (see
+[Matching a path with `$path`](#matching-a-path-with-path)). Every arm must
+contain a satisfiable presence gate or `$path`; otherwise the vacuous arm is a
+load error.
 
-Effective precedence is caller baseline, matching trigger payloads (nearest
-root and then filename order), then the document's own `$schema`. Trigger
+Effective precedence is caller baseline, matching trigger payloads (schema
+root order and then filename order), then the document's own `$schema`. Trigger
 payloads must be merge-compatible object schemas. Discovery is transactional:
 an invalid opted-in envelope rejects the scan, while unrelated YAML files are
 ignored. Library hosts opt in explicitly with
 `DarkmatterSchemas::with_trigger_discovery`; `md compose` and
 `md schema validate` opt in for repository-backed files and accept
-`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect roots,
-shadowing, matched arms, and defeat explanations.
+`--no-trigger-schemas`. Use `md schema triggers <file>` to inspect the five
+roots (marking absent folders and an unset or invalid `SCHEMAS_DIR`),
+shadowing, matched arms, and defeat explanations:
+
+```text
+Schema roots (search order):
+1. package root: none (the document is not in a package)
+2. package-area root: /repo/claudine/schemas
+3. file tree root: /repo/schemas
+4. SCHEMAS_DIR: unset
+5. home: /home/me/schemas (absent)
+```

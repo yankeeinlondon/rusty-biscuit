@@ -111,7 +111,9 @@ excluded keys without executing anything.
   beside a raw JSON Schema arm. An existing file outside that glob rules the
   arm out. Attachment happens per arm in `convert.rs` and both `resolve.rs`
   union sites. `FileMatchGlobs` (a `GlobReference` with the file-name view)
-  is the one judgment, shared with Claudine's candidate walk; a caller
+  is the one judgment, shared with Claudine's candidate walk (which walks
+  `roots(ctx)` and keeps a file only when `lists_file(path, ctx)` holds:
+  `matches` plus `list_files`' out-of-tree file-symlink skip); a caller
   property is judged from its origin (`DarkmatterSchemas::with_caller_input_records`,
   which every host that validates caller overrides itself must call, as
   Claudine's pre-validation and launch schema do).
@@ -162,3 +164,32 @@ For grammar or schema changes, cover:
   artifact.
 - Imported dependency/cycle errors and source spans.
 - Read/write/read repetition when composition persists normalized values.
+
+## Schema roots and `$path` triggers
+
+- `SchemaRoots::for_document(&ctx)` (`schemas/roots.rs`) is the one root list:
+  package, package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`, each with a
+  `SchemaRootState` (`Searched`, `Absent`, `Duplicate { of }`,
+  `NotApplicable`, `Invalid`). `md schema triggers` prints exactly these
+  states; DMLS and `md` share them through `triggers::scan(&ctx)`.
+- `ctx` must be the checked document's context (compose's
+  `source_file_resolution_context`, the CLI's `request.document_context`,
+  DMLS's per-document derivation). The registry keeps that context and
+  `evaluate_registry(registry, fm, Some(path))` judges `$path` in it.
+- Discovery still runs only inside a repository (`md`) or a workspace folder
+  (DMLS); the roots do not decide that gate.
+- `PathGlobs::new` compiles one single-pattern `GlobReference` per `$path`
+  pattern (negation kept beside it). Bare and `./` patterns are judged from
+  the trigger's `LoadedTrigger::pattern_cwd` (the folder holding its
+  `schemas/`, or the document's `base_dir()` for `SCHEMAS_DIR`/home
+  triggers); `&`, `^`, `~`, absolute from the document's own context. `@`,
+  `vault:`, `%`, and `{{` anywhere are `TriggerMatch` definition errors naming
+  the pattern.
+- A test fixture for roots builds its context with `build_resolution_context`
+  from a `RequestSnapshot` carrying a fixture home and env, never
+  `FileResolutionContext::new` (ambient `HOME` would add a real `~/schemas`).
+  `md` child processes scrub `SCHEMAS_DIR`; declare it with
+  `application_input("SCHEMAS_DIR", ..)`. A DMLS fixture whose triggers live
+  in the workspace `schemas/` must be a repository: outside one, a
+  document's tree root is its own folder.
+

@@ -183,18 +183,17 @@ types:
 
 Other schemas can import `address` by name, for example with `address@./address-types.yaml`. A whole-file schema reference to this types-only file fails with a structured **no exported schema** error. It does not turn the helper names into document properties. Discovering or importing a type library does not automatically activate a document schema or lifecycle binding scope.
 
-To make an exported schema apply automatically, place its definition in one of the accepted discovery directories:
+To make an exported schema apply automatically, place its definition in one of the five [schema roots](./definition.md#schema-roots), searched in this order:
 
-- `{root}/schemas`
-- in a monorepo:
-    - `{package-area-root}/schemas`
-    - `{package-root}/schemas`
+1. in a monorepo, `{package-root}/schemas` of the document's package
+2. in a monorepo, `{package-area-root}/schemas` of the document's package area
+3. `{root}/schemas`
+4. the folder the `SCHEMAS_DIR` environment variable names, when it is set (the folder itself, which can be any folder you choose; no `schemas/` is appended)
+5. `~/schemas`
 
-- when the environment variable SCHEMA_DIR is set then it will be looked in as well
+`{root}` is the document's file tree root: the root of its repository when it is in one, otherwise the tree it was opened in (often the document's own folder). Package and package area are the document's, not those of the directory you launched from. `schemas/` folders anywhere else are not searched.
 
-Note that `{root}` is the root of the repo you currently operating in if you're in a repo, if you're NOT in a repo then `{root}` is the current working directory (or the root folder in your editor in the case of DMLS).
-
-Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. `SCHEMA_DIR` adds explicitly selected definitions with workspace-wide applicability; it does not replace normal discovery. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
+Recognized standalone schemas with an exported `$schema` augment the Darkmatter baseline within their discovery scope. Automatically discovered package-area and package schemas do not apply to sibling scopes. `SCHEMAS_DIR` adds explicitly selected definitions with workspace-wide applicability; it does not replace normal discovery. Types-only libraries remain available for imports without automatically applying a schema. Arbitrary YAML files are not schema inputs.
 
 Direct, explicitly supplied always-on schemas remain supported independently of automatic discovery.
 
@@ -263,7 +262,7 @@ The explicit-base form requires an explicit-relative `path`, preventing a fallba
 
 `base: workspace` selects the consuming document's repository/worktree root, even when the editor opened only a repository subdirectory. Outside a repository, it selects the nearest containing editor workspace folder or the captured CLI working directory. Nested repositories and linked worktrees use their own roots. Repository-discovery errors remain errors, not evidence that the document is outside a repository.
 
-The consuming root is independent of schema-source location, including external `SCHEMA_DIR` sources. It does not expand the applicability of automatically discovered nested schemas. Additional base selectors remain under design review; these examples describe the intended contract, not current support.
+The consuming root is independent of schema-source location, including external `SCHEMAS_DIR` sources. It does not expand the applicability of automatically discovered nested schemas. Additional base selectors remain under design review; these examples describe the intended contract, not current support.
 
 For the matching model and its implementation status, read [Schema Triggers in Darkmatter](./schema-targeting.md).
 

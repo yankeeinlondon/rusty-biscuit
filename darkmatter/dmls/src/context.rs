@@ -438,6 +438,17 @@ pub(crate) mod test_support {
         DocumentResolution::from_context(workspace_context().for_source(path))
     }
 
+    /// The resolution for a document at a real `path` inside repository
+    /// `root`, with no home: `root` is the tree root, so `{root}/schemas` is
+    /// a schema root for the document.
+    pub(crate) fn resolution_in_repository(root: &Path, path: &Path) -> DocumentResolution {
+        DocumentResolution::from_context(
+            FileResolutionContext::from_snapshot(root, None, HashMap::new())
+                .with_repository_root(root)
+                .for_source(path),
+        )
+    }
+
     /// The resolution for a document at a real `path` inside `root`, with no
     /// repository.
     pub(crate) fn resolution_in(root: &Path, path: &Path) -> DocumentResolution {

@@ -14,6 +14,18 @@ use dmls::overlay::expressions;
 use lsp_server::{RequestId, Response};
 use serde_json::{Value, json};
 
+/// A minimal repository Git discovery accepts, without running `git`.
+fn init_repository(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join(".git/objects")).unwrap();
+    std::fs::create_dir_all(root.join(".git/refs/heads")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(
+        root.join(".git/config"),
+        "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+    )
+    .unwrap();
+}
+
 fn neovim_like_initialize_params(root: &std::path::Path) -> Value {
     let root_uri = url::Url::from_directory_path(root).unwrap();
     json!({
@@ -561,6 +573,10 @@ fn server_rescan_fallback_tracks_unopened_files_on_save() {
 #[test]
 fn trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope() {
     let workspace = LspWorkspace::new();
+    // A repository, so the open envelope's own context has the workspace as
+    // its tree root and `schemas/` as a schema root: its refresh reports the
+    // failed scan itself rather than waiting for the consumer's transition.
+    init_repository(workspace.path());
     let schemas = workspace.path().join("schemas");
     std::fs::create_dir(&schemas).unwrap();
     std::fs::write(

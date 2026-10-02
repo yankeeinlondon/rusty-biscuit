@@ -125,7 +125,7 @@ captured `ctx.*` `ComposeContext`, so never name a new request method
 `ResolutionContext::new(ctx)`, `ReferenceGraphOptions::with_compose(&request)`,
 `FileTree::new(path, &request)`, `evaluate_condition_against(expr, data, &ctx)`,
 `detect_schema(.., &ctx)`, `resolve_schema*(.., &ctx)`, and
-`triggers::scan(.., &ctx)` all take one; none has a context-free form.
+`triggers::scan(&ctx)` all take one; none has a context-free form.
 Validators are either context-bound (`ValidatorCache::validator_for(schema,
 base, &ctx)`) or structural (`structural_validator_for`, `build_structural_validator`) for
 callers with no request (coercion probes, examples, lint): an absolute path is
@@ -177,6 +177,12 @@ Important contracts:
   parsers used by authoring and DMLS.
 - Trigger matching is schema-based and passive. A schema-trigger document is a
   kinded document and must retain its root `kind` declaration.
+- Triggers and bare-name `$schema` lookup use the five schema roots of the
+  **document's** context (`schemas::roots::SchemaRoots::for_document`):
+  package, package area, `base_dir()`, `SCHEMAS_DIR` (the folder itself, from
+  `ctx.env()`), `~/schemas`. Never walk ancestors or read the process
+  environment for them. `$path` patterns are `GlobReference`s; see
+  [schema.md](schema.md#schema-roots-and-path-triggers).
 
 Read [schema.md](schema.md) for imports, unions, pattern dictionaries,
 suggestions, triggers, and DMLS schema behavior.

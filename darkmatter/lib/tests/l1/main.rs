@@ -87,6 +87,7 @@ mod render_tree_roundtrip;
 mod request_context_epoch;
 mod schema_phase_validation;
 mod schema_quoting_safety;
+mod schema_roots;
 mod schemas_convert_snapshots;
 mod schemas_detect_table;
 mod schemas_grammar_proptest;

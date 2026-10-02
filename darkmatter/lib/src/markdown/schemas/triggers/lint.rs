@@ -144,9 +144,7 @@ mod tests {
 
     #[test]
     fn accepts_path_arm() {
-        let arms = MatchArms(vec![MatchExpr::Path(PathGlobs {
-            patterns: vec!["**/*.md".into()],
-        })]);
+        let arms = MatchArms(vec![MatchExpr::Path(PathGlobs::new(vec!["**/*.md".into()]).unwrap())]);
         assert!(lint(&arms).is_ok());
     }
 
