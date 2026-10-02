@@ -38,9 +38,11 @@ violations there. This keeps the editor free of false positives.
 
 ## Passivity
 
-Computing diagnostics is read-only. DMLS resolves local paths and reads its
-in-memory workspace graph; the only filesystem touch is an existence `stat` for
-broken-path checks. It never executes a shell command (`$(...)`, `::shell`),
+Computing diagnostics is read-only. DMLS resolves local paths through each
+repository's file-resolution context (see [File references](./file-references.md))
+and reads its in-memory workspace graph; the only filesystem touches are the
+existence probes resolution makes and the one repository discovery per context
+build. It never executes a shell command (`$(...)`, `::shell`),
 fetches a remote URL, or mutates a file. Shell and remote content is *explained*
 statically (see the `darkmatter.security` source), never run.
 
@@ -91,11 +93,23 @@ feature layer.
   `ComposeWarning` (as `UNKNOWN_IDENTIFIER_CODE` does). There is no shared
   cross-crate constant module until a second shared code exists.
 
+### File-resolution context (`source: darkmatter.context`)
+
+| Code | Meaning |
+|------|---------|
+| `dm.context.build_failure` | **Error**, at line 0, column 0. The document's file-resolution context could not be built (for example, repository discovery failed on a corrupt `.git/config`), or an untitled buffer's workspace folders do not lie in exactly one repository. No file reference in the document is resolved, including its `$schema`, so no link, transclusion, or schema diagnostic appears beside it. See [File references](./file-references.md#when-a-context-cannot-be-built). |
+
+Every diagnostic about a reference that did not resolve (`dm.links.broken_path`,
+`dm.transclusion.broken_path`, `dm.schema.invalid_file_reference`, and
+`dm.context.build_failure`) carries `data: {"resolution_failure": "<Class>"}`,
+the biscuit-file failure class (`InvalidReference`, `MissingContext`,
+`NoMatch`, `Io`, `UnsupportedRemote`).
+
 ### Layer 0 — Markdown links (`source: darkmatter.links`)
 
 | Code | Meaning |
 |------|---------|
-| `dm.links.broken_path` | A relative link path matched no indexed document. |
+| `dm.links.broken_path` | A link path matched no indexed document, resolving `&`, `^`, `@`, and relative paths as `md compose` does. |
 | `dm.links.missing_anchor` | The link resolved to a document, but its `#fragment` anchor does not exist there. |
 | `dm.links.duplicate_heading` | Two or more headings generate the same GitHub anchor slug (carries `relatedInformation` linking the twins). |
 
