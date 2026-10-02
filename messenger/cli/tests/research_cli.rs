@@ -203,6 +203,36 @@ fn validate_accepts_the_fleet_fixture() {
     assert_eq!(code(&output), 0, "{}", stdout(&output));
 }
 
+/// A relative document argument is taken from the directory `messenger` was
+/// launched in, which the binary captures once in its request snapshot.
+#[test]
+fn validate_takes_a_relative_document_from_the_launch_directory() {
+    let fleet = Fleet::new();
+    let launch = fleet.path("messenger/docs/research/platforms");
+    let mut command = Command::new(biscuit_test_harness::bin_exe!("messenger"));
+    // `--root` is relative too, so both spellings come from the launch
+    // directory (macOS temp directories are reached through a symlink).
+    command
+        .current_dir(&launch)
+        .args(["research", "--root", "../../../.."])
+        .args(["--today", "2026-09-17", "validate", "--json", "discord.md"])
+        .env_remove("COMPLETE")
+        .env("NO_COLOR", "1");
+    let output = command.output().expect("run messenger");
+    assert_eq!(code(&output), 0, "{}", stdout(&output));
+    assert_eq!(json(&output)["valid"], true);
+
+    let mut missing = Command::new(biscuit_test_harness::bin_exe!("messenger"));
+    missing
+        .current_dir(fleet.root())
+        .args(["research", "--root", "."])
+        .args(["--today", "2026-09-17", "validate", "--json", "discord.md"])
+        .env_remove("COMPLETE")
+        .env("NO_COLOR", "1");
+    let output = missing.output().expect("run messenger");
+    assert_ne!(code(&output), 0, "`discord.md` does not exist in the fleet root:\n{}", stdout(&output));
+}
+
 /// End to end over the real shipped artifacts: the accepted documents are
 /// still legacy prose without a bound schema, so the fleet is not yet valid.
 #[test]

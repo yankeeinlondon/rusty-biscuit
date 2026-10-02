@@ -57,11 +57,14 @@ fn load(path: &Path) -> Markdown {
 /// One validator cache per test process, so each schema compiles once.
 ///
 /// Each document's `$schema` and `file` values resolve from its own
-/// directory, through a context built at the package.
+/// directory, through a context built at the repository root (read at run
+/// time, see [`lib_dir`]). Fixtures name `messenger/docs/` through `..`, which
+/// must stay inside the tree even where no `.git` marks the root (an archive
+/// run's extracted workspace).
 fn schemas() -> &'static DarkmatterSchemas {
     static SCHEMAS: OnceLock<DarkmatterSchemas> = OnceLock::new();
     SCHEMAS.get_or_init(|| {
-        let snapshot = RequestSnapshot::new(env!("CARGO_MANIFEST_DIR"));
+        let snapshot = RequestSnapshot::new(messenger_dir().parent().expect("repository root"));
         DarkmatterSchemas::new(build_resolution_context(&snapshot).expect("package context"))
     })
 }
