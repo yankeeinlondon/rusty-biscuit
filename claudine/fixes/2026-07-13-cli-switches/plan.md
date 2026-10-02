@@ -347,8 +347,8 @@ Checkpoint 4: `cargo run -p claudine-gen -- check` clean; generator and catalog-
 
 Depends on Phase 4.
 
-- [ ] **Update the fleet prompt** (`docs/research/agent-cli/_fleet.md`) to request the new fields, with evidence for value consumption and attachment forms; validate in the fleet's success lifecycle with both shape and relation checks, and revision-aware refresh so a recently dated doc cannot skip the changed contract.
-- [ ] **Pilot one provider** (Codex, because `-c` is the headline case) and inspect before the fleet. Record observed version and evidence.
+- [x] **Update the fleet prompt** (`docs/research/agent-cli/_fleet.md`) to request the new fields, with evidence for value consumption and attachment forms; validate in the fleet's success lifecycle with both shape and relation checks, and revision-aware refresh so a recently dated doc cannot skip the changed contract.
+- [x] **Pilot one provider** (Codex, because `-c` is the headline case) and inspect before the fleet. Record observed version and evidence.
 - [ ] **Re-research all roster providers**; respect `skip_research` roster entries, but every compiled provider still gets metadata or an explicit unknown gap. Repeatable scalar switches stay scalar. Anything not established is `unknown` with the gap described, never guessed.
 - [ ] **Regenerate** (`claudine providers generate` / `claudine-gen`), commit nothing; run the drift check.
 - [ ] **Lookup API** in the lib: keyed by provider and effective entrypoint (global + exact-path entries), returns a switch record or the union type for a candidate set, and keeps each arm so Phase 6 can name which candidate disagrees. Remove no handwritten list because none exists; guard with a test that no handwritten switch-type table exists in the CLI.
