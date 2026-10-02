@@ -623,7 +623,7 @@ pub(crate) struct FrontmatterInterpolationReport {
     /// Best-effort only: the first key error that was a missing runtime
     /// context capture. The compose pass raises the same error for that key.
     pub missing_runtime_context: Option<MarkdownError>,
-    /// Unknown-root reads, each with the top-level key whose value read it.
+    /// Undeclared-property reads, each with the top-level key whose value read it.
     /// Candidates only: this pass may run before the final state and schema
     /// exist. Best-effort (discovery) runs record none.
     pub missing_roots: Vec<(String, MissingRoot)>,

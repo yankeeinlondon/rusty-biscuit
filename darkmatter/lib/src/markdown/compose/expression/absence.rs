@@ -259,7 +259,7 @@ impl MissingRootObserver for () {
     fn missing_root(&mut self, _root: &str) {}
 }
 
-/// One unhandled read of an unknown root.
+/// One unhandled read of an absent document property.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MissingRoot {
     pub(crate) root: String,

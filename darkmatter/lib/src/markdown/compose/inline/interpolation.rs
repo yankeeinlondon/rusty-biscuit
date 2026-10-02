@@ -74,7 +74,7 @@ pub(crate) fn run_stage(
     )
     .map_err(|failure| anchor_authored_failure(markdown, origin, failure))?;
     report.add_warnings(targets.warnings);
-    // An unknown root in a whole-value directive target already warns as a
+    // An absent property in a whole-value directive target already warns as a
     // skipped nullable target; a second warning would report one issue twice.
     drop(evaluator.take_missing_roots());
     let origin = origin.map(|origin| origin.after_edits(&targets.edits, &targets.output));

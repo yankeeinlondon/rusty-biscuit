@@ -107,7 +107,7 @@ pub struct ComposeReport {
     pub(crate) unknown_root_candidates: UnknownRootCandidates,
 }
 
-/// First-read unknown-root candidates in read order, one per root.
+/// First-read undeclared-property candidates in read order, one per root.
 ///
 /// The root set is private to this type so it cannot drift from the list.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -235,7 +235,7 @@ pub(crate) struct UnknownRootCandidate {
     pub(crate) locus: CandidateLocus,
 }
 
-/// Where an unknown-root candidate was read, as precisely as the reading
+/// Where an undeclared-property candidate was read, as precisely as the reading
 /// surface can prove.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CandidateLocus {
@@ -516,7 +516,7 @@ impl ComposeReport {
         }
     }
 
-    /// Records the unknown-root `roots` one stage read, each at `locus(root)`.
+    /// Records the undeclared-property `roots` one stage read, each at `locus(root)`.
     ///
     /// Only a root's first read is kept (and located): the document warns
     /// once per root, at its first authored location.

@@ -1,4 +1,4 @@
-//! Turns one document's unknown-root candidates into
+//! Turns one document's undeclared-property candidates into
 //! `dm.expression.undeclared_property` advisories.
 //!
 //! An undeclared property is valid: it evaluates to `null` unless something

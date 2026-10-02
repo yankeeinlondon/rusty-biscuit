@@ -213,7 +213,7 @@ impl EvalValue {
 pub struct Evaluator<'a, L: EvaluationLookup> {
     state: &'a L,
     presentation_values: Option<&'a HashMap<String, Value>>,
-    /// Unhandled reads of unknown roots, when the surface observes them.
+    /// Unhandled reads of absent document properties, when the surface observes them.
     /// Stage-local and uncontended: one evaluator serves one stage.
     missing_roots: Option<RefCell<Vec<MissingRoot>>>,
 }

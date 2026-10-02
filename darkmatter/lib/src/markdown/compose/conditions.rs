@@ -144,7 +144,7 @@ pub fn evaluate_condition<L: EvaluationLookup>(
     evaluate_condition_observed(expr, state, line, ctx, &mut ())
 }
 
-/// [`evaluate_condition`], reporting each evaluated read of an unknown root to
+/// [`evaluate_condition`], reporting each evaluated read of an absent property to
 /// `observer`. The whole condition is an ordinary position: a bare
 /// `when="x"` is a gate, not an absence check, so a misspelled gate is
 /// reported rather than silently disabling content.
