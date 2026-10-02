@@ -576,7 +576,11 @@ prompt argument, and a `target=<value>` schema value) and through
 suggestions name the file it resolved). A failed schema `file` value, a
 tolerated reference warning, and an unresolved prompt argument
 (`CompositionError::resolution_failure`) render a `failure: <class>` row, as in
-`md`.
+`md`. Its `external_*` tests use the shared `CrossRepositoryFixture`: a prompt
+in another repository takes `&`, `^`, and bare root lookups from its own
+repository and `@` from the launch tree, in composition and in completion
+(`CommittedPrompt::resolve` derives such a prompt with
+`composition::derive_request_context_for_source`, composition's policy).
 
 ### Agent text is data
 

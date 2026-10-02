@@ -571,6 +571,16 @@ the prompt document's context, so the authored property order (below)
 survives `$schema: '&schemas/order.yaml'` as well as
 `$schema: ./order.yaml`.
 
+A prompt in another repository gets the context composition gives it. Its
+own repository anchors `&`, `^`, and a bare path's root lookup, while `@`
+keeps searching the tree you launched from. Launched from `~/work/app`:
+
+```text
+claudine compose ~/work/lib/prompts/p.md zebra=<TAB>
+  $schema: '&schemas/order.yaml'   → ~/work/lib/schemas/order.yaml
+  $schema: '@order.yaml'           → ~/work/app/order.yaml (launch tree first)
+```
+
 ### Property names (before `=`)
 
 Required properties are emitted first in declaration order, then

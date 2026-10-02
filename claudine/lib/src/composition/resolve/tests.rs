@@ -991,3 +991,32 @@ fn cross_platform_prompt_composes_cleanly() {
         "frontmatter YAML must not leak into body: {content}"
     );
 }
+
+/// Two fake Git repositories, `launch/` and `source/`, under `root`, with a
+/// prompt at `source/prompts/prompt.md`.
+fn two_repositories(root: &Path) -> (PathBuf, PathBuf) {
+    for repo in ["launch", "source"] {
+        let git = root.join(repo).join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(git.join("config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
+    }
+    let prompt = root.join("source/prompts/prompt.md");
+    fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+    fs::write(&prompt, "Body\n").unwrap();
+    (root.join("launch"), prompt)
+}
+
+#[test]
+fn source_context_keeps_its_own_repository_and_the_launch_scope() {
+    let root = TempDir::new().unwrap();
+    let (launch, prompt) = two_repositories(root.path());
+    let launch_context = capture_file_resolution_context(&RequestSnapshot::new(&launch)).unwrap();
+
+    let derived = derive_request_context_for_source(&launch_context, &prompt).unwrap();
+
+    assert_eq!(derived.repository_root(), Some(root.path().join("source").as_path()));
+    assert_eq!(derived.launch_magic_scope(), launch_context.launch_magic_scope());
+    derived.validate().unwrap();
+}

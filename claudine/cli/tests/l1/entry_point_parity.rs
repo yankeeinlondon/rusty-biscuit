@@ -33,8 +33,8 @@ use std::process::Output;
 
 use biscuit_file::{ResolutionFailure, to_portable_string};
 use matrix::{
-    Consumer, DocumentCell, EntryPoint, Expected, Observed, Owner, ParityFixture, ParityReport, Row,
-    ValueCell, rows_for,
+    Consumer, CrossRepositoryFixture, DocumentCell, EntryPoint, Expected, LAUNCH_MAGIC, Observed, Owner,
+    ParityFixture, ParityReport, Row, SOURCE_MAGIC, ValueCell, rows_for,
 };
 
 use crate::common::{CliProcessFixture, strip_ansi};
@@ -223,7 +223,7 @@ impl Fixtures {
             | EntryPoint::SchemaValidation
             | EntryPoint::MdCompose
             | EntryPoint::MdSchemaValidate
-            | EntryPoint::MdArgument
+            | EntryPoint::MdArgument(_)
             | EntryPoint::DmlsDiagnostics
             | EntryPoint::DmlsDocumentLinks
             | EntryPoint::DmlsLinkGraph
@@ -248,7 +248,7 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
                 | EntryPoint::SchemaValidation
                 | EntryPoint::MdCompose
                 | EntryPoint::MdSchemaValidate
-                | EntryPoint::MdArgument
+                | EntryPoint::MdArgument(_)
                 | EntryPoint::DmlsDiagnostics
                 | EntryPoint::DmlsDocumentLinks
                 | EntryPoint::DmlsLinkGraph
@@ -268,7 +268,7 @@ fn run(fixtures: &Fixtures, row: &Row) -> (Expected, Observed) {
                 | EntryPoint::SchemaValidation
                 | EntryPoint::MdCompose
                 | EntryPoint::MdSchemaValidate
-                | EntryPoint::MdArgument
+                | EntryPoint::MdArgument(_)
                 | EntryPoint::DmlsDiagnostics
                 | EntryPoint::DmlsDocumentLinks
                 | EntryPoint::DmlsLinkGraph
@@ -339,4 +339,119 @@ fn claudine_entry_points_agree_on_every_reference() {
         report.record(fixture, row, expected, observed);
     }
     report.assert_parity();
+}
+
+/// `claudine <args>` launched from the cross-repository fixture's launch
+/// repository.
+fn claudine_from_launch(cli: &CliProcessFixture, fixture: &CrossRepositoryFixture, args: &[&std::ffi::OsStr]) -> Output {
+    cli.command_builder()
+        // The launch repository decides the `@` scope, which is the subject.
+        .ambient_context(&fixture.launch())
+        .build()
+        .args(args)
+        .output()
+        .expect("run claudine")
+}
+
+/// Completion lines for `claudine __complete … <command> <prompt> <partial>`.
+fn complete_from_launch(
+    cli: &CliProcessFixture,
+    fixture: &CrossRepositoryFixture,
+    command: &str,
+    prompt: &Path,
+    partial: &str,
+) -> Vec<String> {
+    let args: Vec<&std::ffi::OsStr> = vec![
+        "__complete".as_ref(),
+        "--current".as_ref(),
+        "3".as_ref(),
+        "--".as_ref(),
+        "claudine".as_ref(),
+        command.as_ref(),
+        prompt.as_os_str(),
+        partial.as_ref(),
+    ];
+    let output = claudine_from_launch(cli, fixture, &args);
+    assert!(output.status.success(), "__complete failed: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Setter completion for a prompt in another repository reads its `$schema`
+/// the way composition does: `&`, `^`, and bare root lookups (and the `./`
+/// and absolute controls) find the source repository's schema, `@` the
+/// launch repository's, in every composition command, for values and for
+/// names in authored order.
+#[test]
+fn external_prompt_schema_completion_keeps_both_anchors() {
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    let cli = CliProcessFixture::named("cross_repository_completion");
+    let fixture = CrossRepositoryFixture::create(cli.workspace_path());
+    let prompts: Vec<_> = fixture
+        .schema_references()
+        .into_iter()
+        .enumerate()
+        .map(|(index, (label, reference, owner))| {
+            (label, fixture.write_schema_document(&format!("prompt-{index}"), &reference, ""), owner)
+        })
+        .collect();
+
+    let mut failures = Vec::new();
+    for command in ["compose", "inline-compose", "sequence"] {
+        for (label, prompt, owner) in &prompts {
+            let mut values = complete_from_launch(&cli, &fixture, command, prompt, "zebra=");
+            values.sort();
+            let mut expected: Vec<String> =
+                owner.zebra_values().iter().map(|value| format!("zebra='{value}'")).collect();
+            expected.sort();
+            if values != expected {
+                failures.push(format!("{command} {label}: values {values:?}, expected {expected:?}"));
+            }
+            let names = complete_from_launch(&cli, &fixture, command, prompt, "a");
+            if names != ["zebra=", "apple="] {
+                failures.push(format!("{command} {label}: names {names:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "external prompt completion:\n{}", failures.join("\n"));
+}
+
+/// Claudine composition of a prompt in another repository, the behavior
+/// completion must match: `@magic.md` reads the launch repository's file, and
+/// every `$schema` spelling accepts a value only its expected owner declares.
+#[test]
+fn external_prompt_composition_keeps_both_anchors() {
+    let _ = include_str!("../../../../darkmatter/lib/tests/common/entry_point_parity/mod.rs");
+    let cli = CliProcessFixture::named("cross_repository_composition");
+    let fixture = CrossRepositoryFixture::create(cli.workspace_path());
+
+    let document = fixture.write_magic_document();
+    let output = claudine_from_launch(&cli, &fixture, &["compose".as_ref(), "--dry-run".as_ref(), document.as_os_str()]);
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success() && stdout.contains(LAUNCH_MAGIC) && !stdout.contains(SOURCE_MAGIC),
+        "claudine compose must read the launch `@magic.md`; status {}, stdout:\n{stdout}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let mut failures = Vec::new();
+    for (index, (label, reference, owner)) in fixture.schema_references().into_iter().enumerate() {
+        let prompt = fixture.write_schema_document(
+            &format!("composed-{index}"),
+            &reference,
+            &format!("zebra: {}\n", owner.zebra_values()[0]),
+        );
+        let output = claudine_from_launch(&cli, &fixture, &["compose".as_ref(), "--dry-run".as_ref(), prompt.as_os_str()]);
+        if !output.status.success() {
+            failures.push(format!(
+                "{label} `{reference}` ({owner:?}): {}",
+                strip_ansi(&String::from_utf8_lossy(&output.stderr))
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "external prompt composition:\n{}", failures.join("\n"));
 }

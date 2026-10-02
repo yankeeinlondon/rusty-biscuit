@@ -84,15 +84,16 @@ impl CommittedPrompt {
             return None;
         }
         let path = in_repository_spelling(&request, path);
-        // A home or magic-root prompt lives outside the launch tree; admit it
-        // as trusted-external only when the ordinary derivation is invalid,
-        // the rule composition applies to its root document.
         let ordinary = request.for_source_reference(&reference, &path);
-        let context = if ordinary.validate().is_err() {
-            request.for_trusted_external_source_reference(&reference, &path)
-        } else {
-            ordinary
-        };
+        if ordinary.validate().is_ok() && request.repository_root().is_some() {
+            return Some(Self { path, context: ordinary });
+        }
+        // Outside the launch repository (or launched from none) the prompt
+        // gets composition's source derivation: its own repository anchors
+        // `&`, `^`, and bare references, while `@` keeps the launch scope.
+        let context = claudine::composition::derive_request_context_for_source(&request, &path)
+            .ok()?
+            .for_source_reference(&reference, &path);
         Some(Self { path, context })
     }
 }
