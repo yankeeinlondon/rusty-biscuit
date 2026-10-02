@@ -91,8 +91,8 @@ fn a_walk_does_not_follow_a_directory_link() {
 
 /// Criterion 25 (biscuit-file part): a bound glob skips a file symlink whose
 /// target leaves the tree and reports it; an in-tree link is listed; an
-/// unbound glob skips nothing; a single-file reference to the link still
-/// fails.
+/// unbound glob skips nothing; `lists_file` gives the same verdict for one
+/// path; a single-file reference to the link still fails.
 #[test]
 fn a_file_link_out_of_the_tree_is_skipped_by_a_bound_glob() {
     let fx = Fixture::new();
@@ -115,11 +115,18 @@ fn a_file_link_out_of_the_tree_is_skipped_by_a_bound_glob() {
             }],
             "{pattern}"
         );
+        // One path at a time, `lists_file` agrees with the listing, while
+        // lexical `matches` still judges the link where it sits.
+        let globs = glob(&[pattern]);
+        assert!(globs.lists_file(&inside, &ctx) && globs.lists_file(&real, &ctx), "{pattern}");
+        assert!(!globs.lists_file(&leak, &ctx), "{pattern}");
+        assert!(globs.matches(&leak, &ctx), "{pattern}");
     }
 
     let unbound = glob(&["&docs/*.md"]).list_files(&ctx).unwrap();
     assert_eq!(unbound.matches, [inside.clone(), leak.clone(), real.clone()]);
     assert!(unbound.skipped.is_empty());
+    assert!(glob(&["&docs/*.md"]).lists_file(&leak, &ctx));
 
     // The reader opt-in removes the boundary, so nothing is skipped.
     let opted_in = ctx.clone().allow_external_relative();

@@ -34,6 +34,15 @@ impl PreparedSet {
             .position(|pattern| !pattern.negated && pattern.judge(file, name) == Some(true))
     }
 
+    /// The real target of the file symlink `link` when the pattern that
+    /// admits it is bound to the tree and the target lies outside it: the
+    /// one rule that makes a listing skip a link.
+    pub(crate) fn escaping_target(&self, admitting: usize, link: &Path) -> Option<PathBuf> {
+        let boundary = self.patterns[admitting].tree_boundary.as_ref()?;
+        let target = canonicalize_simplified(link).ok()?;
+        (!PathIdentity::new(&target).starts_with(boundary)).then_some(target)
+    }
+
     /// The positive patterns' roots, merged in precedence order: each
     /// pattern's roots in turn, a root already seen through an earlier
     /// pattern keeping its first place. Each carries every walk directory
@@ -140,11 +149,7 @@ impl PreparedSet {
                 continue;
             };
             let listed = relative.iter().fold(root.root.clone(), |dir, name| dir.join(name));
-            if is_link
-                && let Some(boundary) = &self.patterns[admitting].tree_boundary
-                && let Ok(target) = canonicalize_simplified(entry.path())
-                && !PathIdentity::new(&target).starts_with(boundary)
-            {
+            if is_link && let Some(target) = self.escaping_target(admitting, entry.path()) {
                 skipped.push(SkippedEntry {
                     link: listed,
                     target,

@@ -167,6 +167,19 @@ impl GlobReference {
             .is_some_and(|set| set.matches(path, ctx.cwd()))
     }
 
+    /// Whether [`list_files`](Self::list_files) would list the existing file
+    /// `path` if its walk reached it: [`matches`](Self::matches), except that
+    /// a file symlink whose target leaves the tree, which a listing reports
+    /// as a [`SkippedEntry`], is not listed.
+    ///
+    /// For a caller that walks [`roots`](Self::roots) itself (to apply its
+    /// own filters) and must offer exactly what a listing would. Reads the
+    /// link's target, so it is not lexical.
+    pub fn lists_file(&self, path: &Path, ctx: &FileResolutionContext) -> bool {
+        self.prepare_available(ctx)
+            .is_some_and(|set| set.lists(path, ctx.cwd()))
+    }
+
     /// Whether the absolute `path` is a member, judged with no context: a
     /// bare pattern is read from the path's filesystem root (so
     /// `**/fixes/**/spec.md` judges the full path) and an absolute pattern as
@@ -199,7 +212,8 @@ impl GlobReference {
     }
 
     /// The positive patterns' roots in precedence order, for a caller that
-    /// walks them itself and judges each file with [`matches`](Self::matches).
+    /// walks them itself and judges each file with
+    /// [`lists_file`](Self::lists_file).
     /// A pattern whose roots this context cannot supply contributes none.
     pub fn roots(&self, ctx: &FileResolutionContext) -> Vec<PathBuf> {
         self.prepare_available(ctx)

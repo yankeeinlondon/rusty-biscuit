@@ -1082,6 +1082,7 @@ let roots = specs.roots(&ctx);              // for callers that walk themselves
 | `take_first(&ctx)` | `Option<PathBuf>` | the single most local match (`%` uses this) |
 | `matches(&path, &ctx)` | `bool` | membership of one path, which need not exist |
 | `roots(&ctx)` | `Vec<PathBuf>` | the positive patterns' roots, in precedence order |
+| `lists_file(&path, &ctx)` | `bool` | whether `list_files` would list an existing file its walk reached: `matches`, except that a file symlink whose target leaves the tree (a skipped entry) is not listed. For a caller that walks `roots` itself with its own filters, as Claudine's completion does, and must offer exactly what a listing would |
 | `matches_without_context(&path)` | `bool` | membership of an absolute path for a caller with no request: bare patterns read from the filesystem root (`**/fixes/**/spec.md` judges the full path), absolute patterns as written; patterns that need a context admit and reject nothing |
 | `with_file_name_view()` | `GlobReference` | also match a bare file name at any depth when the glob after the prefix has no `/` (`*.md`, `!_*.md`) |
 | `escape(text)` | `String` | make text literal: `[id].md` → `[[]id[]].md` |
