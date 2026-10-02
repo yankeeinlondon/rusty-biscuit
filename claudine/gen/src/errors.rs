@@ -115,6 +115,16 @@ pub enum GenError {
     #[error("--scaffold requires a provider slug (e.g. `claudine-gen generate <slug> --scaffold`)")]
     ScaffoldRequiresSlug,
 
+    #[error(
+        "research document `{path}` carries contract revision {found}, but its contract is at \
+         revision {current} and no frozen `_schema.r{found}.yaml` exists beside it; re-research \
+         the document"
+    )]
+    ResearchRevisionUnsupported { path: PathBuf, found: u64, current: u64 },
+
+    #[error("agent-cli `cli_switches` record `{record}`: {message}")]
+    CliSwitchInvalid { record: String, message: String },
+
     #[error("missing value for field `{field}`: {message}")]
     MissingValue { field: &'static str, message: String },
 

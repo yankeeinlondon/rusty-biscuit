@@ -80,6 +80,18 @@
             "write_path": false
           }
         },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
+          }
+        },
         "config_paths": {
           "source": {
             "kind": "research",
@@ -3559,6 +3571,18 @@
             "use_mcp_server": true,
             "use_mcp_tool": true,
             "write_path": true
+          }
+        },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
           }
         },
         "config_paths": {
@@ -9399,6 +9423,18 @@
             "write_path": true
           }
         },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
+          }
+        },
         "config_paths": {
           "override": {
             "reason": "The agent-cli macOS records for Codex use `$CODEX_HOME` / annotated-compound grammar (\"config.toml; default ...\") that the bare-path rule skips loudly, which would leave a wrong primary entry — config_paths[0] is the load-bearing user-level config path for agent discovery (discover_agents_full). Pin today's pair until agent-cli mandates one bare path per record.",
@@ -15044,6 +15080,18 @@
             "write_path": false
           }
         },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
+          }
+        },
         "config_paths": {
           "source": {
             "kind": "research",
@@ -20036,6 +20084,18 @@
             "use_mcp_server": false,
             "use_mcp_tool": false,
             "write_path": false
+          }
+        },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
           }
         },
         "config_paths": {
@@ -25122,6 +25182,18 @@
             "use_mcp_server": false,
             "use_mcp_tool": false,
             "write_path": false
+          }
+        },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
           }
         },
         "config_paths": {
@@ -30449,6 +30521,18 @@
             "write_path": false
           }
         },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
+          }
+        },
         "config_paths": {
           "override": {
             "reason": "The agent-cli macOS records use literal \"/Users/<name>/.kimi-code/\" grammar (skipped by the bare-path rule, leaving an empty projection) and describe the newer .kimi-code home, while the shipping wrapper detects ~/.kimi. Ordering is load-bearing - the legacy config.json stays FIRST because agent discovery (discover_agents_full) reports presence from config_paths[0] and Kimi's CLI auto-migrates config.json to config.toml. Pin today's list until a path-grammar + home-migration ruling lands.",
@@ -35242,6 +35326,18 @@
             "use_mcp_server": false,
             "use_mcp_tool": false,
             "write_path": false
+          }
+        },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
           }
         },
         "config_paths": {
@@ -41645,6 +41741,18 @@
             "write_path": false
           }
         },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
+          }
+        },
         "config_paths": {
           "source": {
             "kind": "research",
@@ -46828,6 +46936,18 @@
             "use_mcp_server": true,
             "use_mcp_tool": true,
             "write_path": false
+          }
+        },
+        "cli_switches": {
+          "source": {
+            "kind": "research",
+            "path": "cli_switches",
+            "topic": "agent-cli"
+          },
+          "value": {
+            "unknown": {
+              "gap": "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches."
+            }
           }
         },
         "config_paths": {

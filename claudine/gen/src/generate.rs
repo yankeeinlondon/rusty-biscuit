@@ -384,6 +384,23 @@ fn extract_catalog_value(
     skips: &mut Vec<CoercionSkip>,
     offering_join: &mut OfferingJoinReport,
 ) -> Result<Value, GenError> {
+    // The whole topic frontmatter as authored: its revision decides whether
+    // switch records exist at all, and Darkmatter's coercion would hide a
+    // wrong-typed element or an explicit null in one of them.
+    if entry.coercion == Coercion::CliSwitchRecords {
+        let DeclaredSource::Research { topic, .. } = entry.source else {
+            unreachable!("CliSwitchRecords is declared with a research source")
+        };
+        let authored =
+            inputs
+                .research_authored
+                .get(topic)
+                .ok_or_else(|| GenError::MissingValue {
+                    field: entry.field,
+                    message: format!("no research loaded for topic `{topic}`"),
+                })?;
+        return coerce::cli_switch_catalog(authored);
+    }
     let raw = match entry.source {
         DeclaredSource::Roster { key } => match inputs.roster.get(key) {
             Some(value) => value.clone(),
