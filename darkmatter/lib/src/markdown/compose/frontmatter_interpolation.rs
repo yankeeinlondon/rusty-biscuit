@@ -1710,12 +1710,11 @@ mod tests {
 
         #[test]
         fn env_resolves() {
-            // fixed_for_testing has empty env, so use a live context
-            let ctx = ComposeContext::capture();
+            // A context's environment is whatever its request supplied.
+            let mut ctx = test_context();
+            ctx.env_mut().insert("HOME".to_string(), "/home/me".to_string());
             let state = FrontmatterSeedState::new(HashMap::new(), ctx);
-            // env should have HOME on any unix system
-            let result = state.get("env.HOME");
-            assert!(result.is_some());
+            assert_eq!(state.get("env.HOME"), Some(json!("/home/me")));
         }
 
         #[test]
@@ -2444,7 +2443,7 @@ mod tests {
             // resolution context, so read-side functions resolve in frontmatter.
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             let mut fm = fm_from_json(json!({
                 "exists": "{{ file_exists('spec.md') }}",
@@ -2471,7 +2470,7 @@ mod tests {
             // same resolution context.
             let dir = tempfile::TempDir::new().unwrap();
             std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
-            let ctx = ResolutionContext::new(dir.path().to_path_buf());
+            let ctx = ResolutionContext::at(dir.path().to_path_buf());
 
             let mut fm = fm_from_json(json!({
                 "exists": "{{ file_exists('spec.md') }}",

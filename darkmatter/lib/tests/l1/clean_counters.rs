@@ -37,7 +37,7 @@ fn markdown_with(yaml_body: &str) -> Markdown {
 }
 
 fn context() -> CleanSchemaContext {
-    CleanSchemaConfig::new()
+    CleanSchemaConfig::new(crate::request_support::cwd_context())
         .with_trigger_schemas(false)
         .resolve(None)
         .expect("baseline-only resolution must succeed")
@@ -111,7 +111,7 @@ fn empty_frontmatter_produces_no_findings() {
 #[test]
 #[serial]
 fn schema_free_configuration_resolves_no_effective_schema() {
-    let context = CleanSchemaConfig::new()
+    let context = CleanSchemaConfig::new(crate::request_support::cwd_context())
         .without_baseline_schema()
         .with_trigger_schemas(false)
         .resolve(None)
@@ -207,7 +207,7 @@ fn resolved_context_is_reusable_across_documents() {
 #[test]
 #[serial]
 fn trigger_discovery_is_skippable() {
-    let disabled = CleanSchemaConfig::new()
+    let disabled = CleanSchemaConfig::new(crate::request_support::cwd_context())
         .with_trigger_schemas(false)
         .resolve(None);
     assert!(

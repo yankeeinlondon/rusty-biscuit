@@ -74,6 +74,9 @@ required-features = ["terminal-tests"]
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and the CLI owns L2
 # (render-tree terminal) tier tests.
 [package.metadata.ci.tests]
+# The entry-point parity runner includes darkmatter's shared matrix by
+# `#[path]` and spells it in its test.
+source-inputs = ["darkmatter/lib/tests/common/entry_point_parity/mod.rs"]
 tiers = ["L1", "L2"]
 features = ["terminal-tests"]
 local-features = []

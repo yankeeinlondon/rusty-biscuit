@@ -5,22 +5,11 @@ fn test_compose_returns_unchanged_document() {
     let content = "# Hello\n\nWorld";
     let md: Markdown = content.into();
 
-    let (composed, _report) = md.compose().unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
 
     // Content should still match (cleanup may add spacing)
     assert!(composed.content().contains("Hello"));
     assert!(composed.content().contains("World"));
-}
-
-#[test]
-fn test_compose_mut_modifies_in_place() {
-    let content = "# Hello\n\nWorld";
-    let mut md: Markdown = content.into();
-
-    let _report = md.compose_mut().unwrap();
-
-    assert!(md.content().contains("Hello"));
-    assert!(md.content().contains("World"));
 }
 
 #[test]
@@ -32,7 +21,7 @@ fn test_compose_with_custom_options() {
         .disable(ComposeOperation::Cleanup)
         .disable(ComposeOperation::Normalization);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // With cleanup disabled, content should be unchanged
     assert_eq!(composed.content(), md.content());
@@ -47,7 +36,7 @@ fn test_compose_cleanup_stage() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Cleanup should add blank line between header and paragraph
     assert!(composed.content().contains("\n\n"));
@@ -61,7 +50,7 @@ fn test_compose_cleanup_strips_incidental_newlines_by_default() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(
         composed.content(),
@@ -93,7 +82,7 @@ fn test_compose_cleanup_preserves_mixed_document_structure_and_word_boundaries()
     );
     let options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
 
-    let (composed, report) = Markdown::from(content).compose_with(options).unwrap();
+    let (composed, report) = Markdown::from(content).compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), expected);
     assert!(report.cleanup_changed);
@@ -108,7 +97,7 @@ fn test_compose_cleanup_can_preserve_incidental_newlines() {
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), content);
     assert!(!report.cleanup_changed);
@@ -123,7 +112,7 @@ fn test_compose_cleanup_fixed_width_reflows_prose() {
         .only(&[ComposeOperation::Cleanup])
         .with_fixed_width(40);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(report.cleanup_changed);
     assert!(composed.content().contains('\n'));
@@ -147,7 +136,7 @@ fn test_compose_cleanup_fixed_width_forces_strip_over_preserve() {
         .with_incidental_newline_mode(crate::markdown::cleanup::IncidentalNewlineMode::Preserve)
         .with_fixed_width(80);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // The two source lines collapse to a single line that fits within 80 columns.
     assert_eq!(composed.content(), "Short first line. Short second line.\n");
@@ -164,7 +153,7 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
     let source = "- Alpha beta gamma delta\n    epsilon zeta eta theta.";
 
     let strip_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
-    let (stripped, _) = Markdown::from(source).compose_with(strip_options).unwrap();
+    let (stripped, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(strip_options)).unwrap();
     let mut direct: Markdown = source.into();
     direct.cleanup();
     assert_eq!(stripped.content(), direct.content());
@@ -173,7 +162,7 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
     let preserve_options = ComposeOptions::new()
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(IncidentalNewlineMode::Preserve);
-    let (preserved, _) = Markdown::from(source).compose_with(preserve_options).unwrap();
+    let (preserved, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(preserve_options)).unwrap();
     let expected_preserved = cleanup_content_with_indent_preserving_incidental(
         source,
         DEFAULT_INDENT,
@@ -185,7 +174,7 @@ fn test_compose_cleanup_list_modes_match_direct_library_cleanup() {
         .only(&[ComposeOperation::Cleanup])
         .with_incidental_newline_mode(IncidentalNewlineMode::Preserve)
         .with_fixed_width(24);
-    let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
+    let (fixed, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(fixed_options)).unwrap();
     let expected_fixed = reflow_to_width(direct.content(), 24);
     assert_eq!(fixed.content(), expected_fixed);
     assert_eq!(
@@ -206,7 +195,7 @@ fn assert_compose_cleanup_preserves_nested_list_inside_blockquote(source: &str) 
 
     let default_options = ComposeOptions::new().only(&[ComposeOperation::Cleanup]);
     let (default, _) = Markdown::from(source)
-        .compose_with(default_options)
+        .compose_with(&crate::markdown::compose::test_request(default_options))
         .unwrap();
     let direct_default = cleanup_content(source);
     assert_eq!(default.content(), direct_default);
@@ -215,14 +204,14 @@ fn assert_compose_cleanup_preserves_nested_list_inside_blockquote(source: &str) 
         .only(&[ComposeOperation::Cleanup])
         .with_indent_size(2);
     let (configured, _) = Markdown::from(source)
-        .compose_with(configured_options)
+        .compose_with(&crate::markdown::compose::test_request(configured_options))
         .unwrap();
     assert_eq!(configured.content(), cleanup_content_with_indent(source, 2));
 
     let fixed_options = ComposeOptions::new()
         .only(&[ComposeOperation::Cleanup])
         .with_fixed_width(24);
-    let (fixed, _) = Markdown::from(source).compose_with(fixed_options).unwrap();
+    let (fixed, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(fixed_options)).unwrap();
     assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
 }
 
@@ -266,7 +255,7 @@ fn test_compose_indent_eight_matches_exact_library_cleanup() {
         .only(&[ComposeOperation::Cleanup])
         .with_indent_size(8)
         .with_fixed_width(30);
-    let (composed, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+    let (composed, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
 
     let cleaned = cleanup_content_with_indent(source, 8);
     let expected = reflow_to_width(&cleaned, 30);
@@ -278,7 +267,7 @@ fn test_compose_indent_eight_matches_exact_library_cleanup() {
         assert!(UnicodeWidthStr::width(line) <= 30, "line exceeded width: {line:?}");
     }
 
-    let (second, _) = Markdown::from(expected.as_str()).compose_with(options).unwrap();
+    let (second, _) = Markdown::from(expected.as_str()).compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert_eq!(second.content(), expected);
 }
 
@@ -319,10 +308,10 @@ fn test_compose_cleanup_preserves_additional_paragraphs_inside_blockquoted_items
             .with_list_spacing(spacing)
             .with_indent_size(indent)
             .with_fixed_width(24);
-        let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+        let (first, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
         assert_eq!(first.content(), expected);
 
-        let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+        let (second, _) = Markdown::from(first.content()).compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(second.content(), expected);
     }
 }
@@ -416,10 +405,10 @@ fn test_compose_cleanup_preserves_markers_in_protected_bodies() {
         let options = ComposeOptions::new()
             .only(&[ComposeOperation::Cleanup])
             .with_fixed_width(24);
-        let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+        let (first, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
         assert_eq!(first.content(), expected);
 
-        let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+        let (second, _) = Markdown::from(first.content()).compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(second.content(), expected);
     }
 }
@@ -446,11 +435,11 @@ fn test_compose_cleanup_preserves_ten_digit_prose_boundary() {
         .only(&[ComposeOperation::Cleanup])
         .with_list_spacing(ListSpacingMode::Normal);
 
-    let (first, _) = Markdown::from(source).compose_with(options.clone()).unwrap();
+    let (first, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(options.clone())).unwrap();
     assert_eq!(first.content(), expected);
     assert!(first.content().contains("1234567890) ten-digit prose\n\n+ second unordered"));
 
-    let (second, _) = Markdown::from(first.content()).compose_with(options).unwrap();
+    let (second, _) = Markdown::from(first.content()).compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert_eq!(second.content(), expected);
 }
 
@@ -470,32 +459,32 @@ fn slow_compose_cleanup_preserves_quoted_marker_looking_indented_code() {
     for source in fixtures {
         let direct_default = cleanup_content(source);
         let (default, _) = Markdown::from(source)
-            .compose_with(ComposeOptions::new().only(&[ComposeOperation::Cleanup]))
+            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().only(&[ComposeOperation::Cleanup])))
             .unwrap();
         assert_eq!(default.content(), direct_default);
 
         let (configured, _) = Markdown::from(source)
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .only(&[ComposeOperation::Cleanup])
-                    .with_indent_size(4),
+                    .with_indent_size(4)),
             )
             .unwrap();
         assert_eq!(configured.content(), cleanup_content_with_indent(source, 4));
 
         let (fixed, _) = Markdown::from(source)
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .only(&[ComposeOperation::Cleanup])
-                    .with_fixed_width(24),
+                    .with_fixed_width(24)),
             )
             .unwrap();
         assert_eq!(fixed.content(), reflow_to_width(&direct_default, 24));
         let (fixed_second, _) = Markdown::from(fixed.content())
             .compose_with(
-                ComposeOptions::new()
+                &crate::markdown::compose::test_request(ComposeOptions::new()
                     .only(&[ComposeOperation::Cleanup])
-                    .with_fixed_width(24),
+                    .with_fixed_width(24)),
             )
             .unwrap();
         assert_eq!(fixed_second.content(), fixed.content());
@@ -515,7 +504,7 @@ fn test_compose_cleanup_fixed_width_keeps_reference_definitions_intact() {
     let options = ComposeOptions::new()
         .only(&[ComposeOperation::Cleanup])
         .with_fixed_width(24);
-    let (fixed, _) = Markdown::from(source).compose_with(options).unwrap();
+    let (fixed, _) = Markdown::from(source).compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     let mut direct: Markdown = source.into();
     direct.cleanup();
@@ -539,7 +528,7 @@ fn test_compose_normalization_stage_no_change() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Normalization]);
 
-    let (_, report) = md.compose_with(options).unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Well-formed document, no normalization needed
     assert!(report.normalization_report.is_none());
@@ -550,7 +539,7 @@ fn test_compose_preserves_frontmatter() {
     let content = "---\ntitle: Test\n---\n# Hello";
     let md: Markdown = content.into();
 
-    let (composed, _) = md.compose().unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
 
     let title: Option<String> = composed.fm_get("title").unwrap();
     assert_eq!(title, Some("Test".to_string()));
@@ -561,7 +550,7 @@ fn test_compose_report_summary() {
     let content = "# Header\nParagraph";
     let md: Markdown = content.into();
 
-    let (_, report) = md.compose().unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
 
     // Should have a meaningful summary
     let summary = report.summary();
@@ -573,7 +562,7 @@ fn test_compose_report_has_changes() {
     let content = "# Header\nParagraph";
     let md: Markdown = content.into();
 
-    let (_, report) = md.compose().unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
 
     // Cleanup should have made changes
     assert!(report.has_changes());
@@ -587,7 +576,7 @@ fn test_compose_stages_all_disabled() {
 
     let options = ComposeOptions::new().only(&[]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // No changes should be made
     assert_eq!(composed.content(), md.content());
@@ -615,7 +604,7 @@ fn test_compose_stages_run_in_order() {
 
     let (composed, report) = Markdown::try_from(root.as_path())
         .unwrap()
-        .compose_with(options)
+        .compose_with(&crate::markdown::compose::test_request(options))
         .unwrap();
 
     assert!(!composed.content().contains("hidden"));
@@ -636,7 +625,7 @@ fn test_compose_with_external_state() {
         ComposeOptions::new().with_external_state(serde_json::json!({"key": "value"}));
 
     // Should not fail
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::markdown::compose::test_request(options));
     assert!(result.is_ok());
 }
 
@@ -659,7 +648,7 @@ fn test_compose_fail_fast_false_continues_on_warning() {
 
     let options = ComposeOptions::new().with_fail_fast(false);
 
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::markdown::compose::test_request(options));
     assert!(result.is_ok());
 }
 
@@ -672,7 +661,7 @@ fn test_effective_state_available_to_stages() {
     let options =
         ComposeOptions::new().with_external_state(serde_json::json!({"external": "data"}));
 
-    let result = md.compose_with(options);
+    let result = md.compose_with(&crate::markdown::compose::test_request(options));
     assert!(result.is_ok());
 }
 
@@ -687,7 +676,7 @@ fn test_replacement_stage_with_frontmatter() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("Hello bar"));
     assert!(composed.content().contains("Content with bar here."));
@@ -702,7 +691,7 @@ fn test_replacement_stage_overlap_resolution() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "long and short");
     assert_eq!(report.replacements_applied, 2);
@@ -716,7 +705,7 @@ fn test_replacement_stage_non_recursive() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // "foo" -> "foobar" but NOT -> "baz"
     assert_eq!(composed.content(), "foobar");
@@ -730,7 +719,7 @@ fn test_replacement_stage_null_value() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Hello  world");
     assert_eq!(report.replacements_applied, 1);
@@ -743,7 +732,7 @@ fn test_replacement_stage_number_value() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Version: 42");
     assert_eq!(report.replacements_applied, 1);
@@ -756,7 +745,7 @@ fn test_replacement_stage_no_replace_in_frontmatter() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // No changes when no replace map
     assert_eq!(composed.content(), md.content());
@@ -775,7 +764,7 @@ fn test_replacement_stage_with_external_state() {
             "replace": {"foo": "bar"}
         }));
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "# Hello bar");
     assert_eq!(report.replacements_applied, 1);
@@ -793,7 +782,7 @@ fn test_replacement_stage_frontmatter_overrides_external_with_deep_merge() {
             "replace": {"foo": "from_external"}
         }));
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "from_fm qux");
     assert_eq!(report.replacements_applied, 2);
@@ -806,7 +795,7 @@ fn test_replacement_stage_report_summary() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::TextReplacement]);
 
-    let (_, report) = md.compose_with(options).unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(report.replacements_applied, 3);
     let summary = report.summary();
@@ -823,7 +812,7 @@ fn test_replacement_then_cleanup() {
     let options = ComposeOptions::new()
         .only(&[ComposeOperation::TextReplacement, ComposeOperation::Cleanup]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Replacement happened
     assert!(composed.content().contains("bar here"));
@@ -845,7 +834,7 @@ fn test_interpolation_simple_variable() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "# Hello Alice!");
     assert_eq!(report.interpolations_applied, 1);
@@ -858,7 +847,7 @@ fn test_interpolation_nested_variable() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Welcome Bob");
     assert_eq!(report.interpolations_applied, 1);
@@ -871,7 +860,7 @@ fn test_interpolation_missing_variable() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Missing variables become empty string
     assert_eq!(composed.content(), "Hello !");
@@ -885,7 +874,7 @@ fn test_interpolation_fallback_uses_default() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Color: unknown");
     assert_eq!(report.interpolations_applied, 1);
@@ -898,7 +887,7 @@ fn test_interpolation_fallback_missing_variable_renders_default() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Value: default");
     assert_eq!(report.interpolations_applied, 1);
@@ -911,7 +900,7 @@ fn test_interpolation_fallback_uses_primary() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Color: blue");
     assert_eq!(report.interpolations_applied, 1);
@@ -924,7 +913,7 @@ fn test_interpolation_ternary_true() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Status: on");
     assert_eq!(report.interpolations_applied, 1);
@@ -937,7 +926,7 @@ fn test_interpolation_ternary_false() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Status: off");
     assert_eq!(report.interpolations_applied, 1);
@@ -950,7 +939,7 @@ fn test_interpolation_comparison_equal() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "five");
     assert_eq!(report.interpolations_applied, 1);
@@ -963,7 +952,7 @@ fn test_interpolation_comparison_greater_than() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "many");
     assert_eq!(report.interpolations_applied, 1);
@@ -976,7 +965,7 @@ fn test_interpolation_multiple_expressions() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Alice Smith");
     assert_eq!(report.interpolations_applied, 2);
@@ -991,7 +980,7 @@ fn test_interpolation_scans_inline_code_spans() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Hello Alice! Code: `Alice`");
     assert_eq!(report.interpolations_applied, 2);
@@ -1007,7 +996,7 @@ fn test_interpolation_code_blocks_via_option() {
         .only(&[ComposeOperation::Interpolation])
         .with_interpolate_code_blocks(true);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Both expressions expanded when interpolate_code_blocks is enabled
     assert!(composed.content().contains("Hello Alice!"));
@@ -1022,7 +1011,7 @@ fn test_interpolation_code_blocks_via_frontmatter() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Both expressions expanded when frontmatter flag is set
     assert!(composed.content().contains("Hello Alice!"));
@@ -1037,7 +1026,7 @@ fn test_interpolation_skips_fenced_code() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Only the first expression is expanded, fenced block preserved
     assert!(composed.content().contains("Hello Alice!"));
@@ -1052,7 +1041,7 @@ fn test_interpolation_no_expressions() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), md.content());
     assert_eq!(report.interpolations_applied, 0);
@@ -1067,7 +1056,7 @@ fn test_interpolation_with_external_state() {
         .only(&[ComposeOperation::Interpolation])
         .with_external_state(serde_json::json!({"name": "External"}));
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "# Hello External!");
     assert_eq!(report.interpolations_applied, 1);
@@ -1082,7 +1071,7 @@ fn test_interpolation_frontmatter_overrides_external() {
         .only(&[ComposeOperation::Interpolation])
         .with_external_state(serde_json::json!({"name": "External"}));
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Frontmatter wins on conflict
     assert_eq!(composed.content(), "# Hello Frontmatter!");
@@ -1096,7 +1085,7 @@ fn test_interpolation_chained_fallback() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Value: second");
     assert_eq!(report.interpolations_applied, 1);
@@ -1113,7 +1102,7 @@ fn test_interpolation_parse_error_is_fatal_without_fail_fast() {
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(false);
 
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
     assert!(matches!(err, MarkdownError::Interpolation { .. }), "{err:?}");
 }
 
@@ -1126,7 +1115,7 @@ fn test_interpolation_parse_error_fail_fast_returns_error() {
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(true);
 
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
     assert!(matches!(err, MarkdownError::Interpolation { .. }));
 }
 
@@ -1140,7 +1129,7 @@ fn test_interpolation_bare_pipe_is_fatal_without_fail_fast() {
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(false);
 
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
     assert!(matches!(err, MarkdownError::Interpolation { .. }), "{err:?}");
 }
 
@@ -1153,7 +1142,7 @@ fn test_interpolation_bare_pipe_fail_fast_error_message() {
         .only(&[ComposeOperation::Interpolation])
         .with_fail_fast(true);
 
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
     let err_string = format!("{}", err);
     assert!(
         err_string.contains("Unexpected '|'") || err_string.contains("parse"),
@@ -1168,7 +1157,7 @@ fn test_full_compose_with_interpolation() {
     let content = "---\nname: Alice\ncount: 3\n---\n# Welcome {{ name }}\nYou have {{ count > 0 ? \"items\" : \"nothing\" }}";
     let md: Markdown = content.into();
 
-    let (composed, report) = md.compose().unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
 
     assert!(composed.content().contains("Welcome Alice"));
     assert!(composed.content().contains("You have items"));
@@ -1183,7 +1172,7 @@ fn test_interpolation_report_summary() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (_, report) = md.compose_with(options).unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(report.interpolations_applied, 2);
     let summary = report.summary();
@@ -1213,7 +1202,7 @@ PLACEHOLDER content here.
         "extra": "external_value"
     }));
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Replacement happened
     assert!(composed.content().contains("actual content here"));
@@ -1251,7 +1240,7 @@ Hello :wave: {{ greeting }} :smile:"#;
         ComposeOperation::Interpolation,
     ]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content(), "Hello 👋 こんにちは 😊");
     assert_eq!(report.replacements_applied, 2);
@@ -1276,7 +1265,7 @@ Rounded: {{ round(pi) }}"#;
 
     let options = ComposeOptions::new().only(&[ComposeOperation::Interpolation]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("Items: 3"));
     assert!(composed.content().contains("Number: 42"));
@@ -1289,7 +1278,7 @@ fn disclosure_block_markers_survive_compose() {
     let content = "::disclosure\nLicense\n::details\nBody\n::end-disclosure\n";
     let md: Markdown = content.into();
 
-    let (composed, _report) = md.compose().unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap();
     let text = composed.content();
 
     assert!(
@@ -1407,7 +1396,7 @@ fn body_file_transclusion_stays_document_relative_with_fallback() {
     let options = ComposeOptions::new()
         .with_source_file(&root)
         .with_file_ref_fallback_dir(fallback_dir.path().to_path_buf());
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         composed.content().contains("# From Document"),

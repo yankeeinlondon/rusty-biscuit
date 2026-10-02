@@ -37,6 +37,11 @@ execution-time gate degrades to a pure membership check: the command is already
 approved, so it runs with no prompt — this run or any later loop iteration with
 flipped conditions. A dead-branch command is **approved but never executed**.
 
+Collection resolves every transclusion target the way composition does, from
+the same repository-aware context, so a `::file &README.md` or
+`::file ^docs/guide.md` reaches the same file in both, whatever directory `md`
+was launched from.
+
 Collection walks each transcluded child with the inputs composition gives it:
 the parent's composed values as inherited defaults, the directive's `set.*`
 overlay on top, and the same replace settings. So a partial's
@@ -151,15 +156,19 @@ The following commands will never be allowed:
 
 ### Whitelist and Blacklist Files
 
-Approved commands are stored in a namespaced whitelist file:
+Approved commands are stored in a namespaced whitelist file, and a companion
+blacklist file tracks user-denied commands. `md compose` keeps both beside the
+document, or in the directory `md` was launched from when the document comes
+from stdin:
 
-- `[repo root]/.darkmatter-shell-whitelist` if CWD is a git repo
-- `${HOME}/.darkmatter-shell-whitelist` otherwise
+```text
+docs/guide.md          → docs/.darkmatter-shell-whitelist, docs/.darkmatter-shell-blacklist
+md compose - (in ~/w)  → ~/w/.darkmatter-shell-whitelist,  ~/w/.darkmatter-shell-blacklist
+```
 
-A companion blacklist file tracks user-denied commands:
-
-- `[repo root]/.darkmatter-shell-blacklist` if CWD is a git repo
-- `${HOME}/.darkmatter-shell-blacklist` otherwise
+A library caller that sets no policy root (`ComposeOptions::with_shell_policy_root`)
+gets the request context's repository root, else its home directory, else the
+request directory. Pre-flight and execution read the same files.
 
 ## Interactive Approval
 
@@ -187,7 +196,7 @@ When Darkmatter is used through an external orchestrator (such as Claudine), the
 
 ### Claudine/Darkmatter Boundary
 
-**Darkmatter's role is discovery.** It walks the document graph condition-blind — following transclusions, resolving interpolation, parsing `::shell`/`::shell-block` directives, and scanning frontmatter for `$(...)` expressions. `Markdown::compose_preflight(options)` returns a `ComposePreflightReport` whose `approval_set()` is every command that could run under any state, without checking policy files or making approval decisions. (`collect_shell_commands` remains as the lower-level entry point that returns the raw entries.)
+**Darkmatter's role is discovery.** It walks the document graph condition-blind — following transclusions, resolving interpolation, parsing `::shell`/`::shell-block` directives, and scanning frontmatter for `$(...)` expressions. `Markdown::compose_preflight(&request)` takes the same [`ComposeRequest`](../topics/compose-requests.md) the compose pass will use and returns a `ComposePreflightReport` whose `approval_set()` is every command that could run under any state, without checking policy files or making approval decisions. (`collect_shell_commands` remains as the lower-level entry point that returns the raw entries.)
 
 **Before the body exists.** An orchestrator that must run a step before the body's includes exist (Claudine's `initialize`) reads the frontmatter first with `ComposeOptions::only_frontmatter_surface()`. That projection never walks the body graph; its approval set is `collect_frontmatter_shell_commands`, the document's frontmatter `$(...)` commands alone. The full condition-blind discovery above runs after the step, on the settled document.
 

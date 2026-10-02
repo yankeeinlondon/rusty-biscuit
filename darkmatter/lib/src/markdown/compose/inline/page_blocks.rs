@@ -7,7 +7,7 @@ use super::super::body_origin::BodyProvenance;
 use super::super::page_blocks;
 use super::super::shell_expansion;
 use super::super::context::report::CandidateLocus;
-use super::super::{ComposeOptions, ComposeReport, ComposeWarning, EffectiveState};
+use super::super::{ComposeReport, ComposeWarning, EffectiveState};
 use tracing::debug;
 
 /// Runs page blocks (conditional content regions) and carries `body` past
@@ -15,7 +15,7 @@ use tracing::debug;
 pub(crate) fn run_stage(
     markdown: &mut Markdown,
     state: &EffectiveState,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &shell_expansion::types::PipelineRuntime,
     report: &mut ComposeReport,
     body: &mut BodyProvenance,

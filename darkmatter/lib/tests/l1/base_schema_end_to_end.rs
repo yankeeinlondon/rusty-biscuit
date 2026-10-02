@@ -11,7 +11,7 @@ use biscuit_test_harness::manifest_dir;
 use serde_yaml_ng::Value as YamlValue;
 
 fn base_api() -> DarkmatterSchemas {
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline(darkmatter_base_schema())
         .expect("base schema must be baseline-compatible")
 }
@@ -169,7 +169,7 @@ fn base_style_schema_validates_nested_values() {
 
 #[test]
 fn claudine_schema_file_resolves_as_baseline() {
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must resolve imports and remain baseline-compatible");
 
@@ -193,7 +193,7 @@ fn claudine_schema_file_resolves_as_baseline() {
 #[test]
 fn claudine_schema_accepts_typed_lifecycle_stack() {
     let md: Markdown = "---\nstart:\n  info: Starting\n  stack:\n    - when: env.CI == 'true'\n      action:\n        - message: Build started\n        - action: shell\n          command: cargo test\n          no_error: true\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must load")
         .validate(&md)
@@ -209,7 +209,7 @@ fn claudine_schema_accepts_typed_lifecycle_stack() {
 #[test]
 fn claudine_schema_rejects_malformed_lifecycle_stack() {
     let md: Markdown = "---\nstart:\n  stack: run-now\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must load")
         .validate(&md)
@@ -221,7 +221,7 @@ fn claudine_schema_rejects_malformed_lifecycle_stack() {
 #[test]
 fn claudine_schema_accepts_loop_controls_and_lifecycle_concerns_together() {
     let md: Markdown = "---\nloop:\n  while: step < 3\n  action:\n    op: increment\n    prop: step\n  info: Iteration complete\n  stack:\n    - action: stop\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_baseline_from_file(claudine_schema_path())
         .expect("Claudine schema must load")
         .validate(&md)
@@ -336,7 +336,7 @@ fn nested_mapping_object_matches_inline_object_literal_json_schema() {
 #[test]
 fn sequence_union_arms_accept_nested_mapping_object_shapes() {
     let md: Markdown = "---\n$schema:\n  choice:\n    - string\n    - kind: string(required)\n      value: number\nchoice:\n  kind: score\n  value: 10\n---\nBody\n".into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&md)
         .expect("validation must run");
 

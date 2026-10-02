@@ -7,6 +7,7 @@ use crate::artifact::{
 };
 use crate::io::load_markdown;
 use crate::render::render_terminal_output;
+use crate::request::MdRequest;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use std::io::{self, IsTerminal};
@@ -21,9 +22,10 @@ pub fn run_render(
     show: bool,
     indent: Option<usize>,
     cli: &Cli,
+    request: &MdRequest,
 ) -> Result<()> {
     debug!("rendering document");
-    let mut md = load_markdown(input)?;
+    let mut md = load_markdown(input, request)?;
 
     // Apply cleanup with the specified or default indentation
     let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);

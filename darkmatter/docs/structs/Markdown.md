@@ -210,7 +210,7 @@ A document can reference external assets through hyperlinks, images, transclusio
 
 **`has_transclusions() -> bool`** returns `true` if the document contains any transclusion directives (`::file`, `::code`, `::url`, `::toc-linking`, `::file-links`, `prologue`, or `epilogue`).
 
-**`transclusions() -> MarkdownResult<Vec<TransclusionRef>>`** returns all transclusion references with provenance. This is a local query; use `transclusion_graph()` for recursive traversal.
+**`transclusions_with_options(&ComposeRequest) -> MarkdownResult<Vec<TransclusionRef>>`** returns all transclusion references with provenance, each target resolved through the request's file-resolution context. This is a local query; use `transclusion_graph()` for recursive traversal.
 
 Each `TransclusionRef` includes:
 
@@ -240,15 +240,15 @@ This includes `::toc-linking` as a dependency source and surfaces the generated 
 
 **`composed_image_references(options) -> MarkdownResult<Vec<ImageReference>>`** returns composed-order image references.
 
-All graph methods accept `ReferenceGraphOptions`, which wraps `ComposeOptions` and inherits its cache configuration. Graph construction persists no semantic-result artifact; when `cache_root` is set, only raw remote URL response bodies (transport artifacts) are stored, under the path `FileStore::resolve_cache_root()` resolves with `cache_namespace` for branch/profile isolation -- matching the compose pipeline's cache semantics exactly.
+All graph methods accept `ReferenceGraphOptions`, which wraps a prepared `ComposeRequest` and inherits its cache configuration and file-resolution context; there is no default, because every graph resolves its references through a request. Graph construction persists no semantic-result artifact; when `cache_root` is set, only raw remote URL response bodies (transport artifacts) are stored, under the path `FileStore::resolve_cache_root()` resolves with `cache_namespace` for branch/profile isolation -- matching the compose pipeline's cache semantics exactly.
 
 ```rust
-let mut options = ReferenceGraphOptions::default();
-options.compose = options.compose
+let options = ComposeOptions::new()
     .with_cache_root(workspace_root)
     .with_cache_namespace("feature-branch");
+let request = ComposeRequest::prepare(options, &RequestSnapshot::new(workspace_root))?;
 
-let graph = md.reference_graph(options)?;
+let graph = md.reference_graph(ReferenceGraphOptions::with_compose(&request))?;
 ```
 
 ### Graph-Aware Inline Tag Extraction

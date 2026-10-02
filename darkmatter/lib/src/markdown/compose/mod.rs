@@ -58,19 +58,26 @@
 //!
 //! ```
 //! use darkmatter::markdown::Markdown;
-//! use darkmatter::markdown::compose::{ComposeOptions, ComposeOperation};
+//! use darkmatter::markdown::compose::{
+//!     ComposeOperation, ComposeOptions, ComposeRequest, RequestSnapshot,
+//! };
 //!
 //! let content = "# Hello\nWorld";
-//! let mut md: Markdown = content.into();
+//! let md: Markdown = content.into();
+//! // A library call names its request directory; a binary uses
+//! // `RequestSnapshot::from_process()`.
+//! let snapshot = RequestSnapshot::new(std::env::temp_dir());
 //!
 //! // Transform with default options (all operations enabled)
-//! let report = md.compose_mut().unwrap();
+//! let request = ComposeRequest::prepare(ComposeOptions::new(), &snapshot).unwrap();
+//! let (composed, report) = md.compose_with(&request).unwrap();
 //!
 //! // Transform with specific operations disabled
 //! let options = ComposeOptions::new()
 //!     .disable(ComposeOperation::Cleanup)
 //!     .disable(ComposeOperation::Normalization);
-//! let report = md.compose_with(options).unwrap();
+//! let request = ComposeRequest::prepare(options, &snapshot).unwrap();
+//! let (composed, report) = md.compose_with(&request).unwrap();
 //! ```
 //!
 //! ## Maintenance
@@ -159,7 +166,12 @@ pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource};
-pub use context::capture_file_resolution_context;
+pub use context::request::{
+    ComposeRequest, ContextBuildError, RequestSnapshot, build_resolution_context,
+    build_resolution_context_with_catalog,
+};
+#[cfg(test)]
+pub(crate) use context::request::test_support::{request as test_request, request_in as test_request_in};
 pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
@@ -181,7 +193,7 @@ pub(crate) use context::options::TransclusionOptions;
 // Shared helpers, re-exported so in-crate callers reach them as `compose::<name>`.
 pub use util::find_git_root_from;
 pub(crate) use util::{
-    abbreviate_path, document_resolution_context, find_target_range, prepare_frontmatter_for_compose,
+    abbreviate_path, find_target_range, prepare_frontmatter_for_compose,
 };
 
 use super::Markdown;
@@ -196,24 +208,7 @@ use tracing::instrument;
 pub use super::normalize::HeadingLevel;
 
 impl Markdown {
-    /// Transforms the document using default options.
-    ///
-    /// This is equivalent to `compose_with(ComposeOptions::new())`.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::Markdown;
-    ///
-    /// let content = "# Test\nContent";
-    /// let md: Markdown = content.into();
-    /// let (composed, report) = md.compose().unwrap();
-    /// ```
-    pub fn compose(&self) -> MarkdownResult<(Markdown, ComposeReport)> {
-        self.compose_with(ComposeOptions::new())
-    }
-
-    /// Transforms the document with custom options.
+    /// Composes the document for `request`.
     ///
     /// Returns a new `Markdown` document and a report of changes made.
     ///
@@ -221,46 +216,37 @@ impl Markdown {
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
-    /// use darkmatter::markdown::compose::{ComposeOperation, ComposeOptions};
+    /// use darkmatter::markdown::compose::{
+    ///     ComposeOperation, ComposeOptions, ComposeRequest, RequestSnapshot,
+    /// };
     ///
-    /// let content = "# Test\nContent";
-    /// let md: Markdown = content.into();
+    /// let md: Markdown = "# Test\nContent".into();
+    /// let options = ComposeOptions::new().disable(ComposeOperation::Normalization);
+    /// let request =
+    ///     ComposeRequest::prepare(options, &RequestSnapshot::new(std::env::temp_dir())).unwrap();
     ///
-    /// let options = ComposeOptions::new()
-    ///     .disable(ComposeOperation::Normalization);
-    ///
-    /// let (composed, report) = md.compose_with(options).unwrap();
+    /// let (composed, report) = md.compose_with(&request).unwrap();
     /// ```
-    #[instrument(skip_all, fields(source = ?options.source))]
+    #[instrument(skip_all, fields(source = ?request.options().source))]
     pub fn compose_with(
         &self,
-        options: ComposeOptions,
+        request: &ComposeRequest,
     ) -> MarkdownResult<(Markdown, ComposeReport)> {
         let mut result = self.clone();
-        let report = result.run_compose_pipeline(options)?;
+        let report = result.run_compose_pipeline(request)?;
         Ok((result, report))
     }
 
-    /// Transforms the document in place, returning only the report.
-    ///
-    /// This is more efficient than `compose()` when you don't need
-    /// to preserve the original document.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::Markdown;
-    ///
-    /// let content = "# Test\nContent";
-    /// let mut md: Markdown = content.into();
-    /// let report = md.compose_mut().unwrap();
-    ///
-    /// // md is now composed
-    /// ```
-    pub fn compose_mut(&mut self) -> MarkdownResult<ComposeReport> {
-        self.run_compose_pipeline(ComposeOptions::new())
+    /// Composes the document over a request derived from an entry point's
+    /// request, for an inline pass inside that entry point.
+    pub(crate) fn compose_with_options(
+        &self,
+        options: ComposeRequest,
+    ) -> MarkdownResult<(Markdown, ComposeReport)> {
+        let mut result = self.clone();
+        let report = result.run_root_pipeline(options)?;
+        Ok((result, report))
     }
-
 }
 
 #[cfg(test)]

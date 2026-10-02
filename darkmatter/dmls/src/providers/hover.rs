@@ -46,7 +46,7 @@ fn link_hover(ctx: &DocumentContext, doc_id: DocumentId, offset: usize) -> Optio
     let span = ctx.graph.node(link_id)?.span.clone();
     let value = match resolved_targets(ctx.graph, link_id).into_iter().next() {
         Some(node) => resolved_hover(ctx.graph, node),
-        None => unresolved_hover(ctx.graph, doc_id, target),
+        None => unresolved_hover(ctx, doc_id, target),
     };
     Some(markdown_hover(ctx, span, value))
 }
@@ -71,9 +71,9 @@ fn resolved_hover(graph: &WorkspaceGraph, target: NodeId) -> String {
 }
 
 /// Hover for a link whose target did not resolve — explains why.
-fn unresolved_hover(graph: &WorkspaceGraph, doc_id: DocumentId, target: &LinkTarget) -> String {
-    match graph.diagnose_unresolved(doc_id, target) {
-        Some(LinkDiagnostic::BrokenPath) => {
+fn unresolved_hover(ctx: &DocumentContext, doc_id: DocumentId, target: &LinkTarget) -> String {
+    match ctx.graph.diagnose_unresolved(doc_id, target, ctx.file_context()) {
+        Some(LinkDiagnostic::BrokenPath { .. }) => {
             let path = match target {
                 LinkTarget::RelativePath { path, .. } => path.as_str(),
                 _ => "",

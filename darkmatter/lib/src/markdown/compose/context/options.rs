@@ -108,6 +108,24 @@ pub(crate) fn source_file_context(
     }
 }
 
+/// The derivation a file source at `path` resolves under: `TrustedExternal`
+/// when only that derivation of `context` admits the source (it lies outside
+/// the request's tree), else `Ordinary`.
+fn source_derivation_for(
+    context: &biscuit_file::FileResolutionContext,
+    path: &Path,
+    opening: Option<&SourceOpening>,
+) -> SourceDerivation {
+    let derive = |derivation| source_file_context(context, path, derivation, opening);
+    if derive(SourceDerivation::Ordinary).validate().is_err()
+        && derive(SourceDerivation::TrustedExternal).validate().is_ok()
+    {
+        SourceDerivation::TrustedExternal
+    } else {
+        SourceDerivation::Ordinary
+    }
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -239,16 +257,6 @@ pub struct ComposeOptions {
     /// Whether `@`-prefixed paths resolve to the git repository root.
     /// Default: true.
     pub(crate) resolve_repo_root: bool,
-
-    /// Custom search roots for `@`-prefixed (magic) file references.
-    ///
-    /// Each entry is a `(path, position)` pair where `position` controls
-    /// whether the path is searched before (`Start`) or after (`End`) the
-    /// default roots (git repo root, HOME).
-    pub(crate) magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
-
-    /// Immutable request-scoped file-resolution inputs supplied by the host.
-    pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
 
     /// How the current file source entered this compose run.
     pub(crate) source_derivation: SourceDerivation,
@@ -564,7 +572,6 @@ impl std::fmt::Debug for ComposeOptions {
             .field("code_fallback_language", &self.code_fallback_language)
             .field("ignore_invalid_references", &self.ignore_invalid_references)
             .field("resolve_repo_root", &self.resolve_repo_root)
-            .field("magic_paths", &self.magic_paths)
             .field("shell_timeout", &self.shell_timeout)
             .field("shell_policy_root", &self.shell_policy_root)
             .field("shell_working_directory", &self.shell_working_directory)
@@ -638,8 +645,8 @@ impl ComposeOptions {
     /// [`for_document`](Self::for_document) — it captures exactly the groups
     /// the document names, which also folds them into the compose cache key,
     /// and fixes the request's repository observation at creation.
-    /// [`ComposeContext::capture`] remains available for callers that
-    /// genuinely want the full snapshot.
+    /// [`ComposeContext::capture_for_dir`] remains available for callers that
+    /// genuinely want the full snapshot of a directory.
     pub fn new() -> Self {
         Self::new_with_context(ComposeContext::capture_minimal())
             .with_context_authority(super::authority::ContextAuthority::DarkmatterOwned)
@@ -670,7 +677,7 @@ impl ComposeOptions {
     pub fn for_document(anchor: &Path, document: &crate::markdown::Markdown) -> Self {
         let options = Self::new_with_context(ComposeContext::capture_for_document(anchor, document))
             .with_context_authority(super::authority::ContextAuthority::DarkmatterOwned);
-        options.establish_repository_observation();
+        options.establish_request_repository();
         options
     }
 
@@ -715,52 +722,41 @@ impl ComposeOptions {
         self.context_authority.extend(&mut self.context, &requirements);
     }
 
-    /// These options as the compose pass of `document` will see them, after
-    /// [`extend_context_for`](Self::extend_context_for).
-    ///
-    /// Pre-flight discovery evaluates a document before that pass runs, so it
-    /// must read the same context or it would observe groups the real pass has.
-    pub(crate) fn extended_for(
-        &self,
-        document: &crate::markdown::Markdown,
-    ) -> std::borrow::Cow<'_, Self> {
+    /// Whether [`extend_context_for`](Self::extend_context_for) would capture
+    /// a group `document` names that these options lack.
+    pub(crate) fn needs_extension_for(&self, document: &crate::markdown::Markdown) -> bool {
         let requirements = super::capture::ContextRequirements::for_document(document);
-        if !self.context_authority.is_extendable()
-            || self
+        self.context_authority.is_extendable()
+            && self
                 .context
                 .missing_requirements(&requirements)
                 .iter()
                 .next()
-                .is_none()
-        {
-            return std::borrow::Cow::Borrowed(self);
-        }
-        let mut extended = self.clone();
-        extended.extend_context_for(document);
-        std::borrow::Cow::Owned(extended)
+                .is_some()
     }
 
     /// Fixes the request's repository observation (decision D3).
     ///
     /// Only a [`DarkmatterOwned`] request without an embedder-supplied
     /// refresh provider observes the repository itself; see
-    /// [`CurrentAuthority::establish_ambient_repository`].
-    /// [`for_document`](Self::for_document) calls this at request creation.
-    /// The root pipeline entry calls it again as the fallback for a request
-    /// built through [`new`](Self::new) or
-    /// [`new_with_context`](Self::new_with_context), where it is a no-op once
+    /// [`CurrentAuthority::establish_ambient_repository`]. It runs when a
+    /// request is created ([`for_document`](Self::for_document) and
+    /// [`ComposeRequest`](super::request::ComposeRequest)) and is a no-op once
     /// established. A child pipeline never calls it: a descendant must find
     /// the observation already fixed, never establish it late.
     ///
     /// [`CurrentAuthority::establish_ambient_repository`]: crate::markdown::compose::context::CurrentAuthority::establish_ambient_repository
     /// [`DarkmatterOwned`]: super::authority::ContextAuthority::DarkmatterOwned
-    pub(crate) fn establish_repository_observation(&self) {
-        if self.current.has_provider()
-            || !matches!(self.context_authority, super::authority::ContextAuthority::DarkmatterOwned)
-        {
+    pub(super) fn establish_request_repository(&self) {
+        if !self.observes_its_own_repository() {
             return;
         }
         self.current.establish_ambient_repository(&self.context);
+    }
+
+    fn observes_its_own_repository(&self) -> bool {
+        !self.current.has_provider()
+            && matches!(self.context_authority, super::authority::ContextAuthority::DarkmatterOwned)
     }
 
     /// The request's one repository observation, when it holds one: the
@@ -773,48 +769,59 @@ impl ComposeOptions {
             .or_else(|| self.context.observations().repository())
     }
 
-    /// Capture file-resolution evidence once for an ambient compatibility request.
-    ///
-    /// A source inside the request's repository observation projects that
-    /// observation's scope catalog rather than discovering the repository a
-    /// second time (decision D3); only a source outside it, or a request that
-    /// holds no observation, captures at the source directory.
-    pub(crate) fn ensure_file_resolution_context(&mut self) {
-        if self.file_resolution_context.is_some() {
-            return;
+    /// The request's repository observation when it found a repository that
+    /// contains `dir`, so the context builder can project it instead of
+    /// discovering the repository a second time.
+    pub(super) fn request_repository_containing(
+        &self,
+        dir: &Path,
+    ) -> Option<std::sync::Arc<super::repository_scope::RepositoryObservation>> {
+        self.request_repository()
+            .filter(|repository| repository.contains(dir))
+            .cloned()
+    }
+
+    /// Makes the context builder's discovery at `dir` the request's
+    /// repository observation, when this request observes its own repository
+    /// from that same directory and has not yet established one.
+    pub(super) fn adopt_request_repository(
+        &self,
+        dir: &Path,
+        discovery: super::request::RepositoryDiscovery,
+    ) {
+        if self.observes_its_own_repository()
+            && self.context.anchor() == dir
+            && !self.context.capture_requirements().contains(super::capture::ContextGroup::Repo)
+        {
+            self.current.adopt_ambient_repository(discovery.values, discovery.observation);
         }
-        let ambient = || std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let (base_dir, inside_request_repository) = match &self.source {
-            ComposeSource::File(path) => {
-                let absolute = if path.is_absolute() {
-                    path.clone()
-                } else {
-                    ambient().join(path)
-                };
-                let base_dir = absolute.parent().map(Path::to_path_buf).unwrap_or_else(ambient);
-                let inside = self
-                    .request_repository()
-                    .is_some_and(|repository| repository.contains(&base_dir));
-                (base_dir, inside)
-            }
-            // A document with no on-disk location resolves from the request's
-            // retained anchor — the directory the observation was made at —
-            // not from the process CWD at compose time (decision D2).
-            _ => match self.context.anchor() {
-                anchor if anchor.as_os_str().is_empty() => (ambient(), false),
-                anchor => (anchor.to_path_buf(), true),
-            },
-        };
-        self.file_resolution_context = Some(match self.request_repository() {
-            Some(repository) if inside_request_repository => {
-                let mut context = biscuit_file::FileResolutionContext::new(&base_dir);
-                if let Some(catalog) = repository.scope_catalog() {
-                    context = context.with_repository_scope_catalog(catalog);
-                }
-                context
-            }
-            _ => super::capture::capture_file_resolution_context(&base_dir),
-        });
+    }
+
+    /// Re-anchors a Darkmatter-owned context on the request directory when it
+    /// has captured nothing that depends on its anchor.
+    ///
+    /// [`new`](Self::new) captures only date and time, so its anchor is a
+    /// placeholder; a later capture (`ctx.cwd`, the `Repo` group) then
+    /// describes the request directory rather than the process directory.
+    pub(super) fn anchor_unanchored_context(&mut self, dir: &Path) {
+        if matches!(self.context_authority, super::authority::ContextAuthority::DarkmatterOwned)
+            && self.context.anchor() != dir
+            && self
+                .context
+                .capture_requirements()
+                .iter()
+                .all(|group| group == super::capture::ContextGroup::DateTime)
+        {
+            self.context = self.context.clone().with_anchor(dir);
+        }
+    }
+
+    /// Makes `ctx.env` (and the `AGENT`/`MODEL` values derived from it) the
+    /// request context's environment.
+    pub(super) fn align_context_environment(&mut self, env: &std::collections::HashMap<String, String>) {
+        if self.context.env() != env {
+            *self.context.env_mut() = env.clone();
+        }
     }
 
     /// Creates new compose options using a pre-captured context.
@@ -847,8 +854,6 @@ impl ComposeOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid_references: None,
             resolve_repo_root: true,
-            magic_paths: Vec::new(),
-            file_resolution_context: None,
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
             shell_timeout: std::time::Duration::from_secs(10),
@@ -944,13 +949,14 @@ impl ComposeOptions {
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
-    /// use darkmatter::markdown::compose::ComposeOptions;
+    /// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, RequestSnapshot};
     ///
     /// let md: Markdown = "---\nname: \"{{ 'x' }}\"\n---\n::file ./missing.md\n".into();
     /// let options = ComposeOptions::new().only_frontmatter_surface();
     /// assert!(options.is_frontmatter_surface_only());
     ///
-    /// let (projected, _report) = md.compose_with(options).unwrap();
+    /// let request = ComposeRequest::prepare(options, &RequestSnapshot::new(std::env::temp_dir())).unwrap();
+    /// let (projected, _report) = md.compose_with(&request).unwrap();
     /// assert_eq!(projected.frontmatter().as_map()["name"], "x");
     /// assert!(projected.content().contains("::file ./missing.md"));
     /// ```
@@ -985,25 +991,30 @@ impl ComposeOptions {
     /// `opening` is the reference that resolved to `path` and the path it
     /// resolved to, when the caller has them; the child's context is then
     /// derived from it (see [`SourceOpening`]).
+    /// A source outside the request's tree that only a trusted-external
+    /// derivation of `context` admits is marked `TrustedExternal`.
     #[must_use]
-    pub(crate) fn with_accepted_source_file(
+    pub(crate) fn with_accepted_source_file_in(
         mut self,
         path: impl Into<PathBuf>,
         opening: Option<SourceOpening>,
+        context: &biscuit_file::FileResolutionContext,
     ) -> Self {
         let path = path.into();
-        self.source_derivation = self
-            .file_resolution_context
-            .as_ref()
-            .filter(|snapshot| {
-                let derive = |derivation| source_file_context(snapshot, &path, derivation, opening.as_ref());
-                derive(SourceDerivation::Ordinary).validate().is_err()
-                    && derive(SourceDerivation::TrustedExternal).validate().is_ok()
-            })
-            .map_or(SourceDerivation::Ordinary, |_| SourceDerivation::TrustedExternal);
+        self.source_derivation = source_derivation_for(context, &path, opening.as_ref());
         self.source = ComposeSource::File(path);
         self.source_opening = opening;
         self
+    }
+
+    /// Admits the root file source the way a child source is admitted
+    /// ([`Self::with_accepted_source_file_in`]): a source outside the
+    /// request's tree that only a trusted-external derivation of `context`
+    /// admits is marked `TrustedExternal`.
+    pub(crate) fn admit_source_in(&mut self, context: &biscuit_file::FileResolutionContext) {
+        if let ComposeSource::File(path) = &self.source {
+            self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref());
+        }
     }
 
     /// Sets the compose source as a URL.
@@ -1058,7 +1069,7 @@ impl ComposeOptions {
     ///
     /// ```
     /// use darkmatter::markdown::Markdown;
-    /// use darkmatter::markdown::compose::{ComposeOptions, OverrideLayer};
+    /// use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, OverrideLayer, RequestSnapshot};
     /// use serde_json::json;
     ///
     /// let md: Markdown = "---\ntitle: t\n---\n{{ user }} / {{ output }}\n".into();
@@ -1066,7 +1077,8 @@ impl ComposeOptions {
     ///     OverrideLayer::authored(json!({ "user": "{{ title }}" })),
     ///     OverrideLayer::data(json!({ "output": "{{ title }}" })),
     /// ]);
-    /// let (composed, _) = md.compose_with(options).unwrap();
+    /// let request = ComposeRequest::prepare(options, &RequestSnapshot::new(std::env::temp_dir())).unwrap();
+    /// let (composed, _) = md.compose_with(&request).unwrap();
     /// assert_eq!(composed.content().trim(), "t / {{ title }}");
     /// ```
     #[must_use]
@@ -1407,56 +1419,9 @@ impl ComposeOptions {
         self
     }
 
-    /// Adds a custom search root for `@`-prefixed file references.
-    ///
-    /// The root's tier is inferred from where it lies: a root inside the
-    /// launch local root (the repository root, or the request directory when
-    /// there is no repository) joins the local tier searched before every
-    /// home-based root; every other root joins the user tier searched after
-    /// it. Within a tier, `PathPosition::Start` roots are searched before
-    /// that tier's intrinsic roots (package, package area, local root for the
-    /// local tier; home for the user tier) and `PathPosition::End` roots
-    /// after them.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use darkmatter::markdown::compose::{ComposeOptions, PathPosition};
-    ///
-    /// let options = ComposeOptions::new()
-    ///     .with_magic_path("/project/.claudine", PathPosition::Start)
-    ///     .with_magic_path("/home/user/.claudine", PathPosition::Start);
-    /// ```
-    #[must_use]
-    pub fn with_magic_path(
-        mut self,
-        path: impl Into<PathBuf>,
-        position: biscuit_file::PathPosition,
-    ) -> Self {
-        self.magic_paths.push((path.into(), position));
-        self
-    }
-
-    /// Supplies the immutable request snapshot used by every file-reference
-    /// surface in this compose run.
-    ///
-    /// Caller overrides without explicit [`CallerInputRecord`] provenance are
-    /// anchored at this context's request base. A separate
-    /// [`Self::with_file_ref_fallback_dir`] is retained for compatibility and
-    /// diagnostic metadata, but is not required for caller projection when
-    /// this context is present.
-    #[must_use]
-    pub fn with_file_resolution_context(
-        mut self,
-        context: biscuit_file::FileResolutionContext,
-    ) -> Self {
-        self.file_resolution_context = Some(context);
-        self
-    }
-
-    /// Returns the host-supplied request snapshot, when present.
-    pub fn file_resolution_context(&self) -> Option<&biscuit_file::FileResolutionContext> {
-        self.file_resolution_context.as_ref()
+    /// The document these options compose.
+    pub fn source(&self) -> &ComposeSource {
+        &self.source
     }
 
     /// Sets the fallback language for code transclusion.
@@ -1466,11 +1431,15 @@ impl ComposeOptions {
         self
     }
 
-    /// Returns a `TransclusionOptions` view of the transclusion-related fields.
+    /// Returns a `TransclusionOptions` view of the transclusion-related fields,
+    /// resolving through the request's `context`.
     ///
     /// Used internally to pass transclusion config to resolver and TOC linking
     /// functions without coupling them to the full `ComposeOptions` type.
-    pub(crate) fn transclusion_options(&self) -> TransclusionOptions {
+    pub(crate) fn transclusion_options_in(
+        &self,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> TransclusionOptions {
         TransclusionOptions {
             source: self.source.clone(),
             max_depth: self.max_transclusion_depth,
@@ -1480,43 +1449,29 @@ impl ComposeOptions {
             code_fallback_language: self.code_fallback_language.clone(),
             ignore_invalid: self.ignore_invalid_references,
             resolve_repo_root: self.resolve_repo_root,
-            magic_paths: self.magic_paths.clone(),
-            file_resolution_context: self.file_resolution_context.clone(),
+            file_resolution_context: context.clone(),
             source_derivation: self.source_derivation,
             source_opening: self.source_opening.clone(),
         }
     }
 
-    /// The document's directory (`cwd`) when there is no request snapshot:
-    /// relative and `@` references resolve here.
-    ///
-    /// File sources resolve to the directory the source file lives in; all other
-    /// sources (string/stdin) fall back to the current directory.
-    fn resolution_cwd(&self) -> PathBuf {
-        match &self.source {
-            ComposeSource::File(path) => path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from(".")),
-            _ => PathBuf::from("."),
-        }
-    }
-
-    /// The current source's context, derived from the request snapshot by
+    /// The current source's context, derived from the request's `context` by
     /// [`source_file_context`].
     ///
     /// A source with no path (a string, stdin, or URL) has no directory of its
-    /// own, so it uses the snapshot unchanged: its `cwd` is the request's.
-    /// Deriving it to `.` would make it depend on the process directory and
-    /// put it outside the request's tree.
-    pub(crate) fn source_file_resolution_context(&self) -> Option<biscuit_file::FileResolutionContext> {
-        let snapshot = self.file_resolution_context.as_ref()?;
-        Some(match &self.source {
+    /// own, so it uses the request's context unchanged: its `cwd` is the
+    /// request's. Deriving it to `.` would make it depend on the process
+    /// directory and put it outside the request's tree.
+    pub(crate) fn source_file_resolution_context_in(
+        &self,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> biscuit_file::FileResolutionContext {
+        match &self.source {
             ComposeSource::File(path) => {
-                source_file_context(snapshot, path, self.source_derivation, self.source_opening.as_ref())
+                source_file_context(context, path, self.source_derivation, self.source_opening.as_ref())
             }
-            _ => snapshot.clone(),
-        })
+            _ => context.clone(),
+        }
     }
 
     /// Builds the [`ResolutionContext`] used by read-side expression functions
@@ -1528,28 +1483,16 @@ impl ComposeOptions {
     /// HTTP(S) URL arguments read from the fetch cache rather than disk.
     ///
     /// [`ResolutionContext`]: super::super::expression::ResolutionContext
-    pub(crate) fn expression_resolution_context(
+    pub(crate) fn expression_resolution_context_in(
         &self,
+        request_context: &biscuit_file::FileResolutionContext,
         remote_fetch: &super::super::remote_fetch::RemoteFetchRuntime,
     ) -> super::super::expression::ResolutionContext {
-        let file_resolution_context = self.source_file_resolution_context();
         // The derived context decides `cwd`, so expression helpers that compare
         // it with their own `cwd` see the same spelling.
-        let cwd = file_resolution_context
-            .as_ref()
-            .map_or_else(|| self.resolution_cwd(), |ctx| ctx.cwd().to_path_buf());
-        let (repository_root, package_area, home_dir) = match &file_resolution_context {
-            Some(ctx) => (
-                ctx.repository_root().map(Path::to_path_buf),
-                ctx.package_area().map(Path::to_path_buf),
-                ctx.home_dir().map(Path::to_path_buf),
-            ),
-            None => (None, None, dirs::home_dir()),
-        };
-        let mut context = super::super::expression::ResolutionContext::new(cwd);
-        context.repository_root = repository_root;
-        context.package_area = package_area;
-        context.magic_paths = self.magic_paths.clone();
+        let mut context = super::super::expression::ResolutionContext::new(
+            self.source_file_resolution_context_in(request_context),
+        );
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.remote_fetch = self.remote_reads_enabled().then(|| remote_fetch.clone());
         context.ctx_values = self.context_values_for_resolution();
@@ -1558,8 +1501,6 @@ impl ComposeOptions {
             context.shell_probe =
                 crate::markdown::compose::shell_expansion::probe::ShellProbe::from_environment(self.context.env());
         }
-        context.home_dir = home_dir;
-        context.file_resolution_context = file_resolution_context;
         context.icmp = self.icmp_authority();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
@@ -1573,8 +1514,11 @@ impl ComposeOptions {
     ///
     /// [`expression_resolution_context`]: Self::expression_resolution_context
     /// [`ResolutionContext`]: super::super::expression::ResolutionContext
-    pub(crate) fn frontmatter_resolution_context(&self) -> super::super::expression::ResolutionContext {
-        let mut context = self.local_expression_resolution_context();
+    pub(crate) fn frontmatter_resolution_context_in(
+        &self,
+        request_context: &biscuit_file::FileResolutionContext,
+    ) -> super::super::expression::ResolutionContext {
+        let mut context = self.local_expression_resolution_context_in(request_context);
         context.remote_fetch = self.remote_reads_enabled().then(|| self.remote_fetch_runtime());
         context.nested_compose = self.nested_compose.clone();
         context
@@ -1585,25 +1529,15 @@ impl ComposeOptions {
     /// Hosts that evaluate document-authored expressions outside the main
     /// compose pipeline use this adapter so they retain the same immutable
     /// file-resolution snapshot, source derivation, and magic roots.
-    pub fn local_expression_resolution_context(&self) -> super::super::expression::ResolutionContext {
-        let file_resolution_context = self.source_file_resolution_context();
+    pub(crate) fn local_expression_resolution_context_in(
+        &self,
+        request_context: &biscuit_file::FileResolutionContext,
+    ) -> super::super::expression::ResolutionContext {
         // The derived context decides `cwd`, so expression helpers that compare
         // it with their own `cwd` see the same spelling.
-        let cwd = file_resolution_context
-            .as_ref()
-            .map_or_else(|| self.resolution_cwd(), |ctx| ctx.cwd().to_path_buf());
-        let (repository_root, package_area, home_dir) = match &file_resolution_context {
-            Some(ctx) => (
-                ctx.repository_root().map(Path::to_path_buf),
-                ctx.package_area().map(Path::to_path_buf),
-                ctx.home_dir().map(Path::to_path_buf),
-            ),
-            None => (None, None, dirs::home_dir()),
-        };
-        let mut context = super::super::expression::ResolutionContext::new(cwd);
-        context.repository_root = repository_root;
-        context.package_area = package_area;
-        context.magic_paths = self.magic_paths.clone();
+        let mut context = super::super::expression::ResolutionContext::new(
+            self.source_file_resolution_context_in(request_context),
+        );
         context.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         context.ctx_values = self.context_values_for_resolution();
         context.observations = self.context.observations().clone();
@@ -1611,8 +1545,6 @@ impl ComposeOptions {
             context.shell_probe =
                 crate::markdown::compose::shell_expansion::probe::ShellProbe::from_environment(self.context.env());
         }
-        context.home_dir = home_dir;
-        context.file_resolution_context = file_resolution_context;
         context.icmp = self.icmp_authority();
         context.current = self.current_authority();
         context.caller_file_provenance = self.caller_file_provenance.clone();
@@ -1637,7 +1569,6 @@ impl ComposeOptions {
             policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
-            file_resolution_context: self.file_resolution_context.clone(),
             strip_ansi: self.shell_strip_ansi,
         }
     }
@@ -1866,11 +1797,11 @@ impl ComposeOptions {
     /// (which runs before frontmatter shell expansion and other offset-shifting
     /// stages). The typical flow is:
     ///
-    /// 1. Call `Markdown::compose_preflight(&options)` to collect the
+    /// 1. Call `Markdown::compose_preflight(&request)` to collect the
     ///    approval set and the graph.
     /// 2. Authorize the approval set with the caller's policy/prompt.
-    /// 3. Call
-    ///    `Markdown::compose_with(options.with_pre_approved_commands(...).with_preflight_graph(report.preflight_graph))`.
+    /// 3. Compose with
+    ///    `request.map_options(|o| o.with_pre_approved_commands(...).with_preflight_graph(report.preflight_graph))`.
     ///
     /// `None` (the default) preserves the legacy behavior: the transclusion
     /// engine parses directives and resolves targets itself.
@@ -2135,11 +2066,8 @@ pub(crate) struct TransclusionOptions {
     /// Whether repo-root (`@`) resolution is enabled.
     pub resolve_repo_root: bool,
 
-    /// Custom search roots for `@`-prefixed (magic) file references.
-    pub magic_paths: Vec<(PathBuf, biscuit_file::PathPosition)>,
-
-    /// Immutable request snapshot inherited by every nested document.
-    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// The request's context, inherited by every nested document.
+    pub file_resolution_context: biscuit_file::FileResolutionContext,
 
     /// How the current file source entered the traversal.
     pub(crate) source_derivation: SourceDerivation,
@@ -2148,6 +2076,9 @@ pub(crate) struct TransclusionOptions {
     pub(crate) source_opening: Option<SourceOpening>,
 }
 
+/// Unit tests that never resolve a file anchor the context at the system
+/// temporary directory.
+#[cfg(test)]
 impl Default for TransclusionOptions {
     fn default() -> Self {
         Self {
@@ -2159,8 +2090,7 @@ impl Default for TransclusionOptions {
             code_fallback_language: "txt".to_string(),
             ignore_invalid: None,
             resolve_repo_root: true,
-            magic_paths: Vec::new(),
-            file_resolution_context: None,
+            file_resolution_context: biscuit_file::FileResolutionContext::new(std::env::temp_dir()),
             source_derivation: SourceDerivation::Ordinary,
             source_opening: None,
         }
@@ -2475,14 +2405,8 @@ fn baseline_canonical_json(
 /// even when the root path is unchanged).
 fn encode_file_resolution_context(
     enc: &mut GraphIdentityEncoder,
-    context: &Option<biscuit_file::FileResolutionContext>,
+    context: &biscuit_file::FileResolutionContext,
 ) {
-    let Some(context) = context else {
-        enc.tag(0);
-        return;
-    };
-    enc.tag(1);
-
     for path in [
         context.source_path(),
         Some(context.cwd()),
@@ -2588,8 +2512,13 @@ impl ComposeOptions {
     ///
     /// The no-`..` destructure is the compile-time maintenance guard: adding a
     /// field to `ComposeOptions` fails to compile here until its graph- and
-    /// cache-identity treatment is chosen.
-    fn classify_options(&self) -> ComposeOptionsClassification {
+    /// cache-identity treatment is chosen. The request's `file_resolution_context`
+    /// is encoded beside the fields, since a request holds it outside the
+    /// options.
+    fn classify_options(
+        &self,
+        file_resolution_context: &biscuit_file::FileResolutionContext,
+    ) -> ComposeOptionsClassification {
         let ComposeOptions {
             enabled_operations,
             fail_fast,
@@ -2610,8 +2539,6 @@ impl ComposeOptions {
             code_fallback_language,
             ignore_invalid_references,
             resolve_repo_root,
-            magic_paths,
-            file_resolution_context,
             source_derivation,
             source_opening,
             shell_timeout,
@@ -2737,7 +2664,7 @@ impl ComposeOptions {
         for (property, record) in caller_input_records {
             enc.str(property);
             enc.str(&canonical_json_sorted(record.raw()));
-            encode_file_resolution_context(&mut enc, &Some(record.origin().clone()));
+            encode_file_resolution_context(&mut enc, record.origin());
         }
         enc.field("caller_file_provenance");
         let mut projected: Vec<_> = caller_file_provenance.iter().collect();
@@ -2747,7 +2674,7 @@ impl ComposeOptions {
             enc.str(occurrence);
             enc.str(&provenance.property);
             enc.str(&provenance.reference);
-            encode_file_resolution_context(&mut enc, &Some(provenance.origin.clone()));
+            encode_file_resolution_context(&mut enc, &provenance.origin);
             enc.path(&provenance.candidate);
             enc.tag(match provenance.candidate_provenance {
                 biscuit_file::RootProvenance::Repository => 0,
@@ -2785,16 +2712,6 @@ impl ComposeOptions {
         enc.field("resolve_repo_root");
         enc.bool(*resolve_repo_root);
 
-        // Ordered vector: preserve order (search-root precedence is behavioral).
-        enc.field("magic_paths");
-        enc.count(magic_paths.len());
-        for (path, position) in magic_paths {
-            enc.path(path);
-            enc.tag(match position {
-                biscuit_file::PathPosition::Start => 0,
-                biscuit_file::PathPosition::End => 1,
-            });
-        }
         enc.field("file_resolution_context");
         encode_file_resolution_context(&mut enc, file_resolution_context);
         enc.field("source_derivation");
@@ -3077,16 +2994,6 @@ impl ComposeOptions {
         cenc.field("resolve_repo_root");
         cenc.bool(*resolve_repo_root);
 
-        // Ordered vector: preserve order (search-root precedence is behavioral).
-        cenc.field("magic_paths");
-        cenc.count(magic_paths.len());
-        for (path, position) in magic_paths {
-            cenc.path(path);
-            cenc.tag(match position {
-                biscuit_file::PathPosition::Start => 0,
-                biscuit_file::PathPosition::End => 1,
-            });
-        }
         cenc.field("file_resolution_context");
         encode_file_resolution_context(&mut cenc, file_resolution_context);
         cenc.field("source_derivation");
@@ -3149,7 +3056,7 @@ impl ComposeOptions {
         for (property, record) in caller_input_records {
             cenc.str(property);
             cenc.str(&canonical_json_sorted(record.raw()));
-            encode_file_resolution_context(&mut cenc, &Some(record.origin().clone()));
+            encode_file_resolution_context(&mut cenc, record.origin());
         }
         cenc.field("baseline_schema");
         match &baseline_canonical {
@@ -3199,8 +3106,11 @@ impl ComposeOptions {
     /// Encoded by the typed, length-delimited [`GraphIdentityEncoder`] under
     /// [`CACHE_OPTIONS_DOMAIN`]; it carries no `Debug` encoding and is not
     /// value-compatible with the historical string-join hash.
-    pub(crate) fn compose_cache_fingerprint(&self) -> u64 {
-        self.classify_options().cache_value_fingerprint
+    pub(crate) fn compose_cache_fingerprint(
+        &self,
+        context: &biscuit_file::FileResolutionContext,
+    ) -> u64 {
+        self.classify_options(context).cache_value_fingerprint
     }
 }
 
@@ -3225,9 +3135,9 @@ pub(crate) struct ReferenceGraphOptionsIdentity {
 }
 
 impl ReferenceGraphOptionsIdentity {
-    /// Captures the identity of `options`' graph-affecting configuration.
-    pub(crate) fn capture(options: &ComposeOptions) -> Self {
-        let classification = options.classify_options();
+    /// Captures the identity of `request`'s graph-affecting configuration.
+    pub(crate) fn capture(request: &super::request::ComposeRequest) -> Self {
+        let classification = request.options().classify_options(request.resolution_context());
         Self {
             value_fingerprint: classification.graph_value_fingerprint,
             shell_approval_handler: classification.shell_approval_handler,
@@ -3300,6 +3210,7 @@ fn schema_phase_tag(phase: Option<crate::markdown::schemas::SchemaPhase>) -> u8 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::{test_request, test_request_in, ComposeRequest};
     use std::path::PathBuf;
 
     /// `ComposeOptions::new()` must not perform host or repository discovery.
@@ -3337,40 +3248,31 @@ mod tests {
             discovered.is_empty(),
             "ComposeOptions::new() captured discovery-derived keys: {discovered:?}. \
              Construct with `new_with_context(ComposeContext::capture_for_document(..))` \
-             when a document is in hand, or `ComposeContext::capture()` for a deliberate \
+             when a document is in hand, or `ComposeContext::capture_for_dir(..)` for a deliberate \
              full snapshot.",
         );
     }
 
+    /// A request prepared at the launch directory anchors the unanchored
+    /// default context there; a later source elsewhere does not move it.
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
-    fn ambient_context_upgrade_keeps_the_request_launch_anchor() {
-        struct RestoreCwd(PathBuf);
-        impl Drop for RestoreCwd {
-            fn drop(&mut self) {
-                let _ = std::env::set_current_dir(&self.0);
-            }
-        }
-
-        let original = std::env::current_dir().unwrap();
-        let _restore = RestoreCwd(original);
+    fn request_context_upgrade_keeps_the_request_launch_anchor() {
         let launch = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(launch.path()).unwrap();
-        // The anchor is captured as `current_dir()` reports it (symlink-resolved
-        // on macOS, legacy short-name spelling on Windows) — not `canonicalize`,
-        // whose verbatim `\\?\` form never enters the context.
-        let expected = std::env::current_dir().unwrap();
-        let mut options = ComposeOptions::new();
+        let expected = launch.path().to_path_buf();
+        let mut request = ComposeRequest::prepare(
+            ComposeOptions::new(),
+            &super::super::request::RequestSnapshot::new(&expected),
+        )
+        .unwrap();
 
-        std::env::set_current_dir(target.path()).unwrap();
-        options.source = ComposeSource::File(target.path().join("prompt.md"));
+        request.source = ComposeSource::File(target.path().join("prompt.md"));
         let document: crate::markdown::Markdown = "{{ ctx.cwd }}".into();
-        options.extend_context_for(&document);
+        request.extend_context_for(&document);
 
-        assert_eq!(options.context.anchor(), expected);
+        assert_eq!(request.context.anchor(), expected);
         assert_eq!(
-            options.context.get("cwd"),
+            request.context.get("cwd"),
             Some(&serde_json::json!(biscuit_file::to_portable_string(&expected))),
         );
     }
@@ -3395,7 +3297,7 @@ mod tests {
     /// contexts (Phase 2 Track A verification goal).
     #[test]
     fn frontmatter_resolution_context_carries_fallback() {
-        let options = ComposeOptions::new().with_file_ref_fallback_dir("/tmp/launch");
+        let options = test_request(ComposeOptions::new().with_file_ref_fallback_dir("/tmp/launch"));
         let ctx = options.frontmatter_resolution_context();
         assert_eq!(
             ctx.file_ref_fallback_dir.as_deref(),
@@ -3407,7 +3309,7 @@ mod tests {
     /// `None` — preserving the legacy document-only resolution behavior.
     #[test]
     fn frontmatter_resolution_context_without_fallback_is_none() {
-        let options = ComposeOptions::new();
+        let options = test_request(ComposeOptions::new());
         let ctx = options.frontmatter_resolution_context();
         assert!(ctx.file_ref_fallback_dir.is_none());
     }
@@ -3432,9 +3334,7 @@ mod tests {
             request_root.path().display().to_string(),
         );
         let snapshot = biscuit_file::FileResolutionContext::new(request_root.path()).with_env(env);
-        let options = ComposeOptions::new()
-            .with_source_file(nested.join("child.md"))
-            .with_file_resolution_context(snapshot);
+        let options = test_request_in(ComposeOptions::new().with_source_file(nested.join("child.md")), snapshot);
 
         // SAFETY: this test is serialized while mutating process-global state.
         unsafe { std::env::set_var("DARKMATTER_SNAPSHOT_ROOT", ambient.path()) };
@@ -3448,10 +3348,7 @@ mod tests {
             crate::markdown::compose::expression::resolve_ctx::resolve_document_file_ref(
                 &file_ref,
                 &ctx.cwd,
-                ctx.repository_root.as_deref(),
-                ctx.package_area.as_deref(),
-                &ctx.magic_paths,
-                ctx.file_resolution_context.as_ref(),
+                &ctx.file_resolution_context,
             )
             .unwrap()
         });
@@ -3512,7 +3409,7 @@ mod tests {
         let baseline = options
             .baseline_schema
             .expect("baseline schema must be set");
-        let api = DarkmatterSchemas::new()
+        let api = DarkmatterSchemas::new(biscuit_file::FileResolutionContext::new(std::env::temp_dir()))
             .with_baseline(baseline)
             .expect("baseline must convert");
 
@@ -3554,15 +3451,49 @@ mod tests {
         }
     }
 
+    /// A process-independent request context for the identity fixtures, so
+    /// two options built alike compare only their own fields.
+    fn neutral_context() -> biscuit_file::FileResolutionContext {
+        biscuit_file::FileResolutionContext::from_snapshot(
+            fixture_root(""),
+            None,
+            std::collections::HashMap::new(),
+        )
+    }
+
+    /// An absolute fixture path under a fixed root on every OS.
+    fn fixture_root(relative: &str) -> PathBuf {
+        let root = std::env::temp_dir().join("identity-fixture");
+        if relative.is_empty() { root } else { root.join(relative) }
+    }
+
+    fn req(options: ComposeOptions) -> ComposeRequest {
+        test_request_in(options, neutral_context())
+    }
+
+    fn req_in(options: ComposeOptions, context: biscuit_file::FileResolutionContext) -> ComposeRequest {
+        test_request_in(options, context)
+    }
+
+    /// The graph identity of `options` under the neutral context.
     fn id(options: &ComposeOptions) -> ReferenceGraphOptionsIdentity {
-        ReferenceGraphOptionsIdentity::capture(options)
+        rid(&req(options.clone()))
+    }
+
+    fn rid(request: &ComposeRequest) -> ReferenceGraphOptionsIdentity {
+        ReferenceGraphOptionsIdentity::capture(request)
+    }
+
+    /// The compose-cache fingerprint of `options` under the neutral context.
+    fn fp(options: &ComposeOptions) -> u64 {
+        options.compose_cache_fingerprint(&neutral_context())
     }
 
     /// Options over a deterministic fixed context.
     ///
     /// The graph identity folds in the complete runtime context (including
     /// volatile `now`/`timestamp`/`memory_*`), so comparing options built from
-    /// two independent `ComposeContext::capture()` calls would differ on that
+    /// two independent `ComposeContext::capture_for_dir(..)` calls would differ on that
     /// capture drift alone. A shared fixed context isolates the option field
     /// each identity test actually targets.
     fn fixed_opts() -> ComposeOptions {
@@ -3611,10 +3542,10 @@ mod tests {
                 std::collections::HashMap::new(),
             )
         };
-        let base = fixed_opts().with_file_resolution_context(snapshot());
+        let base = req_in(fixed_opts(), snapshot());
         let variants = [
-            fixed_opts().with_file_resolution_context(snapshot().with_base_dir(temp.path())),
-            fixed_opts().with_file_resolution_context(snapshot().allow_external_relative()),
+            req_in(fixed_opts(), snapshot().with_base_dir(temp.path())),
+            req_in(fixed_opts(), snapshot().allow_external_relative()),
             base.clone().with_accepted_source_file(
                 temp.path().join("docs/a.md"),
                 Some(SourceOpening {
@@ -3625,10 +3556,10 @@ mod tests {
         ];
         let unopened = base.clone().with_accepted_source_file(temp.path().join("docs/a.md"), None);
         for variant in &variants {
-            assert_ne!(id(&base), id(variant));
+            assert_ne!(rid(&base), rid(variant));
             assert_ne!(base.compose_cache_fingerprint(), variant.compose_cache_fingerprint());
         }
-        assert_ne!(id(&unopened), id(&variants[2]));
+        assert_ne!(rid(&unopened), rid(&variants[2]));
         assert_ne!(unopened.compose_cache_fingerprint(), variants[2].compose_cache_fingerprint());
     }
 
@@ -3640,7 +3571,7 @@ mod tests {
                 CallerInputRecord::new(
                     serde_json::json!("fixes/case/spec.md"),
                     biscuit_file::FileResolutionContext::from_snapshot(
-                        base,
+                        fixture_root(base),
                         None,
                         std::collections::HashMap::new(),
                     ),
@@ -3649,17 +3580,14 @@ mod tests {
             .into_iter()
             .collect()
         };
-        let a = fixed_opts().with_caller_input_records(records("/repo/one"));
-        let b = fixed_opts().with_caller_input_records(records("/repo/two"));
+        let a = fixed_opts().with_caller_input_records(records("repo/one"));
+        let b = fixed_opts().with_caller_input_records(records("repo/two"));
         let cloned = a.clone();
 
         assert_ne!(id(&a), id(&b));
-        assert_ne!(a.compose_cache_fingerprint(), b.compose_cache_fingerprint());
+        assert_ne!(fp(&a), fp(&b));
         assert_eq!(id(&a), id(&cloned));
-        assert_eq!(
-            a.compose_cache_fingerprint(),
-            cloned.compose_cache_fingerprint()
-        );
+        assert_eq!(fp(&a), fp(&cloned));
         assert_eq!(
             a.caller_input_records()["spec"].raw(),
             &serde_json::json!("fixes/case/spec.md")
@@ -3667,13 +3595,22 @@ mod tests {
     }
 
     /// A bare source context for the identity fixtures below.
+    /// Fixed options whose context registers `roots` as start-position `@`
+    /// roots, in order.
+    fn with_magic_roots(roots: &[&str]) -> ComposeRequest {
+        let context = roots.iter().fold(identity_source_context(), |context, root| {
+            context.add_magic_path(*root, biscuit_file::PathPosition::Start)
+        });
+        req_in(fixed_opts(), context)
+    }
+
     fn identity_source_context() -> biscuit_file::FileResolutionContext {
         biscuit_file::FileResolutionContext::from_snapshot(
-            "/repo/docs",
-            Some("/repo".into()),
+            fixture_root("repo/docs"),
+            Some(fixture_root("repo")),
             std::collections::HashMap::new(),
         )
-        .with_repository_root("/repo")
+        .with_repository_root(fixture_root("repo"))
     }
 
     /// The captured launch `@` scope anchors the whole `@` chain independently
@@ -3683,17 +3620,17 @@ mod tests {
     #[test]
     fn identities_distinguish_launch_magic_scope() {
         let launch_a = biscuit_file::FileResolutionContext::from_snapshot(
-            "/repo/area-a",
+            fixture_root("repo/area-a"),
             None,
             std::collections::HashMap::new(),
         )
-        .with_repository_root("/repo");
+        .with_repository_root(fixture_root("repo"));
         let launch_b = biscuit_file::FileResolutionContext::from_snapshot(
-            "/repo/area-b",
+            fixture_root("repo/area-b"),
             None,
             std::collections::HashMap::new(),
         )
-        .with_repository_root("/repo");
+        .with_repository_root(fixture_root("repo"));
         assert_ne!(
             launch_a.launch_magic_scope(),
             launch_b.launch_magic_scope(),
@@ -3701,18 +3638,20 @@ mod tests {
         );
 
         let source = identity_source_context();
-        let a = fixed_opts().with_file_resolution_context(
+        let a = req_in(
+            fixed_opts(),
             source
                 .clone()
                 .with_launch_magic_scope(launch_a.launch_magic_scope().clone()),
         );
-        let b = fixed_opts().with_file_resolution_context(
+        let b = req_in(
+            fixed_opts(),
             source
                 .clone()
                 .with_launch_magic_scope(launch_b.launch_magic_scope().clone()),
         );
 
-        assert_ne!(id(&a), id(&b));
+        assert_ne!(rid(&a), rid(&b));
         assert_ne!(
             a.compose_cache_fingerprint(),
             b.compose_cache_fingerprint()
@@ -3725,19 +3664,21 @@ mod tests {
     #[test]
     fn identities_distinguish_magic_tier_override() {
         let base = identity_source_context();
-        let inferred = fixed_opts().with_file_resolution_context(
+        let inferred = req_in(
+            fixed_opts(),
             base.clone()
-                .add_magic_path("/repo/configs", biscuit_file::PathPosition::Start),
+                .add_magic_path(fixture_root("repo/configs"), biscuit_file::PathPosition::Start),
         );
-        let user = fixed_opts().with_file_resolution_context(
+        let user = req_in(
+            fixed_opts(),
             base.add_magic_path_with_tier(
-                "/repo/configs",
+                fixture_root("repo/configs"),
                 biscuit_file::PathPosition::Start,
                 biscuit_file::MagicPathTier::User,
             ),
         );
 
-        assert_ne!(id(&inferred), id(&user));
+        assert_ne!(rid(&inferred), rid(&user));
         assert_ne!(
             inferred.compose_cache_fingerprint(),
             user.compose_cache_fingerprint()
@@ -3749,12 +3690,13 @@ mod tests {
     /// field participates in both identity products.
     #[test]
     fn identities_distinguish_context_package_root() {
-        let without = fixed_opts().with_file_resolution_context(identity_source_context());
-        let with = fixed_opts().with_file_resolution_context(
-            identity_source_context().with_package_root("/repo/darkmatter/lib"),
+        let without = req_in(fixed_opts(), identity_source_context());
+        let with = req_in(
+            fixed_opts(),
+            identity_source_context().with_package_root(fixture_root("repo/darkmatter/lib")),
         );
 
-        assert_ne!(id(&without), id(&with));
+        assert_ne!(rid(&without), rid(&with));
         assert_ne!(
             without.compose_cache_fingerprint(),
             with.compose_cache_fingerprint()
@@ -3764,11 +3706,11 @@ mod tests {
     #[test]
     fn caller_file_occurrences_each_participate_in_request_identity() {
         let origin = biscuit_file::FileResolutionContext::from_snapshot(
-            "/repo/launch",
-            Some("/repo".into()),
+            fixture_root("repo/launch"),
+            Some(fixture_root("repo")),
             std::collections::HashMap::new(),
         );
-        let candidate = std::path::PathBuf::from("/repo/launch/missing.md");
+        let candidate = fixture_root("repo/launch/missing.md");
         let provenance = |property: &str, reference: &str| {
             crate::markdown::compose::expression::resolve_ctx::CallerFileProvenance {
                 property: property.to_string(),
@@ -3800,15 +3742,11 @@ mod tests {
 
     #[test]
     fn options_identity_sensitive_to_ordered_vector_reorder() {
-        // `magic_paths` order is behavioral (search-root precedence); reordering
+        // Magic-root order is behavioral (search-root precedence); reordering
         // must change identity.
-        let a = fixed_opts()
-            .with_magic_path("/one", biscuit_file::PathPosition::Start)
-            .with_magic_path("/two", biscuit_file::PathPosition::Start);
-        let b = fixed_opts()
-            .with_magic_path("/two", biscuit_file::PathPosition::Start)
-            .with_magic_path("/one", biscuit_file::PathPosition::Start);
-        assert_ne!(id(&a), id(&b));
+        let a = with_magic_roots(&["/one", "/two"]);
+        let b = with_magic_roots(&["/two", "/one"]);
+        assert_ne!(rid(&a), rid(&b));
     }
 
     /// The length-prefixed encoding keeps set-element boundaries: a single
@@ -3880,8 +3818,8 @@ mod tests {
 
         for (label, build) in path_field_builders() {
             assert_ne!(
-                id(&build(a.clone())),
-                id(&build(b.clone())),
+                rid(&build(a.clone())),
+                rid(&build(b.clone())),
                 "graph identity collided on non-UTF-8 `{label}` paths"
             );
         }
@@ -3895,17 +3833,19 @@ mod tests {
     fn cache_fingerprint_distinguishes_non_utf8_paths_that_display_identically() {
         let (a, b) = lossy_twin_paths();
 
-        let magic = |p: PathBuf| fixed_opts().with_magic_path(p, biscuit_file::PathPosition::Start);
+        let magic = |p: PathBuf| {
+            req_in(
+                fixed_opts(),
+                identity_source_context().add_magic_path(p, biscuit_file::PathPosition::Start),
+            )
+        };
         assert_ne!(
             magic(a.clone()).compose_cache_fingerprint(),
             magic(b.clone()).compose_cache_fingerprint()
         );
 
         let fallback = |p: PathBuf| fixed_opts().with_file_ref_fallback_dir(p);
-        assert_ne!(
-            fallback(a).compose_cache_fingerprint(),
-            fallback(b).compose_cache_fingerprint()
-        );
+        assert_ne!(fp(&fallback(a)), fp(&fallback(b)));
     }
 
     /// Two `PathBuf`s whose `OsStr` bytes differ only in an invalid continuation
@@ -3933,29 +3873,33 @@ mod tests {
     /// a path to the options carrying it.
     #[cfg(unix)]
     #[allow(clippy::type_complexity)]
-    fn path_field_builders() -> Vec<(&'static str, Box<dyn Fn(PathBuf) -> ComposeOptions>)> {
+    fn path_field_builders() -> Vec<(&'static str, Box<dyn Fn(PathBuf) -> ComposeRequest>)> {
         vec![
             (
                 "magic_paths",
-                Box::new(|p| fixed_opts().with_magic_path(p, biscuit_file::PathPosition::Start))
-                    as Box<dyn Fn(PathBuf) -> ComposeOptions>,
+                Box::new(|p| {
+                    req_in(
+                        fixed_opts(),
+                        identity_source_context().add_magic_path(p, biscuit_file::PathPosition::Start),
+                    )
+                }) as Box<dyn Fn(PathBuf) -> ComposeRequest>,
             ),
             (
                 "shell_policy_root",
-                Box::new(|p| fixed_opts().with_shell_policy_root(p)),
+                Box::new(|p| req(fixed_opts().with_shell_policy_root(p))),
             ),
             (
                 "shell_working_directory",
-                Box::new(|p| fixed_opts().with_shell_working_directory(p)),
+                Box::new(|p| req(fixed_opts().with_shell_working_directory(p))),
             ),
-            ("cache_root", Box::new(|p| fixed_opts().with_cache_root(p))),
+            ("cache_root", Box::new(|p| req(fixed_opts().with_cache_root(p)))),
             (
                 "file_ref_fallback_dir",
-                Box::new(|p| fixed_opts().with_file_ref_fallback_dir(p)),
+                Box::new(|p| req(fixed_opts().with_file_ref_fallback_dir(p))),
             ),
             (
                 "source_file",
-                Box::new(|p| fixed_opts().with_source_file(p)),
+                Box::new(|p| req(fixed_opts().with_source_file(p))),
             ),
         ]
     }
@@ -3966,12 +3910,10 @@ mod tests {
     /// platform — a naive concatenation would fold both shapes into `a/b`.
     #[test]
     fn options_identity_magic_path_separator_does_not_cross_element_boundary() {
-        let merged = fixed_opts().with_magic_path("a/b", biscuit_file::PathPosition::Start);
-        let split = fixed_opts()
-            .with_magic_path("a", biscuit_file::PathPosition::Start)
-            .with_magic_path("b", biscuit_file::PathPosition::Start);
+        let merged = with_magic_roots(&["a/b"]);
+        let split = with_magic_roots(&["a", "b"]);
 
-        assert_ne!(id(&merged), id(&split));
+        assert_ne!(rid(&merged), rid(&split));
         assert_ne!(
             merged.compose_cache_fingerprint(),
             split.compose_cache_fingerprint()
@@ -3995,15 +3937,16 @@ mod tests {
     /// matching for path-bearing options.
     #[test]
     fn options_identity_path_encoding_is_clone_stable() {
-        let opts = fixed_opts()
-            .with_magic_path("/one", biscuit_file::PathPosition::Start)
-            .with_shell_policy_root("/policy")
-            .with_shell_working_directory("/work")
-            .with_cache_root("/cache")
-            .with_file_ref_fallback_dir("/fallback")
-            .with_source_file("/doc.md");
+        let opts = with_magic_roots(&["/one"]).derive(|options| {
+            options
+                .with_shell_policy_root("/policy")
+                .with_shell_working_directory("/work")
+                .with_cache_root("/cache")
+                .with_file_ref_fallback_dir("/fallback")
+                .with_source_file("/doc.md")
+        });
 
-        assert_eq!(id(&opts), id(&opts.clone()));
+        assert_eq!(rid(&opts), rid(&opts.clone()));
         assert_eq!(
             opts.compose_cache_fingerprint(),
             opts.clone().compose_cache_fingerprint()
@@ -4185,11 +4128,8 @@ mod tests {
         let a = ComposeOptions::new().with_exclude_keys(["x", "y"]);
         let b = ComposeOptions::new().with_exclude_keys(["y", "x"]);
         // `exclude_keys` is not part of the cache fingerprint, so both match.
-        assert_eq!(a.compose_cache_fingerprint(), b.compose_cache_fingerprint());
-        assert_eq!(
-            a.compose_cache_fingerprint(),
-            super::super::super::cache::hashing::options_hash(&a)
-        );
+        assert_eq!(fp(&a), fp(&b));
+        assert_eq!(fp(&a), super::super::super::cache::hashing::options_hash(&req(a)));
     }
 
     /// The cached-default fast path must be a pure speedup: an identical schema
@@ -4208,8 +4148,8 @@ mod tests {
         // The marker itself is encoded into the graph identity, so only the
         // cache fingerprint (which omits it) can compare the schema encoding.
         assert_eq!(
-            marked.compose_cache_fingerprint(),
-            by_hand.compose_cache_fingerprint(),
+            fp(&marked),
+            fp(&by_hand),
             "cached default encoding must equal the freshly converted one"
         );
         assert_eq!(
@@ -4229,9 +4169,6 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_ne!(
-            default.compose_cache_fingerprint(),
-            custom.compose_cache_fingerprint(),
-        );
+        assert_ne!(fp(&default), fp(&custom));
     }
 }

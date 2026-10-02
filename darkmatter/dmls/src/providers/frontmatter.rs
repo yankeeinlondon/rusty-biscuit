@@ -31,7 +31,6 @@ use lsp_types::{
 };
 
 use super::DocumentContext;
-use crate::graph::normalize_join;
 use crate::overlay::{
     FmEntry, FmEntryRole, FmPathSegment, FmValueKind, FrontmatterAst, SchemaAuthoringState,
     doc_links, expressions,
@@ -1396,9 +1395,17 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 
 /// The `(value_span, resolved_path)` navigation targets in the frontmatter:
 /// the `$schema` file reference plus every `file(...)`-typed scalar value.
+///
+/// Each value resolves through the document's context to the existing file,
+/// else to where it would be created. A document without a context has no
+/// targets.
 fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, PathBuf)> {
-    let Some(base_dir) = ctx.path.parent() else {
+    if ctx.file_context().is_err() {
         return Vec::new();
+    }
+    let navigate = |value: &str| {
+        ctx.resolve_reference(value)
+            .and_then(|target| target.navigation_target().map(Path::to_path_buf))
     };
     let mut targets = Vec::new();
 
@@ -1407,8 +1414,9 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
         && entry.kind == FmValueKind::Scalar
         && let Some(value) = &entry.scalar
         && looks_like_path(value)
+        && let Some(path) = navigate(value)
     {
-        targets.push((entry.value_span.clone(), normalize_join(base_dir, value)));
+        targets.push((entry.value_span.clone(), path));
     }
 
     // `file(...)`-typed scalar values at any depth: a top-level key is a
@@ -1426,8 +1434,9 @@ fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, 
             .is_some_and(|def| file_atom(&def).is_some())
             && let Some(value) = &entry.scalar
             && is_schema_file_value(value)
+            && let Some(path) = navigate(value)
         {
-            targets.push((entry.value_span.clone(), normalize_join(base_dir, value)));
+            targets.push((entry.value_span.clone(), path));
         }
     }
     targets
@@ -2337,7 +2346,7 @@ mod tests {
         let config = DmlsConfig::default();
         let roots = [PathBuf::from("/w")];
         let state = OverlayState::default();
-        let overlay = state.for_document(&uri, text, path, &config, &roots);
+        let overlay = state.for_document(&uri, text, path, &config, &roots, &crate::context::test_support::resolution_for(path));
         let source_map = SourceMap::new(uri.clone(), 1, PositionEncoding::Utf16, Arc::from(text));
         let mut indices = BTreeMap::new();
         for (doc_path, source) in docs {
@@ -2346,7 +2355,7 @@ mod tests {
                 crate::graph::index_document(Path::new(doc_path), source),
             );
         }
-        let graph = WorkspaceGraph::build(&indices, 1);
+        let graph = WorkspaceGraph::build(&indices, 1, &crate::context::test_support::workspace_contexts());
         let profile = ClientProfile::from_initialize(&InitializeParams::default(), PositionEncoding::Utf16);
         let ctx = DocumentContext {
             uri: &uri,
@@ -2358,6 +2367,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: overlay.as_ref(),
+            resolution: &crate::context::test_support::resolution_for(path),
         };
         f(&ctx)
     }

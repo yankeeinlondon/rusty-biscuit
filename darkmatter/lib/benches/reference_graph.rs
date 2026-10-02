@@ -120,7 +120,16 @@ fn bench_reference_graph(c: &mut Criterion) {
         // context discovery, which would dominate) and so the prebuilt graph
         // and the validation request share one options identity — otherwise the
         // opaque-graph guard would (correctly) reject the mismatched pairing.
-        let graph_opts = ReferenceGraphOptions::with_compose(ComposeOptions::new());
+        let request_dir = fixture
+            ._dir
+            .as_ref()
+            .map_or_else(std::env::temp_dir, |dir| dir.path().to_path_buf());
+        let request = darkmatter::markdown::compose::ComposeRequest::prepare(
+            ComposeOptions::new(),
+            &darkmatter::markdown::compose::RequestSnapshot::new(request_dir),
+        )
+        .expect("prepare request");
+        let graph_opts = ReferenceGraphOptions::with_compose(&request);
         let val_opts = ReferenceValidationOptions::with_graph(graph_opts.clone());
 
         // Build + validate: the cost without a prebuilt graph.

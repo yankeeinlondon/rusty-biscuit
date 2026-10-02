@@ -7,6 +7,7 @@
 //! not declared below never compiles; `test_layout.rs` rejects one.
 
 mod agent_errors_check;
+mod context_construction_guard;
 mod drift;
 mod fixtures_provenance;
 mod generate_ux;

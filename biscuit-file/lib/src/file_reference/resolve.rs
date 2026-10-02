@@ -305,6 +305,19 @@ fn kind_uses_repository_root(kind: &ReferenceKind) -> bool {
     )
 }
 
+impl FileReferenceError {
+    /// The [`ResolutionFailure`] class of this error.
+    ///
+    /// This is the same classification
+    /// [`DetailedResolution`](crate::file_reference::DetailedResolution) reports for a
+    /// failed outcome. It is never [`ResolutionFailure::NoMatch`], which is an
+    /// outcome without an error.
+    #[must_use]
+    pub fn resolution_failure(&self) -> ResolutionFailure {
+        classify_error(self)
+    }
+}
+
 /// Map a typed [`FileReferenceError`] onto its resolution-failure class.
 ///
 /// The class must not be re-derived from the reference kind downstream (D8);
@@ -394,11 +407,10 @@ pub(crate) fn resolve_target(
     parsed: &ParsedReference,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
 ) -> Result<Option<Resolved>, FileReferenceError> {
-    let ctx = ResolutionContext::from_ambient()?;
-
     if let ReferenceKind::Url(_) = &parsed.kind {
-        let raw = interpolated_url_string(&parsed.kind, &ctx)?;
+        let raw = interpolated_url_string(&parsed.kind, ctx)?;
         let url = ::url::Url::parse(&raw)
             .map_err(|e| FileReferenceError::InvalidUrl(e.to_string()))?;
         let scheme = url.scheme();
@@ -410,7 +422,7 @@ pub(crate) fn resolve_target(
         return Ok(Some(Resolved::Remote(url)));
     }
 
-    let local = resolve(parsed, magic_paths, vault_roots, &ctx)?;
+    let local = resolve(parsed, magic_paths, vault_roots, ctx)?;
     Ok(local.map(Resolved::Local))
 }
 
@@ -2222,5 +2234,61 @@ mod tests {
         // No git root above the temp directory, so only the base-derived root
         // is present.
         assert_eq!(result.roots(), &[base.join("prompts")]);
+    }
+
+    #[test]
+    fn resolution_failure_invalid_reference() {
+        let error = FileReferenceError::InvalidSyntax("@".to_string());
+        assert_eq!(
+            error.resolution_failure(),
+            ResolutionFailure::InvalidReference
+        );
+    }
+
+    #[test]
+    fn resolution_failure_missing_context() {
+        let error = FileReferenceError::MissingHomeContext;
+        assert_eq!(
+            error.resolution_failure(),
+            ResolutionFailure::MissingContext
+        );
+    }
+
+    #[test]
+    fn resolution_failure_io() {
+        let error = FileReferenceError::Io {
+            path: abs("a/file.txt"),
+            source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        };
+        assert_eq!(error.resolution_failure(), ResolutionFailure::Io);
+    }
+
+    #[test]
+    fn resolution_failure_unsupported_remote() {
+        let error = FileReferenceError::RemoteNotLocal("https://example.com/a.md".to_string());
+        assert_eq!(
+            error.resolution_failure(),
+            ResolutionFailure::UnsupportedRemote
+        );
+    }
+
+    /// `NoMatch` is an outcome without an error, so no error classifies as it.
+    #[test]
+    fn resolution_failure_never_no_match() {
+        let errors = [
+            FileReferenceError::InvalidSyntax("@".to_string()),
+            FileReferenceError::MissingHomeContext,
+            FileReferenceError::CurrentDirectory(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            )),
+            FileReferenceError::RemoteNotLocal("https://example.com/a.md".to_string()),
+        ];
+        for error in &errors {
+            assert_ne!(
+                error.resolution_failure(),
+                ResolutionFailure::NoMatch,
+                "{error}"
+            );
+        }
     }
 }

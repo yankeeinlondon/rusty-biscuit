@@ -429,6 +429,44 @@ pub enum TransclusionError {
     Json(#[from] serde_json::Error),
 }
 
+/// The payload of the [`TransclusionError::Io`] a file reference raises when
+/// no candidate resolved to a file.
+///
+/// It stays an `Io` error of kind `NotFound` (callers match on that), and this
+/// type is what lets [`TransclusionError::resolution_failure`] tell a no-match
+/// from a real I/O failure without reading the message.
+#[derive(Debug, Error)]
+#[error("File not found: {reference}")]
+pub(crate) struct TargetNotFound {
+    pub(crate) reference: String,
+}
+
+impl TransclusionError {
+    /// The no-match error for the file reference spelled `reference`.
+    pub(crate) fn target_not_found(reference: impl Into<String>) -> Self {
+        Self::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            TargetNotFound { reference: reference.into() },
+        ))
+    }
+
+    /// The file-reference failure class, when a file reference raised this
+    /// error: a resolution error's own class, or
+    /// [`ResolutionFailure::NoMatch`](biscuit_file::ResolutionFailure::NoMatch)
+    /// when no candidate resolved to a file.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        match self {
+            Self::FileReference(source) => Some(source.resolution_failure()),
+            Self::Io(source)
+                if source.get_ref().is_some_and(|inner| inner.is::<TargetNotFound>()) =>
+            {
+                Some(biscuit_file::ResolutionFailure::NoMatch)
+            }
+            _ => None,
+        }
+    }
+}
+
 impl biscuit_terminal::errors::BlockError for TransclusionError {
     fn status_block(
         &self,
@@ -673,10 +711,14 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     .hint("Use only one assignment per property name on a directive line.")
             }
 
-            TransclusionError::Io(source) => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TransclusionError", "I/O failure"))
-                .body(source.to_string())
-                .hint("Check file existence and permissions."),
+            TransclusionError::Io(source) => {
+                let mut body = vec![Prose::new(source.to_string())];
+                body.extend(self.resolution_failure().map(crate::markdown::errors::resolution_failure_row));
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new("TransclusionError", "I/O failure"))
+                    .body(body)
+                    .hint("Check file existence and permissions.")
+            }
 
             TransclusionError::UrlParse(source) => StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("TransclusionError", "URL parse failure"))
@@ -688,7 +730,10 @@ impl biscuit_terminal::errors::BlockError for TransclusionError {
                     "TransclusionError",
                     "file reference failure",
                 ))
-                .body(source.to_string())
+                .body(vec![
+                    Prose::new(source.to_string()),
+                    crate::markdown::errors::resolution_failure_row(source.resolution_failure()),
+                ])
                 .hint("Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped."),
 
             TransclusionError::Json(source) => StatusBlock::new(StatusState::Error)

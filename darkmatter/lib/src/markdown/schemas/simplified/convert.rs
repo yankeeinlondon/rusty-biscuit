@@ -1387,7 +1387,7 @@ mod tests {
         // `file` value as absent, and an omitted key (or explicit null) is
         // likewise valid.
         let schema = convert("spec: file");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({ "spec": "" })), "empty optional file must validate");
         assert!(v.is_valid(&json!({ "spec": null })), "null optional file must validate");
         assert!(v.is_valid(&json!({})), "absent optional file must validate");
@@ -1396,7 +1396,7 @@ mod tests {
     #[test]
     fn required_file_rejects_empty_string() {
         let schema = convert("plan: 'file(required)'");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(!v.is_valid(&json!({ "plan": "" })), "empty required file must fail");
     }
 
@@ -1538,7 +1538,7 @@ asset:
             "required union must not carry an empty-string file arm: {arms:?}"
         );
 
-        let validator = crate::markdown::schemas::validate::build_validator(&v, None, None).unwrap();
+        let validator = crate::markdown::schemas::validate::build_structural_validator(&v).unwrap();
         assert!(
             !validator.is_valid(&json!({ "asset": "" })),
             "required union must reject the empty-string sentinel"
@@ -1659,7 +1659,6 @@ flag:
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_lazy_eager_required_matrix() {
         // The full 4-cell matrix from the spec's semantics table. `eager` and
         // `required` are orthogonal: `required` governs presence, `eager`
@@ -1667,7 +1666,7 @@ flag:
         // existing path passes lazy declarations and fails eager ones.
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("exists.md"), b"x").unwrap();
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
+        let context = biscuit_file::FileResolutionContext::new(dir.path());
 
         let present_missing = json!({ "p": "./missing.md" });
         let present_existing = json!({ "p": "./exists.md" });
@@ -1688,7 +1687,10 @@ flag:
 
         for (decl, absent_ok, null_ok, present_missing_ok, present_existing_ok) in cases {
             let schema = convert(decl);
-            let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+            let v = crate::markdown::schemas::validate::build_validator_in_context(
+                &schema, None, None, &context,
+            )
+            .unwrap();
             assert_eq!(v.is_valid(&absent), *absent_ok, "{decl}: absent");
             assert_eq!(v.is_valid(&null), *null_ok, "{decl}: null");
             assert_eq!(
@@ -1705,18 +1707,15 @@ flag:
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_malformed_reference_is_fatal_under_both_lazy_and_eager() {
         // Laziness defers *existence*, not *syntax*: a malformed reference (the
         // empty string, rejected at `FileReference` parse time) is rejected by
         // both the lazy bare `file` and the eager `file(eager)` declarations.
-        let dir = tempfile::tempdir().expect("tempdir");
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
         let malformed = json!({ "p": "" });
 
         for decl in ["p: 'file(required)'", "p: 'file(eager; required)'"] {
             let schema = convert(decl);
-            let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+            let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
             assert!(
                 !v.is_valid(&malformed),
                 "{decl}: malformed reference must be rejected"
@@ -1725,33 +1724,28 @@ flag:
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn file_array_lazy_accepts_missing_item_eager_rejects() {
         // Per-item posture: `file[]` accepts an array whose item is a
         // syntactically valid missing path, while `file(eager)[]` rejects the
         // same missing item (and accepts an existing one).
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("exists.md"), b"x").unwrap();
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
 
         let missing_item = json!({ "p": ["./missing.md"] });
         let existing_item = json!({ "p": ["./exists.md"] });
 
-        let lazy = crate::markdown::schemas::validate::build_validator(
-            &convert("p: 'file[]'"),
-            None,
-            None,
-        )
+        let lazy = crate::markdown::schemas::validate::build_structural_validator(&convert("p: 'file[]'"))
         .unwrap();
         assert!(
             lazy.is_valid(&missing_item),
             "file[] must accept a missing syntactically valid item"
         );
 
-        let eager = crate::markdown::schemas::validate::build_validator(
+        let eager = crate::markdown::schemas::validate::build_validator_in_context(
             &convert("p: 'file(eager)[]'"),
             None,
             None,
+            &biscuit_file::FileResolutionContext::new(dir.path()),
         )
         .unwrap();
         assert!(
@@ -2047,7 +2041,7 @@ config: "{ host: string }(required)"
         ];
         for (ty, valid_value) in cases {
             let schema = convert(&format!("opt: {ty}"));
-            let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+            let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
             assert!(v.is_valid(&json!({})), "{ty}: absent must validate");
             assert!(v.is_valid(&json!({ "opt": null })), "{ty}: null must validate");
             assert!(
@@ -2057,7 +2051,7 @@ config: "{ host: string }(required)"
 
             let required_schema = convert(&format!("req: '{ty}(required)'"));
             let v_req =
-                crate::markdown::schemas::validate::build_validator(&required_schema, None, None).unwrap();
+                crate::markdown::schemas::validate::build_structural_validator(&required_schema).unwrap();
             assert!(
                 !v_req.is_valid(&json!({ "req": null })),
                 "{ty}: required must reject null"
@@ -2067,13 +2061,13 @@ config: "{ host: string }(required)"
         // Enum is tested separately because its members live inside the
         // grammar's parentheses; `required` follows after a `;` separator.
         let schema = convert("opt: enum(red,green)");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({})), "enum: absent must validate");
         assert!(v.is_valid(&json!({ "opt": null })), "enum: null must validate");
         assert!(v.is_valid(&json!({ "opt": "red" })), "enum: valid member must validate");
 
         let required_enum = convert("req: 'enum(red,green; required)'");
-        let v_req = crate::markdown::schemas::validate::build_validator(&required_enum, None, None).unwrap();
+        let v_req = crate::markdown::schemas::validate::build_structural_validator(&required_enum).unwrap();
         assert!(
             !v_req.is_valid(&json!({ "req": null })),
             "enum: required must reject null"
@@ -2085,15 +2079,19 @@ config: "{ host: string }(required)"
     }
 
     #[test]
-    #[serial_test::serial(darkmatter_file_cwd)]
     fn optional_file_accepts_null_and_empty_as_absent() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("x.md");
         std::fs::write(&path, b"x").unwrap();
-        let _cwd = FileFormatCwdGuard::enter(dir.path());
 
         let schema = convert("spec: file");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_validator_in_context(
+            &schema,
+            None,
+            None,
+            &biscuit_file::FileResolutionContext::new(dir.path()),
+        )
+        .unwrap();
         assert!(v.is_valid(&json!({})), "absent optional file must validate");
         assert!(v.is_valid(&json!({ "spec": null })), "null optional file must validate");
         assert!(v.is_valid(&json!({ "spec": "" })), "empty optional file must validate");
@@ -2107,7 +2105,7 @@ config: "{ host: string }(required)"
     fn optional_object_and_inline_object_accept_null() {
         for (key, ty) in [("object", "object"), ("inline", "'{ foo: string }'")] {
             let schema = convert(&format!("opt: {ty}"));
-            let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+            let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
             assert!(v.is_valid(&json!({})), "{key}: absent must validate");
             assert!(v.is_valid(&json!({ "opt": null })), "{key}: null must validate");
         }
@@ -2116,7 +2114,7 @@ config: "{ host: string }(required)"
     #[test]
     fn optional_array_accepts_null() {
         let schema = convert("opt: string[]");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({})));
         assert!(v.is_valid(&json!({ "opt": null })));
         assert!(v.is_valid(&json!({ "opt": [] })));
@@ -2127,7 +2125,7 @@ config: "{ host: string }(required)"
     fn optional_property_union_accepts_null() {
         let yaml = "opt:\n  - string\n  - number\n";
         let schema = convert(yaml);
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({})));
         assert!(v.is_valid(&json!({ "opt": null })));
         assert!(v.is_valid(&json!({ "opt": "x" })));
@@ -2137,7 +2135,7 @@ config: "{ host: string }(required)"
     #[test]
     fn optional_constraints_are_bypassed_by_null() {
         let schema = convert("opt: 'string(not-empty; min(5))'");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({ "opt": null })), "null must bypass constraints");
         assert!(!v.is_valid(&json!({ "opt": "" })), "empty string still rejected");
         assert!(!v.is_valid(&json!({ "opt": "ab" })), "too-short string still rejected");
@@ -2145,10 +2143,10 @@ config: "{ host: string }(required)"
 
     #[test]
     fn required_string_rejects_null_with_type_problem() {
-        use crate::markdown::schemas::validate::{collect_problems, build_validator};
+        use crate::markdown::schemas::validate::{build_structural_validator, collect_problems};
 
         let schema = convert("req: 'string(required)'");
-        let v = build_validator(&schema, None, None).unwrap();
+        let v = build_structural_validator(&schema).unwrap();
         assert!(!v.is_valid(&json!({ "req": null })));
         let problems = collect_problems(&v, &json!({ "req": null }), &PositionMap::new());
         assert_eq!(problems.len(), 1);
@@ -2161,14 +2159,14 @@ config: "{ host: string }(required)"
         // so the optional wrapper adds null and the required wrapper is only
         // a presence check.
         let schema = convert("opt: any");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         assert!(v.is_valid(&json!({})));
         assert!(v.is_valid(&json!({ "opt": null })));
         assert!(v.is_valid(&json!({ "opt": { "nested": [1, 2, 3] } })));
 
         let required_schema = convert("req: 'any(required)'");
         let v_req =
-            crate::markdown::schemas::validate::build_validator(&required_schema, None, None).unwrap();
+            crate::markdown::schemas::validate::build_structural_validator(&required_schema).unwrap();
         assert!(!v_req.is_valid(&json!({})), "required any rejects absent");
         assert!(
             v_req.is_valid(&json!({ "req": null })),
@@ -2281,7 +2279,7 @@ config: "{ host: string }(required)"
     #[test]
     fn generated_required_validates_when_absent_and_type_checks_when_present() {
         let schema = convert("ctx_today: 'string(generated; required)'");
-        let v = crate::markdown::schemas::validate::build_validator(&schema, None, None).unwrap();
+        let v = crate::markdown::schemas::validate::build_structural_validator(&schema).unwrap();
         // Absent — validates (spec semantics point 1).
         assert!(v.is_valid(&json!({})), "absent generated property must validate");
         // Present and correctly typed — validates.
@@ -2344,27 +2342,6 @@ ctx_kind:
                 .unwrap_or_else(|e| panic!("parse failed for `{input}`: {e:?}"));
             atom_to_schema("test", &atom)
                 .unwrap_or_else(|e| panic!("convert failed for `{input}`: {e:?}"));
-        }
-    }
-
-    /// Temporary CWD guard so `darkmatter-file` validation sees deterministic
-    /// relative paths. Serialised with `darkmatter_file_cwd` to match the
-    /// convention used in `validate::tests`.
-    struct FileFormatCwdGuard {
-        prior: std::path::PathBuf,
-    }
-
-    impl FileFormatCwdGuard {
-        fn enter(dir: &std::path::Path) -> Self {
-            let prior = std::env::current_dir().expect("read CWD");
-            std::env::set_current_dir(dir).expect("set CWD");
-            Self { prior }
-        }
-    }
-
-    impl Drop for FileFormatCwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.prior);
         }
     }
 }
@@ -2550,7 +2527,7 @@ mod schema_plus_phase1 {
     }
 
     fn validator_of(schema: &Value) -> jsonschema::Validator {
-        crate::markdown::schemas::validate::build_validator(schema, None, None)
+        crate::markdown::schemas::validate::build_structural_validator(schema)
             .expect("build validator")
     }
 

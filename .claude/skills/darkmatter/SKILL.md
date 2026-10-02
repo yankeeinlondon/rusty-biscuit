@@ -61,10 +61,14 @@ also load the `renderable` skill; for terminal components, load
 
 ## Composition authority
 
-`ComposeOptions` is the request authority. It carries the captured resolution
-context plus remote configuration, cache root and policy, compose identity,
-baseline/meta-schema controls, and rendering options. A source-derived file
-reference must resolve against that captured context.
+`ComposeRequest` is the request authority: `ComposeOptions` (remote
+configuration, cache root and policy, compose identity, baseline/meta-schema
+controls, rendering options) plus the one required `FileResolutionContext`
+built from a `RequestSnapshot`. A source-derived file reference must resolve
+against a context derived from that one. User-facing docs:
+`darkmatter/docs/topics/compose-requests.md` (API, builder, Mermaid),
+`topics/file-referencing.md` (forms and tree rule), and
+`errors/file-reference-failures.md` (the `failure:` row).
 
 The root compose pipeline is ordered:
 
@@ -80,6 +84,53 @@ The root compose pipeline is ordered:
 10. Concurrent transclusion.
 11. Inline cleanup and optional fixed-width reflow.
 12. Root-only link normalization.
+
+Every entry point that resolves file references takes a `ComposeRequest`:
+`compose_with`, `compose_preflight*`, the `collect_*` functions,
+`transclusions_with_options`, `ReferenceGraphOptions::with_compose`,
+`execute_directive`, and `execute_resolved_shell_values`. A request is
+`ComposeRequest::prepare(options, &RequestSnapshot)` (which builds the context
+through `build_resolution_context`) or `ComposeRequest::with_context(options,
+built_or_derived_context)`. Preparation fixes the repository observation and
+reuses it for the builder (one discovery per request), re-anchors a
+`ComposeOptions::new()` context on the request directory, and makes `ctx.env`
+the context's environment. Magic roots enter only through
+`RequestSnapshot::with_magic_root*`; `ComposeOptions` has no magic paths and no
+public context setter. Only binaries call `RequestSnapshot::from_process()`. DMLS builds one
+context per repository (`dmls/src/context.rs`, see
+[dmls.md](dmls.md#file-resolution-contexts)).
+A file source (root or child) outside the request's tree is admitted
+trusted-external when only that derivation validates (`source_derivation_for`,
+applied to the root in `ComposeRequest::assemble`). The schema stage validates
+in the source's derived context (`source_file_resolution_context`), and
+`resolve_ctx::document_file_context` recognizes that context by canonical
+directory, not spelling (`/var` vs `/private/var`); re-deriving it with
+`for_cwd` would drop a `~` tree root.
+Unit tests use `crate::markdown::compose::test_request(options)` /
+`test_request_in(options, context)`; `lib/tests/l1` uses
+`crate::request_support::{request, request_at, context_at, cwd_context}`.
+
+**The context is required, never `Option`.** `ComposeOptions` is only the
+settings builder and holds no context. The pipeline runs on `ComposeRequest`,
+which `Deref`s to `ComposeOptions`: stages take `&ComposeRequest`, context
+views live on the request (`transclusion_options`,
+`source_file_resolution_context`, `*_resolution_context`,
+`with_accepted_source_file`, `extended_for`), and in-pipeline builder chains
+use `request.derive(|o| …)`. `request.resolution_context()` is the
+file-resolution context; `request.context()` (through `Deref`) is the
+captured `ctx.*` `ComposeContext`, so never name a new request method
+`context`. Internal inline passes use `Markdown::compose_with_options(request)`.
+`DarkmatterSchemas::new(ctx)`, `CleanSchemaConfig::new(ctx)`,
+`ResolutionContext::new(ctx)`, `ReferenceGraphOptions::with_compose(&request)`,
+`FileTree::new(path, &request)`, `evaluate_condition_against(expr, data, &ctx)`,
+`detect_schema(.., &ctx)`, `resolve_schema*(.., &ctx)`, and
+`triggers::scan(.., &ctx)` all take one; none has a context-free form.
+Validators are either context-bound (`ValidatorCache::validator_for(schema,
+base, &ctx)`) or structural (`structural_validator_for`, `build_structural_validator`) for
+callers with no request (coercion probes, examples, lint): an absolute path is
+judged as resolved (it must exist; `match()` judges its full path), and every
+value that needs a context is judged by syntax only. Root-union coercion relies
+on the absolute-path half to pick an arm by glob.
 
 Keep this order stable. Whole-value `{{ ... }}` and `$(...)` values are
 executable state: they must resolve or fail, never leak as literal syntax.
@@ -100,6 +151,8 @@ Important contracts:
 - Optional schema properties accept missing or `null` values.
 - Validation keeps source positions, origin information, typed problem codes,
   pending values, and file-reference diagnostics.
+  `FileReferenceDiagnostic::resolution_failure()` gives the biscuit-file
+  class; the diagnostic is re-derived in the validator's own request context.
 - Eager `file(eager)` values may normalize only on successful composition;
   validation-only APIs remain read-only.
 - `literal(value)` preserves YAML scalar typing and lowers to JSON Schema
@@ -353,6 +406,37 @@ The ordinary local L1 recipe excludes `slow_` tests and leaves the internal
 `terminal-tests` / `browser-tests` build features disabled. Tier recipes enable
 their required targets; CI enables both features when constructing all-tier
 coverage.
+
+**Context guards.** `context_construction_guard.rs` in darkmatter lib, cli,
+dmls, messenger lib/cli, and claudine-gen (Claudine pending) runs the shared
+engine `cli/tests/common/context_guard.rs` over that crate's `src/`:
+construction (`FileResolutionContext::new|from_snapshot`, `::from_process`),
+optional context (`Option<[&]FileResolutionContext>`, no allowlist allowed),
+and ambient state (`std::env::*` reads, `dirs`/`home`/biscuit-file
+`home_dir`, `capture_env`, `.resolve()`/`.resolve_from(..)`/`.resolve_target()`,
+`PortablePath` without `with_ctx`). Allowlists are exact
+`(gate, path, identifier, count, reason)`; a read may be listed only when it
+feeds neither file resolution, `ctx.*`, nor `env.*`. A failing guard prints
+the `Allowance` to paste; fix the read instead when it resolves a path or
+seeds `ctx.*`. The production-scope rule (`#[cfg(test)]` blanking) lives in
+`source_scan::production_sources`, shared with
+`semantic_results_never_persist.rs`.
+
+**Entry-point parity matrix.** `lib/tests/common/entry_point_parity/mod.rs`
+holds the fixture (monorepo + fixture `HOME` + `outside.md`), the
+`EntryPoint` enum with exhaustive `owner()`/`rows()`, both tables, and
+`ParityReport`. Runners: `lib/tests/l1/entry_point_parity.rs` (pipeline,
+pre-flight, schema validation), `cli/tests/l1/entry_point_parity.rs` (`md`),
+`dmls/tests/l1/entry_point_parity.rs`; Claudine's is pending. A new entry
+point is an `EntryPoint` variant plus rows; a failing cell is an entry-point
+defect, never a table edit, except where a design decision says otherwise
+(caller-supplied `../` may leave the tree: `md`'s argument opts in with
+`allow_external_relative`). Compare failures only by `ResolutionFailure`:
+`MarkdownError::resolution_failure()` walks the cause chain (nested children,
+`TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
+`ComposeWarning::resolution_failure` carries it, and `md` renders it as a
+`failure: <kebab-class>` row on every block and warning
+(`darkmatter/docs/errors/file-reference-failures.md` is its user contract).
 
 Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
 and GitNexus first to include actual downstream consumers such as Claudine when

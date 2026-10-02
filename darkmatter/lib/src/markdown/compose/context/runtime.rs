@@ -127,44 +127,6 @@ impl ComposeContext {
 }
 
 impl ComposeContext {
-    /// Captures the current runtime context using CWD as the base directory.
-    ///
-    /// This snapshots:
-    /// - Current local and UTC time
-    /// - Today, yesterday, and tomorrow dates
-    /// - Day of week (full and abbreviated)
-    /// - Year, month (numeric and named)
-    /// - All environment variables
-    /// - Repository, monorepo, OS, and hardware information (via sniff)
-    pub fn capture() -> Self {
-        match std::env::current_dir() {
-            Ok(base_dir) => Self::capture_for_dir(&base_dir),
-            Err(e) => {
-                // CWD discovery failed: populate date/time/env but leave
-                // sniff-derived fields null, and record the failure.
-                let (mut values, diagnostics) = (
-                    serde_json::Map::new(),
-                    vec![
-                        super::ContextMergeDiagnostic::PartialRuntimeCapture {
-                            area: "invocation.cwd",
-                            detail: format!("current_dir() failed: {e}"),
-                        },
-                    ],
-                );
-                super::capture::populate_datetime(&mut values);
-                values.insert("cwd".into(), serde_json::Value::Null);
-                Self::from_values(
-                    values,
-                    diagnostics,
-                    Vec::new(),
-                    std::env::vars().collect(),
-                    PathBuf::new(),
-                    ContextRequirements::for_content(""),
-                )
-            }
-        }
-    }
-
     /// Captures only the groups that cost no discovery: date/time, plus the
     /// environment snapshot every capture takes.
     ///
@@ -178,9 +140,12 @@ impl ComposeContext {
     /// document is already in hand — it captures exactly the groups the
     /// document names, which additionally keeps those groups inside the
     /// compose cache key (see `cache::hashing::context_hash`).
+    ///
+    /// The snapshot is anchored nowhere (an empty path): it reads no process
+    /// directory. A [`ComposeRequest`](super::request::ComposeRequest)
+    /// re-anchors it on the request directory.
     pub fn capture_minimal() -> Self {
-        let base_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        Self::capture_for_content(&base_dir, "")
+        Self::capture_for_content(std::path::Path::new(""), "")
     }
 
     /// Captures the runtime context using the given base directory.
@@ -408,6 +373,13 @@ impl ComposeContext {
     /// The directory this snapshot was anchored on at capture time.
     pub fn anchor(&self) -> &std::path::Path {
         &self.inner.anchor
+    }
+
+    /// This snapshot anchored on `anchor`, for a snapshot whose captured
+    /// groups do not depend on where it was anchored.
+    pub(crate) fn with_anchor(mut self, anchor: &std::path::Path) -> Self {
+        std::sync::Arc::make_mut(&mut self.inner).anchor = anchor.to_path_buf();
+        self
     }
 
     /// The groups of `required` this snapshot did not capture.

@@ -550,3 +550,45 @@ fn a_relative_home_env_is_captured_as_no_home_directory() {
         Err(FileReferenceError::MissingHomeContext)
     ));
 }
+
+/// `resolve_target_in_context` takes a URL's `{{VAR}}` segments from the
+/// context's environment, never the process's, and resolves a local target
+/// from the context's directory.
+#[test]
+fn resolve_target_in_context_reads_only_the_context() {
+    use biscuit_file::Resolved;
+    use std::collections::HashMap;
+
+    let base = TempDir::new().unwrap();
+    fs::write(base.path().join("local.md"), b"local").unwrap();
+    // A name no process environment defines, so only the context can fill it.
+    let variable = "BISCUIT_FILE_TARGET_IN_CONTEXT_HOST";
+    let env = HashMap::from([(variable.to_string(), "docs.example.com".to_string())]);
+    let ctx = FileResolutionContext::from_snapshot(base.path(), None, env);
+
+    let remote = FileReference::new(&format!("https://{{{{{variable}}}}}/guide.md")).unwrap();
+    match remote.resolve_target_in_context(&ctx).unwrap() {
+        Some(Resolved::Remote(url)) => assert_eq!(url.as_str(), "https://docs.example.com/guide.md"),
+        other => panic!("expected a remote target, got {other:?}"),
+    }
+    // The ambient twin reads the process environment, which lacks the name.
+    match remote.resolve_target().unwrap() {
+        // A URL host is lowercased, so compare without case.
+        Some(Resolved::Remote(url)) => {
+            assert!(url.as_str().contains(&variable.to_ascii_lowercase()), "{url}")
+        }
+        other => panic!("expected a remote target, got {other:?}"),
+    }
+
+    let local = FileReference::new("local.md").unwrap();
+    match local.resolve_target_in_context(&ctx).unwrap() {
+        Some(Resolved::Local(path)) => assert_eq!(path, base.path().join("local.md")),
+        other => panic!("expected a local target, got {other:?}"),
+    }
+
+    let relative = FileResolutionContext::new("relative/dir");
+    assert!(matches!(
+        local.resolve_target_in_context(&relative),
+        Err(FileReferenceError::RelativeContextDirectory { .. })
+    ));
+}

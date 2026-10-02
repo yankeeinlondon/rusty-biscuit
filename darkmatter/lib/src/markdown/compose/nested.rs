@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use super::context::options::{SourceDerivation, SourceOpening};
 use super::expression::ExpressionError;
 use super::shell_expansion::types::PipelineRuntime;
-use super::{ComposeOptions, ComposeReport, ComposeSource, ContextRequirements, transclusion};
+use super::{ComposeReport, ComposeSource, ContextRequirements, transclusion};
 use crate::markdown::Markdown;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
 
@@ -92,7 +92,7 @@ pub(crate) struct NestedCompose {
 
 struct Scope {
     /// The calling pipeline's options, without this handle (no `Arc` cycle).
-    options: ComposeOptions,
+    options: crate::markdown::compose::ComposeRequest,
     /// The calling pipeline's runtime, forked while its node is on the stack.
     runtime: Mutex<PipelineRuntime>,
     /// The root document as it entered the pipeline, when this document owns
@@ -122,7 +122,7 @@ impl NestedCompose {
     /// Installs a handle for the document whose node `runtime` has just
     /// entered. Discovery options keep their discovery slot.
     pub(crate) fn install(
-        options: &mut ComposeOptions,
+        options: &mut crate::markdown::compose::ComposeRequest,
         runtime: &PipelineRuntime,
         document: &Markdown,
     ) -> Option<Self> {
@@ -208,7 +208,7 @@ impl NestedCompose {
             options.context_authority(),
         );
         runtime.record_context_groups(context.capture_requirements());
-        let options = options.with_request_context(context);
+        let options = options.derive(|options| options.with_request_context(context));
 
         let node = format!("as_markdown#{}", NEXT_NODE.fetch_add(1, Ordering::Relaxed));
         let result = child.run_compose_pipeline_node(options, &mut runtime, Some((node, PathBuf::from("as_markdown()"))));

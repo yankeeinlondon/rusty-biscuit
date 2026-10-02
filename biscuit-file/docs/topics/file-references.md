@@ -348,10 +348,13 @@ a miss.
 
 A URL parses into a typed remote reference. It never becomes a local
 candidate: sending it through local-path resolution fails with
-`RemoteNotLocal`. With the `url` feature, `resolve_target()` distinguishes
-`Resolved::Local` from `Resolved::Remote` so callers can route remote
-references to the separate fetching API (whose failures are `FetchError`, a
-different type from `FileReferenceError`).
+`RemoteNotLocal`. With the `url` feature, `resolve_target_in_context(&ctx)`
+distinguishes `Resolved::Local` from `Resolved::Remote` so callers can route
+remote references to the separate fetching API (whose failures are
+`FetchError`, a different type from `FileReferenceError`). A `{{VAR}}` in the
+URL is filled from the context's environment, so
+`https://{{DOCS_HOST}}/guide.md` names the host the request was given, not
+whatever the process has. `resolve_target()` is the ambient twin.
 
 ## Modifiers
 
@@ -502,7 +505,9 @@ may be relative: environment values (a relative `{{VAR}}` expansion resolves
 like any relative reference), configured magic roots (anchored on the
 captured request directory), and vault roots. The ambient `home_dir()`
 provider reports a relative `$HOME` as no home directory, so `new()` never
-captures one.
+captures one. `new()` reads the environment through the public
+`capture_env()`; a caller that builds with `from_snapshot` and wants the same
+process values calls `home_dir()` and `capture_env()` itself.
 
 ### Deriving contexts for documents
 
@@ -753,6 +758,7 @@ Trusting an external document and letting relative references leave a tree
 | `resolve()` | Live ambient state | `Result<Option<PathBuf>, FileReferenceError>` | Simple top-level calls; compatibility |
 | `resolve_from(cwd)` | Explicit `cwd` + live ambient state | `Result<Option<PathBuf>, FileReferenceError>` | Document-relative callers not yet carrying a context |
 | `complete_partial(token, cwd)` | Explicit `cwd` + live discovery | `Result<Option<PartialCompletion>, _>` | Compatibility completion |
+| `resolve_target_in_context(&ctx)` | Explicit, authoritative context (`url` feature) | `Result<Option<Resolved>, FileReferenceError>` | Callers that accept a remote target |
 
 `resolve_relative()` and the `url`-gated `resolve_target()` are also ambient
 compatibility operations.
@@ -783,7 +789,8 @@ process CWD or `cwd` respectively.
 | `complete_partial(token, cwd)` | Expand an ambient completion token |
 | `complete_partial_in_context(token, ctx)` | Expand a completion token from the same roots as execution |
 | `resolve_relative(base)` | Resolve ambiently, return a lexical relative path |
-| `resolve_target()` | With `url`: distinguish `Resolved::Local` from `Resolved::Remote` |
+| `resolve_target()` | With `url`: distinguish `Resolved::Local` from `Resolved::Remote` (ambient) |
+| `resolve_target_in_context(ctx)` | With `url`: the same, from the context's directory, home, and environment |
 
 All builder methods consume and return `self` for chaining.
 `PathPosition::Start` inserts a magic root before its tier's intrinsic roots;
@@ -830,6 +837,10 @@ data — never re-derive it from the reference kind:
 | `NoMatch` | The complete applicable search found no regular file |
 | `Io` | CWD access or a candidate metadata probe failed |
 | `UnsupportedRemote` | A remote reference was sent through local-path resolution |
+
+To classify a `FileReferenceError` you already hold, call
+`error.resolution_failure()`; it returns the same class a detailed result
+reports, and never `NoMatch`.
 
 Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
 `RootProvenance` vocabulary is `Repository`, `Source`, `PackageRoot`,

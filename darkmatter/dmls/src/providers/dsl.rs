@@ -11,7 +11,7 @@
 //! [`doc_links`](crate::overlay::doc_links)'s topic-doc lookup. No process is
 //! ever spawned and no socket is ever opened (spec acceptance criterion 7).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use darkmatter::markdown::compose::directives_api::{DirectiveKind, scan_shell_block_commands};
 use darkmatter::markdown::compose::directive_targets::{
@@ -35,7 +35,7 @@ use super::DocumentContext;
 use super::frontmatter;
 use super::location::line_range;
 use crate::diagnostics::codes::{code, source};
-use crate::graph::normalize_join;
+use crate::context::{ReferenceTarget, resolution_failure_data};
 use crate::overlay::shell::PolicyVerdict;
 use crate::overlay::{directives, doc_links, expressions, shell};
 use crate::workspace::file_path_to_uri;
@@ -281,22 +281,27 @@ pub fn hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     frontmatter_shell_hover(ctx, offset)
 }
 
-/// Hover describing a directive's semantics and (for transclusion) its resolved
-/// target; for `::shell`, the parsed command and policy verdict.
+/// Hover describing a directive's semantics and (for a file target) its
+/// resolved target; for `::shell`, the parsed command and policy verdict.
 fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let directive = directives::directive_at(ctx.text, offset)?;
     let info = directives::info_for(directive.kind)?;
     let mut lines = vec![format!("**`{}`** — {}", info.keyword, info.summary)];
 
-    if directives::is_transclusion(directive.kind)
+    if directives::has_file_target(directive.kind)
         && let Some(target) = &directive.target
     {
         let path = target.value.split('#').next().unwrap_or(&target.value);
         match resolve_local_path(ctx, path) {
-            Some(resolved) if resolved.exists() => {
+            Some(ReferenceTarget::Found(resolved)) => {
                 lines.push(format!("\n→ `{}`", resolved.display()));
             }
-            _ => lines.push(format!("\n⚠️ target `{path}` was not found")),
+            Some(ReferenceTarget::Missing { .. }) => {
+                lines.push(format!("\n⚠️ target `{path}` was not found"));
+            }
+            // No context: nothing is resolved, and the document already
+            // carries the context-failure diagnostic.
+            None => {}
         }
     }
 
@@ -437,17 +442,21 @@ fn shell_verdict_markdown(command: &str, ctx: &DocumentContext) -> String {
 
 // ── Definition & document links ─────────────────────────────────────────────
 
-/// Definition: transclusion target → file; bare interpolation variable →
-/// frontmatter key.
+/// Definition: transclusion or `::toc-linking` target → file; bare
+/// interpolation variable → frontmatter key.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if let Some(directive) = directives::directive_at(ctx.text, offset)
-        && directives::is_transclusion(directive.kind)
+        && directives::has_file_target(directive.kind)
         && let Some(target) = &directive.target
         && target.span.start <= offset
         && offset <= target.span.end
     {
         let path = target.value.split('#').next().unwrap_or(&target.value);
-        if let Some(location) = resolve_local_path(ctx, path).and_then(|p| file_location(&p)) {
+        if let Some(location) = resolve_local_path(ctx, path)
+            .as_ref()
+            .and_then(ReferenceTarget::found)
+            .and_then(file_location)
+        {
             return vec![location];
         }
     }
@@ -470,11 +479,12 @@ fn interpolation_definition(ctx: &DocumentContext, offset: usize) -> Option<Loca
     Some(Location::new(ctx.uri.clone(), range))
 }
 
-/// Document links for `::file`/`::code` targets and `prologue`/`epilogue`.
+/// Document links for `::file`/`::code`/`::toc-linking` targets and
+/// `prologue`/`epilogue`.
 pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
     let mut links = Vec::new();
     for directive in directives::directives(ctx.text) {
-        if !directives::is_transclusion(directive.kind) {
+        if !directives::has_file_target(directive.kind) {
             continue;
         }
         let Some(target) = directive.target else {
@@ -497,10 +507,9 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 /// A document link over `span` targeting the resolved local path, if it exists.
 fn transclusion_link(ctx: &DocumentContext, span: SourceSpan, path: &str) -> Option<DocumentLink> {
     let range = ctx.source_map.byte_range_to_lsp(span)?;
-    let resolved = resolve_local_path(ctx, path)?;
-    if !resolved.exists() {
+    let ReferenceTarget::Found(resolved) = resolve_local_path(ctx, path)? else {
         return None;
-    }
+    };
     let target = url::Url::from_file_path(&resolved).ok()?;
     Some(DocumentLink {
         range,
@@ -679,7 +688,7 @@ fn disclosure_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Transclusion target warnings and transclusion cycles.
+/// Transclusion and `::toc-linking` target warnings and transclusion cycles.
 fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     let empty_frontmatter = serde_json::Value::Object(serde_json::Map::new());
     let bundle = ctx.overlay.and_then(|overlay| overlay.bundle());
@@ -719,7 +728,7 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 
     for directive in directives::directives(ctx.text) {
-        if !directives::is_transclusion(directive.kind) {
+        if !directives::has_file_target(directive.kind) {
             continue;
         }
         let Some(target) = directive.target else {
@@ -732,18 +741,25 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         if is_remote(path) {
             continue;
         }
-        let resolved = resolve_local_path(ctx, path);
-        let broken = resolved.as_ref().is_none_or(|resolved| !resolved.exists());
-        if broken
+        // Without a context nothing is resolved; the document's
+        // context-failure diagnostic stands in for its references.
+        if let Some(ReferenceTarget::Missing { failure, .. }) = resolve_local_path(ctx, path)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(target.span.clone())
         {
-            out.push(diagnostic(
+            let mut broken = diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
                 code::TRANSCLUSION_BROKEN_PATH,
                 source::COMPOSE,
-                format!("broken transclusion: no file matches `{path}`"),
-            ));
+                match directive.kind {
+                    DirectiveKind::TocLinking => {
+                        format!("broken `::toc-linking` target: no file matches `{path}`")
+                    }
+                    _ => format!("broken transclusion: no file matches `{path}`"),
+                },
+            );
+            broken.data = Some(resolution_failure_data(failure));
+            out.push(broken);
         }
     }
 
@@ -1076,13 +1092,14 @@ pub(crate) fn body_base(text: &str) -> usize {
     }
 }
 
-/// Lexically resolves a workspace-local `path` against the document's directory.
-fn resolve_local_path(ctx: &DocumentContext, path: &str) -> Option<PathBuf> {
+/// Resolves a local transclusion `path` through the document's context, as
+/// `md compose` resolves it. `None` for a remote target or a document without
+/// a context.
+fn resolve_local_path(ctx: &DocumentContext, path: &str) -> Option<ReferenceTarget> {
     if is_remote(path) {
         return None;
     }
-    let base_dir = ctx.path.parent()?;
-    Some(normalize_join(base_dir, path))
+    ctx.resolve_reference(path)
 }
 
 /// A line-based location for a resolved local file.
@@ -1679,7 +1696,7 @@ mod tests {
             PositionEncoding::Utf16,
             Arc::from(text),
         );
-        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
         let config = DmlsConfig::default();
         let profile = ClientProfile {
             client_name: None,
@@ -1715,6 +1732,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: None,
+            resolution: &crate::context::test_support::resolution_for(path),
         };
         let registry = ProviderRegistry::with_substrate();
 
@@ -1765,7 +1783,7 @@ mod tests {
             PositionEncoding::Utf16,
             Arc::from(text),
         );
-        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
         let config = DmlsConfig::default();
         let profile = ClientProfile {
             client_name: None,
@@ -1801,6 +1819,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: None,
+            resolution: &crate::context::test_support::resolution_for(path),
         };
         let registry = ProviderRegistry::with_substrate();
         let hover_value = |literal: &str| {
@@ -1880,7 +1899,7 @@ mod tests {
             PositionEncoding::Utf16,
             text.into(),
         );
-        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1);
+        let graph = WorkspaceGraph::build(&BTreeMap::new(), 1, &crate::context::test_support::workspace_contexts());
         let config = DmlsConfig::default();
         let profile = bare_profile();
         let ctx = DocumentContext {
@@ -1893,6 +1912,7 @@ mod tests {
             config: &config,
             profile: &profile,
             overlay: None,
+            resolution: &crate::context::test_support::resolution_for("/t.md"),
         };
         let token_start = text.find("ctx.pa").unwrap();
         let item = text_edit_item(

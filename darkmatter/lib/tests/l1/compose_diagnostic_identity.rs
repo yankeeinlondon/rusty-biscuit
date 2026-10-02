@@ -30,7 +30,7 @@ fn compose_file(path: &Path) -> (String, ComposeReport) {
     let md = Markdown::try_from(path).expect("document loads");
     let dir = path.parent().expect("fixture documents live in a directory");
     let (composed, report) = md
-        .compose_with(options(dir).with_source_file(path.to_path_buf()))
+        .compose_with(&crate::request_support::request(options(dir).with_source_file(path.to_path_buf())))
         .expect("lenient warnings do not fail composition");
     (composed.content().to_string(), report)
 }
@@ -54,7 +54,7 @@ fn one_replacement_and_one_bad_body_expression_fail_with_one_error() {
 
     let md = Markdown::try_from(path.as_path()).expect("document loads");
     let error = md
-        .compose_with(options(dir.path()).with_source_file(path.clone()))
+        .compose_with(&crate::request_support::request(options(dir.path()).with_source_file(path.clone())))
         .expect_err("a bad body expression fails composition");
 
     let MarkdownError::Interpolation { expression, cause, .. } = &error else {
@@ -149,7 +149,7 @@ fn identical_bad_expressions_in_two_frontmatter_keys_fail_on_one_key() {
 
     let md = Markdown::try_from(path.as_path()).expect("document loads");
     let error = md
-        .compose_with(options(dir.path()).with_source_file(path.clone()))
+        .compose_with(&crate::request_support::request(options(dir.path()).with_source_file(path.clone())))
         .expect_err("a bad mixed-text frontmatter expression fails composition");
 
     let MarkdownError::Interpolation { key, .. } = &error else {

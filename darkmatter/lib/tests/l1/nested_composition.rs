@@ -37,7 +37,7 @@ fn probe_options() -> ComposeOptions {
 
 fn compose(document: &Markdown, options: ComposeOptions) -> (Markdown, ComposeReport) {
     document
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .unwrap_or_else(|error| panic!("compose must succeed: {error}"))
 }
 
@@ -175,7 +175,7 @@ fn empty_and_non_string_arguments() {
         ("null", "null={{ as_markdown(missing) }}\n"),
     ] {
         let error = Markdown::from(body)
-            .compose_with(probe_options())
+            .compose_with(&crate::request_support::request(probe_options()))
             .expect_err("a non-string argument fails the document");
         let expected = format!("as_markdown() argument 0: expected string, got {actual}");
         assert!(error.to_string().contains(&expected), "{expected}: {error}");
@@ -210,7 +210,7 @@ fn nested_diagnostics_keep_their_provenance() {
         "{{ as_markdown(\"strict={{ length(1, 2) }}\") }}\n",
     );
     let error = document
-        .compose_with(probe_options().with_source_file(&path))
+        .compose_with(&crate::request_support::request(probe_options().with_source_file(&path)))
         .expect_err("a nested evaluation failure fails the request");
     let message = format!("{error}");
     assert!(message.contains("as_markdown(): nested composition failed"), "{message}");
@@ -222,7 +222,7 @@ fn nested_diagnostics_keep_their_provenance() {
         "before\n\n{{ as_markdown(\"{{ no_such_function() }}\") }}\n",
     );
     let error = document
-        .compose_with(probe_options().with_source_file(&path))
+        .compose_with(&crate::request_support::request(probe_options().with_source_file(&path)))
         .expect_err("a nested compose error fails the request");
     let message = format!("{error}");
     assert!(message.contains("as_markdown(): nested composition failed"), "{message}");
@@ -270,7 +270,7 @@ fn self_composition_reaches_the_depth_limit() {
         }))
         .with_exclude_keys(["again"]);
 
-    let error = document.compose_with(options).expect_err("self-composition must fail");
+    let error = document.compose_with(&crate::request_support::request(options)).expect_err("self-composition must fail");
 
     assert!(
         matches!(transclusion_error(&error), TransclusionError::MaxDepthExceeded { max_depth: 16 }),
@@ -294,7 +294,7 @@ fn mixed_nesting_consumes_one_depth_budget() {
     assert!(composed.content().contains("LEAF"), "{}", composed.content());
 
     let error = document
-        .compose_with(probe_options().with_source_file(&path).with_max_transclusion_depth(2))
+        .compose_with(&crate::request_support::request(probe_options().with_source_file(&path).with_max_transclusion_depth(2)))
         .expect_err("the as_markdown node counts against the budget");
     assert!(
         matches!(transclusion_error(&error), TransclusionError::MaxDepthExceeded { max_depth: 2 }),
@@ -311,7 +311,7 @@ fn mutual_function_and_transclusion_recursion_is_a_cycle() {
     let (path, document) = root_document(temp.path(), "a.md", "{{ as_markdown(\"::file ./b.md\") }}\n");
 
     let error = document
-        .compose_with(probe_options().with_source_file(&path))
+        .compose_with(&crate::request_support::request(probe_options().with_source_file(&path)))
         .expect_err("mutual recursion must fail");
 
     let TransclusionError::CycleDetected { chain } = transclusion_error(&error) else {
@@ -322,7 +322,7 @@ fn mutual_function_and_transclusion_recursion_is_a_cycle() {
 
 fn approval_set(document: &Markdown, options: &ComposeOptions) -> HashSet<String> {
     document
-        .compose_preflight(options)
+        .compose_preflight(&crate::request_support::request(options.clone()))
         .unwrap_or_else(|error| panic!("preflight must succeed: {error}"))
         .approval_set()
         .into_iter()
@@ -391,7 +391,7 @@ fn assert_shape_fails_before_execution(name: &str, frontmatter: &str, body: &str
     );
     let options = ComposeOptions::new().with_source_file(&path);
 
-    let error = document.compose_preflight(&options).expect_err(name);
+    let error = document.compose_preflight(&crate::request_support::request(options.clone())).expect_err(name);
     let MarkdownError::ShellExpansion(inner) = &error else {
         panic!("{name}: expected a shell expansion error, got {error:?}");
     };
@@ -404,7 +404,7 @@ fn assert_shape_fails_before_execution(name: &str, frontmatter: &str, body: &str
         .into_iter()
         .collect();
     document
-        .compose_with(options.with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
         .expect_err(name);
     assert!(!sentinel.exists(), "{name}: a frontmatter command ran before the rejection");
 }
@@ -486,7 +486,7 @@ fn frontmatter_nested_effects_wait_for_the_root_gate() {
     let approved: HashSet<String> = [format!("touch {sentinel_text}")].into_iter().collect();
 
     let error = document
-        .compose_with(options.with_pre_approved_commands(approved))
+        .compose_with(&crate::request_support::request(options.with_pre_approved_commands(approved)))
         .expect_err("the unapproved body command must fail the gate");
 
     let MarkdownError::ShellExpansion(inner) = &error else {
@@ -522,7 +522,7 @@ async fn nested_content_never_introduces_remote_transclusion() {
             allowed_hosts: vec!["127.0.0.1".into()],
             ..Default::default()
         });
-        let result = tokio::task::spawn_blocking(move || document.compose_with(options))
+        let result = tokio::task::spawn_blocking(move || document.compose_with(&crate::request_support::request(options)))
             .await
             .unwrap();
         if let Ok((composed, _)) = &result {

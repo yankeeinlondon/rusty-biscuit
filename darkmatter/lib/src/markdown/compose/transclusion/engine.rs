@@ -11,7 +11,7 @@ use crate::markdown::compose::cache::operation::CacheableOperation;
 use crate::markdown::compose::context::effective_state::{self as state, EffectiveStateBuilder};
 use crate::markdown::compose::context::options::SourceOpening;
 use crate::markdown::compose::{
-    ComposeOperation, ComposeOptions, ComposeReport, ComposeSource, ComposeWarning, EffectiveState,
+    ComposeOperation, ComposeReport, ComposeSource, ComposeWarning, EffectiveState,
 };
 use crate::markdown::compose::{
     file_links, indent, remote, remote_fetch, replacement, shell_expansion, toc_linking,
@@ -459,7 +459,7 @@ impl<'a> TransclusionEngine<'a> {
         directives: &[transclusion::BlockDirective],
         kind: transclusion::DirectiveKind,
         state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         remote_fetch: &remote_fetch::RemoteFetchRuntime,
         report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
@@ -737,7 +737,7 @@ impl<'a> TransclusionEngine<'a> {
         &self,
         refs: &transclusion::FrontmatterRefs,
         _state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         remote_fetch: &remote_fetch::RemoteFetchRuntime,
         _report: &mut ComposeReport,
         prepared: &mut Vec<PreparedTransclusion>,
@@ -772,7 +772,7 @@ impl<'a> TransclusionEngine<'a> {
         &self,
         reference: &str,
         slot: SectionSlot,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         remote_fetch: &remote_fetch::RemoteFetchRuntime,
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
@@ -924,7 +924,7 @@ impl<'a> TransclusionEngine<'a> {
         item: PreparedTransclusion,
         state: &EffectiveState,
         state_identity: cache::hashing::PhaseStateIdentity,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         runtime_mutex: &std::sync::Mutex<&mut shell_expansion::types::PipelineRuntime>,
     ) -> MarkdownResult<ResolvedTransclusion> {
         match item {
@@ -1098,7 +1098,8 @@ impl<'a> TransclusionEngine<'a> {
                     options.context_authority(),
                 );
                 child_runtime.record_context_groups(child_context.capture_requirements());
-                let mut child_options = options.clone().with_request_context(child_context);
+                let mut child_options =
+                    options.clone().derive(|options| options.with_request_context(child_context));
                 child_options.source = child_source;
                 child_options.source_opening = None;
                 // Recursive graph reuse for remote children: hand the child its
@@ -1275,7 +1276,7 @@ impl<'a> TransclusionEngine<'a> {
         order: usize,
         span: std::ops::Range<usize>,
         directive: file_links::FileLinksDirective,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
     ) -> MarkdownResult<ResolvedTransclusion> {
         let skipped_replace = |replacement: String, report: ComposeReport| {
             Ok(ResolvedTransclusion {
@@ -1399,7 +1400,7 @@ impl<'a> TransclusionEngine<'a> {
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
         state_identity: cache::hashing::PhaseStateIdentity,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
     ) -> MarkdownResult<String> {
@@ -1470,7 +1471,7 @@ impl<'a> TransclusionEngine<'a> {
             || {
                 let mut child_options =
                     markdown_child_options(options, state.data(), directive_options, &path_buf, opening.cloned())
-                        .with_request_context(child_context.clone());
+                        .derive(|options| options.with_request_context(child_context.clone()));
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
                 // transclusion stage reuses grandchild target resolution too.
@@ -1546,7 +1547,7 @@ impl<'a> TransclusionEngine<'a> {
         path: &Path,
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
-        options: &ComposeOptions,
+        options: &crate::markdown::compose::ComposeRequest,
         cache_handle: &cache::RunLocalCache,
     ) -> MarkdownResult<String> {
         // Compute variant params (needed for both cache key and core)
@@ -1639,7 +1640,7 @@ impl<'a> TransclusionEngine<'a> {
         content
     }
 
-    fn resolve_ignore_invalid(&self, options: &ComposeOptions) -> bool {
+    fn resolve_ignore_invalid(&self, options: &crate::markdown::compose::ComposeRequest) -> bool {
         if let Some(value) = options.ignore_invalid_references {
             return value;
         }
@@ -1689,12 +1690,12 @@ pub(crate) fn apply_directive_set_overlay(
 /// data defaults ([`child_inherited_origin`]): the parent already scanned
 /// every authored value once.
 pub(crate) fn markdown_child_options(
-    parent: &ComposeOptions,
+    parent: &crate::markdown::compose::ComposeRequest,
     parent_data: &HashMap<String, Value>,
     directive_options: &transclusion::BlockOptions,
     path: &Path,
     opening: Option<SourceOpening>,
-) -> ComposeOptions {
+) -> crate::markdown::compose::ComposeRequest {
     let mut inherited: Map<String, Value> = parent_data.clone().into_iter().collect();
     // Prologue/epilogue are scoped to the defining document — never propagate.
     // ctx is captured fresh per-document by EffectiveStateBuilder, so the
@@ -1708,13 +1709,14 @@ pub(crate) fn markdown_child_options(
         transclusion::ReplaceOption::OneOff(one_off) => Some(one_off.clone()),
         _ => None,
     };
-    let mut child_options = parent
-        .clone()
-        .with_replace_parent_wins(matches!(
-            directive_options.replace,
-            transclusion::ReplaceOption::ParentWins
-        ))
-        .with_one_off_replace(one_off);
+    let mut child_options = parent.clone().derive(|options| {
+        options
+            .with_replace_parent_wins(matches!(
+                directive_options.replace,
+                transclusion::ReplaceOption::ParentWins
+            ))
+            .with_one_off_replace(one_off)
+    });
     child_options.external_state = Some(Value::Object(inherited));
     child_options.inherited_origin = child_inherited_origin(directive_options);
     child_options.with_accepted_source_file(path.to_path_buf(), opening)

@@ -89,6 +89,11 @@ fn bench_compose_schema_transclusion(c: &mut Criterion) {
     let options = ComposeOptions::new()
         .with_source_file(&root)
         .with_darkmatter_baseline_schema();
+    let request = darkmatter::markdown::compose::ComposeRequest::prepare(
+        options,
+        &darkmatter::markdown::compose::RequestSnapshot::new(dir.path()),
+    )
+    .expect("prepare request");
 
     let mut group = c.benchmark_group("compose_schema_transclusion");
     group.throughput(Throughput::Elements(1));
@@ -97,7 +102,7 @@ fn bench_compose_schema_transclusion(c: &mut Criterion) {
     group.bench_function("compose_with", |b| {
         b.iter(|| {
             let (composed, report) = black_box(&md)
-                .compose_with(black_box(options.clone()))
+                .compose_with(black_box(&request))
                 .expect("compose must not fault");
             black_box((composed, report));
         });

@@ -102,17 +102,19 @@ the compose pipeline.
 ## API
 
 ```rust
-use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation}};
+use darkmatter::markdown::{Markdown, compose::{ComposeOptions, ComposeOperation, ComposeRequest, RequestSnapshot}};
 
-// Compose with all operations enabled (default)
-let (composed, report) = md.compose()?;
+// Every compose takes a prepared request. Binaries snapshot their process
+// once; libraries and tests use `RequestSnapshot::new(dir)`.
+let snapshot = RequestSnapshot::from_process()?;
+let (composed, report) = md.compose_with(&ComposeRequest::prepare(ComposeOptions::new(), &snapshot)?)?;
 
 // Only run specific operations
 let options = ComposeOptions::new()
     .only(&[ComposeOperation::Interpolation])
     .with_external_state(json!({"key": "value"}))
     .with_fail_fast(true);
-let (composed, report) = md.compose_with(options)?;
+let (composed, report) = md.compose_with(&ComposeRequest::prepare(options, &snapshot)?)?;
 
 // Disable specific operations
 let options = ComposeOptions::new()
@@ -131,16 +133,22 @@ let options = ComposeOptions::new()
     )
     .with_fixed_width(80);
 
-// In-place mutation (no clone)
-let report = md.compose_mut()?;
-
 // Full pipeline with transclusion (requires source file path)
 let md = Markdown::try_from(std::path::Path::new("docs/root.md"))?;
 let options = ComposeOptions::new()
     .with_source_file("docs/root.md");
-let (composed, report) = md.compose_with(options)?;
+let request = ComposeRequest::prepare(options, &snapshot)?;
+let (composed, report) = md.compose_with(&request)?;
 println!("{}", report.summary());
 ```
+
+`ComposeRequest::prepare` fails with `ContextBuildError` (relative request
+directory, opening reference outside the request's repository, repository
+discovery error) instead of letting a bad context surface later as a missing
+file. Every file-reference error keeps biscuit-file's `ResolutionFailure`;
+read it with `resolution_failure()`, never from message text. User docs:
+`darkmatter/docs/topics/compose-requests.md` and
+`darkmatter/docs/errors/file-reference-failures.md`.
 
 ## Demand-Driven Runtime Context Evidence
 
@@ -269,10 +277,21 @@ The supplied entry points are:
 - `ComposeContext::capture_for_document_with_evidence`
 
 Existing `ComposeContext::capture_for_content`,
-`ComposeContext::capture_for_document`, and `ComposeOptions::new()` remain
-ambient compatibility APIs and use the same `populate_*` code. Ambient capture
+`ComposeContext::capture_for_document`, and `capture_for_dir` remain
+ambient compatibility APIs and use the same `populate_*` code. They read no
+process environment: their `env` starts empty and a request installs the
+snapshot's (`align_context_environment`). Internal group captures take the
+environment from their caller (`capture_runtime_context_for_groups(dir,
+groups, &env)`: `CtxLookup::new(dir, &env)` from a condition's context,
+`AnchoredRefresh` from its request). The
+CWD-based `ComposeContext::capture()` is gone, and `capture_minimal()` (what
+`ComposeOptions::new()` uses) is anchored at an empty path until a request
+re-anchors it, so neither reads the process directory. Ambient capture
 snapshots the environment once and reuses its original `GitRepo` handle for
-file changes rather than discovering the repository a second time.
+file changes rather than discovering the repository a second time. Shell
+directives of a pathless source run in `context.cwd()`
+(`resolve_working_directory(opts, source, &context)`), never the process
+directory.
 
 ### Lazy reserved roots (`current`, `current_env`)
 
@@ -286,8 +305,9 @@ file changes rather than discovering the repository a second time.
   eager `Repo` capture, or one discovery at the anchor. `for_document` is the
   request boundary: it fixes that observation at creation, before validation,
   pre-flight, or compose run. A request built through `new()` or
-  `new_with_context(..).with_context_authority(DarkmatterOwned)` is fixed by
-  the root pipeline entry instead, unconditionally — not gated on whether the
+  `new_with_context(..).with_context_authority(DarkmatterOwned)` is fixed when
+  its `ComposeRequest` is prepared (adopting the context builder's discovery
+  when the context is anchored at the request directory), unconditionally — not gated on whether the
   root plans a `current.repo*` read, because a transcluded child may be the
   only reader and a child pipeline never establishes request state. The
   provider never discovers. `ComposeOptions::with_current_provider` installs
@@ -1078,7 +1098,7 @@ darkmatter/lib/src/
 │   ├── error.rs
 │   └── verbs.rs
 └── markdown/compose/
-    ├── mod.rs           # Public API facade (compose/compose_with/compose_mut) + re-exports
+    ├── mod.rs           # Public API facade (compose_with) + re-exports
     ├── util.rs          # Shared non-stage helpers (git-root, path abbrev, target range, fm prep)
     ├── pipeline/        # Driver spine + operation registry
     │   ├── mod.rs       # run_compose_pipeline* driver
@@ -1106,6 +1126,7 @@ darkmatter/lib/src/
     ├── context/         # Shared pipeline state + runtime context capture
     │   ├── mod.rs
     │   ├── options.rs   # ComposeOptions, ComposeSource, TransclusionOptions
+    │   ├── request.rs   # RequestSnapshot, build_resolution_context, ComposeRequest
     │   ├── runtime.rs   # ComposeContext (the ctx namespace)
     │   ├── report.rs    # ComposeReport, ComposeWarning, SourceRange
     │   ├── effective_state.rs # EffectiveState, builder, merge logic

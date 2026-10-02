@@ -15,7 +15,7 @@ use super::expression::EvaluationLookup;
 use super::schema_validation::PreparedSchemas;
 use super::shell_expansion::types::frontmatter_key_line;
 use super::util::abbreviate_path;
-use super::{ComposeOptions, ComposeReport, ComposeSource, ComposeWarning, EffectiveState};
+use super::{ComposeReport, ComposeSource, ComposeWarning, EffectiveState};
 use crate::markdown::Markdown;
 
 /// Reconciles `report`'s candidates for `markdown` into warnings.
@@ -30,7 +30,7 @@ use crate::markdown::Markdown;
 pub(crate) fn reconcile(
     report: &mut ComposeReport,
     markdown: &Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     state: &EffectiveState,
     schemas: &PreparedSchemas,
 ) {
@@ -58,7 +58,8 @@ pub(crate) fn reconcile(
         ComposeSource::Url(url) => Some(std::path::PathBuf::from(url.to_string())),
         ComposeSource::Unknown => None,
     };
-    let display = document.as_deref().map(abbreviate_path);
+    let home = options.resolution_context().home_dir();
+    let display = document.as_deref().map(|path| abbreviate_path(path, home));
     let source = markdown.full_source_context_for_errors();
 
     for candidate in unknown {

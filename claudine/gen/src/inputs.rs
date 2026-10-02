@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
+use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, coerce};
 use serde_json::Value;
 
@@ -51,18 +52,28 @@ pub struct ProviderInputs {
 ///
 /// `topics` names the research topics the mapping registry consumes; each
 /// must exist and validate against its sidecar schema.
-/// Relative area paths have the same meaning as their absolute form.
+/// A relative `area` is joined onto `snapshot`'s request directory. Research
+/// schemas resolve through one context built from `snapshot` rebased at the
+/// area, so `&` and `^` anchor in the area's repository.
 ///
 /// ## Errors
 ///
-/// Fails loudly when `area` cannot be absolutized; when a roster entry is
-/// missing or flagged `skip_research: true`; when YAML cannot be parsed; when
-/// a research document or sidecar is missing; or when research frontmatter
-/// does not satisfy its sidecar schema.
-pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, GenError> {
-    let area = std::path::absolute(area).map_err(|source| GenError::Io {
-        path: area.to_path_buf(),
-        source,
+/// Fails loudly when `area` cannot be absolutized; when the area's
+/// file-resolution context cannot be built ([`GenError::ResolutionContext`]);
+/// when a roster entry is missing or flagged `skip_research: true`; when YAML
+/// cannot be parsed; when a research document or sidecar is missing; or when
+/// research frontmatter does not satisfy its sidecar schema.
+pub fn load(
+    area: &Path,
+    slug: &str,
+    topics: &[&str],
+    snapshot: &RequestSnapshot,
+) -> Result<ProviderInputs, GenError> {
+    let area = std::path::absolute(snapshot.request_dir().join(area)).map_err(|source| {
+        GenError::Io {
+            path: area.to_path_buf(),
+            source,
+        }
     })?;
     let roster = load_roster_entry(&area.join("docs/providers.yaml"), slug)?;
     let facts = load_optional_yaml_map(&area.join(format!("docs/providers/facts/{slug}.yaml")))?;
@@ -70,7 +81,7 @@ pub fn load(area: &Path, slug: &str, topics: &[&str]) -> Result<ProviderInputs, 
         load_overrides(&area.join(format!("docs/providers/overrides/{slug}.yaml")))?;
     // Schema resolution otherwise rediscovers the same repository and package
     // area for every research topic in this provider generation pass.
-    let schemas = generator_schemas(&area);
+    let schemas = generator_schemas(&area, snapshot)?;
 
     let mut research = BTreeMap::new();
     let mut sidecars = BTreeMap::new();
@@ -198,8 +209,14 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
 /// document's `$schema` sidecar, and returns the schema-coerced
 /// frontmatter object (so `boolish`/`numberlike` quirks never reach the
 /// mapping layer).
-pub fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
-    load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new())
+///
+/// The `$schema` reference resolves through `context`, normally the area's
+/// context from [`area_resolution_context`].
+pub fn load_validated_frontmatter(
+    path: &Path,
+    context: &FileResolutionContext,
+) -> Result<Value, GenError> {
+    load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new(context.clone()))
 }
 
 fn load_validated_frontmatter_with_api(
@@ -244,18 +261,26 @@ fn load_validated_frontmatter_with_api(
     Ok(coerce::coerce_frontmatter(&effective.json_schema, &frontmatter).value)
 }
 
-fn generator_schemas(area: &Path) -> DarkmatterSchemas {
-    let Some(repository_root) = sniff::filesystem::git::GitRepo::discover(area)
-        .ok()
-        .flatten()
-        .map(|repository| repository.repo_root().to_path_buf())
-    else {
-        return DarkmatterSchemas::new();
-    };
-    let context = FileResolutionContext::new(area)
-        .with_repository_root(repository_root)
-        .with_package_area(area);
-    DarkmatterSchemas::new().with_file_resolution_context(context)
+fn generator_schemas(area: &Path, snapshot: &RequestSnapshot) -> Result<DarkmatterSchemas, GenError> {
+    Ok(DarkmatterSchemas::new(area_resolution_context(area, snapshot)?))
+}
+
+/// Builds the file-resolution context for `area` from `snapshot` rebased at
+/// the area, so `&` and `^` anchor in the area's repository.
+///
+/// ## Errors
+///
+/// Returns [`GenError::ResolutionContext`] when the context cannot be built.
+pub fn area_resolution_context(
+    area: &Path,
+    snapshot: &RequestSnapshot,
+) -> Result<FileResolutionContext, GenError> {
+    build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
+        GenError::ResolutionContext {
+            area: area.to_path_buf(),
+            source,
+        }
+    })
 }
 
 /// Parses a YAML file into a `serde_json::Value`.

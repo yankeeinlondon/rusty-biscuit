@@ -131,6 +131,9 @@ doctest = false
 bench = false
 
 [package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/context_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
 all-features = true
 local-features = ["desktop", "research"]
 # `required-features = ["desktop"]` bin targets that nextest does not archive

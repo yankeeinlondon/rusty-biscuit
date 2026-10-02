@@ -2,6 +2,7 @@
 
 use crate::args::SchemaValidateFormat;
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
+use crate::request::MdRequest;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
@@ -49,6 +50,7 @@ pub fn run_validate(
     format: SchemaValidateFormat,
     quiet: bool,
     no_trigger_schemas: bool,
+    request: &MdRequest,
 ) -> Result<()> {
     let terminal = Terminal::default();
 
@@ -67,7 +69,7 @@ pub fn run_validate(
         std::process::exit(64);
     }
 
-    let api = match load_api(schema) {
+    let api = match load_api(schema, request) {
         Ok(api) => api,
         Err(err) => {
             emit_schema_error(&err);
@@ -80,7 +82,7 @@ pub fn run_validate(
     let mut any_validation_failure = false;
 
     for file in &files {
-        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas);
+        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas, request);
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
@@ -108,14 +110,19 @@ pub fn run_validate(
     Ok(())
 }
 
-/// Builds the [`DarkmatterSchemas`] entry point, applying the CLI baseline
-/// flag or `BASELINE_SCHEMA` env var fallback.
-fn load_api(schema: Option<&Path>) -> Result<DarkmatterSchemas, SchemaError> {
+/// Builds the [`DarkmatterSchemas`] entry point at the launch context,
+/// applying the CLI baseline flag or the snapshot's `BASELINE_SCHEMA`
+/// fallback. Each file re-anchors it on its own context.
+fn load_api(schema: Option<&Path>, request: &MdRequest) -> Result<DarkmatterSchemas, SchemaError> {
     let baseline_path = schema
         .map(PathBuf::from)
-        .or_else(|| std::env::var(BASELINE_SCHEMA_ENV).ok().map(PathBuf::from));
+        .or_else(|| request.snapshot().env().get(BASELINE_SCHEMA_ENV).map(PathBuf::from));
 
-    let api = DarkmatterSchemas::new();
+    let context = request.launch_context().map_err(|error| SchemaError::Baseline {
+        message: format!("{error:#}"),
+        source: None,
+    })?;
+    let api = DarkmatterSchemas::new(context.clone());
     match baseline_path {
         Some(path) => api.with_baseline_from_file(path),
         None => Ok(api),
@@ -129,6 +136,7 @@ fn validate_one(
     file: &Path,
     assignments: &[Assignment],
     no_trigger_schemas: bool,
+    request: &MdRequest,
 ) -> FileOutcome {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
@@ -139,23 +147,23 @@ fn validate_one(
         Err(err) => return FileOutcome::ParseError(err.to_string()),
     };
 
-    let api = if no_trigger_schemas {
-        api.clone()
-    } else if let Some(boundary) = darkmatter::markdown::compose::capture_file_resolution_context(
-        discovery_path.parent().unwrap_or(&discovery_path),
-    )
-    .repository_root()
-    .map(Path::to_path_buf)
-    {
-        match api
-            .clone()
-            .with_trigger_discovery(&discovery_path, boundary)
-        {
-            Ok(api) => api,
-            Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+    // The document's context resolves its schema `file` values and bounds
+    // trigger discovery. A context that cannot be built has no better outcome
+    // than the file's parse error (exit 3).
+    let document_context = match request.document_context(None, &discovery_path) {
+        Ok(context) => context,
+        Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
+    };
+    let boundary = document_context.repository_root().map(Path::to_path_buf);
+    let api = api.clone().with_file_resolution_context(document_context);
+    let api = match boundary {
+        Some(boundary) if !no_trigger_schemas => {
+            match api.with_trigger_discovery(&discovery_path, boundary) {
+                Ok(api) => api,
+                Err(err) => return FileOutcome::SchemaError(Box::new(err)),
+            }
         }
-    } else {
-        api.clone()
+        _ => api,
     };
 
     if !assignments.is_empty() {
@@ -342,6 +350,14 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
     // suppressed empty / message-equal descriptions, so a `Some` here renders.
     if let Some(description) = problem.description.as_deref() {
         let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
+        println!("{}", Prose::new(sub_line).render(terminal));
+    }
+    // The stable class of a failed `file` value (R5), on its own sub-line.
+    if let Some(reference) = problem.file_reference.as_ref() {
+        let sub_line = format!(
+            "        <dim>failure:</dim> {}",
+            darkmatter::markdown::errors::resolution_failure_name(reference.resolution_failure())
+        );
         println!("{}", Prose::new(sub_line).render(terminal));
     }
 }

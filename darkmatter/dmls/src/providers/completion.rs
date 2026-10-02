@@ -12,7 +12,8 @@ use std::path::Path;
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionTextEdit, TextEdit};
 
 use super::DocumentContext;
-use crate::graph::{DocumentId, WorkspaceGraph, normalize_join};
+use crate::context::reference_candidates;
+use crate::graph::{DocumentId, WorkspaceGraph};
 
 /// Fenced-code language tokens offered by completion (canonical
 /// `LanguageGrammar` tokens plus a few common aliases). Each resolves through
@@ -114,10 +115,12 @@ fn anchor_completions(
     let target_doc = if path_part.is_empty() {
         Some(doc_id)
     } else {
-        ctx.path
-            .parent()
-            .map(|base| normalize_join(base, path_part))
-            .and_then(|resolved| ctx.graph.document_id(&resolved))
+        // The document the link resolves to, as the graph resolves it.
+        ctx.file_context().ok().and_then(|context| {
+            reference_candidates(context, path_part)
+                .iter()
+                .find_map(|candidate| ctx.graph.document_id(candidate))
+        })
     };
     let Some(target_doc) = target_doc else {
         return Vec::new();

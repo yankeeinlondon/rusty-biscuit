@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use claudine_catalog_types::{AcpServerMode, ModelCatalogSource};
+use darkmatter::markdown::compose::RequestSnapshot;
 use serde_json::Value;
 use strum::{IntoEnumIterator, VariantNames};
 
@@ -102,10 +103,10 @@ pub fn provider_slugs() -> Vec<&'static str> {
 }
 
 /// Generates every provider in [`provider_slugs`] order.
-pub fn generate_all(area: &Path) -> Result<Vec<Generation>, GenError> {
+pub fn generate_all(area: &Path, snapshot: &RequestSnapshot) -> Result<Vec<Generation>, GenError> {
     provider_slugs()
         .into_iter()
-        .map(|slug| generate_for_area(area, slug))
+        .map(|slug| generate_for_area(area, slug, snapshot))
         .collect()
 }
 
@@ -178,9 +179,16 @@ pub fn find_area(from: &Path) -> Result<PathBuf, GenError> {
 
 /// Runs the full pipeline for one provider under `area`.
 ///
+/// Research inputs load through [`inputs::load`] with `snapshot`, the
+/// request's process state.
+///
 /// Order matters: schema↔catalog compatibility and source-collision gates
 /// run BEFORE any value mapping.
-pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError> {
+pub fn generate_for_area(
+    area: &Path,
+    slug: &str,
+    snapshot: &RequestSnapshot,
+) -> Result<Generation, GenError> {
     let topics: BTreeSet<&str> = REGISTRY
         .iter()
         .filter_map(|entry| match entry.source {
@@ -189,7 +197,7 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
         })
         .collect();
     let topics: Vec<&str> = topics.into_iter().collect();
-    let inputs = inputs::load(area, slug, &topics)?;
+    let inputs = inputs::load(area, slug, &topics, snapshot)?;
     // The expected-offering join needs the committed unchained-ai
     // artifact; its absence or schema mismatch fails generation loudly.
     let artifact = artifact::load(area)?;
@@ -241,8 +249,12 @@ pub fn generate_for_area(area: &Path, slug: &str) -> Result<Generation, GenError
 /// Generates and byte-compares against the committed data.rs. This is the
 /// single code path behind both the CLI `check` subcommand and the nextest
 /// drift test.
-pub fn check_area(area: &Path, slug: &str) -> Result<(Generation, CheckOutcome), GenError> {
-    let generation = generate_for_area(area, slug)?;
+pub fn check_area(
+    area: &Path,
+    slug: &str,
+    snapshot: &RequestSnapshot,
+) -> Result<(Generation, CheckOutcome), GenError> {
+    let generation = generate_for_area(area, slug, snapshot)?;
     let committed_path = committed_data_path(area, slug);
     if !committed_path.is_file() {
         return Ok((

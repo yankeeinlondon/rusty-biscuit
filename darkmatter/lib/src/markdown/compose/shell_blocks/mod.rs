@@ -11,7 +11,6 @@ pub mod types;
 
 pub use types::ShellBlockError;
 
-use super::ComposeOptions;
 use super::shell_expansion::types::{ShellCommandOrigin, ShellDirective, ShellExpansionRuntime};
 use super::shell_expansion::{
     execute_prepared_directive, prepare_directive,
@@ -23,7 +22,7 @@ use std::path::PathBuf;
 use types::{ShellBlockCommandResult, SourceExcerpt};
 
 /// Extract source file path from compose options.
-fn source_file_from_options(options: &ComposeOptions) -> Option<PathBuf> {
+fn source_file_from_options(options: &crate::markdown::compose::ComposeRequest) -> Option<PathBuf> {
     match &options.source {
         super::ComposeSource::File(path) => Some(path.clone()),
         _ => None,
@@ -36,7 +35,7 @@ fn source_file_from_options(options: &ComposeOptions) -> Option<PathBuf> {
 #[cfg(test)]
 pub(crate) fn run_shell_blocks_stage(
     content: &str,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &mut ShellExpansionRuntime,
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
@@ -55,7 +54,7 @@ pub(crate) fn run_shell_blocks_stage(
 pub(crate) fn run_shell_blocks_stage_in(
     content: &str,
     data: Option<&DataRanges>,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     runtime: &mut ShellExpansionRuntime,
     ctx: &biscuit_terminal::errors::SourceContext,
     line_offset: usize,
@@ -91,7 +90,7 @@ pub(crate) fn run_shell_blocks_stage_in(
     // Resolve policy paths once
     let shell_opts = options.shell_options();
     let policy_paths =
-        resolve_policy_paths(&shell_opts, &options.source).map_err(|e| ShellBlockError::Parse {
+        resolve_policy_paths(&shell_opts, &options.source, options.resolution_context()).map_err(|e| ShellBlockError::Parse {
             line: 0,
             message: format!("Policy path resolution failed: {e}"),
             excerpt: SourceExcerpt::default(),
@@ -287,6 +286,7 @@ pub(crate) fn reject_data_shaped_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::{ComposeOptions, ComposeRequest, test_request};
     use crate::markdown::compose::shell_expansion::types::{
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
         ShellTimeoutBehavior,
@@ -344,19 +344,21 @@ mod tests {
 
     fn test_options_with_handler(
         handler: Arc<dyn ShellApprovalHandler>,
-    ) -> (ComposeOptions, TempDir) {
+    ) -> (ComposeRequest, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let options = ComposeOptions::new()
-            .with_shell_approval_handler(handler)
-            .with_shell_policy_root(temp_dir.path())
-            .with_shell_working_directory(std::env::current_dir().unwrap());
+        let options = test_request(
+            ComposeOptions::new()
+                .with_shell_approval_handler(handler)
+                .with_shell_policy_root(temp_dir.path())
+                .with_shell_working_directory(std::env::current_dir().unwrap()),
+        );
         (options, temp_dir)
     }
 
     #[test]
     fn no_shell_blocks() {
         let content = "# Hello\n\nNo blocks here.\n";
-        let options = ComposeOptions::new();
+        let options = test_request(ComposeOptions::new());
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap();
@@ -400,7 +402,7 @@ mod tests {
     #[test]
     fn empty_shell_block() {
         let content = "::shell-block\n::end-block\n";
-        let options = ComposeOptions::new();
+        let options = test_request(ComposeOptions::new());
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap();
@@ -547,13 +549,13 @@ mod tests {
         // timeout, so its length costs no wall clock.
         let content = "::shell-block\nsleep 10 && echo after\n::end-block\n";
         let temp_dir = TempDir::new().unwrap();
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
+        let options = test_request(ComposeOptions::new().with_shell(ShellExpansionOptions {
             timeout: std::time::Duration::from_secs(2),
             timeout_behavior: ShellTimeoutBehavior::EmptyString,
             policy_root: Some(temp_dir.path().to_path_buf()),
             approval_handler: Some(Arc::new(AllowAllHandler)),
             ..Default::default()
-        });
+        }));
         let mut runtime = ShellExpansionRuntime::new();
         let (result, report) =
             run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap();
@@ -567,7 +569,7 @@ mod tests {
     #[test]
     fn unterminated_shell_block() {
         let content = "::shell-block\necho hello\n";
-        let options = ComposeOptions::new();
+        let options = test_request(ComposeOptions::new());
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
         let msg = err.to_string();
@@ -580,7 +582,7 @@ mod tests {
     #[test]
     fn unmatched_end_block() {
         let content = "::end-block\n";
-        let options = ComposeOptions::new();
+        let options = test_request(ComposeOptions::new());
         let mut runtime = ShellExpansionRuntime::new();
         let err = run_shell_blocks_stage(content, &options, &mut runtime, &test_ctx(), 0).unwrap_err();
         let msg = err.to_string();

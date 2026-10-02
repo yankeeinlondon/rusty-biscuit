@@ -18,6 +18,7 @@ use crate::performance;
 use crate::performance::counters;
 
 use super::detection::normalize_path;
+use super::glob::PACKAGE_MANIFEST_FILE_NAMES;
 use super::seed::PackageSeed;
 use super::standard::{MonorepoStandard, PackageProvenance};
 
@@ -686,10 +687,7 @@ pub(super) fn discover_seeds_from_manifests_in_tree(
         }
 
         let file_name = entry.file_name().to_string_lossy();
-        let is_manifest = matches!(
-            file_name.as_ref(),
-            "Cargo.toml" | "package.json" | "pyproject.toml" | "go.mod"
-        );
+        let is_manifest = PACKAGE_MANIFEST_FILE_NAMES.contains(&file_name.as_ref());
         if !is_manifest {
             continue;
         }
@@ -741,6 +739,18 @@ mod tests {
     // ============================================================================
     // ManifestIndex normalization tests (Phase 3)
     // ============================================================================
+
+    /// The name-to-kind matches cannot name the shared list directly, so this
+    /// keeps them from drifting away from it.
+    #[test]
+    fn manifest_index_recognizes_every_package_manifest_file_name() {
+        for name in PACKAGE_MANIFEST_FILE_NAMES {
+            let dir = PathBuf::from("/repo/pkg");
+            let index = ManifestIndex::from_manifest_paths(vec![dir.join(name)]);
+
+            assert_eq!(index.kinds_at(&dir).len(), 1, "{name} not recognized");
+        }
+    }
 
     #[test]
     fn manifest_index_package_dirs_in_tree_uses_normalized_paths() {

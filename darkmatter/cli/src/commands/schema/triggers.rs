@@ -5,22 +5,23 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::capture_file_resolution_context;
+use crate::request::MdRequest;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, normalize_path, trace_registry};
 use std::path::Path;
 
 /// Prints repository roots, shadowing, and arm-by-arm trigger results.
-pub fn run_triggers(file: &Path) -> Result<()> {
+pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, failing `normalize_path`.
     let document_path =
         biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
     let markdown = Markdown::try_from(document_path.as_path())?;
-    let boundary = capture_file_resolution_context(document_path.parent().unwrap_or(&document_path))
+    let context = request.document_context(None, &document_path)?;
+    let boundary = context
         .repository_root()
         .map(Path::to_path_buf)
         .ok_or_else(|| eyre!("no repository boundary found for `{}`", file.display()))?;
-    let api = DarkmatterSchemas::new().with_trigger_discovery(&document_path, &boundary)?;
+    let api = DarkmatterSchemas::new(context.clone()).with_trigger_discovery(&document_path, &boundary)?;
     let registry = api
         .trigger_registry()
         .expect("trigger discovery always installs a registry");

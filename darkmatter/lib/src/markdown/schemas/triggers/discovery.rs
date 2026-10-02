@@ -300,7 +300,12 @@ pub fn normalize_path(document: &Path, boundary: &Path) -> Option<String> {
 /// the trigger, so a registry is never installed with a known-bad payload.
 ///
 /// A document outside the boundary yields an empty registry (not an error).
-pub fn scan(document: &Path, boundary: &Path) -> Result<TriggerRegistry, SchemaError> {
+/// Payload references resolve through the request's `context`.
+pub fn scan(
+    document: &Path,
+    boundary: &Path,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<TriggerRegistry, SchemaError> {
     let document_dir = document
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -367,7 +372,7 @@ pub fn scan(document: &Path, boundary: &Path) -> Result<TriggerRegistry, SchemaE
     // independent of whether any current document matches the trigger.
     let mut payloads = Vec::with_capacity(triggers.len());
     for trigger in &triggers {
-        let payload = super::assemble::resolve_trigger_payload(trigger, &roots).map_err(
+        let payload = super::assemble::resolve_trigger_payload(trigger, &roots, context).map_err(
             |source| SchemaError::TriggerLoad {
                 path: trigger.source.clone(),
                 source: Box::new(source),
@@ -724,7 +729,7 @@ mod tests {
         write_payloads(&root.join("pkg/schemas"));
 
         let doc = root.join("pkg/sub/doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(registry.triggers.len(), 1);
         // The nearest root's file won.
         assert!(registry.triggers[0]
@@ -758,7 +763,7 @@ mod tests {
         write_file(&root.join("schemas/payload-b.yaml"), PAYLOAD_B);
 
         let doc = root.join("pkg/sub/doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(registry.triggers.len(), 2);
         assert!(registry.shadowed.is_empty());
     }
@@ -785,7 +790,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(registry.triggers.len(), 1);
         assert!(registry.triggers[0]
             .source
@@ -805,7 +810,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root).unwrap_err();
+        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(matches!(err, SchemaError::TriggerLoad { .. }));
     }
 
@@ -828,7 +833,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let result = scan(&doc, root);
+        let result = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root));
         assert!(result.is_err(), "transactional: no registry on any failure");
     }
 
@@ -844,7 +849,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root).unwrap_err();
+        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(matches!(
             err,
             SchemaError::TriggerLoad { ref source, .. }
@@ -877,7 +882,7 @@ mod tests {
         write_payloads(&root.join("pkg/schemas"));
 
         let doc = root.join("pkg/sub/doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         // Two unshadowed triggers (a and b from nearest root).
         assert_eq!(registry.triggers.len(), 2);
         // Order: filename-lexicographic within nearest root.
@@ -906,7 +911,7 @@ mod tests {
         .unwrap();
 
         let doc = other.path().join("doc.md");
-        let registry = scan(&doc, repo.path()).unwrap();
+        let registry = scan(&doc, repo.path(), &biscuit_file::FileResolutionContext::new(repo.path())).unwrap();
         assert!(registry.is_empty());
         assert!(registry.roots.is_empty());
     }
@@ -915,7 +920,7 @@ mod tests {
     fn scan_no_schemas_dirs_empty() {
         let repo = repo_fixture();
         let doc = repo.path().join("doc.md");
-        let registry = scan(&doc, repo.path()).unwrap();
+        let registry = scan(&doc, repo.path(), &biscuit_file::FileResolutionContext::new(repo.path())).unwrap();
         assert!(registry.is_empty());
     }
 
@@ -935,7 +940,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(registry.triggers.len(), 2);
     }
 
@@ -946,7 +951,7 @@ mod tests {
         fs::create_dir_all(root.join("schemas")).unwrap();
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert!(registry.is_empty());
         assert_eq!(registry.roots.len(), 1);
     }
@@ -966,7 +971,7 @@ mod tests {
         write_payloads(&root.join("schemas"));
 
         let doc = root.join("doc.md");
-        let registry = scan(&doc, root).unwrap();
+        let registry = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap();
         assert_eq!(registry.triggers.len(), 1);
     }
 
@@ -988,7 +993,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root).unwrap_err();
+        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         assert!(
             matches!(err, SchemaError::TriggerLoad { .. }),
             "missing payload must be a hard load error: {err:?}"
@@ -1010,7 +1015,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let err = scan(&doc, root).unwrap_err();
+        let err = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root)).unwrap_err();
         match err {
             SchemaError::TriggerLoad { source, .. } => {
                 assert!(
@@ -1039,7 +1044,7 @@ mod tests {
         .unwrap();
 
         let doc = root.join("doc.md");
-        let result = scan(&doc, root);
+        let result = scan(&doc, root, &biscuit_file::FileResolutionContext::new(root));
         assert!(
             result.is_err(),
             "a single bad payload must fail the whole scan transactionally"

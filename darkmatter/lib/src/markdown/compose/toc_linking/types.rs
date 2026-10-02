@@ -21,9 +21,15 @@ pub enum TocLinkingError {
     #[error("Invalid heading level '{level}' at line {line}")]
     InvalidLevel { level: String, line: usize },
 
-    /// A referenced file was not found and no fallback resolved.
-    #[error("File not found '{path}' at line {line}")]
-    FileNotFound { path: String, line: usize },
+    /// No target in the chain resolved to a file and the chain does not end
+    /// in `| false`. `failure` is the class of the first (authored) target's
+    /// failure; `None` when that failure was not a file-reference failure.
+    #[error("Could not resolve '{path}' at line {line}")]
+    Unresolved {
+        path: String,
+        line: usize,
+        failure: Option<biscuit_file::ResolutionFailure>,
+    },
 
     /// A glob pattern failed to compile.
     #[error("Invalid glob pattern '{pattern}' at line {line}: {message}")]
@@ -36,6 +42,16 @@ pub enum TocLinkingError {
     /// I/O error reading a referenced file.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+impl TocLinkingError {
+    /// The file-reference failure class, when a target failed to resolve.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        match self {
+            Self::Unresolved { failure, .. } => *failure,
+            _ => None,
+        }
+    }
 }
 
 impl From<CursorError> for TocLinkingError {
@@ -97,11 +113,23 @@ impl biscuit_terminal::errors::BlockError for TocLinkingError {
                 ))
                 .hint("Heading levels must be integers between <cyan>1</cyan> and <cyan>6</cyan>."),
 
-            TocLinkingError::FileNotFound { path, line } => StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new("TocLinkingError", "file not found"))
-                .body(format!(
-                    "<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}"
-                ))
+            TocLinkingError::Unresolved { path, line, failure } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("TocLinkingError", "file reference failure"))
+                .body(
+                    [
+                        Some(format!("<dim>Path:</dim> <cyan>{path}</cyan>\n<dim>Line:</dim> {line}")),
+                        failure.map(|failure| {
+                            format!(
+                                "<dim>failure:</dim> {}",
+                                crate::markdown::errors::resolution_failure_name(failure)
+                            )
+                        }),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                )
                 .hint("Add a <cyan>| fallback.md</cyan> option or end the chain with <cyan>| false</cyan> to allow missing files."),
 
             TocLinkingError::InvalidGlob { pattern, line, message } => StatusBlock::new(StatusState::Error)

@@ -22,7 +22,7 @@ use crate::markdown::compose::ComposeWarning;
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, trace};
 
 /// Errors from condition parsing or evaluation.
@@ -234,7 +234,7 @@ fn caret_marker(input: &str, byte_offset: usize) -> String {
 /// ## Resolution Order
 ///
 /// 1. **Top-level properties** are resolved against the provided `data`.
-/// 2. **`env.*` properties** are resolved against the system environment.
+/// 2. **`env.*` properties** are resolved against `context`'s environment.
 /// 3. **`ctx.*` properties** are resolved via lazy runtime context capture
 ///    based on the referenced context group.
 /// 4. **Unprefixed missing keys** fall back to the `ctx.*` namespace
@@ -244,14 +244,15 @@ fn caret_marker(input: &str, byte_offset: usize) -> String {
 ///
 /// ```
 /// use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+/// use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 /// use serde_json::json;
-/// use std::path::Path;
 ///
+/// let context = build_resolution_context(&RequestSnapshot::new(std::env::temp_dir())).unwrap();
 /// let data = json!({ "draft": true, "audience": "internal" });
 /// let result = evaluate_condition_against(
 ///     "draft && audience == 'internal'",
 ///     &data,
-///     Path::new("."),
+///     &context,
 /// ).unwrap();
 /// assert!(result);
 /// ```
@@ -276,8 +277,9 @@ fn caret_marker(input: &str, byte_offset: usize) -> String {
 pub fn evaluate_condition_against(
     expr: &str,
     data: &Value,
-    work_dir: &Path,
+    context: &biscuit_file::FileResolutionContext,
 ) -> Result<bool, ConditionError> {
+    let work_dir = context.cwd();
     trace!(expr = %expr, "conditions: evaluating against plain data");
 
     // Shortcut API uses a synthetic source context since it's typically
@@ -296,7 +298,7 @@ pub fn evaluate_condition_against(
         span: parse_error_span(expr, e.position),
     })?;
 
-    let lookup = ShortcutLookup::new(data, work_dir);
+    let lookup = ShortcutLookup::new(data, context);
     let value = evaluate(&parsed, &lookup).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
@@ -318,21 +320,19 @@ struct ShortcutLookup<'a> {
     data: &'a Value,
     /// Lazy-capturing `ctx.*` resolver.
     ctx: CtxLookup<'a>,
-    /// Optional document-relative context enabling read-side functions. `None`
-    /// leaves the lookup context-free.
-    resolution_context: Option<ResolutionContext>,
+    /// The caller's context: read-side functions resolve through it and
+    /// `env.*` reads its environment.
+    resolution_context: ResolutionContext,
 }
 
 impl<'a> ShortcutLookup<'a> {
-    fn new(data: &'a Value, work_dir: &'a Path) -> Self {
+    fn new(data: &'a Value, context: &'a biscuit_file::FileResolutionContext) -> Self {
         Self {
             data,
-            ctx: CtxLookup::new(work_dir),
-            // The shortcut API resolves read-side functions against `work_dir`
-            // (local-only: `absolute`/`relative`/`file_exists`/… need a base
-            // directory but no remote runtime). This is a public-API capability
-            // addition for external callers of `evaluate_condition_against`.
-            resolution_context: Some(ResolutionContext::new(work_dir.to_path_buf())),
+            ctx: CtxLookup::new(context.cwd(), context.env()),
+            // Local-only: `absolute`/`relative`/`file_exists`/… need the
+            // context but no remote runtime.
+            resolution_context: ResolutionContext::new(context.clone()),
         }
     }
 
@@ -376,7 +376,13 @@ impl EvaluationLookup for ShortcutLookup<'_> {
 
         // Handle env.* prefixes
         if let Some(env_key) = path.strip_prefix("env.") {
-            return std::env::var(env_key).ok().map(Value::String);
+            return self
+                .resolution_context
+                .file_resolution_context
+                .env()
+                .get(env_key)
+                .cloned()
+                .map(Value::String);
         }
 
         // Try plain data lookup first
@@ -402,26 +408,33 @@ impl EvaluationLookup for ShortcutLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        self.resolution_context.clone()
+        Some(self.resolution_context.clone())
     }
 
     fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
         // Borrowed path (Finding 12) — condition evaluation reuses the context
         // without cloning it per read-side function call.
-        self.resolution_context.as_ref()
+        Some(&self.resolution_context)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use biscuit_file::FileResolutionContext;
+
+    /// The old no-context behavior: a context at `.` with process home and env.
+    fn dot_context() -> FileResolutionContext {
+        FileResolutionContext::new(".")
+    }
 
     /// The public condition API shares the checked `ctx.*` path: a capture
     /// that omits a cataloged key fails evaluation instead of reading `null`.
     #[test]
     fn shortcut_lookup_reports_a_projection_invariant_failure() {
         let data = json!({});
-        let lookup = ShortcutLookup::new(&data, Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         lookup.ctx.mark_captured_without_projection(super::super::context::capture::ContextGroup::Os);
 
         for expression in ["ctx.os == 'macos'", "os"] {
@@ -443,7 +456,7 @@ mod tests {
     #[test]
     fn evaluate_condition_against_keeps_unknown_names_falsy_and_skips_unreached_groups() {
         let data = json!({ "flag": false });
-        let dir = Path::new(".");
+        let dir = &dot_context();
 
         assert!(!evaluate_condition_against("ctx.oss", &data, dir).unwrap());
         assert!(!evaluate_condition_against("flag && ctx.os == 'macos'", &data, dir).unwrap());
@@ -707,9 +720,9 @@ mod tests {
     #[test]
     fn shortcut_top_level_lookup() {
         let data = json!({ "draft": true, "title": "Hello" });
-        assert!(evaluate_condition_against("draft", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("draft", &data, &dot_context()).unwrap());
         assert!(
-            evaluate_condition_against("title == 'Hello'", &data, std::path::Path::new("."))
+            evaluate_condition_against("title == 'Hello'", &data, &dot_context())
                 .unwrap()
         );
     }
@@ -718,37 +731,37 @@ mod tests {
     fn shortcut_nested_lookup() {
         let data = json!({ "user": { "name": "Alice", "admin": true } });
         assert!(
-            evaluate_condition_against("user.name == 'Alice'", &data, std::path::Path::new("."))
+            evaluate_condition_against("user.name == 'Alice'", &data, &dot_context())
                 .unwrap()
         );
         assert!(
-            evaluate_condition_against("user.admin", &data, std::path::Path::new(".")).unwrap()
+            evaluate_condition_against("user.admin", &data, &dot_context()).unwrap()
         );
     }
 
     #[test]
     fn shortcut_missing_values() {
         let data = json!({});
-        assert!(!evaluate_condition_against("missing", &data, std::path::Path::new(".")).unwrap());
-        assert!(evaluate_condition_against("!missing", &data, std::path::Path::new(".")).unwrap());
+        assert!(!evaluate_condition_against("missing", &data, &dot_context()).unwrap());
+        assert!(evaluate_condition_against("!missing", &data, &dot_context()).unwrap());
     }
 
     #[test]
     fn shortcut_comparisons_and_helpers() {
         let data = json!({ "count": 5, "items": [1, 2, 3], "user": { "name": "Alice" } });
-        assert!(evaluate_condition_against("count > 0", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("count > 0", &data, &dot_context()).unwrap());
         assert!(
-            evaluate_condition_against("count >= 5", &data, std::path::Path::new(".")).unwrap()
+            evaluate_condition_against("count >= 5", &data, &dot_context()).unwrap()
         );
         assert!(
-            evaluate_condition_against("count < 10", &data, std::path::Path::new(".")).unwrap()
+            evaluate_condition_against("count < 10", &data, &dot_context()).unwrap()
         );
         assert!(
-            evaluate_condition_against("length(items) == 3", &data, std::path::Path::new("."))
+            evaluate_condition_against("length(items) == 3", &data, &dot_context())
                 .unwrap()
         );
         assert!(
-            evaluate_condition_against("has_key(user, 'name')", &data, std::path::Path::new("."))
+            evaluate_condition_against("has_key(user, 'name')", &data, &dot_context())
                 .unwrap()
         );
     }
@@ -761,7 +774,7 @@ mod tests {
             !evaluate_condition_against(
                 "false_flag && UnknownFn(x)",
                 &data,
-                std::path::Path::new(".")
+                &dot_context()
             )
             .unwrap()
         );
@@ -770,7 +783,7 @@ mod tests {
             evaluate_condition_against(
                 "truthy_flag || UnknownFn(x)",
                 &data,
-                std::path::Path::new(".")
+                &dot_context()
             )
             .unwrap()
         );
@@ -780,21 +793,21 @@ mod tests {
     fn shortcut_and_or_functions() {
         let data = json!({ "a": true, "b": false });
         assert!(
-            !evaluate_condition_against("and(a, b)", &data, std::path::Path::new(".")).unwrap()
+            !evaluate_condition_against("and(a, b)", &data, &dot_context()).unwrap()
         );
-        assert!(evaluate_condition_against("or(a, b)", &data, std::path::Path::new(".")).unwrap());
+        assert!(evaluate_condition_against("or(a, b)", &data, &dot_context()).unwrap());
     }
 
     #[test]
     fn shortcut_ternary() {
         let data = json!({ "enabled": true, "yes": "yes", "empty": "" });
         assert!(
-            evaluate_condition_against("enabled ? yes : empty", &data, std::path::Path::new("."))
+            evaluate_condition_against("enabled ? yes : empty", &data, &dot_context())
                 .unwrap()
         );
         let data = json!({ "enabled": false, "yes": "yes", "empty": "" });
         assert!(
-            !evaluate_condition_against("enabled ? yes : empty", &data, std::path::Path::new("."))
+            !evaluate_condition_against("enabled ? yes : empty", &data, &dot_context())
                 .unwrap()
         );
     }
@@ -802,7 +815,7 @@ mod tests {
     #[test]
     fn shortcut_parse_error_shape() {
         let data = json!({});
-        let result = evaluate_condition_against("&& invalid", &data, std::path::Path::new("."));
+        let result = evaluate_condition_against("&& invalid", &data, &dot_context());
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, ConditionError::Parse { line: 1, .. }));
@@ -814,7 +827,7 @@ mod tests {
         let result = evaluate_condition_against(
             "truthy_flag && UnknownFn(x)",
             &data,
-            std::path::Path::new("."),
+            &dot_context(),
         );
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -823,37 +836,26 @@ mod tests {
 
     #[test]
     fn shortcut_env_lookup() {
-        // Set a known env var for the test
-        unsafe {
-            std::env::set_var("DM_TEST_AGENT", "claude");
-        }
+        // `env.*` reads the resolution context's environment, not the process.
+        let context = dot_context().with_env(HashMap::from([(
+            "DM_TEST_AGENT".to_string(),
+            "claude".to_string(),
+        )]));
         let data = json!({});
         assert!(
-            evaluate_condition_against(
-                "env.DM_TEST_AGENT == 'claude'",
-                &data,
-                std::path::Path::new(".")
-            )
-            .unwrap()
+            evaluate_condition_against("env.DM_TEST_AGENT == 'claude'", &data, &context).unwrap()
         );
         assert!(
-            !evaluate_condition_against(
-                "env.DM_TEST_AGENT == 'opencode'",
-                &data,
-                std::path::Path::new(".")
-            )
-            .unwrap()
+            !evaluate_condition_against("env.DM_TEST_AGENT == 'opencode'", &data, &context)
+                .unwrap()
         );
-        unsafe {
-            std::env::remove_var("DM_TEST_AGENT");
-        }
     }
 
     #[test]
     fn shortcut_ctx_datetime_lookup() {
         let data = json!({});
         // ctx.today and ctx.year are cheap (no I/O)
-        let result = evaluate_condition_against("ctx.today", &data, std::path::Path::new("."));
+        let result = evaluate_condition_against("ctx.today", &data, &dot_context());
         assert!(result.is_ok());
         // The result depends on the actual date, but it should evaluate without error
     }
@@ -863,7 +865,7 @@ mod tests {
         let data = json!({});
         // When a key is not in data, fall back to ctx.* (same as EffectiveState)
         // We test with a datetime key since it's always available
-        let result = evaluate_condition_against("year", &data, std::path::Path::new("."));
+        let result = evaluate_condition_against("year", &data, &dot_context());
         assert!(result.is_ok());
     }
 
@@ -873,7 +875,8 @@ mod tests {
             "build": "from-data",
             "doc": { "child": "literal-doc" },
         });
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
 
         // doc.<path> resolves a data property.
         assert_eq!(lookup.get("doc.build"), Some(json!("from-data")));
@@ -901,14 +904,15 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::write(dir.path().join("spec.md"), "# Spec").unwrap();
         let data = json!({});
+        let context = FileResolutionContext::new(dir.path());
 
-        assert!(evaluate_condition_against("file_exists('spec.md')", &data, dir.path()).unwrap());
-        assert!(!evaluate_condition_against("file_exists('nope.md')", &data, dir.path()).unwrap());
+        assert!(evaluate_condition_against("file_exists('spec.md')", &data, &context).unwrap());
+        assert!(!evaluate_condition_against("file_exists('nope.md')", &data, &context).unwrap());
         assert!(
-            evaluate_condition_against("absolute('spec.md') != ''", &data, dir.path()).unwrap()
+            evaluate_condition_against("absolute('spec.md') != ''", &data, &context).unwrap()
         );
         assert!(
-            evaluate_condition_against("relative('spec.md') == 'spec.md'", &data, dir.path())
+            evaluate_condition_against("relative('spec.md') == 'spec.md'", &data, &context)
                 .unwrap()
         );
     }
@@ -920,7 +924,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({ "false_flag": false });
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         let parsed = expression::parse_condition("false_flag && ctx.repo == 'x'").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
@@ -936,7 +941,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({ "true_flag": true });
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         let parsed = expression::parse_condition("true_flag || ctx.gpu").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
@@ -952,7 +958,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({ "draft": true });
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         let parsed = expression::parse_condition("draft == true").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
@@ -968,7 +975,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({});
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         let parsed = expression::parse_condition("missing_repo_name").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
@@ -985,7 +993,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({});
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         let parsed = expression::parse_condition("ctx.today").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
@@ -1001,7 +1010,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({});
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         let parsed = expression::parse_condition("ctx.today && ctx.year").unwrap();
         let _ = expression::evaluate(&parsed, &lookup);
         let captured = lookup.captured_groups();
@@ -1022,7 +1032,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({ "false_flag": false });
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         // Condition is false, so `ctx.repo` (then-branch) should NOT be evaluated or captured
         let parsed = expression::parse_condition("false_flag ? ctx.repo : 'default'").unwrap();
         let result = expression::evaluate(&parsed, &lookup).unwrap();
@@ -1044,7 +1055,8 @@ mod tests {
         use crate::markdown::compose::expression;
 
         let data = json!({ "true_flag": true });
-        let lookup = ShortcutLookup::new(&data, std::path::Path::new("."));
+        let context = dot_context();
+        let lookup = ShortcutLookup::new(&data, &context);
         // Condition is true, so `ctx.repo` (else-branch) should NOT be evaluated or captured
         let parsed = expression::parse_condition("true_flag ? 'default' : ctx.repo").unwrap();
         let result = expression::evaluate(&parsed, &lookup).unwrap();
@@ -1214,18 +1226,18 @@ mod tests {
                 "config": { "theme": "dark" }
             });
             assert!(
-                evaluate_condition_against("count * 2 == 10", &data, std::path::Path::new("."))
+                evaluate_condition_against("count * 2 == 10", &data, &dot_context())
                     .unwrap()
             );
             assert!(
-                evaluate_condition_against("items[-1] == 'c'", &data, std::path::Path::new("."))
+                evaluate_condition_against("items[-1] == 'c'", &data, &dot_context())
                     .unwrap()
             );
             assert!(
                 evaluate_condition_against(
                     r#"config["theme"] == 'dark'"#,
                     &data,
-                    std::path::Path::new(".")
+                    &dot_context()
                 )
                 .unwrap()
             );
@@ -1238,7 +1250,7 @@ mod tests {
                 evaluate_condition_against(
                     "is_array(items) && length(items) >= 2",
                     &data,
-                    std::path::Path::new(".")
+                    &dot_context()
                 )
                 .unwrap()
             );
@@ -1246,7 +1258,7 @@ mod tests {
                 evaluate_condition_against(
                     r#"starts_with(lower(title), "important")"#,
                     &data,
-                    std::path::Path::new(".")
+                    &dot_context()
                 )
                 .unwrap()
             );

@@ -8,6 +8,7 @@
 
 mod compose_diagnostic_identity;
 mod compose_expression_failure_contract;
+mod context_construction_guard;
 mod context_functions;
 mod current_root_documentation_contract;
 mod current_root_migration_guard;
@@ -16,6 +17,7 @@ mod data_origin;
 mod dasherized_identifier_corpus;
 mod directive_target_analysis;
 mod empty_package_area;
+mod entry_point_parity;
 mod feature_review_incident;
 mod file_tree_roots;
 mod find_files_and_try_frontmatter;
@@ -24,6 +26,8 @@ mod find_files_and_try_frontmatter;
 mod image_test_support;
 #[path = "../layout_matrix_support/mod.rs"]
 mod layout_matrix_support;
+#[path = "../request_support/mod.rs"]
+mod request_support;
 
 mod ambient_ctx_capture;
 mod array_rendering_json;
@@ -73,6 +77,8 @@ mod predict_conflicts;
 mod prelude_exports;
 mod prose_wrap_parity;
 mod reference_integration;
+mod request_context_builder;
+mod required_context;
 mod render_comparison;
 mod render_invariants;
 mod render_tree_hr_snapshots;
@@ -93,6 +99,7 @@ mod shell_block_integration;
 mod shell_expansion_coordinates;
 mod shell_result_values;
 mod preflight_child_state_parity;
+mod preflight_repository_sigils;
 mod shell_probe_preflight;
 mod span_compat;
 mod style_features_baseline;

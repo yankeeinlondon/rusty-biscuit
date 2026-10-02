@@ -81,6 +81,9 @@ required-features = ["terminal-tests"]
 # — tmux-driven report rendering), so the tier must be declared here or those
 # tests run in NO tier anywhere (AC12).
 [package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/context_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]
 # The L2 tier spawns one shared terminal pane through the harness broker.

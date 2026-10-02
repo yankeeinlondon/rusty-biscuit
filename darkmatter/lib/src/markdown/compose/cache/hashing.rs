@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 use std::path::Path;
 
 use crate::markdown::compose::EffectiveState;
-use crate::markdown::compose::{ComposeContext, ComposeOptions};
+use crate::markdown::compose::ComposeContext;
 
 // ── Source identification ──────────────────────────────────────────
 
@@ -122,7 +122,7 @@ impl PhaseStateIdentity {
 /// (`compose/context/options.rs`). The reference-graph options identity is the
 /// other product of that same classification, so cache and graph identity share
 /// one field inventory.
-pub(crate) fn options_hash(options: &ComposeOptions) -> u64 {
+pub(crate) fn options_hash(options: &crate::markdown::compose::ComposeRequest) -> u64 {
     options.compose_cache_fingerprint()
 }
 
@@ -238,6 +238,17 @@ impl Serialize for CanonicalJson<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::compose::{ComposeOptions, ComposeRequest};
+    use biscuit_file::FileResolutionContext;
+
+    /// A fixed, process-independent context so hashes compare only options.
+    fn fixed_context() -> FileResolutionContext {
+        FileResolutionContext::from_snapshot(std::env::temp_dir().join("request"), None, Default::default())
+    }
+
+    fn request(options: ComposeOptions) -> ComposeRequest {
+        crate::markdown::compose::test_request_in(options, fixed_context())
+    }
 
     #[test]
     fn canonical_json_sorts_keys() {
@@ -328,20 +339,26 @@ mod tests {
         assert_ne!(k1, k2);
     }
 
+    /// A request whose file-resolution context registers `roots`, in order.
+    fn with_magic_roots(roots: &[(&str, biscuit_file::PathPosition)]) -> ComposeRequest {
+        let context = roots.iter().fold(fixed_context(), |context, (root, position)| {
+            context.add_magic_path(*root, *position)
+        });
+        crate::markdown::compose::test_request_in(ComposeOptions::new(), context)
+    }
+
     #[test]
     fn options_hash_sensitive_to_magic_paths() {
-        let base = ComposeOptions::new();
-        let with_magic = ComposeOptions::new()
-            .with_magic_path("/custom/root", biscuit_file::PathPosition::Start);
+        let base = with_magic_roots(&[]);
+        let with_magic = with_magic_roots(&[("/custom/root", biscuit_file::PathPosition::Start)]);
 
         assert_ne!(options_hash(&base), options_hash(&with_magic));
     }
 
     #[test]
     fn options_hash_sensitive_to_magic_path_position() {
-        let start =
-            ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::Start);
-        let end = ComposeOptions::new().with_magic_path("/path", biscuit_file::PathPosition::End);
+        let start = with_magic_roots(&[("/path", biscuit_file::PathPosition::Start)]);
+        let end = with_magic_roots(&[("/path", biscuit_file::PathPosition::End)]);
 
         assert_ne!(options_hash(&start), options_hash(&end));
     }
@@ -416,7 +433,7 @@ mod tests {
         };
         use indexmap::IndexMap;
 
-        let base = ComposeOptions::new();
+        let base = request(ComposeOptions::new());
 
         let mut props_a = IndexMap::new();
         props_a.insert(
@@ -450,8 +467,8 @@ mod tests {
             ..Default::default()
         });
 
-        let with_a = ComposeOptions::new().with_baseline_schema(schema_a);
-        let with_b = ComposeOptions::new().with_baseline_schema(schema_b);
+        let with_a = request(ComposeOptions::new().with_baseline_schema(schema_a));
+        let with_b = request(ComposeOptions::new().with_baseline_schema(schema_b));
 
         assert_ne!(options_hash(&base), options_hash(&with_a));
         assert_ne!(options_hash(&base), options_hash(&with_b));
@@ -477,15 +494,15 @@ mod tests {
         // captured on the immediately-preceding commit.
         const LEGACY_DEFAULT_OPTIONS_HASH: u64 = 0x60a6_53c1_5cd5_b9d1;
         assert_ne!(
-            options_hash(&ComposeOptions::new()),
+            options_hash(&request(ComposeOptions::new())),
             LEGACY_DEFAULT_OPTIONS_HASH,
             "the new cache domain must not reproduce the legacy string-join hash, \
              so the encoding domain stays distinct"
         );
         // Determinism guard: the value is context-independent and stable.
         assert_eq!(
-            options_hash(&ComposeOptions::new()),
-            options_hash(&ComposeOptions::new()),
+            options_hash(&request(ComposeOptions::new())),
+            options_hash(&request(ComposeOptions::new())),
         );
     }
 
@@ -494,24 +511,25 @@ mod tests {
     /// cache key (they are semantically distinct compose inputs).
     #[test]
     fn options_hash_distinguishes_none_from_empty_value() {
-        let absent = ComposeOptions::new();
-        let empty_state = ComposeOptions::new().with_external_state(serde_json::json!({}));
-        let empty_overrides = ComposeOptions::new().with_set_overrides(serde_json::json!({}));
+        let absent = request(ComposeOptions::new());
+        let empty_state = request(ComposeOptions::new().with_external_state(serde_json::json!({})));
+        let empty_overrides = request(ComposeOptions::new().with_set_overrides(serde_json::json!({})));
         assert_ne!(options_hash(&absent), options_hash(&empty_state));
         assert_ne!(options_hash(&absent), options_hash(&empty_overrides));
         // And the two distinct empty-valued fields do not collide with each other.
         assert_ne!(options_hash(&empty_state), options_hash(&empty_overrides));
     }
 
-    /// The length-prefixed encoding keeps `magic_paths` element boundaries: a
+    /// The length-prefixed encoding keeps magic-root element boundaries: a
     /// single path spelled with the historical `,` separator must not hash the
     /// same as two separate paths. The old comma-join collapsed both.
     #[test]
     fn options_hash_magic_path_element_boundaries_are_injective() {
-        let merged = ComposeOptions::new().with_magic_path("/a,/b", biscuit_file::PathPosition::Start);
-        let split = ComposeOptions::new()
-            .with_magic_path("/a", biscuit_file::PathPosition::Start)
-            .with_magic_path("/b", biscuit_file::PathPosition::Start);
+        let merged = with_magic_roots(&[("/a,/b", biscuit_file::PathPosition::Start)]);
+        let split = with_magic_roots(&[
+            ("/a", biscuit_file::PathPosition::Start),
+            ("/b", biscuit_file::PathPosition::Start),
+        ]);
         assert_ne!(options_hash(&merged), options_hash(&split));
     }
 
@@ -552,9 +570,9 @@ mod tests {
 
     #[test]
     fn options_hash_sensitive_to_file_ref_fallback_dir() {
-        let base = ComposeOptions::new();
-        let with_a = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a");
-        let with_b = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-b");
+        let base = request(ComposeOptions::new());
+        let with_a = request(ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a"));
+        let with_b = request(ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-b"));
 
         // None vs Some, and Some(a) vs Some(b), must all differ.
         assert_ne!(options_hash(&base), options_hash(&with_a));
@@ -562,7 +580,7 @@ mod tests {
         assert_ne!(options_hash(&with_a), options_hash(&with_b));
 
         // Identical anchors must hash identically.
-        let with_a_again = ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a");
+        let with_a_again = request(ComposeOptions::new().with_file_ref_fallback_dir("/launch/area-a"));
         assert_eq!(options_hash(&with_a), options_hash(&with_a_again));
     }
 }

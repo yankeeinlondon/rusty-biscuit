@@ -9,8 +9,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::util::source_link_context;
-use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeWarning};
+use crate::markdown::compose::{ComposeReport, ComposeWarning};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
     html::{
@@ -127,7 +126,7 @@ fn compose_spelling(reference: &str, strategy: &PortabilityPreference) -> String
 /// [`link_resolve`](super::link_resolve::link_resolve), which errors instead.
 pub fn normalize_links(
     markdown: &mut Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     let source = options.source.clone();
@@ -177,24 +176,19 @@ pub fn normalize_links(
     // Sort by span start descending for safe in-place replacement
     to_normalize.sort_by_key(|(r, _)| std::cmp::Reverse(r.origin.span.start));
 
-    // One context for the whole document; without one `PortablePath` captures
-    // the process directory, home, and environment itself.
-    let ctx = source_link_context(options);
+    // One context for the whole document: the request's, derived for the
+    // source. `PortablePath` never captures process state itself.
+    let ctx = options.source_file_resolution_context();
     let mut new_content = content.to_string();
     let mut applied_count = 0;
     let mut reported_names = BTreeSet::new();
 
     for (record, destination) in to_normalize {
         let (path_text, suffix) = split_suffix(&destination);
-        let target = match &ctx {
-            Some(ctx) => in_context_spelling(Path::new(path_text), ctx),
-            None => PathBuf::from(path_text),
-        };
-        let mut portable =
-            PortablePath::from_path(target).with_portable_env(options.portable_env.iter().cloned());
-        if let Some(ctx) = &ctx {
-            portable = portable.with_ctx(ctx);
-        }
+        let target = in_context_spelling(Path::new(path_text), &ctx);
+        let portable = PortablePath::from_path(target)
+            .with_portable_env(options.portable_env.iter().cloned())
+            .with_ctx(&ctx);
 
         let result = match portable.file_reference() {
             Ok(result) => result,
@@ -281,12 +275,14 @@ fn report_invalid_names(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::ComposeReport;
+    use crate::markdown::compose::{
+        ComposeOptions, ComposeReport, ComposeRequest, test_request, test_request_in,
+    };
     use std::collections::HashMap;
     use std::fs;
     use tempfile::tempdir;
 
-    fn options_with_repo(source: &Path) -> ComposeOptions {
+    fn options_with_repo(source: &Path) -> ComposeRequest {
         let repo = source
             .ancestors()
             .find(|path| path.join(".git").exists())
@@ -294,21 +290,19 @@ mod tests {
         let base = source.parent().expect("source parent");
         let context = biscuit_file::FileResolutionContext::new(base)
             .with_repository_root(repo);
-        ComposeOptions::new()
-            .with_source_file(source)
-            .with_file_resolution_context(context)
+        test_request_in(ComposeOptions::new().with_source_file(source), context)
     }
 
     /// A request snapshot outside any repository whose `cwd` is a directory
     /// that is neither the target's nor an ancestor of it, so no relative
     /// preference can claim a target under `root`.
-    fn detached_options(root: &Path, env: HashMap<String, String>) -> ComposeOptions {
+    fn detached_options(root: &Path, env: HashMap<String, String>) -> ComposeRequest {
         let elsewhere = root.join("elsewhere");
         fs::create_dir_all(&elsewhere).unwrap();
         let snapshot = biscuit_file::FileResolutionContext::new(&elsewhere)
             .without_home_dir()
             .with_env(env);
-        ComposeOptions::new().with_file_resolution_context(snapshot)
+        test_request_in(ComposeOptions::new(), snapshot)
     }
 
     /// A variable's value as a user would export it. A canonical Windows path
@@ -318,7 +312,7 @@ mod tests {
         biscuit_file::to_portable_string(path)
     }
 
-    fn normalize(content: &str, options: &ComposeOptions) -> (String, ComposeReport) {
+    fn normalize(content: &str, options: &ComposeRequest) -> (String, ComposeReport) {
         let mut md = Markdown::new(content);
         let mut report = ComposeReport::new();
         normalize_links(&mut md, options, &mut report).unwrap();
@@ -427,7 +421,7 @@ mod tests {
         let target = home.join("some_file.txt");
         let content = format!("[file]({})\n", biscuit_file::to_portable_string(&target));
 
-        let (output, report) = normalize(&content, &ComposeOptions::new());
+        let (output, report) = normalize(&content, &test_request(ComposeOptions::new()));
 
         assert_eq!(output, "[file](~/some_file.txt)\n");
         assert_eq!(report.link_normalizations_applied, 1);
@@ -452,7 +446,7 @@ mod tests {
             biscuit_file::to_portable_string(&project.join("config.json"))
         );
 
-        let options = detached_options(&root, env).with_portable_env(["PROJECT_ROOT"]);
+        let options = detached_options(&root, env).derive(|options| options.with_portable_env(["PROJECT_ROOT"]));
         let (output, report) = normalize(&content, &options);
 
         assert_eq!(output, "<a href=\"{{{PROJECT_ROOT}}}/config.json\">config</a>\n");
@@ -509,7 +503,7 @@ mod tests {
             biscuit_file::to_portable_string(&notes.join("b.md")),
         );
 
-        let options = detached_options(&root, env).with_portable_env(["NOTES"]);
+        let options = detached_options(&root, env).derive(|options| options.with_portable_env(["NOTES"]));
         let (output, report) = normalize(&content, &options);
 
         assert_eq!(output, "[a]({{{CAPTURED_ROOT}}}/a.json)\n[b]({{{NOTES}}}/b.md)\n");
@@ -536,7 +530,7 @@ mod tests {
             biscuit_file::to_portable_string(&child.join("config.json"))
         );
 
-        let options = detached_options(&root, env).with_portable_env(["USER", "USER_NAME"]);
+        let options = detached_options(&root, env).derive(|options| options.with_portable_env(["USER", "USER_NAME"]));
         let (output, _) = normalize(&content, &options);
 
         assert_eq!(output, "[config]({{{USER_NAME}}}/config.json)");
@@ -688,7 +682,7 @@ mod tests {
     /// A target outside the fallback tree, with no home or portable
     /// environment anchor, so only the absolute fallback reaches it. Returns
     /// the temporary directory, the options, and the destination text.
-    fn absolute_only_fixture() -> (tempfile::TempDir, ComposeOptions, String) {
+    fn absolute_only_fixture() -> (tempfile::TempDir, ComposeRequest, String) {
         let dir = tempdir().unwrap();
         let root = fs::canonicalize(dir.path()).unwrap();
         let other = root.join("other");
@@ -738,7 +732,7 @@ mod tests {
     #[test]
     fn a_suppressed_absolute_fallback_warning_keeps_the_destination_silently() {
         let (_dir, options, destination) = absolute_only_fixture();
-        let options = options.with_absolute_fallback_warning(false);
+        let options = options.derive(|options| options.with_absolute_fallback_warning(false));
 
         for (label, form) in DESTINATION_FORMS {
             let content = form.replace("{}", &destination);
@@ -789,7 +783,7 @@ mod tests {
     fn remote_urls_are_not_touched() {
         let content = "[link](https://example.com/page) and ![img](http://cdn.example.com/img.png)";
 
-        let (output, report) = normalize(content, &ComposeOptions::new());
+        let (output, report) = normalize(content, &test_request(ComposeOptions::new()));
 
         assert_eq!(output, content);
         assert_eq!(report.link_normalizations_applied, 0);
@@ -820,7 +814,7 @@ mod tests {
     /// Normalizes `content` and asserts the destination survived
     /// byte-identical with a preservation warning.
     #[cfg(windows)]
-    fn assert_preserved_with_warning(content: &str, options: &ComposeOptions, label: &str) {
+    fn assert_preserved_with_warning(content: &str, options: &ComposeRequest, label: &str) {
         let (output, report) = normalize(content, options);
 
         assert_eq!(output, content, "{label}: destination was rewritten");
@@ -837,23 +831,23 @@ mod tests {
     /// A Windows snapshot outside any repository whose `cwd` is a directory
     /// beside `root`'s contents, so only the named anchor can claim a target.
     #[cfg(windows)]
-    fn env_options(root: &Path) -> ComposeOptions {
+    fn env_options(root: &Path) -> ComposeRequest {
         let env = HashMap::from([(
             "PROJECT_ROOT".to_string(),
             env_value(&root),
         )]);
-        detached_options(root, env).with_portable_env(["PROJECT_ROOT"])
+        detached_options(root, env).derive(|options| options.with_portable_env(["PROJECT_ROOT"]))
     }
 
     /// As [`env_options`], but the anchor is the home directory.
     #[cfg(windows)]
-    fn home_options(home: &Path) -> ComposeOptions {
+    fn home_options(home: &Path) -> ComposeRequest {
         let elsewhere = home.join("elsewhere");
         fs::create_dir_all(&elsewhere).unwrap();
         let snapshot = biscuit_file::FileResolutionContext::new(&elsewhere)
             .with_home_dir(home)
             .with_env(HashMap::new());
-        ComposeOptions::new().with_file_resolution_context(snapshot)
+        test_request_in(ComposeOptions::new(), snapshot)
     }
 
     /// Rewriting `\\?\C:\…\repo\assets\.\image.png` relative to a document

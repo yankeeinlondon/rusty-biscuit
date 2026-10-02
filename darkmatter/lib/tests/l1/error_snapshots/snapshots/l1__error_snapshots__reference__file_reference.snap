@@ -1,9 +1,11 @@
 ---
-source: darkmatter/lib/tests/error_snapshots/reference.rs
+source: darkmatter/lib/tests/l1/error_snapshots/reference.rs
 expression: out
 ---
 ⤫ ReferenceError: file reference failure
 ┃ 
 ┃ file reference syntax is invalid: unclosed brace
+┃ 
+┃ failure: invalid-reference
 ┃ 
 ┃ Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped.

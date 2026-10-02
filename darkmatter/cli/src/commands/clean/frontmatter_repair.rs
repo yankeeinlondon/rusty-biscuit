@@ -28,6 +28,16 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::extract_frontmatter_block;
 use darkmatter::markdown::schemas::{CleanSchemaConfig, CleanSchemaContext};
+
+/// The `md` request a `clean` run resolves schema references in, and the
+/// reference that opened the document (for a quoted `~/…` argument).
+///
+/// Contexts are built only when the schema tier runs, so a document with no
+/// frontmatter never pays for repository discovery.
+pub struct DocumentRequest<'a> {
+    pub request: &'a crate::request::MdRequest,
+    pub opening: Option<&'a biscuit_file::FileReference>,
+}
 use darkmatter::markdown::span::line_col_of_offset;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -412,6 +422,7 @@ pub fn repair_frontmatter(
     source: &str,
     document_path: Option<&Path>,
     flags: &CleanSchemaFlags,
+    request: &DocumentRequest<'_>,
 ) -> Result<FrontmatterRepair> {
     let original_source = source;
     let Some(original_extraction) = extract_frontmatter_block(source)? else {
@@ -500,7 +511,7 @@ pub fn repair_frontmatter(
     if parses(&yaml) {
         let after_syntax = splice_frontmatter(source, &extraction, &yaml);
         if let Ok(markdown) = build_markdown(after_syntax, document_path) {
-            let context = resolve_schema_context(flags, document_path)?;
+            let context = resolve_schema_context(flags, document_path, request)?;
             let schema_analysis = context.analyze(&markdown, &yaml)?;
 
             let auto_apply: Vec<YamlRepair> = schema_analysis
@@ -650,13 +661,22 @@ fn build_markdown(source: String, document_path: Option<&Path>) -> Result<Markdo
 fn resolve_schema_context(
     flags: &CleanSchemaFlags,
     document_path: Option<&Path>,
+    request: &DocumentRequest<'_>,
 ) -> Result<CleanSchemaContext> {
-    let mut config = CleanSchemaConfig::new();
+    // A file resolves through its own context; stdin through the launch one.
+    let context = match document_path {
+        Some(path) => request.request.document_context(request.opening, path)?,
+        None => request.request.launch_context()?.clone(),
+    };
+    let mut config = CleanSchemaConfig::new(context);
 
     if flags.no_baseline_schema || crate::commands::compose::env_disables_baseline_schema() {
         config = config.without_baseline_schema();
     } else if let Some(path) = &flags.baseline_schema {
-        config = config.with_baseline_schema_file(crate::io::resolve_file_path(path)?);
+        config = config.with_baseline_schema_file(crate::io::resolve_file_path(
+            path,
+            request.request.launch_context()?,
+        )?);
     }
 
     if let Some(schema) = &flags.schema {

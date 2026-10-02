@@ -11,7 +11,7 @@ fn test_stage2_file_transclusion_relevels_to_parent_heading() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("### Child"));
     assert!(composed.content().contains("Body"));
@@ -31,7 +31,7 @@ fn test_stage2_nested_transclusion_counts_recursive_includes() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("# Leaf"));
     assert_eq!(report.transclusions_applied, 2);
@@ -49,7 +49,7 @@ fn test_stage2_duplicate_sibling_includes_are_not_treated_as_cycles() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(&root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content().matches("# Child").count(), 2);
     assert_eq!(report.transclusions_applied, 2);
@@ -70,7 +70,7 @@ fn test_stage2_diamond_dependency_graph_is_allowed() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(&root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content().matches("### Shared").count(), 2);
     assert_eq!(report.transclusions_applied, 4);
@@ -87,7 +87,7 @@ fn test_stage2_cycle_detection_fails() {
 
     let md = Markdown::try_from(a.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(a);
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
 
     assert!(matches!(
         err,
@@ -107,7 +107,7 @@ fn test_stage2_code_transclusion_wraps_fenced_block() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("```rs"));
     assert!(composed.content().contains("fn main()"));
@@ -125,7 +125,7 @@ fn test_stage2_code_transclusion_uses_fallback_language_for_unknown_extension() 
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("```txt"));
     assert!(composed.content().contains("hello"));
@@ -143,7 +143,7 @@ fn test_stage2_repeated_code_includes_are_allowed() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(&root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content().matches("fn repeated() {}").count(), 2);
     assert_eq!(report.transclusions_applied, 2);
@@ -164,7 +164,7 @@ fn test_stage2_when_false_skips_directive() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(!composed.content().contains("Child"));
     assert_eq!(report.transclusions_skipped, 1);
@@ -187,7 +187,7 @@ fn test_stage2_frontmatter_prologue_epilogue() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().starts_with("Intro"));
     assert!(composed.content().contains("Body"));
@@ -223,8 +223,8 @@ fn test_stage2_frontmatter_reference_parse_errors_match_preflight_and_execution(
             let options = ComposeOptions::new()
                 .with_source_file(&root)
                 .with_ignore_invalid_references(Some(true));
-            let preflight_error = md.compose_preflight(&options).unwrap_err();
-            let execution_error = md.compose_with(options).unwrap_err();
+            let preflight_error = md.compose_preflight(&crate::markdown::compose::test_request(options.clone())).unwrap_err();
+            let execution_error = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
             let preflight_source = frontmatter_file_reference_error(&preflight_error);
             let execution_source = frontmatter_file_reference_error(&execution_error);
 
@@ -264,10 +264,10 @@ fn test_stage2_frontmatter_inline_content_matches_preflight_and_execution() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(&root);
-    let preflight = md.compose_preflight(&options).unwrap();
+    let preflight = md.compose_preflight(&crate::markdown::compose::test_request(options.clone())).unwrap();
     assert!(preflight.preflight_graph.edges.is_empty());
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(composed.content().starts_with("Inline preface text"));
     assert!(
         composed
@@ -289,7 +289,7 @@ fn test_stage2_same_file_can_be_used_in_prologue_and_body() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(&root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content().matches("## Shared").count(), 2);
     assert_eq!(report.transclusions_applied, 2);
@@ -298,7 +298,7 @@ fn test_stage2_same_file_can_be_used_in_prologue_and_body() {
 #[test]
 fn test_stage2_missing_source_context_for_relative_path() {
     let md: Markdown = "::file ./child.md".into();
-    let err = md.compose().unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(crate::markdown::compose::ComposeOptions::new())).unwrap_err();
     assert!(matches!(
         err,
         MarkdownError::Transclusion(ref inner)
@@ -319,7 +319,7 @@ fn test_toc_linking_fail_fast_false_becomes_warning() {
     let options = ComposeOptions::new()
         .with_source_file(&root)
         .with_fail_fast(false);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // The directive is replaced by a notice rather than left in place: a
     // tolerated failure still owes the reader a visible gap, and leaking
@@ -335,7 +335,9 @@ fn test_toc_linking_fail_fast_false_becomes_warning() {
         report
             .warnings
             .iter()
-            .any(|warning| warning.message.contains("File not found"))
+            .any(|warning| warning.resolution_failure == Some(biscuit_file::ResolutionFailure::NoMatch)),
+        "{:?}",
+        report.warnings
     );
 }
 
@@ -349,7 +351,7 @@ fn test_toc_linking_fail_fast_true_returns_error() {
     let options = ComposeOptions::new()
         .with_source_file(&root)
         .with_fail_fast(true);
-    let err = md.compose_with(options).unwrap_err();
+    let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
 
     assert!(matches!(err, MarkdownError::TocLinking(_)));
 }
@@ -365,7 +367,7 @@ fn test_stage2_h6_overflow_converts_to_bold_text() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("###### Child"));
     assert!(composed.content().contains("**Deep**"));
@@ -393,7 +395,7 @@ fn test_stage2_consecutive_file_directives_separated_by_blank_line() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Two transclusions should have occurred
     assert_eq!(report.transclusions_applied, 2);
@@ -418,7 +420,7 @@ fn test_stage2_frontmatter_inline_string_prologue() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().starts_with("**Draft** document"));
     assert!(composed.content().contains("Body content."));
@@ -433,7 +435,7 @@ fn test_stage2_frontmatter_inline_string_epilogue() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(
         composed
@@ -459,7 +461,7 @@ fn test_stage2_frontmatter_mixed_file_and_inline() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     let content = composed.content();
     assert!(content.starts_with("File intro."));
@@ -479,7 +481,7 @@ fn test_stage2_frontmatter_bare_filename_is_treated_as_file_reference() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     let content = composed.content();
     assert!(content.starts_with("Intro text."));
@@ -498,7 +500,7 @@ fn test_stage2_parent_frontmatter_propagates_to_child_interpolation() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("Written by Alice."));
 }
@@ -518,7 +520,7 @@ fn test_stage2_parent_replace_map_propagates_to_child() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("Content with actual here."));
 }
@@ -538,7 +540,7 @@ fn test_stage2_replace_parent_wins_inverts_precedence() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(composed.content().trim(), "parent");
 }
@@ -560,7 +562,7 @@ fn test_stage2_replace_one_off_does_not_propagate_to_grandchildren() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     let content = composed.content();
     assert!(content.contains("Child: oneoff root"));
@@ -582,7 +584,7 @@ fn test_stage2_prologue_epilogue_do_not_propagate_to_children() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     let content = composed.content();
     // "Root epilogue." should appear exactly once — at the end of root, not within child
@@ -606,7 +608,7 @@ fn test_stage2_inline_epilogue_with_markdown_links() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _report) = md.compose_with(options).unwrap();
+    let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     let content = composed.content();
     assert!(
@@ -631,7 +633,7 @@ fn test_stage2_exclude_removes_section() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("## Keep"));
     assert!(composed.content().contains("Kept body."));
@@ -656,7 +658,7 @@ fn test_stage2_exclude_wildcard() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("## Keep"));
     assert!(!composed.content().contains("Remove This"));
@@ -674,7 +676,7 @@ fn test_stage2_exclude_prelude() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(!composed.content().contains("Prelude text"));
     assert!(composed.content().contains("## Heading"));
@@ -696,7 +698,7 @@ fn test_stage2_multiple_excludes() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(!composed.content().contains("## A"));
     assert!(composed.content().contains("## B"));
@@ -720,7 +722,7 @@ fn test_stage2_quotation_wrapper_does_not_absorb_following_content() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert_eq!(report.transclusions_applied, 1);
     // The "Following paragraph" must NOT be inside the blockquote
@@ -759,7 +761,7 @@ fn test_stage2_when_env_match_includes_directive() {
     let options = ComposeOptions::new()
         .with_source_file(root)
         .with_context(ctx);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("Claude content."));
     assert_eq!(report.transclusions_applied, 1);
@@ -786,7 +788,7 @@ fn test_stage2_when_env_mismatch_skips_directive() {
     let options = ComposeOptions::new()
         .with_source_file(root)
         .with_context(ctx);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(!composed.content().contains("Claude content."));
     assert_eq!(report.transclusions_applied, 0);
@@ -812,7 +814,7 @@ fn test_stage2_when_env_unset_skips_equality() {
     let options = ComposeOptions::new()
         .with_source_file(root)
         .with_context(ctx);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(!composed.content().contains("Claude content."));
     assert_eq!(report.transclusions_skipped, 1);
@@ -851,7 +853,7 @@ fn test_stage2_mutual_exclusion_conditions() {
     let opts = ComposeOptions::new()
         .with_source_file(&root)
         .with_context(ctx);
-    let (out, report) = md.compose_with(opts).unwrap();
+    let (out, report) = md.compose_with(&crate::markdown::compose::test_request(opts)).unwrap();
     assert!(out.content().contains("CC only."), "Expected CC content");
     assert!(!out.content().contains("OC only."), "Should not contain OC");
     assert!(
@@ -869,7 +871,7 @@ fn test_stage2_mutual_exclusion_conditions() {
     let opts = ComposeOptions::new()
         .with_source_file(&root)
         .with_context(ctx);
-    let (out, report) = md.compose_with(opts).unwrap();
+    let (out, report) = md.compose_with(&crate::markdown::compose::test_request(opts)).unwrap();
     assert!(!out.content().contains("CC only."));
     assert!(out.content().contains("OC only."), "Expected OC content");
     assert!(!out.content().contains("Default only."));
@@ -882,7 +884,7 @@ fn test_stage2_mutual_exclusion_conditions() {
     let opts = ComposeOptions::new()
         .with_source_file(&root)
         .with_context(ctx);
-    let (out, report) = md.compose_with(opts).unwrap();
+    let (out, report) = md.compose_with(&crate::markdown::compose::test_request(opts)).unwrap();
     assert!(!out.content().contains("CC only."));
     assert!(!out.content().contains("OC only."));
     assert!(
@@ -912,7 +914,7 @@ fn test_stage2_relevel_h1_child_under_h3_parent() {
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let options = ComposeOptions::new().with_source_file(root);
-    let (composed, _) = md.compose_with(options).unwrap();
+    let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     // Parent heading before directive is H3, so child should be re-leveled:
     // H1 → H4, H2 → H5
@@ -937,7 +939,7 @@ fn page_block_true_preserves_content_through_pipeline() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(
         composed.content().contains("kept content"),
         "True block body should be preserved, got:\n{}",
@@ -961,7 +963,7 @@ fn page_block_false_removes_content_through_pipeline() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(
         !composed.content().contains("removed"),
         "False block body should be removed, got:\n{}",
@@ -992,7 +994,7 @@ fn page_block_condition_can_read_frontmatter_from_file() {
         .only(&[ComposeOperation::PageBlocks])
         .with_source_file(&root);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(
         composed.content().contains("ready block"),
         "page block should evaluate filesystem expression functions, got:\n{}",
@@ -1012,7 +1014,7 @@ fn page_block_coexists_with_interpolation() {
         ComposeOperation::PageBlocks,
     ]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(
         composed.content().contains("Shown: true"),
         "Page blocks and interpolation should both apply, got:\n{}",
@@ -1029,7 +1031,7 @@ fn page_block_report_and_warnings_populated() {
 
     let options = ComposeOptions::new().only(&[ComposeOperation::PageBlocks]);
 
-    let (_, report) = md.compose_with(options).unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert_eq!(report.page_blocks_rendered, 1);
     assert_eq!(report.page_blocks_skipped, 1);
     assert!(
@@ -1048,7 +1050,7 @@ fn page_block_toggle_disabled_leaves_directives_as_text() {
 
     let options = ComposeOptions::new().only(&[]);
 
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(
         composed.content().contains("::block"),
         "With page_blocks disabled, directives should be left as text"
@@ -1063,7 +1065,7 @@ fn perf_disabled_produces_no_report() {
     let md: Markdown = content.into();
 
     let options = ComposeOptions::new(); // perf_enabled defaults to false
-    let (_, report) = md.compose_with(options).unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(report.perf.is_none(), "Perf should be None when disabled");
 }
 
@@ -1073,7 +1075,7 @@ fn perf_enabled_produces_report() {
     let md: Markdown = content.into();
 
     let options = ComposeOptions::new().with_perf(true);
-    let (_, report) = md.compose_with(options).unwrap();
+    let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
     assert!(
         report.perf.is_some(),
         "Perf should be populated when enabled"
@@ -1095,7 +1097,7 @@ fn perf_enabled_with_interpolation() {
     let md: Markdown = content.into();
 
     let options = ComposeOptions::new().with_perf(true);
-    let (composed, report) = md.compose_with(options).unwrap();
+    let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
     assert!(composed.content().contains("Hello World!"));
     let perf = report.perf.unwrap();
@@ -1131,7 +1133,7 @@ mod remote_transclusion_tests {
             .with_remote_read_config(config)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        md.compose_with(options)
+        md.compose_with(&crate::markdown::compose::test_request(options))
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1259,7 +1261,7 @@ mod remote_transclusion_tests {
             .with_allow_remote_transclusion(true)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(
             result.is_err(),
             "Expected error because no allowed hosts configured"
@@ -1444,7 +1446,7 @@ mod remote_transclusion_tests {
             .with_pre_approved_commands(approved)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, _) = md.compose_with(options).unwrap();
+        let (composed, _) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(
             composed.frontmatter().as_map().get("result"),
             Some(&serde_json::Value::String("yes".to_string()))
@@ -1543,7 +1545,7 @@ mod remote_transclusion_tests {
             .with_remote_read_config(config)
             .only(&[ComposeOperation::Interpolation]);
         let md: Markdown = body.clone().into();
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         assert_eq!(composed.content(), "T: Interp Only\n");
         let rf = report.remote_fetch_stats.unwrap();
@@ -1657,7 +1659,7 @@ mod remote_transclusion_tests {
         // The walked graph is recursive across the URL edges: the root's single
         // edge points at the remote child, whose own single edge points at the
         // remote grandchild.
-        let preflight = md.compose_preflight(&base_options).unwrap();
+        let preflight = md.compose_preflight(&crate::markdown::compose::test_request(base_options.clone())).unwrap();
         assert_eq!(
             preflight.preflight_graph.edges.len(),
             1,
@@ -1680,7 +1682,7 @@ mod remote_transclusion_tests {
         }
 
         // Compose WITHOUT the preflight graph — baseline output.
-        let (baseline, _) = md.compose_with(base_options.clone()).unwrap();
+        let (baseline, _) = md.compose_with(&crate::markdown::compose::test_request(base_options.clone())).unwrap();
         assert!(
             baseline.content().contains("GRANDCHILD-CONTENT-MARKER"),
             "baseline did not transclude remote grandchild: {}",
@@ -1691,7 +1693,7 @@ mod remote_transclusion_tests {
         // threaded remote sub-node and stay byte-identical to the baseline.
         let with_graph_options =
             base_options.with_preflight_graph(preflight.preflight_graph.clone());
-        let (with_graph, _) = md.compose_with(with_graph_options).unwrap();
+        let (with_graph, _) = md.compose_with(&crate::markdown::compose::test_request(with_graph_options)).unwrap();
         assert!(
             with_graph.content().contains("GRANDCHILD-CONTENT-MARKER"),
             "graph-seeded compose did not transclude remote grandchild: {}",
@@ -1818,7 +1820,7 @@ mod remote_transclusion_tests {
 
         // Run 1: populate the remote transport cache; remote → v1.
         let md1 = Markdown::try_from(root.as_path()).unwrap();
-        let (c1, _) = md1.compose_with(mk_options(false)).unwrap();
+        let (c1, _) = md1.compose_with(&crate::markdown::compose::test_request(mk_options(false))).unwrap();
         assert!(
             c1.content().contains("remote v1"),
             "run 1 should embed the original remote body: {}",
@@ -1829,7 +1831,7 @@ mod remote_transclusion_tests {
         // revalidation. The local child is never persisted, so it recomposes
         // and must embed the revalidated body.
         let md2 = Markdown::try_from(root.as_path()).unwrap();
-        let (c2, _) = md2.compose_with(mk_options(true)).unwrap();
+        let (c2, _) = md2.compose_with(&crate::markdown::compose::test_request(mk_options(true))).unwrap();
         assert!(
             c2.content().contains("remote v2"),
             "local child must revalidate its nested remote URL under \
@@ -1915,7 +1917,7 @@ mod remote_transclusion_tests {
             .with_allow_remote_transclusion(true)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(
             result.is_err(),
             "Expected error because no allowed hosts configured"
@@ -1944,7 +1946,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(text.contains("a.md"), "content: {text}");
@@ -1980,7 +1982,7 @@ mod file_links_compose {
         // Full default pipeline (cleanup + normalization enabled) proves the
         // embedded block survives end to end.
         let (composed, _report) = md
-            .compose_with(ComposeOptions::new().with_source_file(&root))
+            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root)))
             .unwrap();
         assert!(
             composed.content().contains("bt:render-tree"),
@@ -2057,7 +2059,7 @@ mod file_links_compose {
 
         let md = Markdown::try_from(root.as_path()).unwrap();
         let (composed, _report) = md
-            .compose_with(ComposeOptions::new().with_source_file(&root))
+            .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new().with_source_file(&root)))
             .unwrap();
 
         let options = TerminalOptions {
@@ -2112,7 +2114,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(text.contains("top.md"), "content: {text}");
@@ -2141,7 +2143,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(text.contains("nested.md"), "content: {text}");
@@ -2160,7 +2162,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(
@@ -2181,7 +2183,7 @@ mod file_links_compose {
             .with_fail_fast(true)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(text.contains("No matching files"), "content: {text}");
@@ -2200,7 +2202,7 @@ mod file_links_compose {
             .with_fail_fast(false)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(
@@ -2232,7 +2234,7 @@ mod file_links_compose {
             .with_fail_fast(true)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let err = md.compose_with(options).unwrap_err();
+        let err = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap_err();
         assert!(
             err.to_string().contains("not a directory"),
             "expected a not-a-directory error, got: {err}"
@@ -2255,7 +2257,7 @@ mod file_links_compose {
             .with_ignore_invalid_references(Some(true))
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(
@@ -2285,7 +2287,7 @@ mod file_links_compose {
             .disable(ComposeOperation::FileLinks)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(text.contains("::file-links"), "directive should remain: {text}");
@@ -2307,7 +2309,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         // Each output line should be indented to match the list item
@@ -2333,7 +2335,7 @@ mod file_links_compose {
             .with_fail_fast(true)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let result = md.compose_with(options);
+        let result = md.compose_with(&crate::markdown::compose::test_request(options));
         assert!(result.is_err(), "expected parse error in strict mode");
     }
 
@@ -2352,7 +2354,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(
@@ -2381,7 +2383,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, _report) = md.compose_with(options).unwrap();
+        let (composed, _report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         assert!(text.contains("lower.md"), "content: {text}");
@@ -2416,7 +2418,7 @@ mod file_links_compose {
             .with_source_file(&root)
             .disable(ComposeOperation::Cleanup)
             .disable(ComposeOperation::Normalization);
-        let (composed, report) = md.compose_with(options).unwrap();
+        let (composed, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
 
         let text = composed.content();
         // First directive's content should appear before second

@@ -191,7 +191,7 @@ does not inject the Darkmatter base schema by default; it keeps the explicit
 `--schema` / `BASELINE_SCHEMA` behavior shown above.
 
 ```rust
-let api = DarkmatterSchemas::new()
+let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 ```
 
@@ -462,9 +462,13 @@ So `spec: ""` + `--set spec=design.md` validates, while `spec: "design.md"` + `-
 ## Library API
 
 ```rust
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::DarkmatterSchemas;
 
-let api = DarkmatterSchemas::new()
+// The context resolves `$schema` references and `file` values; build it for
+// the directory the documents belong to.
+let context = build_resolution_context(&RequestSnapshot::new("/work/project"))?;
+let api = DarkmatterSchemas::new(context)
     .with_baseline_from_file("./schemas/baseline.yaml")?;
 
 let report = api.validate(&markdown)?;

@@ -298,7 +298,7 @@ mod tests {
                 .with_projection_key_removed("today")
                 .with_projection_key_removed("timezone");
             let error = Markdown::from(content)
-                .compose_with(ComposeOptions::new_with_context(context).with_fail_fast(false))
+                .compose_with(&crate::markdown::compose::test_request(ComposeOptions::new_with_context(context).with_fail_fast(false)))
                 .expect_err("a malformed projection must fail composition");
             assert!(
                 matches!(

@@ -1476,7 +1476,11 @@ pub fn home_dir() -> Option<PathBuf> {
 /// Unicode, which POSIX permits, so one stray variable would crash every
 /// context construction. Such variables are skipped instead; a reference
 /// naming one fails with `MissingEnvironmentVariable`.
-fn capture_env() -> HashMap<String, String> {
+///
+/// This is the environment [`FileResolutionContext::new`] snapshots; a caller
+/// that builds through [`FileResolutionContext::from_snapshot`] reads it here
+/// so both see the same variables.
+pub fn capture_env() -> HashMap<String, String> {
     utf8_env(std::env::vars_os())
 }
 

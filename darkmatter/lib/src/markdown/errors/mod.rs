@@ -122,6 +122,42 @@ pub fn as_block_error<'a>(
     None
 }
 
+/// The stable kebab-case name of a file-reference failure class, as the
+/// `failure` detail row of a rendered error spells it.
+///
+/// The names are a contract: tests and tools read the row instead of the
+/// message text, so a name never changes once published.
+///
+/// ## Examples
+///
+/// ```
+/// use biscuit_file::ResolutionFailure;
+/// use darkmatter::markdown::errors::resolution_failure_name;
+///
+/// assert_eq!(resolution_failure_name(ResolutionFailure::NoMatch), "no-match");
+/// ```
+pub fn resolution_failure_name(failure: biscuit_file::ResolutionFailure) -> &'static str {
+    use biscuit_file::ResolutionFailure;
+    match failure {
+        ResolutionFailure::InvalidReference => "invalid-reference",
+        ResolutionFailure::MissingContext => "missing-context",
+        ResolutionFailure::NoMatch => "no-match",
+        ResolutionFailure::Io => "io",
+        ResolutionFailure::UnsupportedRemote => "unsupported-remote",
+    }
+}
+
+/// The `failure` detail row a failed file reference's error block carries,
+/// rendering as `failure: <name>` (see [`resolution_failure_name`]).
+pub fn resolution_failure_row(
+    failure: biscuit_file::ResolutionFailure,
+) -> biscuit_terminal::components::prose::Prose {
+    biscuit_terminal::components::prose::Prose::new(format!(
+        "<dim>failure:</dim> {}",
+        resolution_failure_name(failure)
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

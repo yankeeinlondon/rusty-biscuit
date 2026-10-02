@@ -16,6 +16,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use clap::{Args, Subcommand};
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use messenger::research::generate::{self, Baseline, Drift, GenerateError, load_fleet};
 use messenger::research::model::{Date, PlatformId};
 use messenger::research::publish::{self, Options, PublishError};
@@ -144,7 +145,11 @@ pub(crate) fn parse_platform(text: &str) -> Result<PlatformId, String> {
 }
 
 /// Runs a research command and returns the process exit status.
-pub fn run(args: ResearchArgs) -> i32 {
+///
+/// `snapshot` is the process state captured once by the binary. A failed
+/// capture (an unreadable current directory) is reported like any other
+/// command that cannot run, with [`EXIT_UNAVAILABLE`].
+pub fn run(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> i32 {
     let json = match &args.command {
         ResearchCommand::Validate { json, .. }
         | ResearchCommand::Generate { json, .. }
@@ -157,7 +162,7 @@ pub fn run(args: ResearchArgs) -> i32 {
         ResearchCommand::Reject(args) => args.json,
         ResearchCommand::Cleanup(args) => args.json,
     };
-    match execute(args) {
+    match execute(args, snapshot) {
         Ok(code) => code,
         Err(message) => {
             if json {
@@ -171,13 +176,18 @@ pub fn run(args: ResearchArgs) -> i32 {
     }
 }
 
-fn execute(args: ResearchArgs) -> Result<i32, String> {
-    let root = resolve_root(args.root.as_deref())?;
+fn execute(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> Result<i32, String> {
+    let snapshot = snapshot.map_err(|error| format!("cannot read the current directory: {error}"))?;
+    let root = resolve_root(snapshot.request_dir(), args.root.as_deref())?;
     let workspace = Workspace::new(root).map_err(|error| error.to_string())?;
-    let loader = Loader::new(workspace);
+    let context =
+        build_resolution_context(&snapshot.at_request_dir(workspace.repo_root())).map_err(|error| error.to_string())?;
+    let loader = Loader::new(workspace, context);
     let today = args.today.unwrap_or_else(utc_today);
     match args.command {
-        ResearchCommand::Validate { documents, scope, json } => validate(&loader, &documents, scope, &today, json),
+        ResearchCommand::Validate { documents, scope, json } => {
+            validate(&loader, &documents, snapshot.request_dir(), scope, &today, json)
+        }
         ResearchCommand::Generate { check: true, json } => check(&loader, &today, json),
         ResearchCommand::Generate { check: false, json } => generate(&loader, &today, json),
         ResearchCommand::Report { platform, interface, operation, json } => {
@@ -193,12 +203,13 @@ fn execute(args: ResearchArgs) -> Result<i32, String> {
     }
 }
 
-fn resolve_root(root: Option<&Path>) -> Result<PathBuf, String> {
-    let cwd = std::env::current_dir().map_err(|error| format!("cannot read the current directory: {error}"))?;
+/// The research root: `--root` against the request directory `cwd`, else the
+/// Git top level containing `cwd`.
+fn resolve_root(cwd: &Path, root: Option<&Path>) -> Result<PathBuf, String> {
     if let Some(root) = root {
         return Ok(std::path::absolute(cwd.join(root)).unwrap_or_else(|_| cwd.join(root)));
     }
-    sniff::filesystem::git::api::repo_root(&cwd)
+    sniff::filesystem::git::api::repo_root(cwd)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "not inside a Git repository; pass --root".to_string())
 }
@@ -236,7 +247,16 @@ struct ValidationOutput {
     missing: Vec<PlatformId>,
 }
 
-fn validate(loader: &Loader, documents: &[PathBuf], scope: ScopeArg, today: &Date, json: bool) -> Result<i32, String> {
+/// Relative `documents` are taken from `request_dir`, the directory the
+/// binary was launched in (its snapshot), never a second process read.
+fn validate(
+    loader: &Loader,
+    documents: &[PathBuf],
+    request_dir: &Path,
+    scope: ScopeArg,
+    today: &Date,
+    json: bool,
+) -> Result<i32, String> {
     let output = if documents.is_empty() {
         let fleet = load_fleet(loader, Baseline::FixedPaths, &BTreeMap::new()).map_err(research_error)?;
         let validation = fleet.validate(today);
@@ -253,9 +273,8 @@ fn validate(loader: &Loader, documents: &[PathBuf], scope: ScopeArg, today: &Dat
             ScopeArg::Accepted => Scope::Accepted,
             ScopeArg::Fragment => Scope::Fragment,
         };
-        let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
         for document in documents {
-            let path = if document.is_absolute() { document.clone() } else { cwd.join(document) };
+            let path = if document.is_absolute() { document.clone() } else { request_dir.join(document) };
             let loaded = loader.load_document(&path).map_err(research_error)?;
             let context = Context { roster: roster.record.as_ref(), scope };
             diagnostics.extend(validate_document(&loaded, &context).diagnostics);

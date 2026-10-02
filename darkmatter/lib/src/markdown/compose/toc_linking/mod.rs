@@ -84,7 +84,10 @@ pub(crate) fn resolve_target_chain(
 ) -> Result<Option<(String, std::path::PathBuf)>, TocLinkingError> {
     trace!(target = %directive.targets.join(" > "), "toc_linking: resolving target chain");
 
-    for target in &directive.targets {
+    // The authored (first) target's class is the one reported: the reader
+    // acts on what they wrote, and a fallback's miss must not hide it.
+    let mut first_failure = None;
+    for (index, target) in directive.targets.iter().enumerate() {
         match resolve_file(
             target,
             transclusion_options,
@@ -93,16 +96,18 @@ pub(crate) fn resolve_target_chain(
             ctx.clone(),
         ) {
             Ok(path) => return Ok(Some((target.clone(), path))),
-            Err(_) => continue,
+            Err(failure) if index == 0 => first_failure = failure,
+            Err(_) => {}
         }
     }
 
     if directive.suppress_not_found || directive.targets.is_empty() {
         Ok(None)
     } else {
-        Err(TocLinkingError::FileNotFound {
+        Err(TocLinkingError::Unresolved {
             path: directive.targets.join(", "),
             line: directive.line,
+            failure: first_failure,
         })
     }
 }
@@ -208,28 +213,20 @@ pub(crate) fn process_toc_linking(
 }
 
 /// Resolves a file path relative to the source document.
+/// The target's file, or the class of its failure (`None` for a failure
+/// that is not a file-reference failure).
 fn resolve_file(
     target: &str,
     options: &TransclusionOptions,
     source: &ComposeSource,
     line: usize,
     ctx: SourceContext,
-) -> Result<std::path::PathBuf, TocLinkingError> {
-    let path =
-        resolve_path(target, DirectiveKind::File, options, source, line, ctx).map_err(|_| {
-            TocLinkingError::FileNotFound {
-                path: target.to_string(),
-                line,
-            }
-        })?;
-
+) -> Result<std::path::PathBuf, Option<biscuit_file::ResolutionFailure>> {
+    let path = resolve_path(target, DirectiveKind::File, options, source, line, ctx)
+        .map_err(|error| error.resolution_failure())?;
     if !path.exists() {
-        return Err(TocLinkingError::FileNotFound {
-            path: target.to_string(),
-            line,
-        });
+        return Err(Some(biscuit_file::ResolutionFailure::NoMatch));
     }
-
     Ok(path)
 }
 
@@ -354,7 +351,7 @@ mod tests {
             .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
             .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
-        let (result, report) = md.compose_with(options).unwrap();
+        let (result, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         // Directive should remain in content when stage is disabled
         assert!(result.content.contains("::toc-linking"));
         assert_eq!(report.toc_links_generated, 0);
@@ -377,7 +374,7 @@ mod tests {
             .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
             .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
-        let (_, report) = md.compose_with(options).unwrap();
+        let (_, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert!(report.toc_links_generated > 0);
         assert!(report.has_changes());
         assert!(report.summary().contains("toc-link"));
@@ -646,7 +643,7 @@ mod tests {
             .disable(crate::markdown::compose::ComposeOperation::FrontmatterTransclusion)
             .disable(crate::markdown::compose::ComposeOperation::CodeTransclusion);
 
-        let (result, report) = md.compose_with(options).unwrap();
+        let (result, report) = md.compose_with(&crate::markdown::compose::test_request(options)).unwrap();
         assert_eq!(report.toc_links_generated, 2);
 
         let mut root_count = 0usize;

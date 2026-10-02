@@ -55,7 +55,9 @@ A full-featured Markdown LSP that stands on its own:
 - **Workspace symbols** — fuzzy (subsequence) search for any heading across the
   whole workspace.
 - **Document links** — headings, links, and paths are clickable and
-  eagerly resolved.
+  eagerly resolved. Every path, including `&`, `^`, and `@` references,
+  resolves as `md compose` from the repository root resolves it; see
+  [File references](./file-references.md).
 - **Folding** — collapse frontmatter, sections, fenced code, block quotes,
   lists, and tables.
 - **Hover** — preview the target of a link without opening it (graph-sourced,
@@ -121,7 +123,9 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
 - **Transclusion** (`::file` / `::code` / `prologue` / `epilogue`) — document
   links, go-to-definition, "who transcludes this file" references,
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
-  reported).
+  reported). A `::toc-linking <file>` target gets the same document link,
+  go-to-definition, hover, and broken-path diagnostic; it is not a
+  transclusion, so it takes no part in references or cycles.
 - **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
   functions), hover showing the resolved static value (falling back to the
   effective-schema property description for a declared-but-unset key),
@@ -247,8 +251,8 @@ Legend: ✅ full · ⚠️ supported with a caveat (see notes) · ❌ not availa
   lost.
 - **File watching (Neovim on Linux).** Client-side watching is limited on Linux;
   `dmls` keeps a server-side rescan fallback (a save re-runs discovery), so
-  changes to unopened files still reach the workspace graph — no configuration
-  needed.
+  changes to unopened files and package manifests still reach the workspace
+  graph — no configuration needed.
 - **Hover fidelity.** Hover is text-first Markdown everywhere and never requires
   images. VS Code renders the richest Markdown; the others render conservatively
   in a floating window or popover.

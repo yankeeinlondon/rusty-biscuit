@@ -1,5 +1,5 @@
-//! Substrate diagnostics: broken links, missing anchors, and duplicate heading
-//! slugs.
+//! Substrate diagnostics: the context-build failure, broken links, missing
+//! anchors, and duplicate heading slugs.
 //!
 //! These are the tier-2 (post-index) graph diagnostics of the Phase-4 pipeline;
 //! they range against the current document's concrete spans (via its source
@@ -7,23 +7,44 @@
 //! `relatedInformation` pointing at the colliding twins.
 
 use lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
 };
 
 use super::DocumentContext;
+use crate::context::{ContextFailure, resolution_failure_data};
 use crate::diagnostics::codes::{code, source};
 use crate::graph::LinkDiagnostic;
 use darkmatter::markdown::generate_heading_slug;
 
 /// All substrate diagnostics for the current document.
 pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
-    let Some(doc_id) = ctx.doc_id else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
+    if let Some(failure) = ctx.resolution.failure() {
+        out.push(context_failure_diagnostic(failure));
+    }
+    let Some(doc_id) = ctx.doc_id else {
+        return out;
+    };
     link_diagnostics(ctx, doc_id, &mut out);
     duplicate_heading_diagnostics(ctx, doc_id, &mut out);
     out
+}
+
+/// The one diagnostic a document without a file-resolution context gets,
+/// at line 0, column 0, in place of every reference it cannot resolve.
+fn context_failure_diagnostic(failure: &ContextFailure) -> Diagnostic {
+    Diagnostic {
+        range: Range::default(),
+        severity: Some(DiagnosticSeverity::ERROR),
+        code: Some(NumberOrString::String(code::CONTEXT_BUILD_FAILURE.to_string())),
+        source: Some(source::CONTEXT.to_string()),
+        message: format!(
+            "file references are not resolved in this document ({:?}): {failure}",
+            failure.resolution_failure()
+        ),
+        data: Some(resolution_failure_data(failure.resolution_failure())),
+        ..Default::default()
+    }
 }
 
 /// Broken relative paths and missing anchors.
@@ -32,20 +53,23 @@ fn link_diagnostics(ctx: &DocumentContext, doc_id: crate::graph::DocumentId, out
         let Some(link) = node.as_link() else {
             continue;
         };
-        let Some(kind) = ctx.graph.diagnose_unresolved(doc_id, &link.target) else {
+        let Some(kind) = ctx.graph.diagnose_unresolved(doc_id, &link.target, ctx.file_context())
+        else {
             continue;
         };
         let Some(range) = ctx.source_map.byte_range_to_lsp(node.span.clone()) else {
             continue;
         };
-        let (code_value, message) = match kind {
-            LinkDiagnostic::BrokenPath => (
+        let (code_value, message, data) = match kind {
+            LinkDiagnostic::BrokenPath { failure } => (
                 code::BROKEN_PATH,
                 format!("broken link: no document matches `{}`", link.raw_target),
+                Some(resolution_failure_data(failure)),
             ),
             LinkDiagnostic::MissingAnchor => (
                 code::MISSING_ANCHOR,
                 format!("missing anchor: `{}` has no matching heading", link.raw_target),
+                None,
             ),
         };
         out.push(Diagnostic {
@@ -54,6 +78,7 @@ fn link_diagnostics(ctx: &DocumentContext, doc_id: crate::graph::DocumentId, out
             code: Some(NumberOrString::String(code_value.to_string())),
             source: Some(source::LINKS.to_string()),
             message,
+            data,
             ..Default::default()
         });
     }

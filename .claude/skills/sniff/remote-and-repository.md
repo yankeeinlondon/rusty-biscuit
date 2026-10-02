@@ -15,6 +15,9 @@ conflicts, and provider queries.
 
 ## Topology model
 
+`filesystem::repo::PACKAGE_MANIFEST_FILE_NAMES` is the one public list of
+package manifest file names; use it instead of copying the names.
+
 `RepoInfo.monorepo_standards` lists detected standards with resolved binaries
 and confidence. `RepoInfo.monorepo_layers` lists membership layers. Every layer
 has one authority, optional orchestrators, provenance, a required `lockfile`

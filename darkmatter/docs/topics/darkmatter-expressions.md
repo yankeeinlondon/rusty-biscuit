@@ -259,7 +259,7 @@ namespace.
 | --- | --- | --- |
 | `doc` / `doc.*` | the **current** document's frontmatter (this document) | eager |
 | `ctx.*` | runtime context (date/time, repo, OS, hardware, …) — see [context variables](state-management/context-variables.md) | eager, captured once per request |
-| `env.*` | process environment variables, from the snapshot frozen at capture | eager |
+| `env.*` | environment variables from the request's snapshot (the same map `{{VAR}}` file references read) | eager |
 | `current.*` | the same keys as `ctx.*`, each observed when the reference is evaluated | lazy |
 | `current_env.*` | the same keys as `env.*`, each reread from the live process environment | lazy |
 
@@ -957,14 +957,18 @@ when you have plain JSON data and want a simple boolean result:
 
 ```rust
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use serde_json::json;
-use std::path::Path;
 
-let data = json!({ "draft": true, "audience": "internal" });
+let snapshot = RequestSnapshot::new("/work/project").with_env(
+    [("AUDIENCE".to_string(), "internal".to_string())].into(),
+);
+let context = build_resolution_context(&snapshot).unwrap();
+let data = json!({ "draft": true });
 let result = evaluate_condition_against(
-    "draft && audience == 'internal'",
+    "draft && env.AUDIENCE == 'internal'",
     &data,
-    Path::new("."),
+    &context,
 ).unwrap();
 assert!(result);
 ```
@@ -973,18 +977,18 @@ This shortcut resolves variables in the same order as the compose pipeline:
 
 1. `doc` / `doc.*` against the provided `data` (intercepted first; never falls back to `ctx.doc`).
 2. Top-level and nested paths against the provided `data`.
-3. `env.*` against the system environment.
+3. `env.*` against the context's environment, never the process's.
 4. `ctx.*` via lazy runtime context capture.
 5. Unprefixed missing keys fall back to `ctx.*` (same as `EffectiveState`).
 
-The `work_dir` argument supplies the resolution context, so the
-[read-side functions](#read-side-functions) (`file_exists`, `absolute`,
-`relative`, …) resolve against it — a public-API capability for external
-callers. Pass an absolute directory when the expression uses those functions:
-a relative `work_dir` such as `.` is rejected as a relative context directory
-rather than resolved against whatever the process directory is at the time.
-Expressions that read only `data`, `env.*`, or `ctx.*` (like the example
-above) accept any `work_dir`.
+The `context` argument is a built
+[`FileResolutionContext`](../../../biscuit-file/lib/src/file_reference/context.rs):
+the [read-side functions](#read-side-functions) (`file_exists`, `absolute`,
+`relative`, …) resolve through it, and `env.*` reads its environment. Build
+it from a `RequestSnapshot` that names the directory the expression belongs
+to; a binary captures its own process with `RequestSnapshot::from_process()`.
+A snapshot starts with an empty environment, so `env.X` is null unless the
+snapshot carries `X`.
 
 ### `evaluate_condition`
 

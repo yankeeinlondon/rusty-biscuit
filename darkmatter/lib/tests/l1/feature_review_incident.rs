@@ -70,7 +70,7 @@ fn compose_with_report(
         .with_set_overrides(serde_json::json!({ "spec": spec.to_string_lossy() }))
         .with_fail_fast(fail_fast);
     document
-        .compose_with(options)
+        .compose_with(&crate::request_support::request(options))
         .map(|(composed, report)| (composed.content().to_string(), report))
 }
 

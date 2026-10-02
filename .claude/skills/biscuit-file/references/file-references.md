@@ -84,7 +84,9 @@ cross-platform home once. Supply a validated repository scope catalog,
 and override the snapshot with `with_env()`, `with_home_dir()`, or
 `without_home_dir()` when the caller has authoritative values. `with_env()`
 replaces the whole environment (it does not merge); non-Unicode variables are
-never captured. Context-owned
+never captured. `capture_env()` and `home_dir()` are the exact readers `new()`
+uses, so a caller building through `from_snapshot` (Darkmatter's
+`RequestSnapshot::from_process()`) sees the same values. Context-owned
 `add_magic_path()` and `add_vault()` configure the roots used by explicit APIs.
 
 Every context directory and tree anchor (request and authoring `cwd`,
@@ -182,6 +184,8 @@ failures are `Err`.
 failure vocabulary is `InvalidReference`, `MissingContext`, `NoMatch`, `Io`,
 and `UnsupportedRemote`. `NoMatch` has no underlying error; other failed
 outcomes retain a `FileReferenceError`.
+`FileReferenceError::resolution_failure()` returns that same class for any
+error (never `NoMatch`); do not re-derive it.
 
 `candidate_plan()` returns the complete ordered, unprobed plan. By contrast,
 `DetailedResolution::candidates()` contains only attempts made before the first
@@ -276,5 +280,7 @@ is not absolute on the resolving host (`C:\x` on POSIX, `/x` on Windows);
 nothing is translated between operating systems.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
 request `cwd` and normal derived authoring `cwd`s. `RemoteNotLocal`
-means a URL reached a local path API; use the `url`-gated `resolve_target()`
-when the caller accepts `Resolved::Remote`.
+means a URL reached a local path API; use the `url`-gated
+`resolve_target_in_context(&ctx)` (or the ambient `resolve_target()`) when the
+caller accepts `Resolved::Remote`. Only the context form fills a URL's
+`{{VAR}}` from the context's environment.

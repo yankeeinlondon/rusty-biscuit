@@ -135,7 +135,7 @@ impl AmbientRepository {
     /// One discovery of the `Repo` group at `anchor`.
     fn discover(anchor: &Path) -> Self {
         let (values, _, _, _, observations) =
-            capture_runtime_context_for_groups(anchor, &[ContextGroup::Repo]);
+            capture_runtime_context_for_groups(anchor, &[ContextGroup::Repo], &HashMap::new());
         Self {
             values,
             observation: observations.repository().cloned(),
@@ -159,6 +159,8 @@ impl AmbientRepository {
 #[derive(Debug, Clone)]
 pub(crate) struct AnchoredRefresh {
     anchor: PathBuf,
+    /// The request's environment, the source of `current.agent`/`current.model`.
+    environment: HashMap<String, String>,
     /// The request's repository observation, shared through
     /// [`CurrentAuthority`] by every provider the request builds.
     repository: Arc<OnceLock<AmbientRepository>>,
@@ -177,6 +179,7 @@ impl AnchoredRefresh {
         }
         Self {
             anchor: context.anchor().to_path_buf(),
+            environment: context.env().clone(),
             repository,
         }
     }
@@ -193,7 +196,7 @@ impl CurrentProvider for AnchoredRefresh {
                 .get()
                 .and_then(|repository| repository.values.get(key).cloned()),
             _ => {
-                let (values, ..) = capture_runtime_context_for_groups(&self.anchor, &[group]);
+                let (values, ..) = capture_runtime_context_for_groups(&self.anchor, &[group], &self.environment);
                 values.get(key).cloned()
             }
         };
@@ -305,6 +308,20 @@ impl CurrentAuthority {
             AmbientRepository::discover(context.anchor())
         };
         let _ = self.ambient_repository.set(repository);
+    }
+
+    /// Establishes the request's repository observation from a discovery the
+    /// request already made (the context builder's), so the request still
+    /// discovers its repository once. A no-op once established.
+    pub(crate) fn adopt_ambient_repository(
+        &self,
+        values: Map<String, Value>,
+        observation: Option<Arc<RepositoryObservation>>,
+    ) {
+        if self.discovering {
+            return;
+        }
+        let _ = self.ambient_repository.set(AmbientRepository { values, observation });
     }
 
     /// The request's repository observation, once established.

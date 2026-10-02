@@ -2,6 +2,7 @@
 
 use crate::args::{CodeBlockOutput, Cli};
 use crate::artifact::{OutputArtifact, open_output_artifact};
+use crate::request::MdRequest;
 use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Context, Result, eyre};
@@ -28,13 +29,14 @@ pub fn run_code_block(
     highlight: Option<&str>,
     output: CodeBlockOutput,
     cli: &Cli,
+    request: &MdRequest,
 ) -> Result<()> {
     // Resolve input source: --file / --content force the interpretation;
     // otherwise prefer filesystem existence and fall back to literal content.
     let (code, inferred_lang_token) = if force_content {
         (input.to_string(), None)
     } else if force_file {
-        let path = resolve_file_path_raw(input).wrap_err_with(|| {
+        let path = resolve_file_path_raw(input, request).wrap_err_with(|| {
             format!("`{input}` is not a valid file path (--file was passed)")
         })?;
         let body = std::fs::read_to_string(&path)
@@ -210,19 +212,13 @@ fn code_block_markdown(block: &CodeBlock) -> String {
 
 /// Resolves a raw file path string (no FileReference syntax) to a `PathBuf`.
 ///
-/// The plan's `code-block` command treats the positional input as a plain
-/// file path when `--file` is passed, so we deliberately skip the
-/// `FileReference` indirection and resolve relative paths against the
-/// current working directory.
-fn resolve_file_path_raw(raw: &str) -> Result<PathBuf> {
-    let p = PathBuf::from(raw);
-    if p.is_absolute() {
-        Ok(p)
-    } else {
-        Ok(std::env::current_dir()
-            .wrap_err("Failed to get current directory")?
-            .join(p))
-    }
+/// The `code-block` command treats the positional input as a plain file path
+/// when `--file` is passed, so we deliberately skip the `FileReference`
+/// indirection and resolve a relative path against the request's launch
+/// directory.
+fn resolve_file_path_raw(raw: &str, request: &MdRequest) -> Result<PathBuf> {
+    // `join` keeps an absolute path as is.
+    Ok(request.launch_dir().join(raw))
 }
 
 #[cfg(test)]

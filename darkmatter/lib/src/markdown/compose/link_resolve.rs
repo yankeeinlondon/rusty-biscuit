@@ -7,8 +7,7 @@
 
 use super::body_origin::{EditOrigin, TextEdit};
 use crate::markdown::Markdown;
-use crate::markdown::compose::util::source_link_context;
-use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
+use crate::markdown::compose::{ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
     html::{
@@ -18,7 +17,7 @@ use crate::markdown::reference::{
     local::{extract_markdown_images, extract_markdown_links},
 };
 use crate::markdown::types::{MarkdownError, MarkdownResult};
-use biscuit_file::{FileResolutionContext, try_portable_string};
+use biscuit_file::try_portable_string;
 use std::path::Path;
 use tracing::trace;
 
@@ -38,7 +37,7 @@ use tracing::trace;
 #[cfg(test)]
 pub fn link_resolve(
     markdown: &mut Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     link_resolve_with_edits(markdown, options, report).map(drop)
@@ -48,7 +47,7 @@ pub fn link_resolve(
 /// A rewritten target inside data stays data.
 pub(crate) fn link_resolve_with_edits(
     markdown: &mut Markdown,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
     report: &mut ComposeReport,
 ) -> MarkdownResult<Vec<TextEdit>> {
     let source = options.source.clone();
@@ -159,7 +158,7 @@ pub(crate) fn link_resolve_with_edits(
 fn resolve_absolute(
     raw: &str,
     cwd: Option<&Path>,
-    options: &ComposeOptions,
+    options: &crate::markdown::compose::ComposeRequest,
 ) -> Option<std::path::PathBuf> {
     if raw.starts_with("http://") || raw.starts_with("https://") {
         trace!("resolve_absolute: skipping HTTP(S) URL '{}'", raw);
@@ -177,14 +176,11 @@ fn resolve_absolute(
     // live on the context, not on the reference. We intentionally do NOT use
     // resolve_relative here — link resolve's job is to produce absolute paths,
     // not make them relative again.
-    let resolved = if let Some(dir) = cwd {
+    let resolved = if cwd.is_some() {
         // The source's derived context, not `for_cwd(dir)`: `dir` is the
         // canonical source's parent, which may be spelled differently from
         // the tree the source was opened in.
-        let resolution_ctx = match source_link_context(options) {
-            Some(context) => context,
-            None => FileResolutionContext::new(dir),
-        };
+        let resolution_ctx = options.source_file_resolution_context();
         // An existing target resolves to its matched path; a clean miss (a link
         // to a not-yet-created file) is absolutized to the FIRST shared
         // candidate — document-first for an implicit bare path — via the same
@@ -202,9 +198,10 @@ fn resolve_absolute(
             Err(_) => None,
         }
     } else {
-        // Bare-API path with no document base: only an existing target can be
-        // absolutized; a miss has no candidate anchor without a base.
-        file_ref.resolve().ok().flatten()
+        // A source with no document base (a string document) resolves from
+        // the request directory: only an existing target can be absolutized;
+        // a miss has no candidate anchor without a base.
+        file_ref.resolve_in_context(options.resolution_context()).ok().flatten()
     };
 
     let resolved = resolved?;
@@ -218,7 +215,7 @@ fn resolve_absolute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::ComposeReport;
+    use crate::markdown::compose::{ComposeOptions, ComposeReport, test_request, test_request_in};
     use std::fs;
     use tempfile::tempdir;
 
@@ -231,7 +228,7 @@ mod tests {
 
         let content = "[link](./b.md) and ![img](b.md)";
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -258,9 +255,10 @@ mod tests {
 
         let snapshot = biscuit_file::FileResolutionContext::new(request.path())
             .with_home_dir(&home);
-        let options = ComposeOptions::new()
-            .with_source_file(nested.join("child.md"))
-            .with_file_resolution_context(snapshot);
+        let options = test_request_in(
+            ComposeOptions::new().with_source_file(nested.join("child.md")),
+            snapshot,
+        );
         let mut markdown = Markdown::new("[captured](~/captured.md)");
         let mut report = ComposeReport::new();
         // SAFETY: this test is serialized while mutating process-global state.
@@ -306,7 +304,7 @@ mod tests {
         fs::write(&package_target, "package").unwrap();
         let source = member.join("docs/guide.md");
         let mut md = Markdown::new("[package](^shared.md)");
-        let options = ComposeOptions::new().with_source_file(source);
+        let options = test_request(ComposeOptions::new().with_source_file(source));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -331,7 +329,7 @@ mod tests {
         let content =
             r#"<a href="./b.md">link</a> and <img src="b.md"> and <iframe src="./b.md"></iframe>"#;
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -353,7 +351,7 @@ mod tests {
 
         let content = r#"<video src="./movie.mp4"></video><audio src="movie.mp4"></audio><source src="./movie.mp4">"#;
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -378,7 +376,7 @@ mod tests {
         let content = "<link rel=\"stylesheet\" href=\"./styles.css\">\n<link rel=\"preload\" as=\"font\" href=\"font.woff2\">\n<script src=\"./app.js\"></script>";
 
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -427,7 +425,7 @@ mod tests {
         let content = "[link with parens](<./with (parens).md>)\n<img src='single_quotes.md'>\n<a href=\"mixed.md\" data-target='mixed.md'>mixed</a>\n<a href=\"multi.md\">multi.md is the target</a>";
 
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -481,7 +479,7 @@ mod tests {
         // b.md does not exist
         let content = "[link](./b.md)";
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -520,7 +518,7 @@ mod tests {
         // anchors on the source directory, not the repository root.
         let content = "[link](missing.md)";
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&source);
+        let options = test_request(ComposeOptions::new().with_source_file(&source));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -550,7 +548,7 @@ mod tests {
         // alt contains same path as src - should only replace src
         let content = r#"<img alt="logo.png" src="logo.png">"#;
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -583,7 +581,7 @@ mod tests {
         // HTML entity in href
         let content = r#"<a href="foo&amp;bar.md">link</a>"#;
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -609,7 +607,7 @@ mod tests {
         // Nested source inside video tag
         let content = r#"<video><source src="./movie.mp4"></video>"#;
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -638,7 +636,7 @@ mod tests {
 
         let content = r#"<a href = "./b.md">link</a> and <img src = "b.md"> and <video src = "./movie.mp4"></video> and <link href = "styles.css">"#;
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new().with_source_file(&file_a);
+        let options = test_request(ComposeOptions::new().with_source_file(&file_a));
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();
@@ -685,8 +683,10 @@ mod tests {
     fn declined_resolved_destination_errors_before_transclusion() {
         let content = "[sibling](./sibling.md)";
         let mut md = Markdown::new(content);
-        let options =
-            ComposeOptions::new().with_source_file(Path::new(r"\\?\C:\repo\.\docs\parent.md"));
+        let options = test_request_in(
+            ComposeOptions::new().with_source_file(Path::new(r"\\?\C:\repo\.\docs\parent.md")),
+            biscuit_file::FileResolutionContext::new(Path::new(r"\\?\C:\repo\.\docs")),
+        );
         let mut report = ComposeReport::new();
 
         let err = link_resolve(&mut md, &options, &mut report).unwrap_err();
@@ -708,7 +708,7 @@ mod tests {
     fn test_link_resolve_preserves_http_urls() {
         let content = "[link](https://example.com/page) and ![img](http://cdn.example.com/img.png)";
         let mut md = Markdown::new(content);
-        let options = ComposeOptions::new();
+        let options = test_request(ComposeOptions::new());
         let mut report = ComposeReport::new();
 
         link_resolve(&mut md, &options, &mut report).unwrap();

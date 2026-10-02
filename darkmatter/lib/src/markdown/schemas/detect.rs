@@ -9,8 +9,6 @@
 //! See `darkmatter/features/2026-05-11-schemas/spec.md` § "Schema
 //! Detection" for the authoritative behaviour.
 
-use std::path::{Path, PathBuf};
-
 use biscuit_file::{FileReference, FileResolutionContext};
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -41,11 +39,14 @@ pub struct DetectOptions {
 /// shapes are unioned by property name without `required` promotion. When
 /// `opts.merge` is true, types are widened along the spec's hierarchy and a
 /// property is `required` only if it appears in every source.
-pub fn detect_schema(sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSchema {
-    let contexts: Vec<FileResolutionContext> = sources
-        .iter()
-        .map(|md| compatibility_detection_context(md))
-        .collect();
+///
+/// `file` inference resolves through `context`, derived to each source.
+pub fn detect_schema(
+    sources: &[&Markdown],
+    opts: DetectOptions,
+    context: &FileResolutionContext,
+) -> SimplifiedSchema {
+    let contexts = vec![context.clone(); sources.len()];
     detect_schema_with_contexts(sources, opts, &contexts)
 }
 
@@ -71,7 +72,7 @@ pub fn detect_schema_with_contexts(
     let shapes: Vec<SchemaShape> = sources
         .iter()
         .zip(contexts)
-        .map(|(md, context)| detect_from_document_with_context(md, context))
+        .map(|(md, context)| detect_from_document(md, context))
         .collect();
 
     if shapes.len() == 1 {
@@ -86,17 +87,12 @@ pub fn detect_schema_with_contexts(
     SimplifiedSchema::Single(merged)
 }
 
-/// Detects a [`SchemaShape`] from a single document's frontmatter.
+/// Detects a [`SchemaShape`] from a single document's frontmatter, inferring
+/// `file` values through `request_context` derived to the document.
 ///
 /// `$schema` is skipped because it is reserved by Darkmatter; all other
 /// top-level keys are mapped to base types.
-pub fn detect_from_document(md: &Markdown) -> SchemaShape {
-    let context = compatibility_detection_context(md);
-    detect_from_document_with_context(md, &context)
-}
-
-/// Detects one document's schema using an explicit resolution snapshot.
-pub fn detect_from_document_with_context(
+pub fn detect_from_document(
     md: &Markdown,
     request_context: &FileResolutionContext,
 ) -> SchemaShape {
@@ -115,35 +111,6 @@ pub fn detect_from_document_with_context(
     SchemaShape {
         properties,
         ..Default::default()
-    }
-}
-
-/// Compatibility policy for the context-free detection API.
-///
-/// Detection is an authoring heuristic, so invalid references and probe errors
-/// classify as strings rather than becoming schema-detection failures. The
-/// legacy entry points capture their CWD/environment inputs once here, then use
-/// the same document-first detailed resolver as explicit callers.
-fn compatibility_detection_context(md: &Markdown) -> FileResolutionContext {
-    let base_dir = base_dir_for(md);
-    crate::markdown::compose::document_resolution_context(
-        &base_dir,
-        match md.source() {
-            Some(ComposeSource::File(path)) => Some(path.as_path()),
-            _ => None,
-        },
-        &[],
-        None,
-    )
-}
-
-fn base_dir_for(md: &Markdown) -> PathBuf {
-    match md.source() {
-        Some(ComposeSource::File(path)) => path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(".")),
-        _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     }
 }
 
@@ -604,6 +571,16 @@ fn is_yaml_reserved_literal(s: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// A hermetic context whose directory does not exist, so no frontmatter
+    /// value in these fixtures can resolve to a real file.
+    fn detection_context() -> FileResolutionContext {
+        FileResolutionContext::from_snapshot(
+            "/nonexistent/darkmatter-detection",
+            None,
+            std::collections::HashMap::new(),
+        )
+    }
+
     fn md_with_frontmatter(yaml_body: &str) -> Markdown {
         let content = format!("---\n{yaml_body}---\nbody\n");
         content.as_str().into()
@@ -612,7 +589,7 @@ mod tests {
     #[test]
     fn detects_simple_scalars() {
         let md = md_with_frontmatter("title: Hello\nactive: true\ncount: 42\nrating: 3.14\n");
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!("expected Single");
         };
@@ -652,7 +629,7 @@ mod tests {
         let md = md_with_frontmatter(
             "published: '2026-05-11'\nwhen: '2026-05-11T10:00:00Z'\nstart: '10:30'\n",
         );
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -677,7 +654,7 @@ mod tests {
     #[test]
     fn detects_url_and_email() {
         let md = md_with_frontmatter("homepage: https://example.com\nauthor: alice@example.com\n");
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -714,7 +691,7 @@ mod tests {
         )
         .with_repository_root(repo.path());
 
-        let shape = detect_from_document_with_context(&md, &context);
+        let shape = detect_from_document(&md, &context);
         let PropertyDef::Single(asset) = shape.properties.get("asset").unwrap() else {
             panic!("expected one detected file property");
         };
@@ -730,7 +707,7 @@ mod tests {
         );
         let md = md_with_frontmatter("asset: '{{}}'\n");
 
-        let shape = detect_from_document_with_context(&md, &context);
+        let shape = detect_from_document(&md, &context);
         let PropertyDef::Single(asset) = shape.properties.get("asset").unwrap() else {
             panic!("expected one detected string property");
         };
@@ -740,7 +717,7 @@ mod tests {
     #[test]
     fn skips_reserved_schema_property() {
         let md = md_with_frontmatter("$schema:\n  title: string\ntitle: Hello\n");
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -751,7 +728,7 @@ mod tests {
     #[test]
     fn array_of_strings_detected() {
         let md = md_with_frontmatter("tags:\n  - a\n  - b\n  - c\n");
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -768,7 +745,7 @@ mod tests {
     #[test]
     fn array_with_disjoint_items_falls_back_to_any() {
         let md = md_with_frontmatter("mixed:\n  - 1\n  - true\n  - hi\n");
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -786,7 +763,7 @@ mod tests {
     fn merge_widens_number_int_and_number_to_number() {
         let a = md_with_frontmatter("score: 1\n");
         let b = md_with_frontmatter("score: 1.5\n");
-        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true });
+        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -804,7 +781,7 @@ mod tests {
     fn merge_widens_date_and_string_to_string() {
         let a = md_with_frontmatter("v: '2026-05-11'\n");
         let b = md_with_frontmatter("v: 'plain text'\n");
-        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true });
+        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -821,7 +798,7 @@ mod tests {
     fn merge_produces_union_on_disjoint_types() {
         let a = md_with_frontmatter("flag: true\n");
         let b = md_with_frontmatter("flag: hello\n");
-        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true });
+        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -840,7 +817,7 @@ mod tests {
     fn merge_marks_required_when_present_in_every_file() {
         let a = md_with_frontmatter("title: A\nextra: 1\n");
         let b = md_with_frontmatter("title: B\n");
-        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true });
+        let schema = detect_schema(&[&a, &b], DetectOptions { merge: true }, &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -864,7 +841,7 @@ mod tests {
     fn no_merge_never_marks_required() {
         let a = md_with_frontmatter("title: A\n");
         let b = md_with_frontmatter("title: B\n");
-        let schema = detect_schema(&[&a, &b], DetectOptions { merge: false });
+        let schema = detect_schema(&[&a, &b], DetectOptions { merge: false }, &detection_context());
         let SimplifiedSchema::Single(shape) = schema else {
             panic!();
         };
@@ -880,7 +857,7 @@ mod tests {
     #[test]
     fn yaml_serialisation_emits_schema_block() {
         let md = md_with_frontmatter("title: Hello\ncount: 1\n");
-        let schema = detect_schema(&[&md], DetectOptions::default());
+        let schema = detect_schema(&[&md], DetectOptions::default(), &detection_context());
         let yaml = schema_to_yaml(&schema);
         assert!(yaml.starts_with("$schema:"));
         assert!(yaml.contains("title: string"));

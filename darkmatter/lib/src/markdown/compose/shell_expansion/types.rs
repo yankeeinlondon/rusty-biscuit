@@ -425,7 +425,6 @@ pub struct ShellExpansionOptions {
     pub policy_root: Option<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub approval_handler: Option<Arc<dyn ShellApprovalHandler>>,
-    pub file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Whether to strip ANSI escape codes and set `NO_COLOR=1`.
     pub strip_ansi: bool,
 }
@@ -438,7 +437,6 @@ impl Clone for ShellExpansionOptions {
             policy_root: self.policy_root.clone(),
             working_directory: self.working_directory.clone(),
             approval_handler: self.approval_handler.clone(),
-            file_resolution_context: self.file_resolution_context.clone(),
             strip_ansi: self.strip_ansi,
         }
     }
@@ -459,7 +457,6 @@ impl fmt::Debug for ShellExpansionOptions {
                     &"None"
                 },
             )
-            .field("file_resolution_context", &self.file_resolution_context)
             .field("strip_ansi", &self.strip_ansi)
             .finish()
     }
@@ -473,7 +470,6 @@ impl Default for ShellExpansionOptions {
             policy_root: None,
             working_directory: None,
             approval_handler: None,
-            file_resolution_context: None,
             strip_ansi: true,
         }
     }

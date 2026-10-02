@@ -20,6 +20,9 @@ sfx-native-linux = []
 [dependencies]
 messenger = { path = "../lib", features = ["discord", "slack", "signal", "whatsapp", "telegram", "desktop", "research"] }
 sniff = { path = "../../sniff/lib" }
+# `RequestSnapshot` / `build_resolution_context` for `messenger research`'s
+# loader; already in the tree through `messenger`'s `research` feature.
+darkmatter = { path = "../../darkmatter/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
@@ -39,3 +42,8 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 tempfile = "3.15"
 serial_test = "3"
 insta = "1.47"
+
+[package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/context_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]
