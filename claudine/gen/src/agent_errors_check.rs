@@ -29,7 +29,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::FileReference;
+use biscuit_file::{FileReference, FileResolutionContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -749,9 +749,15 @@ pub fn read_seed(area: &Path, slug: &str) -> Result<Option<ErrorVocabulary>, Gen
 
 /// Reads a provider's research vocabulary from its schema-validated
 /// frontmatter (so a malformed document fails the same way generation would).
-pub fn read_research(area: &Path, slug: &str) -> Result<ResearchVocabulary, GenError> {
+/// The document's `$schema` resolves through `context` (the area's context
+/// from [`inputs::area_resolution_context`]).
+pub fn read_research(
+    area: &Path,
+    slug: &str,
+    context: &FileResolutionContext,
+) -> Result<ResearchVocabulary, GenError> {
     let path = research_doc_path(area, slug);
-    let frontmatter = inputs::load_validated_frontmatter(&path)?;
+    let frontmatter = inputs::load_validated_frontmatter(&path, context)?;
     parse_research(slug, &frontmatter)
 }
 
@@ -764,7 +770,8 @@ fn parse_research(slug: &str, frontmatter: &Value) -> Result<ResearchVocabulary,
 }
 
 /// The full gate: read the seed + research doc, evaluate, and atomically replace
-/// the explicit outcome report.
+/// the explicit outcome report. The research document resolves through
+/// `context` (see [`read_research`]).
 ///
 /// ## Returns
 ///
@@ -777,13 +784,14 @@ pub fn check_provider(
     area: &Path,
     slug: &str,
     findings_path: &Path,
+    context: &FileResolutionContext,
 ) -> Result<FindingsReport, GenError> {
     let fixture_base = area.join(format!("docs/research/{TOPIC}"));
     let report = match read_seed(area, slug) {
         Err(error) => {
             FindingsReport::gate_error(slug, GateErrorScope::GateInput, error.to_string())
         }
-        Ok(seed) => match read_research(area, slug) {
+        Ok(seed) => match read_research(area, slug, context) {
             Ok(research) => {
                 evaluate_with_fixture_base(slug, seed.as_ref(), &research, Some(&fixture_base))
             }

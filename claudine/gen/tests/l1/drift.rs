@@ -102,7 +102,7 @@ fn committed_data_matches_regenerated_inputs() {
 /// lib/src/signals/generated.rs (full scope, all ten provider documents).
 #[test]
 fn committed_signals_match_regenerated_inputs() {
-    match check_signals(area()).expect("signals generation must succeed") {
+    match check_signals(area(), &snapshot()).expect("signals generation must succeed") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
             "drift between committed inputs and lib/src/signals/generated.rs — \
@@ -139,7 +139,7 @@ fn committed_vocabulary_matches_regenerated_inputs() {
 /// committed lib/src/steering/generated.rs.
 #[test]
 fn committed_steering_catalog_matches_regenerated_inputs() {
-    match check_steering_catalog(area()).expect("steering catalog generation must succeed") {
+    match check_steering_catalog(area(), &snapshot()).expect("steering catalog generation must succeed") {
         CheckOutcome::Clean => {}
         CheckOutcome::Drift { details } => panic!(
             "drift between committed steering inputs and lib/src/steering/generated.rs — \

@@ -12,6 +12,7 @@ use claudine_gen::steering_catalog::{
     load_research, orphan_policy_errors, parse_activation_policy, project_research,
 };
 use claudine_gen::GenError;
+use darkmatter::markdown::compose::RequestSnapshot;
 
 fn area() -> PathBuf {
     let root = biscuit_test_harness::manifest_dir!();
@@ -25,6 +26,13 @@ fn area() -> PathBuf {
     root.parent()
         .expect("gen crate lives under the claudine package area")
         .to_path_buf()
+}
+
+/// The area's file-resolution context, built from a snapshot that reads
+/// nothing from the test process.
+fn context_at(area: &Path) -> biscuit_file::FileResolutionContext {
+    claudine_gen::inputs::area_resolution_context(area, &RequestSnapshot::new(area))
+        .expect("area resolution context builds")
 }
 
 fn adapter() -> ReviewedAdapter {
@@ -54,7 +62,7 @@ fn control_grant() -> PolicyGrant {
 }
 
 fn errors_for(grant: PolicyGrant, adapters: Vec<ReviewedAdapter>) -> Vec<String> {
-    let research = load_research(&area(), "pi").expect("real Pi research projects");
+    let research = load_research(&area(), "pi", &context_at(&area())).expect("real Pi research projects");
     activation_errors("pi", &research, &ActivationPolicy { adapters, grants: vec![grant], blocks: vec![] })
 }
 
@@ -133,7 +141,7 @@ fn adapter_must_bind_the_mechanism_and_belong_to_the_provider() {
 
 #[test]
 fn duplicate_grants_and_orphan_providers_are_rejected() {
-    let research = load_research(&area(), "pi").unwrap();
+    let research = load_research(&area(), "pi", &context_at(&area())).unwrap();
     let policy =
         ActivationPolicy { adapters: vec![adapter()], grants: vec![control_grant(), control_grant()], blocks: vec![] };
     let errors = activation_errors("pi", &research, &policy);
@@ -158,7 +166,7 @@ fn duplicate_grants_and_orphan_providers_are_rejected() {
 /// name a researched profile, once, with a reason.
 #[test]
 fn a_blocked_profile_cannot_be_granted_and_blocks_are_validated() {
-    let research = load_research(&area(), "pi").unwrap();
+    let research = load_research(&area(), "pi", &context_at(&area())).unwrap();
     let with = |blocks: Vec<PolicyBlock>, grants: Vec<PolicyGrant>| {
         activation_errors("pi", &research, &ActivationPolicy { adapters: vec![adapter()], grants, blocks })
     };
@@ -180,13 +188,9 @@ fn a_blocked_profile_cannot_be_granted_and_blocks_are_validated() {
 
 #[test]
 fn malformed_research_references_refuse_projection() {
-    let steering = claudine_gen::inputs::load_validated_frontmatter(
-        &area().join("docs/research/steering/pi.md"),
-    )
+    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/steering/pi.md"), &context_at(&area()))
     .unwrap();
-    let execution = claudine_gen::inputs::load_validated_frontmatter(
-        &area().join("docs/research/non-interactive-sessions/pi.md"),
-    )
+    let execution = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/non-interactive-sessions/pi.md"), &context_at(&area()))
     .unwrap();
     assert!(project_research("pi", &steering, &execution).is_ok(), "control projects");
 
@@ -226,9 +230,9 @@ fn malformed_research_references_refuse_projection() {
 #[test]
 fn discovery_projection_walks_the_input_robustness_matrix() {
     use serde_json::{Value, json};
-    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/steering/pi.md")).unwrap();
+    let steering = claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/steering/pi.md"), &context_at(&area())).unwrap();
     let execution =
-        claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/non-interactive-sessions/pi.md")).unwrap();
+        claudine_gen::inputs::load_validated_frontmatter(&area().join("docs/research/non-interactive-sessions/pi.md"), &context_at(&area())).unwrap();
 
     // Control: every researched record projects with its typed method.
     let control = project_research("pi", &steering, &execution).expect("control projects");
@@ -359,7 +363,7 @@ fn policy_parser_walks_the_input_robustness_matrix() {
     assert!(empty.adapters.is_empty() && empty.grants.is_empty() && empty.blocks.is_empty());
     // An empty reason parses; activation refuses it.
     let unexplained = parse(&CONTROL_POLICY.replace("reason: Ordinary launches expose no steering channel.", "reason: \"\"")).unwrap();
-    let research = load_research(&area(), "pi").unwrap();
+    let research = load_research(&area(), "pi", &context_at(&area())).unwrap();
     let errors = activation_errors("pi", &research, &unexplained);
     assert!(errors.iter().any(|e| e.contains("must state its reason")), "{errors:#?}");
     let unverified = parse(&CONTROL_POLICY.replace("[pi-rpc-steer-active-0844]", "[]")).unwrap();
@@ -375,7 +379,7 @@ fn committed_policy_is_valid() {
     let active = claudine_gen::inputs::roster_active_slugs(&area()).unwrap();
     assert!(orphan_policy_errors(&active, &policy).is_empty());
     for slug in &active {
-        let research = load_research(&area(), slug).unwrap_or_else(|err| panic!("{slug}: {err}"));
+        let research = load_research(&area(), slug, &context_at(&area())).unwrap_or_else(|err| panic!("{slug}: {err}"));
         assert_eq!(activation_errors(slug, &research, &policy), Vec::<String>::new(), "{slug}");
     }
 }

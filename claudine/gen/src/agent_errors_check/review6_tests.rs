@@ -109,8 +109,14 @@ fn empirical_schema_fixture_loads_and_resolves() {
         .parent()
         .expect("gen crate lives under the claudine package area");
     let topic = area.join("docs/research/agent-errors");
+    let context = inputs::area_resolution_context(
+        area,
+        &darkmatter::markdown::compose::RequestSnapshot::new(area),
+    )
+    .expect("area resolution context builds");
     let frontmatter = inputs::load_validated_frontmatter(
         &topic.join("_fixtures/research-shaped.md"),
+        &context,
     )
     .expect("empirical fixture should satisfy the sidecar");
     let research = parse_research("fixture", &frontmatter).expect("typed empirical fixture");

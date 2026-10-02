@@ -26,7 +26,9 @@ use strum::IntoEnumIterator;
 use crate::emit::{indent, pascal, render_slice};
 use crate::errors::GenError;
 use crate::generate::{CheckOutcome, diff_lines};
-use crate::inputs::load_validated_frontmatter;
+use crate::inputs::{area_resolution_context, load_validated_frontmatter};
+use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::RequestSnapshot;
 
 /// Every signals research doc, alphabetical (= emission order). A superset
 /// of [`crate::generate::PROVIDER_SLUGS`]: kilo and pi are roster-only.
@@ -40,19 +42,21 @@ pub fn signals_path(area: &Path) -> PathBuf {
 }
 
 /// Builds the deterministic `generated.rs` text from the full signals
-/// corpus under `area`.
-pub fn build_signals(area: &Path) -> Result<String, GenError> {
+/// corpus under `area`, resolving every document's `$schema` through one
+/// context built from `snapshot` rebased at the area.
+pub fn build_signals(area: &Path, snapshot: &RequestSnapshot) -> Result<String, GenError> {
+    let context = area_resolution_context(area, snapshot)?;
     let mut tables = Vec::with_capacity(SIGNAL_SLUGS.len());
     for slug in SIGNAL_SLUGS {
-        tables.push(load_doc(area, slug)?);
+        tables.push(load_doc(area, slug, &context)?);
     }
     Ok(emit_file(&tables))
 }
 
 /// Byte-compares [`build_signals`] output against the committed file — the
 /// code path shared by the CLI `check` subcommand and the drift test.
-pub fn check_signals(area: &Path) -> Result<CheckOutcome, GenError> {
-    let generated = build_signals(area)?;
+pub fn check_signals(area: &Path, snapshot: &RequestSnapshot) -> Result<CheckOutcome, GenError> {
+    let generated = build_signals(area, snapshot)?;
     let path = signals_path(area);
     if !path.is_file() {
         return Ok(CheckOutcome::MissingCommitted { path });
@@ -134,13 +138,17 @@ fn record_err(path: &Path, record: &str, message: impl Into<String>) -> GenError
 /// Loads one sidecar-validated signals doc and runs every generate-time
 /// gate: path grammar, regex compilation, op/value consistency, priority
 /// uniqueness, the exact-duplicate subsumption gate, and join integrity.
-fn load_doc(area: &Path, slug: &'static str) -> Result<DocTable, GenError> {
+fn load_doc(
+    area: &Path,
+    slug: &'static str,
+    context: &FileResolutionContext,
+) -> Result<DocTable, GenError> {
     let doc_path = area.join(format!("docs/research/signals/{slug}.md"));
     let sidecar = area.join("docs/research/signals/_schema.yaml");
     if !sidecar.is_file() {
         return Err(GenError::SidecarMissing { path: sidecar });
     }
-    let frontmatter = load_validated_frontmatter(&doc_path)?;
+    let frontmatter = load_validated_frontmatter(&doc_path, context)?;
 
     let record_values = frontmatter
         .get("records")

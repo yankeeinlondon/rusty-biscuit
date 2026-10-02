@@ -17,6 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use darkmatter::markdown::Markdown;
+use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, coerce};
 use serde_json::Value;
@@ -208,8 +209,14 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
 /// document's `$schema` sidecar, and returns the schema-coerced
 /// frontmatter object (so `boolish`/`numberlike` quirks never reach the
 /// mapping layer).
-pub fn load_validated_frontmatter(path: &Path) -> Result<Value, GenError> {
-    load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new())
+///
+/// The `$schema` reference resolves through `context`, normally the area's
+/// context from [`area_resolution_context`].
+pub fn load_validated_frontmatter(
+    path: &Path,
+    context: &FileResolutionContext,
+) -> Result<Value, GenError> {
+    load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new(context.clone()))
 }
 
 fn load_validated_frontmatter_with_api(
@@ -255,13 +262,25 @@ fn load_validated_frontmatter_with_api(
 }
 
 fn generator_schemas(area: &Path, snapshot: &RequestSnapshot) -> Result<DarkmatterSchemas, GenError> {
-    let context = build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
+    Ok(DarkmatterSchemas::new(area_resolution_context(area, snapshot)?))
+}
+
+/// Builds the file-resolution context for `area` from `snapshot` rebased at
+/// the area, so `&` and `^` anchor in the area's repository.
+///
+/// ## Errors
+///
+/// Returns [`GenError::ResolutionContext`] when the context cannot be built.
+pub fn area_resolution_context(
+    area: &Path,
+    snapshot: &RequestSnapshot,
+) -> Result<FileResolutionContext, GenError> {
+    build_resolution_context(&snapshot.at_request_dir(area)).map_err(|source| {
         GenError::ResolutionContext {
             area: area.to_path_buf(),
             source,
         }
-    })?;
-    Ok(DarkmatterSchemas::new().with_file_resolution_context(context))
+    })
 }
 
 /// Parses a YAML file into a `serde_json::Value`.

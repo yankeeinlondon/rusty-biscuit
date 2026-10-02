@@ -204,7 +204,7 @@ fn run(
                 )
             );
 
-            let signals = claudine_gen::check_signals(&area)?;
+            let signals = claudine_gen::check_signals(&area, snapshot)?;
             drifted |= !matches!(signals, CheckOutcome::Clean);
             print!(
                 "{}",
@@ -228,7 +228,7 @@ fn run(
                 )
             );
 
-            let steering = claudine_gen::check_steering_catalog(&area)?;
+            let steering = claudine_gen::check_steering_catalog(&area, snapshot)?;
             drifted |= !matches!(steering, CheckOutcome::Clean);
             print!(
                 "{}",
@@ -284,7 +284,12 @@ fn run(
                 AgentErrorsCommand::Check { slug, findings } => {
                     let findings_path = findings
                         .unwrap_or_else(|| claudine_gen::default_findings_path(&area, &slug));
-                    let report = claudine_gen::check_agent_errors(&area, &slug, &findings_path)?;
+                    let report = claudine_gen::check_agent_errors(
+                        &area,
+                        &slug,
+                        &findings_path,
+                        &claudine_gen::inputs::area_resolution_context(&area, snapshot)?,
+                    )?;
                     match report.status {
                         claudine_gen::GateStatus::Clean => {
                             print!("{}", report::agent_errors_clean(term, &slug));
@@ -323,8 +328,12 @@ fn run(
             match command {
                 SteeringCommand::Check { slug, json } => {
                     let results = match slug {
-                        Some(slug) => vec![claudine_gen::check_steering(&area, &slug)?],
-                        None => claudine_gen::check_steering_fleet(&area)?,
+                        Some(slug) => vec![claudine_gen::check_steering(
+                            &area,
+                            &slug,
+                            &claudine_gen::inputs::area_resolution_context(&area, snapshot)?,
+                        )?],
+                        None => claudine_gen::check_steering_fleet(&area, snapshot)?,
                     };
                     if json {
                         println!(
@@ -396,8 +405,12 @@ fn run_generate(
     // the topic, every generation must pass its deterministic gate first.
     if area.join("docs/research/steering").is_dir() {
         let steering = match slug {
-            Some(slug) => vec![claudine_gen::check_steering(area, slug)?],
-            None => claudine_gen::check_steering_fleet(area)?,
+            Some(slug) => vec![claudine_gen::check_steering(
+                area,
+                slug,
+                &claudine_gen::inputs::area_resolution_context(area, snapshot)?,
+            )?],
+            None => claudine_gen::check_steering_fleet(area, snapshot)?,
         };
         for result in &steering {
             print!("{}", report::steering_validation(term, result));
@@ -411,11 +424,11 @@ fn run_generate(
     print!("{}", report::artifact_warning(term, &generations));
     // The signals and families artifacts are full-scope like catalog.json:
     // always rebuilt, written through the same per-file confirmation flow.
-    let signals = claudine_gen::build_signals(area)?;
+    let signals = claudine_gen::build_signals(area, snapshot)?;
     let families = claudine_gen::build_families(area, &generations)?;
     let vocabulary = claudine_gen::build_vocabulary(area, snapshot)?;
     let agentic_clis = claudine_gen::build_agentic_clis(area)?;
-    let steering_catalog = claudine_gen::build_steering_catalog(area)?;
+    let steering_catalog = claudine_gen::build_steering_catalog(area, snapshot)?;
     print!(
         "{}",
         report::families_count(term, claudine_gen::compiled_family_keys(&generations).len())
