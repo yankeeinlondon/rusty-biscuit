@@ -33,33 +33,32 @@ implemented_by: claude/opus
 review_note: the clarification process served as a review
 human_review: false
 message_to_agent: |-
-    Phases 4 and 5 are done; read `## Phase 4` and `## Phase 5` of implementation-log.md.
-    What later phases build on:
+    Phases 4, 5, and 6 are done; read `## Phase 4` through `## Phase 6` of implementation-log.md.
+    What Phase 7 builds on:
     (1) Claudine's lifecycle catalog is `claudine::composition::lifecycle::bindings`
     (`LifecycleScope`, `binding_view`, `runtime_bindings`). An absent property is `null` on every
-    lifecycle surface, so the `|| false` legality guards can go (Phase 6). Bare `err` in
-    initialize/start/success/loop fails preparation; bare `group` outside a group fails at event time.
-    (2) DMLS now classifies through Darkmatter: `BindingView::baseline()` +
-    `names_document_property`, and reports unknown functions as the ERROR
-    `dm.expression.unknown_function` via the new public `expression::validate_expression`.
-    `dm.expression.unknown_identifier` no longer exists anywhere; the code is
-    `dm.expression.undeclared_property`. DMLS has no host descriptors, so a bare `err`/`timing`/`group`
-    in a lifecycle `when:` now shows one advisory in the editor (R7c would fix that; out of scope).
-    A guard test (`dmls/tests/l1/undeclared_property.rs`) fails on any root-name literal in DMLS `src/`.
-    (3) Phase 6 (prompts): the new unknown-function check found a real defect in the shipped
-    `prompts/_agent-skills.md`: `skill_description(i)` (body, line 25, inside `::loop`) and
-    `local_skill_description(...)` (frontmatter, lines 10-14) are not Darkmatter functions, so composing
-    either path fails. The DMLS corpus fixture copy and `baseline.json` record the body finding. If you
-    fix the prompt, update `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md` and
-    re-bless with `DMLS_BLESS_MAPPING_CORPUS=1` (the bless run fails on purpose; re-run without it).
-    (4) Phase 7: DMLS docs (`dmls/docs/diagnostics.md`, `docs/lsp/features.md`, grammar.md,
-    dmls-schema-support.md) and the darkmatter skill's `dmls.md` already describe the new contract.
-    The library still names its advisory module `compose/unknown_identifiers.rs` (and two test files
-    `unknown_identifier*`); renaming them is optional churn for the DRY/terminology audit. The DRY
-    follow-ups from Phase 4 (loop renderer ignores `{{{ … }}}`; `LifecycleShellResolution.source` is
-    always `Some`) still stand.
-    (5) Use absolute paths for `cd`: `cd claudine` from inside `claudine/` resolves through zsh CDPATH
-    to the main checkout (/Volumes/coding/personal/rusty-biscuit).
+    lifecycle surface. Bare `err` in initialize/start/success/loop fails preparation; bare `group`
+    outside a group fails at event time.
+    (2) DMLS classifies through Darkmatter (`BindingView::baseline()`, `names_document_property`) and
+    reports unknown functions as the ERROR `dm.expression.unknown_function`. The advisory code is
+    `dm.expression.undeclared_property`. DMLS docs and the darkmatter skill's `dmls.md` already
+    describe this.
+    (3) Phase 6 removed the `|| false` legality guards from `prompts/implement.md` and `prompts/review.md`,
+    and rewrote the `_prompt.md` guidance (absent is `null`; a fallback chooses a default). The
+    regression is `claudine/cli/tests/l1/shipped_prompts.rs::shipped_implement_router_reads_absent_optional_inputs_unguarded`;
+    the router hash pin is refreshed. Phase 7 docs still to rewrite per the Phase 1 audit:
+    `claudine/docs/topics/flow-control/lifecycle.md` (lines ~92, 611-612, 835-839, 859: fallback advice,
+    "strict mode", undeclared `{{agent}}`/`{{branch}}`) and `flow-control-reference.md:127` ("unknown root").
+    (4) NOT fixed, outside R8: `prompts/_agent-skills.md` calls `skill_description(i)` and
+    `local_skill_description(...)`, which are not Darkmatter functions. If the author decides on a fix,
+    update `darkmatter/dmls/tests/fixtures/mapping_only_corpus/_agent-skills.md` too and re-bless with
+    `DMLS_BLESS_MAPPING_CORPUS=1` (the bless run fails on purpose; re-run without it).
+    (5) Still standing: optional rename of `compose/unknown_identifiers.rs` and the `unknown_identifier*`
+    test files; the Phase 4 DRY follow-ups (the loop renderer ignores `{{{ … }}}`;
+    `LifecycleShellResolution.source` is always `Some`).
+    (6) Use absolute paths for `cd`: `cd claudine` from inside `claudine/` resolves through zsh CDPATH
+    to the main checkout (/Volumes/coding/personal/rusty-biscuit). Changed files may appear staged
+    without any `git add`; leave the index as found.
 ---
 
 # Remove Strict Mode and Centralize Expression Binding

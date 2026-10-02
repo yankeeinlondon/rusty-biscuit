@@ -190,6 +190,15 @@ docs_created_during_phase_5: []
 skills_files_updated_during_phase_5:
     - .claude/skills/darkmatter/dmls.md
     - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_6:
+    - prompts/implement.md
+    - prompts/review.md
+    - prompts/_prompt.md
+    - claudine/cli/tests/l1/shipped_prompts.rs
+    - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+docs_updated_during_phase_6: []
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
 packages:
     - darkmatter
     - darkmatter-cli
@@ -954,3 +963,108 @@ binding model with no root catalog of its own (source-scanned). The
 Definition-of-Success `rg` over `darkmatter/` Rust source, extended with
 `LATE_BINDING_ROOTS` and `is_statically_known_root`, matches only the
 forbidden-name list inside the new guard test.
+
+## Phase 6
+
+Phase 6 removes the `(x || false)` legality guards from the shipped prompts
+(R8), proves the reported router case with a hermetic CLI L1 regression
+against the real `prompts/implement.md`, and refreshes the router's hash pin
+after that regression passed (acceptance criterion 11).
+
+### What changed
+
+| File | Change |
+|---|---|
+| `prompts/implement.md` | Deleted the `` `|| false` is the guarded-optional form `` comment; `when: "review || false"` → `when: "review"`; every `(spec\|plan\|review \|\| false)` in the `stderr` and `error` actions → the bare name (lines 64–67, 75–77, 80, 82 of the Phase 1 audit). `frontmatter(spec, "implemented") \|\| false` and `frontmatter(spec,'review_iterations') \|\| 1` are kept: both are real defaults |
+| `prompts/review.md` | Deleted the five-line workaround comment; `when: "spec \|\| false"` / `"plan \|\| false"` / `"review \|\| false"` → bare names |
+| `prompts/_prompt.md` | The bullet that told authors to "guard it with a fallback" now says an unsupplied optional input reads as `null` (so `when: "review"` is false and a plain ternary needs no guard), and that a fallback is for choosing a default (`{{{ title \|\| 'Untitled' }}}`) |
+| `claudine/cli/tests/l1/shipped_prompts.rs` | New test `shipped_implement_router_reads_absent_optional_inputs_unguarded`. The `common` imports are no longer `cfg(unix)`-only, since the new test runs on every OS; only `write_executable` stays Unix-gated |
+| `claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json` | `prompts/implement.md` re-pinned (`8897501d2392dccf-…` → `dab08d3f2c196f65-…`; the body half is unchanged). Refreshed with `CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1` only after the regression passed |
+
+The route-drift fixture `_implement/implement-plan.md` needed no
+re-derivation: it copies `prompts/_implement/implement-plan.md`, which this
+phase did not touch, and its pinned hash is unchanged.
+`fixture_preserves_the_shipped_schema_and_loop_semantics` and
+`fixture_body_matches_the_shipped_body` pass unchanged.
+
+The Phase 1 audit rows classed as **real defaults** were left as they are
+(`pr.md`, `_pr/dirty.md`, `_pr/push.md` proxy `with:` values, `pr.md:32`,
+`_pr/dirty.md:30`). No other shipped prompt still uses `|| false` as a
+legality guard on `spec`/`plan`/`review`. None of the three edited prompts
+has a copy in the DMLS mapping-only corpus, so its baseline is unaffected.
+
+### The regression
+
+`shipped_implement_router_reads_absent_optional_inputs_unguarded` uses
+`CliProcessFixture::command()` (hermetic default: child-local
+`PLAYA_DRY_RUN=1`, private spool, fixture `HOME`, minimal `PATH`). It
+writes the root `prompts/implement.md` into the fixture via `include_str!`
+(so CI re-runs it whenever the prompt changes), plus a fixture spec at
+`fixes/2026-09-17-router-fixture/spec.md` with `implemented: true`. With no
+`review-1.md` beside it, every route is false. It runs
+`claudine compose prompts/implement.md spec=… -y --claude` and asserts in one
+run:
+
+- source: the router reads `plan ? '- a plan file was identified: ' + plan : ''`
+  and `when: "review"` bare, and carries no `spec`/`plan`/`review || false`;
+- the list-form `$schema` accepts the document with only `spec` (the run
+  reaches the `initialize` stack's fall-through action);
+- the run fails at the authored error (`Unable to route the implementation`);
+- the spec line renders, and the plan, review, and "no spec, plan, or
+  review" lines do not (the absent `plan`/`review` evaluated to `null`);
+- the output contains none of `unknown root`, `undefined variable`,
+  `|| false`, `fallback`, or `lifecycle evaluation`;
+- no provider starts: a Unix stub `claude` would touch a marker file, and the
+  marker is absent. On Windows there is no stub; a scratch run with no
+  `claude` on `PATH` confirmed the router errors before any executable check;
+- `fixture.audio_spool()` is absent.
+
+No window is created (no terminal harness; a plain child process).
+
+The pre-fix library cannot be rebuilt at this point (Phases 3–4 removed the
+code), so the test cannot be shown failing against the old binary. It is
+load-bearing in two ways: reverting the prompt fails its source assertions,
+and reintroducing a strict lookup of an absent property would end the run with
+a lifecycle evaluation error rather than the authored routing error.
+
+### Requirement-to-test mapping
+
+| Requirement | Test(s) | Level / target |
+|---|---|---|
+| R8: shipped prompts read optional inputs without legality guards | `shipped_prompts::shipped_implement_router_reads_absent_optional_inputs_unguarded` (source assertions) | Claudine CLI L1 (`l1`) |
+| AC11: the reported router case runs unguarded to the authored routing `error`, with no provider launch and no audio | same test (end-to-end through the real shipped artifact and normal `compose` path) | Claudine CLI L1 |
+| The router still proxies with `review` supplied (bare `when: "review"` is true) | existing `shipped_prompts::shipped_implement_router_runs_real_proxy_handoff` | Claudine CLI L1 (Unix) |
+| The router still proxies a spec to `implement-plan.md` | existing `compose_initialize_acceptance::the_shipped_router_*` (2 tests); `level2_lifecycle_control::level2_lifecycle_shipped_implement_route_matches_direct_run` | L1 + L2 |
+| Pin refreshed only after the regression | `shipped_prompt_route_drift::*` (4 tests) | L1 |
+| Passive corpus over all shipped prompts | existing `shipped_prompts::shipped_prompt_corpus_parses_frontmatter`, `shipped_lifecycle_artifacts_use_mapping_only_set` | L1 |
+
+### Gates
+
+| Area | Recipe | Result |
+|---|---|---|
+| `claudine/` | targeted: `shipped_prompts::`, `shipped_prompt_route_drift::`, `shipped_prompt_contract::`, `compose_initialize_acceptance::` | 44 passed |
+| `claudine/` | `just test` | 8068 passed, 9 skipped (Phase 5: 8067 + the new test) |
+| `claudine/` | `just lint` | exit 0 |
+| `claudine/` | `level2_lifecycle_shipped_implement_route_matches_direct_run` (`--features terminal-tests`) | passed (7.3 s) |
+
+No pre-existing or unrelated failures. `darkmatter/` was not re-run: no
+Darkmatter file changed and no DMLS corpus fixture copies these prompts. No
+`just cross-check` was run: the change is prompt text plus a test that uses no
+path comparison and no shell on Windows. CI covers the other environments.
+
+### Not fixed: `prompts/_agent-skills.md`
+
+The defect Phase 5 flagged (`skill_description(i)` and
+`local_skill_description(...)` are not Darkmatter functions) is unrelated to
+strict mode or R8, and the fix depends on what the prompt is meant to do: add
+a function, or replace the calls. It was left as it was, and the DMLS corpus
+baseline still records the body finding. It is passed on in
+`message_to_agent`.
+
+Working-tree note: the changed files appeared staged in the index without
+any `git add` from this session, as in Phase 5. The index was left as found.
+
+### Phase 6 outcome
+
+Checkpoint 6 is met: `claudine` `just test` passes with the new regression and
+the refreshed pin, and acceptance criterion 11 holds.
