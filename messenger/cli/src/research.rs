@@ -16,7 +16,9 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::table::{Table, TableCellContent, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use clap::{Args, Subcommand};
+use biscuit_file::{FileReference, FileResolutionContext, ResolutionFailure};
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
+use darkmatter::markdown::errors::resolution_failure_name;
 use messenger::research::generate::{self, Baseline, Drift, GenerateError, load_fleet};
 use messenger::research::model::{Date, PlatformId};
 use messenger::research::publish::{self, Options, PublishError};
@@ -186,7 +188,7 @@ fn execute(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> Re
     let today = args.today.unwrap_or_else(utc_today);
     match args.command {
         ResearchCommand::Validate { documents, scope, json } => {
-            validate(&loader, &documents, snapshot.request_dir(), scope, &today, json)
+            validate(&loader, &documents, &snapshot, scope, &today, json)
         }
         ResearchCommand::Generate { check: true, json } => check(&loader, &today, json),
         ResearchCommand::Generate { check: false, json } => generate(&loader, &today, json),
@@ -247,12 +249,15 @@ struct ValidationOutput {
     missing: Vec<PlatformId>,
 }
 
-/// Relative `documents` are taken from `request_dir`, the directory the
-/// binary was launched in (its snapshot), never a second process read.
+/// `documents` are file references resolved in a context built at the
+/// directory the binary was launched in (its snapshot), never a second
+/// process read: `./`, bare, `&`, `^`, `@`, and `~/` work as they do for
+/// `md`, and malformed reference syntax or a relative path leaving the
+/// repository is refused before any file is read.
 fn validate(
     loader: &Loader,
     documents: &[PathBuf],
-    request_dir: &Path,
+    snapshot: &RequestSnapshot,
     scope: ScopeArg,
     today: &Date,
     json: bool,
@@ -273,8 +278,9 @@ fn validate(
             ScopeArg::Accepted => Scope::Accepted,
             ScopeArg::Fragment => Scope::Fragment,
         };
+        let launch = build_resolution_context(snapshot).map_err(|error| error.to_string())?;
         for document in documents {
-            let path = if document.is_absolute() { document.clone() } else { request_dir.join(document) };
+            let path = resolve_document(document, &launch)?;
             let loaded = loader.load_document(&path).map_err(research_error)?;
             let context = Context { roster: roster.record.as_ref(), scope };
             diagnostics.extend(validate_document(&loaded, &context).diagnostics);
@@ -288,6 +294,26 @@ fn validate(
         print!("{}", render_validation(&output, &terminal()));
     }
     Ok(if output.valid { EXIT_OK } else { EXIT_FINDINGS })
+}
+
+/// Resolves one `validate` document argument through the shared reference
+/// grammar.
+///
+/// ## Errors
+///
+/// A message naming the argument, the cause, and its `failure: <class>`, the
+/// row every reference failure carries.
+fn resolve_document(document: &Path, context: &FileResolutionContext) -> Result<PathBuf, String> {
+    let raw = document.to_string_lossy();
+    let failed = |message: String, failure: ResolutionFailure| {
+        format!("document `{raw}` did not resolve to a file: {message}\nfailure: {}", resolution_failure_name(failure))
+    };
+    let reference = FileReference::new(&raw).map_err(|error| failed(error.to_string(), error.resolution_failure()))?;
+    match reference.resolve_in_context(context) {
+        Ok(Some(path)) => Ok(path),
+        Ok(None) => Err(failed("no file matches".into(), ResolutionFailure::NoMatch)),
+        Err(error) => Err(failed(error.to_string(), error.resolution_failure())),
+    }
 }
 
 fn render_validation(output: &ValidationOutput, term: &Terminal) -> String {

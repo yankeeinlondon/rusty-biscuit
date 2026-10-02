@@ -23,6 +23,9 @@ sniff = { path = "../../sniff/lib" }
 # `RequestSnapshot` / `build_resolution_context` for `messenger research`'s
 # loader; already in the tree through `messenger`'s `research` feature.
 darkmatter = { path = "../../darkmatter/lib" }
+# `FileReference` for `messenger research validate`'s document arguments;
+# already in the tree through `messenger`'s `research` feature.
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
