@@ -11,7 +11,7 @@ use darkmatter::markdown::schemas::{
 
 use super::{
     CompositionError, ResolvedCompositionSource, build_effective_instance,
-    is_composition_independent, load_effective_schema_in_context, top_level_pointer_segment,
+    is_composition_independent, load_effective_schema, top_level_pointer_segment,
     value_needs_composition,
 };
 
@@ -39,7 +39,7 @@ pub fn unresolved_supplied_files(
         return Vec::new();
     }
     let Ok(Some(effective)) =
-        load_effective_schema_in_context(source, None, Some(document_context))
+        load_effective_schema(source, None, document_context)
     else {
         return Vec::new();
     };
@@ -394,8 +394,7 @@ fn supplied_file_arms<'a>(
                 candidate[name] = serde_json::Value::Array(vec![candidate[name].take()]);
             }
         }
-        let schemas = DarkmatterSchemas::new()
-            .with_file_resolution_context(document_context.clone())
+        let schemas = DarkmatterSchemas::new(document_context.clone())
             .with_baseline(SimplifiedSchema::Single(relaxed))
             .ok()?;
         let projected = schemas.effective_for(&schema_source).ok()??;

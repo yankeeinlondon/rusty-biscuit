@@ -144,3 +144,8 @@ ubuntu-latest = ["libasound2-dev"]
 # Off by default so test targets may construct commands freely; the crate root
 # denies it for production builds (see `clippy.toml` for the method list).
 disallowed_methods = "allow"
+
+[package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test.
+source-inputs = ["darkmatter/cli/tests/common/context_guard.rs", "darkmatter/cli/tests/common/source_scan.rs"]

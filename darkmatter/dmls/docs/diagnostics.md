@@ -142,8 +142,8 @@ the biscuit-file failure class (`InvalidReference`, `MissingContext`,
 
 | Code | Meaning |
 |------|---------|
-| `dm.links.broken_path` | A link path matched no indexed document, resolving `&`, `^`, `@`, and relative paths as `md compose` does. |
-| `dm.links.missing_anchor` | The link resolved to a document, but its `#fragment` anchor does not exist there. |
+| `dm.links.broken_path` | A link path matched no existing file and no open document, resolving `&`, `^`, `@`, `~`, and relative paths as `md compose` does. A file outside the workspace folder is not broken. |
+| `dm.links.missing_anchor` | The link resolved to an indexed document, but its `#fragment` anchor does not exist there. Fragments on unindexed files are not checked. |
 | `dm.links.duplicate_heading` | Two or more headings generate the same GitHub anchor slug (carries `relatedInformation` linking the twins). |
 
 ### Layer 1 — Wiki links (`source: darkmatter.wiki`)
@@ -263,7 +263,11 @@ Ranges come from the concrete syntax tree, never from parsing the message text:
   mixed, and statically non-null targets do not receive the warning.
 - `dm.transclusion.broken_path` applies only to concrete local targets of
   `::file`, `::code`, and `::toc-linking`, resolved through the document's
-  context like every other reference. Interpolated targets, including a
+  context like every other reference. A `::toc-linking` fallback chain is
+  broken only when no alternative exists and it does not end in `false`; the
+  diagnostic spans the whole chain and carries the first alternative's
+  failure class. A `#` in a directive target is part of the filename, as in
+  composition, never an anchor. Interpolated targets, including a
   `{{VAR}}/file.md` environment path, are excluded because their resolved
   path is not known statically.
 

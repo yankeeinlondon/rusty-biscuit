@@ -214,7 +214,9 @@ struct DeclaredModule {
 }
 
 /// Blanks every `#[cfg(test)]` / `#[cfg(all(test, ..))]` item or statement in
-/// `sanitized`, returning the out-of-line modules those annotations declare.
+/// `sanitized`, returning the modules those annotations declare: out-of-line
+/// `mod name;` items, and inline `mod name { .. }` items, whose own
+/// out-of-line children sit in the module's directory.
 /// `original` supplies `#[path]` values, which `sanitized` has blanked.
 fn blank_test_items(original: &str, sanitized: &mut [u8]) -> Vec<DeclaredModule> {
     const MARKERS: [&[u8]; 2] = [b"#[cfg(test)]", b"#[cfg(all(test"];
@@ -237,7 +239,15 @@ fn blank_test_items(original: &str, sanitized: &mut [u8]) -> Vec<DeclaredModule>
                     }
                     break cursor + 1;
                 }
-                Some(b'{') => break matching_brace(sanitized, cursor) + 1,
+                Some(b'{') => {
+                    // An inline test module's out-of-line children live in its
+                    // directory, so the whole directory is test-only.
+                    let header = &original[start..cursor];
+                    if let Some(name) = out_of_line_module(&format!("{};", header.trim_end())) {
+                        declared.push(DeclaredModule { name, path_attribute: path_attribute(header) });
+                    }
+                    break matching_brace(sanitized, cursor) + 1;
+                }
                 Some(_) => cursor += 1,
             }
         };

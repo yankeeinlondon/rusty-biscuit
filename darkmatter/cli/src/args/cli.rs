@@ -241,6 +241,20 @@ pub struct Cli {
     )]
     pub verbose: u8,
 
+    /// Search DIR for `@` references, before the default roots (repeatable;
+    /// searched in the order given; give it before the subcommand). A
+    /// relative DIR is relative to the launch directory; DIR must exist.
+    // Not `global`: clap keeps only the deepest level's values of a global
+    // `Append` argument, so `md --magic-root a compose --magic-root b` would
+    // silently drop `a`.
+    #[arg(
+        long = "magic-root",
+        value_name = "DIR",
+        action = clap::ArgAction::Append,
+        value_hint = clap::ValueHint::DirPath
+    )]
+    pub magic_roots: Vec<PathBuf>,
+
     /// Enable developer debug logging (1=INFO, 2=DEBUG, 3=TRACE, 4=TRACE+locations).
     /// Alternatively, set RUST_LOG environment variable.
     #[arg(long = "debug", value_name = "LEVEL", global = true, hide = true)]
@@ -549,5 +563,28 @@ mod tests {
     fn render_code_block_flag_parses_dark() {
         let cli = Cli::try_parse_from(["md", "doc.md", "--code-block", "dark"]).unwrap();
         assert_eq!(cli.code_block, CodeBlockArg::Dark);
+    }
+
+    #[test]
+    fn magic_root_is_repeatable_before_the_subcommand() {
+        let cli = Cli::try_parse_from([
+            "md", "--magic-root", "first", "--magic-root", "/second", "compose", "doc.md",
+        ])
+        .unwrap();
+        assert_eq!(cli.magic_roots, [PathBuf::from("first"), PathBuf::from("/second")]);
+    }
+
+    #[test]
+    fn magic_root_after_the_subcommand_is_rejected() {
+        let error = Cli::try_parse_from(["md", "compose", "doc.md", "--magic-root", "dir"])
+            .err()
+            .expect("--magic-root is a top-level flag");
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn magic_root_defaults_to_none() {
+        let cli = Cli::try_parse_from(["md", "compose", "doc.md"]).unwrap();
+        assert!(cli.magic_roots.is_empty());
     }
 }

@@ -47,7 +47,7 @@ Internally these switches map to `claudine::system_prompt::SystemPromptArgs`.
 
 The library pipeline lives in `claudine/lib/src/system_prompt/`:
 
-1. `InvocationContext` captures the launch CWD, HOME, environment, repository observation, and launch file-resolution rules once
+1. `InvocationContext` captures the launch CWD, HOME, environment, repository observation, and launch file-resolution rules once, from the request snapshot the `claudine` binary took when it started
 2. its `LaunchContext` projection selects either an explicit file or a discovered `system-prompt.md`; explicit references resolve through the invocation's launch `FileResolutionContext`
 3. each selected file retains a source-derived `SourceContext`, including its repository/package roots and `FileResolutionContext`
 4. the primary prompt and non-interactive candidates contribute one union of requested `ctx.*` groups; the invocation captures that union as **one launch-anchored shared runtime context** — plain `ctx.*` in a system prompt or appendix projects the caller's launch repository and package area, so moving the source file cannot change its launch-facing expansion (see [composition.md — Launch-Anchored Prepared Context](composition.md#launch-anchored-prepared-context))
@@ -104,14 +104,14 @@ Selected prompt files are composed with Darkmatter before they ever reach the pr
 Current preparation behavior:
 
 - the source file path is passed into `ComposeOptions::with_source_file(...)`
-- the source-derived `FileResolutionContext` is passed into the same `ComposeOptions`, so transclusion and file-like values use the frozen launch/source roots, HOME, and environment rather than ambient process state
+- the source-derived `FileResolutionContext` and those options compose as one request, so transclusion and file-like values use the frozen launch/source roots, HOME, and environment rather than ambient process state; the provider name (`AGENT`) the run adds to `ctx` is in that request's environment too
 - requested runtime groups are captured from invocation-owned evidence and shared across the primary prompt and appendix; downstream composition does not rediscover Git or topology
 - `::shell` runs from the launch repository root; outside a repository it runs from the explicit launch CWD, never from the selected prompt's directory
 - frontmatter is not forwarded to the provider
 - the canonical output is Markdown as authored after composition
 - if the composed body is empty or whitespace-only, Claudine treats that as an explicit disable for the selected scope
 
-File resolution and shell execution deliberately use different roots. References authored inside a prompt resolve from that prompt's source context, including when it lives in a sibling repository or outside Git, while `::shell` directives in both the primary prompt and a file-backed appendix stay pinned to the launch root. The built-in appendix has no file source and composes without a file-resolution context.
+File resolution and shell execution deliberately use different roots. References authored inside a prompt resolve from that prompt's source context, including when it lives in a sibling repository or outside Git, while `::shell` directives in both the primary prompt and a file-backed appendix stay pinned to the launch root. The built-in appendix has no file source, so it composes with the invocation's launch file-resolution context.
 
 Important disable rule:
 

@@ -1096,6 +1096,7 @@ epilogue: ./footer.md
 - **Max depth limits**: Configurable depth for nested transclusion
 - **Heading re-leveling**: Included markdown headings are adjusted to fit the nesting context (H6 overflow handled gracefully)
 - **TOC linking source model**: `::toc-linking` reads headings from the referenced file's raw source, not its recursively composed output
+- **Directive target chains**: `compose::target_chain` owns the `::toc-linking` fallback grammar (`"a.md | b.md | false"`) and the selection rule (first existing wins; trailing `false` suppresses; else the first alternative's class). Composition (`toc_linking::resolve_target_chain`) and DMLS (`ParsedDirective::target_chain` + `TargetChain::select`) both use it; never resolve a whole chain as one filename
 
 ## Module Structure
 

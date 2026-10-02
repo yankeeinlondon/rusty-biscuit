@@ -40,7 +40,8 @@ pub struct DetectOptions {
 /// `opts.merge` is true, types are widened along the spec's hierarchy and a
 /// property is `required` only if it appears in every source.
 ///
-/// `file` inference resolves through `context`, derived to each source.
+/// `file` inference resolves through `context`, derived to each source (see
+/// [`detect_from_document`] for the context a caller must supply).
 pub fn detect_schema(
     sources: &[&Markdown],
     opts: DetectOptions,
@@ -92,6 +93,15 @@ pub fn detect_schema_with_contexts(
 ///
 /// `$schema` is skipped because it is reserved by Darkmatter; all other
 /// top-level keys are mapped to base types.
+///
+/// Detection is passive: it derives with
+/// [`FileResolutionContext::for_source`] and never discovers a repository. A
+/// string whose reference does not resolve is a `string`, and so is every
+/// value when the derived context is invalid, so `request_context` must
+/// admit the document: the request's own context for a document inside its
+/// tree, otherwise the context prepared for that document (another
+/// repository, no repository, or another spelling of its path), as `md
+/// schema detect` does with each argument's document context.
 pub fn detect_from_document(
     md: &Markdown,
     request_context: &FileResolutionContext,

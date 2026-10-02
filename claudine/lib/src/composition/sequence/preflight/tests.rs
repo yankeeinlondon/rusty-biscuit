@@ -49,8 +49,8 @@ fn graph_for(path: &str) -> Result<PreflightGraph, CompositionError> {
     // references still re-anchor on their authoring directory, which is what
     // these tests actually assert.
     let source = crate::composition::resolve_fixture_source(path)?;
-    let plan = resolve_sequence_plan(&source)?.expect("fixture declares a sequence");
-    build_preflight_graph(&plan, &source)
+    let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))?.expect("fixture declares a sequence");
+    build_preflight_graph(&plan, &source, &crate::test_support::context_for(&source.resolved_path))
 }
 
 fn err_for(path: &str) -> CompositionError {
@@ -96,10 +96,10 @@ mod loading {
             "Sequence body.\n",
         );
         let source = crate::composition::resolve_fixture_source(&source_path).unwrap();
-        let plan = resolve_sequence_plan(&source)
+        let plan = resolve_sequence_plan(&source, &crate::test_support::context_for(&source.resolved_path))
             .unwrap()
             .expect("fixture declares a sequence");
-        let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_repo);
+        let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), &launch_repo).unwrap();
         let source_context = invocation.derive_source(&source.resolved_path).unwrap();
         let requirements =
             darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
@@ -199,7 +199,7 @@ mod loading {
             "Body.\n",
         );
         let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
-        let plan = resolve_sequence_plan(&resolved)
+        let plan = resolve_sequence_plan(&resolved, &crate::test_support::context_for(&resolved.resolved_path))
             .unwrap()
             .expect("fixture declares a sequence");
         let snapshot = biscuit_file::FileResolutionContext::from_snapshot(
@@ -220,11 +220,11 @@ mod loading {
             "CLAUDINE_SEQUENCE_SNAPSHOT_ROOT",
             ambient.path(),
         );
-        let graph = build_preflight_graph_with_context_and_resolution(
+        let graph = build_preflight_graph_with_context(
             &plan,
             &resolved,
-            darkmatter::markdown::compose::ComposeContext::capture(),
-            Some(&snapshot),
+            darkmatter::markdown::compose::ComposeContext::capture_for_dir(&std::env::current_dir().unwrap()),
+            &snapshot,
         )
         .unwrap();
 
@@ -1561,7 +1561,7 @@ mod lifecycle_literals {
         .add_magic_path(magic.clone(), biscuit_file::PathPosition::Start);
         // One capture for all six spellings: a full capture probes the host,
         // and the context is not what varies between the cases.
-        let context = darkmatter::markdown::compose::ComposeContext::capture();
+        let context = darkmatter::markdown::compose::ComposeContext::capture_for_dir(&std::env::current_dir().unwrap());
 
         for (reference, dir, file) in cases {
             write_source(dir, file, &[("success", success.clone())], "Prompt.\n");
@@ -1578,12 +1578,12 @@ mod lifecycle_literals {
                 "Body.\n",
             );
             let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
-            let plan = resolve_sequence_plan(&resolved).unwrap().unwrap();
-            let graph = build_preflight_graph_with_context_and_resolution(
+            let plan = resolve_sequence_plan(&resolved, &crate::test_support::context_for(&resolved.resolved_path)).unwrap().unwrap();
+            let graph = build_preflight_graph_with_context(
                 &plan,
                 &resolved,
                 context.clone(),
-                Some(&snapshot),
+                &snapshot,
             )
             .unwrap_or_else(|error| panic!("{reference}: graph failed: {error}"));
 

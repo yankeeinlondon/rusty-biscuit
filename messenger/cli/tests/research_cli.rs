@@ -233,6 +233,47 @@ fn validate_takes_a_relative_document_from_the_launch_directory() {
     assert_ne!(code(&output), 0, "`discord.md` does not exist in the fleet root:\n{}", stdout(&output));
 }
 
+/// A document argument is a file reference: `&` and `^` reach the document
+/// from a nested launch directory, and malformed reserved syntax or a relative
+/// path leaving the repository is refused as `invalid-reference` even when a
+/// file of that literal name exists.
+#[test]
+fn validate_resolves_document_arguments_through_the_reference_grammar() {
+    let fleet = Fleet::new();
+    for dir in [".git/objects", ".git/refs/heads"] {
+        fs::create_dir_all(fleet.path(dir)).expect("mkdir");
+    }
+    fleet.write(".git/HEAD", "ref: refs/heads/main\n");
+    let platforms = "messenger/docs/research/platforms";
+    let discord = fleet.text(&format!("{platforms}/discord.md"));
+    for name in ["@", "&", "^", "!legacy.md"] {
+        fleet.write(&format!("{platforms}/{name}"), &discord);
+    }
+    let launch = fleet.path(platforms);
+    let validate = |document: &str| {
+        let mut command = Command::new(biscuit_test_harness::bin_exe!("messenger"));
+        command
+            .current_dir(&launch)
+            .args(["research", "--root", "../../../.."])
+            .args(["--today", "2026-09-17", "validate", "--json", document])
+            .env_remove("COMPLETE")
+            .env("NO_COLOR", "1");
+        command.output().expect("run messenger")
+    };
+
+    for document in ["&messenger/docs/research/platforms/discord.md", "^messenger/docs/research/platforms/discord.md", "./@"] {
+        let output = validate(document);
+        assert_eq!(code(&output), 0, "{document}: {}", stdout(&output));
+        assert_eq!(json(&output)["valid"], true, "{document}");
+    }
+    for document in ["@", "&", "^", "!legacy.md", "../../../../../outside.md"] {
+        let output = validate(document);
+        assert_ne!(code(&output), 0, "{document}: {}", stdout(&output));
+        let error = json(&output)["error"].as_str().unwrap_or_default().to_string();
+        assert!(error.contains("failure: invalid-reference"), "{document}: {error}");
+    }
+}
+
 /// End to end over the real shipped artifacts: the accepted documents are
 /// still legacy prose without a bound schema, so the fleet is not yet valid.
 #[test]

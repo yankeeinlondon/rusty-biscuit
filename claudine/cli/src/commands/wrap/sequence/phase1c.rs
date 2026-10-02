@@ -314,6 +314,7 @@ fn collect_sequence_missing_values(
                     &source,
                     ctx.effective_overrides.as_ref(),
                     launch_area,
+                    file_resolution_context,
                 )
             {
                 let status = Status::from_prose(format!(

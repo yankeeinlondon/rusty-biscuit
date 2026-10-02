@@ -119,7 +119,11 @@ pub(super) fn translate_schema_failure(
     // Darkmatter names the base it resolved from, which for a caller value can
     // be the document's directory; report the caller's instead (R4).
     rebase_caller_file_problems(&mut problems, &options.caller_input_records);
-    let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
+    let effective = load_effective_schema(
+        source,
+        options.file_ref_fallback_dir.as_deref(),
+        &options.file_resolution_context,
+    )?;
     let phase = match mode {
         PrepareMode::Inline => Some(SchemaPhase::Launch),
         PrepareMode::Direct(_) => None,
@@ -175,6 +179,7 @@ pub(super) fn translate_schema_failure(
                     source,
                     retry_err,
                     options.file_ref_fallback_dir.as_deref(),
+                    &options.file_resolution_context,
                     &options.caller_input_records,
                     phase,
                 )
@@ -197,6 +202,7 @@ pub(super) fn translate_schema_failure(
         source_path: source.resolved_path.clone(),
         message: summary,
         problems: problems.iter().map(|p| p.path.clone()).collect(),
+        failures: resolution_failures(&problems),
     })
 }
 
@@ -204,6 +210,7 @@ pub(super) fn handle_retry_error(
     source: &ResolvedCompositionSource,
     err: CompositionError,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    file_resolution_context: &biscuit_file::FileResolutionContext,
     caller_input_records: &darkmatter::markdown::compose::CallerInputRecords,
     phase: Option<SchemaPhase>,
 ) -> Result<PreparedComposition, CompositionError> {
@@ -217,7 +224,7 @@ pub(super) fn handle_retry_error(
     };
     rebase_caller_file_problems(&mut problems, caller_input_records);
 
-    let effective = load_effective_schema(source, file_ref_fallback_dir)?;
+    let effective = load_effective_schema(source, file_ref_fallback_dir, file_resolution_context)?;
     let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 
     if !categorized.invalid_required.is_empty() {
@@ -239,6 +246,7 @@ pub(super) fn handle_retry_error(
         source_path: source.resolved_path.clone(),
         message: summary,
         problems: problems.iter().map(|p| p.path.clone()).collect(),
+        failures: resolution_failures(&problems),
     })
 }
 
@@ -281,7 +289,17 @@ pub(super) fn build_schema_validation_error(
         source_path: source_path.to_path_buf(),
         message,
         problems,
+        failures: resolution_failures(invalid),
     }
+}
+
+/// The resolution failure class of each file-reference problem, in order.
+pub(super) fn resolution_failures(problems: &[ValidationProblem]) -> Vec<biscuit_file::ResolutionFailure> {
+    problems
+        .iter()
+        .filter_map(|problem| problem.file_reference.as_ref())
+        .map(darkmatter::markdown::schemas::FileReferenceDiagnostic::resolution_failure)
+        .collect()
 }
 
 pub(super) fn build_missing_properties_error(

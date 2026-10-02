@@ -32,7 +32,7 @@
 //! and more correct.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::completion::composition;
 use crate::completion::root_menu;
@@ -128,8 +128,9 @@ impl RootContext {
     /// presence is sufficient to decide whether `init` should appear in
     /// the root menu.
     pub(crate) fn discover() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let home = dirs::home_dir();
+        let snapshot = crate::request::snapshot();
+        let cwd = snapshot.request_dir().to_path_buf();
+        let home = snapshot.home().map(Path::to_path_buf);
         let user_config_exists = user_config_exists(home.as_deref());
         let (repo_config_exists, in_repo) = detect_repo_config(&cwd);
         Self {
@@ -338,7 +339,7 @@ fn clap_dynamic_fallback(argv: &[String], current_index: usize) -> Vec<String> {
         &mut cmd,
         args,
         current_index,
-        std::env::current_dir().ok().as_deref(),
+        Some(crate::request::snapshot().request_dir()),
     ) {
         Ok(candidates) => candidates
             .into_iter()

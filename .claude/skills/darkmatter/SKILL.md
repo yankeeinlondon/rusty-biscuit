@@ -95,7 +95,8 @@ built_or_derived_context)`. Preparation fixes the repository observation and
 reuses it for the builder (one discovery per request), re-anchors a
 `ComposeOptions::new()` context on the request directory, and makes `ctx.env`
 the context's environment. Magic roots enter only through
-`RequestSnapshot::with_magic_root*`; `ComposeOptions` has no magic paths and no
+`RequestSnapshot::with_magic_root*` (for `md`, the top-level repeatable
+`--magic-root <DIR>`, applied in `main` by `request::with_magic_roots`); `ComposeOptions` has no magic paths and no
 public context setter. Only binaries call `RequestSnapshot::from_process()`. DMLS builds one
 context per repository (`dmls/src/context.rs`, see
 [dmls.md](dmls.md#file-resolution-contexts)).
@@ -266,6 +267,30 @@ The binary is `md`. Major command families include:
 - `md code-block` for direct terminal, HTML, or Markdown code rendering.
 - `md graph` and reference commands for document/reference inspection.
 
+Every source-file argument opens through `cli/src/io::open_argument` (or
+`resolve_file_path` for a context of its own): parse with `FileReference`
+first, so a bare `@`/`&`/`^` or `!x.md` is `InvalidReference` even when that
+literal file exists (`./@` names it), then resolve in the launch context, and
+derive the document context from the returned opening reference
+(`OpenedArgument::document_context`). Never join an argument onto the launch
+directory, canonicalize or probe the raw text, or fall back from a parse error
+to a plain path. Route-specific rules: `code-block` without a flag reads a
+file only for one line of reference syntax that resolves; `hash` takes the
+first candidate that exists as a file or directory
+(`darkmatter::markdown::fs::resolve_entry_in_context`, built on the
+resolver's own `resolve_detailed` walk, so an earlier file beats a later
+directory and an earlier `Io` probe fails; `find_files` and DMLS's
+later-buffer fallback follow the same rule); `edit` creates a miss at its
+first candidate; `schema triggers` fails a document outside every repository
+with `DocumentOutsideRepository` (`missing-context`). A reader that interprets
+references *inside* the opened document passes that document context, never
+the launch context: `schema detect`, `schema validate`, and `schema triggers`
+canonicalize the opened path (`canonicalize_simplified`) and call
+`request.document_context(Some(opened.reference()), &canonical)`, and detection
+uses `detect_schema_with_contexts` (library detection is passive and turns a
+context that does not admit the document into `string`). User contract:
+`darkmatter/docs/cli/index.md#every-file-argument-uses-this-grammar`.
+
 Rendering flags are presentation policy. `CliStyleClaims` captures explicitly
 supplied global CLI style claims so command handlers can merge them with
 frontmatter without mistaking defaults for user intent. Keep parsing in
@@ -425,7 +450,7 @@ their required targets; CI enables both features when constructing all-tier
 coverage.
 
 **Context guards.** `context_construction_guard.rs` in darkmatter lib, cli,
-dmls, messenger lib/cli, and claudine-gen (Claudine pending) runs the shared
+dmls, messenger lib/cli, claudine lib/cli, and claudine-gen runs the shared
 engine `cli/tests/common/context_guard.rs` over that crate's `src/`:
 construction (`FileResolutionContext::new|from_snapshot`, `::from_process`),
 optional context (`Option<[&]FileResolutionContext>`, no allowlist allowed),
@@ -437,23 +462,60 @@ feeds neither file resolution, `ctx.*`, nor `env.*`. A failing guard prints
 the `Allowance` to paste; fix the read instead when it resolves a path or
 seeds `ctx.*`. The production-scope rule (`#[cfg(test)]` blanking) lives in
 `source_scan::production_sources`, shared with
-`semantic_results_never_persist.rs`.
+`semantic_results_never_persist.rs`; files below an inline
+`#[cfg(test)] mod tests { .. }` (its `tests/` directory) are test-only too.
 
 **Entry-point parity matrix.** `lib/tests/common/entry_point_parity/mod.rs`
 holds the fixture (monorepo + fixture `HOME` + `outside.md`), the
 `EntryPoint` enum with exhaustive `owner()`/`rows()`, both tables, and
 `ParityReport`. Runners: `lib/tests/l1/entry_point_parity.rs` (pipeline,
 pre-flight, schema validation), `cli/tests/l1/entry_point_parity.rs` (`md`),
-`dmls/tests/l1/entry_point_parity.rs`; Claudine's is pending. A new entry
+`dmls/tests/l1/entry_point_parity.rs`, and
+`claudine/cli/tests/l1/entry_point_parity.rs` (`claudine compose --dry-run`
+for documents; for Table 2 values, `claudine __complete … compose <value>
+resolved=` (completion resolves only the committed prompt, so the value is
+that prompt and every target of that runner's second fixture declares
+`resolved: enum(t<N>)`; no suggestions is `Observed::Unresolved`), the same
+value composed as the prompt argument, and a `target=<value>` schema value).
+The same module's `CrossRepositoryFixture` (`launch/` and `source/` Git
+repositories with disjoint `magic.md` markers and `order.yaml` enums) backs
+the library, `md`, and Claudine runners' `external_*` tests (DMLS's request
+belongs to the document's repository by design): a source in another repository takes `&`,
+`^`, and bare root lookups from its own repository and `@` from the launch
+scope. A CLI that rebuilds a context at a foreign document's directory must
+copy the launch scope back (`with_launch_magic_scope`, as
+`MdRequest::document_context` does); Claudine completion uses
+`claudine::composition::derive_request_context_for_source`, composition's
+policy.
+`EntryPoint::MdArgument(MdRoute)` is one entry point per `md` route that
+reads a file argument (render, compose, clean, toc, get, set, rm, hash, both
+delta slots, graph, edit, validate refs, schema validate/detect/triggers,
+code-block `--file` and default); each route is observed through its own
+result (heading, title, hash, reported path, `Document:` line), Table 2 adds
+an absolute path, the four malformed introducers with matching literal files
+(`ParityFixture::write_route_files`), and `./@`, and the mutating routes
+(`rm`, `edit`) run serially on a restored fixture.
+Each variant must invoke the feature it names: never stand one entry point in
+for another. A new entry
 point is an `EntryPoint` variant plus rows; a failing cell is an entry-point
-defect, never a table edit, except where a design decision says otherwise
-(caller-supplied `../` may leave the tree: `md`'s argument opts in with
-`allow_external_relative`). Compare failures only by `ResolutionFailure`:
+defect, never a table edit. A caller-supplied `../` that leaves the
+repository is `InvalidReference` at every entry point, `md`'s arguments
+included (no `allow_external_relative`). No runner skips cells by OS:
+`RequestSnapshot::from_process` reads the home env-first (`USERPROFILE` on
+Windows), so a `CliProcessFixture` home reaches `md` and `claudine`.
+`@configured-doc.md` lives only under `home/.claudine/prompts` (Claudine's
+user prompt root; the `md` runner passes it as `md --magic-root <DIR>`, and the
+library and DMLS runners register it on their snapshot; production DMLS has no
+extra-root setting). Every runner runs every form. DMLS runs every consumer at
+every editor surface (graph through `index_workspace`; code actions assert no
+create-file fix except for a broken Markdown link). Compare failures only by `ResolutionFailure`:
 `MarkdownError::resolution_failure()` walks the cause chain (nested children,
 `TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
 `ComposeWarning::resolution_failure` carries it, and `md` renders it as a
 `failure: <kebab-class>` row on every block and warning
-(`darkmatter/docs/errors/file-reference-failures.md` is its user contract).
+(`darkmatter/docs/errors/file-reference-failures.md` is its user contract);
+Claudine's prompt-argument errors carry the same row
+(`CompositionError::resolution_failure`).
 
 Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
 and GitNexus first to include actual downstream consumers such as Claudine when

@@ -5,7 +5,7 @@ use crate::artifact::{
     emit_or_show_artifact, html_artifact, json_artifact, markdown_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
-use crate::io::load_markdown;
+use crate::io::load_document;
 use crate::render::render_terminal_output;
 use crate::request::MdRequest;
 use biscuit_terminal::terminal::Terminal;
@@ -25,7 +25,10 @@ pub fn run_render(
     request: &MdRequest,
 ) -> Result<()> {
     debug!("rendering document");
-    let mut md = load_markdown(input, request)?;
+    let (mut md, resolved) = load_document(input, request)?;
+    // Page-relative assets (images, `style:` files) resolve beside the file
+    // the argument opened, not beside its spelling (`@doc.md` has no parent).
+    let input = resolved.as_ref();
 
     // Apply cleanup with the specified or default indentation
     let indent_size = indent.unwrap_or(darkmatter::markdown::cleanup::DEFAULT_INDENT);

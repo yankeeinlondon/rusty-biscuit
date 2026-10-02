@@ -2436,8 +2436,10 @@ pub fn try_frontmatter_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
 /// file reference naming the directory to search (`&claudine/fixes`), and the
 /// rest is a glob matched against paths below it, where `*` stays within one
 /// segment and `**` crosses segments. A pattern without a wildcard names one
-/// file. A missing directory, like a missing file, matches nothing; so does a
-/// `null` pattern. Directory symlinks are not followed.
+/// file. The directory reference names its first candidate that exists, as a
+/// file reference does: when that candidate is a file, or none exists, nothing
+/// matches, and so does a `null` pattern; a candidate that cannot be probed
+/// before it is an error. Directory symlinks are not followed.
 pub fn find_files_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("find_files", args, 1)?;
     if any_null(args) {

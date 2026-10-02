@@ -13,9 +13,23 @@ When darkmatter encounters an `@`-prefixed reference like `@config/settings.toml
 
 The first directory containing a match wins. Each root is searched exactly once; registering an intrinsic root again as a magic path does not add a second probe.
 
-These anchors come from the request's **launch `@` scope**, not from the document being composed. Transcluded and nested documents keep the scope of the request, so an `@` reference inside `includes/chapter.md` searches the same tree as one in the root document, while `./`, bare, `&`, and `^` references stay relative to the document that wrote them. For `md compose` the request directory is the directory you ran `md` in. If the input document lies outside that directory's repository, `md` builds the context from the document's own repository instead. A library caller names its request directory in a `RequestSnapshot` and prepares a `ComposeRequest` from it (see [compose requests](./compose-requests.md)). See [the launch `@` scope](../../../biscuit-file/docs/topics/file-references.md#the-launch--scope) for the full contract.
+These anchors come from the request's **launch `@` scope**, not from the document being composed. Transcluded and nested documents keep the scope of the request, so an `@` reference inside `includes/chapter.md` searches the same tree as one in the root document, while `./`, bare, `&`, and `^` references stay relative to the document that wrote them. For `md compose` the request directory is the directory you ran `md` in. If the input document lies outside that directory's repository, `md` builds the context from the document's own repository for its `./`, bare, `&`, and `^` references, but its `@` references keep the launch scope and any `--magic-root` directories: run from `~/work/app`, `::file @magic.md` in `~/work/lib/doc.md` reads `~/work/app/magic.md`, not `~/work/lib/magic.md`. A library caller names its request directory in a `RequestSnapshot` and prepares a `ComposeRequest` from it (see [compose requests](./compose-requests.md)). See [the launch `@` scope](../../../biscuit-file/docs/topics/file-references.md#the-launch--scope) for the full contract.
 
 ## Adding Custom Search Roots
+
+### From the `md` command line
+
+Give `md` a `--magic-root <DIR>` before the subcommand to add a root for that one run. Repeat it to add several; they are searched in the order given, each ahead of its tier's intrinsic roots (`PathPosition::Start`, tier inferred from the path):
+
+```bash
+# @prompts/review.md now also finds ./shared/prompts/review.md
+# and ~/.claudine/prompts/prompts/review.md
+md --magic-root shared --magic-root ~/.claudine/prompts compose '@prompts/review.md'
+```
+
+The root applies to every route, so every command that reads a file argument (`md compose`, `md render`, `md clean`, `md toc`, `md delta`, `md graph`, `md hash`, `md validate refs`, `md schema validate`, `md schema detect`, `md schema triggers`, `md code-block`, and the frontmatter commands) searches it, both for the document argument and for the references inside the document and its transclusions. A relative `DIR` is relative to the directory you ran `md` in. A `DIR` that does not exist or is not a directory stops `md` with an error naming it, rather than being skipped. `md` reads no environment variable or configuration file for extra roots.
+
+### From the library
 
 Add directories to the search order on the request snapshot. The context builder applies them, and it is the only place magic roots enter a context:
 
@@ -89,7 +103,7 @@ The request context's tier-aware magic-root registrations are included in the co
 
 ## Use Case: Claudine
 
-The primary motivation for magic paths is [claudine](../../claudine/), which needs `@` references to reach Claudine-specific prompt directories as well as the repository. Its `~/.claudine` roots need the explicit user-tier override (**planned**: Claudine registers them on its request snapshot as shown; today it adds them to the context it builds itself):
+The primary motivation for magic paths is [claudine](../../claudine/), which needs `@` references to reach Claudine-specific prompt directories as well as the repository. Claudine registers those roots on its request snapshot, and the builder adds them to every context it builds for the invocation. Its `~/.claudine` roots need the explicit user-tier override:
 
 ```rust
 use biscuit_file::{MagicPathTier, PathPosition};

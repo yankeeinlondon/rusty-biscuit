@@ -115,7 +115,8 @@ fn anchor_completions(
     let target_doc = if path_part.is_empty() {
         Some(doc_id)
     } else {
-        // The document the link resolves to, as the graph resolves it.
+        // The first planned candidate the index holds: headings are known
+        // only for indexed documents.
         ctx.file_context().ok().and_then(|context| {
             reference_candidates(context, path_part)
                 .iter()

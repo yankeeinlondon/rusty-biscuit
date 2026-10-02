@@ -18,19 +18,6 @@ pub struct LaunchWorkspaceContext {
     pub warnings: Vec<String>,
 }
 
-impl Default for LaunchWorkspaceContext {
-    fn default() -> Self {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        Self {
-            launch_cwd: cwd.clone(),
-            repo_root: None,
-            child_cwd: cwd,
-            package_context: None,
-            warnings: Vec::new(),
-        }
-    }
-}
-
 impl LaunchWorkspaceContext {
     /// Project a launch workspace from an already observed repository.
     ///

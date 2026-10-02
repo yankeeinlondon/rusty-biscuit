@@ -12,7 +12,7 @@ use darkmatter::markdown::compose::RequestSnapshot;
 use darkmatter_cli::commands::{
     CleanOptions, run_clean, run_render, run_subcommand, validate_subcommand_usage,
 };
-use darkmatter_cli::request::MdRequest;
+use darkmatter_cli::request::{MdRequest, with_magic_roots};
 use std::io::{self, IsTerminal};
 use tracing_subscriber::{filter::EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -148,9 +148,9 @@ fn run() -> Result<()> {
 
     // The one read of the process's directory, home, and environment for
     // file resolution; every route resolves against this snapshot.
-    let request = MdRequest::new(
-        RequestSnapshot::from_process().wrap_err("Failed to capture the current directory")?,
-    );
+    let snapshot =
+        RequestSnapshot::from_process().wrap_err("Failed to capture the current directory")?;
+    let request = MdRequest::new(with_magic_roots(snapshot, &cli.magic_roots)?);
 
     if let Some(command) = cli.command.clone() {
         validate_subcommand_usage(&cli)?;

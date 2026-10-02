@@ -1,16 +1,17 @@
 //! Definition navigation and document links.
 //!
 //! Both work off the substrate's `references` edges: the link node under the
-//! cursor already carries a resolved target node (heading or document root) or
-//! stays unresolved. Links inside code spans and fenced code blocks never reach
+//! cursor already carries a resolved target node (heading or document root),
+//! an existing file outside the indexed documents, or stays unresolved. Links inside code spans and fenced code blocks never reach
 //! here because the CommonMark parser does not emit link events inside code, so
 //! no suppression logic is needed.
 
 use lsp_types::{DocumentLink, Location};
 
 use super::DocumentContext;
-use super::location::node_location;
-use crate::graph::{EdgeKind, LinkTarget, NodeId, WorkspaceGraph};
+use super::location::{line_range, node_location};
+use crate::graph::{EdgeKind, EdgeTarget, LinkTarget, NodeId, WorkspaceGraph};
+use crate::workspace::file_path_to_uri;
 
 /// Definition locations for a link under `offset` (heading, document, or —
 /// when the link is ambiguous later — multiple locations).
@@ -21,10 +22,17 @@ pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     let Some((link_node, _)) = link_at(ctx, doc_id, offset) else {
         return Vec::new();
     };
-    resolved_targets(ctx.graph, link_node)
+    let locations: Vec<Location> = resolved_targets(ctx.graph, link_node)
         .into_iter()
         .filter_map(|target| node_location(ctx.graph, target))
-        .collect()
+        .collect();
+    if !locations.is_empty() {
+        return locations;
+    }
+    resolved_file(ctx.graph, link_node)
+        .and_then(|path| file_path_to_uri(&path))
+        .map(|uri| vec![Location::new(uri, line_range(1))])
+        .unwrap_or_default()
 }
 
 /// Eagerly-resolved document links for every local/external link in the
@@ -87,9 +95,19 @@ pub(super) fn resolved_targets(graph: &WorkspaceGraph, link: NodeId) -> Vec<Node
         .collect()
 }
 
-/// The filesystem path of a link's resolved target document, if any.
+/// The existing file outside the indexed documents a link resolved to, if any.
+pub(super) fn resolved_file(graph: &WorkspaceGraph, link: NodeId) -> Option<std::path::PathBuf> {
+    graph.outgoing(link, EdgeKind::References).find_map(|edge| match &edge.target {
+        EdgeTarget::File(path) => Some(path.clone()),
+        _ => None,
+    })
+}
+
+/// The filesystem path of a link's resolved target document or file, if any.
 fn resolved_document_path(graph: &WorkspaceGraph, link: NodeId) -> Option<std::path::PathBuf> {
-    let target = resolved_targets(graph, link).into_iter().next()?;
+    let Some(target) = resolved_targets(graph, link).into_iter().next() else {
+        return resolved_file(graph, link);
+    };
     let document = graph.node(target)?.document;
     graph.document(document).map(|record| record.path.clone())
 }

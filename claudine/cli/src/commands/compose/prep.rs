@@ -23,7 +23,7 @@ use claudine::composition::{
     LifecycleRuntimeContext, LoopExecutionOptions, LoopExecutionResult,
     PrepareOptions, PreparedComposition, ProxyHandoff, ResolvedCompositionSource,
     ResolvedExecutionTarget, RunLedger, SharedApprovalCache, SharedRunLedger, SurfacedHandoff,
-    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy_in_context,
+    SystemShellRunner, build_loop_seed_with_lifecycle, commit_proxy,
     resolve_loop_config,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
@@ -196,7 +196,7 @@ pub(crate) fn run_composition_inner(
     let system_prompt_args = shared.system_prompt_args();
 
     let frontmatter_load_t = std::time::Instant::now();
-    let invocation = InvocationContext::capture()?;
+    let invocation = InvocationContext::capture(crate::request::snapshot())?;
     let provisional_context = invocation.launch_file_resolution_context().clone();
     let mut caller_input_records = claudine::composition::CallerInputLayers::from_caller_overrides(
         set_overrides.clone(),
@@ -271,6 +271,7 @@ pub(crate) fn run_composition_inner(
             interactive_opts,
             &term,
             launch_area_fallback.as_deref(),
+            &file_resolution_context,
             !caller_input_records.is_empty(),
             kind.mode(),
         )
@@ -399,7 +400,7 @@ pub(crate) fn run_composition_inner(
                 // catch a refusal, so it is used directly — the target is never
                 // resolved or hop-checked twice.
                 let handoff: ProxyHandoff = match surfaced {
-                    SurfacedHandoff::Request(request) => commit_proxy_in_context(
+                    SurfacedHandoff::Request(request) => commit_proxy(
                         &mut ledger.lock().unwrap(),
                         request,
                         &active_file_resolution_context,
@@ -797,7 +798,6 @@ fn eager_shell_preflight(
         // Retain the captured launch directory as diagnostic metadata;
         // document-authored references use the request-scoped resolver.
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
-        file_resolution_context: Some(file_resolution_context.clone()),
         // Discovery, not judgment: this pass exists to find `::shell`
         // directives. The verdict belongs to canonical preparation — and for
         // an `initialize`-declaring dry run, which still reaches this audit,
@@ -806,7 +806,7 @@ fn eager_shell_preflight(
         // of the typed one the direct route renders (AC28).
         defer_schema_verdict: true,
         proxy_overlay: proxy_overlay.clone(),
-        ..PrepareOptions::default()
+        ..PrepareOptions::new(file_resolution_context.clone())
     }
     .with_layered_overrides(caller_overrides.clone());
 
@@ -1052,7 +1052,7 @@ fn build_and_run_loop(
         &effect_engine,
         &shell_runner,
         &emitter,
-        loop_prepare_options.file_resolution_context.as_ref(),
+        &loop_prepare_options.file_resolution_context,
         loop_prepare_options.document_epoch.as_ref(),
         |ctx, guard| {
             // The prepared snapshot of this iteration's run, reported to the
@@ -1489,7 +1489,7 @@ fn execute_loop_or_single(
         shell_working_directory: Some(prep_context.launch_workspace.child_cwd.clone()),
         prepared_context: Some(prepared_context.clone()),
         file_ref_fallback_dir: Some(prep_context.launch_workspace.launch_cwd.clone()),
-        file_resolution_context: Some(file_resolution_context.clone()),
+        file_resolution_context: file_resolution_context.clone(),
         // Name coercion is a sequence-only concern; standalone compose/loop
         // prep injects no `state` object, so there is nothing to coerce.
         name_coercion_keys: Vec::new(),
@@ -1889,7 +1889,6 @@ fn run_staged_single(
         prep_context.launch_workspace.child_cwd.as_path(),
         provider,
         &handoff_ledger,
-        Some(&prep_context.invocation),
     )? {
         staged_boot::StagedInitialize::Skipped => return Ok(ActiveDocumentOutcome::done(0)),
         staged_boot::StagedInitialize::Handoff(handoff) => {

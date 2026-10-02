@@ -1,6 +1,7 @@
 //! `md validate` subcommand implementation.
 
 use crate::args::{GraphFormat, ValidateOutputFormat, ValidateTarget};
+use crate::io::open_argument;
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
@@ -24,11 +25,10 @@ pub(crate) fn run_validate(target: ValidateTarget, request: &MdRequest) -> Resul
             show_all,
             graph,
         } => {
-            // `join` keeps an absolute input as is.
-            let document = request.launch_dir().join(&input);
-            let md = Markdown::try_from(document.as_path())
+            let opened = open_argument(&input, request)?;
+            let md = Markdown::try_from(opened.path())
                 .wrap_err_with(|| format!("Failed to load {}", input.display()))?;
-            let context = request.document_context(None, &document)?;
+            let context = opened.document_context(request)?;
             let validation_request = ComposeRequest::with_context(
                 ComposeOptions::for_document(request.launch_dir(), &md),
                 context,

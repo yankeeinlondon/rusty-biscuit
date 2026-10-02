@@ -274,8 +274,10 @@ mod tests {
         let source = directory.path().join("docs/CLAUDE.md");
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         let invocation = claudine::invocation_context::InvocationContext::capture_at(
+            crate::request::snapshot(),
             directory.path(),
-        );
+        )
+        .unwrap();
         let source_context = invocation.derive_source(&source).unwrap();
 
         let options = build_harness_shell_options_for_source(
@@ -295,7 +297,7 @@ mod tests {
         initialize_repository(&sibling);
         let source = sibling.join("docs/CLAUDE.md");
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
-        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch);
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(crate::request::snapshot(), &launch).unwrap();
         let source_context = invocation.derive_source(&source).unwrap();
 
         let options = build_harness_shell_options_for_source(

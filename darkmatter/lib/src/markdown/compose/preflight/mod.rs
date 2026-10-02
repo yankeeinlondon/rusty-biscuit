@@ -6,7 +6,9 @@
 //! - [`collect`] performs a condition-**blind** walk of the document graph
 //!   (frontmatter `$(...)`, body `::shell`/`::shell-block`, and transcluded
 //!   children) and returns every command that *could* execute under *any*
-//!   document state.
+//!   document state. It also resolves `::code` and `::toc-linking` targets
+//!   passively (see [`PreflightTargetEdge`]) so a broken reference fails here
+//!   as it does for `::file`.
 //! - [`approval`] turns that collection into the deduped *approval set* the
 //!   orchestrator boundary hands back as the execution membership source.
 //!
@@ -75,6 +77,33 @@ pub enum PreflightResolvedTarget {
     Url(url::Url),
 }
 
+/// The directive family of a [`PreflightTargetEdge`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreflightTargetKind {
+    /// `::code`
+    Code,
+    /// `::toc-linking`
+    TocLinking,
+}
+
+/// A directive target pre-flight resolved without walking it.
+///
+/// `::code` and `::toc-linking` insert text that is never composed as
+/// Markdown, so their targets hold no shell commands to approve. Pre-flight
+/// still resolves each one so a broken reference fails here exactly as a
+/// `::file` target does; it does not read or fetch the target. These are not
+/// [`PreflightGraphEdge`]s and never feed the transclusion resolution cache.
+#[derive(Debug, Clone)]
+pub struct PreflightTargetEdge {
+    pub kind: PreflightTargetKind,
+    /// 1-based line of the directive in its file.
+    pub line: usize,
+    /// The target as authored; for a `::toc-linking` chain, the alternative
+    /// the chain selected.
+    pub raw_target: String,
+    pub resolved_target: PreflightResolvedTarget,
+}
+
 /// Reusable graph metadata for one document visited during pre-flight
 /// collection.
 ///
@@ -115,6 +144,9 @@ pub struct PreflightGraphNode {
     /// bumps, not a subtree deep-clone — Finding 16), followed by frontmatter
     /// prologue/epilogue children, which have no directive edge.
     pub children: Vec<Arc<PreflightGraphNode>>,
+    /// `::code` and `::toc-linking` targets of this document, in directive
+    /// order. A suppressed `::toc-linking` chain (`| false`) has none.
+    pub targets: Vec<PreflightTargetEdge>,
 }
 
 /// Best-effort canonical form of a path for source-equality comparison.
@@ -126,9 +158,9 @@ fn canonical_key(path: &Path) -> PathBuf {
 }
 
 impl PreflightGraphNode {
-    /// Returns `true` when this node has no entries and no edges.
+    /// Returns `true` when this node has no entries, edges, or targets.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty() && self.edges.is_empty()
+        self.entries.is_empty() && self.edges.is_empty() && self.targets.is_empty()
     }
 
     /// Returns the child node this document transcluded from `path`, if any.

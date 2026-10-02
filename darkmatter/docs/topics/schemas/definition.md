@@ -1272,6 +1272,16 @@ md schema detect <file>... [--format yaml|json] [--merge]
 
 Without `--merge`, multiple inputs emit one schema per file with a header comment.
 
+Each document's references are judged from the document itself, the way `md compose` and `md schema validate` resolve them, not from the directory you ran `md` in. A document in another repository finds `./`, bare, `&`, and `^` references in its own repository and `@` references in the launch scope; a document outside every repository keeps the `~` you opened it through; and two spellings of the same path (such as macOS `/var/…` and `/private/var/…`) give the same result. For example, `~/other-repo/docs/plan.md` declares `diagram: './flow.md'` (beside it) and `readme: '&README.md'` (at its repository's root). Run from `~/work/app`, a different repository:
+
+```text
+$ md schema detect ~/other-repo/docs/plan.md
+# detected from: /Users/me/other-repo/docs/plan.md
+$schema:
+  diagram: file
+  readme: file
+```
+
 ### Detection Algorithm
 
 For each top-level frontmatter property (excluding `$schema`), the inferred type is:
@@ -1448,7 +1458,10 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 - `to_json_schema(&SimplifiedSchema)` — lower to Draft 2020-12 JSON Schema (`serde_json::Value`).
 - `EffectiveSchema::validate_for_phase(frontmatter, SchemaPhase)` — validate an already-resolved working instance at `Launch` or `Completion` without mutating it or resolving another schema.
 - `detect_schema(&[&Markdown], DetectOptions, &FileResolutionContext)` — multi-file detection entry point; `file` inference resolves through the context derived to each document.
+- `detect_schema_with_contexts(&[&Markdown], DetectOptions, &[FileResolutionContext])` — the same with one context per document, for documents that do not share the request's tree.
 - `detect_from_document(&Markdown, &FileResolutionContext)` — single-document detection (returns a `SchemaShape`).
+
+Detection is passive: it derives the supplied context to each document and never discovers a repository. A reference that does not resolve is a `string`, and so is every value when that derivation is invalid, so pass a context that admits the document: the request's for a document inside its tree, otherwise the one prepared for that document (in another repository, in none, or opened through another spelling of its path). `md schema detect` passes each argument's document context.
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
 - `lint_suggestions(&SimplifiedSchema)` — check every `suggest(...)` candidate against its target schema; returns `Vec<SuggestionLintProblem>` (never a `SchemaError` for an invalid candidate).
 - `suggestions_for_path(&SimplifiedSchema, &[&str])` — query lint-valid completion candidates for a property path; returns `Option<SuggestionQuery>` with YAML-safe insertion text.

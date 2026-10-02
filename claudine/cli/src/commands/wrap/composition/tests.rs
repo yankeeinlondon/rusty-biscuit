@@ -1133,23 +1133,7 @@ fn emit_preflight_blocked_and_finalize_runs_top_level_and_stack_for_both_events(
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(
-        &mut guard,
-        &effect_engine,
-        &emitter,
-        &settings,
-        &messaging,
-        &term,
-        Path::new("/tmp/test.md"),
-        None,
-        None,
-        None,
-        None,
-        None,
-        &frontmatter,
-        std::time::Instant::now(),
-        err_info,
-    );
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, Path::new("/tmp/test.md"), None, None, None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
     assert!(
         matches!(outcome, PreflightBlockedOutcome::Control(None)),
         "no evaluation error and no flow-control action → Control(None); got {outcome:?}"
@@ -1252,7 +1236,7 @@ fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
     let frontmatter = serde_json::Map::new();
     let mut guard = LifecycleRunGuard::new(&config, &lifecycle_context, &emitter);
 
-    let outcome = preflight::emit_preflight_blocked_and_finalize_in_context(
+    let outcome = preflight::emit_preflight_blocked_and_finalize(
         &mut guard,
         &effect_engine,
         &emitter,
@@ -1264,7 +1248,7 @@ fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
         Some(&source_dir),
         Some(&launch_dir),
         Some(&prepared_context),
-        Some(&resolution),
+        &resolution,
         None,
         &frontmatter,
         std::time::Instant::now(),
@@ -1327,26 +1311,10 @@ fn emit_preflight_blocked_and_finalize_propagates_err_msg_into_blocked_stack() {
     let frontmatter = serde_json::Map::new();
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(
-        &mut guard,
-        &effect_engine,
-        &emitter,
-        &settings,
-        &messaging,
-        &term,
-        Path::new("/tmp/test.md"),
-        None,
-        None,
-        None,
-        None,
-        None,
-        &frontmatter,
-        std::time::Instant::now(),
-        LifecycleErrorInfo::from_action_failure(
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, Path::new("/tmp/test.md"), None, None, None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), LifecycleErrorInfo::from_action_failure(
             "shell_approval",
             "shell command 'rm' is blacklisted".to_string(),
-        ),
-    );
+        ));
     assert!(
         matches!(outcome, PreflightBlockedOutcome::Control(None)),
         "no evaluation error and no flow-control action → Control(None); got {outcome:?}"
@@ -1430,23 +1398,7 @@ fn emit_preflight_blocked_and_finalize_surfaces_blocked_evaluation_error() {
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(
-        &mut guard,
-        &effect_engine,
-        &emitter,
-        &settings,
-        &messaging,
-        &term,
-        &source_path,
-        Some(dir.path()),
-        Some(dir.path()),
-        None,
-        None,
-        None,
-        &frontmatter,
-        std::time::Instant::now(),
-        err_info,
-    );
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     let ce = match outcome {
@@ -1553,23 +1505,7 @@ fn emit_preflight_blocked_and_finalize_blocked_raise_then_finalize_raise_surface
     );
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(
-        &mut guard,
-        &effect_engine,
-        &emitter,
-        &settings,
-        &messaging,
-        &term,
-        &source_path,
-        Some(dir.path()),
-        Some(dir.path()),
-        None,
-        None,
-        None,
-        &frontmatter,
-        std::time::Instant::now(),
-        err_info,
-    );
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     let ce = match outcome {
@@ -1647,23 +1583,7 @@ fn emit_preflight_blocked_and_finalize_surfaces_finalize_evaluation_error_withou
         LifecycleErrorInfo::from_action_failure("harness_plan", "preflight-failure".to_string());
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(
-        &mut guard,
-        &effect_engine,
-        &emitter,
-        &settings,
-        &messaging,
-        &term,
-        &source_path,
-        Some(dir.path()),
-        Some(dir.path()),
-        None,
-        None,
-        None,
-        &frontmatter,
-        std::time::Instant::now(),
-        err_info,
-    );
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     let ce = match outcome {
@@ -1737,23 +1657,7 @@ fn emit_preflight_blocked_and_finalize_returns_control_when_no_evaluation_error(
         LifecycleErrorInfo::from_action_failure("harness_plan", "preflight-failure".to_string());
 
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
-    let outcome = emit_preflight_blocked_and_finalize(
-        &mut guard,
-        &effect_engine,
-        &emitter,
-        &settings,
-        &messaging,
-        &term,
-        &source_path,
-        Some(dir.path()),
-        Some(dir.path()),
-        None,
-        None,
-        None,
-        &frontmatter,
-        std::time::Instant::now(),
-        err_info,
-    );
+    let outcome = emit_preflight_blocked_and_finalize(&mut guard, &effect_engine, &emitter, &settings, &messaging, &term, &source_path, Some(dir.path()), Some(dir.path()), None, None, crate::request::test_context_ref(), None, &frontmatter, std::time::Instant::now(), err_info);
     drop(guard);
 
     assert!(

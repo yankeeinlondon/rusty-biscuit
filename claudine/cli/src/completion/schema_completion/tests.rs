@@ -2,6 +2,7 @@ use super::candidates::{property_value_hint, MatchGlobs};
 use super::*;
 use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
 fn write(path: &Path, content: &str) {
@@ -17,7 +18,7 @@ fn seed_repo(root: &Path) {
 
 fn effective_from_doc(doc: &str) -> EffectiveSchema {
     let md: Markdown = doc.into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request::test_context())
         .effective_for(&md)
         .unwrap()
         .expect("effective schema")

@@ -6,6 +6,8 @@
 //! analysis, and invalidation fan-out are one lookup with an edge-kind filter
 //! rather than N specialized maps.
 
+use std::path::PathBuf;
+
 use super::node::NodeId;
 
 /// Stable index of an edge inside a [`WorkspaceGraph`](super::WorkspaceGraph)
@@ -51,14 +53,19 @@ impl EdgeKind {
 
 /// The target end of an edge.
 ///
-/// Edges to in-workspace nodes resolve to a [`NodeId`]; a link whose target is
-/// broken, external-of-workspace, or a wiki form not yet matched is kept as
-/// [`EdgeTarget::Unresolved`] so Phase 4 diagnostics and Phase 5 wiki matching
-/// have the raw string without re-parsing.
+/// Edges to in-workspace nodes resolve to a [`NodeId`]; a path reference that
+/// resolves to an existing file the graph does not index (above the workspace
+/// folder, in `HOME`, under a magic root, or not Markdown) is
+/// [`EdgeTarget::File`]; a link whose target is broken or a wiki form not yet
+/// matched is kept as [`EdgeTarget::Unresolved`] so diagnostics and wiki
+/// matching have the raw string without re-parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EdgeTarget {
     /// A resolved node in this snapshot.
     Node(NodeId),
+    /// An existing file outside the indexed documents, as the shared file
+    /// resolver found it. It has no nodes, so its headings are unknown.
+    File(PathBuf),
     /// An unresolved raw target string (broken link, unmatched wiki form, …).
     Unresolved(String),
 }
@@ -68,7 +75,7 @@ impl EdgeTarget {
     pub fn node(&self) -> Option<NodeId> {
         match self {
             EdgeTarget::Node(id) => Some(*id),
-            EdgeTarget::Unresolved(_) => None,
+            EdgeTarget::File(_) | EdgeTarget::Unresolved(_) => None,
         }
     }
 }
@@ -91,6 +98,15 @@ impl Edge {
             source,
             kind,
             target: EdgeTarget::Node(target),
+        }
+    }
+
+    /// Builds an edge to an existing file the graph does not index.
+    pub fn to_file(source: NodeId, kind: EdgeKind, path: PathBuf) -> Self {
+        Self {
+            source,
+            kind,
+            target: EdgeTarget::File(path),
         }
     }
 

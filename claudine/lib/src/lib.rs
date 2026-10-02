@@ -34,3 +34,5 @@ pub mod signals;
 pub mod steering;
 pub mod stream;
 pub mod system_prompt;
+#[cfg(test)]
+pub(crate) mod test_support;

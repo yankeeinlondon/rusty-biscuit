@@ -968,8 +968,10 @@ fn resolve_local_target(
 fn source_to_id(source: &ComposeSource) -> NodeId {
     match source {
         ComposeSource::Unknown => NodeId::from("unknown"),
+        // `canonicalize_simplified`, not `canonicalize`: a Windows verbatim
+        // `\\?\` prefix would leak into every id and rendered graph.
         ComposeSource::File(p) => NodeId::from(
-            p.canonicalize()
+            biscuit_file::canonicalize_simplified(p)
                 .unwrap_or_else(|_| p.clone())
                 .to_string_lossy()
                 .to_string(),

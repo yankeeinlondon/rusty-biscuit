@@ -977,7 +977,7 @@ impl TaskExecution<'_> {
             self.stack.prepared_context,
             self.stack.file_resolution_context,
             self.stack.ctx_base_dir,
-        );
+        )?;
         let (view, globals) = runtime_bindings(
             LifecycleScope::TaskSetup,
             LifecycleValues {

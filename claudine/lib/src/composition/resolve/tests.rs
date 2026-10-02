@@ -10,6 +10,28 @@ use biscuit_terminal::terminal::Terminal;
 use crate::diagnostics::Diagnostic;
 use tempfile::TempDir;
 
+/// [`super::with_prompt_magic_roots`] applied to a context: the roots it
+/// registers on a snapshot, added to `context` in the builder's order.
+fn with_prompt_magic_roots(
+    mut context: FileResolutionContext,
+    local_root: &Path,
+    package_area: Option<&Path>,
+    package: Option<&Path>,
+    home: Option<&Path>,
+) -> FileResolutionContext {
+    let snapshot = super::with_prompt_magic_roots(
+        RequestSnapshot::new(local_root),
+        local_root,
+        package_area,
+        package,
+        home,
+    );
+    for (path, position, tier) in snapshot.magic_roots() {
+        context = context.add_magic_path_with_tier(path.clone(), *position, *tier);
+    }
+    context
+}
+
 #[test]
 fn prompt_magic_roots_are_closest_first() {
     // Only Claudine conventions are registered. The package, area,
@@ -430,7 +452,7 @@ fn resolve_absolute_markdown_file() {
     let file = dir.path().join("test.md");
     fs::write(&file, "---\ntitle: Test\n---\n# Hello").unwrap();
 
-    let result = resolve_composition_source(file.to_str().unwrap()).unwrap();
+    let result = resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     assert_eq!(result.resolved_path, file);
     assert_eq!(result.original_ref, file.to_str().unwrap());
     assert_eq!(result.original_text, "---\ntitle: Test\n---\n# Hello");
@@ -445,13 +467,13 @@ fn resolve_rejects_non_markdown() {
     let file = dir.path().join("test.txt");
     fs::write(&file, "hello").unwrap();
 
-    let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+    let err = resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap_err();
     assert!(matches!(err, CompositionError::NotMarkdown(_)));
 }
 
 #[test]
 fn resolve_missing_file() {
-    let err = resolve_composition_source("/nonexistent/path/test.md").unwrap_err();
+    let err = resolve_composition_source("/nonexistent/path/test.md", &crate::test_support::snapshot()).unwrap_err();
     assert!(matches!(
         err,
         CompositionError::FileReferenceNoMatch { .. }
@@ -804,7 +826,7 @@ fn resolve_malformed_frontmatter_reports_parse_error_not_missing_prompt() {
     )
     .unwrap();
 
-    let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+    let err = resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap_err();
     assert!(
         matches!(err, CompositionError::FrontmatterParse(_)),
         "expected FrontmatterParse, got: {err:?}"
@@ -821,7 +843,7 @@ fn resolve_four_dash_fence_maps_to_frontmatter_parse() {
     )
     .unwrap();
 
-    let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
+    let err = resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap_err();
     assert!(
         matches!(err, CompositionError::FrontmatterParse(_)),
         "expected FrontmatterParse for ---- fence, got: {err:?}"
@@ -855,8 +877,13 @@ fn load_error_enrichment_wraps_actual_four_dash_source() {
     )
     .unwrap();
 
-    let err = resolve_composition_source(file.to_str().unwrap()).unwrap_err();
-    let err = enrich_composition_source_load_error(file.to_str().unwrap(), err, true);
+    let err = resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap_err();
+    let err = enrich_composition_source_load_error_in_context(
+        file.to_str().unwrap(),
+        err,
+        true,
+        &crate::test_support::context_for(&file),
+    );
 
     match err {
         CompositionError::WithFrontmatter { inner, excerpt } => {
@@ -876,7 +903,7 @@ fn resolve_markdown_extension() {
     let file = dir.path().join("test.markdown");
     fs::write(&file, "# Hello").unwrap();
 
-    let result = resolve_composition_source(file.to_str().unwrap()).unwrap();
+    let result = resolve_composition_source(file.to_str().unwrap(), &crate::test_support::snapshot()).unwrap();
     assert_eq!(result.resolved_path, file);
 }
 
@@ -940,7 +967,7 @@ fn cross_platform_prompt_composes_cleanly() {
         .expect("workspace root");
     let path = workspace_root.join("prompts/_reviews/cross-platform.md");
 
-    let source = resolve_composition_source(path.to_str().unwrap())
+    let source = resolve_composition_source(path.to_str().unwrap(), &crate::test_support::snapshot())
         .expect("cross-platform.md should resolve and parse cleanly");
 
     assert!(
@@ -963,4 +990,33 @@ fn cross_platform_prompt_composes_cleanly() {
         !content.contains("description:"),
         "frontmatter YAML must not leak into body: {content}"
     );
+}
+
+/// Two fake Git repositories, `launch/` and `source/`, under `root`, with a
+/// prompt at `source/prompts/prompt.md`.
+fn two_repositories(root: &Path) -> (PathBuf, PathBuf) {
+    for repo in ["launch", "source"] {
+        let git = root.join(repo).join(".git");
+        fs::create_dir_all(git.join("objects")).unwrap();
+        fs::create_dir_all(git.join("refs/heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(git.join("config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n").unwrap();
+    }
+    let prompt = root.join("source/prompts/prompt.md");
+    fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+    fs::write(&prompt, "Body\n").unwrap();
+    (root.join("launch"), prompt)
+}
+
+#[test]
+fn source_context_keeps_its_own_repository_and_the_launch_scope() {
+    let root = TempDir::new().unwrap();
+    let (launch, prompt) = two_repositories(root.path());
+    let launch_context = capture_file_resolution_context(&RequestSnapshot::new(&launch)).unwrap();
+
+    let derived = derive_request_context_for_source(&launch_context, &prompt).unwrap();
+
+    assert_eq!(derived.repository_root(), Some(root.path().join("source").as_path()));
+    assert_eq!(derived.launch_magic_scope(), launch_context.launch_magic_scope());
+    derived.validate().unwrap();
 }

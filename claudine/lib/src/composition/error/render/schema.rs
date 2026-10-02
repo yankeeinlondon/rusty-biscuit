@@ -65,6 +65,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             source_path,
             message,
             problems,
+            failures,
         } => {
             let file_link = render_file_link(source_path);
             let mut body = format!("Schema validation failed for {file_link}.\n\n{message}");
@@ -73,6 +74,12 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 for problem in problems {
                     body.push_str(&format!("\n- <cyan>`{problem}`</cyan>"));
                 }
+            }
+            for failure in failures {
+                body.push_str(&format!(
+                    "\n\n<dim>failure:</dim> {}",
+                    darkmatter::markdown::errors::resolution_failure_name(*failure)
+                ));
             }
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "schema validation"))

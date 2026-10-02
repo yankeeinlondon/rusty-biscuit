@@ -2,7 +2,9 @@
 
 use crate::args::SchemaValidateFormat;
 use crate::commands::schema::assignment::{self, Assignment, PositionalKind};
+use crate::io::{DocumentArgumentError, OpenedArgument, open_argument};
 use crate::request::MdRequest;
+use darkmatter::markdown::errors::resolution_failure_name;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::errors::BlockError;
@@ -27,6 +29,10 @@ enum FileOutcome {
         schema_label: Option<String>,
         no_schema: bool,
     },
+    /// The file argument did not open (it is not valid reference syntax,
+    /// failed to resolve, or matched no file); reported with the parse
+    /// errors (exit `3`) because no document was read.
+    Unopened(color_eyre::eyre::Report),
     /// Frontmatter could not be parsed.
     ParseError(String),
     /// Schema could not be resolved/built for this file.
@@ -43,7 +49,8 @@ enum FileOutcome {
 /// - `1` — one or more files failed validation
 /// - `2` — schema or baseline could not be loaded (CLI baseline _or_ a
 ///   per-document `$schema` reference)
-/// - `3` — at least one file's frontmatter could not be parsed
+/// - `3` — at least one file could not be opened or its frontmatter could
+///   not be parsed
 pub fn run_validate(
     inputs: &[String],
     schema: Option<&Path>,
@@ -82,12 +89,18 @@ pub fn run_validate(
     let mut any_validation_failure = false;
 
     for file in &files {
-        let outcome = validate_one(&api, file, &assignments, no_trigger_schemas, request);
+        let (outcome, document) = match open_argument(file, request) {
+            Ok(opened) => {
+                let outcome = validate_one(&api, &opened, &assignments, no_trigger_schemas, request);
+                (outcome, Some(opened.into_path()))
+            }
+            Err(err) => (FileOutcome::Unopened(err), None),
+        };
         match &outcome {
             FileOutcome::Validated { report_valid, .. } if !report_valid => {
                 any_validation_failure = true;
             }
-            FileOutcome::ParseError(_) => {
+            FileOutcome::ParseError(_) | FileOutcome::Unopened(_) => {
                 any_parse_error = true;
             }
             FileOutcome::SchemaError(_) => {
@@ -95,7 +108,7 @@ pub fn run_validate(
             }
             FileOutcome::Validated { .. } => {}
         }
-        emit_outcome(file, &outcome, format, quiet, &terminal);
+        emit_outcome(file, document.as_deref(), &outcome, format, quiet, &terminal);
     }
 
     if any_parse_error {
@@ -133,15 +146,15 @@ fn load_api(schema: Option<&Path>, request: &MdRequest) -> Result<DarkmatterSche
 /// caller can map them to the spec's exit codes.
 fn validate_one(
     api: &DarkmatterSchemas,
-    file: &Path,
+    opened: &OpenedArgument,
     assignments: &[Assignment],
     no_trigger_schemas: bool,
     request: &MdRequest,
 ) -> FileOutcome {
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, disabling trigger discovery.
-    let discovery_path =
-        biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
+    let discovery_path = biscuit_file::canonicalize_simplified(opened.path())
+        .unwrap_or_else(|_| opened.path().to_path_buf());
     let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),
@@ -150,7 +163,7 @@ fn validate_one(
     // The document's context resolves its schema `file` values and bounds
     // trigger discovery. A context that cannot be built has no better outcome
     // than the file's parse error (exit 3).
-    let document_context = match request.document_context(None, &discovery_path) {
+    let document_context = match request.document_context(Some(opened.reference()), &discovery_path) {
         Ok(context) => context,
         Err(err) => return FileOutcome::ParseError(format!("{err:#}")),
     };
@@ -228,19 +241,20 @@ fn schema_label_from(md: &Markdown) -> Option<String> {
 
 fn emit_outcome(
     file: &Path,
+    document: Option<&Path>,
     outcome: &FileOutcome,
     format: SchemaValidateFormat,
     quiet: bool,
     terminal: &Terminal,
 ) {
     match format {
-        SchemaValidateFormat::Pretty => emit_pretty(file, outcome, quiet, terminal),
+        SchemaValidateFormat::Pretty => emit_pretty(file, document, outcome, quiet, terminal),
         SchemaValidateFormat::Json => emit_json(file, outcome),
     }
 }
 
-fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Terminal) {
-    let link = document_link(file);
+fn emit_pretty(file: &Path, document: Option<&Path>, outcome: &FileOutcome, quiet: bool, terminal: &Terminal) {
+    let link = document_link(file, document);
 
     match outcome {
         FileOutcome::Validated {
@@ -279,6 +293,19 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             }
             for advisory in advisories {
                 emit_advisory_bullet(advisory, terminal);
+            }
+        }
+        FileOutcome::Unopened(err) => {
+            let header = format!(
+                "- <red>✗</red> _<dim>the document</dim>_ {link} _<dim>could not be opened:</dim>_"
+            );
+            println!("{}", Prose::new(header).render(terminal));
+            match unopened_argument(err) {
+                Some(argument) => println!("{}", argument.status_block(terminal).render(terminal)),
+                None => {
+                    let bullet = format!("    - {}", escape_prose(&format!("{err:#}")));
+                    println!("{}", Prose::new(bullet).render(terminal));
+                }
             }
         }
         FileOutcome::ParseError(message) => {
@@ -382,11 +409,13 @@ fn strip_pointer_prefix(pointer: &str) -> &str {
 }
 
 /// Builds the styled, OSC8-hyperlinked Prose markup for a document. The
-/// visible label is the path the user passed on the CLI; the underlying
-/// `file://` href is the absolute form so terminal-launched openers can
-/// resolve it regardless of the user's current directory.
-fn document_link(file: &Path) -> String {
-    let absolute = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+/// visible label is the argument as the user spelled it; the underlying
+/// `file://` href is the absolute file it opened (`document`), so `@doc.md`
+/// links to the file it found. An argument that opened nothing links to its
+/// own absolute spelling.
+fn document_link(file: &Path, document: Option<&Path>) -> String {
+    let target = document.unwrap_or(file);
+    let absolute = std::path::absolute(target).unwrap_or_else(|_| target.to_path_buf());
     format!(
         "<blue>[{label}](file://{href})</blue>",
         label = file.display(),
@@ -446,6 +475,16 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
             }
             value
         }
+        FileOutcome::Unopened(err) => json!({
+            "file": file_str,
+            "valid": false,
+            "schema": serde_json::Value::Null,
+            "error": "file_reference",
+            "failure": unopened_argument(err)
+                .map(|argument| resolution_failure_name(argument.resolution_failure())),
+            "message": format!("{err:#}"),
+            "problems": [],
+        }),
         FileOutcome::ParseError(message) => json!({
             "file": file_str,
             "valid": false,
@@ -488,6 +527,11 @@ fn format_location(problem: &ValidationProblem) -> String {
 /// Escape text so it renders exactly as written inside Prose markup.
 fn escape_prose(input: &str) -> String {
     Prose::escape_text(input)
+}
+
+/// The typed argument error inside an [`FileOutcome::Unopened`] report.
+fn unopened_argument(err: &color_eyre::eyre::Report) -> Option<&DocumentArgumentError> {
+    err.chain().find_map(|cause| cause.downcast_ref::<DocumentArgumentError>())
 }
 
 fn emit_schema_error(err: &SchemaError) {

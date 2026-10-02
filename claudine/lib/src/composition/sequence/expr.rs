@@ -40,23 +40,28 @@ pub struct SourceExpressionLookup<'a> {
     item: Option<&'a Map<String, Value>>,
     frontmatter: &'a Map<String, Value>,
     ctx: CtxLookup<'a>,
-    base_dir: &'a Path,
-    file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
-    source_path: Option<&'a Path>,
+    file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    source_path: &'a Path,
 }
 
 impl<'a> SourceExpressionLookup<'a> {
-    /// Build a lookup rooted at `base_dir` — the directory of the document that
-    /// authored the expression, so read-side functions such as `file_exists`
-    /// resolve document-relative rather than against the process CWD.
-    pub fn new(frontmatter: &'a Map<String, Value>, base_dir: &'a Path) -> Self {
+    /// Build a lookup for expressions authored by the document at
+    /// `source_path`, resolving its references through the request's
+    /// `file_resolution_context`, so read-side functions such as `file_exists`
+    /// resolve document-relative. `env.NAME` and `ctx.*` read that context's
+    /// environment.
+    pub fn new(
+        frontmatter: &'a Map<String, Value>,
+        file_resolution_context: &'a biscuit_file::FileResolutionContext,
+        source_path: &'a Path,
+    ) -> Self {
+        let base_dir = source_path.parent().unwrap_or_else(|| file_resolution_context.cwd());
         Self {
             item: None,
             frontmatter,
-            ctx: CtxLookup::new(base_dir),
-            base_dir,
-            file_resolution_context: None,
-            source_path: None,
+            ctx: CtxLookup::new(base_dir, file_resolution_context.env()),
+            file_resolution_context,
+            source_path,
         }
     }
 
@@ -64,18 +69,6 @@ impl<'a> SourceExpressionLookup<'a> {
     #[must_use]
     pub fn with_item(mut self, item: &'a Map<String, Value>) -> Self {
         self.item = Some(item);
-        self
-    }
-
-    /// Reuse the request snapshot for expressions authored by `source_path`.
-    #[must_use]
-    pub fn with_file_resolution_context(
-        mut self,
-        context: Option<&'a biscuit_file::FileResolutionContext>,
-        source_path: &'a Path,
-    ) -> Self {
-        self.file_resolution_context = context;
-        self.source_path = Some(source_path);
         self
     }
 
@@ -115,7 +108,8 @@ impl EvaluationLookup for SourceExpressionLookup<'_> {
             "ctx" => self.ctx.resolve_ctx(path),
             "env" => path
                 .strip_prefix("env.")
-                .and_then(|key| std::env::var(key).ok().map(Value::String)),
+                .and_then(|key| self.file_resolution_context.env().get(key).cloned())
+                .map(Value::String),
             "doc" => match path.strip_prefix("doc.") {
                 Some(rest) => self.document(rest),
                 None => Some(self.document_object()),
@@ -130,15 +124,16 @@ impl EvaluationLookup for SourceExpressionLookup<'_> {
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
-        Some(match self.source_path {
-            Some(source_path) => super::super::document_expression_resolution_context(
-                source_path,
-                None,
-                self.file_resolution_context,
-                None,
-            ),
-            None => ResolutionContext::new(self.base_dir.to_path_buf()),
-        })
+        // `None` makes a read-side function fail with Darkmatter's
+        // "requires a document resolution context" error.
+        super::super::document_expression_resolution_context(
+            self.source_path,
+            None,
+            self.file_resolution_context,
+            None,
+        )
+        .inspect_err(|error| tracing::warn!(%error, "sequence expression context is invalid"))
+        .ok()
     }
 }
 
@@ -235,8 +230,12 @@ mod tests {
     fn item_layer_replaces_top_level_keys_for_every_spelling() {
         let frontmatter = object(json!({ "config": { "b": 2 }, "only_fm": { "x": 3 } }));
         let item = object(json!({ "config": { "a": 1 } }));
-        let base_dir = Path::new(".");
-        let lookup = SourceExpressionLookup::new(&frontmatter, base_dir).with_item(&item);
+        let lookup = SourceExpressionLookup::new(
+            &frontmatter,
+            crate::test_support::process_context(),
+            Path::new("sequence.md"),
+        )
+        .with_item(&item);
 
         let cases = [
             ("config.b", Value::Null),
@@ -288,8 +287,7 @@ mod tests {
         .with_package_area(package)
         .add_magic_path(magic, biscuit_file::PathPosition::Start);
         let frontmatter = Map::new();
-        let lookup = SourceExpressionLookup::new(&frontmatter, request.path())
-            .with_file_resolution_context(Some(&snapshot), &source_path);
+        let lookup = SourceExpressionLookup::new(&frontmatter, &snapshot, &source_path);
 
         for expression in [
             "file_exists('{{CLAUDINE_SEQUENCE_ROOT}}/env.flag')",

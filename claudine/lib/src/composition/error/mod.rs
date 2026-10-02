@@ -117,6 +117,11 @@ pub enum CompositionError {
         source: biscuit_file::FileReferenceError,
     },
 
+    /// The request's file-resolution context could not be built, so no
+    /// reference could be resolved.
+    #[error(transparent)]
+    ResolutionContext(#[from] darkmatter::markdown::compose::ContextBuildError),
+
     /// A file reference the author wrote in their prompt document could not be
     /// resolved to a usable file.
     ///
@@ -2365,6 +2370,10 @@ pub enum CompositionError {
         /// declaration order. Empty when the underlying validator did not
         /// expose structured locations.
         problems: Vec<String>,
+        /// The resolution failure class of each problem that is a failed
+        /// file reference, in problem order; each renders as a `failure:`
+        /// row.
+        failures: Vec<biscuit_file::ResolutionFailure>,
     },
 
     /// Required schema properties are missing and cannot be collected
@@ -3080,6 +3089,27 @@ impl CompositionError {
                 .collect();
         }
         self
+    }
+
+    /// The biscuit-file failure class of a prompt-argument reference that did
+    /// not resolve, rendered as the block's `failure:` row.
+    ///
+    /// The autocomplete family is reached only after the argument matched no
+    /// file (the picker is the recovery for a clean bare miss), so each of its
+    /// variants is a `NoMatch` whatever the picker then did. Other variants
+    /// carry no class here.
+    pub fn resolution_failure(&self) -> Option<biscuit_file::ResolutionFailure> {
+        use biscuit_file::ResolutionFailure;
+        match self {
+            Self::InvalidReference { source, .. } => Some(source.resolution_failure()),
+            Self::FileNotFound(_)
+            | Self::FileReferenceNoMatch { .. }
+            | Self::AutocompleteNoMatches { .. }
+            | Self::AutocompleteOverCap { .. }
+            | Self::AutocompleteNotInteractive
+            | Self::AutocompleteCancelled { .. } => Some(ResolutionFailure::NoMatch),
+            _ => None,
+        }
     }
 
     /// Inspect the retained no-match evidence without coupling to rendering.

@@ -340,7 +340,7 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &darkmatter::effects::EffectEngine::builder()
             .mutation_root(std::env::current_dir().unwrap())
             .auto_rehash(false)
@@ -454,7 +454,7 @@ fn run_event_stack_emits_top_level_and_stack() {
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &darkmatter::effects::EffectEngine::builder()
             .mutation_root(std::env::current_dir().unwrap())
             .auto_rehash(false)
@@ -522,7 +522,7 @@ fn execute_event_still_runs_full_event() {
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &darkmatter::effects::EffectEngine::builder()
             .mutation_root(std::env::current_dir().unwrap())
             .auto_rehash(false)
@@ -621,7 +621,7 @@ fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
         base_dir: None,
         ctx_base_dir: None,
         prepared_context: None,
-        file_resolution_context: None,
+        file_resolution_context: crate::test_support::process_context(),
         effect_engine: &effect_engine,
         shell_runner: &crate::composition::lifecycle_executor::SystemShellRunner,
         emitter: &emitter,

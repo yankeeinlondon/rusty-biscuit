@@ -101,8 +101,9 @@ pub fn is_transclusion(kind: DirectiveKind) -> bool {
     matches!(kind, DirectiveKind::File | DirectiveKind::Code)
 }
 
-/// Whether a directive's positional target is one workspace-local file that
-/// `md compose` resolves: the transclusions plus `::toc-linking <file>`.
+/// Whether a directive's positional target names local files that `md
+/// compose` resolves: the transclusions plus `::toc-linking`'s fallback
+/// chain (read through `ParsedDirective::target_chain`).
 /// `::file-links` names a directory or glob, not one file.
 pub fn has_file_target(kind: DirectiveKind) -> bool {
     is_transclusion(kind) || kind == DirectiveKind::TocLinking

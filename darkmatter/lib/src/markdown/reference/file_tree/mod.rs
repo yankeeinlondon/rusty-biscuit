@@ -72,8 +72,7 @@ impl biscuit_terminal::errors::BlockError for FileTreeError {
 
         match self {
             FileTreeError::PathNotFound(path) => {
-                let absolute = path
-                    .canonicalize()
+                let absolute = biscuit_file::canonicalize_simplified(path)
                     .ok()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| path.display().to_string());
@@ -87,8 +86,7 @@ impl biscuit_terminal::errors::BlockError for FileTreeError {
             }
 
             FileTreeError::NotAFile(path) => {
-                let absolute = path
-                    .canonicalize()
+                let absolute = biscuit_file::canonicalize_simplified(path)
                     .ok()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| path.display().to_string());

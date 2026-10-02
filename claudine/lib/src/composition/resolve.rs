@@ -7,7 +7,7 @@ use biscuit_file::{
     DetailedOutcome, FileReference, FileResolutionContext, MagicPathTier, PathPosition,
     ResolutionFailure,
 };
-use darkmatter::markdown::compose::ComposeSource;
+use darkmatter::markdown::compose::{ComposeSource, RequestSnapshot};
 use darkmatter::markdown::{Markdown, MarkdownError};
 
 use super::error::{CompositionError, MarkdownLoadCause};
@@ -36,99 +36,103 @@ fn map_load_error(path: &Path, err: MarkdownError) -> CompositionError {
 /// Uses `biscuit-file::FileReference` for all path resolution. Validates
 /// that the resolved file has a `.md` or `.markdown` extension.
 ///
-/// This is the ambient compatibility entry point. Canonical Claudine command
-/// paths resolve with an invocation-owned [`FileResolutionContext`] via
-/// [`resolve_composition_source_in_context`]. When invoked from inside a Cargo
-/// workspace package area (common for
-/// monorepo prompts like `@prompts/commit.md`), the package area and the
-/// convention prompt directories are added as prepended magic search roots
-/// so a bare `@<file>` resolves to the closest matching prompt.
+/// The reference resolves against the launch context
+/// [`capture_file_resolution_context`] builds from `snapshot`. Canonical
+/// Claudine command paths resolve with an invocation-owned
+/// [`FileResolutionContext`] via [`resolve_composition_source_in_context`].
 pub fn resolve_composition_source(
     file_ref: &str,
+    snapshot: &RequestSnapshot,
 ) -> Result<ResolvedCompositionSource, CompositionError> {
-    let context = capture_file_resolution_context()?;
+    let context = capture_file_resolution_context(snapshot)?;
     resolve_composition_source_in_context(file_ref, &context)
 }
 
-/// Captures file-resolution inputs for compatibility callers.
+/// Builds the launch file-resolution context for `snapshot`, with Claudine's
+/// prompt conventions registered as extra `@` roots.
 ///
 /// ## Notes
 ///
-/// This helper performs ambient CWD, HOME, environment, Git, and topology
-/// reads. Canonical command paths instead create one
+/// This helper discovers the repository at the snapshot's request directory
+/// on every call. Canonical command paths instead create one
 /// [`InvocationContext`](crate::invocation_context::InvocationContext), use
 /// its launch projection for top-level resolution, and retain the definitive
 /// source bundle returned after resolution.
-pub fn capture_file_resolution_context() -> Result<FileResolutionContext, CompositionError> {
-    let cwd = std::env::current_dir().map_err(|source| CompositionError::InvalidReference {
-        reference: "<request working directory>".to_string(),
-        source: biscuit_file::FileReferenceError::CurrentDirectory(source),
-    })?;
-    let git_root = sniff::filesystem::git::GitRepo::discover(&cwd)
+///
+/// ## Errors
+///
+/// [`CompositionError::ResolutionContext`] when the builder rejects the
+/// context.
+pub fn capture_file_resolution_context(
+    snapshot: &RequestSnapshot,
+) -> Result<FileResolutionContext, CompositionError> {
+    let cwd = snapshot.request_dir();
+    let git_root = sniff::filesystem::git::GitRepo::discover(cwd)
         .ok()
         .flatten()
         .map(|repo| repo.repo_root().to_path_buf());
     let repo_info = git_root
         .as_deref()
         .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let mut context = FileResolutionContext::new(&cwd);
-    if let (Some(root), Some(repo)) = (git_root.as_ref(), repo_info.as_ref()) {
-        let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
-            .expect("observed repository topology must project to valid absolute scopes");
-        context = context.with_repository_scope_catalog(catalog);
-    } else if let Some(root) = git_root.as_ref() {
-        context = context.with_repository_root(root);
-    }
-    let package_area = context.package_area().map(Path::to_path_buf);
-    let package = context.package_root().map(Path::to_path_buf);
-    let home = context.home_dir().map(Path::to_path_buf);
-    // Without a repository the launch directory is the local `@` root, so it
-    // registers the same convention rows a repository would (R5).
-    let local_root = git_root.as_deref().unwrap_or(cwd.as_path());
-    Ok(with_prompt_magic_roots(
-        context,
-        local_root,
-        package_area.as_deref(),
-        package.as_deref(),
-        home.as_deref(),
-    ))
+    Ok(build_prompt_resolution_context(snapshot, git_root.as_deref(), repo_info.as_ref())?)
 }
 
-/// Build a source-anchored snapshot for compatibility callers.
+/// Builds the launch file-resolution context for `snapshot` from a repository
+/// the caller already observed, with Claudine's prompt conventions registered
+/// as extra `@` roots.
 ///
-/// This helper performs a fresh Git/topology observation. Canonical command
-/// paths call `InvocationContext::derive_source` and propagate the resulting
-/// source context without re-deriving it.
+/// `repository_root` is the repository containing the snapshot's request
+/// directory and `repo_info` its topology, when known. The one builder shared
+/// by composition, the invocation context, and shell completion, so a value
+/// completion offers is one runtime resolves.
+///
+/// ## Errors
+///
+/// The builder's [`ContextBuildError`](darkmatter::markdown::compose::ContextBuildError)
+/// when the context fails validation.
+pub fn build_prompt_resolution_context(
+    snapshot: &RequestSnapshot,
+    repository_root: Option<&Path>,
+    repo_info: Option<&sniff::filesystem::repo::RepoInfo>,
+) -> Result<FileResolutionContext, darkmatter::markdown::compose::ContextBuildError> {
+    crate::invocation_context::build_file_resolution_context(
+        snapshot,
+        None,
+        repository_root,
+        repo_info,
+        None,
+    )
+}
+
+/// Build the context for a top-level source in another repository.
+///
+/// The source's directory gets its own built context (its repository is
+/// discovered there), keeping `provisional_context`'s home and environment,
+/// and the launch `@` scope captured by `provisional_context` is carried into
+/// it.
 ///
 /// ## Notes
 ///
 /// - Anchors repository-root discovery at `source_path.parent()`, never at
-///   the process CWD: a top-level document selected from a different
+///   the launch directory: a top-level document selected from a different
 ///   repository keeps that repository's nested references rather than being
 ///   hijacked by wherever the binary was launched from (D2/D10, AC12).
-/// - The launch `@` scope captured by `provisional_context` is carried into
-///   the rebuilt context, and the prompt conventions are registered against
-///   the launch local root rather than the source's repository (ruling 2 of
+/// - The prompt conventions are registered against the launch local root
+///   rather than the source's repository (ruling 2 of
 ///   2026-09-23-local-before-home): a nested `@x.md` searches the launch
 ///   tree first, while `./`, bare, `&`, and `^` references keep the
-///   source-specific anchors above.
-/// - Environment and home directory are retained from the provisional
-///   snapshot, but Git root and repository topology are rediscovered
-///   ambiently by this compatibility helper.
+///   source-specific anchors.
 ///
 /// ## Errors
 ///
-/// Returns [`CompositionError::InvalidReference`] only when `source_path` has
-/// no parent directory — unreachable in practice, since the source arrives here
-/// already resolved to an absolute path.
+/// [`CompositionError::InvalidReference`] when `source_path` has no parent
+/// directory (unreachable in practice, since the source arrives here already
+/// resolved to an absolute path), and [`CompositionError::ResolutionContext`]
+/// when the builder rejects the source's context.
 pub fn derive_request_context_for_source(
     provisional_context: &FileResolutionContext,
     source_path: &Path,
 ) -> Result<FileResolutionContext, CompositionError> {
-    // An already-resolved top-level source is always an absolute path to an
-    // existing file, so `parent()` succeeds in every reachable case. The
-    // `InvalidReference` propagation keeps the API honest if a future caller
-    // violates that invariant.
     let base_dir = source_path.parent().ok_or_else(|| CompositionError::InvalidReference {
         reference: biscuit_file::to_portable_string(source_path),
         source: biscuit_file::FileReferenceError::InvalidSyntax(format!(
@@ -144,29 +148,16 @@ pub fn derive_request_context_for_source(
     let repo_info = git_root
         .as_deref()
         .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let mut context = FileResolutionContext::from_snapshot(
-        base_dir,
-        provisional_context.home_dir().map(Path::to_path_buf),
-        provisional_context.env().clone(),
-    )
-    .with_source_path(source_path);
-    if let (Some(root), Some(repo)) = (git_root.as_ref(), repo_info.as_ref()) {
-        let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
-            .expect("observed repository topology must project to valid absolute scopes");
-        context = context.with_repository_scope_catalog(catalog);
-    } else if let Some(root) = git_root.as_ref() {
-        context = context.with_repository_root(root);
-    }
-    let launch_scope = provisional_context.launch_magic_scope();
-    let home = context.home_dir().map(Path::to_path_buf);
-    Ok(with_prompt_magic_roots(
-        context,
-        launch_scope.local_root(),
-        launch_scope.package_area(),
-        launch_scope.package_root(),
-        home.as_deref(),
-    )
-    .with_launch_magic_scope(launch_scope.clone()))
+    let snapshot = RequestSnapshot::new(base_dir)
+        .with_home(provisional_context.home_dir().map(Path::to_path_buf))
+        .with_env(provisional_context.env().clone());
+    Ok(crate::invocation_context::build_file_resolution_context(
+        &snapshot,
+        Some(source_path),
+        git_root.as_deref(),
+        repo_info.as_ref(),
+        Some(provisional_context.launch_magic_scope()),
+    )?)
 }
 
 /// Resolves and loads a top-level composition source using a previously
@@ -465,7 +456,8 @@ pub fn prompt_magic_fallback_roots(local_root: &Path, home: Option<&Path>) -> Ve
     roots
 }
 
-/// Register Claudine's prompt conventions on a file-resolution context.
+/// Register Claudine's prompt conventions as a request snapshot's extra `@`
+/// roots, in the order the builder registers them.
 ///
 /// The single registration point shared by composition resolution, the
 /// invocation context, and shell completion, so a value completion offers
@@ -490,12 +482,12 @@ pub fn prompt_magic_fallback_roots(local_root: &Path, home: Option<&Path>) -> Ve
 /// lexical path (spec R2), so such a row stays local.
 #[must_use]
 pub fn with_prompt_magic_roots(
-    mut context: FileResolutionContext,
+    mut snapshot: RequestSnapshot,
     local_root: &Path,
     package_area: Option<&Path>,
     package: Option<&Path>,
     home: Option<&Path>,
-) -> FileResolutionContext {
+) -> RequestSnapshot {
     let user_prompt_root = home.map(|home| home.join(".claudine").join("prompts"));
     let user_fallback_root = home.map(|home| home.join(".claudine"));
     let local_root_is_home = home.is_some_and(|home| {
@@ -517,23 +509,23 @@ pub fn with_prompt_magic_roots(
         if is_user_row(&root) {
             continue;
         }
-        context = context.add_magic_path(root, PathPosition::Start);
+        snapshot = snapshot.with_magic_root(root, PathPosition::Start);
     }
     for root in prompt_magic_fallback_roots(local_root, None) {
         if is_user_row(&root) {
             continue;
         }
-        context = context.add_magic_path(root, PathPosition::End);
+        snapshot = snapshot.with_magic_root(root, PathPosition::End);
     }
     // User-tier rows, registered with the explicit override so they stay
     // behind every local-tier candidate in every layout.
     if let Some(root) = user_prompt_root {
-        context = context.add_magic_path_with_tier(root, PathPosition::Start, MagicPathTier::User);
+        snapshot = snapshot.with_magic_root_tier(root, PathPosition::Start, MagicPathTier::User);
     }
     if let Some(root) = user_fallback_root {
-        context = context.add_magic_path_with_tier(root, PathPosition::End, MagicPathTier::User);
+        snapshot = snapshot.with_magic_root_tier(root, PathPosition::End, MagicPathTier::User);
     }
-    context
+    snapshot
 }
 
 fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
@@ -546,21 +538,9 @@ fn push_unique_root(roots: &mut Vec<PathBuf>, root: PathBuf) {
 ///
 /// Source-load failures can happen after the file has resolved and been read
 /// but before a [`ResolvedCompositionSource`] exists. This helper reconstructs
-/// the resolved source text for the CLI render boundary and leaves the error
-/// unchanged when the file cannot be resolved/read again or the error is not
-/// frontmatter-rooted.
-pub fn enrich_composition_source_load_error(
-    file_ref: &str,
-    error: CompositionError,
-    stderr_is_tty: bool,
-) -> CompositionError {
-    let Some(source_text) = read_source_text_for_enrichment(file_ref) else {
-        return error;
-    };
-    error.enrich_frontmatter_text(&source_text, stderr_is_tty)
-}
-
-/// Snapshot-preserving variant of [`enrich_composition_source_load_error`].
+/// the resolved source text through `context` for the CLI render boundary and
+/// leaves the error unchanged when the file cannot be resolved/read again or
+/// the error is not frontmatter-rooted.
 pub fn enrich_composition_source_load_error_in_context(
     file_ref: &str,
     error: CompositionError,
@@ -571,22 +551,6 @@ pub fn enrich_composition_source_load_error_in_context(
         return error;
     };
     error.enrich_frontmatter_text(&source_text, stderr_is_tty)
-}
-
-fn read_source_text_for_enrichment(file_ref: &str) -> Option<String> {
-    let context = capture_file_resolution_context().ok()?;
-    let reference = build_prompt_reference(file_ref).ok()?;
-    let resolved_path = reference.resolve_in_context(&context).ok()??;
-
-    let ext = resolved_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "markdown") {
-        return None;
-    }
-
-    fs::read_to_string(resolved_path).ok()
 }
 
 fn read_source_text_for_enrichment_in_context(

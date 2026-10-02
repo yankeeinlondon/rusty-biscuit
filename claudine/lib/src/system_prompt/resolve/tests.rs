@@ -2,6 +2,47 @@ use super::*;
 use serial_test::serial;
 use tempfile::TempDir;
 
+/// An invocation launched at `context.cwd` from the test process, with `home`
+/// as its home directory when given.
+fn invocation_for(
+    context: &LaunchContext,
+    home: Option<Option<&std::path::Path>>,
+) -> crate::invocation_context::InvocationContext {
+    let mut snapshot = crate::test_support::snapshot();
+    if let Some(home) = home {
+        snapshot = snapshot.with_home(home.map(std::path::Path::to_path_buf));
+    }
+    crate::invocation_context::InvocationContext::capture_at(&snapshot, &context.cwd).unwrap()
+}
+
+fn resolve_system_prompt_source(
+    args: &SystemPromptArgs,
+    context: &LaunchContext,
+) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    super::resolve_system_prompt_source(args, context, &invocation_for(context, None))
+}
+
+fn resolve_system_prompt_source_with_home(
+    args: &SystemPromptArgs,
+    context: &LaunchContext,
+    home: Option<&std::path::Path>,
+) -> Result<Option<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    super::resolve_system_prompt_source(args, context, &invocation_for(context, Some(home)))
+}
+
+fn resolve_non_interactive_candidates(
+    context: &LaunchContext,
+) -> Result<Vec<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    super::resolve_non_interactive_candidates(context, &invocation_for(context, None))
+}
+
+fn resolve_non_interactive_candidates_with_home(
+    context: &LaunchContext,
+    home: Option<&std::path::Path>,
+) -> Result<Vec<(SystemPromptSource, String)>, crate::error::ClaudineError> {
+    super::resolve_non_interactive_candidates(context, &invocation_for(context, Some(home)))
+}
+
 #[test]
 fn explicit_append_file_resolves() {
     let tmp = TempDir::new().unwrap();
@@ -97,6 +138,13 @@ fn explicit_file_not_found_errors() {
 #[test]
 fn explicit_append_at_prefix_searches_repository_root() {
     let repo = TempDir::new().unwrap();
+    // A real repository: the invocation discovers it from the launch
+    // directory, as `@` resolution needs.
+    std::process::Command::new("git")
+        .args(["init", "--initial-branch=main"])
+        .current_dir(repo.path())
+        .output()
+        .expect("initialize git fixture");
     let target = repo.path().join("prompts").join("sys.md");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "# repo sys\n").unwrap();

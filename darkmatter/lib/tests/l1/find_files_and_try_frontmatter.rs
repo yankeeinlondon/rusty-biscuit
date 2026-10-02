@@ -123,6 +123,54 @@ fn find_files_input_matrix() {
     }
 }
 
+/// The searched directory is the bare reference's first candidate that
+/// exists, as for a file reference: `docs/` (the probing document's
+/// directory) is planned before the repository root.
+#[test]
+fn find_files_searches_the_first_existing_candidate_only() {
+    let dir = repo();
+    let d = dir.path();
+    for (path, content) in [
+        ("docs/near", "a file, not a directory\n"),
+        ("near/a.md", "# Later directory\n"),
+        ("later/a.md", "# Only directory\n"),
+        ("loop/a.md", "# Behind a failed probe\n"),
+    ] {
+        std::fs::create_dir_all(d.join(path).parent().expect("parent")).expect("mkdir");
+        std::fs::write(d.join(path), content).expect("write fixture");
+    }
+    let looped = d.join("docs/loop");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("loop", &looped).expect("symlink");
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file("loop", &looped)
+        .expect("creating a file symlink needs Developer Mode or SeCreateSymbolicLinkPrivilege");
+
+    // Control: the only existing candidate is the repository root's directory.
+    let found = value(d, "find_files('later/*.md')").unwrap();
+    assert_eq!(canonical_list(found), json!([portable(d, "later/a.md")]));
+    // An earlier file decides: there is no directory to search.
+    assert_eq!(value(d, "find_files('near/*.md')").unwrap(), json!([]));
+    // An earlier candidate that cannot be probed fails the expression with
+    // the `Io` class.
+    let path = d.join("docs/probe.md");
+    std::fs::write(&path, "---\nv: \"{{ find_files('loop/*.md') }}\"\n---\nBody\n").expect("write probe");
+    let error = Markdown::try_from(path.as_path())
+        .expect("probe parses")
+        .compose_with(&crate::request_support::request(ComposeOptions::new().with_source_file(&path)))
+        .expect_err("a failed probe is not a directory miss");
+    let class = match &error {
+        darkmatter::markdown::MarkdownError::Interpolation { cause, .. } => match cause.as_ref() {
+            darkmatter::markdown::compose::expression::ExpressionError::FileReference(diagnostic) => {
+                diagnostic.source.as_ref().map(|source| source.resolution_failure())
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    assert_eq!(class, Some(biscuit_file::ResolutionFailure::Io), "{error:?}");
+}
+
 #[test]
 fn try_frontmatter_reports_a_failure_as_a_value() {
     let dir = repo();

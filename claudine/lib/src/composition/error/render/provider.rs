@@ -81,6 +81,7 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
             } else {
                 render_candidate_no_match_body(reference, resolution, suggestions, term)
             };
+            let body = super::with_failure_row(body, err);
 
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new(
@@ -91,7 +92,7 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                 .hint("Correct the reference and try again.")
         }
         _ => {
-            let msg = err.to_string();
+            let msg = super::with_failure_row(err.to_string(), err);
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "composition failed"))
                 .body(msg)

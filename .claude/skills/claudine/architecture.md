@@ -362,7 +362,7 @@ All dispatch surfaces that evaluate expressions against an `EventMeta` share the
                       → parse_condition(expr) + evaluate(parsed, &lookup)
 ```
 
-`EventMetaExpressionLookup` resolves `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`, `os.*`, `hardware.*`, `git.*`, `project.*`, and top-level event fields. `EventMetaConditionLookup` layers `ctx.*` (e.g. `ctx.today`) on top for hook `when` evaluation. The old JSON-serialize-and-flatten path was removed by feature `2026-05-02-flattened-bridge`.
+`EventMetaExpressionLookup` resolves `env.NAME`, `extra.<path>`, `tool_input.<path>`, `tool_response.<path>`, `os.*`, `hardware.*`, `git.*`, `project.*`, and top-level event fields. `EventMetaConditionLookup` layers `ctx.*` (e.g. `ctx.today`) on top for hook `when` evaluation, reading the environment of the dispatching process's `RequestSnapshot` (carried on `CanonicalRuntimeConfig`, so `compile_canonical_runtime`, `DispatchRuntimeContext::load_for_env`, and the `dispatch*` entry points take one). Its read-side file functions resolve through a context Darkmatter's builder makes at the hook's directory, on first use. Hook-template `env.NAME` still reads the hook process's environment when the event fires. The old JSON-serialize-and-flatten path was removed by feature `2026-05-02-flattened-bridge`.
 
 ### Config Merge Strategy
 
@@ -531,6 +531,56 @@ Other concerns remain split by responsibility:
 
 Composition execution headers are shared output helpers in
 `cli/src/output/mod.rs`; they do not live in the executor pipeline.
+
+### File-resolution contexts
+
+The `claudine` binary calls `RequestSnapshot::from_process()` once, in
+`dispatch` (`cli/src/request.rs`), anchored at the launch directory (a hook's
+wrapper-supplied `AGENT_CWD` for `handle`). Routes read it through
+`crate::request::snapshot()`; no route reads the process directory, HOME, or
+environment to resolve a reference or seed `ctx.*`. `InvocationContext::capture`,
+`capture_at`, and `capture_for_wrapper` take the snapshot, and completion's
+`ScopeContext` takes its directory and home.
+
+Every `FileResolutionContext` comes from Darkmatter's builder or derives from a
+built one:
+
+- `invocation_context::build_file_resolution_context` registers Claudine's
+  prompt conventions on the snapshot (`composition::with_prompt_magic_roots`
+  returns a `RequestSnapshot`) and calls
+  `build_resolution_context_with_catalog` with the invocation's own repository
+  observation, so a request discovers each repository once. The launch context,
+  `derive_source` (a fresh build at the source directory, keeping the launch
+  `@` scope), `derive_request_context_for_source`,
+  `capture_file_resolution_context(&snapshot)`, and completion's
+  `scopes::file_resolution_context` all use it
+  (`composition::build_prompt_resolution_context` is the public entry).
+- Harness, proxy, sequence-reference, and system-prompt resolution derive
+  (`for_source`, `for_cwd`, `for_trusted_external_cwd`) from the request's
+  context; their old ambient forms are gone.
+
+A context is required wherever one is held: `PrepareOptions::new(context)`,
+`CallerInputLayers::new(context)`, `SequenceSourceOptions::new(context)`,
+`StackExecutionContext::file_resolution_context`, `LoopExpressionLookup::new`,
+`SourceExpressionLookup::new`, and `MaterializedHarnessPrompt`. Composes run on
+a `ComposeRequest` from `composition::compose_request(options, context)`, which
+adds the run's `ctx` environment layer (`AGENT`, `MODEL`, `YOLO`) to the
+context's environment so Darkmatter's alignment keeps them.
+`lib/tests/l1/context_construction_guard.rs` and
+`cli/tests/l1/context_construction_guard.rs` hold the rule (one `from_process`,
+in `request.rs`; no construction; no `Option` context; every ambient read
+allowlisted with its reason), and `cli/tests/l1/entry_point_parity.rs` runs
+Darkmatter's parity matrix through `claudine compose --dry-run` (documents, the
+prompt argument, and a `target=<value>` schema value) and through
+`claudine __complete` (the committed prompt argument, whose `$schema`
+suggestions name the file it resolved). A failed schema `file` value, a
+tolerated reference warning, and an unresolved prompt argument
+(`CompositionError::resolution_failure`) render a `failure: <class>` row, as in
+`md`. Its `external_*` tests use the shared `CrossRepositoryFixture`: a prompt
+in another repository takes `&`, `^`, and bare root lookups from its own
+repository and `@` from the launch tree, in composition and in completion
+(`CommittedPrompt::resolve` derives such a prompt with
+`composition::derive_request_context_for_source`, composition's policy).
 
 ### Agent text is data
 

@@ -23,7 +23,7 @@ use super::node::{
     WikiResolution,
 };
 use super::substrate::{DocumentIndex, WikiLinkFact};
-use crate::context::{ContextFailure, plan_reference, reference_candidates};
+use crate::context::{ContextFailure, ReferenceTarget, plan_reference, resolve_reference};
 use crate::wiki::{self, Match, ParseOutcome, WikiDoc};
 
 /// Stable index of a document inside a [`WorkspaceGraph`] snapshot.
@@ -318,6 +318,9 @@ impl WorkspaceGraph {
                 LinkResolution::Node(node) => {
                     edges.push(Edge::to_node(source, EdgeKind::References, node));
                 }
+                LinkResolution::File(path) => {
+                    edges.push(Edge::to_file(source, EdgeKind::References, path));
+                }
                 LinkResolution::Unresolved => {
                     edges.push(Edge::unresolved(source, EdgeKind::References, raw));
                 }
@@ -353,22 +356,26 @@ impl WorkspaceGraph {
             }
         }
 
-        // Resolve `::file`/`::code` transclusions: a `transcludes` edge is emitted
-        // only when the path names an indexed document. A non-`.md` target
-        // (`::code ./mod.rs`) or a broken path carries no edge — request-time
-        // diagnostics distinguish "missing" from "not a workspace document".
+        // Resolve `::file`/`::code` transclusions to the indexed document's
+        // root, or to an existing unindexed file (`::code ./mod.rs`). A broken
+        // path carries no edge; request-time diagnostics report it.
         for (source, doc_id, path) in pending_transclusions {
-            if let Some(target_doc) = resolver.document(doc_id, &path)
-                && let Some(record) = documents.get(target_doc.0 as usize)
-            {
-                edges.push(Edge::to_node(source, EdgeKind::Transcludes, record.root));
+            match resolver.locate(doc_id, &path) {
+                Some(Located::Document(target_doc)) => {
+                    if let Some(record) = documents.get(target_doc.0 as usize) {
+                        edges.push(Edge::to_node(source, EdgeKind::Transcludes, record.root));
+                    }
+                }
+                Some(Located::File(file)) => {
+                    edges.push(Edge::to_file(source, EdgeKind::Transcludes, file));
+                }
+                Some(Located::Missing(_)) | None => {}
             }
         }
 
-        // Resolve `$schema` (uses_schema) and file uses (uses_file). Schema
-        // files and assets (`.yaml`, images, directories) are not `.md` graph
-        // documents, so they stay `Unresolved`; a `file(...)` value naming an
-        // indexed document resolves to its root, feeding invalidation fan-out.
+        // Resolve `$schema` (uses_schema) and file uses (uses_file). A value
+        // naming an indexed document resolves to its root, feeding invalidation
+        // fan-out; an existing schema file or asset resolves to that file.
         for (source, doc_id, path) in pending_schema_uses {
             edges.push(resolve_file_edge(source, EdgeKind::UsesSchema, doc_id, &path, &mut resolver, &documents));
         }
@@ -678,15 +685,12 @@ impl WorkspaceGraph {
             }
             LinkTarget::RelativePath { path, fragment } => {
                 let context = context.ok()?;
-                let candidates = match plan_reference(context, path) {
-                    Ok(candidates) => candidates,
-                    Err(failure) => return Some(LinkDiagnostic::BrokenPath { failure }),
-                };
-                let target_doc =
-                    candidates.iter().find_map(|candidate| self.document_id(candidate));
-                match target_doc {
-                    None => Some(LinkDiagnostic::BrokenPath { failure: ResolutionFailure::NoMatch }),
-                    Some(target_doc) => match fragment {
+                match locate(context, path, &self.by_path) {
+                    Located::Missing(failure) => Some(LinkDiagnostic::BrokenPath { failure }),
+                    // An unindexed file's headings are unknown, so its anchor
+                    // is not checked.
+                    Located::File(_) => None,
+                    Located::Document(target_doc) => match fragment {
                         Some(slug) if self.heading_in(target_doc, slug).is_none() => {
                             Some(LinkDiagnostic::MissingAnchor)
                         }
@@ -708,11 +712,11 @@ impl WorkspaceGraph {
 /// Why an unresolved link target could not be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkDiagnostic {
-    /// The path did not match any indexed document.
+    /// The path names no existing file and no indexed document.
     BrokenPath {
         /// The failure class: [`ResolutionFailure::NoMatch`] when no planned
-        /// candidate is an indexed document, otherwise why the reference
-        /// could not be planned.
+        /// candidate exists, otherwise why the reference could not be
+        /// resolved.
         failure: ResolutionFailure,
     },
     /// The document resolved but the `#fragment`/anchor did not.
@@ -722,6 +726,7 @@ pub enum LinkDiagnostic {
 /// Outcome of resolving a link target to a graph node.
 enum LinkResolution {
     Node(NodeId),
+    File(PathBuf),
     Unresolved,
     External,
 }
@@ -741,8 +746,10 @@ fn resolve_link(
             }
         }
         LinkTarget::RelativePath { path, fragment } => {
-            let Some(target_doc) = resolver.document(source_doc, path) else {
-                return LinkResolution::Unresolved;
+            let target_doc = match resolver.locate(source_doc, path) {
+                Some(Located::Document(target_doc)) => target_doc,
+                Some(Located::File(file)) => return LinkResolution::File(file),
+                Some(Located::Missing(_)) | None => return LinkResolution::Unresolved,
             };
             match fragment {
                 Some(slug) => match heading_by_slug.get(&(target_doc, slug.clone())) {
@@ -758,10 +765,10 @@ fn resolve_link(
     }
 }
 
-/// Resolves a `uses_schema`/`uses_file` reference to an edge: a resolved edge to
-/// an indexed Markdown document's root when `path` names one, else an
-/// `Unresolved` edge carrying the raw path (an asset, schema YAML, or directory
-/// that is not a graph document). No filesystem access.
+/// Resolves a `uses_schema`/`uses_file` reference to an edge: to an indexed
+/// Markdown document's root when `path` names one, to the file when it names
+/// an existing unindexed file (schema YAML, an asset), else an `Unresolved`
+/// edge carrying the raw path.
 fn resolve_file_edge(
     source: NodeId,
     kind: EdgeKind,
@@ -770,12 +777,14 @@ fn resolve_file_edge(
     resolver: &mut ReferenceResolver<'_>,
     documents: &[DocumentRecord],
 ) -> Edge {
-    if let Some(target_doc) = resolver.document(source_doc, path)
-        && let Some(record) = documents.get(target_doc.0 as usize)
-    {
-        return Edge::to_node(source, kind, record.root);
+    match resolver.locate(source_doc, path) {
+        Some(Located::Document(target_doc)) => match documents.get(target_doc.0 as usize) {
+            Some(record) => Edge::to_node(source, kind, record.root),
+            None => Edge::unresolved(source, kind, path.to_string()),
+        },
+        Some(Located::File(file)) => Edge::to_file(source, kind, file),
+        Some(Located::Missing(_)) | None => Edge::unresolved(source, kind, path.to_string()),
     }
-    Edge::unresolved(source, kind, path.to_string())
 }
 
 /// Supplies each document's file-resolution context to the graph build.
@@ -800,18 +809,63 @@ impl DocumentContexts for NoContexts {
     }
 }
 
-/// Resolves path references to indexed documents during one graph build.
+/// Where a path reference lands.
+#[derive(Debug, Clone)]
+enum Located {
+    /// An indexed document.
+    Document(DocumentId),
+    /// An existing file the graph does not index.
+    File(PathBuf),
+    /// Nothing: the failure class.
+    Missing(ResolutionFailure),
+}
+
+/// Locates `raw` the way composition resolves it, so an existing file is
+/// never reported missing because the workspace folder does not index it.
 ///
-/// A reference resolves to the first planned candidate that is an indexed
-/// document, the in-memory analogue of composition's "first candidate that
-/// exists": open buffers count, and the filesystem is never probed. Contexts
-/// are fetched once per document folder, since planning depends only on the
-/// folder and the repository.
+/// The shared resolver ([`resolve_reference`]) decides existence. Two index
+/// lookups keep it cheap and buffer-aware: a first planned candidate that is
+/// indexed needs no probe, and a reference that matched no file (not one whose
+/// probe failed) resolves to its first candidate that is an open, not yet
+/// saved, buffer.
+fn locate(
+    context: &FileResolutionContext,
+    raw: &str,
+    by_path: &HashMap<PathBuf, DocumentId>,
+) -> Located {
+    let candidates = match plan_reference(context, raw) {
+        Ok(candidates) => candidates,
+        Err(failure) => return Located::Missing(failure),
+    };
+    if let Some(&document) = candidates.first().and_then(|candidate| by_path.get(candidate)) {
+        return Located::Document(document);
+    }
+    match resolve_reference(context, raw) {
+        ReferenceTarget::Found(path) => match by_path.get(&path) {
+            Some(&document) => Located::Document(document),
+            None => Located::File(path),
+        },
+        // A candidate that could not be probed stops the search, as it stops
+        // composition; a later buffer never answers for it.
+        ReferenceTarget::Missing { failure: ResolutionFailure::NoMatch, .. } => candidates
+            .iter()
+            .find_map(|candidate| by_path.get(candidate).copied())
+            .map_or(Located::Missing(ResolutionFailure::NoMatch), Located::Document),
+        ReferenceTarget::Missing { failure, .. } => Located::Missing(failure),
+    }
+}
+
+/// Locates path references during one graph build (see [`locate`]).
+///
+/// Contexts are fetched once per document folder, since planning depends
+/// only on the folder and the repository, and each `(folder, reference)`
+/// pair is located once per build.
 struct ReferenceResolver<'a> {
     contexts: &'a dyn DocumentContexts,
     documents: &'a [DocumentRecord],
     by_path: &'a HashMap<PathBuf, DocumentId>,
     by_folder: HashMap<PathBuf, Result<FileResolutionContext, ContextFailure>>,
+    located: HashMap<(PathBuf, String), Option<Located>>,
 }
 
 impl<'a> ReferenceResolver<'a> {
@@ -820,23 +874,34 @@ impl<'a> ReferenceResolver<'a> {
         documents: &'a [DocumentRecord],
         by_path: &'a HashMap<PathBuf, DocumentId>,
     ) -> Self {
-        Self { contexts, documents, by_path, by_folder: HashMap::new() }
+        Self {
+            contexts,
+            documents,
+            by_path,
+            by_folder: HashMap::new(),
+            located: HashMap::new(),
+        }
     }
 
-    /// The indexed document `raw`, authored in `source`, resolves to.
-    fn document(&mut self, source: DocumentId, raw: &str) -> Option<DocumentId> {
+    /// Where `raw`, authored in `source`, lands; `None` when the document has
+    /// no context.
+    fn locate(&mut self, source: DocumentId, raw: &str) -> Option<Located> {
         let path = &self.documents.get(source.0 as usize)?.path;
         let folder = path.parent().unwrap_or(path).to_path_buf();
+        let key = (folder.clone(), raw.to_string());
+        if let Some(located) = self.located.get(&key) {
+            return located.clone();
+        }
         let contexts = self.contexts;
-        let context = self
+        let located = self
             .by_folder
             .entry(folder)
             .or_insert_with(|| contexts.context_for(path))
             .as_ref()
-            .ok()?;
-        reference_candidates(context, raw)
-            .iter()
-            .find_map(|candidate| self.by_path.get(candidate).copied())
+            .ok()
+            .map(|context| locate(context, raw, self.by_path));
+        self.located.insert(key, located.clone());
+        located
     }
 }
 
@@ -1264,6 +1329,116 @@ mod tests {
         assert_eq!(
             g.diagnose_unresolved(a, &link.as_link().unwrap().target, context.context()),
             Some(LinkDiagnostic::BrokenPath { failure: ResolutionFailure::MissingContext })
+        );
+    }
+
+    #[test]
+    fn test_existing_unindexed_targets_resolve_to_their_files() {
+        // Only `docs/` is indexed; the targets above it exist on disk. Each
+        // resolves as composition resolves it, never as a broken path.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("target.md"), "# Target\n").unwrap();
+        std::fs::write(root.join("schema.yaml"), "title: string\n").unwrap();
+        let doc = root.join("docs/doc.md");
+        let source = "---\n$schema: ../schema.yaml\n---\n\n[t](../target.md) [a](../target.md#nope) [m](../missing.md)\n\n::file ../target.md\n";
+        let indices = BTreeMap::from([(doc.clone(), index_document(&doc, source))]);
+        let contexts = crate::context::FixedContext(
+            FileResolutionContext::from_snapshot(root, None, HashMap::new()),
+        );
+        let g = WorkspaceGraph::build(&indices, 1, &contexts);
+        let id = g.document_id(&doc).unwrap();
+        let target = root.join("target.md");
+        let edge_targets = |kind| -> Vec<EdgeTarget> {
+            (0..g.node_count())
+                .flat_map(|index| g.outgoing(NodeId(index as u32), kind))
+                .map(|edge| edge.target.clone())
+                .collect()
+        };
+        assert_eq!(
+            edge_targets(EdgeKind::References),
+            vec![
+                EdgeTarget::File(target.clone()),
+                EdgeTarget::File(target.clone()),
+                EdgeTarget::Unresolved("../missing.md".into()),
+            ]
+        );
+        assert_eq!(edge_targets(EdgeKind::Transcludes), vec![EdgeTarget::File(target.clone())]);
+        assert_eq!(edge_targets(EdgeKind::UsesSchema), vec![EdgeTarget::File(root.join("schema.yaml"))]);
+
+        // An unindexed file's anchor is unknown, so only the missing file is
+        // diagnosed.
+        let context = contexts.0.for_source(&doc);
+        let diagnoses: Vec<Option<LinkDiagnostic>> = g
+            .links(id)
+            .map(|(_, node)| g.diagnose_unresolved(id, &node.as_link().unwrap().target, Ok(&context)))
+            .collect();
+        assert_eq!(
+            diagnoses,
+            vec![None, None, Some(LinkDiagnostic::BrokenPath { failure: ResolutionFailure::NoMatch })]
+        );
+    }
+
+    #[test]
+    fn test_an_earlier_existing_candidate_outranks_a_later_indexed_one() {
+        // Bare `t.md` in `docs/` plans `docs/t.md` before the root's `t.md`.
+        // Composition takes the first that exists, so the graph must too,
+        // even though only the root's copy is indexed.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/t.md"), "# Near\n").unwrap();
+        let doc = root.join("docs/doc.md");
+        let far = root.join("t.md");
+        let indices = BTreeMap::from([
+            (doc.clone(), index_document(&doc, "[t](t.md)\n")),
+            (far.clone(), index_document(&far, "# Far\n")),
+        ]);
+        let contexts = crate::context::FixedContext(
+            FileResolutionContext::from_snapshot(root, None, HashMap::new()).with_repository_root(root),
+        );
+        let g = WorkspaceGraph::build(&indices, 1, &contexts);
+        let id = g.document_id(&doc).unwrap();
+        let (link, _) = g.links(id).next().unwrap();
+        let targets: Vec<EdgeTarget> =
+            g.outgoing(link, EdgeKind::References).map(|edge| edge.target.clone()).collect();
+        assert_eq!(targets, vec![EdgeTarget::File(root.join("docs/t.md"))]);
+    }
+
+    #[test]
+    fn test_an_unprobeable_earlier_candidate_is_not_answered_by_a_later_buffer() {
+        // `docs/t.md` is a symlink to itself, so probing it fails with an I/O
+        // error; the root's `t.md` is an open, unsaved buffer. Composition
+        // stops at the failure, so the link stays unresolved.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let looped = root.join("docs/t.md");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("t.md", &looped).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file("t.md", &looped)
+            .expect("creating a file symlink needs Developer Mode or SeCreateSymbolicLinkPrivilege");
+        let doc = root.join("docs/doc.md");
+        let buffer = root.join("t.md");
+        let indices = BTreeMap::from([
+            (doc.clone(), index_document(&doc, "[t](t.md)\n")),
+            (buffer.clone(), index_document(&buffer, "# Buffer\n")),
+        ]);
+        let contexts = crate::context::FixedContext(
+            FileResolutionContext::from_snapshot(root, None, HashMap::new()).with_repository_root(root),
+        );
+        let g = WorkspaceGraph::build(&indices, 1, &contexts);
+        let id = g.document_id(&doc).unwrap();
+        let (link, node) = g.links(id).next().unwrap();
+        let targets: Vec<EdgeTarget> =
+            g.outgoing(link, EdgeKind::References).map(|edge| edge.target.clone()).collect();
+        assert_eq!(targets, vec![EdgeTarget::Unresolved("t.md".into())]);
+        let context = contexts.0.for_source(&doc);
+        assert_eq!(
+            g.diagnose_unresolved(id, &node.as_link().unwrap().target, Ok(&context)),
+            Some(LinkDiagnostic::BrokenPath { failure: ResolutionFailure::Io })
         );
     }
 

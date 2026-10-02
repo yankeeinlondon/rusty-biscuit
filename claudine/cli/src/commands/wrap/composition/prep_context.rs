@@ -158,7 +158,7 @@ mod tests {
         resolved_path: &Path,
         excluded: &BTreeSet<Provider>,
     ) -> Result<CompositionPrepContext> {
-        let invocation = InvocationContext::capture()?;
+        let invocation = InvocationContext::capture(crate::request::snapshot())?;
         let source_context = invocation.derive_source(resolved_path)?;
         CompositionPrepContext::from_invocation(invocation, source_context, excluded)
     }

@@ -132,6 +132,7 @@ pub mod remote;
 pub mod replacement;
 pub mod shell_blocks;
 pub mod shell_expansion;
+pub mod target_chain;
 pub mod toc_linking;
 pub mod transclusion;
 

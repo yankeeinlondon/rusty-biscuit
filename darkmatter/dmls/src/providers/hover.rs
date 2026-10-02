@@ -2,12 +2,13 @@
 //!
 //! Content is text-first Markdown everywhere (R-7 hover profile); a link's
 //! preview (target title, heading, resolved path, existence) is drawn from the
-//! already-indexed graph, so no target document is read from disk on hover.
+//! already-built graph, so no target document is read from disk on hover. A
+//! target outside the indexed documents shows only its path.
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Range};
 
 use super::DocumentContext;
-use super::definition::{link_at, resolved_targets};
+use super::definition::{link_at, resolved_file, resolved_targets};
 use super::symbols::document_title;
 use crate::graph::{DocumentId, LinkDiagnostic, LinkTarget, NodeId, NodePayload, WorkspaceGraph};
 
@@ -46,7 +47,10 @@ fn link_hover(ctx: &DocumentContext, doc_id: DocumentId, offset: usize) -> Optio
     let span = ctx.graph.node(link_id)?.span.clone();
     let value = match resolved_targets(ctx.graph, link_id).into_iter().next() {
         Some(node) => resolved_hover(ctx.graph, node),
-        None => unresolved_hover(ctx, doc_id, target),
+        None => match resolved_file(ctx.graph, link_id) {
+            Some(path) => format!("→ `{}`", path.display()),
+            None => unresolved_hover(ctx, doc_id, target),
+        },
     };
     Some(markdown_hover(ctx, span, value))
 }

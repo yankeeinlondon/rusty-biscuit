@@ -31,25 +31,6 @@ fn make_source(
 }
 
 #[test]
-fn request_snapshot_prevents_prepare_time_repository_rediscovery() {
-    let source_repo = TempDir::new().unwrap();
-    fs::create_dir_all(source_repo.path().join(".git")).unwrap();
-    let source_path = source_repo.path().join("prompt.md");
-    fs::write(&source_path, "prompt").unwrap();
-    let request_root = TempDir::new().unwrap();
-    let snapshot = biscuit_file::FileResolutionContext::new(request_root.path());
-
-    assert_eq!(
-        effective_source_repo_root(None, Some(&snapshot), &source_path),
-        None,
-    );
-    assert_eq!(
-        effective_source_repo_root(None, None, &source_path).as_deref(),
-        Some(source_repo.path()),
-    );
-}
-
-#[test]
 fn direct_composition_uses_effective_frontmatter() {
     let dir = TempDir::new().unwrap();
     let source = make_source(
@@ -58,7 +39,7 @@ fn direct_composition_uses_effective_frontmatter() {
         "# Research\n\nDo the research.",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.mode, CompositionMode::ChainedDocument);
     assert!(prepared.prompt.contains("Research"));
     // Effective frontmatter should be a JSON object with the keys
@@ -76,13 +57,13 @@ fn direct_composition_uses_effective_frontmatter() {
 fn canonical_preparation_records_each_compose_on_the_request_owner() {
     let dir = TempDir::new().unwrap();
     let direct = make_source(&dir, &[], "direct body");
-    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), dir.path()).unwrap();
 
     prepare_direct(
         &direct,
         PrepareOptions {
             invocation_context: Some(invocation.clone()),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -92,7 +73,7 @@ fn canonical_preparation_records_each_compose_on_the_request_owner() {
         &inline,
         PrepareOptions {
             invocation_context: Some(invocation.clone()),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -111,7 +92,7 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
         &[("prepared", json!("{{ ctx.os }}"))],
         "{{ ctx.os }}",
     );
-    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&crate::test_support::snapshot(), dir.path()).unwrap();
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
     let document_epoch = invocation.begin_document_epoch();
@@ -123,7 +104,7 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
             invocation_context: Some(invocation.clone()),
             document_epoch: Some(document_epoch),
             prepared_context: Some(context),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -156,7 +137,7 @@ fn inline_composition_uses_effective_frontmatter() {
         "Old content",
     );
 
-    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
     assert!(prepared.prompt.contains("List three colors"));
     // File-aware header first, the author's prompt, then the guardrails bound
@@ -213,7 +194,7 @@ fn inline_composition_warns_but_preserves_retired_custom_guardrails() {
         &source,
         PrepareOptions {
             source_repo_root: Some(dir.path().to_path_buf()),
-            ..PrepareOptions::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .expect("retired customization warns instead of blocking");
@@ -234,7 +215,7 @@ fn inline_composition_missing_prompt() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-    let err = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::PromptPropertyMissing));
 }
 
@@ -250,7 +231,7 @@ fn inline_composition_prefers_a_caller_supplied_prompt_and_keeps_the_file_untouc
         &source,
         PrepareOptions {
             set_overrides: Some(json!({ "prompt": "caller {{ title }}" })),
-            ..Default::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -285,7 +266,7 @@ fn inline_prompt_table_marks_only_required_properties_required_at_completion() {
         "Old content",
     );
 
-    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
 
     assert!(
         prepared.prompt.contains("**Schema properties:**"),
@@ -311,7 +292,7 @@ fn inline_composition_missing_prompt_is_satisfied_by_an_override() {
         &source,
         PrepareOptions {
             set_overrides: Some(json!({ "prompt": "from the caller" })),
-            ..Default::default()
+            ..PrepareOptions::new(crate::test_support::context())
         },
     )
     .unwrap();
@@ -323,7 +304,7 @@ fn inline_composition_wrong_type() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("prompt", json!(42))], "Content");
 
-    let err = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::PromptPropertyWrongType(_)));
 }
 
@@ -340,7 +321,7 @@ fn direct_composition_parses_lifecycle_config() {
         "Do the work.",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(prepared.lifecycle.start.is_some());
     assert!(prepared.lifecycle.success.is_some());
     assert!(prepared.lifecycle.blocked.is_none());
@@ -368,7 +349,7 @@ fn direct_composition_preserves_tight_nested_list() {
 "#;
     let source = make_source(&dir, &[("title", json!("Test"))], body);
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(
         prepared.prompt.contains("properties on \"review.md\":\n    - based on"),
         "parent item must be immediately followed by its first child; got:\n{}",
@@ -393,7 +374,7 @@ fn inline_composition_parses_lifecycle_config() {
         "Old content",
     );
 
-    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(prepared.lifecycle.failure.is_some());
     assert!(prepared.lifecycle.start.is_none());
 }
@@ -410,7 +391,7 @@ fn invalid_lifecycle_config_fails_preparation() {
         "Content",
     );
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::LifecycleSayConflict(_)));
 }
 
@@ -431,7 +412,7 @@ fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let message = prepared
         .lifecycle
         .start
@@ -460,7 +441,7 @@ fn undefined_lifecycle_variable_is_deferred_not_rejected_at_prepare() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let message = prepared
         .lifecycle
         .start
@@ -486,7 +467,7 @@ fn lifecycle_message_referencing_frontmatter_is_deferred_raw() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let message = prepared
         .lifecycle
         .start
@@ -512,7 +493,7 @@ fn lifecycle_fallback_span_is_deferred_raw() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let message = prepared
         .lifecycle
         .start
@@ -536,7 +517,7 @@ fn lifecycle_ctx_interpolation_is_deferred_raw() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let start = prepared.lifecycle.start.as_ref().unwrap();
     let message = start.message.as_ref().unwrap();
     // Deferred: the span survives raw for event-time interpolation (C2).
@@ -558,7 +539,7 @@ fn multiple_lifecycle_spans_all_deferred_raw() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.lifecycle.start.as_ref().unwrap().message.as_deref(),
         Some("leak {{ parent_dir(review)) }}")
@@ -595,7 +576,7 @@ fn malformed_whole_value_spec_path_is_rejected() {
 
     let options = PrepareOptions {
         set_overrides: Some(json!({ "review": review_file.to_str().unwrap() })),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -633,7 +614,7 @@ fn direct_composition_with_env_overrides() {
             "FAIL_FAST".to_string(),
             "false".to_string(),
         )]),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let prepared = prepare_direct(&source, options).unwrap();
@@ -661,7 +642,7 @@ fn direct_lifecycle_ctx_message_is_deferred_raw() {
             ("AGENT".to_string(), "codex".to_string()),
             ("MODEL".to_string(), "gpt-5".to_string()),
         ]),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let prepared = prepare_direct(&source, options).unwrap();
@@ -674,7 +655,7 @@ fn direct_composition_perf_disabled_yields_none() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Simple content.");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert!(prepared.compose_perf.is_none());
 }
 
@@ -685,7 +666,7 @@ fn direct_composition_perf_enabled_yields_some() {
 
     let options = PrepareOptions {
         perf_enabled: true,
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_direct(&source, options).unwrap();
     assert!(prepared.compose_perf.is_some());
@@ -705,7 +686,7 @@ fn inline_composition_preserves_closure_with_perf_enabled() {
 
     let options = PrepareOptions {
         perf_enabled: true,
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
     let prepared = prepare_inline(&source, options).unwrap();
     assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
@@ -727,7 +708,7 @@ fn direct_composition_parses_agent_list() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!(["gemini", "codex"]))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.selection_hints.agent,
         Some(AgentHint::List(vec![Provider::Gemini, Provider::Codex]))
@@ -739,7 +720,7 @@ fn direct_composition_parses_model_single() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("model", json!("gpt-4o"))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.selection_hints.model,
         Some(ModelHint::Single("gpt-4o".to_string()))
@@ -751,7 +732,7 @@ fn direct_composition_parses_model_list() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("model", json!(["gpt-4o", "o3-mini"]))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.selection_hints.model,
         Some(ModelHint::List(vec![
@@ -766,7 +747,7 @@ fn direct_composition_agent_unknown_provider_is_non_fatal() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!("unknown-provider"))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.agent, None);
     assert_eq!(
         prepared.selection_hints.agent_invalid,
@@ -783,7 +764,7 @@ fn direct_composition_agent_list_skips_invalid_entries() {
         "Content",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.selection_hints.agent,
         Some(AgentHint::List(vec![Provider::Claude, Provider::Codex]))
@@ -799,7 +780,7 @@ fn direct_composition_agent_list_all_invalid_is_empty_hint() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!(["bad", "worse"]))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.agent, None);
     assert_eq!(
         prepared.selection_hints.agent_invalid,
@@ -818,7 +799,7 @@ fn direct_composition_single_entry_all_invalid_list_preserves_list_flag() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!(["not-real"]))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.agent, None);
     assert_eq!(
         prepared.selection_hints.agent_invalid,
@@ -834,7 +815,7 @@ fn direct_composition_single_scalar_invalid_is_not_list() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!("not-real"))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.agent, None);
     assert!(!prepared.selection_hints.agent_was_list);
 }
@@ -844,7 +825,7 @@ fn direct_composition_agent_wrong_type_errors() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!(42))], "Content");
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::AgentHintWrongType(_)));
 }
 
@@ -853,7 +834,7 @@ fn direct_composition_model_wrong_type_errors() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("model", json!(42))], "Content");
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::ModelHintWrongType(_)));
 }
 
@@ -862,7 +843,7 @@ fn direct_composition_agent_list_with_non_string_errors() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("agent", json!(["claude", 42]))], "Content");
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::AgentHintWrongType(_)));
 }
 
@@ -871,7 +852,7 @@ fn direct_composition_model_list_with_non_string_errors() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("model", json!(["gpt-4o", 42]))], "Content");
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::ModelHintWrongType(_)));
 }
 
@@ -880,7 +861,7 @@ fn direct_composition_no_agent_or_model_hints() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.agent, None);
     assert_eq!(prepared.selection_hints.model, None);
 }
@@ -892,7 +873,7 @@ fn direct_composition_empty_body_returns_composed_body_empty() {
 
     let options = PrepareOptions {
         set_overrides: Some(json!({"spec": "plan.md", "phase": 1})),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -927,7 +908,7 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
 
     let options = PrepareOptions {
         set_overrides: Some(json!({"spec": "plan.md"})),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let err = prepare_direct(&source, options).unwrap_err();
@@ -999,7 +980,7 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     let options = PrepareOptions {
         pre_approved_commands: Some(approved),
         shell_working_directory: Some(work_dir.path().to_path_buf()),
-        ..Default::default()
+        ..PrepareOptions::new(crate::test_support::context())
     };
 
     let prepared = prepare_direct(&source, options).unwrap();
@@ -1022,7 +1003,7 @@ fn direct_composition_parses_interactive_hint() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("interactive", json!(true))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.interactive, Some(true));
 }
 
@@ -1031,7 +1012,7 @@ fn direct_composition_interactive_null_is_absent() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("interactive", json!(null))], "Content");
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.interactive, None);
 }
 
@@ -1040,7 +1021,7 @@ fn direct_composition_interactive_wrong_type_errors() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("interactive", json!("yes"))], "Content");
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     assert!(matches!(err, CompositionError::InteractiveHintWrongType(_)));
 }
 
@@ -1053,7 +1034,7 @@ fn inline_composition_parses_interactive_hint() {
         "Old content",
     );
 
-    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_inline(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(prepared.selection_hints.interactive, Some(false));
 }
 
@@ -1072,7 +1053,7 @@ fn lifecycle_err_span_survives_raw_in_effective_frontmatter() {
         "Do the work.",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
 
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     let failure = fm.get("failure").unwrap();
@@ -1131,7 +1112,7 @@ fn shell_command_early_binding_resolves_at_preflight() {
         "Do the work.",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let command = first_shell_command(&prepared.lifecycle, LifecycleSignal::Start);
     assert_eq!(command, Expr::StringLiteral("git fetch main".to_string()));
 }
@@ -1151,7 +1132,7 @@ fn shell_command_late_binding_reference_rejected_at_prepare() {
         "Do the work.",
     );
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::LifecycleShellResolution {
             property,
@@ -1193,7 +1174,7 @@ fn lazy_reserved_roots_in_a_lifecycle_shell_command_are_rejected_at_prepare() {
             "Do the work.",
         );
 
-        let err = prepare_direct(&source, PrepareOptions::default())
+        let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context()))
             .expect_err("a lazy reserved root cannot be approved at preflight");
         match err {
             CompositionError::LifecycleShellResolution { raw, message, .. } => {
@@ -1228,7 +1209,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
         ],
         "Do the work.",
     );
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     let CompositionError::LifecycleShellResolution { message, source: Some(cause), .. } = &err else {
         panic!("expected a typed LifecycleShellResolution, got: {err:?}");
     };
@@ -1253,7 +1234,7 @@ fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_th
         ],
         "Do the work.",
     );
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         first_shell_command(&prepared.lifecycle, crate::composition::LifecycleSignal::Start),
         Expr::StringLiteral("echo document".to_string())
@@ -1274,7 +1255,7 @@ fn shell_long_form_command_late_binding_rejected_at_prepare() {
         "Do the work.",
     );
 
-    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let err = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap_err();
     match err {
         CompositionError::LifecycleShellResolution { property, raw, .. } => {
             assert_eq!(property, "failure.stack[0].action[0].command");
@@ -1335,7 +1316,7 @@ fn direct_composition_initializes_the_outputs_accumulator() {
         "# Research\n\nprev={{ last(outputs) }}.",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     let fm = prepared.effective_frontmatter.as_object().unwrap();
     assert_eq!(fm.get("outputs"), Some(&json!([])));
     assert!(
@@ -1356,7 +1337,7 @@ fn prior_outputs_are_visible_to_the_composed_body() {
     runtime.append_output("step one output\n");
     let prepared = prepare_direct(
         &source,
-        PrepareOptions::default().with_layered_overrides(crate::composition::layered_set_overrides(
+        PrepareOptions::new(crate::test_support::context()).with_layered_overrides(crate::composition::layered_set_overrides(
             crate::composition::LayeredOverrides::new(),
             Some(&runtime.snapshot()),
             None,
@@ -1383,7 +1364,7 @@ fn a_user_setter_cannot_replace_outputs() {
 
     let prepared = prepare_direct(
         &source,
-        PrepareOptions::default().with_layered_overrides(crate::composition::layered_set_overrides(
+        PrepareOptions::new(crate::test_support::context()).with_layered_overrides(crate::composition::layered_set_overrides(
             crate::composition::LayeredOverrides::authored(Some(&json!({"outputs": ["hijacked"]}))),
             Some(&crate::composition::RuntimeState::new().snapshot()),
             None,
@@ -1408,7 +1389,7 @@ fn authored_outputs_frontmatter_is_overridden_by_the_accumulator() {
         "prev={{ last(outputs) }}",
     );
 
-    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    let prepared = prepare_direct(&source, PrepareOptions::new(crate::test_support::context())).unwrap();
     assert_eq!(
         prepared.effective_frontmatter.as_object().unwrap().get("outputs"),
         Some(&json!([]))

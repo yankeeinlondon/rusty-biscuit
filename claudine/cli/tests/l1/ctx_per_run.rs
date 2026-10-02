@@ -479,7 +479,12 @@ fn darkmatter_composes(fixture: &CliProcessFixture, file: &str) -> String {
     let markdown = darkmatter::markdown::Markdown::try_from(path.as_path()).expect("load document");
     let options = darkmatter::markdown::compose::ComposeOptions::for_document(fixture.cwd(), &markdown)
         .with_source_file(&path);
-    let (composed, _) = markdown.compose_with(options).expect("darkmatter composes the tree");
+    let request = darkmatter::markdown::compose::ComposeRequest::prepare(
+        options,
+        &darkmatter::markdown::compose::RequestSnapshot::new(fixture.cwd()),
+    )
+    .expect("prepare the request");
+    let (composed, _) = markdown.compose_with(&request).expect("darkmatter composes the tree");
     composed.content().to_string()
 }
 

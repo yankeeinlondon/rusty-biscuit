@@ -66,6 +66,9 @@ impl RuntimeEventBinding {
 #[derive(Debug, Clone)]
 pub struct CanonicalRuntimeConfig {
     pub(crate) config: ClaudineConfig,
+    /// The process snapshot hook `when` conditions resolve file references
+    /// and `ctx.*` against.
+    pub(crate) request: darkmatter::markdown::compose::RequestSnapshot,
     pub(crate) messaging: RuntimeMessagingSettings,
     pub(crate) protect_service: Option<ProtectService>,
     pub(crate) events: HashMap<AgenticEvent, RuntimeEventBinding>,
@@ -74,6 +77,11 @@ pub struct CanonicalRuntimeConfig {
 impl CanonicalRuntimeConfig {
     pub fn config(&self) -> &ClaudineConfig {
         &self.config
+    }
+
+    /// The process snapshot this runtime was compiled for.
+    pub fn request_snapshot(&self) -> &darkmatter::markdown::compose::RequestSnapshot {
+        &self.request
     }
 
     pub fn messaging(&self) -> &RuntimeMessagingSettings {
@@ -97,6 +105,7 @@ impl CanonicalRuntimeConfig {
 pub fn compile_canonical_runtime(
     config: ClaudineConfig,
     _repo_root: Option<&Path>,
+    request: &darkmatter::markdown::compose::RequestSnapshot,
 ) -> Result<CanonicalRuntimeConfig> {
     // 1. Compile event bindings
     let compiled_matchers: HashMap<AgenticEvent, Option<RuntimeMatcher>> = compile_many(
@@ -168,6 +177,7 @@ pub fn compile_canonical_runtime(
 
     Ok(CanonicalRuntimeConfig {
         config,
+        request: request.clone(),
         messaging,
         protect_service,
         events,

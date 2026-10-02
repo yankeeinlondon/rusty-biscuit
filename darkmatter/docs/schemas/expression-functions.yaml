@@ -1093,7 +1093,8 @@ functions:
       order: 64
       description:
           Returns every file a glob reference matches (`&dir/**/name.md`), as sorted
-          absolute paths; the path before the first wildcard is the directory searched.
+          absolute paths; the path before the first wildcard is the directory searched,
+          its first candidate that exists (a file there matches nothing).
       overloads:
           - parameters:
                 - name: pattern

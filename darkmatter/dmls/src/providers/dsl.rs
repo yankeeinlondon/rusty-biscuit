@@ -11,9 +11,14 @@
 //! [`doc_links`](crate::overlay::doc_links)'s topic-doc lookup. No process is
 //! ever spawned and no socket is ever opened (spec acceptance criterion 7).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::compose::directives_api::{DirectiveKind, scan_shell_block_commands};
+use biscuit_file::ResolutionFailure;
+
+use darkmatter::markdown::compose::directives_api::{
+    DirectiveKind, ParsedDirective, scan_shell_block_commands,
+};
+use darkmatter::markdown::compose::target_chain::TargetSelection;
 use darkmatter::markdown::compose::directive_targets::{
     TargetNullability, analyze_directive_targets,
 };
@@ -288,21 +293,20 @@ fn directive_hover(ctx: &DocumentContext, offset: usize) -> Option<Hover> {
     let info = directives::info_for(directive.kind)?;
     let mut lines = vec![format!("**`{}`** — {}", info.keyword, info.summary)];
 
-    if directives::has_file_target(directive.kind)
-        && let Some(target) = &directive.target
-    {
-        let path = target.value.split('#').next().unwrap_or(&target.value);
-        match resolve_local_path(ctx, path) {
-            Some(ReferenceTarget::Found(resolved)) => {
-                lines.push(format!("\n→ `{}`", resolved.display()));
-            }
-            Some(ReferenceTarget::Missing { .. }) => {
-                lines.push(format!("\n⚠️ target `{path}` was not found"));
-            }
-            // No context: nothing is resolved, and the document already
-            // carries the context-failure diagnostic.
-            None => {}
+    // No resolution (no context, a remote or malformed target): nothing is
+    // shown, and the document already carries any context-failure diagnostic.
+    match resolve_directive_target(ctx, &directive) {
+        Some(DirectiveTarget::Found { path, .. }) => {
+            lines.push(format!("\n→ `{}`", path.display()));
         }
+        Some(DirectiveTarget::Suppressed) => {
+            lines.push("\nNo alternative exists; the chain ends in `false`, so this directive renders nothing.".to_string());
+        }
+        Some(DirectiveTarget::Missing { alternatives, .. }) => match alternatives.as_slice() {
+            [path] => lines.push(format!("\n⚠️ target `{path}` was not found")),
+            _ => lines.push(format!("\n⚠️ no file matches any of {}", code_list(&alternatives))),
+        },
+        None => {}
     }
 
     if directive.kind == DirectiveKind::Shell
@@ -446,19 +450,13 @@ fn shell_verdict_markdown(command: &str, ctx: &DocumentContext) -> String {
 /// interpolation variable → frontmatter key.
 pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
     if let Some(directive) = directives::directive_at(ctx.text, offset)
-        && directives::has_file_target(directive.kind)
         && let Some(target) = &directive.target
         && target.span.start <= offset
         && offset <= target.span.end
+        && let Some(DirectiveTarget::Found { path, .. }) = resolve_directive_target(ctx, &directive)
+        && let Some(location) = file_location(&path)
     {
-        let path = target.value.split('#').next().unwrap_or(&target.value);
-        if let Some(location) = resolve_local_path(ctx, path)
-            .as_ref()
-            .and_then(ReferenceTarget::found)
-            .and_then(file_location)
-        {
-            return vec![location];
-        }
+        return vec![location];
     }
 
     if let Some(location) = interpolation_definition(ctx, offset) {
@@ -484,14 +482,11 @@ fn interpolation_definition(ctx: &DocumentContext, offset: usize) -> Option<Loca
 pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
     let mut links = Vec::new();
     for directive in directives::directives(ctx.text) {
-        if !directives::has_file_target(directive.kind) {
-            continue;
-        }
-        let Some(target) = directive.target else {
-            continue;
-        };
-        let path = target.value.split('#').next().unwrap_or(&target.value);
-        if let Some(link) = transclusion_link(ctx, target.span.clone(), path) {
+        // Only the alternative composition selects is linked, over its own
+        // span; a suppressed or missing chain links nothing.
+        if let Some(DirectiveTarget::Found { span, path }) = resolve_directive_target(ctx, &directive)
+            && let Some(link) = file_link(ctx, span, &path)
+        {
             links.push(link);
         }
     }
@@ -506,11 +501,16 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 
 /// A document link over `span` targeting the resolved local path, if it exists.
 fn transclusion_link(ctx: &DocumentContext, span: SourceSpan, path: &str) -> Option<DocumentLink> {
-    let range = ctx.source_map.byte_range_to_lsp(span)?;
     let ReferenceTarget::Found(resolved) = resolve_local_path(ctx, path)? else {
         return None;
     };
-    let target = url::Url::from_file_path(&resolved).ok()?;
+    file_link(ctx, span, &resolved)
+}
+
+/// A document link over `span` targeting the existing file `resolved`.
+fn file_link(ctx: &DocumentContext, span: SourceSpan, resolved: &Path) -> Option<DocumentLink> {
+    let range = ctx.source_map.byte_range_to_lsp(span)?;
+    let target = url::Url::from_file_path(resolved).ok()?;
     Some(DocumentLink {
         range,
         target: target.as_str().parse().ok(),
@@ -731,21 +731,23 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
         if !directives::has_file_target(directive.kind) {
             continue;
         }
-        let Some(target) = directive.target else {
+        let Some(target) = &directive.target else {
             continue;
         };
         if !ExpressionFinder::find_all_plain(&target.value).is_empty() {
             continue;
         }
-        let path = target.value.split('#').next().unwrap_or(&target.value);
-        if is_remote(path) {
-            continue;
-        }
         // Without a context nothing is resolved; the document's
-        // context-failure diagnostic stands in for its references.
-        if let Some(ReferenceTarget::Missing { failure, .. }) = resolve_local_path(ctx, path)
+        // context-failure diagnostic stands in for its references. A chain
+        // ending in `false` that matches nothing is intentional.
+        if let Some(DirectiveTarget::Missing { alternatives, failure }) =
+            resolve_directive_target(ctx, &directive)
             && let Some(range) = ctx.source_map.byte_range_to_lsp(target.span.clone())
         {
+            let matches = match alternatives.as_slice() {
+                [path] => format!("`{path}`"),
+                _ => format!("any of {}", code_list(&alternatives)),
+            };
             let mut broken = diagnostic(
                 range,
                 DiagnosticSeverity::WARNING,
@@ -753,9 +755,9 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                 source::COMPOSE,
                 match directive.kind {
                     DirectiveKind::TocLinking => {
-                        format!("broken `::toc-linking` target: no file matches `{path}`")
+                        format!("broken `::toc-linking` target: no file matches {matches}")
                     }
-                    _ => format!("broken transclusion: no file matches `{path}`"),
+                    _ => format!("broken transclusion: no file matches {matches}"),
                 },
             );
             broken.data = Some(resolution_failure_data(failure));
@@ -1120,6 +1122,59 @@ fn resolve_local_path(ctx: &DocumentContext, path: &str) -> Option<ReferenceTarg
         return None;
     }
     ctx.resolve_reference(path)
+}
+
+/// A directive's file target, read through its grammar and selected by the
+/// rule `md compose` applies (see `darkmatter::markdown::compose::target_chain`).
+enum DirectiveTarget {
+    /// The selected alternative's span and its existing file.
+    Found { span: SourceSpan, path: PathBuf },
+    /// No alternative exists and the chain ends in `false`.
+    Suppressed,
+    /// No alternative exists. `alternatives` are the authored paths (a `#`
+    /// is part of the filename, as in composition); `failure` is the first
+    /// one's class.
+    Missing { alternatives: Vec<String>, failure: ResolutionFailure },
+}
+
+/// `directive`'s file target, or `None` when it has none or it cannot be
+/// decided passively: a malformed chain, no context, or a remote
+/// alternative ahead of any existing one.
+fn resolve_directive_target(ctx: &DocumentContext, directive: &ParsedDirective) -> Option<DirectiveTarget> {
+    if !directives::has_file_target(directive.kind) {
+        return None;
+    }
+    let chain = directive.target_chain(ctx.text)?.ok()?;
+    let mut undecided = false;
+    let selection = chain.select(|alternative| match resolve_local_path(ctx, alternative) {
+        Some(ReferenceTarget::Found(path)) => Ok(path),
+        Some(ReferenceTarget::Missing { failure, .. }) => Err(Some(failure)),
+        None => {
+            undecided = true;
+            Err(None)
+        }
+    });
+    match selection {
+        TargetSelection::Found { index, resolved } => Some(DirectiveTarget::Found {
+            span: chain.alternatives[index].span.clone(),
+            path: resolved,
+        }),
+        _ if undecided => None,
+        TargetSelection::Suppressed => Some(DirectiveTarget::Suppressed),
+        TargetSelection::Unresolved { failure } => Some(DirectiveTarget::Missing {
+            alternatives: chain
+                .alternatives
+                .iter()
+                .map(|alternative| alternative.value.clone())
+                .collect(),
+            failure: failure?,
+        }),
+    }
+}
+
+/// `a`, `b` as inline code.
+fn code_list(items: &[String]) -> String {
+    items.iter().map(|item| format!("`{item}`")).collect::<Vec<_>>().join(", ")
 }
 
 /// A line-based location for a resolved local file.
