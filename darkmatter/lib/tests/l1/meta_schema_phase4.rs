@@ -20,7 +20,7 @@ fn compiled_schema(source: &str) -> Value {
 }
 
 fn validate_document(source: &str) -> darkmatter::markdown::schemas::ValidationReport {
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&Markdown::from(source))
         .expect("schema compilation and validation")
 }
@@ -163,7 +163,7 @@ fn semantic_carriers_are_validation_and_compose_no_ops() {
     );
     let original = Markdown::from(source);
     let before = original.frontmatter().as_map().clone();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&original)
         .expect("validation must run");
     assert!(

@@ -14,9 +14,11 @@ fn write(path: &Path, contents: &str) {
 }
 
 fn resolve_file(path: &Path) -> darkmatter::markdown::schemas::resolve::ResolvedSchema {
+    let dir = path.parent().expect("schema file has a directory");
     resolve_schema(
         &json!(path.to_string_lossy()),
-        path.parent().unwrap_or_else(|| Path::new(".")),
+        dir,
+        &biscuit_file::FileResolutionContext::new(dir),
     )
     .unwrap()
 }
@@ -136,7 +138,8 @@ fn pure_sequence_is_a_whole_file_union_but_not_a_namespace() {
 
     let consumer = dir.path().join("consumer.yaml");
     write(&consumer, "$schema:\n  value: person@./union.yaml\n");
-    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path()).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(matches!(error, SchemaError::SchemaDocument { .. }));
 }
 
@@ -196,7 +199,8 @@ fn import_cycles_remain_bounded_across_envelope_forms() {
         &tagged,
         "kind: schema\ntypes:\n  node: node@./pure.yaml\n",
     );
-    let error = resolve_schema(&json!(pure.to_string_lossy()), dir.path()).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(pure.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(matches!(error, SchemaError::ImportCycle { .. }));
 }
 
@@ -217,6 +221,7 @@ fn raw_json_schema_remains_distinct_and_cannot_supply_named_imports() {
 
     let consumer = dir.path().join("consumer.yaml");
     write(&consumer, "$schema:\n  value: value@./raw.yaml\n");
-    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path()).unwrap_err();
+    let context = biscuit_file::FileResolutionContext::new(dir.path());
+    let error = resolve_schema(&json!(consumer.to_string_lossy()), dir.path(), &context).unwrap_err();
     assert!(matches!(error, SchemaError::AmbiguousReferenced { .. }));
 }

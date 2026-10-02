@@ -90,6 +90,7 @@ fn feature_review_resolves_as_a_bare_name_reference() {
         &json!("feature-review.yaml"),
         doc_dir.path(),
         std::slice::from_ref(&schemas_dir),
+        &biscuit_file::FileResolutionContext::new(doc_dir.path()),
     )
     .expect("feature-review.yaml must resolve as a bare-name schema reference");
     assert!(
@@ -107,7 +108,7 @@ fn feature_review_reference_validates_a_review_document() {
     // document pipeline and drives frontmatter validation. The fictitious `.md`
     // path is never read — only its parent anchors `./feature-review.yaml`.
     let doc_path = repo_schemas_dir().join("__e2e_review_fixture.md");
-    let api = DarkmatterSchemas::new();
+    let api = DarkmatterSchemas::new(crate::request_support::cwd_context());
 
     let valid = Markdown::from(concat!(
         "---\n",

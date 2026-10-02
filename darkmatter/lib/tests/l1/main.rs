@@ -76,6 +76,7 @@ mod prelude_exports;
 mod prose_wrap_parity;
 mod reference_integration;
 mod request_context_builder;
+mod required_context;
 mod render_comparison;
 mod render_invariants;
 mod render_tree_hr_snapshots;

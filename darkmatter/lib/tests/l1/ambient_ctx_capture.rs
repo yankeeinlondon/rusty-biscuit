@@ -1,13 +1,14 @@
 //! Ambient `ctx.*` capture parity.
 //!
-//! Both tests compare a full `ComposeContext::capture()` against the ambient
-//! `ComposeOptions::new()` path. They run inside a purpose-built fixture
-//! repository rather than the rusty-biscuit checkout: a full capture walks the
-//! whole repository (structure, documents, git status), which costs seconds on a
-//! developer machine and over a minute on a cold two-core CI guest, and none of
-//! that size adds coverage. The fixture is a two-package Cargo workspace with a
-//! commit, staged and dirty files, documents, and a skill, so every catalog
-//! category has at least one value to compare.
+//! Both tests compare a full `ComposeContext::capture_for_dir` of the process
+//! directory against the ambient `ComposeOptions::new()` path. They run inside
+//! a purpose-built fixture repository rather than the rusty-biscuit checkout: a
+//! full capture walks the whole repository (structure, documents, git status),
+//! which costs seconds on a developer machine and over a minute on a cold
+//! two-core CI guest, and none of that size adds coverage. The fixture is a
+//! two-package Cargo workspace with a commit, staged and dirty files,
+//! documents, and a skill, so every catalog category has at least one value to
+//! compare.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -126,9 +127,14 @@ fn compose_ambient(content: &str) -> String {
     composed.content().trim().to_string()
 }
 
+/// A full capture of the process directory, which each test has entered.
+fn full_capture() -> ComposeContext {
+    ComposeContext::capture_for_dir(&std::env::current_dir().expect("process directory"))
+}
+
 fn compose_full_capture(content: &str) -> String {
     let md: Markdown = content.into();
-    let options = ComposeOptions::new_with_context(ComposeContext::capture());
+    let options = ComposeOptions::new_with_context(full_capture());
     let (composed, _report) = md
         .compose_with(&crate::request_support::request(options))
         .expect("compose must succeed");
@@ -180,9 +186,7 @@ fn every_catalog_variable_survives_ambient_options() {
     let fixture = Fixture::build();
     let _cwd = CwdGuard::enter(&fixture.cwd);
 
-    let expected = render_every_variable(ComposeOptions::new_with_context(
-        ComposeContext::capture(),
-    ));
+    let expected = render_every_variable(ComposeOptions::new_with_context(full_capture()));
     let ambient = render_every_variable(ComposeOptions::new());
 
     // The fixture must give the comparison something to compare: every catalog
@@ -321,7 +325,7 @@ fn ambient_child_first_reference_renders_the_full_capture_value() {
         field(line, "os").to_string()
     };
 
-    let full = compose(ComposeOptions::new_with_context(ComposeContext::capture()))
+    let full = compose(ComposeOptions::new_with_context(full_capture()))
         .expect("a full capture composes");
     let ambient = compose(ComposeOptions::new()).expect("ambient options grow the request context");
 

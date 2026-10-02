@@ -33,7 +33,7 @@ use proptest::prelude::*;
 fn effective_for(yaml_body: &str) -> EffectiveSchema {
     let content = format!("---\n{yaml_body}---\nbody\n");
     let md: Markdown = content.as_str().into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .effective_for(&md)
         .expect("schema resolution must succeed")
         .expect("document must resolve an effective schema")

@@ -8,7 +8,6 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use serde_json::json;
-use std::path::Path;
 
 /// Composes `content` with default options (`fail_fast` off) and requires the
 /// body expression failure to abort with `fragment` in the error: a body
@@ -319,25 +318,25 @@ fn regression_date_helpers_in_condition_mode() {
     });
 
     // Strict validators - true cases
-    assert!(evaluate_condition_against("is_date(date_str)", &data, Path::new(".")).unwrap());
-    assert!(evaluate_condition_against("is_date_utc(date_str)", &data, Path::new(".")).unwrap());
+    assert!(evaluate_condition_against("is_date(date_str)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(evaluate_condition_against("is_date_utc(date_str)", &data, &crate::request_support::cwd_context()).unwrap());
     assert!(
-        evaluate_condition_against("is_datetime(datetime_str)", &data, Path::new(".")).unwrap()
+        evaluate_condition_against("is_datetime(datetime_str)", &data, &crate::request_support::cwd_context()).unwrap()
     );
     assert!(
-        evaluate_condition_against("is_datetime_utc(datetime_str)", &data, Path::new(".")).unwrap()
+        evaluate_condition_against("is_datetime_utc(datetime_str)", &data, &crate::request_support::cwd_context()).unwrap()
     );
 
     // Strict validators - false cases
-    assert!(!evaluate_condition_against("is_date(bad_str)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_datetime(bad_str)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_date(bad_str)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_datetime(bad_str)", &data, &crate::request_support::cwd_context()).unwrap());
 
     // Relative validators - false cases with distant date
-    assert!(!evaluate_condition_against("is_today(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_today_utc(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_yesterday(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_this_month(distant)", &data, Path::new(".")).unwrap());
-    assert!(!evaluate_condition_against("is_this_year(distant)", &data, Path::new(".")).unwrap());
+    assert!(!evaluate_condition_against("is_today(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_today_utc(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_yesterday(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_this_month(distant)", &data, &crate::request_support::cwd_context()).unwrap());
+    assert!(!evaluate_condition_against("is_this_year(distant)", &data, &crate::request_support::cwd_context()).unwrap());
 }
 
 #[test]
@@ -520,7 +519,7 @@ fn regression_shortcut_api_with_arithmetic_and_access() {
     let result = evaluate_condition_against(
         "items[-1] == 'c' && count + 2 <= config.max",
         &data,
-        Path::new("."),
+        &crate::request_support::cwd_context(),
     )
     .unwrap();
     assert!(result);
@@ -528,7 +527,7 @@ fn regression_shortcut_api_with_arithmetic_and_access() {
     let result2 = evaluate_condition_against(
         "is_array(items) && !is_empty(items) && length(items) * 2 > count",
         &data,
-        Path::new("."),
+        &crate::request_support::cwd_context(),
     )
     .unwrap();
     assert!(result2);

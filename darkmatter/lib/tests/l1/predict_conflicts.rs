@@ -159,7 +159,7 @@ fn evaluate_at(path: &Path, expression: &str) -> Result<Value, String> {
     evaluate(
         &parsed,
         &Lookup {
-            context: ResolutionContext::new(path.to_path_buf()),
+            context: ResolutionContext::new(biscuit_file::FileResolutionContext::new(path)),
         },
     )
     .map_err(|error| error.to_string())

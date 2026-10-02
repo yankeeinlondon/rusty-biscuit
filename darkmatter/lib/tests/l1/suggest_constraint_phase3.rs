@@ -118,7 +118,7 @@ fn lint_categorizes_number_and_string_constraints() {
 fn suggestion_metadata_neither_restricts_validation_nor_blocks_composition() {
     let document: Markdown = "---\n$schema:\n  score: number(integer; min(0); suggest(-1, 2.5, many))\n  color: string(suggest(red, green))\nscore: 42\ncolor: purple\n---\n\n# Valid\n"
         .into();
-    let schemas = DarkmatterSchemas::new();
+    let schemas = DarkmatterSchemas::new(crate::request_support::cwd_context());
     let effective = schemas
         .effective_for(&document)
         .expect("invalid suggestions do not block resolution")

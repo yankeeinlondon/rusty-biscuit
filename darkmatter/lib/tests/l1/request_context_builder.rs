@@ -202,7 +202,7 @@ fn an_expression_and_a_file_reference_read_the_same_snapshot_environment() {
     assert!(content.contains(&format!("value=[{fixtures_text}]")), "{content}");
     assert!(content.contains("agent=[snapshot-agent]"), "{content}");
     assert!(content.contains("title=[Target title]"), "{content}");
-    assert_eq!(request.context().env().get(NAME), Some(&fixtures_text));
+    assert_eq!(request.resolution_context().env().get(NAME), Some(&fixtures_text));
     assert_eq!(request.options().context().env().get(NAME), Some(&fixtures_text));
 }
 

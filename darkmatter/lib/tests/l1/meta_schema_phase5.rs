@@ -28,7 +28,7 @@ fn property_contains(value: &Value, property: &str, key: &str) -> bool {
 }
 
 fn shipped_baseline() -> darkmatter::markdown::schemas::EffectiveSchema {
-    let api = DarkmatterSchemas::new()
+    let api = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .with_darkmatter_baseline_json_schema()
         .expect("shipped Darkmatter base schema");
     api.effective_for(&Markdown::from("---\ntitle: Seed\n---\nBody\n"))
@@ -83,7 +83,7 @@ fn shipped_base_schema_preserves_all_resolver_accepted_declaration_forms() {
         ),
         ("referenced raw JSON Schema", json!("./raw.json")),
     ] {
-        let resolved = resolve_schema_with_roots(&declaration, dir.path(), &[])
+        let resolved = resolve_schema_with_roots(&declaration, dir.path(), &[], &biscuit_file::FileResolutionContext::new(dir.path()))
             .unwrap_or_else(|error| panic!("{form} must remain accepted: {error}"));
         assert!(resolved.json_schema.is_object(), "{form} must produce a JSON Schema");
     }
@@ -125,7 +125,7 @@ fn malformed_declarations_fail_baseline_validation_before_resolver_preparation()
         }
 
         assert!(
-            resolve_schema_with_roots(&instance["$schema"], std::path::Path::new("."), &[])
+            resolve_schema_with_roots(&instance["$schema"], std::path::Path::new("."), &[], &crate::request_support::cwd_context())
                 .is_err(),
             "the later resolver must continue rejecting {form}"
         );
@@ -137,7 +137,7 @@ fn malformed_declarations_fail_baseline_validation_before_resolver_preparation()
         "an optional null retains Darkmatter's established missing-value semantics"
     );
     assert!(
-        resolve_schema_with_roots(&Value::Null, std::path::Path::new("."), &[]).is_err(),
+        resolve_schema_with_roots(&Value::Null, std::path::Path::new("."), &[], &crate::request_support::cwd_context()).is_err(),
         "a present null still cannot be prepared as a schema declaration"
     );
     assert!(

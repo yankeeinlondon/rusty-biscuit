@@ -37,7 +37,7 @@ fn json_schema(schema_body: &str) -> Value {
 /// Validate an in-memory document (inline `$schema`) read-only (no coercion).
 fn validate(doc: &str) -> ValidationReport {
     let md: Markdown = doc.into();
-    DarkmatterSchemas::new()
+    DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&md)
         .expect("schema must compile and validation must run")
 }
@@ -211,7 +211,7 @@ fn literal_default_mismatch_fails_schema_load() {
     let matching: Markdown =
         "---\n$schema:\n  kind: literal(spec; default(spec))\n---\nbody\n".into();
     assert!(
-        DarkmatterSchemas::new().validate(&matching).is_ok(),
+        DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&matching).is_ok(),
         "default equal to the literal value must load"
     );
 
@@ -219,7 +219,7 @@ fn literal_default_mismatch_fails_schema_load() {
     let mismatch: Markdown =
         "---\n$schema:\n  kind: literal(spec; default(other))\n---\nbody\n".into();
     assert!(
-        DarkmatterSchemas::new().validate(&mismatch).is_err(),
+        DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&mismatch).is_err(),
         "default(other) against literal(spec) must fail to load"
     );
 }
@@ -563,7 +563,7 @@ fn expression_pending_shell_value_deferred() {
     // A value still holding `$(...)` follows existing pending-value deferral,
     // not an eager format failure.
     let md: Markdown = "---\n$schema:\n  when: expression\nwhen: $(echo true)\n---\nbody\n".into();
-    let report = DarkmatterSchemas::new()
+    let report = DarkmatterSchemas::new(crate::request_support::cwd_context())
         .validate(&md)
         .expect("schema must compile");
     // Read-only validate: the pending `$(...)` value is a plain string that
@@ -738,7 +738,7 @@ fn literal_large_integer_default_equality_is_exact() {
         let matching: Markdown =
             format!("---\n$schema:\n  version: literal({lit}; default({lit}))\n---\nbody\n").into();
         assert!(
-            DarkmatterSchemas::new().validate(&matching).is_ok(),
+            DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&matching).is_ok(),
             "an equal large-integer default must load for literal({lit})"
         );
 
@@ -746,7 +746,7 @@ fn literal_large_integer_default_equality_is_exact() {
             format!("---\n$schema:\n  version: literal({lit}; default({neighbor}))\n---\nbody\n")
                 .into();
         assert!(
-            DarkmatterSchemas::new().validate(&mismatch).is_err(),
+            DarkmatterSchemas::new(crate::request_support::cwd_context()).validate(&mismatch).is_err(),
             "an unequal large-integer default must fail to load for literal({lit})"
         );
     }

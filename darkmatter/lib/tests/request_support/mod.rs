@@ -9,7 +9,10 @@
 
 use std::path::{Path, PathBuf};
 
-use darkmatter::markdown::compose::{ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot};
+use biscuit_file::FileResolutionContext;
+use darkmatter::markdown::compose::{
+    ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot, build_resolution_context,
+};
 
 pub fn request(options: ComposeOptions) -> ComposeRequest {
     let dir = request_dir(&options);
@@ -25,6 +28,16 @@ pub fn request_at(dir: &Path, options: ComposeOptions) -> ComposeRequest {
     ComposeRequest::prepare(options, &snapshot).expect("test request")
 }
 
+/// The context a test resolves through when its subject is not the request
+/// directory: built at `dir` with the process's home and environment, so a
+/// repository containing `dir` supplies the `&`/`^` roots.
+pub fn context_at(dir: &Path) -> FileResolutionContext {
+    let snapshot = RequestSnapshot::new(dir)
+        .with_home(biscuit_file::home_dir())
+        .with_env(biscuit_file::capture_env());
+    build_resolution_context(&snapshot).expect("test context")
+}
+
 fn request_dir(options: &ComposeOptions) -> PathBuf {
     let process = || std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match options.source() {
@@ -35,4 +48,12 @@ fn request_dir(options: &ComposeOptions) -> PathBuf {
         _ if options.context().anchor().is_absolute() => options.context().anchor().to_path_buf(),
         _ => process(),
     }
+}
+
+/// The context a context-free API used before one was required: anchored at
+/// the process directory with the process's home and environment, and no
+/// repository discovery. For tests whose documents carry no path and whose
+/// assertions do not depend on where they resolve.
+pub fn cwd_context() -> FileResolutionContext {
+    FileResolutionContext::new(std::env::current_dir().expect("process directory"))
 }

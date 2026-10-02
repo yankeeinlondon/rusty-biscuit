@@ -515,7 +515,7 @@ mod resolved_values {
             resolved,
             state(at),
             &ComposeContext::capture_for_content(repo.path(), ""),
-            ResolutionContext::new(repo.path().to_path_buf()),
+            ResolutionContext::new(biscuit_file::FileResolutionContext::new(repo.path())),
         )
         .unwrap_or_else(|error| panic!("{authored}: {error}"))
     }
