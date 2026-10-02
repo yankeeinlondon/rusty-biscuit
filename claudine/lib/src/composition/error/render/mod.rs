@@ -286,7 +286,7 @@ fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
     let caller = problem.caller_file.as_ref()?;
     let reference = match problem.file_reference.as_ref()? {
         darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { raw }
-        | darkmatter::markdown::schemas::FileReferenceDiagnostic::ResolutionFailed { raw }
+        | darkmatter::markdown::schemas::FileReferenceDiagnostic::ResolutionFailed { raw, .. }
         | darkmatter::markdown::schemas::FileReferenceDiagnostic::NoMatch { raw, .. } => raw,
     };
     let mut detail = null_detail_for("composition.invalid_file_reference");
