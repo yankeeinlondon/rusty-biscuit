@@ -44,7 +44,7 @@ depends-on:
 human_review: false
 clarified: false
 reviewed: false
-needs_rulings: true
+needs_rulings: false
 ---
 
 # `Prose` Is a Block, `InlineProse` Is Inline
@@ -118,9 +118,9 @@ Run <code>md hash</code> on <a href="plan.md">the plan</a>
 
 | Input | Meaning |
 |---|---|
-| a single `\n` | soft break inside the block |
+| a single `\n` | soft break inside the block (`LineBreaks::Soft`, the default) |
 | two or more `\n` in a row, with only spaces or tabs between them | block boundary (`Prose`) |
-| `\` immediately before `\n`, or two or more spaces before `\n` | hard break (Open Question 1) |
+| `\` immediately before `\n` | hard break |
 
 `\n\n` and `\n\n\n\n` are the same boundary. A soft break renders as a
 space on the terminal and in HTML, and as a newline in Markdown; this is
@@ -130,6 +130,40 @@ break.
 
 Leading and trailing blank lines produce no empty blocks.
 
+CommonMark's other hard-break form, two or more spaces at the end of a
+line, is not supported. Trailing spaces are ordinary whitespace, so
+`"first  \nsecond"` is a soft break.
+
+The Markdown target emits a hard break as `\` followed by a newline.
+`renderable`'s Markdown renderer emits two trailing spaces today
+(`renderable/src/tree/render/markdown.rs`, `NodeKind::HardBreak`); it
+changes to the backslash form for every producer, darkmatter included.
+Inside a table cell it keeps emitting `<br>`.
+
+In a Rust string literal the backslash form is `"first\\\nsecond"`
+(`\\` for the backslash, `\n` for the newline). `"first\\nsecond"` is a
+backslash followed by the letter `n` and is not a break.
+
+#### Line-break mode
+
+Both components take a `LineBreaks` mode, so a caller whose text uses
+single newlines as line breaks does not have to rewrite it:
+
+```rust
+InlineProse::new(cell).with_line_breaks(LineBreaks::Hard)
+Prose::new(msg).with_line_breaks(LineBreaks::Hard)
+```
+
+| Mode | A single `\n` | Two or more `\n` in `Prose` |
+|---|---|---|
+| `Soft` (default for both) | soft break | block boundary |
+| `Hard` | hard break | block boundary |
+
+The default is the same for both components, so a string means the same
+thing in either one, and Markdown output reproduces the input. The mode is
+part of the shared grammar: a `Prose` passes its mode to the inline parser
+of each paragraph. This is the same switch as markdown-it's `breaks` option.
+
 ### `InlineProse`
 
 - Holds phrasing content only. Its `render_tree()` returns phrasing nodes,
@@ -138,9 +172,10 @@ Leading and trailing blank lines produce no empty blocks.
 - Implements `TerminalRenderable`, `MarkdownRenderable`,
   `BrowserRenderable`, and `TreeRenderable`.
 - Has no `Layout`. Positioning inline content is its container's job.
-- A blank line in `InlineProse` is a soft break (Open Question 2).
+- In `Soft` mode, two or more `\n` in `InlineProse` are one soft break,
+  the same as a single `\n`. In `Hard` mode each `\n` is a hard break.
 - A fenced code block in `InlineProse` degrades to inline code, as `Table`
-  cells already do with `degrade_code_nodes` (Open Question 3).
+  cells already do with `degrade_code_nodes`.
 
 ### `Prose`
 
@@ -195,15 +230,16 @@ shapes. `IntoProseVec` stays for `StatusBlock` if still needed.
 
 Each call site moves to the component that matches its use. Inline sites
 change `Prose` to `InlineProse`; block sites keep `Prose`. About 35 sites
-use a single `\n` as a line break and must change to a hard break or a
-blank line, otherwise their lines join. Known clusters:
+use a single `\n` as a line break, and their lines would join. Each adds
+`.with_line_breaks(LineBreaks::Hard)` and keeps its strings unchanged.
+Known clusters:
 
 - `darkmatter/lib/src/markdown/compose/shell_expansion/types.rs` (13
   `<dim>Key:</dim> value\n…` sites) and `shell_blocks/types.rs`;
 - `darkmatter/lib/src/markdown/errors/blocks.rs:192` (YAML excerpt lines);
 - `claudine/cli/src/output/error_report.rs`, `commands/help.rs`,
   `commands/logs/errors.rs`, `commands/hooks/list.rs:430` (a line break in
-  a table cell, so a hard break in `InlineProse`);
+  a table cell, so `InlineProse` in `Hard` mode);
 - leading or trailing `\n` used for spacing (`claudine/lib/src/render/prompt/`,
   `sniff/cli/src/commands/repo.rs:439`, `worktree/cli/src/commands/create.rs:168`),
   which becomes either nothing or explicit spacing outside the component.
@@ -216,7 +252,8 @@ Content that already uses `\n\n` as a paragraph break keeps its meaning.
 
 - The two components, the shared grammar, newline handling, `ProseTag`,
   `Layout` on every target, and removal of `<span class="prose">`.
-- The `renderable` block-element attribute.
+- The `renderable` block-element attribute, and the Markdown renderer's
+  hard-break form (`\` + newline instead of trailing spaces).
 - Container API changes in the table above.
 - Migrating every call site and updating moved snapshots.
 - `biscuit-terminal/docs/components/prose.md` (and a new page or section
@@ -242,31 +279,41 @@ Content that already uses `\n\n` as a paragraph break keeps its meaning.
 - **`Prose` applies `Layout`** on every target. (Ken, 2026-10-02)
 - **Markdown newline semantics.** A single `\n` does not break a block; a run
   of two or more `\n` does. (Ken, 2026-10-02)
+- **Line breaks are an opt-in mode with the same default everywhere.**
+  `LineBreaks::Soft` is the default for `Prose` and `InlineProse`;
+  `LineBreaks::Hard` makes each single `\n` a hard break. Rejected: making
+  `InlineProse` treat a single `\n` as a hard break by default while `Prose`
+  does not, because the same string would then render differently by
+  component and Markdown output would no longer reproduce the input.
+  `\` before a newline is a hard break in either mode. (Ken, 2026-10-02)
+- **Two or more `\n` in `InlineProse` in `Soft` mode are one soft break.**
+  `InlineProse` has no blocks, and `Soft` mode never forces a line break.
+  Text that needs visible separation uses `Prose` or `LineBreaks::Hard`.
+  Rejected: a hard break, which would make `Soft` mode only partly soft
+  and change Markdown output. (Ken, 2026-10-02)
+- **Trailing spaces are not a hard break.** CommonMark's two-trailing-spaces
+  form is removed: it cannot be seen in review, editors strip it on save,
+  and it hides inside Rust string literals. `\` before a newline is the
+  only hard-break syntax, and the Markdown target emits that form.
+  (Ken, 2026-10-02)
+- **A fenced code block in `InlineProse` becomes inline code**, matching
+  what `Table` cells do today. Rejected: leaving the fence as literal
+  text. (Ken, 2026-10-02)
+- **`ProseTag` is each paragraph's element.**
+  `Prose::new("one\n\ntwo").with_tag(ProseTag::Div)` renders
+  `<div>one</div><div>two</div>`. Rejected: the tag wrapping every block,
+  which cannot work for the default `<p>` and would make `p` a special
+  case. (Ken, 2026-10-02)
+- **One branch, one merge.** The components, container changes, newline
+  rules, and every call-site migration land together and merge once
+  everything is green. Work may be phased by package area on the branch.
+  Rejected: merging in stages with `Prose` keeping today's newline
+  behavior until the last area migrates, which needs a temporary
+  compatibility path built only to be deleted. (Ken, 2026-10-02)
 
 ## Open Questions
 
-1. **Hard-break syntax.** **Recommendation:** support CommonMark's two
-   forms, `\` before the newline and two or more trailing spaces. The
-   backslash form is visible and survives editors that strip trailing
-   whitespace, so migrated call sites use it.
-2. **A blank line inside `InlineProse`.** It cannot start a block.
-   **Recommendation:** treat it as a soft break, so the content stays valid
-   and nothing is lost. Alternative: a hard break.
-3. **A fenced code block inside `InlineProse`.** **Recommendation:** degrade
-   to inline code, matching what `Table` cells do today. Alternative: leave
-   the fence as literal text.
-4. **What `ProseTag` means with several paragraphs.** **Recommendation:**
-   the tag is each paragraph's element (`<div>…</div><div>…</div>`). This
-   is the only reading that works for the default, since `<p>` cannot
-   contain another `<p>` or a `<pre>`, and it keeps every tag behaving the
-   same way. Alternative: the tag wraps all blocks, with paragraphs inside
-   always `<p>`; this suits `section`/`article` better but makes `p` a
-   special case.
-5. **Rollout.** **Recommendation:** land the components and container
-   changes first, with `Prose` keeping today's newline behavior; then
-   migrate call sites one package area at a time; then switch on Markdown
-   newline semantics in the same change as the last migration.
-   Alternative: change semantics at once and fix every area in one pass.
+None.
 
 ## Acceptance Criteria
 
@@ -279,28 +326,37 @@ Content that already uses `\n\n` as a paragraph break keeps its meaning.
    target: Markdown `a\nb`, HTML `<p>a b</p>`, terminal `a b`.
 3. `Prose::new("a\n\nb")`, `"a\n\n\nb"`, and `"a\n  \nb"` each produce two
    paragraphs on every target.
-4. A hard break, in the syntax ruled for Open Question 1, renders as a
-   terminal newline, `<br>`, and a Markdown hard break.
-5. `Prose::new("x").with_tag(ProseTag::Div)` renders `<div>x</div>` in HTML
-   and is unchanged in Markdown and on the terminal; the validator rejects
-   the block-element attribute on any node but `Paragraph`.
-6. A `Prose` with a fenced code block renders `<p>` and `<pre><code>` as
+4. `Prose::new("a\\\nb")` renders a hard break: a terminal newline,
+   `<br>` in HTML, and `a\` plus a newline in Markdown.
+5. `Prose::new("a\nb").with_line_breaks(LineBreaks::Hard)` and the same
+   on `InlineProse` render the hard break of criterion 4, and
+   `Prose::new("a\n\nb").with_line_breaks(LineBreaks::Hard)` is still two
+   paragraphs.
+6. `Prose::new("a  \nb")` is a soft break, not a hard break, and the
+   Markdown target never emits trailing spaces as a hard break.
+7. `InlineProse::new("first\n\nsecond")` renders `first second` on the
+   terminal and in HTML, and `first\nsecond` in Markdown.
+8. `Prose::new("x").with_tag(ProseTag::Div)` renders `<div>x</div>` in HTML,
+   `Prose::new("one\n\ntwo").with_tag(ProseTag::Div)` renders
+   `<div>one</div><div>two</div>`, and both are unchanged in Markdown and
+   on the terminal; the validator rejects the block-element attribute on
+   any node but `Paragraph`.
+9. A `Prose` with a fenced code block renders `<p>` and `<pre><code>` as
    siblings, never `<pre>` inside an inline element.
-7. A `Prose` with a left margin renders that margin in terminal and HTML
+10. A `Prose` with a left margin renders that margin in terminal and HTML
    output; `bt prose --margin-left` output carries it exactly once.
-8. No output anywhere contains `class="prose"`.
-9. Each container in the Containers table accepts its stated type, and
+11. No output anywhere contains `class="prose"`.
+12. Each container in the Containers table accepts its stated type, and
    `fold_prose_nodes_into_blocks` / `degrade_code_nodes` no longer run on
    Prose content.
-10. Every listed single-`\n` call site keeps its line structure after
+13. Every listed single-`\n` call site keeps its line structure after
     migration, verified by its existing snapshot or a new one.
-11. `just test` and `just lint` pass in every package area listed in
+14. `just test` and `just lint` pass in every package area listed in
     `packages`.
 
 ## Definition of Done
 
-- All acceptance criteria are met and every Open Question has a ruling
-  recorded under Decisions.
+- All acceptance criteria are met.
 - `docs/components/prose.md` describes both components, the newline rules,
   `ProseTag`, and `Layout`; the interim-contract doc comments on
   `Prose::render_html_fragment` and the CLI's `render_html_with_layout` are
