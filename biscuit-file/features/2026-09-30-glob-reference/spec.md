@@ -39,36 +39,36 @@ reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    Phase 3 (Darkmatter consumers) is done; see the implementation log's
-    "Phase 3" section and its Departures entries. What later phases need:
-    - Caller-supplied values are judged by `match()` from their origin
-      (launch) context. The plumbing is `schemas::validate::CallerOrigins`
-      (property -> origin), carried by `ValidatorCache`, `EffectiveSchema`,
-      and public `DarkmatterSchemas::with_caller_input_records`. The "no
-      explicit records" rule is public `caller_input_records_for_overrides`.
-      Any host that validates caller overrides itself must call
-      `with_caller_input_records` (Claudine's pre-validation, launch schema,
-      and translation already do). Phase 5's Claudine track only has to
-      replace the completion walks (they now call `MatchGlobs::new` and
-      `matches(path, &file_resolution_context(ctx))` but still walk the
-      launch directory) and fix rendering/order.
-    - `FileMatchGlobs` API is now `new(&[String]) -> Result<_, GlobReferenceError>`,
-      `matches(&Path, &FileResolutionContext)`, `roots(&ctx)`; `compile` and
-      `is_match` are gone.
-    - `match()` definition errors come from the simplified grammar via
-      `schemas::file_match::definition_error`; Phase 4's `$path` trigger
-      errors can follow the same shape (R10).
-    - biscuit-file gained `GlobReference::matches_without_context` for the
-      structural (no-request) validator. Root-union coercion is context-free,
-      so a `./`, `&`, `^`, or `@` pattern cannot steer coercion (pre-existing
-      gap, documented in `darkmatter/docs/topics/schemas/definition.md`).
-    - Skipped-symlink warnings use `dm.glob.skipped_symlink`
-      (`ComposeWarning::skipped_symlink`, `compose/glob_listing.rs`).
-    - The literal-miss hint (`DetailedResolution::glob_hint()`) is still not
-      rendered by any consumer: no Phase 3 consumer resolves a single file.
-      Whoever owns `::file`/`::code` no-match messages should append it.
-    - Fixtures that need a repository must `git init`; a bare `.git`
-      directory is not a repository to a prepared request context.
+    Phase 5 (DMLS and Claudine) is done; see the implementation log's
+    "Phase 5" section and its Changed Outputs and Departures entries. What
+    Phase 6 (the source-scan guard) needs to know:
+    - Production glob-crate use today is exactly the planned allowlist:
+      `biscuit-file/lib/src/file_reference/glob/{parse.rs,roots.rs}` (the
+      `GlobReference` module), `darkmatter/lib/src/markdown/compose/toc_linking/filter.rs`,
+      `darkmatter/dmls/src/workspace/discover.rs`, and
+      `darkmatter/dmls/src/overlay/schema.rs`. Claudine's completion walk uses
+      the `ignore` crate (`WalkBuilder`) for its filtered walk; that is a
+      directory walker, not a glob matcher, and is the walk the spec keeps in
+      Claudine. Decide in Phase 6 whether the guard names `ignore` at all;
+      if it does, `claudine/cli/src/completion/` walkers need allowlisting.
+    - New public API from Phase 5: `GlobReference::lists_file(path, ctx)`
+      (biscuit-file) and `FileMatchGlobs::lists_file` (darkmatter): the
+      `list_files` verdict for one walked path, sharing the out-of-tree
+      file-symlink rule (`PreparedSet::escaping_target`). Claudine's walk
+      judges with it. Plus `darkmatter::markdown::compose::file_resolution_context_identity`,
+      which DMLS's effective-schema cache key uses.
+    - Behavior change to keep in mind for Phase 7's parity rows and Phase 8's
+      docs: a bare `match()` pattern in completion now offers repository-root
+      files after the launch directory's (criterion 5), so the shipped
+      `prompts/review.md` router launched from a package also offers matching
+      root specs. The PTY fixture in `claudine/cli/tests/common/review_router.rs`
+      was updated for it (decoy renamed `remote-decoy`).
+    - `PortablePath` compares spellings: render a candidate from the path
+      as walked under the context's roots, never from a canonicalized path,
+      or a `/var` launch directory shares no route with `/private/var`.
+    - Windows: `just cross-check claudine-cli --os windows` showed 3 failures
+      in `loop_gate_ambient` and `pr_flow_rehearsal`, which use none of the
+      changed code; see the log's Windows Evidence for the baseline run.
 ---
 
 # Glob References Share the File-Reference Grammar

@@ -6,6 +6,8 @@ started_phase: "1"
 packages:
     - biscuit-file
     - darkmatter
+    - darkmatter-cli
+    - dmls
     - claudine
     - claudine-cli
 source_files_during_phase_1:
@@ -91,6 +93,73 @@ skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/biscuit-file/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/roots.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/common/protected_env.rs
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/schema-activation.md
+    - darkmatter/example-docs/schemas/external.md
+    - claudine/docs/rollout-strategy.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - biscuit-file/lib/src/file_reference/glob/mod.rs
+    - biscuit-file/lib/src/file_reference/glob/list.rs
+    - biscuit-file/lib/src/file_reference/glob/matches.rs
+    - biscuit-file/lib/tests/l1/glob_reference/boundary.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/common/review_router.rs
+    - claudine/cli/tests/level2/level2_provided_partial_file_capture.rs
+    - claudine/cli/tests/level2/level2_windows_provided_partial_file_capture.rs
+docs_updated_during_phase_5:
+    - biscuit-file/docs/topics/file-references.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/completions/auto-complete.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Implementation Log for 2026-09-30-glob-reference (8 phases)
@@ -260,6 +329,91 @@ Recorded as they are found; Phase 8 consolidates them.
   (the OS rejects the name); it is now `NoMatch`, as on Unix, and carries the
   literal-miss hint.
 
+- **Schema roots replace the ancestor walk (Phase 4, Decision 24).** Trigger
+  discovery and bare-name `$schema` lookup search the five roots (package,
+  package area, `base_dir()`, `SCHEMAS_DIR`, `~/schemas`) of the document's
+  context. In-between folders (`{package}/docs/schemas/`) are no longer
+  searched; `SCHEMAS_DIR` and `~/schemas` now are. Unit tests that relied on
+  `pkg/schemas` being an ancestor now declare `pkg` as the package
+  (`discovery::tests::scan_for`, `schemas::phase4_trigger_assembly::doc_context`);
+  `ancestor_walk_*` unit tests were replaced by
+  `symlinked_tree_schemas_root_is_not_searched`,
+  `scan_skips_in_between_schemas_folders`, and
+  `scan_reads_another_repository_s_roots_never`.
+- **`$path` is a glob reference (Phase 4).** `*` no longer crosses `/` (R4;
+  the old matcher used `globset`'s default, which let `prompts/*.md` match
+  `prompts/a/b.md`), a bare pattern is read from the trigger's folder rather
+  than the discovery boundary, and `@`, `%`, `vault:`, `{{VAR}}` (anywhere),
+  an invalid glob, and an all-`!` list are definition errors naming the
+  pattern. No shipped `$path` trigger exists, so no shipped output changes.
+- **`md schema triggers` output (Phase 4).** The `Boundary:` line and the
+  walked `Schema roots:` list are gone; it prints the five roots in search
+  order, marking absent folders, a duplicate of an earlier root, an unset or
+  invalid `SCHEMAS_DIR`, and "no package / package area". Reviewed once on
+  this repository (`md schema triggers claudine/README.md`):
+
+  ```text
+  Document: /Volumes/coding/wt/rusty-biscuit/fix-magic-globs/claudine/README.md
+  Schema roots (search order):
+  1. package root: none (the document is not in a package)
+  2. package-area root: /Volumes/coding/wt/rusty-biscuit/fix-magic-
+     globs/claudine/schemas
+  3. file tree root: /Volumes/coding/wt/rusty-biscuit/fix-magic-globs/schemas
+  4. SCHEMAS_DIR: unset
+  5. home: /Users/ken/schemas (absent)
+  Shadowed envelopes:
+  - none
+  Triggers:
+  - none
+  ```
+- **`md schema about` `$path` row (Phase 4).** Its description now names the
+  glob-reference prefixes and the refused ones instead of "boundary-relative
+  path".
+- **Shipped example (Phase 4, Decision 28).**
+  `darkmatter/example-docs/schemas/external.md` names `$schema: ./external.yaml`.
+- **DMLS outside a repository (Phase 4).** A workspace that is not a Git
+  repository gives each document a context rooted at its own folder, so its
+  triggers now come from that folder's `schemas/` (and `SCHEMAS_DIR`,
+  `~/schemas`) rather than from the workspace folder's. The LSP test
+  `trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope`
+  relied on the old reach (the open envelope in `schemas/` saw itself) and
+  now runs in a repository; the two overlay unit tests whose fixture context
+  had no repository now use one (`test_support::resolution_in_repository`).
+
+- **`match()` completion reaches every root (Phase 5, criteria 3, 5, 17).**
+  Claudine's TAB and ENTER walks used to walk the launch directory only and
+  sort candidates by text. They now walk `roots()` (a bare pattern: the
+  launch directory, then the repository root) in native order, and TAB
+  values outside the launch directory are spelled `../…`, `&…`, `~/…`, or
+  absolute. Existing tests changed:
+  `schema_completion::tests::property_value_match_pattern_anchors_on_cwd_not_repo_root`
+  asserted that a repository-root `docs/top.md` is **not** offered from
+  `claudine/`; criterion 5 reverses that, so it became
+  `property_value_bare_match_offers_the_launch_folder_then_the_repository_root`
+  (offers `docs/area.md` then `../docs/top.md`; its fixture now runs
+  `git init`, since a bare `.git` directory is not a repository to a
+  prepared context and `../` was rendered absolute).
+- **Shipped review router (Phase 5).** `prompts/review.md` declares
+  `spec: file(required;eager;match(**/*spec*.md))`. Launched from a package
+  with `spec=<partial>`, it now also offers repository-root specs that
+  contain the partial, after the launch area's (a chooser where there used
+  to be a single confirmation). The PTY fixture
+  `claudine/cli/tests/common/review_router.rs` planted a repository-root
+  "decoy" matching the partial `fixes/2026-09-10-local` to prove a
+  launch-area-only walk (from `2026-09-10-no-interactive-completion`); that
+  premise contradicts Decision 19 / criterion 5, so the decoy moved to
+  `fixes/2026-09-10-remote-decoy/` (reached by the walk, filtered by the
+  partial), the L2 capture assertions follow the new name, and the
+  companion `level1_review_router_partial_repo_root_launch_widens_candidates_to_the_chooser`
+  became `level1_review_router_partial_offers_a_repository_root_spec_after_the_launch_area`
+  (package launch, a root spec matching the partial is second in the
+  chooser and its identity survives the proxy). An author who wants the old
+  launch-area-only reach writes `./**/*spec*.md`.
+- **Chooser order (Phase 5).** The ENTER missing-property chooser and the
+  provided-partial chooser no longer re-sort `match()` candidates by path;
+  they list them in native order. The bare-`file` default glob keeps its
+  sorted order.
+
 ## Departures from Spec
 
 - **R2: optional first-root list mode not built (deliberate omission).** The
@@ -317,6 +471,74 @@ Recorded as they are found; Phase 8 consolidates them.
   `add_warnings`, keyed `(code, link)` so one link reached twice is one
   warning; `::file-links` adds them to its own transclusion report.
 
+- **Phase 4: discovery takes the document's context, no path or boundary.**
+  `triggers::scan(&ctx)` and `DarkmatterSchemas::with_trigger_discovery()`
+  read the roots from the context they are given, which must be the checked
+  document's own context; the registry keeps it and judges `$path` in it
+  (`TriggerRegistry::context`, `evaluate_registry(registry, fm, Some(path))`).
+  `schema_roots`, `normalize_path`, `normalize_relative_path`, and
+  `TriggerRegistry.boundary` are deleted.
+- **Phase 4: where discovery runs is unchanged.** `md compose`,
+  `md schema validate`, `md clean`, and `md schema triggers` still discover
+  triggers only inside a repository (the last still fails outside one with
+  `missing-context`), and DMLS only inside a workspace folder. The spec's root
+  table says root 3 is "always" present; it does not say discovery must start
+  running outside a repository, so the existing gate stays.
+- **Phase 4: per-pattern contexts for `$path`.** Bare and `./` patterns are
+  read from the trigger's `pattern_cwd` (the folder holding its `schemas/`, or
+  the document's `base_dir()` for `SCHEMAS_DIR` and `~/schemas`); every other
+  prefix (`&`, `^`, `~`, absolute) is judged in the document's own context.
+  Judging `^` from the trigger's folder instead would have made criterion 21's
+  `^docs/**` miss a package document for a trigger in `{repo}/schemas`. Each
+  pattern compiles to its own single-pattern `GlobReference` (negation kept
+  beside it), which is equivalent to the list semantics (R11: per-pattern
+  judgment). `../` is not forbidden by the spec and is accepted, read like
+  `./`.
+- **Phase 4: `$path` definition errors reuse `SchemaError::TriggerMatch`**
+  with a message naming the authored pattern (R10): it is the existing
+  trigger-definition path that `md` and DMLS both report.
+- **Phase 4: symlinked roots.** Roots 1 to 3 must be real directories (a
+  symlinked repository `schemas/` was already excluded); `SCHEMAS_DIR` and
+  `~/schemas` are user configuration and may be symlinks to a directory.
+- **Phase 4: `TriggerTrace` is no longer `serde::Serialize`.** Its roots are
+  now `SchemaRoots`; nothing serialized the trace.
+- **Phase 4: `SCHEMAS_DIR` joins the `md` test fixture's protected
+  application inputs** (`darkmatter/cli/tests/common/protected_env.rs`), so a
+  developer's shell value is scrubbed from every spawned `md` and a test
+  declares it with `application_input`.
+- **Phase 4 `$path` matrix outcomes (logged as the plan asks).** Absent
+  (`match: {}`): the existing vacuous-arm load error. `$path: null` and an
+  empty `$path:`: "must be a glob string ... got null", distinct from absent.
+  Duplicate `$path` key: the YAML layer's existing refusal ("duplicate entry
+  with key"), reported as a malformed trigger file.
+
+- **Phase 5: `GlobReference::lists_file` (new public biscuit-file API).**
+  `matches` judges a file symlink where it sits (Phase 2), so it admits an
+  out-of-tree link that `list_files` skips. Claudine's walk filters while
+  walking and cannot use `list_files`, and the plan forbids re-implementing
+  containment in Claudine, so biscuit-file exposes the listing verdict for
+  one path; `list_files` and `lists_file` share one rule
+  (`PreparedSet::escaping_target`). `FileMatchGlobs::lists_file` wraps it.
+- **Phase 5: DMLS cache key reuses Darkmatter's context encoder.** The spec
+  lists repository root, `cwd`, `base_dir` origin, and a snapshot hash
+  (`HOME`, environment, `@` roots). The key uses the new public
+  `darkmatter::markdown::compose::file_resolution_context_identity`, the
+  existing exhaustive encoder behind the compose graph identity, which
+  covers those and more (source path, package and area roots, launch `@`
+  scope, vault roots, external-relative opt-in), hashed with
+  `biscuit-hash`. The build `generation()` stays in the key. No second
+  hand-written identity exists in DMLS.
+- **Phase 5: `md` vs DMLS parity is checked at the library level.** DMLS
+  tests cannot run the `md` binary, so `dmls/tests/l1/schema_roots_parity.rs`
+  compares DMLS's per-repository context and overlay with the context and
+  `DarkmatterSchemas` assembly `md schema validate` performs (launched from
+  the document's folder); `md`'s own output is pinned by the Phase 4 CLI
+  tests over the same library calls. A full LSP session then checks the
+  published diagnostics.
+- **Phase 5: one-way parity asserts `file_match_admits` and `matches`.**
+  The `x-darkmatter-match` validator shares the same `FileMatchGlobs`
+  judgment (Phase 3) and is not driven separately per candidate.
+
 ## Windows Evidence
 
 None in Phase 1 (no code paths changed). The `backslash_escape` default
@@ -337,6 +559,38 @@ None in Phase 1 (no code paths changed). The `backslash_escape` default
   **7180 passed, 67 skipped** (`cross-check-key: be600858c4ae4b48`, after
   the fix; an earlier run before it also passed). Claudine was not
   cross-checked (plumbing only; CI's push-to-`main` Windows leg covers it).
+
+- **Phase 4:** `just cross-check darkmatter-cli --os windows` first failed
+  one new test, `schema_triggers::triggers_command_prints_the_five_schema_roots_in_search_order`:
+  the package root printed as `…\cwd\area/pkg\schemas`, because the
+  repository catalog spells package roots with `/`. Roots compared correctly
+  (canonical identity); only the printed spelling was mixed. Fixed by
+  re-collecting each root folder's components (`roots.rs::native_spelling`)
+  and recorded in the `os` skill. Re-runs after the fix: darkmatter **7178
+  passed, 67 skipped** (`cross-check-key: 02c2c53564bd09ce`), darkmatter-cli
+  **825 passed, 69 skipped** (`08d0b6bc72e53093`), dmls **785 passed, 9
+  skipped** (`21aa4421d5b6bb3a`).
+
+- **Phase 5:** `just cross-check biscuit-file --os windows`: **pass**.
+  `just cross-check dmls --os windows`: **790 passed, 9 skipped**
+  (`cross-check-key: 119a8da664b47082`), including the new cache-key and
+  parity tests. `just cross-check claudine-cli --os windows`: **2620 passed,
+  3 failed, 11 skipped**. The failures are
+  `loop_gate_ambient::{lifecycle_reference_loop_example_runs_as_written,
+  loop_gate_info_renders_loop_count_on_every_pass}` ("compose failed" after
+  the agent prompt of a counting `goose` stub loop) and
+  `pr_flow_rehearsal::blocked_push_with_ask_triages_then_fixes_and_commits`
+  (exit 1 in the `prompts/pr.md` push route). None of the three uses
+  `match()`, completion, globs, triggers, or schema roots (no reference in
+  either file or in the prompts they run), and every completion test passed
+  on Windows. A baseline run of the same three tests from a clean `HEAD`
+  worktree was attempted and refused by the rig's storage preflight
+  (40.9 GiB free of the 50 GiB required); it was not forced. They are
+  recorded as **unrelated, not confirmed pre-existing**; CI's push-to-`main`
+  Windows leg will show them. The out-of-tree symlink completion test is
+  Unix-only (creating a symlink needs a privilege on Windows); the
+  biscuit-file rule it rests on is covered on Windows by `boundary.rs`'s
+  test where links can be made.
 
 ## Handed-off Reads
 
@@ -774,6 +1028,241 @@ rest are inline unit tests or existing L1 files).
   origins, `git init` fixtures), `.claude/skills/darkmatter/compose.md`,
   `.claude/skills/darkmatter/schema.md`, `.claude/skills/biscuit-file/SKILL.md`,
   `.claude/skills/os/windows.md` (item 16).
+
+## Phase 4
+
+Five schema roots replace the ancestor walk, and `$path` triggers run on
+`GlobReference`. Packages: `darkmatter` (lib), `darkmatter-cli`, and `dmls`
+(kept compiling and green; its caching and parity work is Phase 5).
+
+### What was built
+
+- **Root list** (`darkmatter/lib/src/markdown/schemas/roots.rs`, new, public
+  as `darkmatter::markdown::schemas::{SchemaRoots, SchemaRoot, SchemaRootKind,
+  SchemaRootState, SearchedRoot, InvalidSchemasDir, SCHEMAS_DIR_VARIABLE}`):
+  `SchemaRoots::for_document(&ctx)` returns all five roots in order with a
+  state each (`Searched`, `Absent`, `Duplicate { of }`, `NotApplicable`,
+  `Invalid { value, reason }`), plus `search_paths()` (bare-name lookup) and
+  `searched()` (each with its `pattern_cwd`). Inputs: `ctx.package_root()`,
+  `ctx.package_area()`, `ctx.base_dir()`, `ctx.env()["SCHEMAS_DIR"]`,
+  `ctx.home_dir()`; dedup by `canonicalize_simplified` + `PathIdentity`.
+  Nothing reads the process (the context guard still passes).
+- **Discovery** (`triggers/discovery.rs`): `scan(&ctx)` enumerates the
+  searched roots, shadows by file name, and records each trigger's
+  `pattern_cwd`; the registry keeps `roots: SchemaRoots` and the context.
+  Module doc rewritten. `DarkmatterSchemas::with_trigger_discovery()` takes no
+  arguments; bare-name `$schema` lookup (`resolve.rs`, unchanged code) now
+  walks `roots.search_paths()`.
+- **`$path`** (`triggers/grammar.rs`, `matcher.rs`, `assemble.rs`):
+  `PathGlobs::new` compiles one `GlobReference` (file-name view) per pattern
+  and refuses `@`, `vault:`, `%`, `{{` anywhere, invalid globs, and all-`!`
+  lists with a `TriggerMatch` error naming the pattern. The matcher takes a
+  `PathSubject` (document path + context + the trigger's `pattern_cwd`);
+  `PathSubject::detached()` replaces the old `""` path. The thread-local
+  `globset` cache and `compile_globs` are deleted.
+- **Callers**: compose (`schema_validation.rs`, gate renamed
+  `discovers_triggers`), `md clean` (`schemas/clean.rs`), `md schema validate`,
+  `md schema triggers` (new output via `OrderedList` + `Prose`), and DMLS
+  (`overlay/mod.rs` scans `context.for_source(path)`).
+- **Shipped example**: `darkmatter/example-docs/schemas/external.md`.
+- **Docs**: `definition.md` ("Repository Trigger Schemas" rewritten with
+  "Schema roots" and "Matching a path with `$path`" subsections, the bare-name
+  paragraph, `md schema triggers` sample), `dmls-schema-support.md` (diagram,
+  DMLS now reads `SCHEMAS_DIR` and `~/schemas`, restart caveat),
+  `authoring-schemas.md` (five-root list, `{root}` outside a repository,
+  `SCHEMAS_DIR`), `schema-activation.md` and `claudine/docs/rollout-strategy.md`
+  (`SCHEMA_DIR` → `SCHEMAS_DIR`). `git grep SCHEMA_DIR` over every `docs/`
+  tree and `.claude/skills` now returns nothing. Phase 8 still owns the full
+  docs pass (`match()` section examples, README, Claudine docs).
+- **Drifted comments fixed** (code is right): `md clean`'s two "git-root
+  ancestor walk" comments, DMLS `trigger_boundary`'s doc (it now only gates),
+  the `discovery.rs` test-fixture comment, and the `$path` descriptor in
+  `about.rs`.
+
+### Requirement-to-test mapping
+
+All new tests are L1 (no tier marker in any path segment).
+`darkmatter/lib/tests/l1/main.rs` declares `schema_roots`; the CLI tests are
+in the already-declared `darkmatter/cli/tests/l1/schema_triggers.rs`.
+
+| Requirement | Test |
+|---|---|
+| Wave 7 root list; criterion 27 (order, document's package not the launch's) | `darkmatter::l1 schema_roots::schema_roots_are_package_area_tree_schemas_dir_then_home` |
+| Wave 7 input matrix (control, absent, empty, whitespace, relative, missing, `SCHEMA_DIR`, equals `~/schemas`, no home) | `schema_roots::schemas_dir_and_home_input_matrix` |
+| Criterion 28 (shadowing both directions, shadowed trigger reported and not evaluated) | `schema_roots::an_earlier_root_shadows_a_later_one_by_file_name` |
+| Criterion 29 (`SCHEMAS_DIR` names the folder itself; bare `docs/*.md` from the repository root; unset adds nothing) | `schema_roots::schemas_dir_names_the_schemas_folder_itself`, cli `schema_triggers::schema_validate_applies_triggers_from_schemas_dir_and_home` |
+| Criterion 30 (in-between folders) | `schema_roots::in_between_schemas_folders_are_not_discovered`, `discovery::tests::scan_skips_in_between_schemas_folders` |
+| Criterion 31 (`~/schemas` trigger and `$schema: user.yaml`) | `schema_roots::home_schemas_apply_in_a_repository_with_no_schemas_folder`, cli `schema_validate_applies_triggers_from_schemas_dir_and_home` |
+| Criterion 21 (`^docs/**`, `~/notes/**`, bare `*.md` at any depth, forbidden prefixes incl. after `!`) | `schema_roots::path_triggers_read_reference_prefixes`, `schema_roots::forbidden_path_prefixes_are_definition_errors_naming_the_pattern` |
+| Criterion 21 last sentence (trigger vs `match()` parity, incl. nearest root, negation, file-name view, case) | `schema_roots::path_triggers_and_match_validation_give_the_same_verdicts` (mutation-checked: ignoring `pattern_cwd` fails it) |
+| Wave 8 `$path` field matrix (control + 15 edits) | `schema_roots::path_field_input_matrix` |
+| Criteria 27, 29 through `md schema triggers` | cli `schema_triggers::triggers_command_prints_the_five_schema_roots_in_search_order`, `triggers_command_marks_unset_and_invalid_schemas_dir` |
+| Definition errors through `md schema validate` | cli `schema_triggers::schema_validate_reports_a_forbidden_path_prefix_naming_the_pattern` |
+| Criterion 33 (shipped example, passive + end-to-end) | cli `schema_triggers::shipped_external_schema_example_names_its_sibling_explicitly` |
+| Matcher unit behavior (file-name view, separator, negation, case, no document) | `triggers::matcher::tests::path_*` |
+
+Criterion 32 (`md` and DMLS agree) is Phase 5's: DMLS now calls the same
+`scan` on the document's context, but its parity tests are scheduled there.
+The plan's "absent from the snapshot even if set in the test process" cell is
+covered structurally: the reader takes only `ctx.env()`, the context guard
+forbids process-environment reads in `src/`, and the test process's
+environment is never mutated (repository rule).
+
+### Repository check
+
+`ls -d */schemas */*/schemas` (plus root `schemas/`): `schemas/`,
+`claudine/schemas/`, `darkmatter/schemas/` remain roots; the in-between
+`claudine/docs/schemas/`, `darkmatter/docs/schemas/`, and
+`darkmatter/example-docs/schemas/` are no longer searched. `md schema validate`
+over all 364 documents naming `feature-review.yaml`, `review.yaml`,
+`suggestion-review.yaml`, or `memory.yaml` by bare name: 364 valid. Over the
+other bare-name documents: two fail as before this change
+(`claudine/fixes/_completed/2026-08-31-silent-success-and-startup-stall/log.md`
+names `fix-log.yaml`, `darkmatter/features/_completed/2026-07-14-invalid-frontmatter/log.md`
+names `feature-log.yaml`; neither file exists anywhere in the repository).
+
+### Existing-test reconciliation
+
+First full `just test` after the change: 2 failed (DMLS overlay unit tests
+whose fixture context had no repository; intended, see Changed Outputs), then
+1 failing 8/12 runs (`dmls::l1 lsp_session::trigger_payload_failure_retains_effective_schema_and_diagnoses_envelope`;
+intended, same cause: the open envelope's own context no longer reached the
+workspace `schemas/`; 10/10 after the fixture became a repository). Every other
+existing test passed unedited apart from signature updates.
+
+### Gates (macOS unless noted)
+
+| Area | Command | Result |
+|---|---|---|
+| darkmatter (lib, cli, dmls, zed-dmls) | `just test --no-fail-fast` | 8851 passed, 12 skipped, 0 failed |
+| darkmatter | `just test-l2` | 18 + 69 + 3 passed |
+| darkmatter | `just lint` | pass |
+| claudine, claudine-cli | `cargo check --tests` | compiles (no use of the changed trigger APIs) |
+| darkmatter, Windows | `just cross-check darkmatter --os windows` | 7178 passed, 67 skipped |
+| darkmatter-cli, Windows | `just cross-check darkmatter-cli --os windows` | 825 passed, 69 skipped (after one fix, below) |
+| dmls, Windows | `just cross-check dmls --os windows` | 785 passed, 9 skipped |
+
+`just check-tier-coverage` does not exist in this checkout (as in Phases 2
+and 3); every new test path is marker-free and compiled by a declared target.
+
+### Docs and skills
+
+Docs as listed under "What was built". Skills: `.claude/skills/darkmatter/SKILL.md`
+(scan signature, five-root bullet), `.claude/skills/darkmatter/schema.md`
+(new "Schema roots and `$path` triggers" section), `.claude/skills/os/windows.md`
+(item 4: catalog package roots arrive with mixed separators).
+
+## Phase 5
+
+The editor and the shell agree on schema roots, and Claudine's `match()`
+completion walks the globs' roots. Packages: `dmls`, `claudine-cli`,
+`darkmatter` (one public function and one wrapper), and `biscuit-file`
+(one public method).
+
+### What was built
+
+- **Track A, DMLS cache key (criterion 22).** `OverlayCache::schema_for`
+  (`darkmatter/dmls/src/overlay/mod.rs`) keys the effective schema on
+  content + configuration + trigger registry + the document's context
+  identity (`file_resolution_context_identity`, new and public in
+  `darkmatter/lib/src/markdown/compose/context/options.rs`, re-exported from
+  `darkmatter::markdown::compose`) + the build generation. Before, the key
+  carried only the generation, so two contexts with the same generation (any
+  `DocumentResolution::from_context`, or a rebuilt context whose catalog
+  moved a `^` root) were served one cached schema. The roots still come from
+  `SchemaRoots::for_document` through `triggers::scan` (no DMLS root list);
+  the snapshot is still the one the server was launched with.
+- **Track A, parity (criteria 21 DMLS half, 32).** New
+  `darkmatter/dmls/tests/l1/schema_roots_parity.rs` (declared in
+  `tests/l1/main.rs`).
+- **Track B, Claudine walks (criteria 1, 3–6, 12, 17, 24, Decision 25).**
+  `claudine/cli/src/completion/schema_completion/candidates.rs`:
+  `file_candidates` (TAB) and `file_candidate_paths` (ENTER) share
+  `match_glob_files`, which walks `MatchGlobs::roots` in precedence order
+  with the existing walk filters, examines each file once (a `PathIdentity`
+  set over the canonical root plus walked names, so the first root's walk
+  owns it), keeps it when `MatchGlobs::lists_file` holds, and sorts each
+  root's pass by depth then components (native order). TAB values come from
+  `candidate_value`: a file under the launch directory goes to `PortablePath`
+  as its bare launch-relative reference (kept as authored), any other file
+  as a path with the restricted strategy (`SameDirRelative`, `ChildDir`,
+  `ImmediateParentDir`, `PeerDir`, `RepoRoot(None)`, `HomeDir`,
+  `AbsolutePath`), always `with_ctx` the completion context. The typed
+  partial filters the rendered value. The `out.sort()` calls are gone, and
+  the two choosers in `commands/schema_interactive/mod.rs` no longer re-sort
+  `match()` candidates (the bare-`file` default glob is still sorted, now
+  inside `file_candidate_paths`).
+- **biscuit-file `GlobReference::lists_file`** and darkmatter
+  `FileMatchGlobs::lists_file` (see Departures). `file_match_admits` already
+  used `matches` (Phase 3); no change.
+- **Found while testing: `PortablePath` compares spellings.** Rendering from
+  a canonicalized target against a `/var/…` launch directory found no shared
+  route and fell through to the absolute form. `candidate_value` therefore
+  passes the path as walked (spelled from the context's own roots).
+
+### Requirement-to-test mapping
+
+All new tests are L1 (no tier marker in any path segment).
+
+| Requirement | Test |
+|---|---|
+| Criterion 22 (`^` roots differ; regression: failed before the fix) | `dmls overlay::tests::schema_cache_keys_on_the_package_root` |
+| Criterion 22 (`SCHEMAS_DIR` differs; passed before by the registry's `Debug` in the key; mutation-checked: still passes with the registry term removed) | `dmls overlay::tests::schema_cache_keys_on_the_snapshot_environment` |
+| Criterion 32 (same roots, applied triggers, bare-name file for criteria 27–31's documents: package doc, repository doc, in-between schema) | `dmls::l1 schema_roots_parity::md_and_dmls_give_the_same_roots_triggers_and_bare_names` |
+| Criteria 29, 31 through a real LSP session (`SCHEMAS_DIR` and `~/schemas` from the launch snapshot) | `schema_roots_parity::a_session_applies_schemas_dir_and_home_like_md` |
+| Criterion 21 (definition error identical in `md` and DMLS) | `schema_roots_parity::a_forbidden_path_prefix_is_the_same_definition_error_in_md_and_dmls` |
+| Criterion 1 (Incident 2, exact candidate) | `claudine-cli bin schema_completion::tests::incident_2_completes_a_caret_pattern_from_the_repository_root`; end to end through `claudine __complete` with the prompt in `~/.claudine/prompts`: `claudine-cli::l1 compose_schema_cli::completion_file_match_reads_the_caret_prefix_from_the_launch_repository` |
+| Criteria 3, 17 (`^`, `&`, `./` from a nested package; native order, not text order) | `schema_completion::tests::a_nested_launch_lists_each_prefix_in_native_order` |
+| Criterion 4 | `schema_completion::tests::a_root_exclusion_removes_files_a_positive_caret_pattern_admits` |
+| Criterion 5 | `schema_completion::tests::each_file_is_judged_by_its_nearest_root`, `property_value_bare_match_offers_the_launch_folder_then_the_repository_root` |
+| Criterion 6 (one-way parity, every prefix tested: bare, `./`, `&`, `^`, `~`, absolute, negations) | `assert_offers_resolve_and_are_admitted`, called by every test above |
+| Criterion 12 | `schema_completion::tests::a_file_name_negation_is_neither_offered_nor_admitted` |
+| Criterion 24 (bare inside the launch directory, `../`, `&`, `~/`, absolute, never `{{`, every value resolves back) | `schema_completion::tests::candidates_outside_the_launch_folder_take_the_first_form_that_resolves`, plus the resolve-back check in every test |
+| Decision 25 / criterion 25 (completion omits an out-of-tree link, no warning; Unix only, as symlink creation needs privileges on Windows) | `schema_completion::tests::an_out_of_tree_file_symlink_is_omitted_without_a_warning` |
+| `lists_file` agrees with `list_files` per path | `biscuit-file l1 glob_reference::boundary::a_file_link_out_of_the_tree_is_skipped_by_a_bound_glob` (extended) |
+| Shipped router, root spec after the launch area through the proxy | `claudine-cli::l1 level1_review_router_partial_pty::level1_review_router_partial_offers_a_repository_root_spec_after_the_launch_area` |
+
+The Input Robustness Matrix does not apply: no file format or configuration
+reader changed (the `$path` and `SCHEMAS_DIR` matrices are Phase 4's).
+
+### Existing-test reconciliation
+
+| Test | Class | Resolution |
+|---|---|---|
+| `schema_completion::tests::property_value_match_pattern_anchors_on_cwd_not_repo_root` | intended (criterion 5) | rewritten, see Changed Outputs |
+| `level1_review_router_partial_pty::{yolo_confirms…, decline_and_cancel…, proxy_target_schema…}` | intended (Decision 19) | decoy moved out of the partial's reach, see Changed Outputs |
+| `level1_review_router_partial_repo_root_launch_widens_candidates_to_the_chooser` | intended | repurposed (premise removed) |
+| `context_construction_guard` (claudine-cli) | bug in new code | `PortablePath::from_*` now chains `.with_ctx` at construction |
+| `spawn_site_guard` (claudine-cli) | bug in new test | the e2e test uses `common::init_git_repo` |
+
+### Gates (macOS unless noted)
+
+| Area | Command | Result |
+|---|---|---|
+| darkmatter (lib, cli, dmls, zed-dmls) | `just test --no-fail-fast` | 8856 passed, 12 skipped |
+| darkmatter | `just test-l2` | 18 + 69 + 3 passed |
+| darkmatter | `just lint` | pass |
+| claudine (lib, cli, gen, …) | `just test --no-fail-fast` | 8093 passed, 9 skipped |
+| claudine | `just test-l2` | 277 + 3 passed |
+| claudine | `just lint` | pass |
+| biscuit-file | `just test` / `just lint` | 1043 passed / pass |
+
+`just check-tier-coverage` does not exist in this checkout (as in Phases 2
+to 4); every new test path is marker-free and compiled by a declared target
+(`dmls/tests/l1/main.rs` declares `schema_roots_parity`; the rest are inline
+unit tests or existing L1 files).
+
+### Docs and skills
+
+- Docs: `biscuit-file/docs/topics/file-references.md` (`lists_file` row),
+  `darkmatter/docs/topics/schemas/dmls-schema-support.md` (context in the
+  cache key), `claudine/docs/topics/completions/shell-completions.md`
+  (`match()` values: roots table, order, spelling, chooser order),
+  `claudine/docs/topics/completions/auto-complete.md` (provided partials).
+- Skills: `.claude/skills/darkmatter/dmls.md` (cache key, parity gate, test
+  traps), `.claude/skills/darkmatter/schema.md` (`lists_file`),
+  `.claude/skills/biscuit-file/SKILL.md` (`lists_file`),
+  `.claude/skills/claudine/SKILL.md` (completion walks and rendering).
 
 ## Appendix: Baseline Inventory
 

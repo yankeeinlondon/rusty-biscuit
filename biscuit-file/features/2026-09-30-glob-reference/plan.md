@@ -4,7 +4,7 @@ feature: 2026-09-30-glob-reference
 spec: biscuit-file/features/2026-09-30-glob-reference/spec.md
 total_phases: 8
 created: 2026-10-01
-phase: 3
+phase: 5
 agent: "claude/sonnet"
 yolo: "true"
 packages:
@@ -97,6 +97,73 @@ skills_files_updated_during_phase_3:
     - .claude/skills/darkmatter/schema.md
     - .claude/skills/biscuit-file/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_4:
+    - darkmatter/lib/src/markdown/schemas/roots.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/about.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/matcher.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/lint.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/schema_roots.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/tests/l1/schema_triggers.rs
+    - darkmatter/cli/tests/common/protected_env.rs
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/tests/l1/lsp_session.rs
+docs_updated_during_phase_4:
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - darkmatter/docs/topics/schemas/authoring-schemas.md
+    - darkmatter/docs/topics/schemas/schema-activation.md
+    - darkmatter/example-docs/schemas/external.md
+    - claudine/docs/rollout-strategy.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/os/windows.md
+source_files_during_phase_5:
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/schema_roots_parity.rs
+    - biscuit-file/lib/src/file_reference/glob/mod.rs
+    - biscuit-file/lib/src/file_reference/glob/list.rs
+    - biscuit-file/lib/src/file_reference/glob/matches.rs
+    - biscuit-file/lib/tests/l1/glob_reference/boundary.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/cli/src/commands/schema_interactive/mod.rs
+    - claudine/cli/tests/l1/compose_schema_cli.rs
+    - claudine/cli/tests/l1/level1_review_router_partial_pty.rs
+    - claudine/cli/tests/common/review_router.rs
+    - claudine/cli/tests/level2/level2_provided_partial_file_capture.rs
+    - claudine/cli/tests/level2/level2_windows_provided_partial_file_capture.rs
+docs_updated_during_phase_5:
+    - biscuit-file/docs/topics/file-references.md
+    - darkmatter/docs/topics/schemas/dmls-schema-support.md
+    - claudine/docs/topics/completions/shell-completions.md
+    - claudine/docs/topics/completions/auto-complete.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/darkmatter/dmls.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/claudine/SKILL.md
 ---
 
 # Plan: Glob References Share the File-Reference Grammar
@@ -510,7 +577,7 @@ Goal: five schema roots replace the ancestor walk; triggers run on
 
 ### Wave 7 (sequential; one subagent): the root list
 
-- [ ] **Root list function** in `schemas/triggers/discovery.rs` (or a new
+- [x] **Root list function** in `schemas/triggers/discovery.rs` (or a new
   `schemas/roots.rs` if discovery grows unwieldy): given the prepared
   context, return the ordered, deduplicated list of schema roots:
   1. package root `/schemas`
@@ -528,10 +595,10 @@ Goal: five schema roots replace the ancestor walk; triggers run on
     ignored and never read from the process environment.
   - Replace `schema_roots(document_dir, boundary)` and its ancestor walk;
     update the module doc.
-- [ ] **Bare-name `$schema` lookup** (`schemas/resolve.rs`): a single file name
+- [x] **Bare-name `$schema` lookup** (`schemas/resolve.rs`): a single file name
   with no separator resolves to the first root holding it. Path-qualified
   `$schema` is untouched.
-- [ ] **Input matrix for the root reader** (one test, fixture `HOME`, request
+- [x] **Input matrix for the root reader** (one test, fixture `HOME`, request
   snapshot only):
 
   | Field | Shape | Outcome |
@@ -547,7 +614,7 @@ Goal: five schema roots replace the ancestor walk; triggers run on
 
 ### Wave 8 (parallel; disjoint files; after Wave 7)
 
-- [ ] **Task: Trigger matching on `GlobReference`**
+- [x] **Task: Trigger matching on `GlobReference`**
   (`triggers/matcher.rs`, `assemble.rs`, `grammar.rs`/`lint.rs`).
   - Parse `$path` patterns as `GlobReference` with `with_file_name_view()`;
     judge a document path with `matches` against the prepared context.
@@ -560,7 +627,7 @@ Goal: five schema roots replace the ancestor walk; triggers run on
     (`base_dir()`).
   - Shadowing by file name across roots is as today; a shadowed trigger is
     reported, not evaluated (criterion 28).
-- [ ] **Task: `$path` field matrix.** One test walking the `$path` field of a
+- [x] **Task: `$path` field matrix.** One test walking the `$path` field of a
   real trigger-schema fixture, one edit per cell, with a control row:
 
   | Shape | Edit | Expected through `md schema validate` / trigger report |
@@ -580,30 +647,30 @@ Goal: five schema roots replace the ancestor walk; triggers run on
   Before declaring the matrix done, grep the trigger envelope for
   `#[serde(default)]`, `filter_map(.. as_str())`, `unwrap_or_default()`,
   and `.ok()` on `$path` parsing, and fix any that conflate shapes.
-- [ ] **Task: `md schema triggers` output** (`darkmatter/cli/src/commands/schema/triggers.rs`).
+- [x] **Task: `md schema triggers` output** (`darkmatter/cli/src/commands/schema/triggers.rs`).
   Print the five roots in search order, marking absent folders, an unset
   `SCHEMAS_DIR`, and R9-invalid values, instead of "Boundary" and walked roots.
   Render with `biscuit-terminal` `TerminalRenderable` components
   (`UnorderedList`/`Prose`), per repository convention.
-- [ ] **Task: Shipped example.** Rewrite
+- [x] **Task: Shipped example.** Rewrite
   `darkmatter/example-docs/schemas/external.md` to `$schema: ./external.yaml`
   (criterion 33); verify it validates.
 
 ### Wave 9 (parallel tests; after Wave 8)
 
-- [ ] **Schema-root tests** (criteria 27–31): order in a fixture monorepo with
+- [x] **Schema-root tests** (criteria 27–31): order in a fixture monorepo with
   `SCHEMAS_DIR` and `HOME` in the snapshot; shadowing both directions
   (repository file wins; remove it and the home file wins); `SCHEMAS_DIR`
   names the folder itself (`dm-defs` outside `HOME` and every repository: a
   file directly inside is found, one only in `dm-defs/schemas/` is not);
   in-between folders (`{package}/docs/schemas/`) neither apply nor resolve;
   `~/schemas` with a fixture `HOME` and `$schema: user.yaml`.
-- [ ] **Trigger/`match()` parity** (criterion 21 last sentence): for a shared
+- [x] **Trigger/`match()` parity** (criterion 21 last sentence): for a shared
   set of patterns and paths, trigger matching and `match()` validation give
   identical verdicts, including nearest-root, negation, and file-name view.
-- [ ] **CLI tests** for `md schema triggers` output (criteria 27, 29) and
+- [x] **CLI tests** for `md schema triggers` output (criteria 27, 29) and
   definition errors from `md schema validate`.
-- [ ] **Repository check.** Re-run `ls -d */schemas */*/schemas` and confirm
+- [x] **Repository check.** Re-run `ls -d */schemas */*/schemas` and confirm
   the spec's claim (root 3 and area-root schemas keep working; documents that
   name `feature-review.yaml` or `review.yaml` by bare name still resolve, by
   running `md schema validate` over them). Log any document that now fails.
@@ -621,7 +688,7 @@ disjoint tracks.
 
 ### Wave 10 (parallel; disjoint crates)
 
-- [ ] **Track A: DMLS** (`darkmatter/dmls`). Load the `darkmatter` skill.
+- [x] **Track A: DMLS** (`darkmatter/dmls`). Load the `darkmatter` skill.
   - Effective-schema cache (`overlay/mod.rs` ~148) keys on content hash **plus**
     the context: repository root, document `cwd`, `base_dir` origin, and a
     hash of the request snapshot (`HOME`, environment, extra `@` roots).
@@ -637,7 +704,7 @@ disjoint tracks.
     separately (no stale cache hit); `md` and DMLS give the same roots,
     applied triggers, and bare-name resolution for the documents of
     criteria 27–31. L2 tests use no real editor windows.
-- [ ] **Track B: Claudine completion** (`claudine/cli/src/completion/schema_completion/candidates.rs`,
+- [x] **Track B: Claudine completion** (`claudine/cli/src/completion/schema_completion/candidates.rs`,
   and `file_match_admits`' caller in `claudine/lib` if present).
   Load the `claudine` skill.
   - `file_candidates` (TAB) and `file_candidate_paths` (ENTER chooser) walk
