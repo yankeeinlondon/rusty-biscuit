@@ -123,7 +123,7 @@ The primary public modules are below; the shared `error` type and flat
 |--------|----------------|
 | `actions` | Hook action types and responses |
 | `badges` | Styled terminal badge constants |
-| `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine |
+| `composition` | Markdown frontmatter composition (direct/inline/sequence) plus the loop engine; `ownership` decides who owns each argument after the file and checks the tail per launch |
 | `config` | Agent detection, hook registration, atomic writes, backups |
 | `diagnostics` | Typed diagnostic facets, discovery, effective selection, and snapshots |
 | `dispatch` | Event processing pipeline, templates, matchers, expression bridge |
@@ -217,7 +217,7 @@ An empty `ctx.area` at the repository root is expected.
 
 | Subsystem | In one line | Reference |
 |-----------|-------------|-----------|
-| Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting); `partition_composition_tail` then splits off the agent tail as one `composition::ProviderTail` (tokens + authored `--` boundary; redacted `Debug`; non-UTF-8 refused). Composition and direct wrappers share its notice (`wrap::provider_tail_report`, once per provider/tail per command via `ProviderTailNotices`), `redact_sensitive_args` on every display surface, and one exit report (`AgentErrorReport::for_native_exit` over a typed `output::native_exit::NativeExit`: bounded stdout/stderr tails, precedence classifier, "likely caused by the forwarded arguments" only for a rejection naming a tail switch; composition renders it once after recovery is exhausted). `resume::assemble_resume_args` re-sends the tail exactly once after the resume entrypoint and carries only Claudine's own transport flags (read from the argv with the tail's contiguous run removed) | [CLI Pre-Parsing](topics/cli-pre-parsing.md) · [Provider-argument partition](topics/argv-normalization.md#provider-argument-partition) |
+| Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting); `partition_composition_tail` then keeps the file and Claudine options for clap and holds every other token after the file (with a marker where a Claudine option was removed) as `composition::ArgumentsAfterFile`; non-UTF-8 refused. Once the file is read, `compose::ownership::own_caller_arguments` (shared by `compose`/`inline-compose`/`sequence`) reads the **authored** snapshot (`authored_schema_parameters` → Darkmatter `EffectiveSchema::declares_top_level_property`; literal `agent`) and calls the pure `composition::own_arguments` against the candidate providers' compiled switch catalog, yielding setters, `argv` positionals (via `merge_set_overrides`), and one `ProviderTail` (tokens + authored `--` boundary + per-switch `SwitchAssignment`s; redacted `Debug`). Ambiguity prompts on a TTY (answer decides ownership only), else errors. `SwitchContext::check` → `composition::check_launch_tail` is the resolved-provider check: in the pipeline before the notice, for statically known `sequence` steps before step 1, and in `harness_orch/launch.rs::build_harness_launch` before every spawn (resume at its own entrypoint via `SwitchContext::for_resume`); a direct wrapper's tail has no assignments and always passes. Composition and direct wrappers share its notice (`wrap::provider_tail_report`, once per provider/tail per command via `ProviderTailNotices`), `redact_sensitive_args` on every display surface, and one exit report (`AgentErrorReport::for_native_exit` over a typed `output::native_exit::NativeExit`: bounded stdout/stderr tails, precedence classifier, "likely caused by the forwarded arguments" only for a rejection naming a tail switch; composition renders it once after recovery is exhausted). `resume::assemble_resume_args` re-sends the tail exactly once after the resume entrypoint and carries only Claudine's own transport flags (read from the argv with the tail's contiguous run removed) | [CLI Pre-Parsing](topics/cli-pre-parsing.md) · [Provider-argument partition](topics/argv-normalization.md#provider-argument-partition) · [Type-aware ownership](topics/argv-normalization.md#type-aware-ownership) |
 | System prompt | File-backed `--append-system-prompt`/`--asp` + `--replace-system-prompt`/`--rsp`, launch-CWD `system-prompt.md` discovery, per-provider delivery; direct wrappers also take `--edit` | [System Prompt](topics/system-prompt.md) |
 | Timeouts | Two rules only — `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`) | [Timeouts](topics/timeouts.md) |
 | Run budgets | `sequence --budget-ledger` debits each agent launch before spawn in `execute_attempt_phase` and caps its `timeout` at the remaining active time, rounded **up** to whole seconds (the wall-clock timer has 1 s resolution); step boundaries, retry backoff, settle, and a heartbeat thread check exhaustion. The run is installed process-wide (`budget::run`), so every hook is a no-op without a ledger | [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
@@ -365,13 +365,18 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   rejected document once. Not yet read by the generator. Before writing or changing a
   contract, a fleet prompt, or the `research` recipe, read
   [Research Contracts and Fleets](research-contracts.md).
-- `agent-cli/` — the public CLI surface. Contract revision 2 types the switch
-  inventory (`cli_switch` in its `_types.yaml`: value type, aliases, attachment
-  forms, invocation scope, gaps), which `claudine-gen` projects into
-  `ProviderInfo::cli_switches` (`CliSwitchCatalog::Researched` or
-  `::Unknown { gap }`). Documents still at revision 1 validate against the
-  frozen `_schema.r1.yaml` and generate `Unknown`; the fleet prompt has not yet
-  been updated for revision 2. See [Provider Metadata § Switch
+- `agent-cli/` — the public CLI surface, narrowed to the contract standard at
+  revision 2. Its typed switch inventory (`cli_switch` in its `_types.yaml`:
+  value type, aliases, attachment forms, invocation scope, gaps) is projected
+  by `claudine-gen` into `ProviderInfo::cli_switches`; all ten providers are
+  researched (2026-10-01). Read it only through
+  `claudine::provider::{lookup_switch, match_switch_token, lookup_candidates}`,
+  keyed by provider and native command path (`["exec"]`, `["exec", "resume"]`,
+  `[]` for the root); a guard test fails on a hand-written switch table.
+  Composition token ownership and the resolved-provider check
+  (`composition::ownership`) read it through `match_switch_token`. The
+  fleet's relations script also runs `claudine-gen validate <slug>`, so the
+  generator judges switch records itself. See [Provider Metadata § Switch
   metadata](topics/provider-metadata.md#switch-metadata-cli_switches).
 - `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
   authored (every live topic directory carries a `_schema.yaml` sidecar as of

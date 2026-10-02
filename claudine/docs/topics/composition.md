@@ -23,8 +23,9 @@ Because composition flows through the same execution path as `claudine claude` /
 
 ### Positional Arguments
 
-Each command accepts exactly one file reference plus zero or more `key=value`
-setters, in any order:
+Each command takes one file reference plus any number of `key=value` setters
+and bare words. The first bare word that is not a setter is the file; it must
+come before any provider switch:
 
 ```sh
 claudine compose @prompts/review.md review=review.md
@@ -35,7 +36,33 @@ claudine inline-compose draft=false @notes/update.md
 A token is a setter when it contains `=` and its key starts with an ASCII
 letter or `_` and contains only letters, digits, `_`, or `-`. Dot-paths and
 path-like tokens (for example `foo.bar=baz`) are not setters and are treated
-as file-reference candidates.
+as file-reference candidates (or, after the file, as positional arguments).
+
+Every bare word after the file that no provider switch takes becomes the
+`argv` frontmatter property, an array of strings in the order typed:
+
+```sh
+claudine compose plan.md alpha --codex -c x=y beta phase=2
+# argv: ["alpha", "beta"]   phase: 2   provider tail: -c x=y
+```
+
+```markdown
+Arguments: {{ argv }}
+```
+
+- Values are strings, never JSON5-parsed (`1` stays `"1"`); an empty argument
+  stays an empty string. The file is not in `argv`, and neither is anything
+  after an authored `--`.
+- With at least one positional, `argv` overrides an authored `argv`, like a
+  setter. With none, an authored `argv` is left alone.
+- `argv` is reserved: an `argv=…` setter, or a `--set` object holding `argv`,
+  is an error before `--` (with or without positionals). Pass the values as
+  bare words instead.
+- `sequence` applies `argv` to every step, and it stays caller input through
+  retries and `proxy` hand-offs. `inline-compose` never writes it into the
+  document.
+- A document that declares `argv` in its `$schema` validates the effective
+  array like any other value (declare it as `string[]`).
 
 Setter values are parsed as JSON5 first and fall back to strings when JSON5
 parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
@@ -47,21 +74,44 @@ per-step overlay keys still win over both `--set` and shorthand setters.
 ### Provider Argument Forwarding
 
 Any CLI switch Claudine does not own is forwarded to the underlying agent,
-mirroring the direct-wrapper contract. The first non-Claudine switch **after
-the composition file** starts an agent tail; every token from there is passed
-through verbatim:
+mirroring the direct-wrapper contract. No `--` is needed. Which tokens after
+the file belong to the agent is decided per token from the switch's researched
+type in Claudine's compiled catalog:
 
 ```sh
-# `-c model_reasoning_effort=low` is forwarded to Codex; the setter-shaped
-# value is NOT applied as a frontmatter override.
-claudine sequence fleet.md --codex -c model_reasoning_effort=low
+# Codex's -c takes one value, so the setter-shaped value is forwarded and
+# not applied as a frontmatter override; phase=2 is Claudine's setter.
+claudine sequence fleet.md --codex -c model_reasoning_effort=low phase=2
+
+# Claude's --add-dir takes a list: a and b are forwarded; x=y is a setter.
+claudine compose plan.md --claude --add-dir a b x=y
 ```
 
-No `--` is required. An explicit `--` after the file still works and forwards
-its tail opaquely (no Claudine flag is extracted from it). Claudine-owned flags
-always win before a `--` — a colliding native switch (e.g. Codex's own `-m`)
-must be placed after `--`. The composition file must come first: an unowned
-switch (or a `--`) before the file is an error with ordering guidance.
+- A `key=value` the document's `$schema` declares is always Claudine's, even
+  directly after a provider switch.
+- Any other `key=value` goes to the agent only as the first value of a switch
+  that takes a string or a list; otherwise it is a setter.
+- A bare word a switch does not take is a positional argument (`argv`), so a
+  provider operand needs `--`.
+- The types come from the provider named on the command line, else the
+  document's literal `agent`, else every provider. When those providers read a
+  word differently (Claude's `-c` takes nothing, Codex's takes a value),
+  Claudine asks which agent the arguments are for in an interactive session,
+  and otherwise fails with `ambiguous provider argument`. Naming the provider
+  (`--codex`) or using `--` settles it.
+- Ownership reads the document **as authored**: a caller `agent=…` or `--set`
+  changes the run, not who owns a token.
+- Before every launch the implicit switches are checked against the provider
+  that actually runs, at the command it runs (including a resume entrypoint).
+  A value the switch does not take, or a missing required value, fails before
+  the spawn.
+
+An explicit `--` after the file still works and forwards its tail opaquely:
+nothing after it is classified or checked. Claudine-owned flags always win
+before a `--` — a colliding native switch (e.g. Codex's own `-m`) must be
+placed after `--`. The composition file must come first: an unowned switch
+(or a `--`) before the file is an error with ordering guidance. The full rules
+are in [argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
 
 Before launch, one INFO status says what is forwarded. It names switches only,
 never values, and describes a tail after `--` as opaque. Each switch before
@@ -86,8 +136,9 @@ invalid one may be rejected by the agent at startup (see
 values (`--api-key ****`, `--token=****`, `-c****` for a credential attached
 to a short switch) masked, so a launch can be audited. The `AGENT_PARAMS`
 variable the agent's environment carries is masked the same way. The agent
-itself receives the original tokens. A forwarded token that is not valid UTF-8
-is refused before anything runs, because Claudine will not change its bytes.
+itself receives the original tokens. An argument after the file that is not
+valid UTF-8 is refused before anything runs, because Claudine will not change
+its bytes.
 See the mechanism in
 [argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
 
