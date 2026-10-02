@@ -408,6 +408,19 @@ it as one. Name the provider (for example `--codex`), or pass provider arguments
 A value shown in that message is hidden behind a secret-named switch, has
 recognized secrets masked, and has control characters escaped.
 
+When a declared parameter directly after the switch is what left it empty,
+the error names that setter's key (never its value) and asks for a separate
+provider value instead, because naming the provider would not change the
+outcome. With `phase` declared, `--codex -c phase=2 x=y` fails the same way:
+`x=y` never moves up to become `-c`'s value.
+
+```text
+Error: provider argument `-c` takes a value for Codex (at its `exec` command), but none was
+forwarded with it: the `phase` setter after it is a parameter the document declares, so it
+stays Claudine's and is never the switch's value.
+Give `-c` a separate provider value, or put intentional provider arguments after `--`.
+```
+
 Ownership is fixed once per invocation: a retry, proxy target, or step may run
 a different provider, but it never reassigns a setter or positional.
 

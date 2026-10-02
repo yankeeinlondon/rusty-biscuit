@@ -579,3 +579,19 @@ fn clap_fallback_completes_providers_format_values() {
         "expected 'json' format value, got {got:?}"
     );
 }
+
+/// Completion's setter shapes read the shared grammar
+/// (`claudine::composition::setter_key`), so a word ownership calls a
+/// setter is the word completion offers setter values for.
+#[test]
+fn completion_setter_shapes_match_the_shared_grammar() {
+    for token in [
+        "phase=2", "_k=v", "a-b=", "k9_-=x=y", "a=b=c", "foo.bar=baz", "9key=v", "-k=v", "é=v", "=v", "phase", "",
+    ] {
+        let key = claudine::composition::setter_key(token);
+        assert_eq!(is_setter_shaped(token), key.is_some(), "`{token}`");
+        assert_eq!(split_setter(token), key.map(|key| (key, &token[key.len() + 1..])), "`{token}`");
+        let name = token.split_once('=').map_or(token, |(name, _)| name);
+        assert_eq!(is_setter_name_partial(name), claudine::composition::is_setter_name(name), "`{name}`");
+    }
+}

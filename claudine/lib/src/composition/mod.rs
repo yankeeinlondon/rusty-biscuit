@@ -49,7 +49,7 @@ mod types;
 pub use ownership::{
     ARGV_KEY, ArgumentOwner, ArgumentsAfterFile, CallerArgument, OwnedArguments,
     OwnershipCandidate, OwnershipError, SchemaParameters, TailMismatch, check_launch_tail,
-    own_arguments, owner_of_last_argument, setter_key,
+    is_setter_name, own_arguments, owner_of_last_argument, setter_key,
 };
 pub use provider_tail::{ProviderTail, ProviderTailNotices, SwitchAssignment};
 

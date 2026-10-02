@@ -1,6 +1,8 @@
 use super::*;
 use crate::provider::{CliSwitch, CliSwitchCatalog, SwitchScope, match_token_in};
 
+mod setters;
+
 fn s(tokens: &[&str]) -> Vec<String> {
     tokens.iter().map(|token| token.to_string()).collect()
 }

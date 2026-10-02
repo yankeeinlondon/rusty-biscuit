@@ -6,10 +6,15 @@
 //! catalog written by hand anywhere else would be a second table that drifts
 //! from the research and that the generator's validation never sees.
 //!
-//! This guard scans the non-test source of both crates, comments and string
+//! Those types decide who owns each argument after a composition file once
+//! per invocation; retries, resumes, proxy targets, and `sequence` steps
+//! recheck the tail against their provider but never classify again. A
+//! second classification call would let a launch path reassign a setter.
+//!
+//! These guards scan the non-test source of both crates, comments and string
 //! literals blanked by [`source_scan::sanitize`].
 
-use crate::common::source_scan::{line_at, sanitize};
+use crate::common::source_scan::{is_ident, line_at, sanitize};
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -64,6 +69,25 @@ fn sources() -> Vec<(String, String)> {
         .collect()
 }
 
+/// Files (in order, one entry per occurrence) where `needle` appears as an
+/// identifier, not as the tail of a longer one.
+fn identifier_sites(files: &[(String, String)], needle: &str) -> Vec<String> {
+    files
+        .iter()
+        .flat_map(|(file, source)| {
+            let sanitized = sanitize(source);
+            sanitized
+                .windows(needle.len())
+                .enumerate()
+                .filter(|(offset, window)| {
+                    *window == needle.as_bytes() && (*offset == 0 || !is_ident(sanitized[offset - 1]))
+                })
+                .map(|_| file.clone())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
 fn sites(source: &str) -> Vec<(usize, &'static str)> {
     let sanitized = sanitize(source);
     CONSTRUCTORS
@@ -103,5 +127,28 @@ fn switch_metadata_is_never_written_by_hand() {
             .iter()
             .any(|(file, source)| is_generated(file) && !sites(source).is_empty()),
         "no generated data.rs carries a researched switch; did the generated catalog move?"
+    );
+}
+
+/// Ownership is decided once per invocation: the pure classifier has one
+/// production caller, and that caller is reached only from the two command
+/// entry points (`compose`/`inline-compose` share `prep.rs`), never from a
+/// retry, resume, proxy, or step launch path.
+#[test]
+fn composition_arguments_are_classified_once_per_invocation() {
+    let files = sources();
+    assert_eq!(
+        identifier_sites(&files, "own_arguments("),
+        ["lib/src/composition/ownership.rs", "cli/src/commands/compose/ownership.rs"],
+        "only `own_caller_arguments` classifies (plus the definition)"
+    );
+    assert_eq!(
+        identifier_sites(&files, "own_caller_arguments("),
+        [
+            "cli/src/commands/compose/ownership.rs",
+            "cli/src/commands/compose/prep.rs",
+            "cli/src/commands/sequence.rs",
+        ],
+        "each command entry point classifies once (plus the definition)"
     );
 }

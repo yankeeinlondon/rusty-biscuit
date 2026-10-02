@@ -88,15 +88,21 @@ impl fmt::Debug for ArgumentsAfterFile {
     }
 }
 
-/// The key of a setter-shaped token (`key=value` with a key matching
-/// `^[A-Za-z_][A-Za-z0-9_-]*$`), or `None`.
+/// The key of a setter-shaped token (`key=value` split at the first `=`,
+/// with a key [`is_setter_name`] accepts), or `None`.
+///
+/// This is the one setter grammar: ownership, the CLI's setter parser, and
+/// shell completion all read it.
 pub fn setter_key(token: &str) -> Option<&str> {
     let (key, _) = token.split_once('=')?;
-    let mut chars = key.chars();
-    let first = chars.next()?;
-    let valid = (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
-    valid.then_some(key)
+    is_setter_name(key).then_some(key)
+}
+
+/// Whether `name` can be a setter key: `^[A-Za-z_][A-Za-z0-9_-]*$`.
+pub fn is_setter_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
 }
 
 /// Whether `token` is a number for ownership: a finite decimal with an
@@ -285,6 +291,9 @@ pub struct TailMismatch {
     /// The offending value, redacted for display; `None` when the problem is
     /// a missing value.
     pub value: Option<String>,
+    /// For a missing value: the key of the document-declared setter that
+    /// directly followed the switch and stayed Claudine's. Never its value.
+    pub declared_setter: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,13 +318,25 @@ impl fmt::Display for TailMismatch {
         let (provider, switch) = (self.provider, &self.switch);
         let value = self.value.as_deref().unwrap_or("");
         match self.kind {
-            MismatchKind::MissingValue => write!(
-                f,
-                "provider argument `{switch}` takes a value for {provider} (at {place}), but \
-                 none was forwarded with it.\n\
-                 A `key=value` the document declares as a parameter is Claudine's, never the \
-                 switch's value. "
-            )?,
+            MismatchKind::MissingValue => {
+                write!(
+                    f,
+                    "provider argument `{switch}` takes a value for {provider} (at {place}), but \
+                     none was forwarded with it"
+                )?;
+                if let Some(key) = &self.declared_setter {
+                    // A provider was named or resolved, so "name the provider"
+                    // would not help: the setter is a parameter either way.
+                    return write!(
+                        f,
+                        ": the `{key}` setter after it is a parameter the document declares, so \
+                         it stays Claudine's and is never the switch's value.\n\
+                         Give `{switch}` a separate provider value, or put intentional provider \
+                         arguments after `--`."
+                    );
+                }
+                write!(f, ". ")?;
+            }
             MismatchKind::ExtraValue => write!(
                 f,
                 "provider argument `{switch}` takes no further value for {provider} (at \
@@ -503,7 +524,14 @@ fn own_in(
                 last = Some(ArgumentOwner::Provider);
                 continue;
             }
-            open = None;
+            // A declared parameter the open switch would have taken: it stays
+            // Claudine's and the switch keeps no value, so record the key for
+            // the missing-value error rather than reattaching a later token.
+            if let Some(open) = open.take()
+                && offered
+            {
+                assignments[open.assignment].declared_setter = Some(key.to_string());
+            }
             claudine.push(token.clone());
             last = Some(ArgumentOwner::Claudine);
             continue;
@@ -514,6 +542,7 @@ fn own_in(
             assignments.push(SwitchAssignment {
                 switch: at,
                 values: at + 1..at + 1,
+                declared_setter: None,
             });
             implicit.push(token.clone());
             open = Some(OpenSwitch {
@@ -641,6 +670,9 @@ fn check_in(
             switch: matched.spelling.to_string(),
             kind,
             value: value.map(|index| display_value(matched.spelling, &args[index])),
+            declared_setter: (kind == MismatchKind::MissingValue)
+                .then(|| assignment.declared_setter.clone())
+                .flatten(),
         };
         let attached_only = separate > 0 && !switch.accepts(SwitchAttachment::Space);
         match switch.value {

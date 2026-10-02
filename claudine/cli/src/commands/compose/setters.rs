@@ -5,7 +5,7 @@
 //! the file become the `argv` string array, which neither source may set by
 //! name.
 
-use claudine::composition::{ARGV_KEY, OwnershipError};
+use claudine::composition::{ARGV_KEY, OwnershipError, setter_key};
 use color_eyre::eyre::{Result, eyre};
 
 /// Refuse `argv` as a named parameter, from a setter or a `--set` key.
@@ -43,37 +43,22 @@ pub(crate) fn parse_shorthand_value(raw: &str) -> serde_json::Value {
     }
 }
 
-/// Classify a positional token as a shorthand setter.
+/// Classify a positional token as a shorthand setter, by the shared grammar
+/// ([`claudine::composition::setter_key`]).
 ///
 /// ## Returns
 /// - `None` — token is not a setter (pass through as file candidate)
-/// - `Some(Err)` — setter syntax recognized but invalid (empty key)
+/// - `Some(Err)` — an empty key (`=foo`): the grammar reads it as a bare word,
+///   but among Claudine's own tokens it is almost certainly a mistyped setter
 /// - `Some(Ok((key, value)))` — valid setter
 pub(crate) fn parse_compose_setter(
     token: &str,
 ) -> Option<std::result::Result<(String, serde_json::Value), String>> {
-    let eq_pos = token.find('=')?;
-    let key = &token[..eq_pos];
-    let raw_value = &token[eq_pos + 1..];
-
-    if key.is_empty() {
+    if token.starts_with('=') {
         return Some(Err("setter key must not be empty".to_string()));
     }
-
-    let mut chars = key.chars();
-    let first = chars.next().unwrap();
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return None;
-    }
-
-    for ch in chars {
-        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-            continue;
-        }
-        return None;
-    }
-
-    let value = parse_shorthand_value(raw_value);
+    let key = setter_key(token)?;
+    let value = parse_shorthand_value(&token[key.len() + 1..]);
     Some(Ok((key.to_string(), value)))
 }
 

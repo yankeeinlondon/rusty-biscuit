@@ -62,6 +62,10 @@ pub struct SwitchAssignment {
     pub switch: usize,
     /// Indices of the tokens the switch took as values (empty for none).
     pub values: Range<usize>,
+    /// The key of a document-declared setter that directly followed the
+    /// switch and stayed Claudine's, so the switch took no value from it.
+    /// A missing-value error names this key.
+    pub declared_setter: Option<String>,
 }
 
 impl ProviderTail {

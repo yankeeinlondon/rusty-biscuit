@@ -191,6 +191,178 @@ fn a_mixed_tail_keeps_its_boundary_and_only_the_prefix_is_owned() {
     assert_eq!(owned.tail.assignments().len(), 1);
 }
 
+// ── Setter ownership after a provider switch, through the real catalog ──
+//
+// The rows that need the partition (a Claudine option standing between
+// provider tokens) or the compiled research. Each asserts both the Claudine
+// tokens and the exact forwarded tokens; the controlled-catalog table is in
+// the library's ownership tests.
+
+fn claude() -> Vec<OwnershipCandidate> {
+    vec![OwnershipCandidate {
+        provider: Provider::Claude,
+        command_path: Vec::new(),
+    }]
+}
+
+/// Partition behind `claudine compose plan.md`, then own for `candidates`:
+/// (clap argv after `plan.md`, owned Claudine tokens, forwarded tokens).
+fn owned_after_file(
+    tokens: &[&str],
+    schema: &SchemaParameters,
+    candidates: &[OwnershipCandidate],
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let mut line = vec!["claudine", "compose", "plan.md"];
+    line.extend_from_slice(tokens);
+    let (claudine, after) = partition_composition_tail(argv(&line)).expect("no partition error");
+    let owned = own_arguments(&after, schema, candidates).unwrap_or_else(|err| panic!("{tokens:?} should launch: {err}"));
+    let clap = claudine
+        .into_iter()
+        .skip(3)
+        .map(|t| t.to_string_lossy().into_owned())
+        .collect();
+    (clap, owned.claudine, owned.tail.launch_args().to_vec())
+}
+
+struct RoutedRow {
+    after_file: &'static [&'static str],
+    declares_phase: bool,
+    candidates: fn() -> Vec<OwnershipCandidate>,
+    clap: &'static [&'static str],
+    owned: &'static [&'static str],
+    forwarded: &'static [&'static str],
+}
+
+const ROUTED_ROWS: &[RoutedRow] = &[
+    RoutedRow {
+        after_file: &["--provider", "codex", "--yolo", "phase=2"],
+        declares_phase: false,
+        candidates: codex,
+        clap: &["--provider", "codex", "--yolo"],
+        owned: &["phase=2"],
+        forwarded: &[],
+    },
+    RoutedRow {
+        after_file: &["--provider", "codex", "--config=x=y", "phase=2"],
+        declares_phase: false,
+        candidates: codex,
+        clap: &["--provider", "codex"],
+        owned: &["phase=2"],
+        forwarded: &["--config=x=y"],
+    },
+    RoutedRow {
+        after_file: &["--provider", "codex", "-c", "x=y", "-m", "gpt5", "phase=2"],
+        declares_phase: false,
+        candidates: codex,
+        clap: &["--provider", "codex", "-m", "gpt5"],
+        owned: &["phase=2"],
+        forwarded: &["-c", "x=y"],
+    },
+    RoutedRow {
+        after_file: &["--provider", "codex", "--frobnicate", "phase=2"],
+        declares_phase: false,
+        candidates: codex,
+        clap: &["--provider", "codex"],
+        owned: &["phase=2"],
+        forwarded: &["--frobnicate"],
+    },
+    RoutedRow {
+        after_file: &["--provider", "claude", "--add-dir", "a", "b", "phase=2"],
+        declares_phase: false,
+        candidates: claude,
+        clap: &["--provider", "claude"],
+        owned: &["phase=2"],
+        forwarded: &["--add-dir", "a", "b"],
+    },
+    RoutedRow {
+        after_file: &["--provider", "claude", "--add-dir", "x=y", "phase=2"],
+        declares_phase: false,
+        candidates: claude,
+        clap: &["--provider", "claude"],
+        owned: &["phase=2"],
+        forwarded: &["--add-dir", "x=y"],
+    },
+    // A Claudine option ends a variadic run; `b` cannot reconnect to it.
+    RoutedRow {
+        after_file: &["--provider", "claude", "--add-dir", "a", "-m", "gpt5", "b"],
+        declares_phase: false,
+        candidates: claude,
+        clap: &["--provider", "claude", "-m", "gpt5"],
+        owned: &["b"],
+        forwarded: &["--add-dir", "a"],
+    },
+    // The authored `--` is the provider-data escape hatch, even for a
+    // declared parameter.
+    RoutedRow {
+        after_file: &["--provider", "codex", "--", "-c", "x=y", "phase=2"],
+        declares_phase: false,
+        candidates: codex,
+        clap: &["--provider", "codex"],
+        owned: &[],
+        forwarded: &["-c", "x=y", "phase=2"],
+    },
+    RoutedRow {
+        after_file: &["--provider", "codex", "--", "-c", "x=y", "phase=2"],
+        declares_phase: true,
+        candidates: codex,
+        clap: &["--provider", "codex"],
+        owned: &[],
+        forwarded: &["-c", "x=y", "phase=2"],
+    },
+];
+
+#[test]
+fn setters_after_provider_switches_are_claudines_for_every_routed_row() {
+    for row in ROUTED_ROWS {
+        let schema = if row.declares_phase {
+            SchemaParameters::from_names(["phase"])
+        } else {
+            SchemaParameters::NoSchema
+        };
+        let actual = owned_after_file(row.after_file, &schema, &(row.candidates)());
+        assert_eq!(
+            actual,
+            (strs(row.clap), strs(row.owned), strs(row.forwarded)),
+            "{:?}",
+            row.after_file
+        );
+    }
+}
+
+/// The "takes no value" row uses a provider-only switch chosen from the
+/// generated metadata: Codex `--ephemeral` at `exec`.
+#[test]
+fn a_researched_no_value_switch_never_takes_the_setter_after_it() {
+    let lookup = claudine::provider::lookup_switch(Provider::Codex, &["exec"], "--ephemeral");
+    assert_eq!(
+        lookup.value(),
+        claudine::provider::SwitchValue::None,
+        "the fixture needs a Codex `exec` switch researched as taking no value; pick another if the research changed"
+    );
+    let actual = owned_after_file(&["--provider", "codex", "--ephemeral", "phase=2"], &SchemaParameters::NoSchema, &codex());
+    assert_eq!(actual, (strs(&["--provider", "codex"]), strs(&["phase=2"]), strs(&["--ephemeral"])));
+}
+
+/// With no provider named and no `agent`, every provider is a candidate:
+/// Codex reads `-c` as a string, so `x=y` is forwarded and `phase=2` applied;
+/// a launch resolved to Claude, whose `-c` takes nothing, is refused.
+#[test]
+fn the_no_hint_union_forwards_a_value_the_resolved_provider_may_refuse() {
+    let every: Vec<OwnershipCandidate> = claudine::provider::PROVIDERS_DISPLAY_ORDER
+        .iter()
+        .map(|provider| OwnershipCandidate {
+            provider: *provider,
+            command_path: Vec::new(),
+        })
+        .collect();
+    let (_, after) = partition_composition_tail(argv(&["claudine", "compose", "plan.md", "-c", "x=y", "phase=2"])).unwrap();
+    let owned = own_arguments(&after, &SchemaParameters::NoSchema, &every).unwrap();
+    assert_eq!(owned.claudine, strs(&["phase=2"]));
+    assert_eq!(owned.tail.launch_args(), strs(&["-c", "x=y"]));
+    let mismatch = claudine::composition::check_launch_tail(&owned.tail, Provider::Claude, &[]).unwrap_err();
+    assert_eq!((mismatch.switch.as_str(), mismatch.value.as_deref()), ("-c", Some("x=y")));
+}
+
 // ── Drift detection: the owned surface is derived from clap definitions ──
 
 #[test]

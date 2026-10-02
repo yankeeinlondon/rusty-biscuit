@@ -173,6 +173,34 @@ fn a_resolved_provider_that_takes_no_value_fails_before_its_spawn() {
     assert!(!stderr.contains("Forwarding provider arguments"), "no notice for a refused launch: {stderr}");
 }
 
+/// The setter-table row whose value only one candidate takes, followed by a
+/// setter: `x=y` is forwarded with `-c` because Codex takes a string, and
+/// `phase=2` is a setter. The run resolves to Claude, whose `-c` takes no
+/// value, so it fails before the spawn instead of rerouting `x=y` into
+/// frontmatter. (A document with no `agent` at all cannot resolve a provider
+/// without a terminal, so the union here comes from the `agent` list; the
+/// every-provider union is covered by the ownership unit tests.)
+#[test]
+fn a_union_setter_row_resolved_to_claude_fails_before_its_spawn() {
+    let fixture = CliProcessFixture::named("own-setter-union");
+    let log = stub(&fixture, "claude", "exit 0");
+    // Only `phase` is a parameter: no schema claims the provider value key `x`.
+    let file = doc(
+        &fixture,
+        "plan.md",
+        &format!("---\nagent: [claude, codex]\n$schema:\n  phase: string\n{PROBE}---\nBody\n"),
+    );
+
+    let (code, stderr) = run(&fixture, &["compose", &file, "-c", "x=y", "phase=2"]);
+
+    assert_ne!(code, 0, "{stderr}");
+    assert!(launches(&log).is_empty(), "Claude must never be spawned");
+    assert!(stderr.contains("`-c` takes no further value for Claude"), "{stderr}");
+    assert!(stderr.contains("`x=y`"), "names the forwarded token: {stderr}");
+    assert!(!stderr.contains("phase=2"), "the setter is not provider data: {stderr}");
+    assert_eq!(probe(&fixture), "", "no lifecycle ran");
+}
+
 /// A sequence whose step provider is known statically fails before step 1.
 #[test]
 fn a_sequence_fails_before_step_one_when_a_known_step_provider_disagrees() {
@@ -229,6 +257,7 @@ fn a_claudine_option_interrupting_a_value_run_fails_rather_than_reattaching() {
     assert_ne!(code, 0, "{stderr}");
     assert!(launches(&log).is_empty());
     assert!(stderr.contains("`-c` takes a value for Codex"), "{stderr}");
+    assert_names_the_declared_setter(&stderr);
 }
 
 // ── Ambiguity and the candidate set (criteria 19, 20, 29) ──
@@ -303,6 +332,7 @@ fn schema_names_come_from_a_source_relative_union() {
     assert_ne!(code, 0, "`phase` is a parameter, so `-c` is left empty: {stderr}");
     assert!(launches(&log).is_empty());
     assert!(stderr.contains("`-c` takes a value for Codex"), "{stderr}");
+    assert_names_the_declared_setter(&stderr);
 }
 
 /// A raw JSON Schema contributes its declared top-level property names.
@@ -320,6 +350,7 @@ fn a_raw_json_schema_contributes_its_top_level_names() {
     let (code, stderr) = run(&fixture, &["compose", &file, "--codex", "-c", "phase=2"]);
     assert_ne!(code, 0, "`phase` is declared, so `-c` is left empty: {stderr}");
     assert!(stderr.contains("`-c` takes a value for Codex"), "{stderr}");
+    assert_names_the_declared_setter(&stderr);
 
     // A nested property is not a top-level name: the setter is the switch's.
     let (code, stderr) = run(&fixture, &["compose", &file, "--codex", "-c", "nested=1"]);
@@ -568,4 +599,12 @@ fn help_needs_no_required_argument_on_any_command() {
         assert_eq!(code, 0, "{args:?}: {stderr}");
         assert!(stdout.contains(usage), "{args:?}: {stdout}");
     }
+}
+
+/// The missing-value error names the declared setter that stayed Claudine's
+/// and the separate-value or `--` remedy, without echoing any setter value.
+fn assert_names_the_declared_setter(stderr: &str) {
+    assert!(stderr.contains("the `phase` setter after it"), "{stderr}");
+    assert!(stderr.contains("separate provider value") && stderr.contains("`--`"), "{stderr}");
+    assert!(!stderr.contains("phase=2") && !stderr.contains("x=y"), "{stderr}");
 }
