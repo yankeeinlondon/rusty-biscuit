@@ -131,6 +131,7 @@ mod provider_tail_launch;
 mod provider_tail_notice;
 mod provider_tail_ownership;
 mod run_harness_loop_call_sites;
+mod setter_after_switch;
 // Spawns the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.
 #[cfg(feature = "test-fixtures")]

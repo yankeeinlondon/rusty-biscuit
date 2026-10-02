@@ -62,6 +62,9 @@ command that enqueued the job, so without them an L1 test that composes such a
 prompt leaks two `claudine` processes per run and plays a sound on the host.
 `detached_audio.rs`, whose subject is that worker, is the one file that opts
 back in.
+To assert the exact child argv or the composed prompt (providers read it on
+stdin), install a recording stub provider with `common::launch_recorder`
+(`install`/`launches`/`prompts`, Unix-only) rather than writing another one.
 A test whose subject *is* the running child — a signal, a deadline, a streaming
 read, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — uses `command_std()`
 (or `command_builder()…build_std()`), which is the same policy on a

@@ -8,67 +8,14 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use crate::common;
-use common::{CliProcessFixture, strip_ansi, write_executable};
+use common::launch_recorder::{install as stub, launches, occurrences};
+use common::{CliProcessFixture, strip_ansi};
 
 const API_KEY: &str = "sk-proj-launchsecret0123456789";
 const TOKEN: &str = "sk-ant-tokensecret987654321";
 const ATTACHED: &str = "sk-proj-attachedsecret5555";
-
-/// Install a stub `binary` that records each launch, then runs `behavior`.
-///
-/// Launch `n` (0-based, in order, shared by every stub in the fixture) writes
-/// the binary name and then its arguments to `launches/launch-NNN` (`\x1f`
-/// separated), and its `AGENT_PARAMS` to `launches/params-N`. `behavior` is
-/// shell code that can read `$n`.
-fn stub(fixture: &CliProcessFixture, binary: &str, behavior: &str) -> PathBuf {
-    let dir = fixture.home().join("launches");
-    fs::create_dir_all(&dir).unwrap();
-    write_executable(
-        &fixture.bin_dir().join(binary),
-        &format!(
-            "#!/bin/sh\n\
-             dir='{dir}'\n\
-             n=$(cat \"$dir/count\" 2>/dev/null || echo 0)\n\
-             echo $((n + 1)) > \"$dir/count\"\n\
-             file=$(printf 'launch-%03d' \"$n\")\n\
-             {{ printf '%s\\037' '{binary}'; for arg in \"$@\"; do printf '%s\\037' \"$arg\"; done; }} > \"$dir/$file\"\n\
-             printf '%s' \"$AGENT_PARAMS\" > \"$dir/params-$n\"\n\
-             {behavior}\n",
-            dir = dir.display()
-        ),
-    );
-    dir
-}
-
-/// Every recorded launch, in launch order.
-fn launches(dir: &Path) -> Vec<Vec<String>> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|name| name.starts_with("launch-"))
-        .collect();
-    names.sort();
-    names
-        .iter()
-        .map(|name| {
-            fs::read_to_string(dir.join(name))
-                .unwrap()
-                .split('\u{1f}')
-                .filter(|arg| !arg.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .collect()
-}
-
-fn occurrences(args: &[String], run: &[&str]) -> usize {
-    args.windows(run.len())
-        .filter(|window| window.iter().zip(run).all(|(arg, want)| arg == want))
-        .count()
-}
 
 fn run(fixture: &CliProcessFixture, args: &[&str]) -> (i32, String, String) {
     let output = fixture.command().args(args).output().unwrap();

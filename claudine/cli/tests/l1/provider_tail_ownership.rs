@@ -9,61 +9,10 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use crate::common;
-use common::{CliProcessFixture, strip_ansi, write_executable};
-
-/// Install a stub `binary` that records each launch (binary name, then its
-/// arguments, `\x1f` separated, in `launches/launch-NNN`), then runs
-/// `behavior`, which can read the 0-based launch number `$n`.
-fn stub(fixture: &CliProcessFixture, binary: &str, behavior: &str) -> PathBuf {
-    let dir = fixture.home().join("launches");
-    fs::create_dir_all(&dir).unwrap();
-    write_executable(
-        &fixture.bin_dir().join(binary),
-        &format!(
-            "#!/bin/sh\n\
-             dir='{dir}'\n\
-             n=$(cat \"$dir/count\" 2>/dev/null || echo 0)\n\
-             echo $((n + 1)) > \"$dir/count\"\n\
-             file=$(printf 'launch-%03d' \"$n\")\n\
-             {{ printf '%s\\037' '{binary}'; for arg in \"$@\"; do printf '%s\\037' \"$arg\"; done; }} > \"$dir/$file\"\n\
-             {behavior}\n",
-            dir = dir.display()
-        ),
-    );
-    dir
-}
-
-fn launches(dir: &Path) -> Vec<Vec<String>> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-                .filter(|name| name.starts_with("launch-"))
-                .collect()
-        })
-        .unwrap_or_default();
-    names.sort();
-    names
-        .iter()
-        .map(|name| {
-            fs::read_to_string(dir.join(name))
-                .unwrap()
-                .split('\u{1f}')
-                .filter(|arg| !arg.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .collect()
-}
-
-fn occurrences(args: &[String], run: &[&str]) -> usize {
-    args.windows(run.len())
-        .filter(|window| window.iter().zip(run).all(|(arg, want)| arg == want))
-        .count()
-}
+use common::launch_recorder::{install as stub, launches, occurrences};
+use common::{CliProcessFixture, strip_ansi};
 
 fn contains(args: &[String], token: &str) -> bool {
     args.iter().any(|arg| arg == token)
