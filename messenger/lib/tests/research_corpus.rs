@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
 use darkmatter::markdown::schemas::{DarkmatterSchemas, EffectiveSchema, ValidationReport};
 use messenger::ProviderKind;
 use serde_json::Value;
@@ -54,9 +55,15 @@ fn load(path: &Path) -> Markdown {
 }
 
 /// One validator cache per test process, so each schema compiles once.
+///
+/// Each document's `$schema` and `file` values resolve from its own
+/// directory, through a context built at the package.
 fn schemas() -> &'static DarkmatterSchemas {
     static SCHEMAS: OnceLock<DarkmatterSchemas> = OnceLock::new();
-    SCHEMAS.get_or_init(DarkmatterSchemas::new)
+    SCHEMAS.get_or_init(|| {
+        let snapshot = RequestSnapshot::new(env!("CARGO_MANIFEST_DIR"));
+        DarkmatterSchemas::new(build_resolution_context(&snapshot).expect("package context"))
+    })
 }
 
 /// Resolved schemas by canonical `$schema` path. `DarkmatterSchemas::validate`

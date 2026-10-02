@@ -125,7 +125,7 @@ impl Loader {
     /// its own, so `&` and `^` anchor wherever that build found the
     /// repository (none for a workspace outside any Git repository).
     pub fn new(workspace: Workspace, context: FileResolutionContext) -> Self {
-        let schemas = DarkmatterSchemas::new().with_file_resolution_context(context.clone());
+        let schemas = DarkmatterSchemas::new(context.clone());
         Self {
             workspace,
             context,

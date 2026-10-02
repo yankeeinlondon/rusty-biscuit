@@ -266,7 +266,8 @@ fn assert_round_trips(dir: &str, min: usize) {
     files.sort();
     assert!(files.len() >= min, "{dir} shrank to {}", files.len());
     let markdown = Markdown::try_from(files[0].as_path()).expect("markdown");
-    let effective = DarkmatterSchemas::new()
+    let context = build_resolution_context(&RequestSnapshot::new(repo_root())).expect("repository context");
+    let effective = DarkmatterSchemas::new(context)
         .effective_for(&markdown)
         .expect("schema")
         .expect("bound schema");
