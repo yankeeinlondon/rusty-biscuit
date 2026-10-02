@@ -6,9 +6,9 @@
 # shape is a named type, in ./_types.yaml or ../_types.yaml.
 #
 # Revision 2 types the switch inventory (`cli_switch@./_types.yaml`) so
-# `claudine-gen` can project it into the compiled catalog. A document without
-# `schema_revision: 2` validates against the frozen `_schema.r1.yaml` and
-# generates an explicit unknown gap for its switches.
+# `claudine-gen` can project it into the compiled catalog. Every document is
+# at revision 2, so no frozen `_schema.r<N>.yaml` is kept; before the next
+# revision change, copy this file to `_schema.r2.yaml`.
 $schema:
     schema_revision: literal(2; required) -> Revision of this research contract; a document written for another revision is validated against that revision's frozen contract, and its switches generate as unknown
     provider: identifier(required)@../_types.yaml -> Roster slug of the provider this document describes

@@ -146,3 +146,21 @@ fn candidates_keep_each_answer_and_agree_only_on_equal_values() {
     assert_eq!(unknown.agreed_value(), Some(SwitchValue::Unknown));
     assert_eq!(union(vec![]).agreed_value(), None);
 }
+
+/// The compiled Codex catalog answers per command path: the resume
+/// entrypoint has its own records, so a switch may take a list under `exec`
+/// and one value under `exec resume`.
+#[test]
+fn codex_resume_entrypoint_has_its_own_answers() {
+    let image = |path: &[&str]| lookup_switch(Provider::Codex, path, "-i").value();
+    assert!(matches!(image(&["exec"]), SwitchValue::Variadic { .. }), "{:?}", image(&["exec"]));
+    assert_eq!(image(&["exec", "resume"]), SwitchValue::String { optional: false });
+    for path in [&["exec"][..], &["exec", "resume"], &[]] {
+        assert_eq!(lookup_switch(Provider::Codex, path, "-c").value(), SwitchValue::String { optional: false });
+    }
+    assert!(matches!(lookup_switch(Provider::Codex, &["exec", "resume"], "--json"), SwitchLookup::Known(_)));
+    assert_eq!(lookup_switch(Provider::Codex, &[], "--json"), SwitchLookup::NotInCatalog);
+
+    let candidates = lookup_candidates([(Provider::Codex, &["exec"][..]), (Provider::Codex, &["exec", "resume"][..])], "-i");
+    assert_eq!(candidates.agreed_value(), None, "variadic and scalar disagree");
+}

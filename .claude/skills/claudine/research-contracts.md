@@ -5,7 +5,9 @@ before writing or changing a research contract, a fleet prompt, or the
 `research` recipe.
 
 Reasoning level (`claudine/docs/research/reasoning-level/`) is the reference
-topic. Copy its files when starting or narrowing another topic.
+topic. Copy its files when starting or narrowing another topic. Agent CLI
+(`agent-cli/`) is the reference for a topic the generator reads: its
+relations gate also runs the generator over the document.
 
 ## What a topic consists of
 
@@ -82,6 +84,13 @@ Both run in the prompt's `success` event. A failure raises an error, the
 run becomes a failure, and `finalize` retries once with the findings shown
 to the researcher.
 
+For a topic `claudine-gen` projects into the compiled catalog, the relations
+script ends by running `claudine-gen --area <claudine> validate <slug>`, which
+generates that provider from the working tree and fails only when the
+generator refuses an input (drift from the committed `data.rs` is expected
+mid-fleet). The generator's own rules then judge the document, and the script
+does not repeat them. `agent-cli/_relations.py` shows the pattern.
+
 ## Researchers
 
 The rotation is written once, in the prompt's `assigned` property, by
@@ -113,6 +122,7 @@ Each of these cost a failed run.
 | `md schema validate` accepts `null` for an optional property, an empty list without `min`, and a number where a string is required | A generator coercion that decides behavior reads the frontmatter as authored and rejects each of these itself |
 | `cargo run -p claudine-cli` fails: the package has four binaries | Add `--bin claudine` |
 | A build replaces the binary a running fleet is using | Do not build while a fleet runs |
+| `cargo` is a denied lifecycle command, and a lifecycle command may not take its executable from interpolation | Call a built tool from the relations script, which runs under a literal `python3`; the `research` recipe builds `claudine-gen` before the fleet starts |
 
 ## Design and history
 

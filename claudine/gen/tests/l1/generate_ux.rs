@@ -56,6 +56,8 @@ fn full_fixture() -> Fixture {
     };
     copy_file("docs/providers.yaml");
     copy_file("docs/providers/catalog.json");
+    // Types every research contract shares (agent-cli imports them).
+    copy_file("docs/research/_types.yaml");
     copy_dir("docs/providers/facts");
     copy_dir("docs/providers/overrides");
     for topic in [
@@ -401,8 +403,6 @@ fn scaffold_unwired_slug_errors_before_writing() {
 fn validate_accepts_drifted_inputs_and_reports_a_refusal_on_stdout() {
     const REVISION_TWO: &str = include_str!("../fixtures/agent-cli-r2/codex.md");
     let fixture = full_fixture();
-    let shared_types = "docs/research/_types.yaml";
-    fs::copy(real_area().join(shared_types), fixture.path().join(shared_types)).unwrap();
     let doc = fixture.path().join("docs/research/agent-cli/codex.md");
     fs::write(&doc, REVISION_TWO).unwrap();
 
@@ -426,6 +426,9 @@ fn validate_accepts_drifted_inputs_and_reports_a_refusal_on_stdout() {
         stdout.starts_with("codex: the generator refuses an input:") && stdout.contains("`-c`"),
         "{stdout}"
     );
-    assert!(fs::read_to_string(data_path(fixture.path(), "codex")).unwrap().contains("CliSwitchCatalog::Unknown"),
-        "validate writes nothing");
+    assert_eq!(
+        fs::read(data_path(fixture.path(), "codex")).unwrap(),
+        fs::read(data_path(real_area(), "codex")).unwrap(),
+        "validate writes nothing"
+    );
 }

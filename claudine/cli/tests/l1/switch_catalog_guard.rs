@@ -14,17 +14,10 @@ use crate::common::source_scan::{line_at, sanitize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Constructors of switch metadata. `SwitchValue::Unknown` is absent: it is
-/// what a reader answers for an unestablished switch, not a type claim.
-const CONSTRUCTORS: &[&str] = &[
-    "CliSwitch {",
-    "CliSwitchCatalog::Researched(",
-    "SwitchValue::None",
-    "SwitchValue::String",
-    "SwitchValue::Number",
-    "SwitchValue::Variadic",
-    "VariadicMin::AtLeast(",
-];
+/// Constructions of a switch table: a record literal, an array of records,
+/// or a researched catalog over a literal slice. Matching on a catalog or a
+/// `SwitchValue` reads the research and is allowed; ownership has to.
+const CONSTRUCTORS: &[&str] = &["CliSwitch {", "[CliSwitch", "CliSwitchCatalog::Researched(&"];
 
 fn area_root() -> PathBuf {
     biscuit_test_harness::manifest_dir!()

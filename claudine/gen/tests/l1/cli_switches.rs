@@ -292,10 +292,17 @@ fn an_empty_inventory_needs_a_stated_gap() {
 }
 
 /// A document written before revision 2 validates against the frozen
-/// revision-1 contract and generates an explicit gap.
+/// revision-1 contract and generates an explicit gap. Every committed
+/// document is now revision 2, so the last revision-1 Codex document and its
+/// contract are kept as fixtures to prove the mechanism.
 #[test]
 fn a_revision_one_document_generates_an_explicit_gap() {
     let fixture = Fixture::for_slug("codex").with_real_overrides();
+    fixture.write(DOC, include_str!("../fixtures/agent-cli-r1/codex.md"));
+    fixture.write(
+        "docs/research/agent-cli/_schema.r1.yaml",
+        include_str!("../fixtures/agent-cli-r1/_schema.r1.yaml"),
+    );
     let generation = fixture.generate().unwrap();
     let gap = cli_switches(&generation)["unknown"]["gap"].as_str().unwrap();
     assert!(gap.contains("revision 2"), "{gap}");

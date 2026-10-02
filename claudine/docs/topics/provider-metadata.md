@@ -218,9 +218,11 @@ forwarded switch (see
 **Planned:** using the value types to decide which arguments on a composition
 command line belong to the agent.
 
-A test in `claudine-cli` fails when switch metadata (a `CliSwitch` literal or a
-`SwitchValue` other than `Unknown`) is written anywhere but a generated
-`data.rs`, so no second, hand-kept table can drift from the research.
+A test in `claudine-cli` fails when a switch table (a `CliSwitch` literal, an
+array of them, or a researched catalog over a literal slice) is written
+anywhere but a generated `data.rs`, so no second, hand-kept table can drift
+from the research. Matching on a looked-up `SwitchValue` is reading the
+research and is allowed.
 
 #### Research written for an older contract
 
@@ -243,9 +245,12 @@ flowchart LR
 ```
 
 Each coercion decides what an older document projects to. Today only `agent-cli`
-is versioned this way: its documents still at revision 1 keep feeding
-`config_paths`, and their `cli_switches` generate as `Unknown` with a gap asking
-for re-research. Delete a frozen contract once no document is at its revision.
+is versioned this way: a revision-1 document would keep feeding `config_paths`,
+and its `cli_switches` would generate as `Unknown` with a gap asking for
+re-research. Every `agent-cli` document is now at revision 2, so the area keeps
+no frozen contract; the generator's tests keep the revision-1 contract as a
+fixture to prove the mechanism. Delete a frozen contract once no document is at
+its revision.
 
 ### Related generated artifacts
 

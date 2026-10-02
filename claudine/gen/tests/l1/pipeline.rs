@@ -76,17 +76,12 @@ impl Fixture {
             copy(&format!("docs/research/{topic}/{slug}.md"));
         }
         // The agent-cli contract names its records in its own types file and
-        // shares identifier/evidence types; documents written before
-        // revision 2 validate against the frozen revision-1 contract. Joined
-        // onto the manifest directory so a change to one runs these tests.
+        // shares identifier/evidence types. Joined onto the manifest
+        // directory so a change to one runs these tests.
         let manifest = biscuit_test_harness::manifest_dir!();
         for (rel, from) in [
             ("docs/research/_types.yaml", manifest.join("../docs/research/_types.yaml")),
             ("docs/research/agent-cli/_types.yaml", manifest.join("../docs/research/agent-cli/_types.yaml")),
-            (
-                "docs/research/agent-cli/_schema.r1.yaml",
-                manifest.join("../docs/research/agent-cli/_schema.r1.yaml"),
-            ),
         ] {
             fs::copy(&from, dir.path().join("claudine").join(rel))
                 .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
