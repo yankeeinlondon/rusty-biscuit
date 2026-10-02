@@ -265,7 +265,7 @@ impl OverlayState {
                 }
                 Ok(Some(_)) => {
                     let mut cache = self.inner.lock().expect("overlay lock poisoned");
-                    if let Some(context) = resolution.context() {
+                    if let Ok(context) = resolution.context() {
                         cache.trigger_registry(path, workspace_roots, context);
                     }
                     if let Some(error) = cache
@@ -400,7 +400,7 @@ impl OverlayCache {
     ) -> SchemaOutcome {
         // A document whose context failed resolves no `$schema` reference or
         // trigger payload; its context-failure diagnostic says why.
-        let Some(context) = resolution.context() else {
+        let Ok(context) = resolution.context() else {
             self.schema.remove(uri_key);
             return SchemaOutcome::Ready(None);
         };

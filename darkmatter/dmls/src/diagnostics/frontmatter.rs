@@ -283,7 +283,7 @@ fn schema_problem_diagnostics(
         };
         // Without a context no file value was resolved for this document; its
         // one context-failure diagnostic stands in for them.
-        if problem.file_reference.is_some() && ctx.file_context().is_none() {
+        if problem.file_reference.is_some() && ctx.file_context().is_err() {
             continue;
         }
         if matches!(

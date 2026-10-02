@@ -99,6 +99,14 @@ required-features = ["terminal-tests"]
 # rendering under tmux. The per-package conversion surfaced them: the old area
 # recipe ran L2 only for the library and CLI, so these had never run as L2.
 [package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test; the entry-point parity runner
+# does the same with darkmatter's shared matrix.
+source-inputs = [
+  "darkmatter/cli/tests/common/context_guard.rs",
+  "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+]
 tiers = ["L1", "L2"]
 features = ["terminal-tests", "effects-instrumentation"]
 local-features = ["effects-instrumentation"]

@@ -1400,7 +1400,7 @@ pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
 /// else to where it would be created. A document without a context has no
 /// targets.
 fn nav_targets(ctx: &DocumentContext, ast: &FrontmatterAst) -> Vec<(SourceSpan, PathBuf)> {
-    if ctx.file_context().is_none() {
+    if ctx.file_context().is_err() {
         return Vec::new();
     }
     let navigate = |value: &str| {

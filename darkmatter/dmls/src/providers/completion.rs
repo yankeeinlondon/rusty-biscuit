@@ -116,7 +116,7 @@ fn anchor_completions(
         Some(doc_id)
     } else {
         // The document the link resolves to, as the graph resolves it.
-        ctx.file_context().and_then(|context| {
+        ctx.file_context().ok().and_then(|context| {
             reference_candidates(context, path_part)
                 .iter()
                 .find_map(|candidate| ctx.graph.document_id(candidate))

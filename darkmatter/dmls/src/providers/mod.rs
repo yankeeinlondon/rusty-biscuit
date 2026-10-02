@@ -36,7 +36,7 @@ use lsp_types::{
 use biscuit_file::FileResolutionContext;
 
 use crate::capabilities::ClientProfile;
-use crate::context::{DocumentResolution, ReferenceTarget, resolve_reference};
+use crate::context::{ContextFailure, DocumentResolution, ReferenceTarget, resolve_reference};
 use crate::config::DmlsConfig;
 use crate::graph::{DocumentId, WorkspaceGraph};
 use crate::overlay::DocumentOverlay;
@@ -75,15 +75,15 @@ pub struct DocumentContext<'a> {
 }
 
 impl DocumentContext<'_> {
-    /// The file-resolution context, when the document has one.
-    pub fn file_context(&self) -> Option<&FileResolutionContext> {
+    /// The file-resolution context, or why the document has none.
+    pub fn file_context(&self) -> Result<&FileResolutionContext, &ContextFailure> {
         self.resolution.context()
     }
 
     /// Resolves `raw` against the document's context, probing the
     /// filesystem; `None` when the document has no context.
     pub fn resolve_reference(&self, raw: &str) -> Option<ReferenceTarget> {
-        self.file_context().map(|context| resolve_reference(context, raw))
+        self.file_context().ok().map(|context| resolve_reference(context, raw))
     }
 }
 

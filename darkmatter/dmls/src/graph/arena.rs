@@ -23,7 +23,7 @@ use super::node::{
     WikiResolution,
 };
 use super::substrate::{DocumentIndex, WikiLinkFact};
-use crate::context::{plan_reference, reference_candidates};
+use crate::context::{ContextFailure, plan_reference, reference_candidates};
 use crate::wiki::{self, Match, ParseOutcome, WikiDoc};
 
 /// Stable index of a document inside a [`WorkspaceGraph`] snapshot.
@@ -669,7 +669,7 @@ impl WorkspaceGraph {
         &self,
         source: DocumentId,
         target: &LinkTarget,
-        context: Option<&FileResolutionContext>,
+        context: Result<&FileResolutionContext, &ContextFailure>,
     ) -> Option<LinkDiagnostic> {
         match target {
             LinkTarget::External => None,
@@ -677,7 +677,7 @@ impl WorkspaceGraph {
                 self.heading_in(source, slug).is_none().then_some(LinkDiagnostic::MissingAnchor)
             }
             LinkTarget::RelativePath { path, fragment } => {
-                let context = context?;
+                let context = context.ok()?;
                 let candidates = match plan_reference(context, path) {
                     Ok(candidates) => candidates,
                     Err(failure) => return Some(LinkDiagnostic::BrokenPath { failure }),
@@ -783,9 +783,9 @@ fn resolve_file_edge(
 /// DMLS's [`RepositoryContexts`](crate::context::RepositoryContexts) is the
 /// production source. The graph never builds or guesses a context itself.
 pub trait DocumentContexts: Send + Sync + std::fmt::Debug {
-    /// The context references in `document` resolve against, or `None` when
-    /// the document has none (its context build failed).
-    fn context_for(&self, document: &Path) -> Option<FileResolutionContext>;
+    /// The context references in `document` resolve against, or why the
+    /// document has none.
+    fn context_for(&self, document: &Path) -> Result<FileResolutionContext, ContextFailure>;
 }
 
 /// A [`DocumentContexts`] with no context for any document: every path
@@ -795,8 +795,8 @@ pub trait DocumentContexts: Send + Sync + std::fmt::Debug {
 pub struct NoContexts;
 
 impl DocumentContexts for NoContexts {
-    fn context_for(&self, _document: &Path) -> Option<FileResolutionContext> {
-        None
+    fn context_for(&self, _document: &Path) -> Result<FileResolutionContext, ContextFailure> {
+        Err(ContextFailure::NotProvided)
     }
 }
 
@@ -811,7 +811,7 @@ struct ReferenceResolver<'a> {
     contexts: &'a dyn DocumentContexts,
     documents: &'a [DocumentRecord],
     by_path: &'a HashMap<PathBuf, DocumentId>,
-    by_folder: HashMap<PathBuf, Option<FileResolutionContext>>,
+    by_folder: HashMap<PathBuf, Result<FileResolutionContext, ContextFailure>>,
 }
 
 impl<'a> ReferenceResolver<'a> {
@@ -832,7 +832,8 @@ impl<'a> ReferenceResolver<'a> {
             .by_folder
             .entry(folder)
             .or_insert_with(|| contexts.context_for(path))
-            .as_ref()?;
+            .as_ref()
+            .ok()?;
         reference_candidates(context, raw)
             .iter()
             .find_map(|candidate| self.by_path.get(candidate).copied())
@@ -1246,7 +1247,10 @@ mod tests {
         assert_eq!(g.incoming(root, EdgeKind::Transcludes).count(), 0);
         assert_eq!(g.incoming(root, EdgeKind::UsesFile).count(), 0);
         let (_, link) = g.links(a).next().unwrap();
-        assert_eq!(g.diagnose_unresolved(a, &link.as_link().unwrap().target, None), None);
+        assert_eq!(
+            g.diagnose_unresolved(a, &link.as_link().unwrap().target, Err(&ContextFailure::NotProvided)),
+            None
+        );
     }
 
     #[test]

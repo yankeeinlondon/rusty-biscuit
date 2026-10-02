@@ -56,6 +56,10 @@ pub enum ContextFailure {
         /// The workspace folders that were counted.
         folders: Vec<PathBuf>,
     },
+    /// The caller supplied no context for the document, as a graph built
+    /// with [`NoContexts`](crate::graph::NoContexts) does.
+    #[error("no file-resolution context was supplied for this document")]
+    NotProvided,
 }
 
 impl ContextFailure {
@@ -63,10 +67,11 @@ impl ContextFailure {
     ///
     /// An untitled buffer with no single repository is
     /// [`ResolutionFailure::MissingContext`]: the repository anchor is absent.
+    /// So is a document no context was supplied for.
     pub fn resolution_failure(&self) -> ResolutionFailure {
         match self {
             Self::Build(error) => error.resolution_failure(),
-            Self::UntitledWorkspace { .. } => ResolutionFailure::MissingContext,
+            Self::UntitledWorkspace { .. } | Self::NotProvided => ResolutionFailure::MissingContext,
         }
     }
 }
@@ -90,9 +95,9 @@ pub struct DocumentResolution {
 }
 
 impl DocumentResolution {
-    /// The derived context, when the build succeeded.
-    pub fn context(&self) -> Option<&FileResolutionContext> {
-        self.outcome.as_ref().ok()
+    /// The derived context, or why the document has none.
+    pub fn context(&self) -> Result<&FileResolutionContext, &ContextFailure> {
+        self.outcome.as_ref()
     }
 
     /// The cached build failure, when there is one.
@@ -279,8 +284,8 @@ impl RepositoryContexts {
 }
 
 impl DocumentContexts for RepositoryContexts {
-    fn context_for(&self, document: &Path) -> Option<FileResolutionContext> {
-        self.for_document(document).outcome.ok()
+    fn context_for(&self, document: &Path) -> Result<FileResolutionContext, ContextFailure> {
+        self.for_document(document).outcome
     }
 }
 
@@ -291,8 +296,8 @@ impl DocumentContexts for RepositoryContexts {
 pub struct FixedContext(pub FileResolutionContext);
 
 impl DocumentContexts for FixedContext {
-    fn context_for(&self, document: &Path) -> Option<FileResolutionContext> {
-        Some(self.0.for_source(document))
+    fn context_for(&self, document: &Path) -> Result<FileResolutionContext, ContextFailure> {
+        Ok(self.0.for_source(document))
     }
 }
 
@@ -582,6 +587,6 @@ mod tests {
         init_repository(&root);
         assert!(contexts.for_document(&root.join("docs/a.md")).failure().is_some(), "cached");
         assert!(contexts.invalidate(&root.join(".git/config")));
-        assert!(contexts.for_document(&root.join("docs/a.md")).context().is_some());
+        assert!(contexts.for_document(&root.join("docs/a.md")).context().is_ok());
     }
 }

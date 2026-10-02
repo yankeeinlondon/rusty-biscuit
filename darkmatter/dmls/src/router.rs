@@ -314,8 +314,8 @@ impl ServerState {
         let name = untitled_name(uri)?;
         let resolution = self.contexts.for_untitled(&self.roots);
         let path = match resolution.context() {
-            Some(context) => context.request_cwd().join(&name),
-            None => PathBuf::from(&name),
+            Ok(context) => context.request_cwd().join(&name),
+            Err(_) => PathBuf::from(&name),
         };
         Some((path, resolution))
     }
