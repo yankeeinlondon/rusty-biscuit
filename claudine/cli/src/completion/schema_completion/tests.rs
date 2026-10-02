@@ -405,13 +405,11 @@ fn property_value_emits_windows_shaped_path_portably() {
 }
 
 #[test]
-fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
-    // Regression: a `file(match(...))` property walked the effective repo
-    // root, so a user completing inside a package area saw matches from
-    // the whole repo — and the offered repo-relative path did not resolve
-    // at runtime (read-side refs anchor on the launch `cwd`). The walk
-    // must start at `cwd` and surface only files beneath it, rendered
-    // cwd-relative.
+fn property_value_bare_match_offers_the_launch_folder_then_the_repository_root() {
+    // A bare pattern runs under the launch directory, then the repository
+    // root. A file outside the launch directory is spelled so it resolves
+    // from there (`../docs/top.md`), never as a repository-relative path that
+    // would not.
     let effective = effective_from_doc(concat!(
         "---\n",
         "$schema:\n",
@@ -419,8 +417,9 @@ fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
         "---\nbody\n",
     ));
     let tmp = TempDir::new().unwrap();
-    seed_repo(tmp.path());
-    // A doc above the cwd (repo root) and one under the cwd (package area).
+    // A real repository: a bare `.git` directory is not one to a prepared
+    // context, which would leave `../` outside the tree.
+    git_init(tmp.path());
     write(&tmp.path().join("docs").join("top.md"), "# top\n");
     write(
         &tmp.path().join("claudine").join("docs").join("area.md"),
@@ -429,13 +428,10 @@ fn property_value_match_pattern_anchors_on_cwd_not_repo_root() {
 
     let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
     let got = property_value(&effective, "review", "", &ctx);
-    assert!(
-        got.iter().any(|c| c == "review='docs/area.md'"),
-        "cwd-local doc must surface, rendered cwd-relative: {got:?}"
-    );
-    assert!(
-        !got.iter().any(|c| c.contains("top.md")),
-        "repo-root doc above the cwd must NOT surface: {got:?}"
+    assert_eq!(
+        got,
+        ["review='docs/area.md'", "review='../docs/top.md'"],
+        "launch-folder files first, in their bare spelling: {got:?}"
     );
 }
 
@@ -709,4 +705,244 @@ fn match_globs_path_qualified_negation_filters_subset() {
     assert!(matcher.matches(Path::new("src/inner/mod.rs"), &context));
     assert!(!matcher.matches(Path::new("src/test_helpers.rs"), &context));
     assert!(!matcher.matches(Path::new("src/inner/test_util.rs"), &context));
+}
+
+// ── `match()` glob references: roots, order, spelling ─────────────────────
+
+/// A canonical temporary directory, so expected paths compare equal on
+/// macOS, where `/var` is a link to `/private/var`.
+fn canonical_tempdir() -> (TempDir, std::path::PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let root = biscuit_file::canonicalize_simplified(tmp.path()).unwrap();
+    (tmp, root)
+}
+
+fn git_init(root: &Path) {
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root)
+        .status()
+        .expect("run git");
+    assert!(status.success());
+}
+
+/// `{root}` as a Git repository with workspace package `pkg`.
+fn repository_with_package(root: &Path) {
+    git_init(root);
+    write(&root.join("Cargo.toml"), "[workspace]\nmembers = [\"pkg\"]\n");
+    write(
+        &root.join("pkg").join("Cargo.toml"),
+        "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    );
+    write(&root.join("pkg").join("src").join("lib.rs"), "");
+}
+
+fn spec_schema(patterns: &str) -> EffectiveSchema {
+    effective_from_doc(&format!(
+        "---\n$schema:\n  spec: \"file(required;eager;match({patterns}))\"\n---\nbody\n"
+    ))
+}
+
+fn patterns(list: &[&str]) -> Vec<String> {
+    list.iter().map(|pattern| pattern.to_string()).collect()
+}
+
+/// The `spec` values the TAB walk offers for `partial`.
+fn offered(effective: &EffectiveSchema, partial: &str, ctx: &ScopeContext) -> Vec<String> {
+    property_value(effective, "spec", partial, ctx)
+        .into_iter()
+        .map(|candidate| {
+            candidate
+                .strip_prefix("spec='")
+                .and_then(|rest| rest.strip_suffix('\''))
+                .expect("a `spec='…'` candidate")
+                .to_string()
+        })
+        .collect()
+}
+
+/// Every offered value resolves back to the file the ENTER walk lists at
+/// the same position, and `match()` validation admits it (one-way parity).
+fn assert_offers_resolve_and_are_admitted(effective: &EffectiveSchema, globs: &[String], ctx: &ScopeContext) {
+    let resolution = crate::completion::scopes::file_resolution_context(ctx).unwrap();
+    let values = offered(effective, "", ctx);
+    let paths = file_candidate_paths(globs, ctx);
+    assert_eq!(values.len(), paths.len(), "{values:?} vs {paths:?}");
+    let matcher = MatchGlobs::new(globs).unwrap();
+    for (value, path) in values.iter().zip(&paths) {
+        assert!(!value.contains("{{"), "{value}");
+        let resolved = biscuit_file::FileReference::new(value)
+            .unwrap()
+            .resolve_in_context(&resolution)
+            .unwrap()
+            .unwrap_or_else(|| panic!("`{value}` resolves"));
+        assert_eq!(
+            biscuit_file::canonicalize_simplified(&resolved).unwrap(),
+            biscuit_file::canonicalize_simplified(path).unwrap(),
+            "`{value}` resolves back to the walked file"
+        );
+        assert!(matcher.matches(path, &resolution), "{}", path.display());
+        assert!(
+            darkmatter::markdown::schemas::file_match::file_match_admits(value, globs, &resolution),
+            "`{value}` is admitted"
+        );
+    }
+}
+
+#[test]
+fn incident_2_completes_a_caret_pattern_from_the_repository_root() {
+    let (_tmp, repo) = canonical_tempdir();
+    repository_with_package(&repo);
+    write(&repo.join("fixes/2026-09-29-ts-review-improvements/spec.md"), "# fix\n");
+    write(&repo.join("fixes/2026-09-01-other/spec.md"), "# other\n");
+    let effective = spec_schema("^**/*spec*.md");
+    let ctx = ScopeContext::discover_from(&repo);
+
+    assert_eq!(
+        property_value(&effective, "spec", "ts-review", &ctx),
+        ["spec='fixes/2026-09-29-ts-review-improvements/spec.md'"]
+    );
+    assert_offers_resolve_and_are_admitted(&effective, &patterns(&["^**/*spec*.md"]), &ctx);
+}
+
+#[test]
+fn a_nested_launch_lists_each_prefix_in_native_order() {
+    let (_tmp, repo) = canonical_tempdir();
+    repository_with_package(&repo);
+    for file in ["zz-spec.md", "fixes/y/spec.md", "pkg/spec.md", "pkg/b/spec.md", "pkg/a/spec.md"] {
+        write(&repo.join(file), "# spec\n");
+    }
+    let ctx = ScopeContext::discover_from(&repo.join("pkg"));
+
+    // Package root first (shallowest, then component-wise), then the
+    // repository root's own files; a sort on the rendered text would put
+    // every `../` first.
+    let cases: [(&str, &[&str]); 3] = [
+        ("^**/*spec*.md", &["spec.md", "a/spec.md", "b/spec.md", "../zz-spec.md", "../fixes/y/spec.md"]),
+        ("&**/*spec*.md", &["../zz-spec.md", "spec.md", "../fixes/y/spec.md", "a/spec.md", "b/spec.md"]),
+        ("./**/*spec*.md", &["spec.md", "a/spec.md", "b/spec.md"]),
+    ];
+    for (pattern, expected) in cases {
+        let effective = spec_schema(pattern);
+        assert_eq!(offered(&effective, "", &ctx), expected, "{pattern}");
+        assert_offers_resolve_and_are_admitted(&effective, &patterns(&[pattern]), &ctx);
+    }
+}
+
+#[test]
+fn a_root_exclusion_removes_files_a_positive_caret_pattern_admits() {
+    let (_tmp, repo) = canonical_tempdir();
+    repository_with_package(&repo);
+    write(&repo.join("live/spec.md"), "# live\n");
+    write(&repo.join("done/spec.md"), "# done\n");
+    write(&repo.join("fixes/_completed/x/spec.md"), "# archived\n");
+    let ctx = ScopeContext::discover_from(&repo);
+    let resolution = crate::completion::scopes::file_resolution_context(&ctx).unwrap();
+
+    let effective = spec_schema("^**/*spec*.md, !&**/done/**");
+    assert_eq!(offered(&effective, "", &ctx), ["live/spec.md"]);
+    assert_offers_resolve_and_are_admitted(&effective, &patterns(&["^**/*spec*.md", "!&**/done/**"]), &ctx);
+
+    // The walk never offers `_completed`; the exclusion is what rejects a
+    // typed value under it.
+    let archived = repo.join("fixes/_completed/x/spec.md");
+    assert!(MatchGlobs::new(&patterns(&["^**/*spec*.md"])).unwrap().matches(&archived, &resolution));
+    assert!(!MatchGlobs::new(&patterns(&["^**/*spec*.md", "!&**/_completed/**"]))
+        .unwrap()
+        .matches(&archived, &resolution));
+}
+
+#[test]
+fn each_file_is_judged_by_its_nearest_root() {
+    let (_tmp, repo) = canonical_tempdir();
+    repository_with_package(&repo);
+    let inside = repo.join("pkg/fixes/x/spec.md");
+    let root_fix = repo.join("fixes/y/spec.md");
+    let other = repo.join("other/z/spec.md");
+    for file in [&inside, &root_fix, &other] {
+        write(file, "# spec\n");
+    }
+    let globs = patterns(&["**/*spec*.md", "!fixes/**"]);
+    let effective = spec_schema("**/*spec*.md, !fixes/**");
+    let ctx = ScopeContext::discover_from(&repo.join("pkg"));
+    let resolution = crate::completion::scopes::file_resolution_context(&ctx).unwrap();
+
+    assert_eq!(offered(&effective, "", &ctx), ["../other/z/spec.md"]);
+    let matcher = MatchGlobs::new(&globs).unwrap();
+    assert!(!matcher.matches(&inside, &resolution));
+    assert!(!matcher.matches(&root_fix, &resolution));
+    assert!(matcher.matches(&other, &resolution));
+    assert_offers_resolve_and_are_admitted(&effective, &globs, &ctx);
+}
+
+#[test]
+fn a_file_name_negation_is_neither_offered_nor_admitted() {
+    let (_tmp, repo) = canonical_tempdir();
+    repository_with_package(&repo);
+    write(&repo.join("docs/_x.md"), "# hidden by name\n");
+    write(&repo.join("docs/y.md"), "# kept\n");
+    let globs = patterns(&["*.md", "!_*.md"]);
+    let effective = spec_schema("*.md, !_*.md");
+    let ctx = ScopeContext::discover_from(&repo);
+    let resolution = crate::completion::scopes::file_resolution_context(&ctx).unwrap();
+
+    let values = offered(&effective, "", &ctx);
+    assert!(values.contains(&"docs/y.md".to_string()), "{values:?}");
+    assert!(!values.iter().any(|value| value.contains("_x.md")), "{values:?}");
+    assert!(!file_candidate_paths(&globs, &ctx).iter().any(|path| path.ends_with("docs/_x.md")));
+    assert!(!MatchGlobs::new(&globs).unwrap().matches(&repo.join("docs/_x.md"), &resolution));
+    assert_offers_resolve_and_are_admitted(&effective, &globs, &ctx);
+}
+
+#[test]
+fn candidates_outside_the_launch_folder_take_the_first_form_that_resolves() {
+    let (_tmp, root) = canonical_tempdir();
+    let repo = root.join("repo");
+    let home = root.join("home");
+    let outside = root.join("outside");
+    std::fs::create_dir_all(&repo).unwrap();
+    repository_with_package(&repo);
+    write(&repo.join("top/x/spec.md"), "# repository\n");
+    write(&home.join("notes/spec.md"), "# home\n");
+    write(&outside.join("spec.md"), "# absolute\n");
+    let launch = repo.join("pkg/deep");
+    std::fs::create_dir_all(&launch).unwrap();
+    let mut ctx = ScopeContext::discover_from(&launch);
+    ctx.home = Some(home.clone());
+
+    // Two levels up is no restricted relative form, so `&`.
+    let effective = spec_schema("&top/**/*spec*.md");
+    assert_eq!(offered(&effective, "", &ctx), ["&top/x/spec.md"]);
+    assert_offers_resolve_and_are_admitted(&effective, &patterns(&["&top/**/*spec*.md"]), &ctx);
+
+    // Outside the repository, under home: `~/`.
+    let effective = spec_schema("~/notes/*spec*.md");
+    assert_eq!(offered(&effective, "", &ctx), ["~/notes/spec.md"]);
+    assert_offers_resolve_and_are_admitted(&effective, &patterns(&["~/notes/*spec*.md"]), &ctx);
+
+    // Outside both: the absolute path.
+    let absolute = format!("{}/*spec*.md", biscuit_file::to_portable_string(&outside));
+    let effective = spec_schema(&absolute);
+    let values = offered(&effective, "", &ctx);
+    assert_eq!(values.len(), 1, "{values:?}");
+    assert!(Path::new(&values[0]).is_absolute(), "{values:?}");
+    assert_offers_resolve_and_are_admitted(&effective, &patterns(&[&absolute]), &ctx);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_out_of_tree_file_symlink_is_omitted_without_a_warning() {
+    let (_tmp, root) = canonical_tempdir();
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    repository_with_package(&repo);
+    write(&root.join("secret.md"), "# outside\n");
+    write(&repo.join("docs/real.md"), "# real\n");
+    std::os::unix::fs::symlink(root.join("secret.md"), repo.join("docs/leak.md")).unwrap();
+    let globs = patterns(&["docs/*.md"]);
+    let effective = spec_schema("docs/*.md");
+    let ctx = ScopeContext::discover_from(&repo);
+
+    assert_eq!(offered(&effective, "", &ctx), ["docs/real.md"]);
+    assert_eq!(file_candidate_paths(&globs, &ctx), [repo.join("docs/real.md")]);
 }

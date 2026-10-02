@@ -609,20 +609,39 @@ property and dispatches by `CompletionKind`:
 - **`enum` → enum members** as `property='value'`. Prefix-insensitive
   match when a value partial is typed; all members surface when the
   partial is empty.
-- **`file(match='*.png', …)` → filesystem paths** rooted at the
-  invoking `cwd` (the launch area; see the "Why anchored on the `cwd`"
-  note under *Setter values*), filtered by the
-  property's glob patterns. The walk shares the scope walker's
-  exclusion rules — `.gitignore` plus the `_`-prefix and curated
-  skip-list (`target`, `node_modules`, …) elision — so archived
-  `_completed/` artefacts never surface. The typed value partial is
-  applied as a case-insensitive substring (`*partial*`) over the
-  repo-relative path, not just the basename: because `match(...)`
-  candidates routinely share a basename (every `**/*spec*.md` hit is
-  `spec.md`), a directory fragment like `spec=features/real` is the
-  only way to narrow them. An empty `match(...)` list falls back to the
-  default markdown glob (see the ENTER-path note below); the legacy
-  zero-candidate behavior was dropped.
+- **`file(match(…))` → the files the globs admit.** Each pattern is a
+  glob reference, so its prefix picks where it searches, exactly as a
+  single file reference does:
+
+  | Pattern | Searched, in order |
+  |---------|--------------------|
+  | `**/*spec*.md` (bare) | the launch directory, then the repository root |
+  | `./**/*spec*.md` | the launch directory only |
+  | `&**/*spec*.md` | the repository root |
+  | `^**/*spec*.md` | the package, the package area, then the repository root |
+  | `~/notes/*.md`, `@prompts/*.md`, `/abs/*.md` | home, the `@` roots, the path as written |
+
+  A file is offered once, from the first of those folders that contains
+  it, and only when `match()` validation would accept it there, so a
+  `!fixes/**` exclusion judged from the package is not undone by the
+  repository-root pass. The walk shares the scope walker's exclusion
+  rules — `.gitignore` plus the `_`-prefix and curated skip-list
+  (`target`, `node_modules`, …) — so archived `_completed/` artefacts
+  never surface (validation still accepts one you type), and a file
+  symlink whose target leaves the repository is left out.
+
+  Candidates keep the search order (nearest folder first, then
+  shallowest, then by path component); they are not re-sorted
+  alphabetically. Each is spelled so that it resolves back to the same
+  file from where you are: a file under the launch directory keeps its
+  plain relative path (`fixes/…/spec.md`), and any other file takes the
+  first of `../x.md` or `../sibling/x.md`, `&path`, `~/path`, or the
+  absolute path that does. The typed value partial is a
+  case-insensitive substring (`*partial*`) over that spelling, so a
+  directory fragment like `spec=features/real` narrows candidates that
+  share a basename. An empty `match(...)` list falls back to the
+  default markdown glob under the launch directory (see the ENTER-path
+  note below).
 - **`url`, `email`, `date`, `datetime`, `time` (hint-only)** emit no
   candidates. The `__complete` stdout protocol does not carry a
   description channel today, so the hint string from
@@ -638,6 +657,11 @@ claudine compose @plan.md tier=<TAB>
 claudine compose @plan.md cover=<TAB>          # schema: file(match('*.png'))
 → cover='assets/cover.png'
 → cover='assets/dark/cover.png'
+
+# launched from packages/web, schema: file(match(^**/*spec*.md))
+claudine compose @plan.md spec=<TAB>
+→ spec='fixes/login/spec.md'                 # under the launch directory
+→ spec='&fixes/2026-09-29-ts-review/spec.md' # the repository root's, two levels up
 ```
 
 ### Root-level unions
@@ -718,7 +742,9 @@ Claudine prints the non-interactive remediation block instead.
 - A property typed `file[]` uses a multi-select `ChooseMany` chooser:
   press `Space` to toggle items, then `Enter` to submit the set.
 
-Candidates come from the schema's `match(...)` globs when present;
+Candidates come from the schema's `match(...)` globs when present,
+searched and ordered exactly as TAB completion's are (see *Property
+values* above), and listed in that order;
 otherwise the bare `file`/`file[]` fallback walks the invoking `cwd`
 (the launch area — the runtime missing-property chooser runs *before*
 the wrapper's `switch_process_cwd`, so its `cwd` is still the launch

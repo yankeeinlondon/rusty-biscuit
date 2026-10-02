@@ -23,7 +23,8 @@ use std::fs;
 
 use crate::common;
 use common::completion::{
-    run_complete, seed_cargo_workspace_members as seed_cargo_workspace, write_file,
+    fake_home, run_complete, run_complete_with_home,
+    seed_cargo_workspace_members as seed_cargo_workspace, write_file,
 };
 use common::CliProcessFixture;
 #[cfg(unix)]
@@ -1609,6 +1610,32 @@ fn completion_file_array_literal_comma_filename_is_unsupported() {
 // completion that's filtered to the matching glob. Verifies the CLI
 // __complete surface emits `prop='relpath'` candidates for matching files
 // and skips non-matching ones.
+
+/// Incident 2: a user prompt's `match(^**/*spec*.md)` completes a spec in
+/// the repository the user launched from, spelled as it will resolve there.
+#[test]
+fn completion_file_match_reads_the_caret_prefix_from_the_launch_repository() {
+    let ws = common::TestWorkspace::named("complete-schema-caret-match");
+    assert!(common::init_git_repo(ws.path()));
+    write_file(
+        &ws.path().join("fixes/2026-09-29-ts-review-improvements/spec.md"),
+        "# fix\n",
+    );
+    write_file(&ws.path().join("fixes/2026-09-01-other/spec.md"), "# other\n");
+    let home = fake_home(ws.path());
+    let prompt = home.join(".claudine/prompts/implement.md");
+    write_file(
+        &prompt,
+        "---\n$schema:\n    - spec: file(required;eager;match(^**/*spec*.md))\n---\nImplement {{ spec }}.\n",
+    );
+
+    let got = run_complete_with_home(
+        ws.path(),
+        &home,
+        &["compose", prompt.to_str().unwrap(), "spec=ts-review"],
+    );
+    assert_eq!(got, ["spec='fixes/2026-09-29-ts-review-improvements/spec.md'"]);
+}
 
 #[test]
 fn completion_file_match_emits_matching_files_only() {
