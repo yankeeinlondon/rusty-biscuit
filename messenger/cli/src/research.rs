@@ -185,7 +185,9 @@ fn execute(args: ResearchArgs, snapshot: std::io::Result<RequestSnapshot>) -> Re
     let loader = Loader::new(workspace, context);
     let today = args.today.unwrap_or_else(utc_today);
     match args.command {
-        ResearchCommand::Validate { documents, scope, json } => validate(&loader, &documents, scope, &today, json),
+        ResearchCommand::Validate { documents, scope, json } => {
+            validate(&loader, &documents, snapshot.request_dir(), scope, &today, json)
+        }
         ResearchCommand::Generate { check: true, json } => check(&loader, &today, json),
         ResearchCommand::Generate { check: false, json } => generate(&loader, &today, json),
         ResearchCommand::Report { platform, interface, operation, json } => {
@@ -245,7 +247,16 @@ struct ValidationOutput {
     missing: Vec<PlatformId>,
 }
 
-fn validate(loader: &Loader, documents: &[PathBuf], scope: ScopeArg, today: &Date, json: bool) -> Result<i32, String> {
+/// Relative `documents` are taken from `request_dir`, the directory the
+/// binary was launched in (its snapshot), never a second process read.
+fn validate(
+    loader: &Loader,
+    documents: &[PathBuf],
+    request_dir: &Path,
+    scope: ScopeArg,
+    today: &Date,
+    json: bool,
+) -> Result<i32, String> {
     let output = if documents.is_empty() {
         let fleet = load_fleet(loader, Baseline::FixedPaths, &BTreeMap::new()).map_err(research_error)?;
         let validation = fleet.validate(today);
@@ -262,9 +273,8 @@ fn validate(loader: &Loader, documents: &[PathBuf], scope: ScopeArg, today: &Dat
             ScopeArg::Accepted => Scope::Accepted,
             ScopeArg::Fragment => Scope::Fragment,
         };
-        let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
         for document in documents {
-            let path = if document.is_absolute() { document.clone() } else { cwd.join(document) };
+            let path = if document.is_absolute() { document.clone() } else { request_dir.join(document) };
             let loaded = loader.load_document(&path).map_err(research_error)?;
             let context = Context { roster: roster.record.as_ref(), scope };
             diagnostics.extend(validate_document(&loaded, &context).diagnostics);
