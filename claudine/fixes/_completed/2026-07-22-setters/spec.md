@@ -28,7 +28,7 @@ related:
     - 2026-07-13-cli-switches
 depends-on:
     - 2026-07-13-cli-switches
-review_iterations: 0
+review_iterations: 1
 reviewed: true
 reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-01
@@ -42,6 +42,7 @@ message_to_agent: |-
     - The spec `status` is still `planned`; the author decides when to move
       it to `implemented`/`completed`. Nothing was moved to `_completed`.
 implemented: true
+completed: true
 ---
 
 # A shorthand setter after a provider switch is forwarded to the agent
