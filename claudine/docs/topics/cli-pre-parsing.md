@@ -69,8 +69,9 @@ boundary). Its job — plus forwarding the agent tail — now belongs to the
 post-normalization ownership partition, `argv::partition_composition_tail`,
 described in [argv-normalization.md](./argv-normalization.md#provider-argument-partition).
 It returns the tail as one `ProviderTail` descriptor that records where an
-authored `--` split it; the same page documents the forwarding notice and
-redaction that composition and the direct wrappers share.
+authored `--` split it; the same page documents the forwarding notice,
+redaction, and correlated error report that composition and the direct
+wrappers share, and how a lifecycle `resume` re-sends the tail.
 Rule 4 still runs so `--help` is hoisted before the partition sees it.
 
 For the token-level semantics of each rule — including every pass-through

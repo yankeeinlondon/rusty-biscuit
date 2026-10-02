@@ -75,14 +75,87 @@ The notice appears once per distinct provider and tail for the whole command,
 so a `sequence` whose steps and parallel tasks all launch Codex with the same
 tail shows it once. `--quiet` and `--silent` suppress it. Claudine makes no
 claim about whether the agent accepts a forwarded switch, so a genuinely
-invalid one may be rejected by the agent at startup.
+invalid one may be rejected by the agent at startup (see
+[When the agent rejects the tail](#when-the-agent-rejects-the-tail)).
 
 `--dry-run` shows the forwarded tail in its metadata table, with secret-shaped
-values (`--api-key ****`, `--token=****`) masked, so a launch can be audited.
-The agent itself receives the original tokens. A forwarded token that is not
-valid UTF-8 is refused before anything runs, because Claudine will not change
-its bytes. See the mechanism in
+values (`--api-key ****`, `--token=****`, `-c****` for a credential attached
+to a short switch) masked, so a launch can be audited. The `AGENT_PARAMS`
+variable the agent's environment carries is masked the same way. The agent
+itself receives the original tokens. A forwarded token that is not valid UTF-8
+is refused before anything runs, because Claudine will not change its bytes.
+See the mechanism in
 [argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
+
+#### Every launch carries the tail once
+
+The tail is fixed for the whole command. Each launch the command makes gets
+it exactly once, token for token: the first attempt, a lifecycle `retry`, a
+`proxy` target, every `sequence` step (whichever provider the step launches),
+and a lifecycle `resume`.
+
+A resume launches the provider's resume entrypoint instead of the original
+argv. Claudine appends the tail right after that entrypoint, then re-adds
+only its own transport flags (such as Codex's `--json` or OpenCode's
+`--format json`):
+
+```text
+first attempt:  codex exec --add-dir a --add-dir a --json …
+resume:         codex exec resume <session> --add-dir a --add-dir a --json
+```
+
+Repeated switches keep their order and count. A flag you forwarded yourself
+(the `--json` above) is not dropped and is not doubled by Claudine's own copy.
+Claudine does not filter the tail per entrypoint, so a resume entrypoint that
+does not accept a forwarded switch rejects it like any other launch.
+
+#### When the agent rejects the tail
+
+When a launch that forwarded a tail fails because the agent rejected its
+arguments, Claudine prints one report after recovery is exhausted (a failure
+the lifecycle `retry`s or `resume`s away reports nothing):
+
+```text
+Agent Error (Goose, exit 2)
+Goose rejected its arguments. This was likely caused by the forwarded
+arguments: --bogus.
+error: unexpected argument '--bogus' found
+Check Goose's usage for the forwarded arguments.
+```
+
+The report names forwarded switches without values, or says the tail was
+opaque when it came after `--`. It quotes the agent's own diagnostic line with
+recognized secrets masked, including a forwarded secret the agent echoed back
+without its flag. A line you already saw (streamed live by a structured run, or
+printed as the run's failure line) is not repeated; the report points at it
+instead. `--quiet` and `--silent` never hide the report, and it changes
+nothing else: exit code, lifecycle `failure`/`finalize`, and retry policy are
+the same as without it.
+
+Claudine classifies the agent's exit from its termination, exit code, and the
+last ten lines of both stdout and stderr, in this order; the first match wins:
+
+```mermaid
+flowchart TD
+    A[agent exited] --> B{interrupted?}
+    B -- yes --> X[interrupted: not attributed]
+    B -- no --> C{timed out?}
+    C -- yes --> Y[timeout: not attributed]
+    C -- no --> D{missing binary, auth, API error, unknown model?}
+    D -- yes --> Z[that cause: not attributed]
+    D -- no --> E{argument rejected?}
+    E -- no --> W[missing argument or unclassified: not attributed]
+    E -- yes --> F{tail non-empty, and any switch the message names is in the tail?}
+    F -- no --> V[generic argument error]
+    F -- yes --> R[correlated report]
+```
+
+A rejection that names one of Claudine's own injected switches (for example
+`--output-last-message`) is reported as an ordinary agent error, not blamed on
+the tail. A rejection that names no switch is attributed to a non-empty tail,
+including an explicit tail of operands only. A launch path that hands the
+terminal to the agent (an interactive session) captures nothing, so its
+failures are never classified.
 
 ### Shell Completion
 

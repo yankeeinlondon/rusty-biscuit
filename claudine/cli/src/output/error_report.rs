@@ -184,11 +184,11 @@ fn find_signature<'a>(exit: &'a NativeExit, signatures: &[&str]) -> Option<(&'a 
 
 /// The first captured line (stderr before stdout) whose lowercase form
 /// satisfies `matches`, with whether its stream was shown.
-fn find_line<'a>(exit: &'a NativeExit, matches: impl Fn(&str) -> bool) -> Option<(&'a str, bool)> {
+fn find_line(exit: &NativeExit, matches: impl Fn(&str) -> bool) -> Option<(&str, bool)> {
     find_line_raw(exit, |line| matches(&line.to_lowercase()))
 }
 
-fn find_line_raw<'a>(exit: &'a NativeExit, matches: impl Fn(&str) -> bool) -> Option<(&'a str, bool)> {
+fn find_line_raw(exit: &NativeExit, matches: impl Fn(&str) -> bool) -> Option<(&str, bool)> {
     exit.tails().find_map(|tail| {
         tail.text
             .lines()

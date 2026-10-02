@@ -284,8 +284,58 @@ composition and the direct wrappers (`claudine codex …`) print it:
 Every surface that shows argument values passes them through the shared
 `redact_sensitive_args` policy first: the composition `--dry-run` "Provider
 args" row, the direct-wrapper `--dry-run` command line, the debug trace of the
-provider argv, and `AGENT_PARAMS`. The child still receives the original
-tokens.
+provider argv, and `AGENT_PARAMS`. The policy masks the value after a
+secret-named switch (`--api-key ****`, `--token=****`), any token that starts
+with a known credential prefix, and such a credential attached to a short
+switch (`-csk-…` becomes `-c****`). Redaction is by shape and switch name, so
+an ordinary attached value such as `-cfoo` is shown as typed. The child still
+receives the original tokens.
+
+### Resume and the tail
+
+The tail is part of every launch's argv, including a lifecycle `resume`.
+`resume::assemble_resume_args` builds a resume argv in three parts:
+
+1. the provider's resume entrypoint (`codex exec resume <session>`);
+2. the tail, once, in authored order;
+3. the transport and safety flags Claudine itself injected into the first
+   launch (`--json`, `--format json`, `--print-logs`, Pi's `--mode`, …).
+
+The third part is read from the first launch's argv with the tail's one
+contiguous run removed. Every launch plan seeds its argv with the tail and only
+prepends the entrypoint or appends after it, so the run is always found. That
+is how a `--json` the caller forwarded is neither dropped nor doubled:
+
+```text
+tail:           --add-dir a --add-dir a --json
+first attempt:  exec --add-dir a --add-dir a --json --output-last-message /tmp/x
+resume:         exec resume thread-7 --add-dir a --add-dir a --json --output-last-message /tmp/x
+```
+
+The session-compatibility check compares the invocation's canonical argv on
+both sides, and the tail is in both, so the tail never makes a resume look
+incompatible.
+
+### Correlated errors
+
+When a launch with a non-empty tail fails, the one report builder
+(`AgentErrorReport::for_native_exit`) decides whether to attribute the failure
+to the tail. Both launch paths call it once per terminal failure: the direct
+wrappers after the agent exits, and composition after lifecycle recovery is
+exhausted. It reads a typed `NativeExit` (exit code, termination, and the last
+ten lines of stdout and of stderr) and attributes the failure only when the
+agent rejected its arguments and any switch the rejection names is one of the
+tail's tokens (`-c` matches a forwarded `-cvalue`, `--token` matches
+`--token=…`). Its wording and the rest of the classification are described in
+[composition.md → When the agent rejects the tail](composition.md#when-the-agent-rejects-the-tail).
+
+Provider text the report quotes is masked with the shared secret recognizer
+plus every value `redact_sensitive_args` would mask in the tail, so an agent
+that echoes `hunter2222` back without `--password` still shows `****`. Control
+characters are removed and markup is escaped before display. On the captured
+(non-structured) composition path, a failure that will be attributed to the
+tail is not also echoed raw; any other captured stderr is echoed with the same
+masking.
 
 ## Pass-through guarantees
 
@@ -328,6 +378,11 @@ Integration tests live in
 and drive the compiled `claudine` binary through the headline cases plus
 the key pass-through cases (`--version`, root `--help`, `hooks --describe`)
 and the provider-forwarding cases (non-owned flag after/before the file).
+[`provider_tail_launch.rs`](../../cli/tests/l1/provider_tail_launch.rs)
+checks the exact child argv of every launch (fresh, retry, proxy target,
+resume, each sequence step), secrets on every display surface, and the
+correlated report; [`provider_tail_notice.rs`](../../cli/tests/l1/provider_tail_notice.rs)
+checks the notice and the non-UTF-8 refusal.
 [`provider_tail_notice.rs`](../../cli/tests/l1/provider_tail_notice.rs) covers
 the notice, its deduplication across sequence steps and parallel tasks,
 redaction, and non-UTF-8 refusal on both launch paths.

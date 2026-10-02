@@ -200,10 +200,10 @@ fn bootstrap_mcp_state(repo_root: Option<&std::path::Path>) -> Result<bool> {
 
 /// How a wrapper run ended.
 enum WrapperOutcome {
-    /// The agent ran and exited with `code`; a non-zero code still needs the
-    /// agent error report.
+    /// The agent ran and exited; a non-zero exit still needs the agent error
+    /// report.
     AgentExited {
-        exit: crate::output::native_exit::NativeExit,
+        exit: Box<crate::output::native_exit::NativeExit>,
         /// The passthrough tail, for correlating an argument rejection.
         provider_tail: claudine::composition::ProviderTail,
         model_source: Option<profile::ModelSource>,
@@ -851,7 +851,7 @@ fn run_provider_wrapper_inner(
     exec::cleanup_mcp_injection(mcp_cleanup);
 
     Ok(WrapperOutcome::AgentExited {
-        exit,
+        exit: Box::new(exit),
         provider_tail,
         model_source,
     })
