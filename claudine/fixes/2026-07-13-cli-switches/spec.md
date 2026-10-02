@@ -24,6 +24,32 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-01
 review_iterations: 0
 refreshed_on: 2026-10-01
+human_review: false
+message_to_agent: |-
+    Phase 1 (rulings and spikes) is recorded in implementation-log.md under "## Phase 1".
+    Read rulings 10-14 there before starting. The plan's defaults were accepted, and
+    the spikes added these new facts:
+    - Plan paths written as `harness_orch/...` and `wrap/...` live under
+      `claudine/cli/src/commands/wrap/`.
+    - Phase 3: only the direct wrapper builds an AgentErrorReport today
+      (`commands/wrap/mod.rs:252`, stderr only); the composition harness never does.
+      The streaming path's stdout tail ring (10 lines) feeds only the signal hub and
+      its stderr buffer has no bound. Bound both tails with
+      `claudine::signals::EXIT_STDOUT_TAIL_LINES`/`EXIT_STDERR_TAIL_LINES`.
+    - Phase 4: `agent-cli/_schema.yaml` has no `schema_revision`. Introduce
+      revision 2, and project the committed old-revision documents as explicit
+      whole-provider unknown gaps so the generator check stays green until Phase 5
+      re-researches the fleet. Put the normalized scope in a new property; leave
+      the legacy `scope` labels alone.
+    - Phase 6: the pre-clap partition in `cli/src/main.rs:275` runs before any
+      file is read, so type-aware ownership is a second pass inside the
+      composition command after `resolve_composition_source`. Read schema
+      parameter names through `EffectiveSchema::declares_top_level_property`
+      (make it `pub` in Darkmatter; it is `pub(crate)` today) rather than
+      copying the walk.
+    Baseline from `claudine/`: `just test` 8075 passed, 9 skipped; `just lint`
+    clean; `cargo run -p claudine-gen -- check` clean (pre-existing warning: the
+    unchained-ai models-catalog artifact is stale).
 ---
 
 # Composition forwards provider CLI switches to the agent

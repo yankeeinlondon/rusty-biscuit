@@ -4,6 +4,11 @@ created: 2026-10-01
 phase: 1
 agent: claude/sonnet
 yolo: "true"
+packages: []
+source_files_during_phase_1: []
+docs_updated_during_phase_1: []
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
 ---
 
 # Plan: Composition forwards provider CLI switches to the agent
@@ -100,17 +105,17 @@ ruling (or the default noted is used and recorded in the implementation log).
 
 Run once, before the work they inform. One host, quick sample.
 
-- [ ] **Spike A: early frontmatter read seam.** Read `lib/src/composition/hints.rs` (`parse_selection_hints_from_frontmatter`) and composition's file-reference/schema resolver. Confirm an existing entry point can read frontmatter and `$schema` property names with no template, shell, lifecycle, provider discovery, or network. Record the function to call, or the minimal extraction needed. Informs Phase 6.
-- [ ] **Spike B: structured-stream capture bounds.** Identify how the direct wrapper and `harness_orch/attempt.rs` capture stdout/stderr tails today and which bounds exist. Confirm bounded tails of both streams are obtainable without retaining full streams. Informs Phase 3.
-- [ ] **Spike C: schema-validation of a `string[]` named `argv`.** Confirm `SimplifiedSchema` can validate the effective `argv` array and that an overlay is not persisted by `inline-compose`. Informs Phase 6.
-- [ ] **Spike D: generator extension point.** Read `claudine/gen` and `catalog-types` to identify where `cli_switches` flows into `data.rs`, and whether `cli_switches` is read today. Informs Phase 4.
+- [x] **Spike A: early frontmatter read seam.** Read `lib/src/composition/hints.rs` (`parse_selection_hints_from_frontmatter`) and composition's file-reference/schema resolver. Confirm an existing entry point can read frontmatter and `$schema` property names with no template, shell, lifecycle, provider discovery, or network. Record the function to call, or the minimal extraction needed. Informs Phase 6.
+- [x] **Spike B: structured-stream capture bounds.** Identify how the direct wrapper and `harness_orch/attempt.rs` capture stdout/stderr tails today and which bounds exist. Confirm bounded tails of both streams are obtainable without retaining full streams. Informs Phase 3.
+- [x] **Spike C: schema-validation of a `string[]` named `argv`.** Confirm `SimplifiedSchema` can validate the effective `argv` array and that an overlay is not persisted by `inline-compose`. Informs Phase 6.
+- [x] **Spike D: generator extension point.** Read `claudine/gen` and `catalog-types` to identify where `cli_switches` flows into `data.rs`, and whether `cli_switches` is read today. Informs Phase 4.
 
 ### Tasks
 
-- [ ] **Record rulings.** Write the rulings above (author answers or accepted defaults) into a new `implementation-log.md` in this directory.
-- [ ] **Run the spikes.** Record each spike's finding (a few lines each) in `implementation-log.md`; if a spike answers "this spec assumption is wrong", record it as a ruling for the author instead of silently diverging.
-- [ ] **Baseline.** From `claudine/`, run `just test`, `just lint`, and `cargo run -p claudine-gen -- check`; record any pre-existing failures so they are not attributed to this work.
-- [ ] **Locate guards.** Confirm `tests/l1/wrap_direct_argv.rs`, `tests/l1/argv_normalization.rs`, `tests/l1/test_placement.rs`, and `dispatch_inventory.rs` exist and note what each protects.
+- [x] **Record rulings.** Write the rulings above (author answers or accepted defaults) into a new `implementation-log.md` in this directory.
+- [x] **Run the spikes.** Record each spike's finding (a few lines each) in `implementation-log.md`; if a spike answers "this spec assumption is wrong", record it as a ruling for the author instead of silently diverging.
+- [x] **Baseline.** From `claudine/`, run `just test`, `just lint`, and `cargo run -p claudine-gen -- check`; record any pre-existing failures so they are not attributed to this work.
+- [x] **Locate guards.** Confirm `tests/l1/wrap_direct_argv.rs`, `tests/l1/argv_normalization.rs`, `tests/l1/test_placement.rs`, and `dispatch_inventory.rs` exist and note what each protects.
 
 Checkpoint 1: rulings recorded, spikes answered, baseline known.
 
