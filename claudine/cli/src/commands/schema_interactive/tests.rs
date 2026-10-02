@@ -207,7 +207,7 @@ fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), crate::request::snapshot())
         .unwrap();
 
     // Build interactive options that DENY (default: all false).
@@ -233,7 +233,7 @@ fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allo
         "---\n$schema:\n  cover: 'file(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), crate::request::snapshot())
         .unwrap();
 
     // Non-TTY options deny prompting, so a missing `file` property must
@@ -261,7 +261,7 @@ fn pre_validate_with_interactive_succeeds_when_overrides_supply_value() {
         "---\n$schema:\n  title: 'string(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), crate::request::snapshot())
         .unwrap();
 
     let overrides = serde_json::json!({ "title": "Plan" });
@@ -285,7 +285,7 @@ fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
         "---\n$schema:\n  config: 'object(required)'\n---\nbody\n",
     )
     .unwrap();
-    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), &crate::request::snapshot())
+    let source = claudine::composition::resolve_composition_source(file.to_str().unwrap(), crate::request::snapshot())
         .unwrap();
 
     // Allow interactive so the helper attempts to enter the loop.

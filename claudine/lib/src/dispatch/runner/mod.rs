@@ -137,6 +137,7 @@ fn evaluate_when_with_lookup(
 /// Execute hook actions in declaration order.
 ///
 /// Returns the selected blocking response from `call` actions when applicable.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_actions(
     actions: &[HookAction],
     compiled_mappers: Option<&[Option<CompiledMapper>]>,

@@ -385,6 +385,7 @@ fn post_shell_validate(
         source_path: source.resolved_path.clone(),
         message: "post-shell schema validation failed".to_string(),
         problems: report.problems.iter().map(|p| p.path.clone()).collect(),
+        failures: translate::resolution_failures(&report.problems),
     })
 }
 
@@ -716,6 +717,7 @@ fn pre_validate_with_origin(
             .iter()
             .map(|p| p.path.clone())
             .collect(),
+        failures: translate::resolution_failures(&composition_independent),
     })
 }
 

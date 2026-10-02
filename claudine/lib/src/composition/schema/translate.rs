@@ -202,6 +202,7 @@ pub(super) fn translate_schema_failure(
         source_path: source.resolved_path.clone(),
         message: summary,
         problems: problems.iter().map(|p| p.path.clone()).collect(),
+        failures: resolution_failures(&problems),
     })
 }
 
@@ -245,6 +246,7 @@ pub(super) fn handle_retry_error(
         source_path: source.resolved_path.clone(),
         message: summary,
         problems: problems.iter().map(|p| p.path.clone()).collect(),
+        failures: resolution_failures(&problems),
     })
 }
 
@@ -287,7 +289,17 @@ pub(super) fn build_schema_validation_error(
         source_path: source_path.to_path_buf(),
         message,
         problems,
+        failures: resolution_failures(invalid),
     }
+}
+
+/// The resolution failure class of each file-reference problem, in order.
+pub(super) fn resolution_failures(problems: &[ValidationProblem]) -> Vec<biscuit_file::ResolutionFailure> {
+    problems
+        .iter()
+        .filter_map(|problem| problem.file_reference.as_ref())
+        .map(darkmatter::markdown::schemas::FileReferenceDiagnostic::resolution_failure)
+        .collect()
 }
 
 pub(super) fn build_missing_properties_error(

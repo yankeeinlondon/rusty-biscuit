@@ -27,6 +27,9 @@ pub(crate) fn record_prep_substage(
 }
 
 /// Emits non-fatal Darkmatter compose warnings to stderr, unless `--silent` is set.
+///
+/// A tolerated file-reference failure keeps its stable `failure: <class>`
+/// row, as `md` renders it.
 pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
     if silent {
         return;
@@ -37,6 +40,12 @@ pub(crate) fn emit_compose_warnings(warnings: &[ComposeWarning], silent: bool) {
             message = format!("[{}] line {line}: {message}", warning.stage);
         } else {
             message = format!("[{}] {message}", warning.stage);
+        }
+        if let Some(failure) = warning.resolution_failure {
+            message = format!(
+                "{message}\nfailure: {}",
+                darkmatter::markdown::errors::resolution_failure_name(failure)
+            );
         }
         crate::log::warn(&message);
     }

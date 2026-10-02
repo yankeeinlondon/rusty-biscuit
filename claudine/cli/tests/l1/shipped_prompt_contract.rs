@@ -151,11 +151,21 @@ fn inspect_block_conditions(prompt: &Path, body: &str, errors: &mut Vec<String>)
     }
 }
 
+/// Claudine's launch context for the checkout the shipped prompts live in,
+/// built once per test: building it discovers the repository.
+fn checkout_context() -> biscuit_file::FileResolutionContext {
+    claudine::composition::capture_file_resolution_context(
+        &darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn shipped_prompts_have_parseable_schemas_and_expressions() {
     let paths = shipped_prompt_paths();
     assert!(!paths.is_empty(), "the shipped prompt corpus must not be empty");
 
+    let context = checkout_context();
     let mut errors = Vec::new();
     for prompt in paths {
         let markdown = match Markdown::try_from(prompt.as_path()) {
@@ -165,7 +175,7 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
                 continue;
             }
         };
-        if let Err(error) = DarkmatterSchemas::new(claudine::composition::capture_file_resolution_context(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap()).unwrap()).effective_for(&markdown) {
+        if let Err(error) = DarkmatterSchemas::new(context.clone()).effective_for(&markdown) {
             errors.push(format!("{} [$schema]: {error}", prompt.display()));
         }
 
@@ -186,12 +196,13 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
 /// Every shipped schema must successfully construct both phase projections.
 #[test]
 fn shipped_prompt_schemas_project_at_both_phases() {
+    let context = checkout_context();
     let mut failures = Vec::new();
     for prompt in shipped_prompt_paths() {
         let Ok(markdown) = Markdown::try_from(prompt.as_path()) else {
             continue;
         };
-        let Ok(Some(effective)) = DarkmatterSchemas::new(claudine::composition::capture_file_resolution_context(&darkmatter::markdown::compose::RequestSnapshot::from_process().unwrap()).unwrap()).effective_for(&markdown) else {
+        let Ok(Some(effective)) = DarkmatterSchemas::new(context.clone()).effective_for(&markdown) else {
             continue;
         };
         let empty = Value::Object(serde_json::Map::new());

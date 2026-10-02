@@ -97,6 +97,7 @@ pub fn resolve_interactive_options(silent: bool) -> InteractiveSchemaOptions {
 /// collection). User cancellation of the prompt bubbles back as the
 /// original `MissingProperties` error so the CLI shows the non-TTY
 /// remediation block.
+#[allow(clippy::too_many_arguments)]
 pub fn pre_validate_with_interactive_collection(
     source: &ResolvedCompositionSource,
     set_overrides: Option<&serde_json::Value>,
@@ -279,6 +280,9 @@ fn downgrade_to_schema_validation(err: CompositionError) -> CompositionError {
                 source_path,
                 message: format!("{pointer}: {reason}"),
                 problems: vec![pointer],
+                // Only a reference no file matched becomes an unresolved
+                // partial.
+                failures: vec![biscuit_file::ResolutionFailure::NoMatch],
             }
         }
         other => other,

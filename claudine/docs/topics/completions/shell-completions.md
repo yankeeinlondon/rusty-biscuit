@@ -145,7 +145,9 @@ Default iteration order (`ScopeSet::iter_scopes`):
 6. **Extras** — mode-specific (see below).
 
 Magic convention roots come from Claudine's shared `with_prompt_magic_roots`
-registration and are expanded by `FileReference::complete_partial_in_context`.
+registration, which adds them to the request snapshot before Darkmatter's
+builder makes the completion context (the same builder call composition
+uses), and are expanded by `FileReference::complete_partial_in_context`.
 Claudine registers its prompt conventions around biscuit-file's intrinsic
 roots, and biscuit-file orders every `@` root into two tiers: the **local**
 tree is exhausted before anything home-based. `<local>` is the repository
@@ -237,7 +239,9 @@ file.
 ### Magic `@` resolution
 
 A partial beginning with `@` is a magic path — a **filename search**. The
-engine constructs one explicit `FileResolutionContext`, asks
+engine builds one `FileResolutionContext` from the request snapshot the
+`claudine` binary took at startup (its launch directory, HOME, and
+environment), asks
 `FileReference::complete_partial_in_context` for the ordered roots and rendered
 prefix, and emits that prefix plus each matching basename. A bare partial emits
 `@<basename>`; a path-shaped partial retains its scope. The `@` stays because it
@@ -316,6 +320,12 @@ A partial ending in `/` (or preceded by any path segment) is a committed
 directory — the user has narrowed to a specific subtree. The walker
 stays inside that subtree and enumerates everything the mode contract
 accepts.
+
+The subtree is looked up where composition looks for the committed
+token: under the launch directory first, then under the repository
+root. From a nested package, `prompts/<TAB>` therefore offers the
+package's own `prompts/` files ahead of the repository's, and a name both
+hold is offered once, for the file composition would open.
 
 ```text
 claudine compose prompts/<TAB>
@@ -535,6 +545,32 @@ prompt's `$schema` declaration via Darkmatter before falling back to the
 shell default. Implementation lives in
 [`completion/schema_completion/mod.rs`](../../../cli/src/completion/schema_completion/mod.rs).
 
+### Which prompt supplies the schema
+
+The committed prompt argument is located exactly as `claudine compose`
+locates it: through the shared file-reference grammar and the same
+request context (launch directory, repository, package area, package,
+home, and Claudine's prompt roots). Every form composition accepts works,
+including the token the positional completer just emitted:
+
+```text
+claudine compose @pro<TAB>                 → @prompt.md
+claudine compose @prompt.md zebra=<TAB>    → zebra='red'  zebra='blue'
+claudine compose &prompt.md z<TAB>         → zebra=
+claudine compose ~/prompt.md zebra=<TAB>   → zebra='red'  zebra='blue'
+```
+
+Bare, `./`, absolute, `&`, `^`, `@`, and `~/` arguments all follow their
+composition meaning. In particular `./prompt.md` names only the file in
+the launch directory: from a nested package with no `prompt.md` of its
+own, it offers nothing, even when the repository root has one. A prompt
+argument that composition would reject yields no schema candidates.
+
+A `$schema: <file>` reference inside the prompt is read the same way, in
+the prompt document's context, so the authored property order (below)
+survives `$schema: '&schemas/order.yaml'` as well as
+`$schema: ./order.yaml`.
+
 ### Property names (before `=`)
 
 Required properties are emitted first in declaration order, then
@@ -645,6 +681,15 @@ Runtime operation-file recovery distinguishes three outcomes for
    errors consume that budget but are skipped, so later matches and matches
    already found within the bound remain available. An unusable repository root
    still produces no suggestions.
+
+Each of these errors ends with the `failure: <class>` row Darkmatter renders for
+a failed file reference, so a script can tell why the argument did not resolve
+without parsing the message. An explicit miss is `failure: no-match`, and a
+reference that cannot be used as written (a `../` that leaves the repository)
+is `failure: invalid-reference`. A bare name whose picker cannot open, finds
+nothing, finds too much, or is cancelled is also `failure: no-match`, because
+the picker runs only after the name matched no file. The classes are listed in
+[File Reference Failures](../../../../darkmatter/docs/errors/file-reference-failures.md).
 
 Interactive file collection also applies to **missing `$schema`
 properties**: when a frontmatter schema declares

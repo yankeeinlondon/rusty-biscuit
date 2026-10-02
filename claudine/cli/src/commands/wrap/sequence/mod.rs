@@ -60,7 +60,7 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 /// several hops from the sequence document. Schema verdicts are deferred during
 /// this discovery-only compose because prompt-task `params` bind just in time;
 /// the task's canonical prepare validates the resulting effective values.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::result_large_err)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
     source: &ResolvedCompositionSource,

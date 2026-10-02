@@ -145,6 +145,7 @@ fn enrich_omits_the_excerpt_when_nothing_is_locatable() {
         source_path: PathBuf::from("review.md"),
         message: "invalid".to_string(),
         problems: vec!["/nope".to_string()],
+        failures: Vec::new(),
     }
     .enrich_frontmatter(&source, true);
     assert!(err.frontmatter_excerpt().is_none(), "got: {err:?}");
@@ -461,6 +462,7 @@ fn schema_validation_display_includes_message() {
         source_path: PathBuf::from("prompts/plan.md"),
         message: "expected number, got string".to_string(),
         problems: vec!["/properties/count".to_string()],
+        failures: Vec::new(),
     };
     let rendered = err.to_string();
     assert!(
@@ -2807,6 +2809,7 @@ fn caller_input_schema_problem_in_clarify_highlights_the_arm_declaration() {
             source_path: PathBuf::from("prompts/clarify.md"),
             message: "no existing file matched reference `fix`".to_string(),
             problems: vec!["/spec".to_string()],
+            failures: Vec::new(),
         },
         CompositionError::UnresolvedFileReference {
             source_path: PathBuf::from("prompts/clarify.md"),
@@ -2844,6 +2847,7 @@ fn several_schema_problems_show_the_union_of_their_regions() {
         source_path: PathBuf::from("review.md"),
         message: "invalid".to_string(),
         problems: vec!["/alpha".to_string(), "/omega".to_string()],
+        failures: Vec::new(),
     }
     .enrich_frontmatter(&source, true);
     let excerpt = validation.frontmatter_excerpt().expect("both are declared");
@@ -2905,4 +2909,42 @@ fn shell_expansion_failure_is_excerpted_only_for_a_frontmatter_origin() {
 
     let body = failure(ShellCommandOrigin::Body { line: 10 }).enrich_frontmatter(&source, true);
     assert!(body.frontmatter_excerpt().is_none(), "got: {body:?}");
+}
+
+/// A prompt argument that resolved to nothing names its biscuit-file class in
+/// a `failure:` row, the row the entry-point parity matrix reads; an error
+/// with no reference names none.
+#[test]
+fn unresolved_prompt_arguments_render_their_failure_class() {
+    use biscuit_file::ResolutionFailure;
+    use biscuit_terminal::prelude::TerminalRenderable;
+    use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+
+    let escape = CompositionError::InvalidReference {
+        reference: "../outside.md".into(),
+        source: biscuit_file::FileReferenceError::RelativeTreeEscape {
+            base_dir: PathBuf::from("/repo"),
+            candidate: PathBuf::from("/outside.md"),
+            reference: "../outside.md".into(),
+        },
+    };
+    let cases = [
+        (escape, Some(("invalid-reference", ResolutionFailure::InvalidReference))),
+        (CompositionError::FileNotFound("x.md".into()), Some(("no-match", ResolutionFailure::NoMatch))),
+        (CompositionError::AutocompleteNotInteractive, Some(("no-match", ResolutionFailure::NoMatch))),
+        (
+            CompositionError::AutocompleteNoMatches { query: "q".into() },
+            Some(("no-match", ResolutionFailure::NoMatch)),
+        ),
+        (CompositionError::NotMarkdown("x.txt".into()), None),
+    ];
+    let term = Terminal::new_optimistic(80);
+    for (err, expected) in cases {
+        assert_eq!(err.resolution_failure(), expected.map(|(_, class)| class), "{err:?}");
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        match expected {
+            Some((name, _)) => assert!(rendered.contains(&format!("failure: {name}")), "{err:?}: {rendered}"),
+            None => assert!(!rendered.contains("failure:"), "{err:?}: {rendered}"),
+        }
+    }
 }

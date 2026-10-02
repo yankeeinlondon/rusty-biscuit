@@ -116,11 +116,11 @@ fn gather_implicit(
     if partial_token.is_empty() {
         gather_empty_or_word(mode, ctx, scope_set, active)
     } else if active.is_empty() {
-        gather_committed(mode, ctx, scope, active)
+        gather_committed(mode, completion.roots(), scope, active)
     } else if scope.is_empty() {
         gather_empty_or_word(mode, ctx, scope_set, active)
     } else {
-        gather_committed(mode, ctx, scope, active)
+        gather_committed(mode, completion.roots(), scope, active)
     }
 }
 

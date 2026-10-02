@@ -1110,6 +1110,7 @@ mod corpus {
                     source_path: PathBuf::from("run.md"),
                     message: "agent must be a string".to_string(),
                     problems: Vec::new(),
+                    failures: Vec::new(),
                 }),
             ),
             (

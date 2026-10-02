@@ -90,6 +90,7 @@ pub fn formal_keys(root: &Map<String, Value>) -> Result<FormalKeys<'_>, Composit
 ///
 /// Returns the typed [`CompositionError`] variants raised by template
 /// evaluation, by [`normalize_plan`], and by step-state schema validation.
+#[allow(clippy::too_many_arguments)]
 pub fn normalize_formal_plan(
     items: Vec<Value>,
     keys: FormalKeys<'_>,

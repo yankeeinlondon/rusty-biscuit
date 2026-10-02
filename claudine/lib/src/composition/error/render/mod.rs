@@ -156,6 +156,19 @@ pub(super) fn pointer_to_dotted(pointer: &str) -> String {
 ///
 /// The Prose layer downgrades `<a href>` to plain text when the terminal
 /// does not support OSC8.
+/// `body` followed by `err`'s `failure: <class>` row, when it has a class
+/// ([`CompositionError::resolution_failure`]). The class name is the stable
+/// spelling Darkmatter renders, so one reader parses both.
+pub(super) fn with_failure_row(mut body: String, err: &CompositionError) -> String {
+    if let Some(failure) = err.resolution_failure() {
+        body.push_str(&format!(
+            "\n\n<dim>failure:</dim> {}",
+            darkmatter::markdown::errors::resolution_failure_name(failure)
+        ));
+    }
+    body
+}
+
 pub(super) fn render_file_link(path: &std::path::Path) -> String {
     let label = biscuit_file::to_portable_string(path);
     let escaped_label = escape_prose_path(&label);

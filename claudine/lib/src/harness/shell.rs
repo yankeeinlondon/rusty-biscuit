@@ -115,8 +115,6 @@ pub(crate) fn tokenize_words_strict(raw: &str) -> Result<Vec<String>, ShellExpan
     Ok(words)
 }
 
-/// Validate an already-tokenized command against shell policies.
-
 /// The shell policy files under `policy_root`.
 ///
 /// Darkmatter reads an explicit policy root directly; the context it is
@@ -136,6 +134,7 @@ fn policy_paths_at(
     resolve_policy_paths(&shell_opts, &ComposeSource::File(policy_root.join("dummy")), &context).ok()
 }
 
+/// Validate an already-tokenized command against shell policies.
 ///
 /// This is used for structured command inputs such as JSON arrays or expanded
 /// objects where the caller has already separated the executable from its args.
@@ -282,7 +281,7 @@ pub fn validate_and_approve_command_parts(
                     ShellApprovalDecision::AllowExactPersist => {
                         debug!("handler approved (AllowExactPersist), persisting to whitelist");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_exact(
-                            &policy_paths,
+                            policy_paths,
                             &normalized,
                         );
                         cache_approval_decision(
@@ -294,7 +293,7 @@ pub fn validate_and_approve_command_parts(
                     ShellApprovalDecision::AllowCommandPersist => {
                         debug!("handler approved (AllowCommandPersist), persisting to whitelist");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_whitelist_prefix(
-                            &policy_paths,
+                            policy_paths,
                             executable,
                         );
                         cache_approval_decision(
@@ -325,7 +324,7 @@ pub fn validate_and_approve_command_parts(
                     ShellApprovalDecision::BlacklistPersist => {
                         debug!("handler blacklisted command");
                         let _ = darkmatter::markdown::compose::shell_expansion::store::append_blacklist_exact(
-                            &policy_paths,
+                            policy_paths,
                             &normalized,
                         );
                         cache_approval_decision(

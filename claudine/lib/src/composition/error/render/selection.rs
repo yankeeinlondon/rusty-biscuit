@@ -29,17 +29,23 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         }
         CompositionError::AutocompleteNoMatches { query } => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CompositionError", "no autocomplete matches"))
-            .body(format!(
-                "No files matched autocomplete query <cyan>`{}`</cyan>.",
-                escape_prose_path(query)
+            .body(super::with_failure_row(
+                format!(
+                    "No files matched autocomplete query <cyan>`{}`</cyan>.",
+                    escape_prose_path(query)
+                ),
+                err,
             ))
             .hint("Check the query token or run without a query to see all candidates."),
         CompositionError::AutocompleteOverCap { query, cap } => StatusBlock::new(StatusState::Error)
             .error_header(ErrorHeader::new("CompositionError", "too many matches"))
-            .body(format!(
-                "More than <cyan>{cap}</cyan> files matched autocomplete query \
-                 <cyan>`{}`</cyan>.",
-                escape_prose_path(query)
+            .body(super::with_failure_row(
+                format!(
+                    "More than <cyan>{cap}</cyan> files matched autocomplete query \
+                     <cyan>`{}`</cyan>.",
+                    escape_prose_path(query)
+                ),
+                err,
             ))
             .hint("Type more characters to narrow the query."),
         CompositionError::AutocompleteNotInteractive => StatusBlock::new(StatusState::Error)
@@ -47,16 +53,22 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 "CompositionError",
                 "autocomplete not available",
             ))
-            .body("Autocomplete requires an interactive terminal.".to_string())
+            .body(super::with_failure_row(
+                "Autocomplete requires an interactive terminal.".to_string(),
+                err,
+            ))
             .hint("Run in a terminal, or supply an explicit file path or reference."),
         CompositionError::AutocompleteCancelled { query } => StatusBlock::new(StatusState::Warning)
             .error_header(ErrorHeader::new(
                 "CompositionError",
                 "autocomplete cancelled",
             ))
-            .body(format!(
-                "Autocomplete for query <cyan>`{}`</cyan> was cancelled.",
-                escape_prose_path(query)
+            .body(super::with_failure_row(
+                format!(
+                    "Autocomplete for query <cyan>`{}`</cyan> was cancelled.",
+                    escape_prose_path(query)
+                ),
+                err,
             ))
             .hint("Supply an explicit file path or reference, or run the command again."),
         // The dispatcher only routes selection-family variants here.

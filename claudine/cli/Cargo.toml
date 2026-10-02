@@ -181,6 +181,14 @@ required-features = ["real-tests"]
 # need inert AI-provider CLI stubs for provider discovery, and the darkmatter
 # `md` binary built into the workspace target dir (inline_compose_hash).
 [package.metadata.ci.tests]
+# The context construction guard includes darkmatter-cli's shared engine by
+# `#[path]` and spells both files in its test; the entry-point parity runner
+# does the same with darkmatter's shared matrix.
+source-inputs = [
+  "darkmatter/cli/tests/common/context_guard.rs",
+  "darkmatter/cli/tests/common/source_scan.rs",
+  "darkmatter/lib/tests/common/entry_point_parity/mod.rs",
+]
 tiers = ["L1", "L2"]
 features = ["daemon-tests", "terminal-tests", "test-fixtures"]
 local-features = ["test-fixtures"]

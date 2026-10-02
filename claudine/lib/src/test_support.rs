@@ -20,9 +20,13 @@ pub(crate) fn snapshot_at(dir: impl AsRef<Path>) -> RequestSnapshot {
     snapshot().at_request_dir(dir.as_ref())
 }
 
-/// Claudine's launch context for the test process's directory.
+/// A launch context outside any repository (the system temporary directory).
+///
+/// Its fallback tree admits a test document wherever its fixture lives, as a
+/// request launched beside that document would, and building it never walks
+/// the checkout the tests run from.
 pub(crate) fn context() -> FileResolutionContext {
-    crate::composition::capture_file_resolution_context(&snapshot()).expect("build the test context")
+    context_at(std::env::temp_dir())
 }
 
 /// Claudine's launch context for a request launched at `dir`.

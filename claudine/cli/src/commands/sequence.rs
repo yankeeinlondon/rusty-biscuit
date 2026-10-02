@@ -473,7 +473,7 @@ mod tests {
         }
         let md = Markdown::with_frontmatter(fm, "body");
         fs::write(&file, md.as_string()).unwrap();
-        claudine::composition::resolve_composition_source(file.to_string_lossy().as_ref(), &crate::request::snapshot())
+        claudine::composition::resolve_composition_source(file.to_string_lossy().as_ref(), crate::request::snapshot())
             .unwrap()
     }
 

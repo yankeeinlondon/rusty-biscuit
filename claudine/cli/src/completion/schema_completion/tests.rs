@@ -2,6 +2,7 @@ use super::candidates::{property_value_hint, MatchGlobs};
 use super::*;
 use std::collections::HashSet;
 use std::fs;
+use std::path::Path;
 use tempfile::TempDir;
 
 fn write(path: &Path, content: &str) {
