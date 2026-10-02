@@ -16,7 +16,7 @@ use crate::errors::GenError;
 use crate::generate::CoercionSkip;
 use crate::registry::{Coercion, RegistryEntry};
 
-pub(crate) use cli_switches::cli_switch_catalog;
+pub(crate) use cli_switches::{check_cli_switch_catalog, cli_switch_catalog};
 
 mod cli_switches;
 mod event_policy;

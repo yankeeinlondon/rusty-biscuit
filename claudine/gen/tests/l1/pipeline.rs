@@ -463,7 +463,32 @@ fn override_without_reason_is_rejected() {
         "model_env_vars:\n    value: [\"X\"]\n",
     );
     let err = fixture.generate().unwrap_err();
-    assert!(matches!(err, GenError::OverrideMissingReason { field } if field == "model_env_vars"));
+    assert!(matches!(
+        err,
+        GenError::OverrideInvalidReason { field, found: "no `reason:` key" } if field == "model_env_vars"
+    ));
+}
+
+#[test]
+fn an_override_reason_of_the_wrong_shape_is_named_not_reported_absent() {
+    let cases = [
+        ("    reason: null\n", "null"),
+        ("    reason: 7\n", "a number"),
+        ("    reason: [a]\n", "a list"),
+        ("    reason: \"  \"\n", "an empty string"),
+    ];
+    for (reason, expected) in cases {
+        let fixture = Fixture::new();
+        fixture.write(
+            "docs/providers/overrides/claude.yaml",
+            &format!("model_env_vars:\n    value: [\"X\"]\n{reason}"),
+        );
+        let err = fixture.generate().unwrap_err();
+        assert!(
+            matches!(&err, GenError::OverrideInvalidReason { field, found } if field == "model_env_vars" && *found == expected),
+            "{reason:?}: {err}"
+        );
+    }
 }
 
 #[test]

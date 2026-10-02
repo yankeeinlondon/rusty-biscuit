@@ -348,6 +348,11 @@ fn resolve_fields(
             extract_catalog_value(entry, inputs, artifact, &mut skips, &mut offering_join);
         let (value, provenance) = match inputs.overrides.get(entry.field) {
             Some(over) => {
+                // An override skips the coercion, so the coercion's rules
+                // still judge it.
+                if entry.coercion == Coercion::CliSwitchRecords {
+                    coerce::check_cli_switch_catalog(&over.value)?;
+                }
                 let suppressed = source_value.ok();
                 let stale = suppressed.as_ref() == Some(&over.value);
                 (
