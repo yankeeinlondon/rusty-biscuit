@@ -70,27 +70,12 @@ impl CtxLookupOutcome {
             }
         }
     }
-
-    /// Answers a bare name (`when="repo"`) that fell back to the ctx namespace.
-    ///
-    /// A bare name is primarily a document variable, so an uncaptured group
-    /// resolves as an undefined name rather than a missing capture; a captured
-    /// group still enforces the projection invariant.
-    pub(crate) fn into_checked_bare_name(
-        self,
-        unknown: impl FnOnce() -> Option<Value>,
-    ) -> Result<Option<Value>, ExpressionError> {
-        match self {
-            Self::NotCaptured { .. } => Ok(None),
-            outcome => outcome.into_checked(unknown),
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::markdown::compose::expression::{EvaluationLookup, evaluate, parse};
+    use crate::markdown::compose::expression::{EvaluationLookup, ResolvedBinding, evaluate, parse};
     use crate::markdown::compose::frontmatter_interpolation::FrontmatterSeedState;
     use crate::markdown::compose::interpolation::{EvalResult, Evaluator};
     use crate::markdown::compose::{ComposeContext, EffectiveState};
@@ -215,10 +200,11 @@ mod tests {
         assert_eq!(eval("ctx.os", &captured).unwrap(), json!("authored-os"));
     }
 
-    /// Ruling 8: a bare name that falls back to the ctx namespace is a document
-    /// variable first.
+    /// A bare name is a document property and nothing else (R3): a missing one
+    /// is absent whatever the capture holds, and a malformed capture is not
+    /// consulted.
     #[test]
-    fn a_bare_name_fallback_is_undefined_when_its_group_is_uncaptured() {
+    fn a_bare_name_never_reads_the_ctx_namespace() {
         let uncaptured = state(json!({}), ComposeContext::fixed_for_testing());
         assert_eq!(uncaptured.get_checked("repo_root").unwrap(), None);
 
@@ -226,7 +212,8 @@ mod tests {
             json!({}),
             ComposeContext::fixed_for_testing_with([("repo_root", json!("/repo"))]),
         );
-        assert_eq!(captured.get_checked("repo_root").unwrap(), Some(json!("/repo")));
+        assert_eq!(captured.get_checked("repo_root").unwrap(), None);
+        assert_eq!(captured.get_checked("ctx.repo_root").unwrap(), Some(json!("/repo")));
 
         let shadowed = state(json!({ "repo_root": "frontmatter" }), ComposeContext::fixed_for_testing());
         assert_eq!(shadowed.get_checked("repo_root").unwrap(), Some(json!("frontmatter")));
@@ -235,8 +222,9 @@ mod tests {
             json!({}),
             ComposeContext::fixed_for_testing().with_projection_key_removed("today"),
         );
+        assert_eq!(malformed.get_checked("today").unwrap(), None);
         assert!(matches!(
-            malformed.get_checked("today"),
+            malformed.get_checked("ctx.today"),
             Err(ExpressionError::ContextProjectionInvariant { .. })
         ));
     }
@@ -278,7 +266,7 @@ mod tests {
 
         let seed = FrontmatterSeedState::new(HashMap::new(), ComposeContext::fixed_for_testing());
         assert!(matches!(
-            seed.get_checked("ctx.repo_root"),
+            seed.resolve("ctx.repo_root").map(ResolvedBinding::into_value),
             Err(ExpressionError::ContextNotCaptured { group: ContextGroup::Repo, .. })
         ));
     }
@@ -318,10 +306,10 @@ mod tests {
             ComposeContext::fixed_for_testing().with_projection_key_removed("today"),
         );
         assert!(matches!(
-            seed.get_checked("ctx.today"),
+            seed.resolve("ctx.today").map(ResolvedBinding::into_value),
             Err(ExpressionError::ContextProjectionInvariant { group: ContextGroup::DateTime, .. })
         ));
-        assert_eq!(seed.get_checked("ctx.oss").unwrap(), None);
-        assert_eq!(seed.get_checked("ctx.year").unwrap(), Some(json!("2024")));
+        assert_eq!(seed.resolve("ctx.oss").map(ResolvedBinding::into_value).unwrap(), None);
+        assert_eq!(seed.resolve("ctx.year").map(ResolvedBinding::into_value).unwrap(), Some(json!("2024")));
     }
 }

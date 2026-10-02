@@ -1,10 +1,14 @@
 ---
-hash: ef46db3751d8e999-0f29e3a7a8c0d3e4
-last_updated: 2026-09-29
+hash: ef46db3751d8e999-fa6c8739d601c5c0
+last_updated: 2026-10-01
 ---
 # Claudine Change Timeline
 
 Condensed history of significant Claudine features and refactors, newest first. Each entry names the feature/fix slug and the durable takeaway; deep references live in the linked docs. For current behavior always trust [architecture.md](architecture.md), [cli-reference.md](cli-reference.md), and the repo `docs/topics/*` — this file is historical context, not a spec.
+
+## 2026-10
+
+- **2026-10-01 — `remove-strict-mode`**: Expression lookup has one contract across Darkmatter and Claudine. (1) Darkmatter: `SubtreeStrictness`/`.strict()`/`validate_strict_roots` and `EvaluationLookup::is_known_variable_root` are gone, and a bare name never falls back to `ctx`. A root resolves reserved namespace (`doc`, `ctx`, `env`, `current`, `current_env`) → host global → document property; an absent property is `null`. Hosts declare globals in a `BindingView`, associate runtime entries with `EvaluationSession::associate` (reserved names, omissions, contradictions refused before any provider runs), check authored text passively with `prepare_value` + `validate_prepared` (every branch), and evaluate with `evaluate_prepared` / `SubtreeCompose::with_binding_view`. The advisory is `dm.expression.undeclared_property` (no alias for `unknown_identifier`). (2) Claudine: `lifecycle/bindings.rs` is the one catalog for `err`/`timing`/`group` (plus `outputs` at sequence approval) per `LifecycleScope`; `first_undefined_stack_variable`, `validate_no_undefined_lifecycle_variables`, `LifecycleUndefinedVariable`, and `LATE_BINDING_ROOTS` are deleted. `err` is an explicit `null` in `finalize`/teardown without a failure; `group` outside a group raises `claudine.outside-group`; every approval scope refuses `group`. The typed Darkmatter cause rides on `LifecycleErrorInfo::cause` (`CompositionError::lifecycle_cause()`), and setup/teardown run the bytes sequence approval fixed (`ApprovedCommand`). (3) DMLS classifies roots through `BindingView::baseline()` and reports unknown functions as the error `dm.expression.unknown_function`. (4) Shipped prompts dropped their `(x || false)` legality guards; a fallback now only chooses a default. **Trap:** don't reintroduce a root list or a lookup override to decide what a bare name means — declare a global in a view. See [Lifecycle § Binding Time](topics/flow-control/lifecycle.md#binding-time-early-vs-late) and Darkmatter's [Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
 
 ## 2026-09
 

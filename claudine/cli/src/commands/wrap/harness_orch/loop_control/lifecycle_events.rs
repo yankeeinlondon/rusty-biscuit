@@ -274,6 +274,7 @@ pub(super) fn build_lifecycle_stack_context_for_materialized<'a>(
     let base_dir = source_path.parent().or(repo_root);
     StackExecutionContext {
         signal,
+        scope: None,
         frontmatter: fm_map,
         // The per-attempt live cell carried by `materialized` is shared across
         // every lifecycle event in this iteration, so a `start.stack`

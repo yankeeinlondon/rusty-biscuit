@@ -114,6 +114,39 @@ pub(crate) struct ProcessResult<T> {
     /// empty vector. Consumed by the rate-limit projection and persisted
     /// as `extra["signals"]` on the SessionEnd JSONL summary row.
     pub(crate) signals: Vec<claudine::signals::ObservedSignal>,
+    /// Bounded tails of the raw lines the child wrote, for the native-exit
+    /// failure report. Populated only by the semantic spawn path, which reads
+    /// both streams; the captured path returns whole streams in `data`, and
+    /// the inherited and wire paths leave this `None`.
+    pub(crate) stream_tails: Option<StreamTails>,
+}
+
+/// The last raw lines of a structured child's stdout and stderr, bounded by
+/// [`claudine::signals::EXIT_STDOUT_TAIL_LINES`] and
+/// [`claudine::signals::EXIT_STDERR_TAIL_LINES`].
+///
+/// The stderr lines are the ones that passed noise filtering and were not
+/// consumed by a stderr bridge; every one of them was also streamed to the
+/// terminal, or echoed there when a suppressed run failed.
+#[derive(Clone, Default)]
+pub(crate) struct StreamTails {
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
+}
+
+/// The native-exit evidence of a structured run. Its stderr was already shown
+/// (see [`StreamTails`]); its stdout went to the stream parser, not the
+/// terminal. A run with no tails carries none.
+pub(crate) fn structured_native_exit(
+    exit_code: i32,
+    termination: claudine::harness::ProcessTermination,
+    tails: Option<&StreamTails>,
+) -> crate::output::native_exit::NativeExit {
+    let exit = crate::output::native_exit::NativeExit::new(exit_code, termination);
+    match tails {
+        Some(tails) => exit.with_stdout(&tails.stdout, false).with_stderr(&tails.stderr, true),
+        None => exit,
+    }
 }
 
 /// Construct the streaming assistant-text renderer over stdout.

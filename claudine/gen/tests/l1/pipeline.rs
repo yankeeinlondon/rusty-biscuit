@@ -13,7 +13,7 @@ use claudine_gen::{GenError, Provenance, generate_for_area};
 use darkmatter::markdown::compose::RequestSnapshot;
 
 /// Research topics the registry consumes (fixture copy set).
-const TOPICS: &[&str] = &[
+pub(crate) const TOPICS: &[&str] = &[
     "acp",
     "agent-cli",
     "agent-logging",
@@ -38,8 +38,9 @@ fn real_area() -> &'static Path {
     })
 }
 
-struct Fixture {
+pub(crate) struct Fixture {
     dir: tempfile::TempDir,
+    slug: &'static str,
 }
 
 impl Fixture {
@@ -49,14 +50,19 @@ impl Fixture {
     /// so the workspace-relative unchained-ai artifact resolves at
     /// `<tmp>/unchained-ai/artifacts/models-catalog.json`.
     fn new() -> Self {
-        Self::from_dir(tempfile::tempdir().unwrap())
+        Self::for_slug("claude")
+    }
+
+    /// The same fixture over another provider's real inputs.
+    pub(crate) fn for_slug(slug: &'static str) -> Self {
+        Self::from_dir(tempfile::tempdir().unwrap(), slug)
     }
 
     fn new_in(parent: &Path) -> Self {
-        Self::from_dir(tempfile::tempdir_in(parent).unwrap())
+        Self::from_dir(tempfile::tempdir_in(parent).unwrap(), "claude")
     }
 
-    fn from_dir(dir: tempfile::TempDir) -> Self {
+    fn from_dir(dir: tempfile::TempDir, slug: &'static str) -> Self {
         let real = real_area();
         let copy = |rel: &str| {
             let to = dir.path().join("claudine").join(rel);
@@ -65,10 +71,26 @@ impl Fixture {
                 .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
         };
         copy("docs/providers.yaml");
-        copy("docs/providers/facts/claude.yaml");
+        copy(&format!("docs/providers/facts/{slug}.yaml"));
         for topic in TOPICS {
             copy(&format!("docs/research/{topic}/_schema.yaml"));
-            copy(&format!("docs/research/{topic}/claude.md"));
+            copy(&format!("docs/research/{topic}/{slug}.md"));
+        }
+        // The agent-cli contract names its records in its own types file and
+        // shares identifier/evidence types; documents written before
+        // revision 2 validate against the frozen revision-1 contract. Joined
+        // onto the manifest directory so a change to one runs these tests.
+        let manifest = biscuit_test_harness::manifest_dir!();
+        for (rel, from) in [
+            ("docs/research/_types.yaml", manifest.join("../docs/research/_types.yaml")),
+            ("docs/research/agent-cli/_types.yaml", manifest.join("../docs/research/agent-cli/_types.yaml")),
+            (
+                "docs/research/agent-cli/_schema.r1.yaml",
+                manifest.join("../docs/research/agent-cli/_schema.r1.yaml"),
+            ),
+        ] {
+            fs::copy(&from, dir.path().join("claudine").join(rel))
+                .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
         }
         let artifact_to = dir.path().join(ARTIFACT_REL);
         fs::create_dir_all(artifact_to.parent().unwrap()).unwrap();
@@ -79,14 +101,24 @@ impl Fixture {
             artifact_to,
         )
         .unwrap_or_else(|err| panic!("fixture copy of `{ARTIFACT_REL}` failed: {err}"));
-        Self { dir }
+        Self { dir, slug }
     }
 
-    fn area(&self) -> PathBuf {
+    /// Adds the provider's real overrides file, for a provider whose inputs
+    /// do not generate without one (Codex pins `model_catalog_source`).
+    pub(crate) fn with_real_overrides(self) -> Self {
+        let rel = format!("docs/providers/overrides/{}.yaml", self.slug);
+        fs::create_dir_all(self.path("docs/providers/overrides")).unwrap();
+        fs::copy(real_area().join(&rel), self.path(&rel))
+            .unwrap_or_else(|err| panic!("fixture copy of `{rel}` failed: {err}"));
+        self
+    }
+
+    pub(crate) fn area(&self) -> PathBuf {
         self.dir.path().join("claudine")
     }
 
-    fn path(&self, rel: &str) -> PathBuf {
+    pub(crate) fn path(&self, rel: &str) -> PathBuf {
         self.area().join(rel)
     }
 
@@ -107,15 +139,15 @@ impl Fixture {
         fs::write(path, content.replace(from, to)).unwrap();
     }
 
-    fn write(&self, rel: &str, content: &str) {
+    pub(crate) fn write(&self, rel: &str, content: &str) {
         let path = self.path(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
     }
 
-    fn generate(&self) -> Result<claudine_gen::Generation, GenError> {
+    pub(crate) fn generate(&self) -> Result<claudine_gen::Generation, GenError> {
         let area = self.area();
-        generate_for_area(&area, "claude", &RequestSnapshot::new(&area))
+        generate_for_area(&area, self.slug, &RequestSnapshot::new(&area))
     }
 }
 

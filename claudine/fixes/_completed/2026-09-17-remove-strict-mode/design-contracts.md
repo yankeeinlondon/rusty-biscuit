@@ -6,6 +6,12 @@ grammar, data-flow and recovery contracts under the request to complete design
 steps 1–3. Names and signatures below describe the proposed implementation;
 they are not claims that these APIs already exist.
 
+> **Re-scoped 2026-10-01.** The fix is now its core only; see
+> [spec.md § Scope](spec.md#scope-re-scoped-2026-10-01). In scope: C1, C2, C9,
+> and C3's per-event scope matrix, which Claudine declares through the Rust
+> host-binding API. Out of scope: C3's encoding as schema data, C4–C8, and
+> C9's use of the C4 envelope and C5 bundle.
+
 The final discussion clarified host-owned globals (C3) and confirmed automatic
 time-based activation refresh (C6). Neither remains a pending human ruling.
 Markdown cannot declare globals or switch event bindings. Layering follows the

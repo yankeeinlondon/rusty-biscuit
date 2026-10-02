@@ -22,6 +22,7 @@ use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cap_policy::{CapPolicy, CapScope, Quantity, Unit};
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
+use crate::provider::cli_switch::CliSwitchCatalog;
 use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
@@ -353,6 +354,9 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         repo_resources: OverlayCapability::NativeRoot,
         repo_prompt: OverlayCapability::Unsupported,
         mcp: OverlayCapability::Unsupported,
+    },
+    cli_switches: CliSwitchCatalog::Unknown {
+        gap: "The agent-cli research predates contract revision 2, which records switch value types; re-research the provider to establish its switches.",
     },
 };
 

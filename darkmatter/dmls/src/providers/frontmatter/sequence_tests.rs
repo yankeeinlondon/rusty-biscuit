@@ -461,7 +461,7 @@ fn expression_diagnostics_newly_reach_list_items() {
         assert_eq!(malformed[0].severity, Some(lsp_types::DiagnosticSeverity::ERROR));
         let unknown: Vec<&Diagnostic> = diagnostics
             .iter()
-            .filter(|d| code(d) == crate::diagnostics::codes::code::EXPRESSION_UNKNOWN_IDENTIFIER)
+            .filter(|d| code(d) == crate::diagnostics::codes::code::EXPRESSION_UNDECLARED_PROPERTY)
             .collect();
         assert_eq!(unknown.len(), 1, "{diagnostics:#?}");
         assert_eq!(unknown[0].range.start.line, 5);

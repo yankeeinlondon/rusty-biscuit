@@ -139,6 +139,38 @@ fn redact_sensitive_args_is_case_insensitive_and_alias_aware() {
 /// Bare-argument recognition uses the shared credential-token prefixes, so
 /// every GitHub and Slack token kind is masked, not only `ghp_`/`xox[bp]-`.
 #[test]
+fn redact_sensitive_args_masks_a_credential_attached_to_a_short_switch() {
+    let args: Vec<String> = ["-csk-proj-abc123", "-csecret", "-c", "--", "-"]
+        .iter()
+        .map(|arg| arg.to_string())
+        .collect();
+    assert_eq!(
+        redact_sensitive_args(&args),
+        vec!["-c****", "-csecret", "-c", "--", "-"]
+    );
+}
+
+#[test]
+fn sensitive_arg_values_returns_each_masked_original_value() {
+    let args: Vec<String> = [
+        "--token",
+        "hunter22",
+        "--api-key=sk-ant-x1",
+        "-csk-proj-abc123",
+        "ghp_bare",
+        "-c",
+        "x=y",
+    ]
+    .iter()
+    .map(|arg| arg.to_string())
+    .collect();
+    assert_eq!(
+        sensitive_arg_values(&args),
+        vec!["hunter22", "sk-ant-x1", "sk-proj-abc123", "ghp_bare"]
+    );
+}
+
+#[test]
 fn redact_sensitive_args_masks_every_shared_credential_prefix() {
     let args: Vec<String> = ["ghs_abc", "github_pat_abc", "xoxa-abc", "gho_abc", "skip-this", "ghost"]
         .iter()

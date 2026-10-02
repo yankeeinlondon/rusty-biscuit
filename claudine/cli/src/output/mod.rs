@@ -2,6 +2,7 @@ pub(crate) mod api_errors;
 pub(crate) mod assistant;
 pub(crate) mod error_report;
 pub(crate) mod error_walker;
+pub(crate) mod native_exit;
 pub(crate) mod switches;
 
 pub(crate) use api_errors::try_format_api_error;
@@ -340,7 +341,11 @@ pub(crate) fn log_dry_run(
 
     // Full command line
     let cmd_parts: Vec<String> = std::iter::once(biscuit_file::to_portable_string(binary_path))
-        .chain(child_args.iter().map(|a| shell_escape(a)))
+        .chain(
+            crate::commands::wrap::env::redact_sensitive_args(child_args)
+                .iter()
+                .map(|a| shell_escape(a)),
+        )
         .collect();
     log::message(
         &Prose::new(format!(

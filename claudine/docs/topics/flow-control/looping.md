@@ -177,7 +177,7 @@ Templates are also rendered inside arrays and objects — every string leaf is p
 
 The rule of thumb: **a value that is purely a single template span preserves its evaluated type; anything mixing template with literal text becomes a string.** This means `set(retries, {{state.loop.count}})` lands as a JSON number you can safely compare arithmetically, while `set(label, "iter-{{state.loop.count}}")` lands as the obvious string.
 
-> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core but differ in two deliberate ways — loop-contextual error typing, and unknown-root leniency (loop) vs strict fail-closed (lifecycle). See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
+> **Loop vs lifecycle interpolation.** The loop action renderer and the lifecycle event renderer share the same Darkmatter expression core and the same missing-property semantics (an absent property is `null`), and differ in two ways — loop-contextual error typing, and the loop renderer not recognizing `{{{ … }}}` escapes. See [Composition — Loop vs lifecycle interpolation](../composition.md#loop-vs-lifecycle-interpolation); both engines are held to a [shared conformance matrix](../../../lib/src/composition/interpolation_conformance.rs).
 
 
 ## Mutation Operations

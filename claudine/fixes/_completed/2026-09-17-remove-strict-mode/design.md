@@ -1,8 +1,15 @@
 # Remove Strict Mode: Technical Design
 
-Status: **design rulings resolved; ready for independent review;
-not yet approved for implementation planning**.
-Last updated: 2026-09-19.
+Status: **in-scope core approved for implementation 2026-10-01** (rollout
+ruling 2; the plan review covers the in-scope design artifacts).
+Last updated: 2026-10-01.
+
+> **Re-scoped 2026-10-01.** The fix is now its core only; see
+> [spec.md § Scope](spec.md#scope-re-scoped-2026-10-01). In scope: D1, D2, D4,
+> D7, D8, D21. Out of scope: D3, D5, D6, D9–D20, D22, which stay below as the
+> record. D2's open serialization format belongs to the parked R7c. D7's
+> statement that `doc.err` remains explicit document access is withdrawn: `err`
+> is a lifecycle global and there is no `doc.err` model.
 
 ## Relationship to the specification
 

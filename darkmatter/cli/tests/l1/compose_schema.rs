@@ -575,7 +575,7 @@ fn compose_without_an_effective_schema_does_not_synthesize_frontmatter() {
 }
 
 #[test]
-fn materialized_optional_parameter_is_known_to_strict_subtree_compose() {
+fn declared_unset_and_undeclared_properties_are_both_null_in_subtree_compose() {
     let process = CliProcessFixture::new();
     use darkmatter::markdown::compose::EffectiveStateBuilder;
     use darkmatter::markdown::compose::subtree::SubtreeCompose;
@@ -593,18 +593,15 @@ fn materialized_optional_parameter_is_known_to_strict_subtree_compose() {
         .unwrap();
 
     let rendered = SubtreeCompose::new(&serde_json::json!("message={{ commit_message }}"), &state)
-        .strict()
         .compose()
         .unwrap();
     assert_eq!(rendered, serde_json::json!("message="));
 
-    let error = SubtreeCompose::new(&serde_json::json!("{{ commit_mesage }}"), &state)
-        .strict()
+    // An undeclared name (here a typo) is an absent property: valid, `null`.
+    let undeclared = SubtreeCompose::new(&serde_json::json!("{{ commit_mesage }}"), &state)
         .compose()
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("unknown root"), "unexpected error: {error}");
-    assert!(error.contains("commit_mesage"), "unexpected error: {error}");
+        .expect("an undeclared property is not an error");
+    assert_eq!(undeclared, serde_json::Value::Null);
 }
 
 #[test]

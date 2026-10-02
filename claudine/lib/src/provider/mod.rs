@@ -40,6 +40,7 @@ mod billing_model;
 mod cap_policy;
 mod claude;
 mod cli_sensitivity;
+mod cli_switch;
 mod codex;
 mod display_policy;
 mod errors;
@@ -78,6 +79,9 @@ pub use behavior::{
 pub use billing_model::BillingModel;
 pub use cap_policy::CapPolicy;
 pub use cli_sensitivity::CliSensitiveAxes;
+pub use cli_switch::{
+    CliSwitch, CliSwitchCatalog, SwitchAttachment, SwitchScope, SwitchValue, VariadicMin,
+};
 pub use display_policy::{DisplayPolicy, EventClass, ToolResultSummary};
 pub use errors::{ConfigError, McpError};
 pub use event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
@@ -382,6 +386,11 @@ pub struct ProviderInfo {
     /// request for this provider. An `Unsupported` verdict is refused
     /// before the provider is spawned.
     pub overlay_capabilities: OverlayCapabilities,
+
+    /// Researched switch metadata for the provider's own CLI, or the gap
+    /// that explains why none is established. Generated from the
+    /// `agent-cli` research topic; never hand-written.
+    pub cli_switches: CliSwitchCatalog,
 }
 
 impl ProviderInfo {

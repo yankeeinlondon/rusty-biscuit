@@ -1,9 +1,16 @@
-# SimplifiedSchema for the agent-cli research topic.
+# SimplifiedSchema for the agent-cli research topic, revision 2.
 #
 # Captures the public CLI surface that Claudine wrappers and provider metadata
 # need: version/docs links, flags, subcommands, config discovery, and platform
-# packaging. Referenced by future provider docs via `$schema: ./_schema.yaml`.
+# packaging. Referenced by provider docs via `$schema: ./_schema.yaml`.
+#
+# Revision 2 types the switch inventory (`cli_switch@./_types.yaml`) so
+# `claudine-gen` can project it into the compiled catalog. A document without
+# `schema_revision: 2` validates against the frozen `_schema.r1.yaml` and
+# generates an explicit unknown gap for its switches.
 $schema:
+    schema_revision: literal(2; required) -> Revision of this research contract; a document written for another revision is validated against that revision's frozen contract, and its switches generate as unknown
+
     # Date the research file was first created.
     created: date
 
@@ -16,6 +23,9 @@ $schema:
 
     # Current upstream CLI version observed during research, or "unknown".
     latest_version: string(required)
+
+    versions_examined: version[](required)@../_types.yaml -> Provider versions whose help output, documentation, or source the switch records were established from
+    evidence: evidence[](required)@../_types.yaml -> Every source a switch record rests on, cited by its evidence_ids
 
     # Primary product, repository, and documentation URLs.
     homepage: url
@@ -31,8 +41,8 @@ $schema:
     # One record per top-level subcommand or mode.
     subcommands: "{ name: string(required), description: string(required), non_interactive: boolean, notes: string }[]"
 
-    # Full CLI switch inventory. `scope` is free-form until the fleet reveals stable groups.
-    cli_switches: "{ flag: string(required), value: string, scope: string[], default: string, description: string(required), example: string, notes: string }[]"
+    cli_switches: cli_switch[](required)@./_types.yaml -> Full CLI switch inventory, one record per switch and command path set; empty only when cli_switches_gap explains why
+    cli_switches_gap: string(not-empty) -> Why the switch inventory could not be established and the check that would establish it; present exactly when cli_switches is empty
 
     # Config discovery exposed by the CLI itself.
     config_paths: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,env,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"

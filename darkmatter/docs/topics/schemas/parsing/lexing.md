@@ -59,8 +59,8 @@ number is read by `read_number`, which never joins a `-`; that is what keeps
 Arithmetic whose left operand is an identifier or boolean therefore needs
 whitespace before the minus: write `{{ iteration - 1 }}`, not
 `{{ iteration-1 }}`. The unspaced form is a reference to a key named
-`iteration-1`; when no such key exists, composition warns with
-`dm.expression.unknown_identifier` (see
+`iteration-1`; when no such key exists, it is an absent property (`null`) and
+composition adds the advisory `dm.expression.undeclared_property` (see
 [Interpolation § Missing Variables](../../inline/interpolation.md#missing-variables)).
 
 Bracket access still reaches any key the identifier grammar cannot spell — one

@@ -2859,6 +2859,15 @@ pub(crate) fn is_absence_predicate(name: &str) -> bool {
     })
 }
 
+/// Whether the evaluator dispatches `name`, matched exactly as
+/// `evaluate_function` matches it: lowercased, then by canonical name or alias.
+pub(crate) fn is_dispatchable(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    joined_bindings().iter().any(|entry| {
+        entry.binding.canonical == name || entry.binding.aliases.contains(&name.as_str())
+    })
+}
+
 /// Returns every canonical function name the evaluator can dispatch.
 ///
 /// This is the authoritative runtime surface: the lazy operators plus the two

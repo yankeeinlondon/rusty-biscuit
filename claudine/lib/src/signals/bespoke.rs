@@ -49,7 +49,7 @@ pub fn exit_source_payload(exit_code: i32, stdout: &str, stderr: &str) -> Value 
 
 /// The last `keep` lines of `text`, joined with newlines (whole text when it
 /// has fewer than `keep` lines).
-fn tail_lines(text: &str, keep: usize) -> String {
+pub fn tail_lines(text: &str, keep: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(keep)..].join("\n")
 }

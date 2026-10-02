@@ -218,3 +218,98 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
         "passive LSP requests must build no effect engine and attempt no network access",
     );
 }
+
+/// Expression validation is passive (spec R7, DMLS Level 1): reporting an
+/// undeclared property and an unknown function — in a frontmatter
+/// `expression`, a lifecycle stack, and the body — runs no lifecycle action,
+/// no frontmatter `$()` or `::shell`, writes no file, and reads no lazy
+/// `current.*` / `current_env.*` value (DMLS never opens an evaluation
+/// session; `undeclared_property.rs` scans the source for that).
+#[test]
+fn expression_validation_runs_no_actions_shells_file_effects_or_lazy_providers() {
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
+    let workspace = LspWorkspace::new();
+    let spelled = |name: &str| workspace.path().join(name).to_string_lossy().replace('\\', "/");
+    let (frontmatter_shell, action_shell, body_shell) =
+        (spelled("FRONTMATTER_SHELL_RAN"), spelled("ACTION_SHELL_RAN"), spelled("BODY_SHELL_RAN"));
+    let text = format!(
+        "---\n\
+         $schema:\n  gate: expression\n\
+         title: Passive validation\n\
+         gate: current.branch == 'main' && missing_gate_fn(title)\n\
+         note: $(touch {frontmatter_shell})\n\
+         start:\n  stack:\n    - when: err\n      action:\n        - shell: touch {action_shell}\n        - set_frontmatter:\n            touched: true\n\
+         finalize:\n  say: \"{{{{ current_env.HOME }}}}\"\n\
+         ---\n\n\
+         {{{{ current.branch }}}} {{{{ undeclared_prop }}}} {{{{ no_such_fn(title) }}}}\n\n\
+         ::shell touch {body_shell}\n"
+    );
+    let doc_path = workspace.path().join("lifecycle.md");
+    std::fs::write(&doc_path, &text).unwrap();
+    let listing = |dir: &std::path::Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    };
+    let files_before = listing(workspace.path());
+    let doc_uri = url::Url::from_file_path(&doc_path).unwrap();
+
+    let mut fixture = LspFixture::start(&workspace);
+    fixture.initialize(passive_initialize_params(workspace.path()));
+    fixture.notify(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": { "uri": doc_uri.as_str(), "languageId": "markdown", "version": 1, "text": text }
+        }),
+    );
+    let diagnostics = fixture.wait_for_diagnostics(doc_uri.as_str());
+    let reported = |code: &str| -> Vec<String> {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!(code))
+            .map(|diagnostic| diagnostic["message"].as_str().unwrap().to_string())
+            .collect()
+    };
+    // Validation ran: both classifications reached the editor.
+    assert!(
+        reported("dm.expression.undeclared_property").iter().any(|message| message.starts_with("`undeclared_prop`")),
+        "{diagnostics:#?}"
+    );
+    let unknown = reported("dm.expression.unknown_function");
+    for name in ["missing_gate_fn", "no_such_fn"] {
+        assert!(unknown.iter().any(|message| message.starts_with(&format!("`{name}`"))), "{name}: {diagnostics:#?}");
+    }
+    // Hover on each lazy read evaluates nothing either.
+    for (line, character) in [(4u32, 8u32), (14, 14), (17, 6)] {
+        let response = fixture.request(
+            "textDocument/hover",
+            json!({ "textDocument": { "uri": doc_uri.as_str() }, "position": { "line": line, "character": character } }),
+        );
+        assert!(response.error.is_none(), "{:?}", response.error);
+    }
+    fixture.shutdown();
+
+    for sentinel in [&frontmatter_shell, &action_shell, &body_shell] {
+        assert!(!std::path::Path::new(sentinel).exists(), "{sentinel} was created: a shell ran");
+    }
+    assert_eq!(std::fs::read_to_string(&doc_path).unwrap(), text, "a lifecycle action wrote the document");
+    assert_eq!(listing(workspace.path()), files_before, "validation created or removed files");
+
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "passive validation must build no effect engine and attempt no network access",
+    );
+}

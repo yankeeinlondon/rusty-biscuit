@@ -2,14 +2,15 @@
 //!
 //! Shares the Darkmatter expression core (`parse`/`evaluate`/`ExpressionFinder`/
 //! `scalar_string`) with the lifecycle DM2 substrate, but keeps a small
-//! loop-specific value renderer for three required semantic differences
-//! (mixed-string JSON re-parse, contextual `InvalidAction` errors, and
-//! unknown-root leniency). The overlap that both engines must preserve is
-//! pinned by `composition::interpolation_conformance`. See
+//! loop-specific value renderer for its contextual `InvalidAction` errors. It
+//! does not recognize `{{{ … }}}` escapes. The overlap that both engines must
+//! preserve, missing-property semantics included, is pinned by
+//! `composition::interpolation_conformance`. See
 //! `docs/topics/composition.md` → "Loop vs lifecycle interpolation".
 
 use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, ExpressionFinder, evaluate, parse, scalar_string,
+    BindingView, EvaluationLookup, ExpressionError, ExpressionFinder, ResolutionContext,
+    ResolvedBinding, evaluate, parse, scalar_string,
 };
 use serde_json::{Map, Number, Value};
 
@@ -244,6 +245,10 @@ fn render_string_with_lookup(
 
 /// Sized newtype around a borrowed `&dyn EvaluationLookup` so it can be passed
 /// to `evaluate`, whose generic parameter requires `Sized`.
+///
+/// Forwards every trait method: a method left to its default would silently
+/// replace the inner lookup's classification, formatting, or resolution
+/// context.
 struct SizedLookup<'a>(&'a dyn EvaluationLookup);
 
 impl<'a> EvaluationLookup for SizedLookup<'a> {
@@ -251,8 +256,40 @@ impl<'a> EvaluationLookup for SizedLookup<'a> {
         self.0.get(path)
     }
 
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        self.0.resolve(path)
+    }
+
+    fn binding_view(&self) -> Option<&BindingView> {
+        self.0.binding_view()
+    }
+
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        self.0.format_resolved(path, value)
+    }
+
     fn get_string(&self, path: &str) -> String {
         self.0.get_string(path)
+    }
+
+    fn resolution_context(&self) -> Option<ResolutionContext> {
+        self.0.resolution_context()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        self.0.resolution_context_ref()
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.0.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.0.context_variable_names()
+    }
+
+    fn begin_expression_scope(&self) {
+        self.0.begin_expression_scope();
     }
 }
 

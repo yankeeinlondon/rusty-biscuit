@@ -302,6 +302,7 @@ fn an_unknown_code_and_detail_survive_the_err_star_projection() {
         snapshot: Some(Box::new(snapshot)),
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
     let value = info.to_value();
 

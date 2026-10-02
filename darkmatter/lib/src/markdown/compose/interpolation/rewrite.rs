@@ -74,9 +74,9 @@ fn expression_holds_token(loc: &ExpressionLocation) -> Option<LocatedInterpolati
 ///
 /// A full-document composition always passes [`Strict`](Self::Strict), whatever
 /// `ComposeOptions::fail_fast` says: an expression that cannot be parsed or
-/// evaluated is an authoring error there. [`Lenient`](Self::Lenient) is for
-/// best-effort callers, `compose_subtree(..., SubtreeStrictness::Lenient)` and
-/// preflight command discovery, which must keep going past a bad span.
+/// evaluated is an authoring error there, and subtree compose is strict too.
+/// [`Lenient`](Self::Lenient) is for best-effort preflight command discovery,
+/// which must keep going past a bad span.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExpressionFailurePolicy {
     /// A parse or evaluation failure becomes a coded `ComposeWarning` and the

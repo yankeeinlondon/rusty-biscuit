@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use darkmatter::markdown::Markdown;
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::compose::{RequestSnapshot, build_resolution_context};
-use darkmatter::markdown::schemas::{DarkmatterSchemas, coerce};
+use darkmatter::markdown::schemas::{DarkmatterSchemas, PropertyDef, SimplifiedSchema, coerce};
 use serde_json::Value;
 
 use crate::errors::GenError;
@@ -42,6 +42,10 @@ pub struct ProviderInputs {
     pub facts: BTreeMap<String, Value>,
     /// Research topic → schema-validated, coerced frontmatter object.
     pub research: BTreeMap<String, Value>,
+    /// Research topic → the same validated frontmatter exactly as authored,
+    /// before Darkmatter's coercion, for a coercion that must tell a wrong
+    /// type or an explicit null from a valid value.
+    pub research_authored: BTreeMap<String, Value>,
     /// Research topic → sidecar path (for the compatibility gate).
     pub sidecars: BTreeMap<String, PathBuf>,
     /// Override field → entry. Empty when the file is absent.
@@ -61,8 +65,9 @@ pub struct ProviderInputs {
 /// Fails loudly when `area` cannot be absolutized; when the area's
 /// file-resolution context cannot be built ([`GenError::ResolutionContext`]);
 /// when a roster entry is missing or flagged `skip_research: true`; when YAML
-/// cannot be parsed; when a research document or sidecar is missing; or when
-/// research frontmatter does not satisfy its sidecar schema.
+/// cannot be parsed; when a research document or sidecar is missing; when
+/// research frontmatter does not satisfy its sidecar schema; or when a
+/// document's contract revision has no contract to validate it against.
 pub fn load(
     area: &Path,
     slug: &str,
@@ -84,6 +89,7 @@ pub fn load(
     let schemas = generator_schemas(&area, snapshot)?;
 
     let mut research = BTreeMap::new();
+    let mut research_authored = BTreeMap::new();
     let mut sidecars = BTreeMap::new();
     for topic in topics {
         let doc_path = area.join(format!("docs/research/{topic}/{slug}.md"));
@@ -91,8 +97,9 @@ pub fn load(
         if !sidecar.is_file() {
             return Err(GenError::SidecarMissing { path: sidecar });
         }
-        let frontmatter = load_validated_frontmatter_with_api(&doc_path, &schemas)?;
-        research.insert((*topic).to_string(), frontmatter);
+        let frontmatter = validate_frontmatter(&doc_path, &schemas)?;
+        research.insert((*topic).to_string(), frontmatter.coerced);
+        research_authored.insert((*topic).to_string(), frontmatter.authored);
         sidecars.insert((*topic).to_string(), sidecar);
     }
 
@@ -101,6 +108,7 @@ pub fn load(
         roster,
         facts,
         research,
+        research_authored,
         sidecars,
         overrides,
     })
@@ -211,24 +219,35 @@ fn load_overrides(path: &Path) -> Result<BTreeMap<String, OverrideEntry>, GenErr
 /// mapping layer).
 ///
 /// The `$schema` reference resolves through `context`, normally the area's
-/// context from [`area_resolution_context`].
+/// context from [`area_resolution_context`]. A document written for an older
+/// revision of its topic contract is validated against that revision's frozen
+/// sidecar (see [`frozen_contract_override`]).
 pub fn load_validated_frontmatter(
     path: &Path,
     context: &FileResolutionContext,
 ) -> Result<Value, GenError> {
-    load_validated_frontmatter_with_api(path, &DarkmatterSchemas::new(context.clone()))
+    Ok(validate_frontmatter(path, &DarkmatterSchemas::new(context.clone()))?.coerced)
 }
 
-fn load_validated_frontmatter_with_api(
-    path: &Path,
-    api: &DarkmatterSchemas,
-) -> Result<Value, GenError> {
+/// One validated research document's frontmatter in both forms.
+struct ValidatedFrontmatter {
+    coerced: Value,
+    authored: Value,
+}
+
+fn validate_frontmatter(path: &Path, api: &DarkmatterSchemas) -> Result<ValidatedFrontmatter, GenError> {
     let md = Markdown::try_from(path).map_err(|err| GenError::Markdown {
         path: path.to_path_buf(),
         message: err.to_string(),
     })?;
+    let frontmatter = serde_json::to_value(md.frontmatter().as_map()).map_err(|err| {
+        GenError::Json {
+            message: err.to_string(),
+        }
+    })?;
+    let schema_override = frozen_contract_override(path, &frontmatter)?;
     let effective = api
-        .effective_for(&md)
+        .effective_for_with_override(&md, schema_override.as_ref())
         .map_err(|err| GenError::Markdown {
             path: path.to_path_buf(),
             message: err.to_string(),
@@ -237,12 +256,6 @@ fn load_validated_frontmatter_with_api(
             path: path.to_path_buf(),
             message: "research document declares no `$schema`".into(),
         })?;
-
-    let frontmatter = serde_json::to_value(md.frontmatter().as_map()).map_err(|err| {
-        GenError::Json {
-            message: err.to_string(),
-        }
-    })?;
 
     let report = effective.validate(&frontmatter);
     if !report.valid {
@@ -258,7 +271,67 @@ fn load_validated_frontmatter_with_api(
         });
     }
 
-    Ok(coerce::coerce_frontmatter(&effective.json_schema, &frontmatter).value)
+    let coerced = coerce::coerce_frontmatter(&effective.json_schema, &frontmatter).value;
+    Ok(ValidatedFrontmatter {
+        coerced,
+        authored: frontmatter,
+    })
+}
+
+/// The frozen sidecar a document written for an older contract revision
+/// validates against, as a `$schema` override; `None` when the document
+/// matches its contract's current revision or the contract is unversioned.
+///
+/// Applies to a document whose `$schema` is `./_schema.yaml` and whose
+/// sidecar declares `schema_revision: literal(N; …)`. A document without
+/// `schema_revision` is revision 1. Revision M ≠ N validates against
+/// `_schema.rM.yaml` beside the sidecar, so a contract change does not
+/// break generation while the fleet re-researches; the consumer of the
+/// changed fields decides how an older document projects.
+///
+/// ## Errors
+///
+/// [`GenError::ResearchRevisionUnsupported`] when no frozen sidecar exists
+/// for the document's revision.
+fn frozen_contract_override(path: &Path, frontmatter: &Value) -> Result<Option<Value>, GenError> {
+    if frontmatter.get("$schema").and_then(Value::as_str) != Some("./_schema.yaml") {
+        return Ok(None);
+    }
+    let sidecar = path.with_file_name("_schema.yaml");
+    let Some(current) = contract_revision(&sidecar)? else {
+        return Ok(None);
+    };
+    let found = match frontmatter.get("schema_revision") {
+        None => 1,
+        Some(value) => match value.as_u64() {
+            Some(revision) => revision,
+            // A null or non-integer revision is the current contract's to reject.
+            None => return Ok(None),
+        },
+    };
+    if found == current {
+        return Ok(None);
+    }
+    let frozen = format!("_schema.r{found}.yaml");
+    if !path.with_file_name(&frozen).is_file() {
+        return Err(GenError::ResearchRevisionUnsupported {
+            path: path.to_path_buf(),
+            found,
+            current,
+        });
+    }
+    Ok(Some(Value::String(format!("./{frozen}"))))
+}
+
+/// The `literal` revision a sidecar's `schema_revision` property pins, if any.
+fn contract_revision(sidecar: &Path) -> Result<Option<u64>, GenError> {
+    let SimplifiedSchema::Single(shape) = crate::schema_compat::load_sidecar_schema(sidecar)? else {
+        return Ok(None);
+    };
+    Ok(match shape.properties.get("schema_revision") {
+        Some(PropertyDef::Single(atom)) => atom.literal_value().and_then(Value::as_u64),
+        _ => None,
+    })
 }
 
 fn generator_schemas(area: &Path, snapshot: &RequestSnapshot) -> Result<DarkmatterSchemas, GenError> {

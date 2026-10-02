@@ -268,5 +268,6 @@ pub(crate) fn run_child(
         // never originate here.
         guard_context: None,
         signals: Vec::new(),
+        stream_tails: None,
     })
 }

@@ -161,6 +161,64 @@ Plan for {{topic}}.
     );
 }
 
+/// A required-property violation is a validation boundary even though reading a
+/// missing property is `null`: the run stops before any `start` action and
+/// before the provider, under the existing recovery policy. A document without
+/// `initialize` fails eagerly with no lifecycle event; one with `initialize`
+/// routes the failure once through its `blocked`/`finalize`, where `err` is
+/// readable and an absent property is `null` — never a lifecycle error.
+#[cfg(unix)]
+#[test]
+fn a_required_property_violation_stops_before_lifecycle_actions_under_existing_recovery_policy() {
+    const STACKS: &str = r#"start:
+  stack:
+    - action: {append_line: ["events.log", "start"]}
+blocked:
+  stack:
+    - when: "plan"
+      action: {append_line: ["events.log", "guard over an absent property"]}
+    - action: {append_line: ["events.log", "blocked {{ err.code }} plan=[{{ plan }}]"]}
+finalize:
+  stack:
+    - action: {append_line: ["events.log", "finalize"]}
+"#;
+    for (case, initialize, expected) in [
+        ("eager", "", vec![]),
+        (
+            "staged",
+            "initialize:\n  stack:\n    - action: {append_line: [\"events.log\", \"initialize\"]}\n",
+            vec!["initialize", "blocked composition.missing_properties plan=[]", "finalize"],
+        ),
+    ] {
+        let fixture = CliProcessFixture::named("compose-schema-cli");
+        fixture.initialize_repository();
+        let count_path = fixture.cwd().join("call-count.txt");
+        let md_file = fixture.cwd().join("plan.md");
+        fs::write(
+            &md_file,
+            format!("---\n$schema:\n  topic: 'string(required)'\n{initialize}{STACKS}---\nPlan for {{{{topic}}}}.\n"),
+        )
+        .unwrap();
+        write_executable(
+            &fixture.bin_dir().join("goose"),
+            &format!("#!/bin/sh\necho touched >> {}\nexit 0\n", count_path.display()),
+        );
+
+        let assert = fixture.command()
+            .args(["compose", "--goose", md_file.to_str().unwrap()])
+            .assert()
+            .failure();
+
+        let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+        assert!(plain.to_lowercase().contains("missing properties"), "{case}: {plain}");
+        assert!(!plain.contains("undefined variable") && !plain.contains("unknown root"), "{case}: {plain}");
+        assert!(!count_path.exists(), "{case}: no provider session may launch");
+        let log = fs::read_to_string(fixture.cwd().join("events.log")).unwrap_or_default();
+        assert_eq!(log.lines().collect::<Vec<_>>(), expected, "{case}: {plain}");
+        assert!(!fixture.audio_spool().exists(), "{case}: no audio is published");
+    }
+}
+
 /// AC9a / AC13, compose half: a required property authored as a conditional
 /// expression is judged *after* the document's own expression has had its
 /// chance. With no caller value the expression yields `null`, which — with

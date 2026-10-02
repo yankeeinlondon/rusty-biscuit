@@ -627,7 +627,7 @@ fn attribute_frontmatter_failure(
     failure.into_anchored(authored).with_on_disk_source(on_disk)
 }
 
-/// Records frontmatter unknown-root reads, each located at its top-level key.
+/// Records frontmatter undeclared-property reads, each located at its top-level key.
 fn add_frontmatter_candidates(
     report: &mut ComposeReport,
     stage: &'static str,

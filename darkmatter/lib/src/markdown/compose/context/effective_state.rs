@@ -222,36 +222,40 @@ impl EffectiveState {
             return resolved.ok().flatten();
         }
 
-        // Reserved `doc` namespace — intercepted before normal key lookup and
-        // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
-        // collapses into `ctx.*`.
+        // Reserved `doc` namespace — intercepted before normal key lookup, so
+        // `doc.*` always reads the document, even for a reserved-looking key.
         if super::super::expression::doc_namespace::is_doc_namespace(path) {
             return super::super::expression::doc_namespace::resolve_doc_namespace_in_map(
                 path, &self.data,
             );
         }
 
-        // Handle special prefixes
+        // The `ctx` and `env` namespaces, their exact roots included, so a
+        // frontmatter key of either name is reachable only as `doc.<name>`.
         if let Some(ctx_key) = path.strip_prefix("ctx.") {
             return self.get_context_value(ctx_key);
         }
-
+        if path == "ctx" {
+            return self.data.get("ctx").cloned();
+        }
         if let Some(env_key) = path.strip_prefix("env.") {
             return self.get_env_value(env_key);
         }
+        if path == "env" {
+            return Some(self.context.env_value());
+        }
 
-        // Handle nested path or simple key in frontmatter, then fall back
-        // to the ctx namespace so that `when="repo"` resolves `ctx.repo`
-        // when `repo` isn't a frontmatter key.
+        // Everything else is a document property. A missing one is absent; it
+        // never falls through to `ctx` (`repo` and `ctx.repo` are different
+        // names).
         self.get_nested_value(path)
-            .or_else(|| self.get_context_value(path))
     }
 
     /// Checked twin of [`get`](Self::get) for the evaluator channel.
     ///
-    /// Explicit `ctx.*` paths and the bare-name ctx fallback classify against
-    /// the captured groups before any user-authored `ctx` value is consulted,
-    /// so an authored value cannot mask a missing capture.
+    /// Explicit `ctx.*` paths classify against the captured groups before any
+    /// user-authored `ctx` value is consulted, so an authored value cannot mask
+    /// a missing capture.
     pub(crate) fn get_checked(
         &self,
         path: &str,
@@ -267,15 +271,7 @@ impl EffectiveState {
                 .classify_context_value(ctx_key)
                 .into_checked(|| self.get_context_value(ctx_key));
         }
-        if path.starts_with("env.") {
-            return Ok(self.get(path));
-        }
-        match self.get_nested_value(path) {
-            Some(value) => Ok(Some(value)),
-            None => self
-                .classify_context_value(path)
-                .into_checked_bare_name(|| self.get_context_value(path)),
-        }
+        Ok(self.get(path))
     }
 
     /// Classifies `ctx.<key>`; a present value keeps the merge order of
@@ -416,11 +412,18 @@ impl super::super::expression::EvaluationLookup for EffectiveState {
         self.get(path)
     }
 
-    fn get_checked(
+    fn resolve(
         &self,
         path: &str,
-    ) -> Result<Option<Value>, super::super::expression::ExpressionError> {
+    ) -> Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>
+    {
         self.get_checked(path)
+            .map(|value| super::super::expression::ResolvedBinding::classify(path, value))
+    }
+
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        coerce_named_object(path, value, &self.name_coercion_keys)
+            .unwrap_or_else(|| super::super::expression::default_format(value))
     }
 
     fn get_string(&self, path: &str) -> String {
@@ -443,15 +446,6 @@ impl super::super::expression::EvaluationLookup for EffectiveState {
                 .collect()
         });
         NAMES.as_slice()
-    }
-
-    /// Known: a reserved namespace, a key of the merged state (frontmatter,
-    /// `--set`, caller files, inherited parent state — even when its value is
-    /// `null` or empty), or a bare runtime-context name (`when="repo"`).
-    fn is_known_variable_root(&self, root: &str) -> bool {
-        super::super::expression::absence::is_reserved_root(root)
-            || self.data.contains_key(root)
-            || super::super::expression::EvaluationLookup::is_valid_context_variable(self, root)
     }
 
     fn begin_expression_scope(&self) {
@@ -495,11 +489,16 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
         self.state.get(path)
     }
 
-    fn get_checked(
+    fn resolve(
         &self,
         path: &str,
-    ) -> Result<Option<Value>, super::super::expression::ExpressionError> {
-        self.state.get_checked(path)
+    ) -> Result<super::super::expression::ResolvedBinding, super::super::expression::ExpressionError>
+    {
+        super::super::expression::EvaluationLookup::resolve(self.state, path)
+    }
+
+    fn format_resolved(&self, path: &str, value: &Value) -> String {
+        super::super::expression::EvaluationLookup::format_resolved(self.state, path, value)
     }
 
     fn get_string(&self, path: &str) -> String {
@@ -523,10 +522,6 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
 
     fn context_variable_names(&self) -> &[&'static str] {
         self.state.context_variable_names()
-    }
-
-    fn is_known_variable_root(&self, root: &str) -> bool {
-        super::super::expression::EvaluationLookup::is_known_variable_root(self.state, root)
     }
 
     fn begin_expression_scope(&self) {

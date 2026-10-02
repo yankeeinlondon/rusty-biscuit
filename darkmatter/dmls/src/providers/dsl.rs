@@ -794,10 +794,11 @@ fn transclusion_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Malformed body interpolations and unknown identifiers in any operand
-/// position (see [`KnownRoots`]), both `WARNING`: a body `{{ … }}` is only
-/// *inferred* to be an expression (foreign template syntax is common in
-/// prose), and an unknown root might be supplied at runtime.
+/// Malformed body interpolations and undeclared document properties in any
+/// operand position (see [`KnownRoots`]), both `WARNING`: a body `{{ … }}` is
+/// only *inferred* to be an expression (foreign template syntax is common in
+/// prose), and an undeclared property is valid and may be supplied at runtime.
+/// A call to an unknown function is an `ERROR`: compose fails on it.
 fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     let body_base = body_base(ctx.text);
     let known_roots = KnownRoots::for_document(ctx);
@@ -819,16 +820,29 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
                 }
             }
             Ok(expr) => {
+                let base = interpolation.inner.start;
+                for (name, span) in expressions::unknown_function_calls(&expr, &interpolation.text) {
+                    if let Some(range) =
+                        ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)
+                    {
+                        out.push(diagnostic(
+                            range,
+                            DiagnosticSeverity::ERROR,
+                            code::EXPRESSION_UNKNOWN_FUNCTION,
+                            source::COMPOSE,
+                            expressions::unknown_function_message(&name),
+                        ));
+                    }
+                }
                 let Some(known_roots) = &known_roots else {
                     continue;
                 };
-                let base = interpolation.inner.start;
                 for finding in known_roots.findings(&expr, &interpolation.text, expressions::parse, None) {
                     let span = finding_span(&finding);
                     if let Some(range) =
                         ctx.source_map.byte_range_to_lsp(base + span.start..base + span.end)
                     {
-                        out.push(unknown_identifier_diagnostic(range, source::COMPOSE, &finding));
+                        out.push(undeclared_property_diagnostic(range, source::COMPOSE, &finding));
                     }
                 }
             }
@@ -836,20 +850,24 @@ fn expression_diagnostics(ctx: &DocumentContext, out: &mut Vec<Diagnostic>) {
     }
 }
 
-/// Frontmatter membership for `dm.expression.unknown_identifier`, computed
-/// once per diagnostics pass and shared by the body-interpolation and
-/// frontmatter-expression providers.
+/// The classification for `dm.expression.undeclared_property`, computed once
+/// per diagnostics pass and shared by the body-interpolation and
+/// frontmatter-expression providers: Darkmatter's baseline [`BindingView`]
+/// plus this document's frontmatter and schema membership.
 ///
 /// Only exists when the document has frontmatter (so the intended variable
 /// set is known); on a frontmatter-less document every bare identifier could
 /// be a `--set` value, so none is flagged. The compose runtime has no such
 /// blind spot.
 ///
-/// A property the effective schema **declares** counts as known even when the
-/// document leaves it unset: schema-declared properties (including required
-/// ones) are the caller-supplied parameters a document interpolates, validated
-/// against the merged state at compose time — not unknown identifiers.
+/// A property the effective schema **declares** is not undeclared even when
+/// the document leaves it unset: schema-declared properties (including
+/// required ones) are the caller-supplied parameters a document interpolates,
+/// validated against the merged state at compose time.
+///
+/// [`BindingView`]: darkmatter::markdown::compose::expression::BindingView
 pub(crate) struct KnownRoots<'a> {
+    view: darkmatter::markdown::compose::expression::BindingView,
     ast: &'a crate::overlay::FrontmatterAst,
     shape: darkmatter::markdown::schemas::SchemaShape,
 }
@@ -858,6 +876,7 @@ impl<'a> KnownRoots<'a> {
     pub(crate) fn for_document(ctx: &DocumentContext<'a>) -> Option<Self> {
         let ast = ctx.overlay.and_then(|overlay| overlay.ast.as_ref())?;
         Some(Self {
+            view: darkmatter::markdown::compose::expression::BindingView::baseline(),
             ast,
             shape: frontmatter::known_shape(ctx),
         })
@@ -867,7 +886,7 @@ impl<'a> KnownRoots<'a> {
         self.ast.entry_by_dotted(name).is_some() || self.shape.properties.contains_key(name)
     }
 
-    /// See [`expressions::unknown_identifier_findings`].
+    /// See [`expressions::undeclared_property_findings`].
     pub(crate) fn findings(
         &self,
         expr: &darkmatter::markdown::compose::expression::SpannedExpr,
@@ -879,14 +898,15 @@ impl<'a> KnownRoots<'a> {
             darkmatter::markdown::compose::expression::ParseError,
         >,
         forbidden_quote: Option<char>,
-    ) -> Vec<expressions::UnknownIdentifierFinding> {
-        expressions::unknown_identifier_findings(
+    ) -> Vec<expressions::UndeclaredPropertyFinding> {
+        expressions::undeclared_property_findings(
             expr,
             source,
             reparse,
             |root| {
-                expressions::is_unknown_root(
+                expressions::is_undeclared_property(
                     root,
+                    &self.view,
                     |name| self.ast.entry_by_dotted(name).is_some(),
                     |name| self.shape.properties.contains_key(name),
                 )
@@ -898,23 +918,23 @@ impl<'a> KnownRoots<'a> {
 }
 
 /// The expression-relative span of a finding.
-pub(crate) fn finding_span(finding: &expressions::UnknownIdentifierFinding) -> &SourceSpan {
+pub(crate) fn finding_span(finding: &expressions::UndeclaredPropertyFinding) -> &SourceSpan {
     match finding {
-        expressions::UnknownIdentifierFinding::Identifier { span, .. }
-        | expressions::UnknownIdentifierFinding::DashSeparatedKey { span, .. } => span,
+        expressions::UndeclaredPropertyFinding::Property { span, .. }
+        | expressions::UndeclaredPropertyFinding::DashSeparatedKey { span, .. } => span,
     }
 }
 
-/// A `dm.expression.unknown_identifier` diagnostic at `WARNING`, the severity
+/// A `dm.expression.undeclared_property` diagnostic at `WARNING`, the severity
 /// the compose runtime uses for the same condition. A proven dash-separated-key
 /// fix rides in `data` as a [`expressions::KeyReferenceFix`].
-pub(crate) fn unknown_identifier_diagnostic(
+pub(crate) fn undeclared_property_diagnostic(
     range: Range,
     source_value: &str,
-    finding: &expressions::UnknownIdentifierFinding,
+    finding: &expressions::UndeclaredPropertyFinding,
 ) -> Diagnostic {
     let data = match finding {
-        expressions::UnknownIdentifierFinding::DashSeparatedKey { fix: Some(fix), .. } => {
+        expressions::UndeclaredPropertyFinding::DashSeparatedKey { fix: Some(fix), .. } => {
             serde_json::to_value(fix).ok()
         }
         _ => None,
@@ -924,9 +944,9 @@ pub(crate) fn unknown_identifier_diagnostic(
         ..diagnostic(
             range,
             DiagnosticSeverity::WARNING,
-            code::EXPRESSION_UNKNOWN_IDENTIFIER,
+            code::EXPRESSION_UNDECLARED_PROPERTY,
             source_value,
-            expressions::unknown_identifier_message(finding),
+            expressions::undeclared_property_message(finding),
         )
     }
 }

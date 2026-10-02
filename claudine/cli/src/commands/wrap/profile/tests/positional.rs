@@ -472,8 +472,10 @@ fn extract(
     has_piped_stdin: bool,
 ) -> (Vec<String>, PromptSource) {
     let args: Vec<String> = passthrough.iter().map(|s| s.to_string()).collect();
-    extract_prompt_source_from_passthrough(profile(provider), &args, has_piped_stdin)
-        .expect("extract_prompt_source_from_passthrough should succeed")
+    let (args, source, _removed) =
+        extract_prompt_source_from_passthrough(profile(provider), &args, has_piped_stdin)
+            .expect("extract_prompt_source_from_passthrough should succeed");
+    (args, source)
 }
 
 #[test]
@@ -912,7 +914,8 @@ fn direct_wrap_argv_with_tail(
     assert_eq!(parsed.edit, matches!(message, FirstMessage::Edited(_)));
 
     let p = profile(provider);
-    let (mut args, source) = extract_prompt_source_from_passthrough(p, &child_args, false).unwrap();
+    let (mut args, source, _removed) =
+        extract_prompt_source_from_passthrough(p, &child_args, false).unwrap();
     match message {
         FirstMessage::Positional(prompt) => assert_eq!(
             source.as_inline(),

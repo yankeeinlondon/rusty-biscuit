@@ -77,15 +77,15 @@ because the mistake now ships.
 
 The error names the source file, the authored line and column, and the
 expression, and no partially composed document is written. `ComposeOptions::with_fail_fast(false)`
-does not relax this; it governs recoverable non-expression stages only. The one
-lenient path is an explicit `compose_subtree(..., SubtreeStrictness::Lenient)`
-call over a data tree. The public condition API (`evaluate_condition`,
-`parse_condition`) returns its failures as `Result` errors and leaves their
-disposition to the caller.
+does not relax this; it governs recoverable non-expression stages only. Subtree
+compose (`compose_subtree`, `SubtreeCompose`) follows the same rule. The public
+condition API (`evaluate_condition`, `parse_condition`) returns its failures as
+`Result` errors and leaves their disposition to the caller.
 
-A well-formed identifier that resolves to nothing is **not** a failure: it
-renders empty and warns with `dm.expression.unknown_identifier` unless something
-knows the name or the author handled its absence. See
+A well-formed identifier that resolves to nothing is **not** a failure: it is an
+absent document property, which evaluates to `null` and renders empty. Unless
+something declares the name or the author handled its absence, composition adds
+the advisory `dm.expression.undeclared_property`. See
 [Interpolation § Missing Variables](../../inline/interpolation.md#missing-variables).
 
 The language server also carries static checks over the same AST, so an author

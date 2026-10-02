@@ -39,17 +39,8 @@ pub(crate) mod lifecycle {
     pub(crate) const COMMUNICATION_FIELDS: [&str; 9] =
         ["say", "say_first", "message", "stderr", "notify", "info", "warn", "success", "stdout"];
 
-    /// Globals Claudine binds only while a lifecycle event fires.
-    pub(crate) const LATE_BINDING_ROOTS: [&str; 3] = ["err", "timing", "current"];
-
     fn is_event(segment: Option<&FmPathSegment<'_>>) -> bool {
         matches!(segment, Some(Key(key)) if EVENT_KEYS.contains(key))
-    }
-
-    /// Whether `path` lies strictly beneath a lifecycle event key, where the
-    /// late-binding roots are in scope.
-    pub(crate) fn is_beneath_event(path: &[FmPathSegment<'_>]) -> bool {
-        path.len() > 1 && is_event(path.first())
     }
 
     /// Whether a whole-value scalar at `path` is evaluated exactly once: an

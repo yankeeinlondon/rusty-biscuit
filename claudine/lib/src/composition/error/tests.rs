@@ -84,6 +84,7 @@ fn already_emitted_wraps_once_and_delegates_display() {
         message: "boom".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let display = err.to_string();
     let marked = err.already_emitted();
@@ -1758,6 +1759,7 @@ fn phase_11_family_dispatch_routes_to_family_renderers() {
                 source_path: PathBuf::from("prompts/plan.md"),
                 property: "start".to_string(),
                 event: "start".to_string(),
+                source: None,
             },
             "⤫ CompositionError: `err` not available in this event",
         ),
@@ -2070,10 +2072,9 @@ fn pre_flight_state_build_failed_publishes_its_merge_error() {
     );
 }
 
-/// `LifecycleShellResolution`'s source is `Option` because the same variant is
-/// raised by this layer's own late-binding guard, which never calls Darkmatter
-/// and so has no typed error to retain. Both shapes must render identically —
-/// only the recoverable cause differs.
+/// `LifecycleShellResolution`'s typed source never changes how it renders:
+/// with or without one, display, code, and detail are identical — only the
+/// recoverable cause differs.
 #[test]
 fn lifecycle_shell_resolution_source_is_optional_and_leaves_display_unmoved() {
     let untyped = CompositionError::LifecycleShellResolution {

@@ -63,22 +63,22 @@ fn omitted_when_always_runs() {
     assert_eq!(recorder.events(), vec![Emitted::Warn("always".to_string())]);
 }
 
-/// A `when:` guard referencing an unknown root (a typo) fails the event
-/// closed: the outcome carries an action error and the guarded action
-/// dispatches nothing. Without the fail-closed guard the null-resolving
-/// typo would silently skip the item (Finding 2).
+/// A `when:` guard calling an unknown function fails the event closed: the
+/// outcome carries an evaluation error and the guarded action dispatches
+/// nothing. (A misspelled *property* is an absent property, so its guard is
+/// falsy and the item is skipped — see `binding_contract`.)
 #[test]
-fn when_unknown_root_typo_fails_closed() {
+fn when_unknown_function_fails_closed() {
     let config = parse_lifecycle_config(
         &json!({
             "success": {
-                "stack": [{"when": "spec_fil", "action": {"message": "guarded"}}]
+                "stack": [{"when": "spec_fil()", "action": {"message": "guarded"}}]
             }
         }),
         Path::new("t.md"),
     )
     .unwrap();
-    // `spec_file` is present; the guard's `spec_fil` typo is not.
+    // `spec_file` is a property; the guard calls a function that does not exist.
     let fm = map(json!({"spec_file": "x"}));
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);
@@ -97,7 +97,7 @@ fn when_unknown_root_typo_fails_closed() {
     let outcome = context.execute_event(&config);
     assert!(
         outcome.evaluation_error.is_some(),
-        "unknown `when:` root must fail closed through the evaluation channel"
+        "an unknown `when:` function must fail closed through the evaluation channel"
     );
     assert!(
         outcome.action_error.is_none(),
@@ -109,9 +109,9 @@ fn when_unknown_root_typo_fails_closed() {
     );
 }
 
-/// A `when:` guard whose unknown name is wrapped in an `|| false` fallback is
-/// tolerated (not a typo to fail on): the fallback yields false, so the item
-/// is skipped cleanly with no action error and no side effect.
+/// A `when:` guard over an absent property with an `|| false` fallback yields
+/// false, so the item is skipped cleanly with no error and no side effect. The
+/// fallback chooses a value; it is not needed to make the guard legal.
 #[test]
 fn when_guarded_fallback_false_skips_cleanly() {
     let config = parse_lifecycle_config(
@@ -143,9 +143,8 @@ fn when_guarded_fallback_false_skips_cleanly() {
     assert!(recorder.events().is_empty());
 }
 
-/// The same guarded-fallback form, but the fallback yields true, so the
-/// item's action runs. Confirms the tolerance does not disable a legitimate
-/// guard.
+/// The same fallback form, but the fallback yields true, so the item's action
+/// runs.
 #[test]
 fn when_guarded_fallback_true_runs_action() {
     let config = parse_lifecycle_config(
@@ -314,6 +313,7 @@ fn err_global_visible_in_failure_stack_when() {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     };
     let (_dir, engine) = temp_engine();
     let shell = MockShell::new(0);

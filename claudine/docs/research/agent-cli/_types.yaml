@@ -1,0 +1,34 @@
+# Named types for the agent-cli research contract, revision 2.
+#
+# The switch records here decide how Claudine reads a command line that mixes
+# its own inputs with switches for the agent, so every field that changes that
+# decision is a closed set or a checked number, and research that cannot
+# establish a fact says so with unknown and a gap.
+kind: schema
+types:
+    switch_value_type: enum(none,string,number,variadic,unknown) -> How many values the switch takes and what kind; variadic is a list of strings, and unknown means research could not establish it, which Claudine treats as an unrecognized switch and never as none
+
+    switch_attachment: enum(space,equals,short_attached) -> A way the provider accepts a value, where space is the next argument, equals is --name=value, and short_attached is a value written straight after a two-character switch such as -cvalue
+
+    cli_switch:
+        flag: string(required; pattern(^--?[A-Za-z0-9][A-Za-z0-9_.-]*$)) -> The canonical spelling the provider documents, copied exactly with its dashes
+        aliases: string(pattern(^--?[A-Za-z0-9][A-Za-z0-9_.-]*$))[] -> Every other exact spelling the provider accepts for the same switch, such as -c for --config; omit when there are none
+        value: string(not-empty) -> Placeholder a person reads, such as <key=value>; never used to decide the value type
+        value_type: switch_value_type(required)@this -> How the switch takes its value, established from documentation, source, or a test and never guessed from the placeholder or the notes
+        value_optional: boolean -> Whether the single value may be left out; present exactly when value_type is string or number
+        variadic_min:
+            - literal(unknown) -> The fewest values could not be established; the switch record then carries a gap, and the field is present exactly when value_type is variadic
+            - "number(integer; min(1)) -> The fewest values a variadic switch requires; present exactly when value_type is variadic"
+        attachment: switch_attachment[](required)@this -> Every form in which the provider accepts the value; empty exactly when value_type is none or unknown, and short_attached only when a spelling is a single dash and one character
+        invocation_scope: switch_scope[](required)@this -> Where on the command line the switch is accepted; at least one entry
+        scope: string[] -> Topic labels such as config or model_selection that group switches for a reader; descriptive only and never read as command paths
+        default: string(not-empty) -> The value in force when the switch is not given, as the provider documents it
+        description: string(required; not-empty) -> What the switch does, in the provider's terms
+        example: string(not-empty) -> One complete command that uses the switch
+        notes: string(not-empty) -> Anything a wrapper author must know that the other fields cannot express
+        evidence_ids: identifier[](required)@../_types.yaml -> Evidence for the spellings, the value type, and the attachment forms recorded here
+        gap: string(not-empty) -> What could not be established and the check that would establish it; present exactly when value_type or variadic_min is unknown
+
+    switch_scope:
+        applies_to: enum(global,command; required) -> global when the provider accepts the switch at every command path, command when only at the one path below
+        command: string(pattern(^[A-Za-z0-9][A-Za-z0-9_.:-]*$))[] -> The exact native command path after the executable, one word per entry, such as exec then resume; an empty list is the root entrypoint; present exactly when applies_to is command

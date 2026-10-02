@@ -445,10 +445,8 @@ fn lifecycle_malformed_span_is_deferred_raw_through_prepare() {
 
 #[test]
 fn undefined_lifecycle_variable_is_deferred_not_rejected_at_prepare() {
-    // Previously a bare `{{ missing }}` in a lifecycle string was rejected
-    // at prepare. With event-time interpolation (C2) the span is deferred;
-    // an unknown root fails closed at event-time via DM2 strict mode rather
-    // than at prepare. Prepare keeps the raw span.
+    // A bare `{{ missing }}` in a lifecycle string is deferred to event time
+    // (C2), where an absent property is `null`. Prepare keeps the raw span.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -1208,6 +1206,58 @@ fn lazy_reserved_roots_in_a_lifecycle_shell_command_are_rejected_at_prepare() {
             other => panic!("expected LifecycleShellResolution for `{root}`, got: {other:?}"),
         }
     }
+}
+
+/// Lifecycle shell approval — what a sequence's referenced prompt goes through
+/// at its turn — refuses `group` like every late global, even in a branch that
+/// never runs, and carries Darkmatter's typed cause. `doc.group` reads the
+/// document, and its resolved bytes are what was stamped for execution.
+#[test]
+fn lifecycle_shell_approval_refuses_group_in_any_branch_while_doc_group_reads_the_document() {
+    use darkmatter::markdown::compose::expression::{BindingError, ExpressionError, Expr};
+
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            ("group", json!({"label": "document"})),
+            (
+                "start",
+                json!({"stack": [{"action": {"shell": "echo {{ false ? group.label : 'x' }}"}}]}),
+            ),
+        ],
+        "Do the work.",
+    );
+    let err = prepare_direct(&source, PrepareOptions::default()).unwrap_err();
+    let CompositionError::LifecycleShellResolution { message, source: Some(cause), .. } = &err else {
+        panic!("expected a typed LifecycleShellResolution, got: {err:?}");
+    };
+    assert!(message.contains("`group`"), "{message}");
+    let darkmatter::markdown::MarkdownError::Interpolation { cause, .. } = cause.as_ref() else {
+        panic!("expected an interpolation cause, got {cause:?}");
+    };
+    let ExpressionError::Binding(binding) = cause.as_ref() else {
+        panic!("expected a binding cause, got {cause:?}");
+    };
+    let BindingError::Unavailable(read) = binding.as_ref() else {
+        panic!("expected an unavailable read, got {binding:?}");
+    };
+    assert_eq!(read.reason.code(), "claudine.preflight-unavailable");
+
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            ("group", json!({"label": "document"})),
+            ("start", json!({"stack": [{"action": {"shell": "echo {{ doc.group.label }}"}}]})),
+        ],
+        "Do the work.",
+    );
+    let prepared = prepare_direct(&source, PrepareOptions::default()).unwrap();
+    assert_eq!(
+        first_shell_command(&prepared.lifecycle, crate::composition::LifecycleSignal::Start),
+        Expr::StringLiteral("echo document".to_string())
+    );
 }
 
 #[test]

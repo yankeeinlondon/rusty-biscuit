@@ -750,6 +750,7 @@ fn build_loop_stack_context<'a>(
 ) -> StackExecutionContext<'a> {
     StackExecutionContext {
         signal,
+        scope: None,
         frontmatter,
         // The loop engine fires a single `loop` gate concern per iteration and
         // threads frontmatter across iterations via `apply_actions` /

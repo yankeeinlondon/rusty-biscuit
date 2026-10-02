@@ -124,7 +124,8 @@ pub(crate) fn ambient_sensitive_env() -> HashMap<OsString, OsString> {
 /// replaces the value portion with `****`. Matching is case-insensitive for
 /// flag names, and the short alias `-k` and any bare argument starting with a
 /// shared credential-token prefix
-/// ([`claudine::secrets::CREDENTIAL_TOKEN_PREFIXES`]) are also redacted.
+/// ([`claudine::secrets::CREDENTIAL_TOKEN_PREFIXES`]) are also redacted, as is
+/// such a value attached to a short switch (`-csk-…` becomes `-c****`).
 pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
     let sensitive_prefixes: &[&str] = &[
         "--api-key",
@@ -190,8 +191,47 @@ pub(crate) fn redact_sensitive_args(args: &[String]) -> Vec<String> {
             continue;
         }
 
+        // A short switch with a credential-shaped value attached (`-csk-…`):
+        // keep the switch, mask the value.
+        if let Some(attached) = short_attached_value(arg)
+            && has_credential_prefix(attached)
+        {
+            result.push(format!("{}****", &arg[..2]));
+            continue;
+        }
+
         result.push(arg.clone());
     }
 
     result
+}
+
+/// The text attached to a single-dash short switch (`secret` in `-csecret`),
+/// or `None` for anything else.
+fn short_attached_value(arg: &str) -> Option<&str> {
+    let rest = arg.strip_prefix('-')?;
+    if rest.starts_with('-') {
+        return None;
+    }
+    let mut chars = rest.chars();
+    let switch = chars.next()?;
+    let attached = chars.as_str();
+    (switch.is_ascii_alphanumeric() && !attached.is_empty()).then_some(attached)
+}
+
+/// The original values [`redact_sensitive_args`] masks in `args`, so text that
+/// echoes one of them without its flag can be masked too.
+///
+/// A masked token keeps whatever prefix the policy left visible (`--token=`,
+/// `-c`); the value is the rest of the original token.
+pub(crate) fn sensitive_arg_values(args: &[String]) -> Vec<String> {
+    redact_sensitive_args(args)
+        .iter()
+        .zip(args)
+        .filter(|(redacted, original)| redacted != original)
+        .map(|(redacted, original)| {
+            let kept = redacted.strip_suffix("****").unwrap_or("");
+            original.strip_prefix(kept).unwrap_or(original).to_string()
+        })
+        .collect()
 }

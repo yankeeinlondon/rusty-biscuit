@@ -756,16 +756,16 @@ fn construct_argv_and_system_prompt(
         // model, transport, system-prompt, MCP, and prompt-delivery injections
         // (`apply_entrypoint` inserts the entrypoint subcommand at index 0, so a
         // tail-first base still lands after it, exactly like the wrapper). Announce
-        // it once per distinct (provider, tail) before launch.
-        provider_args::announce_forwarded_tail(
+        // it once per distinct (provider, tail) for the owning command.
+        crate::commands::wrap::provider_tail_report::announce(
             provider,
-            &request.provider_args,
-            request.provider_args_explicit,
+            &request.provider_tail,
+            &request.provider_tail_notices,
             silent,
             quiet,
             term,
         );
-        let mut child_args = request.provider_args.clone();
+        let mut child_args = request.provider_tail.launch_args().to_vec();
 
         // -- Yolo ----------------------------------------------------------------
 
@@ -824,7 +824,7 @@ fn construct_argv_and_system_prompt(
             request_yolo = request.yolo,
             effective_yolo,
             non_interactive = effective_non_interactive,
-            child_args = ?child_args,
+            child_args = ?crate::commands::wrap::env::redact_sensitive_args(&child_args),
             "yolo applied to provider argv",
         );
 
@@ -1148,7 +1148,7 @@ fn construct_argv_and_system_prompt(
                 }
             }
             lp::LaunchPlanInputs {
-                provider_args_tail: request.provider_args.clone(),
+                provider_tail: request.provider_tail.clone(),
                 output_format: request.output.map(Into::into),
                 system_prompt_args,
                 system_prompt_opencode_config,
@@ -1732,6 +1732,7 @@ fn provider_run_handoff(
     );
     let init_ctx = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
         // Single pre-launch `initialize` event; the cross-event live cell is
         // owned by the harness loop, which re-materializes frontmatter before

@@ -215,6 +215,11 @@ pub enum Coercion {
     OverlaySelectorRecord,
     /// Facts overlay-capability record → `OverlayCapabilities` expression.
     OverlayCapabilitiesRecord,
+    /// agent-cli frontmatter, as authored → `CliSwitchCatalog`: typed
+    /// switch records at contract revision 2, or an explicit whole-provider
+    /// gap for an older document or an empty inventory. Every shape the
+    /// contract does not allow fails generation; nothing is skipped.
+    CliSwitchRecords,
 }
 
 impl Coercion {
@@ -261,6 +266,7 @@ impl Coercion {
             Coercion::PlatformKindMember => "platform_kind_member",
             Coercion::OverlaySelectorRecord => "overlay_selector_record",
             Coercion::OverlayCapabilitiesRecord => "overlay_capabilities_record",
+            Coercion::CliSwitchRecords => "cli_switch_records",
         }
     }
 }
@@ -306,7 +312,7 @@ pub const SKILL_SUPPORT_MEMBERS: &[&str] =
     &["first_class", "partial", "convention_only", "none", "unknown"];
 
 /// The generator-v1 mapping registry, in `ProviderInfo` serialization
-/// order (10 roster + 11 research + 24 facts = 45 fields).
+/// order (10 roster + 12 research + 24 facts = 46 fields).
 pub const REGISTRY: &[RegistryEntry] = &[
     entry(
         "provider",
@@ -797,6 +803,31 @@ pub const REGISTRY: &[RegistryEntry] = &[
         Coercion::OverlayCapabilitiesRecord,
         "Per-activation-reason overlay capability verdicts (native_root / \
          composable_injection / unsupported)",
+    ),
+    entry(
+        "cli_switches",
+        DeclaredSource::Research {
+            topic: "agent-cli",
+            path: "cli_switches",
+        },
+        // The fields the CliSwitchRecords coercion reads; the record is the
+        // `cli_switch` named type in the topic's `_types.yaml`.
+        &[SchemaExpectation::RecordArray {
+            required_fields: &[
+                "flag",
+                "aliases",
+                "value_type",
+                "value_optional",
+                "variadic_min",
+                "attachment",
+                "invocation_scope",
+                "description",
+                "gap",
+            ],
+        }],
+        Coercion::CliSwitchRecords,
+        "Researched switch metadata (spellings, value type, attachment forms, invocation \
+         scope), or the gap explaining why none is established",
     ),
 ];
 

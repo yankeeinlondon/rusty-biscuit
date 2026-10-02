@@ -113,30 +113,6 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                      braces are meant to appear literally, write `{{{ … }}}`.",
                 )
         }
-        CompositionError::LifecycleUndefinedVariable {
-            source_path,
-            property,
-            variable,
-        } => {
-            let file_link = render_file_link(source_path);
-            let body = format!(
-                "Lifecycle property <cyan>`{property}`</cyan> in {file_link} references \
-                 undefined variable <cyan>`{}`</cyan>, which composition resolves to an \
-                 empty string.",
-                escape_prose_path(variable)
-            );
-
-            StatusBlock::new(StatusState::Error)
-                .error_header(ErrorHeader::new(
-                    "CompositionError",
-                    "undefined lifecycle variable",
-                ))
-                .body(body)
-                .hint(
-                    "Define the variable in frontmatter, prefix a runtime value with \
-                     `ctx.`/`env.`, or supply a fallback (`{{ var || 'default' }}`).",
-                )
-        }
         CompositionError::LifecycleEvaluationError {
             source_path,
             event,
@@ -144,13 +120,14 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             message,
             property,
             reason,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             let surface_label = match property {
                 Some(property) => format!("<cyan>`{}`</cyan>", Prose::escape_text(property)),
                 None => lifecycle_evaluation_surface_label(surface),
             };
-            let reason_text = match reason.as_ref() {
+            let reason_text = match reason {
                 LifecycleEvaluationReason::Expression => escape_prose_path(message),
             };
             let body = format!(
@@ -158,7 +135,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                  lifecycle event was firing, in {surface_label} ({file_link}).\n\n\
                  <b>Reason:</b> {reason_text}"
             );
-            let hint = match reason.as_ref() {
+            let hint = match reason {
                 LifecycleEvaluationReason::Expression => {
                     "This is a crashed expression, not a clean `false` guard: the run \
                      halts and exits non-zero. Fix the expression (resolve the missing \
@@ -475,6 +452,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             path,
             target,
             message,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(
@@ -786,6 +764,7 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             source_path,
             property,
             event,
+            ..
         } => {
             let file_link = render_file_link(source_path);
             let body = format!(

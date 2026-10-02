@@ -45,7 +45,7 @@ fn wrapper_command(
 /// Attach the pre-clap agent tail ([`argv::partition_composition_tail`]) to
 /// the composition command's shared args. A no-op for every other command and
 /// when the tail is empty.
-fn inject_provider_tail(cli: &mut Cli, tail: argv::ProviderArgs) {
+fn inject_provider_tail(cli: &mut Cli, tail: claudine::composition::ProviderTail) {
     let Some(command) = cli.command.as_mut() else {
         return;
     };
@@ -55,8 +55,7 @@ fn inject_provider_tail(cli: &mut Cli, tail: argv::ProviderArgs) {
         Commands::Sequence(args) => &mut args.shared,
         _ => return,
     };
-    shared.provider_args = tail.args;
-    shared.provider_args_explicit = tail.explicit;
+    shared.provider_tail = tail;
 }
 
 /// Check if the Claudine config file exists and is valid. If not (missing or
@@ -306,7 +305,7 @@ fn run() -> Result<std::convert::Infallible> {
 /// pending-delivery warning.
 async fn async_main(
     argv: Vec<OsString>,
-    provider_tail: argv::ProviderArgs,
+    provider_tail: claudine::composition::ProviderTail,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
@@ -332,7 +331,7 @@ async fn async_main(
 /// Parse the CLI and run the selected command, returning its exit code.
 async fn dispatch(
     argv: Vec<OsString>,
-    provider_tail: argv::ProviderArgs,
+    provider_tail: claudine::composition::ProviderTail,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
