@@ -297,9 +297,10 @@ fn each_forwarded_switch_is_explained_from_the_compiled_catalog() {
 }
 
 /// Install a fake `opencode` that records its arguments the way
-/// [`recording_codex`] does.
+/// [`recording_codex`] does and appends a line to `body`, so an inline run
+/// passes its body-change check.
 #[cfg(unix)]
-fn recording_opencode(fixture: &CliProcessFixture) -> std::path::PathBuf {
+fn recording_opencode(fixture: &CliProcessFixture, body: &std::path::Path) -> std::path::PathBuf {
     let dir = fixture.home().join("opencode-launches");
     fs::create_dir_all(&dir).unwrap();
     write_executable(
@@ -307,42 +308,77 @@ fn recording_opencode(fixture: &CliProcessFixture) -> std::path::PathBuf {
         &format!(
             "#!/bin/sh\n\
              for arg in \"$@\"; do printf '%s\\037' \"$arg\"; done > '{dir}/launch-'$$\n\
+             printf '\\nAgent wrote this.\\n' >> '{body}'\n\
              exit 0\n",
-            dir = dir.display()
+            dir = dir.display(),
+            body = body.display()
         ),
     );
     dir
 }
 
 /// OpenCode's compiled record for `--get-yargs-completions` declares its
-/// type unknown, so the notice explains it as unrecognized at the `run`
-/// entrypoint, never as a known OpenCode switch, and the child still
-/// receives it unchanged.
+/// type unknown, so every launch command explains it exactly like a switch
+/// with no record (`--new-unresearched-switch`): unrecognized at the `run`
+/// entrypoint, never a known OpenCode switch. The inline notice is emitted
+/// before its body-change check, and the child receives the tokens unchanged.
 #[cfg(unix)]
 #[test]
 fn a_switch_whose_record_is_typed_unknown_is_not_called_known() {
-    let fixture = CliProcessFixture::named("tail-notice-unknown-type");
-    let log = recording_opencode(&fixture);
-    let file = prompt_file(&fixture);
-    let unrecognized = "--get-yargs-completions: Claudine's compiled OpenCode switch catalog has \
-                        no established type for it at its `run` command; Claudine forwards it anyway.";
+    for switch in ["--get-yargs-completions", "--new-unresearched-switch"] {
+        for command in ["compose", "sequence", "inline-compose", "opencode"] {
+            let case = format!("{command} {switch}");
+            let fixture = CliProcessFixture::named("tail-notice-unknown-type");
+            let body = fixture.cwd().join("inline.md");
+            let log = recording_opencode(&fixture, &body);
+            let target = match command {
+                "compose" => prompt_file(&fixture),
+                "sequence" => {
+                    prompt_file(&fixture);
+                    let seq = fixture.cwd().join("seq.md");
+                    fs::write(&seq, "---\nsequence:\n  - name: plan\n    prompt: plan.md\n---\nBody\n").unwrap();
+                    seq.to_str().unwrap().to_owned()
+                }
+                "inline-compose" => {
+                    fs::write(&body, "---\ntitle: plan\nprompt: Write the plan.\n---\nOld body\n").unwrap();
+                    body.to_str().unwrap().to_owned()
+                }
+                _ => "do the thing".to_owned(),
+            };
+            // A direct wrapper has no type-aware ownership: a bare word after
+            // the switch would be part of its prompt, so the switch goes alone.
+            let forwarded: &[&str] = if command == "opencode" { &[switch] } else { &[switch, "foo"] };
+            let mut args: Vec<&str> = vec![command];
+            if command == "opencode" {
+                args.extend(forwarded);
+                args.push(&target);
+            } else {
+                args.extend(["--opencode", &target]);
+                args.extend(forwarded);
+            }
+            let unrecognized = format!(
+                "{switch}: Claudine's compiled OpenCode switch catalog has no established type \
+                 for it at its `run` command; Claudine forwards it anyway."
+            );
 
-    let output = fixture
-        .command()
-        .env("OPENCODE_MODEL", "test/model")
-        .args(["compose", "--opencode", &file, "--get-yargs-completions", "foo"])
-        .output()
-        .unwrap();
-    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    assert_eq!(output.status.code(), Some(0), "stderr:\n{stderr}");
-    let flat = flattened(&stderr);
-    assert!(flat.contains(unrecognized), "{flat}");
-    for claim in ["is one of OpenCode's switches", "OpenCode switch (", "a OpenCode", "reject"] {
-        assert!(!flat.contains(claim), "{claim}: {flat}");
+            let output = fixture
+                .command()
+                .env("OPENCODE_MODEL", "test/model")
+                .args(&args)
+                .output()
+                .unwrap();
+            let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+            assert_eq!(output.status.code(), Some(0), "{case}\nstderr:\n{stderr}");
+            let flat = flattened(&stderr);
+            assert!(flat.contains(&unrecognized), "{case}: {flat}");
+            for claim in ["is one of OpenCode's switches", "OpenCode switch (", " a OpenCode ", "reject"] {
+                assert!(!flat.contains(claim), "{case} claims {claim}: {flat}");
+            }
+            let launches = launches(&log);
+            assert_eq!(launches.len(), 1, "{case}: {launches:?}");
+            assert_eq!(occurrences(&launches[0], forwarded), 1, "{case}: {launches:?}");
+        }
     }
-    let launches = launches(&log);
-    assert_eq!(launches.len(), 1, "{launches:?}");
-    assert_eq!(occurrences(&launches[0], &["--get-yargs-completions", "foo"]), 1, "{launches:?}");
 }
 
 #[cfg(unix)]
