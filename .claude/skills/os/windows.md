@@ -164,6 +164,14 @@ Compare against that, never against `to_string_lossy()`.
     Give such tests a drive (DMLS's `context::test_support::abs` maps `/w/x`
     to `C:/w/x`) or use a real temporary directory. Found 2026-10-01 on
     `build-win-native` (DMLS frontmatter navigation tests).
+15. **A `/`-rooted file *reference* is `ForeignAbsolutePath` on Windows**,
+    not a lookup. A Darkmatter expression that concatenates onto an empty
+    `dirname(…)` (a bare `spec.md` that no schema stage made absolute)
+    builds `/review-2.md`; on Unix that is a real, wrong path a loose
+    `ends_with` assertion accepts, and on Windows the read-side function
+    fails as `Malformed`. When a test passes only on Unix, print the value
+    and assert the exact path. Found 2026-10-01 on `build-win-native`
+    (`schema_number_increment_survives_quoted_persistence_round_trips`).
 
 ## WezTerm on `build-win`
 

@@ -61,10 +61,14 @@ also load the `renderable` skill; for terminal components, load
 
 ## Composition authority
 
-`ComposeOptions` is the request authority. It carries the captured resolution
-context plus remote configuration, cache root and policy, compose identity,
-baseline/meta-schema controls, and rendering options. A source-derived file
-reference must resolve against that captured context.
+`ComposeRequest` is the request authority: `ComposeOptions` (remote
+configuration, cache root and policy, compose identity, baseline/meta-schema
+controls, rendering options) plus the one required `FileResolutionContext`
+built from a `RequestSnapshot`. A source-derived file reference must resolve
+against a context derived from that one. User-facing docs:
+`darkmatter/docs/topics/compose-requests.md` (API, builder, Mermaid),
+`topics/file-referencing.md` (forms and tree rule), and
+`errors/file-reference-failures.md` (the `failure:` row).
 
 The root compose pipeline is ordered:
 
@@ -431,7 +435,8 @@ defect, never a table edit, except where a design decision says otherwise
 `MarkdownError::resolution_failure()` walks the cause chain (nested children,
 `TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
 `ComposeWarning::resolution_failure` carries it, and `md` renders it as a
-`failure: <kebab-class>` row on every block and warning.
+`failure: <kebab-class>` row on every block and warning
+(`darkmatter/docs/errors/file-reference-failures.md` is its user contract).
 
 Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
 and GitNexus first to include actual downstream consumers such as Claudine when

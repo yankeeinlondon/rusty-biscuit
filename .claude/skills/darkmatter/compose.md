@@ -142,6 +142,14 @@ let (composed, report) = md.compose_with(&request)?;
 println!("{}", report.summary());
 ```
 
+`ComposeRequest::prepare` fails with `ContextBuildError` (relative request
+directory, opening reference outside the request's repository, repository
+discovery error) instead of letting a bad context surface later as a missing
+file. Every file-reference error keeps biscuit-file's `ResolutionFailure`;
+read it with `resolution_failure()`, never from message text. User docs:
+`darkmatter/docs/topics/compose-requests.md` and
+`darkmatter/docs/errors/file-reference-failures.md`.
+
 ## Demand-Driven Runtime Context Evidence
 
 Darkmatter exposes the capture requirements separately from population:
