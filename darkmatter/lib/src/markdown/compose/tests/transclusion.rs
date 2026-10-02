@@ -335,7 +335,9 @@ fn test_toc_linking_fail_fast_false_becomes_warning() {
         report
             .warnings
             .iter()
-            .any(|warning| warning.message.contains("File not found"))
+            .any(|warning| warning.resolution_failure == Some(biscuit_file::ResolutionFailure::NoMatch)),
+        "{:?}",
+        report.warnings
     );
 }
 

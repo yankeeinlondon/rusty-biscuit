@@ -108,6 +108,24 @@ pub(crate) fn source_file_context(
     }
 }
 
+/// The derivation a file source at `path` resolves under: `TrustedExternal`
+/// when only that derivation of `context` admits the source (it lies outside
+/// the request's tree), else `Ordinary`.
+fn source_derivation_for(
+    context: &biscuit_file::FileResolutionContext,
+    path: &Path,
+    opening: Option<&SourceOpening>,
+) -> SourceDerivation {
+    let derive = |derivation| source_file_context(context, path, derivation, opening);
+    if derive(SourceDerivation::Ordinary).validate().is_err()
+        && derive(SourceDerivation::TrustedExternal).validate().is_ok()
+    {
+        SourceDerivation::TrustedExternal
+    } else {
+        SourceDerivation::Ordinary
+    }
+}
+
 /// Configuration for the compose pipeline.
 ///
 /// Controls which operations run, how transclusion resolves references,
@@ -983,17 +1001,20 @@ impl ComposeOptions {
         context: &biscuit_file::FileResolutionContext,
     ) -> Self {
         let path = path.into();
-        let derive = |derivation| source_file_context(context, &path, derivation, opening.as_ref());
-        self.source_derivation = if derive(SourceDerivation::Ordinary).validate().is_err()
-            && derive(SourceDerivation::TrustedExternal).validate().is_ok()
-        {
-            SourceDerivation::TrustedExternal
-        } else {
-            SourceDerivation::Ordinary
-        };
+        self.source_derivation = source_derivation_for(context, &path, opening.as_ref());
         self.source = ComposeSource::File(path);
         self.source_opening = opening;
         self
+    }
+
+    /// Admits the root file source the way a child source is admitted
+    /// ([`Self::with_accepted_source_file_in`]): a source outside the
+    /// request's tree that only a trusted-external derivation of `context`
+    /// admits is marked `TrustedExternal`.
+    pub(crate) fn admit_source_in(&mut self, context: &biscuit_file::FileResolutionContext) {
+        if let ComposeSource::File(path) = &self.source {
+            self.source_derivation = source_derivation_for(context, path, self.source_opening.as_ref());
+        }
     }
 
     /// Sets the compose source as a URL.

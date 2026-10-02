@@ -429,7 +429,10 @@ impl Markdown {
                     // that the span is filled rather than emptied.
                     let mut skipped = ComposeReport::new();
                     skipped.transclusions_skipped = 1;
-                    skipped.add_warning(ComposeWarning::new("transclusion", error.to_string()));
+                    skipped.add_warning(
+                        ComposeWarning::new("transclusion", error.to_string())
+                            .with_resolution_failure(error.resolution_failure()),
+                    );
                     ResolvedTransclusion {
                         order: anchor.order,
                         content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),

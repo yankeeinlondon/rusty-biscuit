@@ -730,6 +730,12 @@ pub(crate) fn schema_validation_failed_block(
         if let Some(desc) = &problem.description {
             body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
         }
+        if let Some(reference) = &problem.file_reference {
+            body_lines.push(format!(
+                "<dim>failure:</dim> {}",
+                crate::markdown::errors::resolution_failure_name(reference.resolution_failure())
+            ));
+        }
     }
 
     StatusBlock::new(StatusState::Error)

@@ -387,15 +387,38 @@ pub(crate) fn resolve_document_file_ref(
 /// The context a document in `cwd` resolves through.
 ///
 /// A snapshot already derived for `cwd` is used as is: re-deriving it would
-/// drop its source path and a trusted-external derivation.
+/// drop its source path, its opening anchor (a `~` tree root), and a
+/// trusted-external derivation. It is recognized by the directory it names,
+/// not its spelling: a source keeps the spelling of the tree it was opened in
+/// (macOS `/var`) while its canonical path does not (`/private/var`).
+///
+/// A `cwd` outside the request's tree is the caller's own document, so it is
+/// derived the way compose admits such a source: trusted-external when only
+/// that derivation is valid.
 fn document_file_context(
     cwd: &Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> biscuit_file::FileResolutionContext {
-    if request_context.cwd() == cwd {
-        request_context.clone()
-    } else {
-        request_context.for_cwd(cwd)
+    if request_context.cwd() == cwd || same_directory(request_context.cwd(), cwd) {
+        return request_context.clone();
+    }
+    let ordinary = request_context.for_cwd(cwd);
+    if ordinary.validate().is_err() {
+        let external = request_context.for_trusted_external_cwd(cwd);
+        if external.validate().is_ok() {
+            return external;
+        }
+    }
+    ordinary
+}
+
+fn same_directory(left: &Path, right: &Path) -> bool {
+    match (
+        biscuit_file::canonicalize_simplified(left),
+        biscuit_file::canonicalize_simplified(right),
+    ) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
     }
 }
 

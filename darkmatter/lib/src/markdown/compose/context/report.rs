@@ -571,6 +571,10 @@ pub struct ComposeWarning {
     /// Root document that consumed the advisory.
     pub consumer: Option<PathBuf>,
 
+    /// The failure class, when the warning reports a file reference that
+    /// failed and was tolerated (a transclusion replaced by a notice).
+    pub resolution_failure: Option<biscuit_file::ResolutionFailure>,
+
     /// Which issue this warning reports, when its family declares one.
     /// Set only by a family's constructor; see [`WarningIdentity`].
     pub(crate) identity: Option<WarningIdentity>,
@@ -660,8 +664,17 @@ impl ComposeWarning {
             code: None,
             path: None,
             consumer: None,
+            resolution_failure: None,
             identity: None,
         }
+    }
+
+    /// This warning, reporting a tolerated file-reference failure of class
+    /// `failure`.
+    #[must_use]
+    pub fn with_resolution_failure(mut self, failure: Option<biscuit_file::ResolutionFailure>) -> Self {
+        self.resolution_failure = failure;
+        self
     }
 
     /// Projects a typed schema advisory into the compose warning model.
@@ -682,6 +695,7 @@ impl ComposeWarning {
             }),
             path: Some(path),
             consumer: Some(consumer.into()),
+            resolution_failure: None,
         }
     }
 
@@ -922,6 +936,7 @@ mod tests {
                 code: Some("dm.schema.missing_simplified_envelope".to_string()),
                 path: Some(PathBuf::from("schema.yaml")),
                 consumer: Some(PathBuf::from(consumer)),
+                resolution_failure: None,
                 identity: Some(WarningIdentity {
                     subject: WarningSubject::Path(PathBuf::from("schema.yaml")),
                 }),
