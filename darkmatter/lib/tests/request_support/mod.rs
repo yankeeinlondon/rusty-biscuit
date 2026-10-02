@@ -3,9 +3,9 @@
 //! `request` keeps the request directory the pipeline chose before requests
 //! were prepared explicitly (a file source's directory, else the context's
 //! anchor, else the process directory), takes home from the process, and the
-//! environment from the options' own context, so `ctx.*` is what the options
-//! captured. A test whose subject is the request directory builds its own
-//! [`RequestSnapshot`].
+//! environment from the options' own context: empty unless the test put
+//! values there, so no test sees the process environment by accident. A test
+//! whose subject is the request directory builds its own [`RequestSnapshot`].
 
 use std::path::{Path, PathBuf};
 

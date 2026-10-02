@@ -22,24 +22,15 @@ fn assert_fatal_without_fail_fast(content: &str, fragment: &str) {
     assert!(message.contains(fragment), "expected {fragment:?} in: {message}");
 }
 
-/// Runs a closure with `AGENT` set to `value`, restoring the previous value
-/// (or unset state) afterwards.
-fn with_agent_env<F, R>(value: &str, f: F) -> R
-where
-    F: FnOnce() -> R,
-{
-    let previous = std::env::var("AGENT").ok();
-    unsafe {
-        std::env::set_var("AGENT", value);
-    }
-    let result = f();
-    unsafe {
-        match previous {
-            Some(v) => std::env::set_var("AGENT", v),
-            None => std::env::remove_var("AGENT"),
-        }
-    }
-    result
+/// Options whose context environment holds `AGENT=value`: a request takes its
+/// snapshot environment from the options, never from the process.
+fn options_with_agent(value: &str) -> ComposeOptions {
+    let mut context = darkmatter::markdown::compose::ComposeContext::capture_minimal();
+    context.env_mut().insert("AGENT".to_string(), value.to_string());
+    // Darkmatter-owned, as `ComposeOptions::new()` is, so the request captures
+    // the groups the document names.
+    ComposeOptions::new_with_context(context)
+        .with_context_authority(darkmatter::markdown::compose::ContextAuthority::DarkmatterOwned)
 }
 
 // ── Arithmetic in interpolation ────────────────────────────────────
@@ -619,13 +610,12 @@ Terminal: {{ terminal("<bold>x</bold>") }}"#;
 }
 
 #[test]
-#[serial_test::serial(env_agent_model)]
 fn regression_ctx_agent_in_interpolation() {
     let content = r#"---
 ---
 Agent: {{ ctx.agent }}"#;
     let md: Markdown = content.into();
-    let (composed, _) = with_agent_env("opencode", || md.compose_with(&crate::request_support::request(darkmatter::markdown::compose::ComposeOptions::new())).unwrap());
+    let (composed, _) = md.compose_with(&crate::request_support::request(options_with_agent("opencode"))).unwrap();
     assert!(composed.content().contains("Agent: opencode"));
 }
 
@@ -667,7 +657,6 @@ Indexed file detected
 }
 
 #[test]
-#[serial_test::serial(env_agent_model)]
 fn regression_page_block_with_has_skill() {
     let dir = tempfile::tempdir().unwrap();
     // Pin the tempdir as the git root so `has_skill` resolves its local skill
@@ -690,19 +679,10 @@ Skill found
         std::fs::read_to_string(&source_path).unwrap(),
     )
     .unwrap();
-    // Build the options *inside* `with_agent_env`: `ComposeOptions::new()`
-    // snapshots the process environment (via `ComposeContext::capture`) at
-    // construction time, and `ctx.agent()` prefers that captured snapshot over
-    // the live env. Constructing it before the override would freeze the agent
-    // to the ambient `AGENT` value; an unrecognized agent searches neither the
-    // user `.claude/skills` root nor the local one, hiding the pinned skill and
-    // failing this test whenever the caller's ambient `AGENT` is not a
-    // recognized agent name.
-    let (composed, _) = with_agent_env("claude", || {
-        let options =
-            darkmatter::markdown::compose::ComposeOptions::new().with_source_file(&source_path);
-        md.compose_with(&crate::request_support::request(options)).unwrap()
-    });
+    // `has_skill` searches the agent's skill roots, so pin a recognized agent;
+    // an unrecognized one searches neither the user nor the local root.
+    let options = options_with_agent("claude").with_source_file(&source_path);
+    let (composed, _) = md.compose_with(&crate::request_support::request(options)).unwrap();
     assert!(composed.content().contains("Skill found"));
 }
 

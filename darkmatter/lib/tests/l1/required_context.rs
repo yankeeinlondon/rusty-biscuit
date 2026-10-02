@@ -12,9 +12,12 @@ use std::path::Path;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::conditions::evaluate_condition_against;
 use darkmatter::markdown::compose::shell_expansion::store::resolve_policy_paths;
-use darkmatter::markdown::compose::shell_expansion::types::ShellExpansionOptions;
+use darkmatter::markdown::compose::shell_expansion::types::{
+    ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionOptions,
+};
 use darkmatter::markdown::compose::{
-    ComposeOptions, ComposeSource, RequestSnapshot, build_resolution_context,
+    ComposeContext, ComposeOptions, ComposeRequest, ComposeSource, RequestSnapshot, ShellExpansionError,
+    build_resolution_context,
 };
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, PropertyDef, SimplifiedType, TypeExpr, ValidatorCache, detect_from_document,
@@ -191,4 +194,68 @@ fn a_string_documents_links_normalize_against_the_request_context() {
         composed.content(),
     );
     assert!(composed.content().contains("guide.md"), "{}", composed.content());
+}
+
+/// A string document's relative link resolves from the request directory.
+/// The process directory (the crate root) holds no `guide.md`, so a resolve
+/// through the process would leave the link untouched.
+#[test]
+fn a_string_documents_relative_link_resolves_from_the_request_directory() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("guide.md"), "# Guide\n").unwrap();
+    assert!(!Path::new("guide.md").exists(), "the process directory must not hold the target");
+    let md: Markdown = "See [the guide](guide.md).\n".into();
+
+    let (composed, report) = md.compose_with(&request_at(dir.path(), ComposeOptions::new())).unwrap();
+    assert_eq!(report.link_resolves_applied, 1, "{}", composed.content());
+
+    let missing: Markdown = "See [nothing](absent.md).\n".into();
+    let (composed, report) = missing.compose_with(&request_at(dir.path(), ComposeOptions::new())).unwrap();
+    assert_eq!(report.link_resolves_applied, 0, "a miss has no anchor to absolutize: {}", composed.content());
+    assert!(composed.content().contains("(absent.md)"), "{}", composed.content());
+}
+
+/// Approves every shell command once.
+struct ApproveAll;
+
+impl ShellApprovalHandler for ApproveAll {
+    fn approve(&self, _request: ShellApprovalRequest) -> Result<ShellApprovalDecision, ShellExpansionError> {
+        Ok(ShellApprovalDecision::AllowOnce)
+    }
+}
+
+/// A string document's shell command runs in the request directory, never
+/// the process's: `cat` reads a file only the request directory holds.
+#[cfg(unix)]
+#[test]
+fn a_string_documents_shell_command_runs_in_the_request_directory() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.path().join("marker.txt"), "request-directory-marker").unwrap();
+    assert!(!Path::new("marker.txt").exists(), "the process directory must not hold the marker");
+    let md: Markdown = "::shell cat marker.txt\n".into();
+
+    let options = ComposeOptions::new().with_shell_approval_handler(std::sync::Arc::new(ApproveAll));
+    let (composed, _) = md.compose_with(&request_at(dir.path(), options)).unwrap();
+    assert!(composed.content().contains("request-directory-marker"), "{}", composed.content());
+}
+
+/// A standalone `ComposeContext` capture reads no process environment, and a
+/// request installs its snapshot's: `ctx.agent` comes from the snapshot alone.
+#[test]
+fn ctx_environment_comes_from_the_request_snapshot_only() {
+    let dir = TempDir::new().unwrap();
+    let source = "Agent: {{ ctx.agent }}\n";
+    let capture = ComposeContext::capture_for_content(dir.path(), source);
+    assert!(capture.env().is_empty(), "a capture reads no process environment: {:?}", capture.env().keys());
+
+    let md: Markdown = source.into();
+    let snapshot = RequestSnapshot::new(dir.path())
+        .with_env(HashMap::from([("AGENT".to_string(), "snapshot-agent".to_string())]));
+    let request = ComposeRequest::prepare(ComposeOptions::new_with_context(capture.clone()), &snapshot).unwrap();
+    let (composed, _) = md.compose_with(&request).unwrap();
+    assert!(composed.content().contains("Agent: snapshot-agent"), "{}", composed.content());
+
+    let empty = ComposeRequest::prepare(ComposeOptions::new_with_context(capture), &RequestSnapshot::new(dir.path())).unwrap();
+    let (composed, _) = md.compose_with(&empty).unwrap();
+    assert!(composed.content().contains("Agent: unknown"), "{}", composed.content());
 }
