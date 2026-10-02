@@ -1,6 +1,6 @@
 ---
 area: darkmatter
-status: finalized-spec
+status: human-in-the-loop
 $schema:
     status: |-
         enum(
@@ -35,97 +35,83 @@ packages:
 human_review: true
 human_review_items:
     - |-
-      **Claudine's part of this fix has still not been built, and the remaining phases depend on it.**
+      **Claudine still has not been moved onto the new design, so it does not
+      compile, and this branch cannot merge until it does.**
 
-      The plan splits the work into eight phases. Phase 3 was supposed to move
-      Claudine (the agent-orchestration tool in `claudine/`) onto the new
-      "one prepared request context" design. That work (Phase 3, "Track B")
-      was never done, so the `claudine` crate **does not compile** on this
-      branch (20 errors today). Phases 5 and 6 finished everything they could
-      in Darkmatter, the `md` CLI, the DMLS editor server, claudine-gen,
-      messenger, and biscuit-file. Phase 6 built the automated "guard" tests
-      that keep file resolution honest and installed them in every package
-      except Claudine's library and CLI, which cannot be compiled to run them.
-      Phase 7 adds Claudine rows to a cross-package test matrix and will hit
-      the same wall.
+      Every other part of this fix is now finished, including the last phase
+      (documentation, skills, and Windows testing). Darkmatter, the `md`
+      command, the editor language server (DMLS), claudine-gen, messenger,
+      biscuit-file, and sniff all build and pass their tests on macOS and
+      native Windows.
 
-      Why decide now: Phase 7 either stalls on Claudine or quietly leaves it
-      out, and the branch cannot merge with a crate that does not compile in
-      any case.
+      Claudine (the agent-orchestration tool in `claudine/`) was supposed to
+      switch to "one prepared context per request" back in Phase 3. That never
+      happened. Its library and CLI fail to compile against the new Darkmatter
+      API (22 errors, the same on macOS and Windows). Everything tied to
+      Claudine is therefore still open: its port, its two guard tests, its row
+      in the cross-package parity test, and its documentation.
+
+      Why decide now: the plan has no phase left. Nobody is scheduled to do
+      the Claudine work, so it needs an explicit decision.
 
       Options:
 
-      - **A. Do Claudine's Phase 3 work next (plus Phase 5's Claudine task
-        and the two Claudine guards from Phase 6), then continue with
-        Phase 7.** Pros: keeps the plan's order and its promise that every
-        package is covered; Claudine is the biggest consumer, so this is where
-        real bugs are most likely. The guard engine is ready, so adding
-        Claudine's guards is a census plus two small files. Cons: a large
-        piece of work (about 15 call sites plus Claudine's own context
-        capture), so Phase 7 starts later.
-      - **B. Run Phase 7 for everything but Claudine now, and add the
-        Claudine parts afterward.** Pros: no waiting. Cons: the matrix files
-        get edited twice, and the branch still cannot merge until Claudine
-        compiles.
-      - **C. Take Claudine out of this fix into its own follow-up fix.** Pros:
-        this fix finishes sooner. Cons: the branch would still hold a
-        Claudine that does not compile (it already depends on the new
-        Darkmatter API), so it could not merge without the follow-up or a
-        revert; it also breaks the promise that every entry point resolves
-        the same way.
+      - **A. Do the Claudine port next, on this branch, as its own pass
+        (recommended).** Move Claudine's context capture and its roughly 15
+        call sites onto the shared builder, add its guard tests and its
+        parity runner (the test tables already contain Claudine's rows), then
+        update its docs. Pros: the branch becomes mergeable, and Claudine, the
+        biggest consumer, gets the same file-resolution guarantees as
+        everything else. Cons: a sizeable piece of work, and it delays the
+        glob-reference feature planned for this branch.
+      - **B. Start the glob-reference feature first and do Claudine
+        afterward.** Pros: keeps momentum on new work. Cons: Claudine stays
+        broken for longer, the glob feature cannot test against Claudine, and
+        the branch still cannot merge.
+      - **C. Move Claudine into a separate follow-up fix.** Pros: this fix
+        could be closed out. Cons: Claudine already depends on the new
+        Darkmatter API, so the branch still cannot merge without that
+        follow-up landing too (or reverting Claudine's dependency). This only
+        moves the problem.
 
-      **Recommendation: A.** The branch cannot merge until Claudine compiles
-      whichever option is chosen, so doing Claudine first costs nothing extra
-      and lets Phase 7 be written once, for every package.
+      **Recommendation: A.** The branch cannot merge without a compiling
+      Claudine under any option. Doing it now is the shortest path to a
+      mergeable branch, and the test tables and guard engine are already
+      built and waiting for it.
 clarified: true
 clarified_by: claude/opus
 reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    PHASE 6 IS IMPLEMENTED except Claudine's lib/cli guards (nothing is
-    committed). Read the "Phase 6" section of implementation-log.md first.
-    (1) Claudine (lib, cli) still does not compile (Phase 3 Track B; see
-    human_review_items). When it does, add `claudine/lib/tests/...` and
-    `claudine/cli/tests/l1/context_construction_guard.rs` exactly like
-    `claudine/gen/tests/l1/context_construction_guard.rs`: include
-    `darkmatter/cli/tests/common/context_guard.rs` by `#[path]`, spell it and
-    `source_scan.rs` with `include_str!` inside the test, declare both in
-    `source-inputs`, run once with an empty allowlist to get the census, then
-    FIX reads that feed resolution/ctx.*/env.* and allowlist only the rest.
-    claudine-cli's l1 binary may already load its own
-    `claudine/cli/tests/common/source_scan.rs`; that is a different file, so
-    no clash, but if a binary loads the darkmatter one twice, the engine
-    already carries `#[allow(clippy::duplicate_mod)]`.
-    (2) Engine API (`context_guard.rs`): `assert_guarded(package, src,
-    allowlist)`, `problems`, `scan`, `check`, `Allowance { gate, path,
-    identifier, count, reason }`, `Gate::{Construction, OptionalContext,
-    AmbientState}`. The optional-context gate rejects any allowlist entry.
-    (3) API changes this phase that Phase 7 / Track B code will meet:
-    `ComposeContext::capture_for_*` now has an EMPTY env (a request installs
-    the snapshot's), `CtxLookup::new(dir, &env)`,
-    `capture_runtime_context_for_groups(dir, groups, &env)`,
-    `execute_command(directive, opts, source, &context)` and
-    `resolve_working_directory(opts, source, &context)` (falls back to
-    `context.cwd()`), biscuit-file `FileReference::resolve_target_in_context`.
-    DMLS: `DocumentResolution::context()`, `DocumentContext::file_context()`,
-    and `DocumentContexts::context_for` return `Result<_, ContextFailure>`
-    (new `ContextFailure::NotProvided` for `NoContexts`).
-    (4) Test helpers are hermetic: `test_support::request` and
-    `request_support::request[_at]` take the environment from the options'
-    context only. A test needing `AGENT` etc. puts it on the options' context
-    (see `options_with_agent` in `lib/tests/l1/expression_regression.rs`);
-    never mutate the process environment.
-    (5) Two rendering-tier CWD reads are allowlisted rather than fixed
-    (`output/terminal.rs` ImageRenderer::new(None), `style/bespoke.rs`
-    pathless stylesheet); a reviewer may want them fixed. The handed-off
-    `file_links/discovery.rs` and `schemas/file_match.rs` reads are
-    allowlisted with reason "handed off to 2026-09-30-glob-reference"; that
-    feature must delete both entries.
-    (6) Earlier notes still hold: never add a `ComposeRequest` method named
-    `context` (Deref shadowing); `with_file_ref_fallback_dir` is kept for the
-    glob feature; R5's `darkmatter/docs/errors/file-reference-failures.md`
-    page still does not exist (Phase 8).
+    ALL 8 PHASES ARE DONE EXCEPT CLAUDINE (nothing from Phase 8 is committed).
+    Read the "Phase 8" section of implementation-log.md first; its Hand-off
+    lists what is next.
+    (1) Claudine (lib, cli) still does not compile (22 errors; Phase 3 Track
+    B was never done). Still open: the Claudine port, Phase 5's Claudine task,
+    the two Claudine `context_construction_guard.rs` files (follow
+    `claudine/gen/tests/l1/context_construction_guard.rs` exactly), Phase 7's
+    claudine-cli parity runner (`ClaudineComposition`/`ClaudineCompletion`
+    variants and rows already exist in the shared tables), and the Claudine
+    docs and skill (`.claude/skills/claudine/architecture.md`,
+    `claudine/docs/topics/{composition,system-prompt,completions/shell-completions}.md`,
+    and the "planned" note in `darkmatter/docs/topics/magic-paths.md` "Use
+    Case: Claudine", which must lose its **planned** marker when Claudine
+    registers its roots on the snapshot).
+    (2) The Phase 6 message's API notes still hold: an empty env on
+    `ComposeContext::capture_for_*`, `CtxLookup::new(dir, &env)`, and DMLS
+    `Result<_, ContextFailure>` accessors. Never add a `ComposeRequest`
+    method named `context`.
+    (3) Windows: every compiling package passes on build-win-native. A
+    darkmatter fixture built `/review-2.md` through `dirname("spec.md") ==
+    ""` and passed on Unix only by a loose `ends_with`. It is fixed (os
+    skill windows.md trap 15). The pre-existing `dirname` bare-name-returns-""
+    behavior is left for review.
+    (4) After Claudine: the feature `2026-09-30-glob-reference` deletes the
+    two handed-off allowlist entries and adds its matrix rows; the branch
+    merges only after both.
+implemented: true
+implemented_by: claude/opus
 ---
 
 # File References Resolve From One Prepared Context

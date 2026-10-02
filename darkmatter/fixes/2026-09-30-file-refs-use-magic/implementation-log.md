@@ -453,6 +453,325 @@ docs_created_during_phase_7: []
 skills_files_updated_during_phase_7:
     - .claude/skills/darkmatter/SKILL.md
     - .claude/skills/os/windows.md
+source_files_during_phase_8:
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/providers/definition.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+docs_updated_during_phase_8:
+    - darkmatter/docs/topics/file-referencing.md
+    - darkmatter/docs/topics/transclusion.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/topics/dmls.md
+    - darkmatter/docs/composition/index.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/errors/README.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/dmls/docs/diagnostics.md
+docs_created_during_phase_8:
+    - darkmatter/docs/errors/file-reference-failures.md
+skills_files_updated_during_phase_8:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/library-surfaces.md
+    - .claude/skills/os/windows.md
+source_code:
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/collect.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/preflight_repository_sigils.rs
+    - darkmatter/cli/tests/l1/compose_transclusion.rs
+    - biscuit-file/lib/src/file_reference/context.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - darkmatter/cli/src/commands/compose.rs
+    - darkmatter/cli/src/commands/schema/triggers.rs
+    - darkmatter/cli/src/commands/schema/validate.rs
+    - darkmatter/lib/benches/compose_pipeline.rs
+    - darkmatter/lib/benches/compose_schema_transclusion.rs
+    - darkmatter/lib/benches/phase6_interpolation.rs
+    - darkmatter/lib/benches/reference_graph.rs
+    - darkmatter/lib/src/markdown/compose/cache/hashing.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/agent.rs
+    - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/checked.rs
+    - darkmatter/lib/src/markdown/compose/context/current.rs
+    - darkmatter/lib/src/markdown/compose/context/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/request.rs
+    - darkmatter/lib/src/markdown/compose/context/runtime.rs
+    - darkmatter/lib/src/markdown/compose/expression/lint.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/assignment.rs
+    - darkmatter/lib/src/markdown/compose/interpolation/fatality_characterization.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/preflight/lifecycle.rs
+    - darkmatter/lib/src/markdown/compose/preflight/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs
+    - darkmatter/lib/src/markdown/compose/tests/frontmatter.rs
+    - darkmatter/lib/src/markdown/compose/tests/icmp.rs
+    - darkmatter/lib/src/markdown/compose/tests/identity.rs
+    - darkmatter/lib/src/markdown/compose/tests/lazy_roots.rs
+    - darkmatter/lib/src/markdown/compose/tests/provider_network.rs
+    - darkmatter/lib/src/markdown/compose/tests/rendering.rs
+    - darkmatter/lib/src/markdown/compose/tests/schema.rs
+    - darkmatter/lib/src/markdown/compose/tests/shell.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/mod.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/resolver.rs
+    - darkmatter/lib/src/markdown/compose/type_tests.rs
+    - darkmatter/lib/src/markdown/compose/util.rs
+    - darkmatter/lib/src/markdown/reference/file_tree/mod.rs
+    - darkmatter/lib/src/markdown/reference/graph.rs
+    - darkmatter/lib/src/markdown/reference/mod.rs
+    - darkmatter/lib/src/markdown/reference/types.rs
+    - darkmatter/lib/src/markdown/reference/validate.rs
+    - darkmatter/lib/src/markdown/schemas/clean.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/tests/l1/ambient_ctx_capture.rs
+    - darkmatter/lib/tests/l1/array_rendering_json.rs
+    - darkmatter/lib/tests/l1/backslash_escape_spans.rs
+    - darkmatter/lib/tests/l1/compose_diagnostic_identity.rs
+    - darkmatter/lib/tests/l1/compose_expression_failure_contract.rs
+    - darkmatter/lib/tests/l1/compose_phase6.rs
+    - darkmatter/lib/tests/l1/compose_reuse_phase5.rs
+    - darkmatter/lib/tests/l1/context_functions.rs
+    - darkmatter/lib/tests/l1/dasherized_identifier_compose.rs
+    - darkmatter/lib/tests/l1/data_origin.rs
+    - darkmatter/lib/tests/l1/declined_path_transclusion.rs
+    - darkmatter/lib/tests/l1/disclosure_transclusion_integration.rs
+    - darkmatter/lib/tests/l1/empty_package_area.rs
+    - darkmatter/lib/tests/l1/expression_regression.rs
+    - darkmatter/lib/tests/l1/feature_review_incident.rs
+    - darkmatter/lib/tests/l1/file_tree_roots.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/frontmatter_surface_projection.rs
+    - darkmatter/lib/tests/l1/git_context_integration.rs
+    - darkmatter/lib/tests/l1/interpolation_literal_pipeline.rs
+    - darkmatter/lib/tests/l1/link_interpolation_integration.rs
+    - darkmatter/lib/tests/l1/literal_token.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase4.rs
+    - darkmatter/lib/tests/l1/missing_ctx_capture.rs
+    - darkmatter/lib/tests/l1/nested_composition.rs
+    - darkmatter/lib/tests/l1/persistent_cache_disabled.rs
+    - darkmatter/lib/tests/l1/predict_conflicts.rs
+    - darkmatter/lib/tests/l1/preflight_child_state_parity.rs
+    - darkmatter/lib/tests/l1/reference_integration.rs
+    - darkmatter/lib/tests/l1/request_context_builder.rs
+    - darkmatter/lib/tests/l1/request_context_epoch.rs
+    - darkmatter/lib/tests/l1/schemas_literal_expression.rs
+    - darkmatter/lib/tests/l1/set_overlay_integration.rs
+    - darkmatter/lib/tests/l1/shell_block_integration.rs
+    - darkmatter/lib/tests/l1/shell_expansion_coordinates.rs
+    - darkmatter/lib/tests/l1/shell_probe_preflight.rs
+    - darkmatter/lib/tests/l1/shell_result_values.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase3.rs
+    - darkmatter/lib/tests/l1/ternary_integration.rs
+    - darkmatter/lib/tests/l1/transcluded_shell_failure.rs
+    - darkmatter/lib/tests/l1/unknown_identifier_warning.rs
+    - darkmatter/lib/tests/l1/url_root_identity.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+    - darkmatter/lib/tests/request_support/mod.rs
+    - sniff/lib/src/filesystem/repo/glob.rs
+    - sniff/lib/src/filesystem/repo/manifest_index.rs
+    - sniff/lib/src/filesystem/repo/mod.rs
+    - darkmatter/dmls/Cargo.toml
+    - Cargo.lock
+    - darkmatter/dmls/src/context.rs
+    - darkmatter/dmls/src/lib.rs
+    - darkmatter/dmls/src/main.rs
+    - darkmatter/dmls/src/router.rs
+    - darkmatter/dmls/src/bench.rs
+    - darkmatter/dmls/src/diagnostics/codes.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter.rs
+    - darkmatter/dmls/src/diagnostics/frontmatter/severity_tests.rs
+    - darkmatter/dmls/src/diagnostics/nested_span/nested_span_tests.rs
+    - darkmatter/dmls/src/graph/arena.rs
+    - darkmatter/dmls/src/graph/invalidate.rs
+    - darkmatter/dmls/src/graph/mod.rs
+    - darkmatter/dmls/src/overlay/mod.rs
+    - darkmatter/dmls/src/overlay/schema.rs
+    - darkmatter/dmls/src/providers/code_actions.rs
+    - darkmatter/dmls/src/providers/completion.rs
+    - darkmatter/dmls/src/providers/diagnostics.rs
+    - darkmatter/dmls/src/providers/dsl.rs
+    - darkmatter/dmls/src/providers/frontmatter.rs
+    - darkmatter/dmls/src/providers/frontmatter/sequence_tests.rs
+    - darkmatter/dmls/src/providers/hover.rs
+    - darkmatter/dmls/src/providers/mod.rs
+    - darkmatter/dmls/src/providers/semantic_tokens.rs
+    - darkmatter/dmls/src/workspace/snapshot.rs
+    - darkmatter/dmls/src/workspace/startup.rs
+    - darkmatter/dmls/src/workspace/watch.rs
+    - darkmatter/dmls/tests/common/mod.rs
+    - darkmatter/dmls/tests/fixtures/mapping_only_corpus/baseline.json
+    - darkmatter/dmls/tests/l1/level1_graph_index.rs
+    - darkmatter/dmls/tests/l1/level1_wiki.rs
+    - darkmatter/dmls/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/mapping_only_corpus.rs
+    - darkmatter/dmls/tests/l1/repository_contexts.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__reference__file_reference.snap
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__transclusion__file_reference.snap
+    - claudine/lib/src/composition/error/render/mod.rs
+    - claudine/gen/src/agent_errors_check.rs
+    - claudine/gen/src/agent_errors_check/review6_tests.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/signals.rs
+    - claudine/gen/src/steering_catalog.rs
+    - claudine/gen/src/steering_check.rs
+    - claudine/gen/tests/l1/agent_errors_check.rs
+    - claudine/gen/tests/l1/drift.rs
+    - claudine/gen/tests/l1/signals_validation.rs
+    - claudine/gen/tests/l1/steering_activation.rs
+    - darkmatter/cli/src/commands/clean/frontmatter_repair.rs
+    - darkmatter/cli/src/commands/frontmatter.rs
+    - darkmatter/cli/src/commands/graph.rs
+    - darkmatter/cli/src/commands/hash.rs
+    - darkmatter/cli/src/commands/mod.rs
+    - darkmatter/cli/src/commands/schema/assignment.rs
+    - darkmatter/cli/src/commands/schema/detect.rs
+    - darkmatter/cli/src/io/mod.rs
+    - darkmatter/cli/src/request.rs
+    - darkmatter/cli/tests/l1/compose_shell.rs
+    - darkmatter/cli/tests/l1/compose_state_set.rs
+    - darkmatter/lib/benches/clean_hot_paths.rs
+    - darkmatter/lib/benches/effective_schema_ownership.rs
+    - darkmatter/lib/benches/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/conditions.rs
+    - darkmatter/lib/src/markdown/compose/context/authority.rs
+    - darkmatter/lib/src/markdown/compose/context/effective_state.rs
+    - darkmatter/lib/src/markdown/compose/expression/catalog/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/repository.rs
+    - darkmatter/lib/src/markdown/compose/expression/path_projection.rs
+    - darkmatter/lib/src/markdown/compose/expression/semantics.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_interpolation.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/execution_tests.rs
+    - darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion/tests/tests.rs
+    - darkmatter/lib/src/markdown/compose/inline/interpolation.rs
+    - darkmatter/lib/src/markdown/compose/inline/page_blocks.rs
+    - darkmatter/lib/src/markdown/compose/inline/replacement.rs
+    - darkmatter/lib/src/markdown/compose/inline/shell_expansion.rs
+    - darkmatter/lib/src/markdown/compose/link_normalization.rs
+    - darkmatter/lib/src/markdown/compose/link_resolve.rs
+    - darkmatter/lib/src/markdown/compose/nested.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/phases.rs
+    - darkmatter/lib/src/markdown/compose/shell_blocks/mod.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/store.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/types.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/compose/unknown_identifiers.rs
+    - darkmatter/lib/src/markdown/reference/file_tree/model.rs
+    - darkmatter/lib/src/markdown/reference/provenance.rs
+    - darkmatter/lib/src/markdown/schemas/coerce.rs
+    - darkmatter/lib/src/markdown/schemas/completion.rs
+    - darkmatter/lib/src/markdown/schemas/detect.rs
+    - darkmatter/lib/src/markdown/schemas/example.rs
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/resolve.rs
+    - darkmatter/lib/src/markdown/schemas/rewrite.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/lint.rs
+    - darkmatter/lib/src/markdown/schemas/tests/clean_quoting.rs
+    - darkmatter/lib/src/markdown/schemas/tests/mod.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/assemble.rs
+    - darkmatter/lib/src/markdown/schemas/triggers/discovery.rs
+    - darkmatter/lib/tests/l1/base_schema_end_to_end.rs
+    - darkmatter/lib/tests/l1/clean_counters.rs
+    - darkmatter/lib/tests/l1/dasherized_identifier_corpus.rs
+    - darkmatter/lib/tests/l1/directive_target_analysis.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase1.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase3.rs
+    - darkmatter/lib/tests/l1/meta_schema_phase5.rs
+    - darkmatter/lib/tests/l1/meta_schema_reference_graph.rs
+    - darkmatter/lib/tests/l1/meta_schema_repo_schemas.rs
+    - darkmatter/lib/tests/l1/more_is_more_literals_and_indexes.rs
+    - darkmatter/lib/tests/l1/prelude_exports.rs
+    - darkmatter/lib/tests/l1/required_context.rs
+    - darkmatter/lib/tests/l1/schema_phase_validation.rs
+    - darkmatter/lib/tests/l1/schema_quoting_safety.rs
+    - darkmatter/lib/tests/l1/schemas_detect_table.rs
+    - darkmatter/lib/tests/l1/schemas_required_count_matrix.rs
+    - darkmatter/lib/tests/l1/schemas_source_projection.rs
+    - darkmatter/lib/tests/l1/schemas_validate_table.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase1.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase2.rs
+    - darkmatter/lib/tests/l1/suggest_constraint_phase4.rs
+    - messenger/lib/src/research/load.rs
+    - messenger/lib/tests/research_corpus.rs
+    - messenger/lib/tests/research_validation.rs
+    - biscuit-file/lib/tests/l1/resolution_context.rs
+    - claudine/gen/Cargo.toml
+    - claudine/gen/tests/l1/context_construction_guard.rs
+    - claudine/gen/tests/l1/main.rs
+    - darkmatter/cli/tests/common/context_guard.rs
+    - darkmatter/cli/tests/common/source_scan.rs
+    - darkmatter/cli/tests/l1/context_construction_guard.rs
+    - darkmatter/cli/tests/l1/main.rs
+    - darkmatter/dmls/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/Cargo.toml
+    - darkmatter/lib/src/markdown/compose/context/capture/repo.rs
+    - darkmatter/lib/src/markdown/compose/expression/ctx.rs
+    - darkmatter/lib/src/markdown/compose/shell_expansion/executor.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/tests/l1/semantic_results_never_persist.rs
+    - messenger/cli/Cargo.toml
+    - messenger/cli/src/research.rs
+    - messenger/cli/tests/context_construction_guard.rs
+    - messenger/cli/tests/research_cli.rs
+    - messenger/lib/Cargo.toml
+    - messenger/lib/tests/context_construction_guard.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/toc_linking/types.rs
+    - darkmatter/lib/src/markdown/errors/blocks.rs
+    - darkmatter/lib/tests/common/entry_point_parity/mod.rs
+    - darkmatter/lib/tests/l1/entry_point_parity.rs
+    - darkmatter/lib/tests/l1/error_snapshots/toc_linking.rs
+    - darkmatter/lib/tests/l1/error_snapshots/snapshots/l1__error_snapshots__markdown_error__schema_validation_format_failure_renders_block.snap
+    - darkmatter/cli/Cargo.toml
+    - darkmatter/cli/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/src/overlay/directives.rs
+    - darkmatter/dmls/tests/l1/entry_point_parity.rs
+    - darkmatter/dmls/src/providers/definition.rs
+documentation:
+    - darkmatter/docs/inline/preflight-checks.md
+    - darkmatter/lib/README.md
+    - darkmatter/docs/topics/magic-paths.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/inline/text-replacement.md
+    - biscuit-file/docs/topics/file-references.md
+    - sniff/docs/sniff-library-architecture.md
+    - darkmatter/docs/topics/compose-requests.md
+    - darkmatter/dmls/docs/diagnostics.md
+    - darkmatter/dmls/docs/features.md
+    - darkmatter/dmls/README.md
+    - darkmatter/docs/dependencies.md
+    - darkmatter/dmls/docs/file-references.md
+    - darkmatter/docs/inline/schema-validation.md
+    - darkmatter/docs/structs/Markdown.md
+    - darkmatter/docs/topics/caching.md
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - darkmatter/docs/inline/shell-expansion.md
+    - darkmatter/docs/inline/toc-linking.md
+    - darkmatter/docs/topics/file-referencing.md
+    - darkmatter/docs/topics/transclusion.md
+    - darkmatter/docs/topics/dmls.md
+    - darkmatter/docs/composition/index.md
+    - darkmatter/docs/darkmatter-compose-pipeline.md
+    - darkmatter/docs/errors/README.md
+    - darkmatter/docs/lsp/architecture.md
+    - darkmatter/docs/lsp/features.md
+    - darkmatter/docs/errors/file-reference-failures.md
+completed_phase: 8
+implemented: true
 ---
 
 # Implementation Log for 2026-09-30-file-refs-use-magic (8 phases)
@@ -1665,3 +1984,195 @@ The DMLS runner and its fix were written by a subagent and reviewed here.
   `lib/tests/common/entry_point_parity/`; each runner includes it inside its
   own file (`#[path] mod matrix;`) and spells it with `include_str!` inside
   the test function. darkmatter-cli and dmls declare it in `source-inputs`.
+
+## Phase 8
+
+Phase 8 started on the committed Phase 7 tree (`875429e43`; 48 commits since
+`e23d0c2b3`). **Claudine (lib, cli) still does not compile** (22 errors,
+macOS and Windows alike), so every Claudine item in this phase is undone, and
+the human-review item on the spec (Claudine's Phase 3 Track B) stays open.
+
+### Wave 18: docs
+
+Darkmatter (most library pages already used `ComposeRequest` and
+`RequestSnapshot` from Phases 2 to 7; `topics/compose-requests.md` already
+held the builder, snapshot, Mermaid flow, failure classes, `ContextBuildError`
+table, and the live `current_env` rule):
+
+- `docs/errors/file-reference-failures.md` (new): the `failure: <class>` row.
+  It leads with what to do per class and shows real `md` output for each
+  surface (argument, pre-composition transclusion check, compose error block,
+  `md schema validate`, tolerated warning), all captured from the built `md`.
+  Linked from `docs/errors/README.md`.
+- `docs/topics/file-referencing.md`: was an unfinished stub ending in empty
+  bullets. Now: the reference forms and where each starts, "one answer per
+  request" with a Mermaid flow, the tree rule with an example, and the
+  caller-supplied exception.
+- `docs/topics/transclusion.md`, `docs/composition/index.md`,
+  `docs/darkmatter-compose-pipeline.md`: a short request section each
+  (snapshot → builder → `ComposeRequest`, Mermaid on the last two), linking
+  to `compose-requests.md`.
+- `docs/topics/darkmatter-expressions.md`: the `env.*` row says it reads the
+  request snapshot's environment, the map `{{VAR}}` references read.
+- `docs/topics/magic-paths.md` already said magic roots enter only through
+  the snapshot; unchanged.
+
+DMLS (written by a subagent, checked against `dmls/src/` and spot-read here):
+`docs/topics/dmls.md` (was empty), `docs/lsp/architecture.md` (was a title;
+now has "File resolution contexts" with the spec's flowchart adapted to the
+code), `docs/lsp/features.md` (§1.4 file reference resolution, `::toc-linking`
+parity, watched manifests and `.git/config`), `dmls/docs/diagnostics.md`
+(`dm.context.build_failure` behavior; `dm.transclusion.broken_path` no longer
+claims prologue/epilogue, which no code emits).
+
+Where the code goes beyond the plan (docs follow the code; recorded for
+review, none is a defect):
+
+1. A document outside any repository gets one cached context per folder; on
+   a discovery failure the key is the document's folder, so the message names
+   that folder.
+2. Invalidation is wider than "ancestor of the changed path": it also drops
+   entries keyed inside the changed path's owning directory (for a path in
+   `.git/`, the repository), and any watched document change inside a
+   repository drops that repository's context.
+3. **Rescan mode does not read `.git/config`**; it compares documents and
+   manifests only. Without a file watcher, a repaired `.git/config` clears
+   the failure only after a later change under that folder, a configuration
+   change, or a restart. R11 named watching `**/.git/config`, which watched
+   mode does. Documented as such.
+4. Untitled buffers fail with `ContextFailure::UntitledWorkspace` (class
+   `MissingContext`); `NotProvided` comes only from `NoContexts` graphs.
+5. A directive target containing `{{ … }}` gets links and definition but never
+   `dm.transclusion.broken_path`.
+6. The context-failure diagnostic carries its own `data` payload.
+
+Stale comments fixed (comment-only): `dmls/src/diagnostics/codes.rs`
+(`TRANSCLUSION_BROKEN_PATH` no longer lists prologue/epilogue) and
+`dmls/src/providers/definition.rs` (`document_links` targets come from the
+context-resolved link graph, not "lexical path joins").
+
+### Wave 18: skills
+
+- darkmatter `SKILL.md`: **drift fixed.** "Composition authority" opened with
+  "`ComposeOptions` is the request authority. It carries the captured
+  resolution context", contradicting the code and the same section's later
+  "`ComposeOptions` … holds no context". Now names `ComposeRequest` and links
+  the three user docs. The `failure:` row sentence points at the new errors
+  page.
+- `library-surfaces.md`: same drift, same fix.
+- `compose.md`: `prepare`'s `ContextBuildError` cases and the
+  `resolution_failure()` rule.
+- `dmls.md`: already current from Phase 4/7; unchanged.
+- biscuit-file (R5 `FileReferenceError::resolution_failure()`) and sniff
+  (R10 `PACKAGE_MANIFEST_FILE_NAMES`) skills already carried both from
+  earlier phases; unchanged.
+- **Not done: the `claudine` skill (`architecture.md`) and
+  `claudine/docs/topics/{composition,system-prompt,completions/shell-completions}.md`.**
+  They describe Claudine's own context capture, and that code has not
+  changed, so they are still accurate. They change with the Claudine port.
+- `os` skill `windows.md`: trap 15 (below).
+
+### Wave 18: Windows evidence (`just cross-check <pkg> --os windows`, `build-win-native`)
+
+| Package | Result |
+|---|---|
+| biscuit-file | pass |
+| sniff | pass (2210 passed, 23 skipped) |
+| darkmatter | **FAIL, 1 of 7160**, fixed, re-run below |
+| darkmatter-cli | pass |
+| dmls | pass |
+| claudine-gen | pass |
+| messenger | pass (593 passed) |
+| messenger-cli | pass |
+| claudine | FAIL: does not compile (unported, see above) |
+| claudine-cli | FAIL: does not compile (depends on claudine) |
+
+The darkmatter failure:
+`markdown::compose::tests::schema::schema_validation_integration::schema_number_increment_survives_quoted_persistence_round_trips`
+failed at iteration 2 with `FileReference { function: "decrement_file_index",
+reference: "/review-2.md", source: ForeignAbsolutePath }`.
+
+- **Cause.** The test runs only the interpolation stages, so the schema stage
+  never makes `spec: file(required;eager)` absolute. `dirname("spec.md")` is
+  `""`, and `dirname(spec) + '/review-' + …` builds `/review-2.md`, a
+  filesystem-root path. Printed on macOS it is `/review-2.md` there too; the
+  test passed on Unix only because its `ends_with("review-2.md")` accepted
+  it. On Windows, biscuit-file rejects a `/`-rooted reference as
+  `ForeignAbsolutePath`, which is correct. Whether the test also failed on
+  `main` was not established (`main` parses through `FileReference::new` too,
+  and its recent push runs are red for other reasons); the fixture was wrong
+  on every OS either way.
+- **Fix (test only).** The spec now lives in `specs/` (`spec: specs/spec.md`),
+  so `dirname` is `specs`, and the assertions require exactly
+  `specs/review-N.md` and `specs/review-{N-1}.md` instead of a suffix.
+- **Finding, not fixed (pre-existing, every OS):** `dirname` of a bare file
+  name returns `""`, so the shipped `dirname(spec) + '/…'` pattern builds a
+  root path whenever `spec` is a bare name that no schema stage normalized.
+  Shipped prompts declare `spec` as an eager `file`, so the full pipeline
+  never meets it. Returning `.` would remove the trap; that is a behavior
+  change to an expression function and is left to review.
+
+Re-run after the fix: darkmatter on Windows **pass, 7160 passed, 67
+skipped**. The other packages' Windows runs covered only comment and doc
+changes since, so they were not re-run. `os` skill `windows.md` gained trap
+15 for this.
+
+### Wave 19: status and final checkpoint
+
+Every changed output and departure across the fix, for the reviewer:
+
+- **Changed outputs.** `md`: a `failure: <kebab-class>` row on every failed
+  file-reference block, `md schema validate` problem, and tolerated-failure
+  warning (R5; documented in `docs/errors/file-reference-failures.md`).
+  DMLS: file-reference diagnostics carry `data: {"resolution_failure":
+  "<Class>"}`, a new `dm.context.build_failure` diagnostic (source
+  `darkmatter.context`), `::toc-linking <file>` targets get links,
+  definition, and `dm.transclusion.broken_path`, and the watcher registers
+  sniff's package manifests and `.git/config`.
+- **Deleted APIs.** `Markdown::compose()`/`compose_mut()`, the `Option`
+  context on `ComposeOptions` and its setter, `ComposeOptions::magic_paths`/
+  `with_magic_path`, `TransclusionOptions::magic_paths`,
+  `establish_repository_observation`/`ensure_file_resolution_context` as
+  standalone calls (Phases 2 and 5 logs list each).
+- **Departures.** R4: `prepare(options, &snapshot)` instead of the spec's
+  `prepare(options)`. R5: the `md` `failure` row (author may overturn). R7:
+  `current_env` stays live, allowlisted. R12: spec drift logged, not edited.
+  S1: builder-failure inputs settled as R11. Phase 7: caller-supplied `../`
+  resolves (raised for review); `@` matrix target lives in the fixture
+  `HOME`. Phase 8: DMLS rescan mode does not read `.git/config` (above).
+- **Spec status.** Set to `human-in-the-loop`, not `implemented`: the
+  status enum has no "implementation complete, ready for review" value, and
+  the branch cannot be reviewed as complete while Claudine does not compile.
+  `implemented: true` is set as the phase protocol requires. The spec was not
+  moved and `just complete` was not run.
+
+Final checkpoint (macOS, final tree):
+
+| Area | `just test` | `just lint` |
+|---|---|---|
+| darkmatter (lib, cli, dmls, zed-dmls) | 8798 passed, 12 skipped | pass |
+| biscuit-file | 1017 passed | pass |
+| sniff | 3121 passed, 32 skipped | pass |
+| messenger | 695 passed, 2 skipped | pass |
+| claudine-gen (`cargo nextest run -p claudine-gen`, clippy `-D warnings`) | 195 passed | pass |
+| claudine area | not runnable: `claudine` does not compile | not runnable |
+
+`git verify-commit` on all 48 commits `e23d0c2b3..HEAD`: 48 verified, 0
+unverified; author Ken Snyder, no attribution trailers. Phase 8's own changes
+are uncommitted, per instructions.
+
+`just ci-local --plan` was not run in this phase (Phase 7's open checkpoint
+item); the plan stays red on Claudine until it compiles.
+
+### Hand-off
+
+- **Next on `fix/magic-globs`: Claudine's port (Phase 3 Track B, plus Phase 5's
+  Claudine task, Phase 6's two Claudine guards, Phase 7's claudine-cli
+  runner, and the Claudine docs and skill named in Wave 18).** The spec's
+  human-review item still asks for that decision.
+- **Then the feature `2026-09-30-glob-reference`.** It must delete the two
+  handed-off allowlist entries (`file_links/discovery.rs`,
+  `schemas/file_match.rs`, reason "handed off to 2026-09-30-glob-reference")
+  and add its rows and `EntryPoint` variants. The branch is not merged until
+  both are done (Decision 16). Watching the post-merge push to `main` is the
+  merger's step.
