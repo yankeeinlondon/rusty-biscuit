@@ -22,6 +22,7 @@ log: darkmatter/fixes/2026-09-30-file-refs-use-magic/log.md
 description: "A **fix** review of `2026-09-30-file-refs-use-magic/spec.md`"
 fix: 2026-09-30-file-refs-use-magic/review-2.md
 previous: 2026-09-30-file-refs-use-magic/review-1.md
+next: 2026-09-30-file-refs-use-magic/review-3.md
 ---
 
 # Review 2
