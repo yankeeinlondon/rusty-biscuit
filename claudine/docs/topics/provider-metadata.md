@@ -79,7 +79,7 @@ from returning.
 
 ## What We Capture
 
-`ProviderInfo` carries **45 serialized fields** plus four non-serialized behavior
+`ProviderInfo` carries **46 serialized fields** plus four non-serialized behavior
 trait objects. The serialized set is the authoritative live surface — inspect it
 with `claudine providers --describe --format json`, or read the committed
 `docs/providers/catalog.json`. It is pinned on both sides by
@@ -106,7 +106,7 @@ The fields group into three families:
   `model_cli_flag`, `non_interactive_conflicting_flags`, `billing_models`,
   `allowed_env_keys`, `display_policy`, `suppress_structured_stderr_on_success`,
   `supports_interactive_inline_closure`, `model_required_in_non_tty`,
-  `overlay_selector`, `overlay_capabilities`.
+  `overlay_selector`, `overlay_capabilities`, `cli_switches`.
 
 Several fields that were sketched as "future work" in earlier drafts have since
 landed (Phases D/F/G): `billing_models`, `model_cli_flag`, `resume`
@@ -116,6 +116,98 @@ landed (Phases D/F/G): `billing_models`, `model_cli_flag`, `resume`
 **generated `DisplayPolicy` sub-record** — the former stdout/stderr noise prefixes
 plus tool-result and event-suppression policy (single owner; zero `provider ==`
 in render code).
+
+### Switch metadata (`cli_switches`)
+
+`cli_switches` records how each switch of the provider's own CLI takes its
+value, so Claudine can tell which words on a command line belong to the agent.
+It comes from the `agent-cli` research topic and holds one of two things:
+
+- `CliSwitchCatalog::Researched(&[CliSwitch])`: every researched switch, with
+  its canonical spelling and aliases, its value type, the forms its value may be
+  written in, and the command paths that accept it.
+- `CliSwitchCatalog::Unknown { gap }`: the inventory is not established, and
+  `gap` says why. This is a gap, not an empty inventory: a switch looked up in
+  it is unrecognized, never "takes no value".
+
+A research record and what it generates:
+
+```yaml
+# docs/research/agent-cli/codex.md (frontmatter, contract revision 2)
+schema_revision: 2
+cli_switches:
+  - flag: --config
+    aliases: ["-c"]
+    value_type: string          # none | string | number | variadic | unknown
+    value_optional: false       # only for string and number
+    attachment: [space, equals, short_attached]
+    invocation_scope:
+      - applies_to: global      # or: applies_to: command, command: [exec]
+    description: "Override a configuration value for this invocation."
+    evidence_ids: [codex-cli-reference]
+```
+
+```rust
+CliSwitch {
+    flag: "--config",
+    aliases: &["-c"],
+    value: SwitchValue::String { optional: false },
+    attachments: &[SwitchAttachment::Space, SwitchAttachment::Equals, SwitchAttachment::ShortAttached],
+    scopes: &[SwitchScope::Global],
+    description: "Override a configuration value for this invocation.",
+    gap: None,
+}
+```
+
+The record type is `cli_switch` in `docs/research/agent-cli/_types.yaml`, which
+describes every field. Generation fails, rather than skipping a record, when:
+
+- a field the record needs is missing, `null`, or the wrong type, or one list
+  element is the wrong type (the generator reads the frontmatter as written, so
+  `7` in a command path is an error, not the word `"7"`);
+- `value_optional` appears on anything but a `string` or `number` switch, or
+  `variadic_min` on anything but a `variadic` one (`variadic_min` is an integer
+  of at least 1, or `unknown`);
+- `attachment` is empty for a switch that takes a value, or set for one that
+  does not, or lists `short_attached` without a one-dash, one-character spelling;
+- a value type or variadic minimum is `unknown` without a `gap`, or a `gap` is
+  present when nothing is unknown;
+- two records claim the same spelling at a command path both accept. A global
+  record meets every path; two command records meet only at an identical path,
+  so `--json` may mean different things under `exec` and under `mcp list`;
+- `cli_switches` is empty without a `cli_switches_gap` saying why.
+
+Records are emitted sorted by canonical spelling and then by command path, so
+the order of the research document never changes `data.rs`.
+
+**Planned:** nothing reads `cli_switches` at run time yet. Looking a switch up
+by provider and command path, and using the type to decide which arguments go
+to the agent, are planned.
+
+#### Research written for an older contract
+
+A research topic whose `_schema.yaml` declares `schema_revision: literal(N)` is
+versioned. When a document's `schema_revision` differs from `N` (a document
+without one is revision 1), the generator validates it against the frozen
+contract for its own revision, `_schema.r<revision>.yaml` beside the sidecar,
+and fails when that file does not exist. This lets a contract change land before
+the fleet re-researches every provider.
+
+```mermaid
+flowchart LR
+    D[research document] --> R{schema_revision<br/>matches the contract?}
+    R -- yes --> V[validate against _schema.yaml]
+    R -- no --> F{frozen _schema.rN.yaml<br/>for its revision N?}
+    F -- yes --> O[validate against the frozen contract]
+    F -- no --> E[generation fails]
+    V --> C[coercions read the document]
+    O --> C
+```
+
+Each coercion decides what an older document projects to. Today only `agent-cli`
+is versioned this way: its documents still at revision 1 keep feeding
+`config_paths`, and their `cli_switches` generate as `Unknown` with a gap asking
+for re-research. Delete a frozen contract once no document is at its revision.
 
 ### Related generated artifacts
 

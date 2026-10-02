@@ -107,6 +107,10 @@ Each of these cost a failed run.
 | A usage limit is not cured by retrying | Test `err.category == 'cap'` before `retry` |
 | A sequence plans one agent before any step exists | Name the agent on the command line; the prompt skips providers assigned to others |
 | A contract changed without a revision change leaves documents invalid and looking current | Change `schema_revision` with every contract change |
+| A revision change makes every committed document fail `claudine-gen` until the fleet reruns | For a topic the generator reads, copy the old contract to `_schema.r<old>.yaml` first; the generator validates an older document against it (a document without `schema_revision` is revision 1). Delete the copy once no document is at that revision |
+| A constraint after `[]` applies to the list, not its items | `string(pattern(^x$))[]` constrains each item; `string[](required)` constrains the list |
+| A flow sequence followed by ` -> description` is invalid YAML | Write a property-level union as a block list, one `- "arm -> description"` per line |
+| `md schema validate` accepts `null` for an optional property, an empty list without `min`, and a number where a string is required | A generator coercion that decides behavior reads the frontmatter as authored and rejects each of these itself |
 | `cargo run -p claudine-cli` fails: the package has four binaries | Add `--bin claudine` |
 | A build replaces the binary a running fleet is using | Do not build while a fleet runs |
 

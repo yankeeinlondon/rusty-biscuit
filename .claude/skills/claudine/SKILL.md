@@ -217,7 +217,7 @@ An empty `ctx.area` at the repository root is expected.
 
 | Subsystem | In one line | Reference |
 |-----------|-------------|-----------|
-| Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting); `partition_composition_tail` then splits off the agent tail as one `composition::ProviderTail` (tokens + authored `--` boundary; redacted `Debug`; non-UTF-8 refused). Composition and direct wrappers share its notice (`wrap::provider_tail_report`, once per provider/tail per command via `ProviderTailNotices`) and `redact_sensitive_args` on every display surface | [CLI Pre-Parsing](topics/cli-pre-parsing.md) · [Provider-argument partition](topics/argv-normalization.md#provider-argument-partition) |
+| Argv pre-parsing | `argv::normalize` rewrites composition-subcommand argv before clap (provider booleans → `--provider`, `--help` hoisting); `partition_composition_tail` then splits off the agent tail as one `composition::ProviderTail` (tokens + authored `--` boundary; redacted `Debug`; non-UTF-8 refused). Composition and direct wrappers share its notice (`wrap::provider_tail_report`, once per provider/tail per command via `ProviderTailNotices`), `redact_sensitive_args` on every display surface, and one exit report (`AgentErrorReport::for_native_exit` over a typed `output::native_exit::NativeExit`: bounded stdout/stderr tails, precedence classifier, "likely caused by the forwarded arguments" only for a rejection naming a tail switch; composition renders it once after recovery is exhausted). `resume::assemble_resume_args` re-sends the tail exactly once after the resume entrypoint and carries only Claudine's own transport flags (read from the argv with the tail's contiguous run removed) | [CLI Pre-Parsing](topics/cli-pre-parsing.md) · [Provider-argument partition](topics/argv-normalization.md#provider-argument-partition) |
 | System prompt | File-backed `--append-system-prompt`/`--asp` + `--replace-system-prompt`/`--rsp`, launch-CWD `system-prompt.md` discovery, per-provider delivery; direct wrappers also take `--edit` | [System Prompt](topics/system-prompt.md) |
 | Timeouts | Two rules only — `timeout` (wall-clock, opt-in) and `step_timeout` (stream-silence, default `30m`) | [Timeouts](topics/timeouts.md) |
 | Run budgets | `sequence --budget-ledger` debits each agent launch before spawn in `execute_attempt_phase` and caps its `timeout` at the remaining active time, rounded **up** to whole seconds (the wall-clock timer has 1 s resolution); step boundaries, retry backoff, settle, and a heartbeat thread check exhaustion. The run is installed process-wide (`budget::run`), so every hook is a no-op without a ledger | [Shared execution budgets](../../../claudine/docs/cli/budget.md) |
@@ -365,7 +365,15 @@ roster, with structured facts in frontmatter validated by a `_schema.yaml` sidec
   rejected document once. Not yet read by the generator. Before writing or changing a
   contract, a fleet prompt, or the `research` recipe, read
   [Research Contracts and Fleets](research-contracts.md).
-- `agent-cli/`, `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
+- `agent-cli/` — the public CLI surface. Contract revision 2 types the switch
+  inventory (`cli_switch` in its `_types.yaml`: value type, aliases, attachment
+  forms, invocation scope, gaps), which `claudine-gen` projects into
+  `ProviderInfo::cli_switches` (`CliSwitchCatalog::Researched` or
+  `::Unknown { gap }`). Documents still at revision 1 validate against the
+  frozen `_schema.r1.yaml` and generate `Unknown`; the fleet prompt has not yet
+  been updated for revision 2. See [Provider Metadata § Switch
+  metadata](topics/provider-metadata.md#switch-metadata-cli_switches).
+- `non-interactive-sessions/`, `usage/` — earlier topics; sidecars
   authored (every live topic directory carries a `_schema.yaml` sidecar as of
   2026-07-03, including `mcp/`, `acp/`, `hooks/`, `resume/`, `skills/`,
   `slash-commands/`, `subagents/`, `plugins/`, and `system-prompt/`)
