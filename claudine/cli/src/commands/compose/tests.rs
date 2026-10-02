@@ -178,9 +178,20 @@ fn positionals_duplicate_setter_last_wins() {
 }
 
 #[test]
-fn positionals_two_files_errors() {
-    let err = parse_composition_positionals(&s(&["a.md", "b.md"])).unwrap_err();
-    assert!(err.to_string().contains("multiple"));
+fn positionals_after_the_file_are_collected_in_order() {
+    let parsed = parse_composition_positionals(&s(&["a.md", "b.md", "k=v", "c", "b.md"])).unwrap();
+    assert_eq!(parsed.file_ref.as_deref(), Some("a.md"));
+    assert_eq!(parsed.positionals, s(&["b.md", "c", "b.md"]));
+    assert_eq!(parsed.shorthand_setters.get("k"), Some(&Value::String("v".into())));
+}
+
+#[test]
+fn positionals_reject_an_argv_setter() {
+    for tokens in [&["file.md", "argv=a"][..], &["argv=[1]", "file.md"], &["file.md", "argv=null"]] {
+        let err = parse_composition_positionals(&s(tokens)).unwrap_err().to_string();
+        assert!(err.contains("reserved for positional arguments"), "{tokens:?}: {err}");
+        assert!(err.contains("bare words"), "{err}");
+    }
 }
 
 #[test]
@@ -200,13 +211,13 @@ fn positionals_dot_path_is_file_candidate() {
 
 #[test]
 fn merge_both_empty() {
-    let result = merge_set_overrides(None, serde_json::Map::new()).unwrap();
+    let result = merge_set_overrides(None, serde_json::Map::new(), Vec::new()).unwrap();
     assert!(result.is_none());
 }
 
 #[test]
 fn merge_set_only() {
-    let result = merge_set_overrides(Some(r#"{"a":"b"}"#), serde_json::Map::new()).unwrap();
+    let result = merge_set_overrides(Some(r#"{"a":"b"}"#), serde_json::Map::new(), Vec::new()).unwrap();
     assert_eq!(result, Some(json!({"a": "b"})));
 }
 
@@ -214,7 +225,7 @@ fn merge_set_only() {
 fn merge_shorthand_only() {
     let mut short = serde_json::Map::new();
     short.insert("k".into(), Value::String("v".into()));
-    let result = merge_set_overrides(None, short).unwrap();
+    let result = merge_set_overrides(None, short, Vec::new()).unwrap();
     assert_eq!(result, Some(json!({"k": "v"})));
 }
 
@@ -222,7 +233,7 @@ fn merge_shorthand_only() {
 fn merge_shorthand_wins() {
     let mut short = serde_json::Map::new();
     short.insert("k".into(), Value::String("new".into()));
-    let result = merge_set_overrides(Some(r#"{"k":"old"}"#), short).unwrap();
+    let result = merge_set_overrides(Some(r#"{"k":"old"}"#), short, Vec::new()).unwrap();
     assert_eq!(result, Some(json!({"k": "new"})));
 }
 
@@ -230,8 +241,28 @@ fn merge_shorthand_wins() {
 fn merge_disjoint() {
     let mut short = serde_json::Map::new();
     short.insert("b".into(), json!(2));
-    let result = merge_set_overrides(Some(r#"{"a":"1"}"#), short).unwrap();
+    let result = merge_set_overrides(Some(r#"{"a":"1"}"#), short, Vec::new()).unwrap();
     assert_eq!(result, Some(json!({"a": "1", "b": 2})));
+}
+
+#[test]
+fn merge_sets_argv_from_positionals_only_when_there_are_some() {
+    let result = merge_set_overrides(None, serde_json::Map::new(), s(&["alpha", "1", ""])).unwrap();
+    // Strings, not JSON5-parsed: `1` stays a string; an empty word stays.
+    assert_eq!(result, Some(json!({"argv": ["alpha", "1", ""]})));
+    let result = merge_set_overrides(Some(r#"{"a":1}"#), serde_json::Map::new(), Vec::new()).unwrap();
+    assert_eq!(result, Some(json!({"a": 1})), "no positionals leaves argv unset");
+}
+
+#[test]
+fn merge_rejects_argv_in_set_json() {
+    for raw in [r#"{"argv":["a"]}"#, r#"{"argv":null}"#] {
+        let err = merge_set_overrides(Some(raw), serde_json::Map::new(), Vec::new()).unwrap_err().to_string();
+        assert!(err.contains("reserved for positional arguments"), "{raw}: {err}");
+    }
+    // Rejected whether or not positionals are given.
+    let err = merge_set_overrides(Some(r#"{"argv":"a"}"#), serde_json::Map::new(), s(&["b"])).unwrap_err();
+    assert!(err.to_string().contains("reserved"), "{err}");
 }
 
 // ── resolve_session_interactivity ────────────────────────────────
