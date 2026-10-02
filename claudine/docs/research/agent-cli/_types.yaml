@@ -32,3 +32,40 @@ types:
     switch_scope:
         applies_to: enum(global,command; required) -> global when the provider accepts the switch at every command path, command when only at the one path below
         command: string(pattern(^[A-Za-z0-9][A-Za-z0-9_.:-]*$))[] -> The exact native command path after the executable, one word per entry, such as exec then resume; an empty list is the root entrypoint; present exactly when applies_to is command
+
+    binary_record:
+        os: os(required)@../_types.yaml -> Operating system this record describes; one record per operating system and never one for all of them
+        binary: string(required; not-empty) -> The command name a user types on this operating system
+        alt_binaries: string[] -> Other executable names or shims installed for the same command, such as codex.cmd on Windows
+        notes: string(not-empty) -> How the name was confirmed, and anything about it a wrapper must know
+
+    install_method:
+        os: os(required)@../_types.yaml -> Operating system the method installs on
+        method: enum(package_manager,standalone_binary,npm,pip,cargo,brew,winget,chocolatey,scoop,app_bundle,source,other; required) -> The kind of installation, where package_manager means a system package manager not named in the set
+        command: string(not-empty) -> The exact command the provider's documentation gives
+        notes: string(not-empty) -> Install location, upgrade path, or a caveat of this method
+
+    subcommand:
+        name: string(required; pattern(^[A-Za-z0-9][A-Za-z0-9_.:\x20-]*$)) -> The native command path after the executable, one space between words, such as exec resume; the root entrypoint is not listed, and a command-scoped switch names one of these paths
+        description: string(required; not-empty) -> What the command does, in one sentence a reader new to the provider understands
+        non_interactive: boolean(required) -> Whether the command runs to completion without a terminal, a browser, or a person answering a prompt
+        notes: string(not-empty) -> Aliases, prompts it may raise, or other behavior a wrapper must know
+
+    config_path:
+        os: os(required)@../_types.yaml -> Operating system the path applies to; one record per operating system because Windows paths differ
+        scope: enum(user,repo,system,env,other; required) -> Where the file sits, where env means a path chosen by an environment variable
+        path: string(required; not-empty) -> The path as the provider documents it, with ~ for the home directory
+        format: enum(json,jsonc,yaml,toml,ini,text,other) -> File format the provider parses the file as; other when it is none of the listed formats
+        notes: string(not-empty) -> Precedence, whether the provider writes the file itself, and other side effects
+
+    env_var:
+        name: string(required; pattern(^[A-Za-z_][A-Za-z0-9_]*$)) -> The variable name exactly as the provider reads it
+        effect: string(required; not-empty) -> What the provider does differently when the variable is set
+
+    introspection_command:
+        command: string(required; not-empty) -> The complete command to run, with its arguments
+        purpose: enum(version,help,models,config_schema,config_dump,doctor,env,capabilities,plugins,mcp,tools,other; required) -> What provider state the command reports
+        machine_readable: boolean(required) -> Whether the output is a structured format a program can parse
+        output_format: enum(json,jsonl,text,table,yaml,toml,unknown; required) -> Format of the command's standard output; unknown when it was not run and the documentation does not say
+        useful_for_codegen: boolean(required) -> Whether Claudine could generate metadata from the output
+        notes: string(not-empty) -> Side effects, authentication it needs, or limits of the output

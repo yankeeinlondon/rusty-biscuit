@@ -1,8 +1,9 @@
-# SimplifiedSchema for the agent-cli research topic, revision 2.
+# Research contract for the agent-cli topic, revision 2.
 #
 # Captures the public CLI surface that Claudine wrappers and provider metadata
-# need: version/docs links, flags, subcommands, config discovery, and platform
-# packaging. Referenced by provider docs via `$schema: ./_schema.yaml`.
+# need: version and documentation links, the typed switch inventory,
+# subcommands, configuration discovery, and platform packaging. Every object
+# shape is a named type, in ./_types.yaml or ../_types.yaml.
 #
 # Revision 2 types the switch inventory (`cli_switch@./_types.yaml`) so
 # `claudine-gen` can project it into the compiled catalog. A document without
@@ -10,59 +11,34 @@
 # generates an explicit unknown gap for its switches.
 $schema:
     schema_revision: literal(2; required) -> Revision of this research contract; a document written for another revision is validated against that revision's frozen contract, and its switches generate as unknown
-
-    # Date the research file was first created.
-    created: date
-
-    # Date the provider CLI surface was last verified.
-    last_updated: date(required)
-
-    # Agent/model that produced the research.
-    agent: string(required)
-    model: string(required)
-
-    # Current upstream CLI version observed during research, or "unknown".
-    latest_version: string(required)
-
+    provider: identifier(required)@../_types.yaml -> Roster slug of the provider this document describes
+    created: date(required) -> Date this document was first written; kept unchanged on refresh
+    last_updated: date(required) -> Date of the research run that produced this version
+    contract_checked: date -> Date the fleet last confirmed this document satisfies the contract; written by the fleet after validation and never by the researcher
+    agent: research_agent(required)@../_types.yaml -> Agentic CLI that performed the research, which the fleet checks against its assignment
+    model: research_model(required)@../_types.yaml -> Model that performed the research, recorded so findings can be weighed by who produced them
+    reasoning_effort: research_effort(required)@../_types.yaml -> Reasoning effort the research itself ran with
+    latest_version: string(required; pattern(^[0-9]+[.][0-9]+[.][0-9]+[0-9A-Za-z.+-]*$|^unknown$)) -> Newest released version found upstream, or unknown when no release channel states one
     versions_examined: version[](required)@../_types.yaml -> Provider versions whose help output, documentation, or source the switch records were established from
     evidence: evidence[](required)@../_types.yaml -> Every source a switch record rests on, cited by its evidence_ids
 
-    # Primary product, repository, and documentation URLs.
-    homepage: url
-    repo: url
-    docs: url
-    cli_docs: url
+    homepage: url(required) -> The provider's product page for the CLI
+    repo: url -> Source repository, absent when the CLI is closed source
+    docs: url(required) -> Entry page of the provider's general documentation
+    cli_docs: url -> Page documenting the command-line reference, absent when the provider publishes none
 
-    # Binary names by OS. Use `os: all` only when the executable name is the same
-    # everywhere; otherwise record per-OS binaries and aliases/shims.
-    binaries: "{ os: enum(macos,linux,windows; required), binary: string(required), alt_binaries: string[], notes: string }[]"
-    install_methods: "{ os: enum(macos,linux,windows; required), method: enum(package_manager,standalone_binary,npm,pip,cargo,brew,winget,chocolatey,scoop,app_bundle,source,other; required), command: string, notes: string }[]"
-
-    # One record per top-level subcommand or mode.
-    subcommands: "{ name: string(required), description: string(required), non_interactive: boolean, notes: string }[]"
+    binaries: binary_record[](required; min(1))@./_types.yaml -> The command name on each operating system, one record per operating system
+    install_methods: install_method[](required)@./_types.yaml -> Each documented way to install the CLI, one record per operating system and method
+    subcommands: subcommand[](required)@./_types.yaml -> Every native command path below the executable; empty when the CLI has none
 
     cli_switches: cli_switch[](required)@./_types.yaml -> Full CLI switch inventory, one record per switch and command path set; empty only when cli_switches_gap explains why
     cli_switches_gap: string(not-empty) -> Why the switch inventory could not be established and the check that would establish it; present exactly when cli_switches is empty
 
-    # Config discovery exposed by the CLI itself.
-    config_paths: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,env,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
-    # General CLI/runtime environment variables not owned by a more specific
-    # topic such as model-config, permissions, mcp, logging, or streaming. Keep
-    # `effect` prose for first-pass research; after the topic fleets, derive
-    # narrower effect enums where the data supports it.
-    env_vars: "{ name: string(required), effect: string(required) }[]"
+    config_paths: config_path[](required)@./_types.yaml -> Configuration files the CLI discovers, one record per operating system and file
+    env_vars: env_var[](required)@./_types.yaml -> General CLI and runtime variables; variables owned by the model-config, agent-permissions, mcp, agent-logging, or streaming topics belong there
+    machine_introspection: introspection_command[](required)@./_types.yaml -> Commands that report provider state a program can use, such as model catalogs, configuration dumps, or doctor checks; plain help and version output is listed only when it has a machine-readable mode
+    wrapper_notes: string(not-empty)[](required) -> Caveats a wrapper author must handle, such as noisy stderr on success, terminal requirements, quoting hazards, or configuration side effects
 
-    # Commands Claudine can run to discover machine-usable provider state. Do
-    # not include generic `--help` / `--version` unless they have a machine-
-    # readable mode or expose state useful to wrappers/codegen.
-    # Examples: model catalogs, config dumps/schemas, doctor diagnostics,
-    # effective env/config, plugin/extension lists, MCP server lists, tool lists.
-    machine_introspection: "{ command: string(required), purpose: enum(version,help,models,config_schema,config_dump,doctor,env,capabilities,plugins,mcp,tools,other; required), machine_readable: boolean(required), output_format: enum(json,jsonl,text,table,yaml,toml,unknown; required), useful_for_codegen: boolean(required), notes: string }[]"
-
-    # Wrapper-impacting caveats: noisy stderr, TTY requirements, shell quoting,
-    # config side effects, broken flags, platform-specific behavior.
-    wrapper_notes: string[]
-
-    changes: string[]
-    requires_claudine_update: boolean(required)
-    reason: string
+    changes: string(not-empty)[](required) -> What changed in this document since the previous version
+    requires_claudine_update: boolean(required) -> Whether a finding here means Claudine's code or metadata must change
+    reason: string(required; not-empty) -> Why Claudine does or does not need to change
