@@ -66,10 +66,16 @@ Arguments: {{ argv }}
 
 Setter values are parsed as JSON5 first and fall back to strings when JSON5
 parsing fails, so `count=3`, `enabled=true`, `tags=["a","b"]`, and
-`review=review.md` all resolve to their natural types.
+`review=review.md` all resolve to their natural types. The value is split at
+the first `=`, so `label=a=b` sets `label` to `a=b`, and `phase=` sets an
+empty string.
 
-Inline setters override matching keys from `--set`. For `sequence`, reserved
-per-step overlay keys still win over both `--set` and shorthand setters.
+Setters can sit anywhere after the file, including after provider switches
+(see [Setters after a provider switch](#setters-after-a-provider-switch)).
+When a key is repeated, the last occurrence wins. Inline setters override
+matching keys from `--set` wherever either is written (`--set` is accepted
+once per command). For `sequence`, reserved per-step overlay keys still win
+over both `--set` and shorthand setters.
 
 ### Provider Argument Forwarding
 
@@ -112,6 +118,82 @@ before a `--` — a colliding native switch (e.g. Codex's own `-m`) must be
 placed after `--`. The composition file must come first: an unowned switch
 (or a `--`) before the file is an error with ordering guidance. The full rules
 are in [argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+#### Setters after a provider switch
+
+A `key=value` written after a provider switch is still a setter: it changes
+the prompt's frontmatter and is never sent to the agent. The only exception
+is the switch's own value. Claudine knows how many values each provider
+switch takes, so it can tell the two apart:
+
+```sh
+# -c takes one value: x=y is Codex's, phase=2 is a setter.
+claudine compose plan.md --codex -c x=y phase=2
+#   frontmatter: phase: 2        agent receives: -c x=y
+
+# The attached form carries its value, so phase=2 is a setter.
+claudine compose plan.md --codex --config=x=y phase=2
+#   frontmatter: phase: 2        agent receives: --config=x=y
+
+# --add-dir takes a list: the run of bare words ends at the setter.
+claudine compose plan.md --claude --add-dir a b phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir a b
+
+# A list switch takes at most one key=value, and only as its first value.
+claudine compose plan.md --claude --add-dir x=y phase=2
+#   frontmatter: phase: 2        agent receives: --add-dir x=y
+
+# A Claudine option (-m) between the words ends the switch's run.
+claudine compose plan.md --codex -c x=y -m gpt5 phase=2
+#   model: gpt5   frontmatter: phase: 2   agent receives: -c x=y
+```
+
+A switch that takes no value, or one Claudine has no record of, never takes
+a `key=value`, so a setter right after it stays a setter. Values the agent
+receives are unchanged strings: in `-c count=3 count=3` the first `count=3`
+reaches Codex as text and the second sets `count` to the number `3`.
+
+The per-token decision, including the cases above, is drawn in the
+flowchart under
+[argv-normalization.md → Type-aware ownership](argv-normalization.md#type-aware-ownership).
+
+**A declared parameter is never a switch's value.** If the document's
+`$schema` declares `phase`, then `phase=2` is a setter even directly after
+`-c`. That leaves `-c` with no value, so the command fails before any agent
+starts. The words after it never move up to fill the gap, so
+`--codex -c phase=2 x=y` fails the same way:
+
+```text
+Error: provider argument `-c` takes a value for Codex (at its `exec` command), but none was
+forwarded with it: the `phase` setter after it is a parameter the document declares, so it
+stays Claudine's and is never the switch's value.
+Give `-c` a separate provider value, or put intentional provider arguments after `--`.
+```
+
+The message names the switch, the parameter, and the provider, but never the
+setter's value. When the `$schema` is written as an expression, its parameter
+names are not known before it runs, so a `key=value` a switch could take is
+an error asking you to put the provider value after `--` or pass the setter
+with `--set`.
+
+**`--` keeps provider data away from the prompt.** Every word after an
+authored `--` goes to the agent untouched, even one shaped like a declared
+parameter:
+
+```sh
+claudine compose plan.md --codex -- -c x=y phase=2
+#   frontmatter: unchanged       agent receives: -c x=y phase=2
+```
+
+The same setter applies to every launch of the command: each `sequence`
+step, a lifecycle `retry`, `resume`, or `proxy` target. `inline-compose` uses
+it for the run and never writes it into the document.
+
+> **Behavior change.** Earlier releases forwarded every token after the first
+> provider switch Claudine did not own, so a trailing `phase=2` reached the
+> agent and the prompt silently kept its default. Setters are now applied
+> wherever they appear. If you meant a `key=value` as provider data, put it
+> after `--`.
 
 Before launch, one INFO status says what is forwarded. It names switches only,
 never values, and describes a tail after `--` as opaque. Each switch before
