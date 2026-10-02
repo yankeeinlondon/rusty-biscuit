@@ -27,7 +27,8 @@ needs_rulings: false
 clarified_by: codex/gpt-6-astra
 reviewed_by: claude/fable
 reviewed_on: 2026-09-19
-review_iterations: 0
+review_iterations: 2
+completed: true
 implemented: true
 implemented_by: claude/opus
 review_note: the clarification process served as a review
