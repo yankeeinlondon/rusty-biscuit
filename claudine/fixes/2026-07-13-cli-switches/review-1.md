@@ -8,7 +8,10 @@ reviewed_by: codex/gpt-6.1-sol
 recurrence: false
 created: 2026-10-02T01:30:56-07:00
 spec: 2026-07-13-cli-switches/spec.md
-implemented: false
+implemented: true
+next: 2026-07-13-cli-switches/review-2.md
+implemented_by: claude/opus
+log: claudine/fixes/2026-07-13-cli-switches/log.md
 description: A **fix** review of `2026-07-13-cli-switches/spec.md`
 fix: 2026-07-13-cli-switches/review-1.md
 findings:
