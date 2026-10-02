@@ -46,17 +46,22 @@ use lsp_types::{
     WorkDoneProgressBegin, WorkDoneProgressCreateParams, WorkDoneProgressEnd,
     WorkDoneProgressReport, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
+use darkmatter::markdown::compose::RequestSnapshot;
 use thiserror::Error;
 
 use crate::capabilities::{ClientProfile, negotiate_position_encoding, server_capabilities};
 use crate::config::ConfigState;
+use crate::context::{DocumentResolution, RepositoryContexts};
 use crate::diagnostics::DiagnosticsScheduler;
 use crate::graph::{WorkspaceGraph, WorkspaceIndex};
 use crate::overlay::OverlayState;
 use crate::providers::{DocumentContext, ProviderRegistry};
 use crate::workspace::snapshot::SharedSnapshot;
 use crate::workspace::startup::{ProgressReporter, SilentProgress, collect_indices};
-use crate::workspace::watch::{WatchMode, coalesce_changes, watch_registration};
+use crate::workspace::watch::{
+    WatchMode, changed_manifests, coalesce_changes, is_context_input, scan_manifests,
+    watch_registration,
+};
 use crate::workspace::{DocumentStore, uri_to_file_path, workspace_roots};
 
 /// Fatal server errors (protocol violations, not per-request failures).
@@ -77,10 +82,21 @@ pub enum ServerError {
 }
 
 /// Server startup options carried from the CLI.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RunOptions {
     /// Explicit `--config` path (wins over `.dmls.toml` discovery).
     pub config_path: Option<PathBuf>,
+    /// `HOME`, the environment, and extra `@` roots every file-resolution
+    /// context is built from, fixed for the server's lifetime. The binary
+    /// takes it from the process once; tests pass a fixture snapshot.
+    pub snapshot: RequestSnapshot,
+}
+
+impl RunOptions {
+    /// Options with no `--config` override.
+    pub fn new(snapshot: RequestSnapshot) -> Self {
+        Self { config_path: None, snapshot }
+    }
 }
 
 /// Performs the `initialize` handshake and runs the router until `exit`.
@@ -118,7 +134,10 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         &roots,
         config.effective().wiki.wiki_root.as_deref(),
     );
-    let index = Arc::new(Mutex::new(WorkspaceIndex::new()));
+    let contexts = Arc::new(RepositoryContexts::new(options.snapshot));
+    let index = Arc::new(Mutex::new(WorkspaceIndex::new(
+        Arc::clone(&contexts) as Arc<dyn crate::graph::DocumentContexts>
+    )));
     let snapshot = {
         let mut guard = index.lock().expect("fresh index lock");
         guard.set_wiki_roots(wiki_roots);
@@ -127,6 +146,12 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
 
     let watch_mode = WatchMode::for_profile(&profile);
     register_watchers(&connection.sender, watch_mode, config.effective());
+    // The rescan fallback learns of a manifest change by comparing scans, so
+    // it needs a baseline from startup.
+    let manifests = match watch_mode {
+        WatchMode::ServerRescan => scan_manifests(&roots),
+        WatchMode::ClientWatched => HashMap::new(),
+    };
     spawn_startup_index(
         connection.sender.clone(),
         roots.clone(),
@@ -148,6 +173,8 @@ pub fn run_server(connection: Connection, options: RunOptions) -> Result<(), Ser
         diagnostics,
         overlay: OverlayState::default(),
         watch_mode,
+        contexts,
+        manifests,
     };
     Router::new(connection, state).run()
 }
@@ -224,6 +251,10 @@ pub struct ServerState {
     /// save-triggered rescan for unopened files; `ClientWatched` relies on
     /// `didChangeWatchedFiles`.
     pub watch_mode: WatchMode,
+    /// One file-resolution context per repository, shared with the graph.
+    pub contexts: Arc<RepositoryContexts>,
+    /// Package-manifest hashes from the last scan, for [`WatchMode::ServerRescan`].
+    manifests: HashMap<PathBuf, u64>,
 }
 
 impl ServerState {
@@ -239,11 +270,11 @@ impl ServerState {
     }
 
     /// Builds a [`DocumentContext`] for an open document and runs `f` against
-    /// it. Returns `None` when the document is not open or lacks a filesystem
-    /// path.
+    /// it. Returns `None` when the document is not open, or is neither a
+    /// `file:` nor an `untitled:` document.
     fn with_document<R>(&self, uri: &Uri, f: impl FnOnce(&DocumentContext) -> R) -> Option<R> {
         let open = self.documents.get(uri)?;
-        let path = uri_to_file_path(uri)?;
+        let (path, resolution) = self.document_resolution(uri)?;
         let snapshot = self.snapshot.load();
         let doc_id = snapshot.document_id(&path);
         let overlay = self.overlay.for_document(
@@ -252,6 +283,7 @@ impl ServerState {
             &path,
             self.config.effective(),
             &self.roots,
+            &resolution,
         );
         let ctx = DocumentContext {
             uri,
@@ -263,8 +295,53 @@ impl ServerState {
             config: self.config.effective(),
             profile: &self.profile,
             overlay: overlay.as_ref(),
+            resolution: &resolution,
         };
         Some(f(&ctx))
+    }
+
+    /// The path a document is analyzed at and its file-resolution context.
+    ///
+    /// A `file:` document uses its repository's context. An `untitled:`
+    /// buffer borrows the context of the single repository the workspace
+    /// folders lie in, and is analyzed as if it sat at that repository's
+    /// root; with no single repository it gets the context failure.
+    fn document_resolution(&self, uri: &Uri) -> Option<(PathBuf, DocumentResolution)> {
+        if let Some(path) = uri_to_file_path(uri) {
+            let resolution = self.contexts.for_document(&path);
+            return Some((path, resolution));
+        }
+        let name = untitled_name(uri)?;
+        let resolution = self.contexts.for_untitled(&self.roots);
+        let path = match resolution.context() {
+            Some(context) => context.request_cwd().join(&name),
+            None => PathBuf::from(&name),
+        };
+        Some((path, resolution))
+    }
+
+    /// Drops the cached contexts `changed` can affect and, when any dropped,
+    /// rebuilds the graph so every path reference re-resolves.
+    ///
+    /// ## Returns
+    ///
+    /// `true` when a context was dropped.
+    fn invalidate_contexts<'p>(&self, changed: impl IntoIterator<Item = &'p Path>) -> bool {
+        let mut dropped = false;
+        for path in changed {
+            dropped |= self.contexts.invalidate(path);
+        }
+        if dropped {
+            self.relink();
+        }
+        dropped
+    }
+
+    /// Rebuilds the graph against the current contexts.
+    fn relink(&self) {
+        let mut index = self.index.lock().expect("index lock poisoned");
+        index.relink();
+        self.snapshot.store(index.snapshot());
     }
 
     /// Recomputes and publishes diagnostics for one open document (empty when
@@ -344,21 +421,32 @@ impl ServerState {
     /// never composes, executes, or fetches — the same passive contract as
     /// startup indexing.
     ///
+    /// The scan also re-hashes every package manifest, and a document or
+    /// manifest it finds changed drops the cached contexts above it, as a
+    /// watched event would.
+    ///
     /// ## Returns
     ///
-    /// `true` when the snapshot changed, so the caller refreshes diagnostics.
-    fn rescan_workspace(&self) -> bool {
+    /// The changed document and manifest paths.
+    fn rescan_workspace(&mut self) -> Vec<PathBuf> {
         let discovered = collect_indices(
             &self.roots,
             &self.config.effective().workspace,
             &SilentProgress,
         );
         let open_paths = self.open_document_paths();
-        let mut index = self.index.lock().expect("index lock poisoned");
-        let changed = index.reconcile_disk(discovered, &open_paths);
-        if changed {
-            self.snapshot.store(index.snapshot());
-        }
+        let mut changed = {
+            let mut index = self.index.lock().expect("index lock poisoned");
+            let changed = index.reconcile_disk(discovered, &open_paths);
+            if !changed.is_empty() {
+                self.snapshot.store(index.snapshot());
+            }
+            changed
+        };
+        let manifests = scan_manifests(&self.roots);
+        changed.extend(changed_manifests(&self.manifests, &manifests));
+        self.manifests = manifests;
+        self.invalidate_contexts(changed.iter().map(PathBuf::as_path));
         changed
     }
 
@@ -372,9 +460,11 @@ impl ServerState {
     /// (`workspace.include`/`exclude`), and re-publishes diagnostics for every
     /// open document. Schema-extension activation (`schema.extensions`) flows
     /// through the overlay's content-and-config-keyed schema cache, so it
-    /// re-assembles on the diagnostics refresh by construction. Nothing runs
-    /// when the effective config is unchanged, and the expensive re-discovery
-    /// runs only when the `workspace` section actually changed.
+    /// re-assembles on the diagnostics refresh by construction. Every cached
+    /// file-resolution context is dropped, even when the effective config is
+    /// unchanged, and rebuilt on the next request. Nothing else runs when the
+    /// effective config is unchanged, and the expensive re-discovery runs only
+    /// when the `workspace` section actually changed.
     ///
     /// ## Returns
     ///
@@ -383,10 +473,15 @@ impl ServerState {
     /// connection) sends the refresh. The new config already applies to every
     /// later request regardless of this signal.
     fn reload_config(&mut self, settings: serde_json::Value) -> bool {
+        let contexts_dropped = self.contexts.clear();
         let before = self.config.effective().clone();
         self.config.apply_client_settings(settings);
         let after = self.config.effective();
         if *after == before {
+            if contexts_dropped {
+                self.relink();
+                self.refresh_all_diagnostics();
+            }
             return false;
         }
         let refresh_semantic_tokens =
@@ -401,15 +496,21 @@ impl ServerState {
 
         {
             let mut index = self.index.lock().expect("index lock poisoned");
-            let mut dirty = false;
+            // Each of these rebuilds the graph, which also re-resolves every
+            // reference against the fresh contexts.
+            let mut rebuilt = false;
             if let Some(wiki_roots) = wiki_roots {
                 index.set_wiki_roots(wiki_roots);
-                dirty = true;
+                rebuilt = true;
             }
             if let Some(discovered) = discovered {
-                dirty |= index.reconcile_disk(discovered, &open_paths);
+                rebuilt |= !index.reconcile_disk(discovered, &open_paths).is_empty();
             }
-            if dirty {
+            if contexts_dropped && !rebuilt {
+                index.relink();
+                rebuilt = true;
+            }
+            if rebuilt {
                 self.snapshot.store(index.snapshot());
             }
         }
@@ -1087,11 +1188,21 @@ impl Router {
     }
 
     /// Applies coalesced `didChangeWatchedFiles` events to the workspace index.
+    ///
+    /// Every event drops the cached contexts above its path. A context input
+    /// (a package manifest or `.git` file) does nothing else; a document
+    /// change is re-indexed unless the document is open.
     fn apply_watched_changes(&mut self, params: DidChangeWatchedFilesParams) {
         let events = params.changes.into_iter().filter_map(|event| {
             uri_to_file_path(&event.uri).map(|path| (path, event.typ))
         });
-        for change in coalesce_changes(events) {
+        let changes = coalesce_changes(events);
+        self.state
+            .invalidate_contexts(changes.iter().map(|change| change.path.as_path()));
+        for change in changes {
+            if is_context_input(&change.path) {
+                continue;
+            }
             // An open buffer is authoritative over disk; skip its watch events.
             if let Some(uri) = crate::workspace::file_path_to_uri(&change.path)
                 && self.state.documents.is_open(&uri)
@@ -1117,6 +1228,14 @@ impl Router {
         let id = self.refresh.issue();
         send_refresh_request(&self.connection.sender, id);
     }
+}
+
+/// The buffer name of an `untitled:` URI (`untitled:Untitled-1` gives
+/// `Untitled-1`); `None` for any other scheme.
+fn untitled_name(uri: &Uri) -> Option<String> {
+    let rest = uri.as_str().strip_prefix("untitled:")?;
+    let name = rest.rsplit(['/', '\\']).find(|segment| !segment.is_empty()).unwrap_or("untitled");
+    Some(name.to_string())
 }
 
 /// Builds an `InvalidParams` error response for a malformed request payload.
@@ -1180,6 +1299,15 @@ fn parse_params<P: serde::de::DeserializeOwned>(params: serde_json::Value) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_untitled_name_reads_only_untitled_uris() {
+        let name = |text: &str| untitled_name(&text.parse::<Uri>().unwrap());
+        assert_eq!(name("untitled:Untitled-1").as_deref(), Some("Untitled-1"));
+        assert_eq!(name("untitled:/scratch/notes.md").as_deref(), Some("notes.md"));
+        assert_eq!(name("untitled:").as_deref(), Some("untitled"));
+        assert_eq!(name("file:///w/a.md"), None);
+    }
 
     #[test]
     fn test_cancel_ledger_take_removes() {

@@ -64,12 +64,17 @@ darkmatter = { path = "../lib" }
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 # xxHash content-hash identity for invalidation (design "Invalidation").
 biscuit-hash = { path = "../../biscuit-hash/lib" }
+# The package-manifest file names that change `^` resolution; DMLS watches
+# exactly sniff's list. Already compiled through `darkmatter`.
+sniff = { path = "../../sniff/lib", features = ["remote"] }
 
 [dev-dependencies]
 # The alias-search work counter behind the linear-diagnostics regression; a
 # dev-dependency feature, so no non-test build of dmls compiles it.
 darkmatter = { path = "../lib", features = ["work-counters"] }
 tempfile = "3"
+# Scoped log capture: a failed context build logs one `error` event.
+tracing-test = "0.2"
 # Level-2 editor tests (tests/level2/level2_editor_neovim.rs): tier gating and
 # the tmux terminal harness for real-rendering SGR capture. `test-toolkit` also
 # backs the Level 1 layout gate (`tests/l1/test_layout.rs`).

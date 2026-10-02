@@ -25,6 +25,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use biscuit_hash::xx_hash_bytes;
+
+use crate::context::DocumentResolution;
+use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::schemas::{
     SchemaError, StandaloneSchemaDocument, StandaloneSchemaEnvelope,
     SuggestionLintProblem, parse_standalone_schema_document,
@@ -195,6 +198,7 @@ impl OverlayState {
         path: &Path,
         config: &DmlsConfig,
         workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
     ) -> Option<DocumentOverlay> {
         // Markdown frontmatter path.
         if let Some(parse) = FrontmatterAst::parse(text) {
@@ -226,6 +230,7 @@ impl OverlayState {
                 path,
                 config,
                 workspace_roots,
+                resolution,
             );
             let suggestions = suggestions::inline_lints(text, ast.as_deref());
             let schema_authoring = schema::frontmatter_authoring(ast.as_deref(), &schema);
@@ -260,7 +265,9 @@ impl OverlayState {
                 }
                 Ok(Some(_)) => {
                     let mut cache = self.inner.lock().expect("overlay lock poisoned");
-                    cache.trigger_registry(path, workspace_roots);
+                    if let Some(context) = resolution.context() {
+                        cache.trigger_registry(path, workspace_roots, context);
+                    }
                     if let Some(error) = cache
                         .trigger_load_errors
                         .values()
@@ -389,20 +396,37 @@ impl OverlayCache {
         path: &Path,
         config: &DmlsConfig,
         workspace_roots: &[PathBuf],
+        resolution: &DocumentResolution,
     ) -> SchemaOutcome {
-        let registry = self.trigger_registry(path, workspace_roots);
+        // A document whose context failed resolves no `$schema` reference or
+        // trigger payload; its context-failure diagnostic says why.
+        let Some(context) = resolution.context() else {
+            self.schema.remove(uri_key);
+            return SchemaOutcome::Ready(None);
+        };
+        let registry = self.trigger_registry(path, workspace_roots, context);
         let registry_key = registry
             .as_ref()
             .map(|registry| xx_hash_bytes(format!("{registry:?}").as_bytes()))
             .unwrap_or_default();
-        let key = schema_cache_key(text, config) ^ registry_key;
+        // A rebuilt context re-assembles: file values were validated against
+        // the old one.
+        let context_key = xx_hash_bytes(resolution.generation().to_string().as_bytes());
+        let key = schema_cache_key(text, config) ^ registry_key ^ context_key;
         if let Some(cached) = self.schema.get(uri_key)
             && cached.key == key
             && deps_unchanged(&cached.deps)
         {
             return cached.outcome.clone();
         }
-        let outcome = match schema::assemble(path, text, config, workspace_roots, registry) {
+        let outcome = match schema::assemble(
+            path,
+            text,
+            config,
+            workspace_roots,
+            registry,
+            context,
+        ) {
             Ok(bundle) => SchemaOutcome::Ready(bundle.map(Arc::new)),
             Err(error) => SchemaOutcome::Failed(Arc::new(error)),
         };
@@ -416,11 +440,12 @@ impl OverlayCache {
         &mut self,
         path: &Path,
         workspace_roots: &[PathBuf],
+        context: &FileResolutionContext,
     ) -> Option<TriggerRegistry> {
         let boundary = schema::trigger_boundary(path, workspace_roots)?;
         let document_dir = path.parent().unwrap_or(path).to_path_buf();
         let key = (boundary.clone(), document_dir);
-        match scan_triggers(path, &boundary) {
+        match scan_triggers(path, &boundary, context) {
             Ok(registry) => {
                 self.trigger_registries.insert(key.clone(), registry.clone());
                 if let Some(previous) = self.trigger_load_errors.remove(&key) {
@@ -527,6 +552,7 @@ mod tests {
                     Path::new("/w/doc.md"),
                     &DmlsConfig::default(),
                     &[PathBuf::from("/w")],
+                    &crate::context::test_support::resolution_for(Path::new("/w/doc.md")),
                 )
                 .is_none()
         );
@@ -542,6 +568,7 @@ mod tests {
                 Path::new("/w/doc.md"),
                 &DmlsConfig::default(),
                 &[PathBuf::from("/w")],
+                &crate::context::test_support::resolution_for(Path::new("/w/doc.md")),
             )
             .unwrap();
         assert!(!overlay.stale);
@@ -571,7 +598,7 @@ mod tests {
         let roots = [root.to_path_buf()];
 
         let first = state
-            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&doc_path))
             .unwrap();
         let bundle1 = ready_bundle(&first);
         let report1 = bundle1.effective.validate(&bundle1.frontmatter_json);
@@ -581,7 +608,7 @@ mod tests {
         std::fs::write(root.join("types.yaml"), "$schema:\n  type: 'enum(x, y)'\n").unwrap();
 
         let second = state
-            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&doc_path))
             .unwrap();
         let bundle2 = ready_bundle(&second);
         assert!(
@@ -612,7 +639,7 @@ mod tests {
         let roots = [root.to_path_buf()];
 
         let first = state
-            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&doc_path))
             .unwrap();
         let bundle1 = ready_bundle(&first);
         let report1 = bundle1.effective.validate(&bundle1.frontmatter_json);
@@ -622,7 +649,7 @@ mod tests {
         std::fs::write(root.join("schema.yaml"), "$schema:\n  value: 'enum(x, y)'\n").unwrap();
 
         let second = state
-            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&doc_path))
             .unwrap();
         let bundle2 = ready_bundle(&second);
         assert!(
@@ -655,7 +682,7 @@ mod tests {
         let roots = [root.to_path_buf()];
 
         let first = state
-            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&doc_path))
             .unwrap();
         let bundle1 = ready_bundle(&first);
         let report1 = bundle1.effective.validate(&bundle1.frontmatter_json);
@@ -674,7 +701,7 @@ mod tests {
         std::fs::write(root.join("b.yaml"), "$schema:\n  value: 'enum(x, y)'\n").unwrap();
 
         let second = state
-            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &doc_path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&doc_path))
             .unwrap();
         let bundle2 = ready_bundle(&second);
         assert!(
@@ -719,7 +746,7 @@ mod tests {
         let doc = uri("file:///w/doc.md");
         let roots = [root.to_path_buf()];
 
-        let first = state.for_document(&doc, text, &doc_path, &config, &roots).unwrap();
+        let first = state.for_document(&doc, text, &doc_path, &config, &roots, &crate::context::test_support::resolution_for(&doc_path)).unwrap();
         let bundle1 = ready_bundle(&first);
         let report1 = bundle1.effective.validate(&bundle1.frontmatter_json);
         assert!(report1.valid, "`a` is a valid enum(a, b): {:?}", report1.problems);
@@ -727,7 +754,7 @@ mod tests {
         // Change the extension baseline file's declared type only.
         std::fs::write(root.join("ext.yaml"), "$schema:\n  provider: 'enum(x, y)'\n").unwrap();
 
-        let second = state.for_document(&doc, text, &doc_path, &config, &roots).unwrap();
+        let second = state.for_document(&doc, text, &doc_path, &config, &roots, &crate::context::test_support::resolution_for(&doc_path)).unwrap();
         let bundle2 = ready_bundle(&second);
         assert!(
             !Arc::ptr_eq(&bundle1, &bundle2),
@@ -751,10 +778,10 @@ mod tests {
         let roots = [PathBuf::from("/w")];
         let text = "---\ntitle: Hi\n---\n\nbody\n";
         let first = state
-            .for_document(&doc, text, path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
             .unwrap();
         let second = state
-            .for_document(&doc, text, path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
             .unwrap();
         assert!(
             Arc::ptr_eq(&ready_bundle(&first), &ready_bundle(&second)),
@@ -770,12 +797,12 @@ mod tests {
         let roots = [PathBuf::from("/w")];
         // First, a good parse seeds the last-good tree.
         state
-            .for_document(&doc, "---\ntitle: Good\n---\n\nbody\n", path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, "---\ntitle: Good\n---\n\nbody\n", path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
             .unwrap();
         // Then a hard YAML error keeps the previous tree, flagged stale, and
         // surfaces the parse error.
         let overlay = state
-            .for_document(&doc, "---\nkey:\n\tbad: 1\n---\n\nbody\n", path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, "---\nkey:\n\tbad: 1\n---\n\nbody\n", path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
             .unwrap();
         assert!(overlay.stale);
         assert!(overlay.parse_error.is_some());
@@ -807,6 +834,7 @@ mod tests {
                     path,
                     &DmlsConfig::default(),
                     &[PathBuf::from("/w")],
+                    &crate::context::test_support::resolution_for(path),
                 )
                 .expect("content claims a standalone schema");
             let SchemaAuthoringState::Standalone { model: Some(model), stale, error, .. } =
@@ -856,6 +884,7 @@ mod tests {
                 Path::new("/w/doc.md"),
                 &DmlsConfig::default(),
                 &[PathBuf::from("/w")],
+                &crate::context::test_support::resolution_for(Path::new("/w/doc.md")),
             )
             .expect("frontmatter overlay");
         let SchemaAuthoringState::Frontmatter(values) = &overlay.schema_authoring else {
@@ -904,6 +933,7 @@ mod tests {
                     path,
                     &DmlsConfig::default(),
                     &roots,
+                    &crate::context::test_support::resolution_for(path),
                 )
                 .expect("content activates regardless of path");
             assert!(overlay.is_standalone_schema());
@@ -934,6 +964,7 @@ mod tests {
                         path,
                         &DmlsConfig::default(),
                         &roots,
+                        &crate::context::test_support::resolution_for(path),
                     )
                     .is_none(),
                 "path-only activation is forbidden for {path:?}"
@@ -968,7 +999,7 @@ mod tests {
         ] {
             assert!(
                 state
-                    .for_document(&uri(uri_text), text, path, &DmlsConfig::default(), &roots)
+                    .for_document(&uri(uri_text), text, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
                     .is_none(),
                 "escape-bearing ordinary YAML must stay inert: {path:?}"
             );
@@ -983,7 +1014,7 @@ mod tests {
         let roots = [PathBuf::from("/w")];
         let good = "$schema:\n  title: string(required)\n";
         let first = state
-            .for_document(&doc, good, path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, good, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
             .expect("valid schema overlay");
         let SchemaAuthoringState::Standalone { model: Some(first_model), .. } =
             &first.schema_authoring
@@ -993,7 +1024,7 @@ mod tests {
 
         for malformed in ["$schema:\n\tbad: string\n", "$schema: 42\n"] {
             let current = state
-                .for_document(&doc, malformed, path, &DmlsConfig::default(), &roots)
+                .for_document(&doc, malformed, path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(path))
                 .expect("lexical claim remains active");
             let SchemaAuthoringState::Standalone { model, stale, error, .. } =
                 &current.schema_authoring
@@ -1018,6 +1049,7 @@ mod tests {
                 Path::new("/w/fresh.yaml"),
                 &DmlsConfig::default(),
                 &roots,
+                &crate::context::test_support::resolution_for(Path::new("/w/fresh.yaml")),
             )
             .expect("lexical claim activates diagnostics");
         let SchemaAuthoringState::Standalone { model, stale, error, .. } =
@@ -1043,6 +1075,7 @@ mod tests {
                 path,
                 &DmlsConfig::default(),
                 &roots,
+                &crate::context::test_support::resolution_for(path),
             )
             .expect("seed standalone model");
         state.forget(&doc);
@@ -1053,6 +1086,7 @@ mod tests {
                 path,
                 &DmlsConfig::default(),
                 &roots,
+                &crate::context::test_support::resolution_for(path),
             )
             .expect("claimed malformed overlay");
         let SchemaAuthoringState::Standalone { model, stale, error, .. } =
@@ -1095,6 +1129,7 @@ mod tests {
                 &path,
                 &DmlsConfig::default(),
                 &roots,
+                &crate::context::test_support::resolution_for(&path),
             ) {
                 Some(DocumentOverlay {
                     schema_authoring:
@@ -1156,7 +1191,7 @@ mod tests {
         let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
 
         let overlay = state
-            .for_document(&doc, text, &path, &DmlsConfig::default(), &[root.to_path_buf()])
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &[root.to_path_buf()], &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let bundle = ready_bundle(&overlay);
         let report = bundle.effective.validate(&bundle.frontmatter_json);
@@ -1176,6 +1211,7 @@ mod tests {
                 &outside,
                 &DmlsConfig::default(),
                 &[root.to_path_buf()],
+                &crate::context::test_support::resolution_for(&outside),
             )
             .unwrap();
         let report = ready_bundle(&overlay).effective.validate(
@@ -1196,13 +1232,13 @@ mod tests {
         let roots = [root.to_path_buf()];
 
         let first = state
-            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         assert!(!ready_bundle(&first).effective.validate(&ready_bundle(&first).frontmatter_json).valid);
 
         let broken = "---\nprompt:\n\tbad: yaml\n---\n";
         let stale = state
-            .for_document(&doc, broken, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, broken, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         assert!(stale.stale);
         assert!(
@@ -1216,7 +1252,7 @@ mod tests {
         )
         .unwrap();
         let retained = state
-            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         assert!(
             !ready_bundle(&retained)
@@ -1241,7 +1277,7 @@ mod tests {
         // Seed: the trigger activates and contributes its `model` required
         // property, so the document is invalid (missing `model`).
         let first = state
-            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let first_report =
             ready_bundle(&first).effective.validate(&ready_bundle(&first).frontmatter_json);
@@ -1262,7 +1298,7 @@ mod tests {
         .unwrap();
 
         let retained = state
-            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, good, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let retained_report = ready_bundle(&retained)
             .effective
@@ -1304,7 +1340,7 @@ mod tests {
         let roots = [root.to_path_buf()];
 
         let initial = state
-            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let initial_report =
             ready_bundle(&initial).effective.validate(&ready_bundle(&initial).frontmatter_json);
@@ -1316,7 +1352,7 @@ mod tests {
 
         std::fs::remove_file(&a_payload).unwrap();
         let failed_a = state
-            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let transitions = state.take_trigger_diagnostic_transitions();
         assert_eq!(transitions.len(), 1);
@@ -1326,7 +1362,7 @@ mod tests {
         std::fs::write(&a_payload, "$schema:\n  model: string(required)\n").unwrap();
         std::fs::remove_file(&b_payload).unwrap();
         let failed_b = state
-            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let transitions = state.take_trigger_diagnostic_transitions();
         assert_eq!(transitions.len(), 2);
@@ -1363,7 +1399,7 @@ mod tests {
             let text = std::fs::read_to_string(&path).unwrap();
             let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
             let overlay = state
-                .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots)
+                .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
                 .unwrap();
             let bundle = ready_bundle(&overlay);
             let report = bundle.effective.validate(&bundle.frontmatter_json);
@@ -1378,7 +1414,7 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         let doc: Uri = url::Url::from_file_path(&path).unwrap().as_str().parse().unwrap();
         let overlay = state
-            .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots)
+            .for_document(&doc, &text, &path, &DmlsConfig::default(), &roots, &crate::context::test_support::resolution_for(&path))
             .unwrap();
         let bundle = ready_bundle(&overlay);
         assert!(bundle.effective.validate(&bundle.frontmatter_json).valid);
@@ -1405,6 +1441,7 @@ mod tests {
                 &path,
                 &DmlsConfig::default(),
                 &[root.to_path_buf()],
+                &crate::context::test_support::resolution_for(&path),
             )
             .unwrap();
         let SchemaOutcome::Failed(error) = overlay.schema else {
