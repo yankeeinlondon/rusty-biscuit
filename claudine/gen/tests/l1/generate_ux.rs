@@ -392,3 +392,40 @@ fn scaffold_unwired_slug_errors_before_writing() {
     // The failure precedes any write: the lib module stays absent.
     assert!(!fixture.path().join("lib/src/provider/nonesuch").exists());
 }
+
+/// `validate` answers one question for a research fleet: does the generator
+/// accept this provider's inputs? Drift from the committed data.rs is the
+/// expected state while research is being rewritten, so it is not a failure;
+/// a refused input is, and its reason is on stdout.
+#[test]
+fn validate_accepts_drifted_inputs_and_reports_a_refusal_on_stdout() {
+    const REVISION_TWO: &str = include_str!("../fixtures/agent-cli-r2/codex.md");
+    let fixture = full_fixture();
+    let shared_types = "docs/research/_types.yaml";
+    fs::copy(real_area().join(shared_types), fixture.path().join(shared_types)).unwrap();
+    let doc = fixture.path().join("docs/research/agent-cli/codex.md");
+    fs::write(&doc, REVISION_TWO).unwrap();
+
+    let drifted = run_gen(fixture.path(), &["check", "codex"]);
+    assert!(!drifted.status.success(), "a revision-2 document drifts codex's data.rs");
+
+    let accepted = run_gen(fixture.path(), &["validate", "codex"]);
+    let stdout = String::from_utf8(accepted.stdout).unwrap();
+    assert!(accepted.status.success(), "drift is not a refusal: {stdout}");
+    assert_eq!(stdout.trim(), "codex: the generator accepts every input");
+
+    // One spelling claimed by two records where both apply: a relation the
+    // shape check cannot see and the generator refuses.
+    let conflicting = REVISION_TWO.replacen("  - flag: --oss\n", "  - flag: --oss\n    aliases: [-c]\n", 1);
+    assert_ne!(conflicting, REVISION_TWO, "fixture expectation drifted");
+    fs::write(&doc, conflicting).unwrap();
+    let refused = run_gen(fixture.path(), &["validate", "codex"]);
+    let stdout = String::from_utf8(refused.stdout).unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        stdout.starts_with("codex: the generator refuses an input:") && stdout.contains("`-c`"),
+        "{stdout}"
+    );
+    assert!(fs::read_to_string(data_path(fixture.path(), "codex")).unwrap().contains("CliSwitchCatalog::Unknown"),
+        "validate writes nothing");
+}

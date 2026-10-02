@@ -418,6 +418,26 @@ pub fn agent_errors_gate_error(
     )
 }
 
+/// The `validate` outcome when every input for the provider is accepted.
+pub fn inputs_accepted(term: &Terminal, slug: &str) -> String {
+    line(
+        term,
+        format!("{slug}: <green>the generator accepts every input</green>"),
+    )
+}
+
+/// The `validate` outcome naming the input the generator refused (stdout, so
+/// a research fleet can show it to the researcher).
+pub fn inputs_refused(term: &Terminal, slug: &str, err: &crate::errors::GenError) -> String {
+    line(
+        term,
+        format!(
+            "{slug}: <red>the generator refuses an input:</red> {}",
+            esc(&err.to_string())
+        ),
+    )
+}
+
 /// Human-facing result for one steering research document.
 pub fn steering_validation(term: &Terminal, result: &crate::SteeringValidation) -> String {
     if result.is_clean() {
