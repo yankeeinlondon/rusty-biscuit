@@ -26,30 +26,32 @@ review_iterations: 0
 refreshed_on: 2026-10-01
 human_review: false
 message_to_agent: |-
-    Phase 1 (rulings and spikes) is recorded in implementation-log.md under "## Phase 1".
-    Read rulings 10-14 there before starting. The plan's defaults were accepted, and
-    the spikes added these new facts:
-    - Plan paths written as `harness_orch/...` and `wrap/...` live under
-      `claudine/cli/src/commands/wrap/`.
-    - Phase 3: only the direct wrapper builds an AgentErrorReport today
-      (`commands/wrap/mod.rs:252`, stderr only); the composition harness never does.
-      The streaming path's stdout tail ring (10 lines) feeds only the signal hub and
-      its stderr buffer has no bound. Bound both tails with
-      `claudine::signals::EXIT_STDOUT_TAIL_LINES`/`EXIT_STDERR_TAIL_LINES`.
-    - Phase 4: `agent-cli/_schema.yaml` has no `schema_revision`. Introduce
-      revision 2, and project the committed old-revision documents as explicit
-      whole-provider unknown gaps so the generator check stays green until Phase 5
-      re-researches the fleet. Put the normalized scope in a new property; leave
-      the legacy `scope` labels alone.
-    - Phase 6: the pre-clap partition in `cli/src/main.rs:275` runs before any
-      file is read, so type-aware ownership is a second pass inside the
-      composition command after `resolve_composition_source`. Read schema
-      parameter names through `EffectiveSchema::declares_top_level_property`
-      (make it `pub` in Darkmatter; it is `pub(crate)` today) rather than
-      copying the walk.
-    Baseline from `claudine/`: `just test` 8075 passed, 9 skipped; `just lint`
-    clean; `cargo run -p claudine-gen -- check` clean (pre-existing warning: the
-    unchained-ai models-catalog artifact is stale).
+    Phase 2 is done; read "## Phase 2" in implementation-log.md. Facts Phase 3 needs:
+    - The tail is `claudine::composition::ProviderTail` (lib/src/composition/provider_tail.rs).
+      Use `launch_args()` to build argv, `implicit_args()`/`opaque_args()`/`boundary()` for
+      reporting. `CompositionExecutionRequest.provider_tail` replaces provider_args and
+      provider_args_explicit. Its Debug prints counts only; keep it that way.
+    - Resume (R1): append `request.provider_tail.launch_args()` once; do not re-derive the
+      tail from the base argv.
+    - Correlated report (R2): `AgentErrorReport::correlated_with_forwarded_tail` still takes
+      `(switch_names, explicit: bool)` and still says "without recognizing". Rebuild it to take
+      `&ProviderTail` and reuse `wrap::provider_tail_report::switch_names_for_display`, the one
+      value-free name renderer (it already handles `=value`, attached short tokens, and opaque
+      suffixes).
+    - Direct wrappers build their descriptor in `commands/wrap/mod.rs` via
+      `flags::passthrough_provider_tail` (reporting only); pass that same value to the report.
+    - The stderr trace formatter (`telemetry.rs` RelativePathEventFormat) prints only selected
+      fields, so a binary test cannot observe a traced argv field. Redact at the call site.
+    - `redact_sensitive_args` does not mask arbitrary attached short values such as
+      `-csecret` in AGENT_PARAMS or the dry-run row; the notice never echoes them. Criterion
+      9's binary matrix (Phase 3) must decide whether more masking is needed.
+    - `claudine codex -- ...` now prints the opaque-tail notice; snapshots that run a direct
+      wrapper with passthrough may need the one added line.
+    - Adding `Provider::X` literals under cli/src (tests included) changes
+      docs/providers/dispatch-inventory.json; regenerate with
+      `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::` after confirming the new
+      entries are reference-class.
+    Gates after Phase 2 from claudine/: `just test` 8108 passed, 9 skipped; `just lint` clean.
 ---
 
 # Composition forwards provider CLI switches to the agent

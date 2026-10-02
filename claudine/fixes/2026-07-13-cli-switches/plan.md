@@ -4,11 +4,51 @@ created: 2026-10-01
 phase: 1
 agent: claude/sonnet
 yolo: "true"
-packages: []
+packages:
+    - claudine
+    - claudine-cli
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/composition/coordinator/invocation.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/flags.rs
+    - claudine/cli/src/commands/wrap/flags/tests.rs
+    - claudine/cli/src/commands/wrap/profile/resolve.rs
+    - claudine/cli/src/commands/wrap/profile/tests/positional.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report/tests.rs
+    - claudine/cli/src/commands/wrap/composition/mod.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/composition/dry_run.rs
+    - claudine/cli/src/commands/wrap/composition/provider_args.rs
+    - claudine/cli/src/commands/wrap/sequence/iterate.rs
+    - claudine/cli/src/commands/wrap/sequence/task_run.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/snapshots/l1__wrap_basics__wrapper_reports_removed_sensitive_env_names.snap
+docs_updated_during_phase_2:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
 ---
 
 # Plan: Composition forwards provider CLI switches to the agent
@@ -125,25 +165,25 @@ Purpose: replace the two parallel fields with one typed descriptor and fix the n
 
 ### Wave 1: descriptor (single owner; others depend on it)
 
-- [ ] **ProviderTail type.** In `lib/src/composition/types.rs` add one descriptor holding ordered args and `Option<usize>` boundary index (None = no boundary, 0 = fully explicit, len = authored empty suffix). Implicit prefix keeps switch/value assignment slots (initially empty/unassigned; filled by Phase 6). Implement `Default`.
+- [x] **ProviderTail type.** In `lib/src/composition/types.rs` add one descriptor holding ordered args and `Option<usize>` boundary index (None = no boundary, 0 = fully explicit, len = authored empty suffix). Implicit prefix keeps switch/value assignment slots (initially empty/unassigned; filled by Phase 6). Implement `Default`.
     - Redacted `Debug`: never print raw tokens, ownership records, or notice keys. Provide an accessor that returns the unredacted tokens for launching only.
     - Replace `CompositionExecutionRequest.provider_args` + `provider_args_explicit`.
-- [ ] **CLI conversion.** Make `argv::ProviderArgs` become the type or convert at exactly one place; replace both fields in `SharedComposeArgs` (`commands/compose/mod.rs`). Update the `commands/sequence.rs` test helper to use `Default`.
-- [ ] **Launch plan seeding.** Keep `LaunchPlanInputs::provider_args_tail` seeding order unchanged; feed it from the descriptor.
+- [x] **CLI conversion.** Make `argv::ProviderArgs` become the type or convert at exactly one place; replace both fields in `SharedComposeArgs` (`commands/compose/mod.rs`). Update the `commands/sequence.rs` test helper to use `Default`.
+- [x] **Launch plan seeding.** Keep `LaunchPlanInputs::provider_args_tail` seeding order unchanged; feed it from the descriptor.
 
 Checkpoint 2a: `just test` green; `wrap_direct_argv.rs` and `argv_normalization.rs` unchanged and green.
 
 ### Wave 2: parallel
 
-- [ ] **Non-UTF-8 refusal.** Replace `to_string_lossy` in the partitioner with a targeted partition error naming the position, not the bytes. Tests: Unix invalid bytes and Windows unpaired surrogate (platform-gated); proves criterion 15 and that direct wrappers behave consistently.
-- [ ] **Redaction and display.** Single function to render a value-free switch-name list from a descriptor (strip `=value`; for implicit short tokens, with no metadata yet, describe an unrecognized short token such as `-csecret` without echoing it; explicit tail never listed as names). Route dry-run "Provider args" row, debug traces, and `AGENT_PARAMS` through `redact_sensitive_args`.
-- [ ] **Command-scoped notice state.** Delete `static ANNOUNCED` in `wrap/composition/provider_args.rs`. Add a notice registry owned by the top-level command, keyed `(provider, tail, boundary)`, claimed atomically (no lock held across render or launch), thread it to composition, sequence tasks, and direct wrappers.
-- [ ] **Notice module move and wording.** Move the notice out of `wrap/composition/` to a module both launch paths use (for example `wrap/provider_tail_report.rs`). Implicit: `Forwarding provider arguments to Codex: -c`. Explicit: `Forwarding an opaque argument tail to Codex (passed after --).`. Mixed tails: one notice with prefix names plus opaque summary. Render with `TerminalRenderable`; stderr; suppressed by `--quiet` and `--silent`. Remove "not recognized by Claudine".
-- [ ] **Direct wrapper population (R5).** Populate the same descriptor from the existing passthrough parsing with no composition ownership checks; emit the same notice and redaction. Child argv must not change.
+- [x] **Non-UTF-8 refusal.** Replace `to_string_lossy` in the partitioner with a targeted partition error naming the position, not the bytes. Tests: Unix invalid bytes and Windows unpaired surrogate (platform-gated); proves criterion 15 and that direct wrappers behave consistently.
+- [x] **Redaction and display.** Single function to render a value-free switch-name list from a descriptor (strip `=value`; for implicit short tokens, with no metadata yet, describe an unrecognized short token such as `-csecret` without echoing it; explicit tail never listed as names). Route dry-run "Provider args" row, debug traces, and `AGENT_PARAMS` through `redact_sensitive_args`.
+- [x] **Command-scoped notice state.** Delete `static ANNOUNCED` in `wrap/composition/provider_args.rs`. Add a notice registry owned by the top-level command, keyed `(provider, tail, boundary)`, claimed atomically (no lock held across render or launch), thread it to composition, sequence tasks, and direct wrappers.
+- [x] **Notice module move and wording.** Move the notice out of `wrap/composition/` to a module both launch paths use (for example `wrap/provider_tail_report.rs`). Implicit: `Forwarding provider arguments to Codex: -c`. Explicit: `Forwarding an opaque argument tail to Codex (passed after --).`. Mixed tails: one notice with prefix names plus opaque summary. Render with `TerminalRenderable`; stderr; suppressed by `--quiet` and `--silent`. Remove "not recognized by Claudine".
+- [x] **Direct wrapper population (R5).** Populate the same descriptor from the existing passthrough parsing with no composition ownership checks; emit the same notice and redaction. Child argv must not change.
 
 ### Wave 3: tests
 
-- [ ] **L1 unit/binary tests.** Distinct-pair dedup, two invocations in one process do not leak, parallel sequence tasks claim once, quiet/silent suppression, mixed-boundary key, redacted `Debug` (a test that formats `{:?}` of a descriptor holding `sk-secret` and asserts absence), notice wording for implicit and explicit.
+- [x] **L1 unit/binary tests.** Distinct-pair dedup, two invocations in one process do not leak, parallel sequence tasks claim once, quiet/silent suppression, mixed-boundary key, redacted `Debug` (a test that formats `{:?}` of a descriptor holding `sk-secret` and asserts absence), notice wording for implicit and explicit.
 
 Checkpoint 2b: `just test` and `just lint` green; `wrap_direct_argv.rs` untouched and green. Docs: update `docs/topics/argv-normalization.md`, `cli-pre-parsing.md`, and the Provider Argument Forwarding section of `composition.md` for notice wording, scope, redaction.
 
@@ -153,14 +193,14 @@ Depends on Phase 2 (descriptor). Waves in order.
 
 ### Wave 1: parallel
 
-- [ ] **Resume carries tail (R1).** In `wrap/resume.rs::append_resume_passthrough_args` and `harness_orch/launch.rs`: append the request's descriptor tokens exactly once at the position the resume entrypoint expects; feed the allowlist carry-over from arguments identified as Claudine injections, not from a base argv that already contains the tail. Preserve authored repetitions and order; no dedup by spelling. A user-supplied `--json`/`--format` must be neither dropped nor doubled.
+- [x] **Resume carries tail (R1).** In `wrap/resume.rs::append_resume_passthrough_args` and `harness_orch/launch.rs`: append the request's descriptor tokens exactly once at the position the resume entrypoint expects; feed the allowlist carry-over from arguments identified as Claudine injections, not from a base argv that already contains the tail. Preserve authored repetitions and order; no dedup by spelling. A user-supplied `--json`/`--format` must be neither dropped nor doubled.
     - Update the comment in `harness_orch/session_key.rs` (canonical argv comparison; the tail is invocation-fixed and must not make a resume look incompatible).
-- [ ] **Typed native-exit input (R2).** Define a type holding exit code, `ProcessTermination`, and bounded stdout/stderr tails (reuse existing capture bounds, per Spike B). Produce it from both the direct wrapper (`commands/wrap/mod.rs`) and `harness_orch/attempt.rs`.
-- [ ] **Classifier fixes (R2).** In `output/error_report.rs`: read both streams; precedence interruption → timeout → missing binary → auth/permission → API failure → model not found → argument rejected → missing argument → none; tighten signatures (`invalid argument` must not match `invalid argument: api key`); each kept signature has a positive and a near-miss fixture; uncertain returns `None`.
+- [x] **Typed native-exit input (R2).** Define a type holding exit code, `ProcessTermination`, and bounded stdout/stderr tails (reuse existing capture bounds, per Spike B). Produce it from both the direct wrapper (`commands/wrap/mod.rs`) and `harness_orch/attempt.rs`.
+- [x] **Classifier fixes (R2).** In `output/error_report.rs`: read both streams; precedence interruption → timeout → missing binary → auth/permission → API failure → model not found → argument rejected → missing argument → none; tighten signatures (`invalid argument` must not match `invalid argument: api key`); each kept signature has a positive and a near-miss fixture; uncertain returns `None`.
 
 ### Wave 2
 
-- [ ] **One report builder.** `AgentErrorReport::correlated_with_forwarded_tail` becomes the one builder called exactly once per terminal failure by both paths, producing the correlated report only when tail non-empty, exit non-zero, and classifier returned `ArgumentRejected`; if a rejection names a switch, correlate only if it belongs to the forwarded tail (a rejection naming an injected Claudine switch stays generic). Wording: redacted switch names or "opaque", redacted diagnostic excerpt, "likely caused by the forwarded arguments"; no "not recognized by Claudine".
+- [x] **One report builder.** `AgentErrorReport::correlated_with_forwarded_tail` becomes the one builder called exactly once per terminal failure by both paths, producing the correlated report only when tail non-empty, exit non-zero, and classifier returned `ArgumentRejected`; if a rejection names a switch, correlate only if it belongs to the forwarded tail (a rejection naming an injected Claudine switch stays generic). Wording: redacted switch names or "opaque", redacted diagnostic excerpt, "likely caused by the forwarded arguments"; no "not recognized by Claudine".
     - Excerpt redaction: shared claudine secret recognizer, masks echoes of values recognized in the original tail even without their flag, escapes terminal control characters and markup.
     - No duplicate stderr echo plus report. A handled retry must not emit a terminal report before recovery is exhausted. Never suppressed by quiet/silent; stderr only; exit code, termination, lifecycle `failure`/`finalize`, and retry policy unchanged.
     - Remove stale `#[allow(dead_code)]`.
