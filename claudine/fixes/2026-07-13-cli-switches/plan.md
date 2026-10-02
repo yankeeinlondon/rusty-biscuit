@@ -7,6 +7,8 @@ yolo: "true"
 packages:
     - claudine
     - claudine-cli
+    - claudine-gen
+    - claudine-catalog-types
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -49,6 +51,96 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_3:
+    - claudine/lib/src/secrets/mod.rs
+    - claudine/lib/src/secrets/tests.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/cli/src/commands/wrap/resume.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/env/sanitize.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/src/output/native_exit.rs
+    - claudine/cli/src/output/error_report.rs
+    - claudine/cli/src/output/error_report/tests.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_4:
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/lib.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/emit/cli_switches.rs
+    - claudine/gen/src/emit/mod.rs
+    - claudine/gen/src/errors.rs
+    - claudine/gen/src/generate.rs
+    - claudine/gen/src/generate/coerce/cli_switches.rs
+    - claudine/gen/src/generate/coerce/mod.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/registry.rs
+    - claudine/gen/src/registry/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+docs_updated_during_phase_4:
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/providers/catalog.json
+docs_created_during_phase_4:
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_schema.r1.yaml
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/research-contracts.md
 ---
 
 # Plan: Composition forwards provider CLI switches to the agent
@@ -209,11 +301,11 @@ Depends on Phase 2 (descriptor). Waves in order.
 
 All with `CliProcessFixture` and a deterministic fake provider; no real provider or network; silent audio defaults kept.
 
-- [ ] **Exact child argv** for the headline command under `compose`, `inline-compose`, `sequence`, setter-shaped value not applied to frontmatter (criteria 1, 2).
-- [ ] **Exactly-once** on retry, proxy target, resume (with repeated authored switches and a user `--json`), and each step of a multi-provider sequence (criteria 7, 25).
-- [ ] **Secrets**: `--api-key sk-…`, `--token=…`, `-csecret` reach the fake provider unchanged and appear in none of INFO, dry-run, debug, `AGENT_PARAMS`, correlated output (criterion 9, 28).
-- [ ] **Notice counts** per distinct pair; none under `--quiet`/`--silent`.
-- [ ] **Correlation matrix**: fixture-backed rejection on stderr and on stdout; injected-switch rejection not attributed; explicit operand-only rejection reported once; no correlation for auth, timeout, interruption, API, ambiguous; exit code preserved (criteria 10, 28).
+- [x] **Exact child argv** for the headline command under `compose`, `inline-compose`, `sequence`, setter-shaped value not applied to frontmatter (criteria 1, 2).
+- [x] **Exactly-once** on retry, proxy target, resume (with repeated authored switches and a user `--json`), and each step of a multi-provider sequence (criteria 7, 25).
+- [x] **Secrets**: `--api-key sk-…`, `--token=…`, `-csecret` reach the fake provider unchanged and appear in none of INFO, dry-run, debug, `AGENT_PARAMS`, correlated output (criterion 9, 28).
+- [x] **Notice counts** per distinct pair; none under `--quiet`/`--silent`.
+- [x] **Correlation matrix**: fixture-backed rejection on stderr and on stdout; injected-switch rejection not attributed; explicit operand-only rejection reported once; no correlation for auth, timeout, interruption, API, ambiguous; exit code preserved (criteria 10, 28).
 
 Checkpoint 3: `just test`, `just test-l2`, `just lint` green. Docs: resume carry-over, correlated errors, redaction in `argv-normalization.md`/`composition.md`; CLI reference for direct-wrapper reporting. Criteria 7 (resume part), 8 (once scope/wording), 9, 10, 11, 15, 25 (resume part), 28 flip to Done in the spec table.
 
@@ -223,14 +315,14 @@ Independent of Phases 2–3; can start after Phase 1 in parallel with them (touc
 
 ### Wave 1: contract
 
-- [ ] **Types in `_types.yaml`.** Per the research-contracts standard (read `.claude/skills/claudine/research-contracts.md`): named types for switch and invocation-scope records; closed enums for `value_type` (`none|string|number|variadic|unknown`) and for attachment forms (space, equals, short-attached); `aliases`; `value_optional`; variadic minimum count; normalized scope (global marker or exact native command path, empty path = root); evidence and observed-version fields; explicit `unknown` with a described evidence gap. Every property has a description. `value` stays a human placeholder.
-- [ ] **Update `agent-cli/_schema.yaml`** `cli_switches[]`; increment `schema_revision`; do not reinterpret `config`/`model_selection` labels as command paths.
+- [x] **Types in `_types.yaml`.** Per the research-contracts standard (read `.claude/skills/claudine/research-contracts.md`): named types for switch and invocation-scope records; closed enums for `value_type` (`none|string|number|variadic|unknown`) and for attachment forms (space, equals, short-attached); `aliases`; `value_optional`; variadic minimum count; normalized scope (global marker or exact native command path, empty path = root); evidence and observed-version fields; explicit `unknown` with a described evidence gap. Every property has a description. `value` stays a human placeholder.
+- [x] **Update `agent-cli/_schema.yaml`** `cli_switches[]`; increment `schema_revision`; do not reinterpret `config`/`model_selection` labels as command paths.
 
 ### Wave 2: generator (parallel with Wave 1 once types are agreed)
 
-- [ ] **Shared vocabulary** in `claudine-catalog-types`: switch metadata record, `ValueType`, scope, attachment forms; static-friendly types.
-- [ ] **`claudine-gen` projection** into each `lib/src/provider/<slug>/data.rs` as typed static metadata, deterministic order. Validation: alias/canonical uniqueness per effective scope (global plus exact-path set; conflicts fail generation rather than depend on insertion order), legal types, non-empty descriptions, every compiled provider has entries or an explicit unknown gap.
-- [ ] **Generator tests** (L1, in the gen/catalog-types area): conflict, illegal type, empty description, ordering determinism, unknown-gap acceptance. Drift check covers output.
+- [x] **Shared vocabulary** in `claudine-catalog-types`: switch metadata record, `ValueType`, scope, attachment forms; static-friendly types.
+- [x] **`claudine-gen` projection** into each `lib/src/provider/<slug>/data.rs` as typed static metadata, deterministic order. Validation: alias/canonical uniqueness per effective scope (global plus exact-path set; conflicts fail generation rather than depend on insertion order), legal types, non-empty descriptions, every compiled provider has entries or an explicit unknown gap.
+- [x] **Generator tests** (L1, in the gen/catalog-types area): conflict, illegal type, empty description, ordering determinism, unknown-gap acceptance. Drift check covers output.
 
 ### Input Robustness Matrix
 
@@ -247,7 +339,7 @@ This work adds a reader of the `cli_switches` research format and a token reader
 | duplicate key | YAML duplicate key rejected | rejected | rejected | duplicate alias error | rejected |
 | trailing/invalid content | invalid document rejected | | | | |
 
-- [ ] **Matrix test** per the table, with the grep smells checked before closure: `#[serde(default)]` on these fields, `Option<T>` where absent and null must differ, `filter_map(.. as_str())`, `unwrap_or_default()`, `.ok()` on a parse.
+- [x] **Matrix test** per the table, with the grep smells checked before closure: `#[serde(default)]` on these fields, `Option<T>` where absent and null must differ, `filter_map(.. as_str())`, `unwrap_or_default()`, `.ok()` on a parse.
 
 Checkpoint 4: `cargo run -p claudine-gen -- check` clean; generator and catalog-types L1 green via the area recipes; `just lint`.
 

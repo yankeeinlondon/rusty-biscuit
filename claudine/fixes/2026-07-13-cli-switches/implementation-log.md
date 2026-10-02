@@ -6,6 +6,8 @@ started_phase: "1"
 packages:
     - claudine
     - claudine-cli
+    - claudine-gen
+    - claudine-catalog-types
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -48,6 +50,96 @@ docs_created_during_phase_2: []
 skills_files_updated_during_phase_2:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_3:
+    - claudine/lib/src/secrets/mod.rs
+    - claudine/lib/src/secrets/tests.rs
+    - claudine/lib/src/signals/bespoke.rs
+    - claudine/lib/src/signals/mod.rs
+    - claudine/cli/src/commands/wrap/resume.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/src/commands/wrap/profile/pi.rs
+    - claudine/cli/src/commands/wrap/launch_plan.rs
+    - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/env/mod.rs
+    - claudine/cli/src/commands/wrap/env/sanitize.rs
+    - claudine/cli/src/commands/wrap/env/tests.rs
+    - claudine/cli/src/commands/wrap/exec/mod.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/semantic.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/captured.rs
+    - claudine/cli/src/commands/wrap/exec/spawn/inherited.rs
+    - claudine/cli/src/commands/wrap/exec/wiring/session.rs
+    - claudine/cli/src/commands/wrap/wrapper_exec.rs
+    - claudine/cli/src/commands/wrap/wrapper_stages.rs
+    - claudine/cli/src/commands/wrap/harness_orch/attempt.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+    - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+    - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+    - claudine/cli/src/commands/wrap/harness_orch/types.rs
+    - claudine/cli/src/output/mod.rs
+    - claudine/cli/src/output/native_exit.rs
+    - claudine/cli/src/output/error_report.rs
+    - claudine/cli/src/output/error_report/tests.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+docs_updated_during_phase_3:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_4:
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/catalog-types/src/lib.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/tests.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/emit/cli_switches.rs
+    - claudine/gen/src/emit/mod.rs
+    - claudine/gen/src/errors.rs
+    - claudine/gen/src/generate.rs
+    - claudine/gen/src/generate/coerce/cli_switches.rs
+    - claudine/gen/src/generate/coerce/mod.rs
+    - claudine/gen/src/inputs.rs
+    - claudine/gen/src/registry.rs
+    - claudine/gen/src/registry/tests.rs
+    - claudine/gen/src/schema_compat.rs
+    - claudine/gen/src/vocabulary/tests.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/main.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/l1/registry_coverage.rs
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+docs_updated_during_phase_4:
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/providers/catalog.json
+docs_created_during_phase_4:
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_schema.r1.yaml
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/research-contracts.md
 ---
 
 # Implementation Log for 2026-07-13-cli-switches (7 phases)
@@ -424,3 +516,343 @@ Linux, WSL2, and macOS-CI were not run separately: the change has no
 Linux-specific code, and every unix-gated test passed on macOS.
 
 No pre-existing failures were found.
+
+## Phase 3
+
+Phase 3 made a lifecycle `resume` re-send the forwarded tail exactly once,
+gave both launch paths one typed native-exit input and one report builder that
+correlates an argument rejection with the tail, and added compiled-binary
+coverage of every launch shape (R1, R2, R7).
+
+### What landed
+
+- **Resume (R1).** `resume::assemble_resume_args(entrypoint, base_args, tail)`
+  replaces `append_resume_passthrough_args`. The resume argv is the resume
+  entrypoint, then the tail once, then the allowlisted transport/safety flags.
+  The allowlist reads Claudine's injections only: the base argv with the tail's
+  first contiguous run removed. That works because every launch plan seeds its
+  argv with the tail and later stages only prepend the entrypoint
+  (`insert(0, …)`) or append. The invariant is documented on
+  `LaunchPlanInputs::provider_tail`. If the run is ever not found, a
+  `tracing::warn!` fires and the whole base argv is read, so no injection is
+  lost. The allowlist's de-duplication now checks only the resume entrypoint
+  and flags already carried. It no longer checks the tail, so a user `--json`
+  never suppresses Claudine's copy of a flag the fresh launch also had.
+  - `LaunchPlanInputs.provider_args_tail: Vec<String>` became
+    `provider_tail: ProviderTail`. `RebuiltLaunchIdentity` and `AttemptLaunch`
+    carry it, and `build_harness_launch` takes it.
+  - `session_key.rs` module docs now name `assemble_resume_args` and say the
+    tail is in both canonical argvs, so it cannot make a resume look
+    incompatible.
+- **Typed native-exit input (R2).** New `cli/src/output/native_exit.rs`:
+  `NativeExit { exit_code, termination, stdout, stderr, shown_headline }`.
+  Each tail is a `StreamTail { text, shown }` bounded by the lib's
+  `EXIT_*_TAIL_LINES` (10). `claudine::signals::tail_lines` is now public for
+  this. `Debug` prints lengths only. Evidence per path:
+  - semantic (structured) spawn: a new stderr ring sits beside the existing
+    stdout ring, returned as `ProcessResult::stream_tails`. stderr counts as
+    shown (streamed live, or echoed when a suppressed run fails); stdout does
+    not.
+  - captured spawn (composition non-structured): both whole streams, bounded.
+    stdout counts as shown when it produced a final message.
+  - inherited spawn, Kimi wire, and the direct-wrapper document harness: exit
+    code and termination only, so the failure stays unclassified (the spec
+    allows this: "unavailable evidence leaves the failure unclassified").
+- **Classifier (R2).** `classify_native_exit` reads both tails, stderr first.
+  Precedence: interruption (termination, or exit 130/143) → timeout →
+  missing binary (`LaunchFailed`, or exit 127 plus "not found"/"no such file")
+  → auth → API (`API Error:`) → model → argument rejected → missing argument →
+  `None`. Signatures were tightened:
+  - dropped `invalid argument` (matched `invalid argument: api key`), the
+    bare `required argument`, and the bare `authentication`. The last one
+    turned `--authentication-mode` into an auth failure.
+  - auth is now an explicit phrase list.
+  - the named switch is taken from the matched line only.
+  Every signature has a positive and a near-miss row.
+- **One builder (R2).** `AgentErrorReport::for_native_exit(provider, exit,
+  tail, model_source) -> NativeExitReport { report, correlated }`. It replaced
+  `from_exit_code`, `from_exit_code_with_source`, `correlated_with_forwarded_tail`,
+  and `classify_exit`, which removed both stale `#[allow(dead_code)]`
+  allowances. It correlates only with a non-empty tail, a failed exit, and
+  `ArgumentRejected` whose named switch (if any) is a tail token (bare,
+  `--name=…`, or a short switch with attached text). Wording: "{P} rejected
+  its arguments. This was likely caused by the forwarded arguments: {names |
+  opaque}." No recognition claim. Provider text is masked by
+  `provider_tail_report::tail_redactor`, which combines the shared
+  recognizer with the values `redact_sensitive_args` masks in the tail. That
+  uses the new lib API `Redactor::with_known_values`. Control characters are
+  stripped and markup escaped. `attributes_to_tail` exposes the decision
+  for a path that echoes output itself.
+  - direct wrapper: `run_execution_stage` returns a `NativeExit`;
+    `WrapperOutcome::AgentExited` carries it (boxed, for clippy's
+    large-variant lint) plus the passthrough tail, and always renders the
+    builder's report on non-zero exit (unchanged behavior for generic causes).
+  - composition: rendered once, only when correlated, in
+    `classify_attempt_phase` after `drive_terminal_recovery` returns
+    `Completed`. A retried or resumed failure therefore never renders one.
+    Other causes keep the existing failure reporting.
+  - captured path: when the attempt will be correlated, the raw stderr echo
+    is skipped. Every other captured stderr echo, and `AttemptOutcome::stderr_text`
+    (which feeds the failure headline and `err.msg`), is masked against the
+    tail when the tail is non-empty.
+- **Redaction gap closed (criterion 9).** `redact_sensitive_args` now masks a
+  credential-shaped value attached to a short switch (`-csk-…` becomes
+  `-c****`). New `sensitive_arg_values` returns the original masked values for
+  the echo redactor.
+
+### Departures and decisions
+
+- **No duplicate excerpt, via the failure headline.** The composition path
+  already prints a per-attempt failure headline
+  (`report_unhandled_failure`) built from the last stderr line. Left alone, a
+  correlated report's excerpt repeated that line. `NativeExit::shown_headline`
+  records the headline when it was shown (`show_checks`), and the builder drops
+  an excerpt the headline contains, pointing at it instead. Under `--quiet`
+  or `--silent` the headline is not shown, so the report carries the excerpt.
+- **Plain `-csecret` stays visible in dry-run and `AGENT_PARAMS`.** The plan
+  listed `-csecret` among the secrets. The spec's R7 list is `--api-key sk-…`
+  and `--token=…`, and the spec says redaction "covers recognized secrets".
+  Without switch metadata, an attached value cannot be told apart from a
+  switch cluster (`-yq`). Masking every attached short token would hide real
+  argv from the audit row. So only a credential-shaped attached value is
+  masked. The notice never echoes any attached text, and the binary test
+  uses `-csk-proj-…`. Phase 5 metadata can widen this.
+- **Multi-provider sequence test uses a proxy.** Sequence steps share the
+  sequence document's `agent` (`sequence/resolve.rs`), so a step's own `agent:`
+  is ignored at launch. Step `b` reaches Claude by an `initialize` proxy to a
+  document naming `agent: claude`. That is the supported way a sequence
+  launches different providers.
+- **The direct-wrapper document harness stays unclassified.** A direct
+  passthrough that runs through the harness loop records an empty tail in its
+  launch plan (`LaunchPlanInputs::recorded_only`). The loop therefore never
+  correlates there, and the wrapper's after-loop report has an exit code but
+  no evidence. Its resume behavior is unchanged: the spec keeps direct-wrapper
+  parsing as it is. Child argv for direct wrappers is unchanged
+  (`wrap_direct_argv.rs` green).
+- **Plan/spec.** Criteria 1, 2, 7, 8, 9, 10, 11, 15, and 28 are marked Done in
+  the spec table. Criterion 25 is split: the boundary and resume parts are
+  Done, and the ownership checks wait for R9.
+
+### Unexpected commit during this phase
+
+While this phase was in progress, commits `778fea8bb` ("fix(claudine): replace
+provider tail fields with typed ProviderTail…") and `6456ef433` ("planning:
+record Phase 2 close") were made in this worktree by a process outside this
+session. `778fea8bb` captured the working tree mid-phase, so it holds most of
+Phase 3's source and tests under a Phase 2 message. After it, this phase also
+changed `cli/src/commands/wrap/mod.rs` and `cli/src/output/error_report.rs`
+(clippy fixes), the three topic pages, the two skill files, `plan.md`,
+`spec.md`, and this log. Those are uncommitted. This session made no commit;
+the commit history needs the author's review.
+
+### Test mapping
+
+| Behavior | Test (tier) |
+| --- | --- |
+| Resume argv: entrypoint, tail once, injections only; repeated switches; user `--json` neither dropped nor doubled; injection matching a tail flag still carried; tail not found | `commands::wrap::resume::tests::*` (6, L1 unit) |
+| Resume through the binary (Codex `exec resume thread-7`, `--add-dir a --add-dir a --json` once) | `provider_tail_launch::a_resume_carries_the_tail_exactly_once` (L1 binary) |
+| Retry / proxy target / each multi-provider sequence step carry the tail once; one notice per provider | `provider_tail_launch::a_retry_…`, `a_proxy_target_…`, `each_step_of_a_multi_provider_sequence_…` (L1 binary) |
+| Exact headline argv, setter-shaped value not applied (`compose`, `inline-compose`, `sequence`); explicit `--` consumed | `provider_tail_launch::compose_forwards_…`, `inline_compose_…`, `sequence_forwards_…`, `compose_consumes_the_separator_…` (L1 binary) |
+| Secrets (`--api-key sk-…`, `--token=…`, `-csk-…`) reach the child; absent from notice, debug, dry run, `AGENT_PARAMS`, correlated report (echo masked) | `provider_tail_launch::secrets_reach_the_child_and_no_display_surface` (L1 binary) |
+| Classifier precedence, positive + near-miss per signature, stdout read, matched-line switch, bounded/redacted `Debug` | `output::error_report::tests::termination_decides_…`, `every_signature_has_a_positive_and_a_near_miss`, `auth_outranks_…`, `stdout_is_read_…`, `the_switch_comes_from_the_matched_line_only`, `evidence_is_bounded_…` (L1 unit) |
+| Builder: correlated once; injected switch generic; operand-only explicit; attached/`=` forms; no misattribution (timeout, interrupt, auth, API, ambiguous, empty tail); masking + escaping; shown line or headline not repeated; generic and per-cause remediation kept | `output::error_report::tests::*` (L1 unit) |
+| Correlation through the binary: captured stderr (once, quiet keeps excerpt, exit 2 preserved), structured stdout, streamed stderr (not repeated), operand-only explicit, and no correlation for injected/auth/API/ambiguous/interrupted/timeout | `provider_tail_launch::a_captured_stderr_…`, `a_structured_stdout_…`, `a_streamed_stderr_…`, `an_operand_only_explicit_…`, `other_failures_are_not_attributed_to_the_tail` (L1 binary) |
+| `-csk-…` masked; masked values recovered for echo masking | `commands::wrap::env::tests::redact_sensitive_args_masks_a_credential_attached_to_a_short_switch`, `sensitive_arg_values_returns_each_masked_original_value` (L1 unit) |
+| `Redactor::with_known_values` | `claudine secrets::tests::caller_known_values_are_masked_like_learned_ones` (L1 unit) |
+
+`provider_tail_launch.rs` is `#![cfg(unix)]` (shell stubs), declared in
+`cli/tests/l1/main.rs`, with no tier marker in any path segment, so `just test`
+runs it. Mutation reasoning: before this phase, the resume test fails (old
+allowlist dropped `--add-dir`), and every correlation test fails (nothing
+called the builder).
+
+The Input Robustness Matrix does not apply: the classifier reads free-form
+provider prose, not a file format or configuration.
+
+### Gates
+
+| Gate | Result |
+| --- | --- |
+| `just test` (claudine/) | 8132 passed, 9 skipped. The first run had one LEAK-FAIL in the untouched lib test `composition::sequence::task::tests::shell_tasks::an_early_wait_error_still_reaps_the_whole_tree` (44 s under load). It passes in isolation, and the full rerun was green. |
+| `just test-l2` (claudine/) | 277 + 3 passed |
+| `just lint` (claudine/) | clean, after eliding two lifetimes and boxing `NativeExit` in `WrapperOutcome` |
+| Windows native (`scripts/cross-check.sh claudine-cli --os windows error_report resume:: env::tests provider_tail launch_plan session_key`) | 126 passed; nothing left staged |
+| Dispatch inventory | regenerated: 1733 → 1750 sites, all new entries `reference`-class (test fixtures in `error_report/tests.rs`; the rest are line shifts); `conditional` unchanged at 60 |
+
+Linux and WSL2 were not run separately: nothing here is Linux-specific, and the
+Unix-gated binary tests passed on macOS.
+
+## Phase 4
+
+Phase 4 added the revision-2 switch-metadata contract for the `agent-cli`
+research topic, the shared vocabulary in `claudine-catalog-types`, and the
+`claudine-gen` projection into a new `ProviderInfo::cli_switches` field (R8,
+part 1). No research document was edited (ruling 12), so every compiled
+provider generates an explicit `Unknown` gap until Phase 5 re-researches it.
+
+### What landed
+
+- **Contract.** `docs/research/agent-cli/_types.yaml` (new) defines
+  `cli_switch`, `switch_scope`, `switch_value_type`
+  (`none|string|number|variadic|unknown`), and `switch_attachment`
+  (`space|equals|short_attached`), each property described (contract lint:
+  35 properties, 0 problems). Fields: `flag`, `aliases`, `value` (placeholder
+  only), `value_type`, `value_optional` (scalar only), `variadic_min`
+  (integer ≥ 1 or `unknown`, variadic only), `attachment`, `invocation_scope`
+  (`applies_to: global|command` plus an exact `command` path; `[]` is the
+  root), the legacy `scope` labels (descriptive only, ruling 13), `default`,
+  `description`, `example`, `notes`, `evidence_ids`, and `gap`.
+  `_schema.yaml` now declares `schema_revision: literal(2; required)`,
+  `versions_examined`, `evidence`, the typed `cli_switches`, and
+  `cli_switches_gap` (required when the inventory is empty).
+- **Revision-aware loading (ruling 12).** The previous contract is frozen,
+  byte for byte, as `_schema.r1.yaml`. `inputs::validate_frontmatter` checks a
+  document's `schema_revision` (absent means 1) against the `literal` its
+  sidecar pins, and validates a mismatched document against
+  `_schema.r<revision>.yaml` through Darkmatter's
+  `effective_for_with_override`. A missing frozen contract fails with
+  `GenError::ResearchRevisionUnsupported`. Legacy documents keep feeding
+  `config_paths` unchanged.
+- **Vocabulary.** `catalog-types/src/cli_switch.rs`: `CliSwitchCatalog
+  { Researched(&[CliSwitch]) | Unknown { gap } }`, `CliSwitch`,
+  `SwitchValue { None | String { optional } | Number { optional } |
+  Variadic { min } | Unknown }`, `VariadicMin { AtLeast(u32) | Unknown }`,
+  `SwitchAttachment`, `SwitchScope { Global | Command(&[&str]) }`. The serde
+  form is the catalog shape. `SwitchValue::VARIANTS` and
+  `SwitchAttachment::VARIANTS` are the research vocabularies the coercion
+  checks against. The lib re-exports them from `provider::cli_switch` and
+  `claudine::provider`.
+- **Generator.** A new last registry entry `cli_switches` (research,
+  `agent-cli/cli_switches`, `Coercion::CliSwitchRecords`). The coercion
+  (`gen/src/generate/coerce/cli_switches.rs`) reads the topic frontmatter **as
+  authored** (new `ProviderInputs::research_authored`), because Darkmatter's
+  coercion turns `7` into `"7"` and treats `null` as absent. It distinguishes
+  absent, null, and present for every load-bearing field. It rejects spellings
+  two records share at a command path both accept (global meets every path;
+  command entries meet only at an identical path), and it sorts records by
+  canonical spelling and then by scope. The emitter (`gen/src/emit/cli_switches.rs`)
+  turns the catalog shape into a `CliSwitchCatalog` literal and rejects any
+  other shape, because overrides reach it directly.
+- **Schema gate.** `schema_compat::load_sidecar_schema` inlines a top-level
+  `name@./_types.yaml` object import so the `RecordArray` expectation checks a
+  named record type. The expectation lists every field the coercion reads.
+- **Regenerated.** All ten `data.rs` files (each `CliSwitchCatalog::Unknown`
+  with the revision gap), `catalog.json`, both field-list guards (45 → 46), the
+  registry source counts (research 11 → 12), and the generated-artifact byte
+  baseline (11 changed pins). The `Researched` form was compiled once: Codex
+  was generated from the revision-2 fixture into the real tree, `cargo check -p
+  claudine` came back clean, and the committed files were restored
+  (`claudine-gen check` clean afterwards).
+
+### Departures and decisions
+
+- **`cli_switches` is the last `ProviderInfo` field**, not next to
+  `non_interactive_conflicting_flags`. Emission orders are numbered, so
+  appending changes no other field's order.
+- **Attachment is treated as load-bearing.** The plan's matrix lists five
+  columns. `attachment` decides whether `-cfoo` or `--config=x` is one token
+  (spec rule 6), so it gets a column too.
+- **`variadic_min` accepts `unknown`.** Ruling 6 allows an unknown minimum.
+  The plan's matrix makes an absent minimum an error. The contract satisfies
+  both: absent or `null` fails, and an unknown minimum is written explicitly as
+  `unknown` with a `gap`.
+- **Matrix outcomes where the plan left a cell open.** Absent `aliases` means
+  none (documented in the contract and on the topic page). An empty
+  `invocation_scope` list is an error. A `command: []` path is the root and is
+  valid. A global entry beside a command entry is an error, because global
+  already covers every path.
+- **The rest of the agent-cli contract is not narrowed.** The description
+  lint still reports 25 problems on older properties (no description, quoted
+  `{ … }` objects): `binaries`, `config_paths`, `subcommands`, and others.
+  Revision 2 has no documents yet, so Phase 5 can still narrow them inside
+  revision 2 before the fleet runs (see `message_to_agent`).
+- **Fleet prompt untouched.** `_fleet.md` still describes revision 1. Updating
+  it, piloting Codex, and re-researching are Phase 5. Until then, running
+  `just research agent-cli` would write revision-1 documents that the
+  generator turns into gaps.
+- **CI visibility.** The fixture's new contract-file copies are spelled
+  `manifest_dir!().join("../docs/…")`. Running `scripts/ci/test_inputs.py`'s
+  `scan` confirms `_types.yaml`, `_schema.r1.yaml`, the shared `_types.yaml`,
+  and the fixture map to `binary_id(claudine-gen::l1)`. The committed
+  `agent-cli/_schema.yaml` and per-provider documents are still copied through
+  `format!` paths in `pipeline.rs`/`generate_ux.rs` and through `area()` in the
+  drift tests, so the index does not see them. That gap predates this phase
+  and applies to every research topic.
+
+### Input robustness matrix
+
+One table-driven test (`cli_switches::every_matrix_cell_has_its_defined_outcome`,
+63 cells) walks the revision-2 Codex fixture through the real pipeline. The
+control row is `cli_switches::control_row_types_dash_c_as_a_string`. "Generator"
+means the switch coercion itself refuses the shape (Darkmatter's shape check
+accepts it), asserted by an error message naming the field. "Error" means any
+gate refuses it.
+
+| Shape | `value_type` | `value_optional` | `variadic_min` | `aliases` | `attachment` | invocation scope |
+| --- | --- | --- | --- | --- | --- | --- |
+| absent | error | generator (string/number) | generator (variadic) | valid, none (control row) | error | error |
+| explicit null | error | generator (string, and on a none switch) | generator (variadic, and on a none switch) | generator | error | error; `command: null` generator |
+| wrong type, whole | error (`[string]`, `3`) | error (`"no"`) | error (`"two"`, `1.5`) | error (`"-c"`) | error (`space`) | error (`global`) |
+| wrong type, one element | n/a | n/a | n/a | error (`["-c", 123]`) | error (`[space, glued]`) | generator (`[exec, 7]`) |
+| wrong type, every element | n/a | n/a | n/a | error (`[123]`) | error (`[glued]`) | generator (`[7]`) |
+| empty | error (`""`) | n/a | error (`0`) | valid (`[]`) | generator (string); generator if set on none | generator (`[]` list); `command: []` = root, valid |
+| duplicate key | error | error | error | error | n/a | error |
+| duplicate value | n/a | n/a | n/a | generator (repeated spelling, alias = flag, alias claimed by another record where both apply) | generator (`[space, space]`) | generator (repeated entry; global beside a command) |
+| not allowed here | error (not a member) | generator (on a none switch) | generator (on a string) | n/a | generator (`short_attached` without a short spelling) | generator (`command` on a global entry) |
+| unknown | n/a | n/a | generator without `gap`; valid with one | n/a | n/a | n/a |
+| trailing/invalid content | error (whole document) | | | | | |
+
+`description` absent, empty, and whitespace-only are each refused (the
+generator also trims before its own non-empty check).
+
+Document-level cells: `schema_revision: null` and `schema_revision: 3` fail
+(the second with no frozen contract to read); a document without revision 2
+generates the gap (`a_revision_one_document_generates_an_explicit_gap`, which
+also proves a missing `_schema.r1.yaml` is `ResearchRevisionUnsupported`);
+`cli_switches: []` needs `cli_switches_gap`, and the gap beside records fails
+(`an_empty_inventory_needs_a_stated_gap`).
+
+Code smells grepped in the new reader and emitter: no `#[serde(default)]`, no
+`unwrap_or_default()`, no `.ok()`, no `filter_map`. The only `Option` is the
+output type's `gap` (absent and null are decided before it) and
+`optional_text`'s return, which follows the three-way `Field` match.
+
+Mutation check: making the coercion accept `null` for `value_optional`,
+`variadic_min`, and `aliases` fails three cells. A first version of the test
+accepted any coercion error and missed this. Each generator cell now names the
+field its error must mention, and the null-aliases cell moved to `--oss`, where
+reading `null` as empty would otherwise pass.
+
+### Test mapping
+
+| Behavior | Test (tier) |
+| --- | --- |
+| `-c` → `--config`, `string`, all three attachment forms, global; variadic min; root scope; absent aliases = none; `unknown` with gap; emitted Rust literal | `claudine-gen::l1 cli_switches::control_row_types_dash_c_as_a_string` (L1) |
+| Every matrix cell above | `cli_switches::every_matrix_cell_has_its_defined_outcome` (L1) |
+| Ordering determinism (catalog value and `data.rs` bytes) | `cli_switches::output_order_does_not_depend_on_document_order` (L1) |
+| Same spelling at disjoint paths is valid; at a shared path conflicts | `cli_switches::a_spelling_may_repeat_at_disjoint_command_paths` (L1) |
+| Empty inventory needs `cli_switches_gap`; gap beside records fails | `cli_switches::an_empty_inventory_needs_a_stated_gap` (L1) |
+| Revision-1 document → explicit gap; no frozen contract → `ResearchRevisionUnsupported` | `cli_switches::a_revision_one_document_generates_an_explicit_gap` (L1) |
+| Gate refuses a contract that drops a field the coercion reads | `cli_switches::the_gate_requires_every_field_the_coercion_reads` (L1) |
+| Every compiled provider has records or a gap (real area) | `cli_switches::every_compiled_provider_has_switches_or_a_gap` (L1) |
+| Drift of regenerated output | existing `drift::*` (L1) and `claudine-gen check` |
+| Vocabulary names and serde catalog shape | `claudine-catalog-types cli_switch::tests::*` (2, L1) |
+| Field lists | `registry_coverage::*`, `registry::tests::registry_matches_matrix_source_counts`, lib `provider::tests::serialized_field_list_matches_catalog` (L1) |
+
+All new gen tests are in `gen/tests/l1/cli_switches.rs`, declared in
+`tests/l1/main.rs`, with no tier marker in any path segment. The fixture is
+read through `include_str!`.
+
+### Gates
+
+| Gate | Result |
+| --- | --- |
+| `cargo run -p claudine-gen -- check` | clean: 10 providers, catalog.json, signals, vocabulary, steering, agentic CLIs, families |
+| `claudine-gen` + `claudine-catalog-types` nextest | 234 passed |
+| `just test` (claudine/) | 8142 passed, 9 skipped, 0 failed |
+| `just lint` (claudine/) | clean; one pre-existing linker warning (`__eh_frame section too large`) |
+| Windows native (`just cross-check claudine-gen --os windows`) | 202 passed (includes every new `cli_switches` test and the `manifest_dir!().join("../…")` fixture copies) |
+
+Linux and WSL2 were not run separately. The new code is pure data handling,
+and its only path operations are `with_file_name` and manifest-relative joins,
+which the Windows run covered. CI's Linux leg runs the same L1 binary.
