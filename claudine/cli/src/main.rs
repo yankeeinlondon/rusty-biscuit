@@ -42,10 +42,11 @@ fn wrapper_command(
     }
 }
 
-/// Attach the pre-clap agent tail ([`argv::partition_composition_tail`]) to
-/// the composition command's shared args. A no-op for every other command and
-/// when the tail is empty.
-fn inject_provider_tail(cli: &mut Cli, tail: claudine::composition::ProviderTail) {
+/// Attach the arguments after the composition file
+/// ([`argv::partition_composition_tail`]) to the composition command's shared
+/// args, for type-aware ownership once the file is read. A no-op for every
+/// other command.
+fn inject_caller_arguments(cli: &mut Cli, arguments: claudine::composition::ArgumentsAfterFile) {
     let Some(command) = cli.command.as_mut() else {
         return;
     };
@@ -55,7 +56,7 @@ fn inject_provider_tail(cli: &mut Cli, tail: claudine::composition::ProviderTail
         Commands::Sequence(args) => &mut args.shared,
         _ => return,
     };
-    shared.provider_tail = tail;
+    shared.caller_arguments = arguments;
 }
 
 /// Check if the Claudine config file exists and is valid. If not (missing or
@@ -271,7 +272,7 @@ fn run() -> Result<std::convert::Infallible> {
     // Ownership partition (replaces the retired Rule 3): split composition argv
     // into the Claudine argv handed to clap and the agent tail forwarded to the
     // provider. Non-composition argv passes through unchanged with an empty tail.
-    let (argv, provider_tail) = argv::partition_composition_tail(normalized)?;
+    let (argv, caller_arguments) = argv::partition_composition_tail(normalized)?;
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.
@@ -292,7 +293,7 @@ fn run() -> Result<std::convert::Infallible> {
         .build()?;
     Ok(runtime.block_on(async_main(
         argv,
-        provider_tail,
+        caller_arguments,
         perf_bootstrap,
         arg_parse_start,
         process_start,
@@ -305,14 +306,14 @@ fn run() -> Result<std::convert::Infallible> {
 /// pending-delivery warning.
 async fn async_main(
     argv: Vec<OsString>,
-    provider_tail: claudine::composition::ProviderTail,
+    caller_arguments: claudine::composition::ArgumentsAfterFile,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
 ) -> std::convert::Infallible {
     let code = match dispatch(
         argv,
-        provider_tail,
+        caller_arguments,
         perf_bootstrap,
         arg_parse_start,
         process_start,
@@ -331,7 +332,7 @@ async fn async_main(
 /// Parse the CLI and run the selected command, returning its exit code.
 async fn dispatch(
     argv: Vec<OsString>,
-    provider_tail: claudine::composition::ProviderTail,
+    caller_arguments: claudine::composition::ArgumentsAfterFile,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
@@ -345,7 +346,7 @@ async fn dispatch(
     claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
-    inject_provider_tail(&mut cli, provider_tail);
+    inject_caller_arguments(&mut cli, caller_arguments);
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 

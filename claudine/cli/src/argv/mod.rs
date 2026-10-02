@@ -21,8 +21,10 @@
 //! Composition provider-argument forwarding is **not** a normalization rule.
 //! It is a separate ownership partition ([`partition_composition_tail`]) that
 //! runs after normalization and splits the argv into the Claudine argv (for
-//! clap) and the agent tail (for execution). It replaced the former Rule 3,
-//! whose synthetic `--` separator collided with authored provider boundaries.
+//! clap) and the arguments after the file, which type-aware ownership divides
+//! into setters, positionals, and the agent tail once the file is read. It
+//! replaced the former Rule 3, whose synthetic `--` separator collided with
+//! authored provider boundaries.
 //!
 //! ## Pass-through guarantees
 //!
@@ -270,26 +272,16 @@ pub(crate) fn is_global_flag_with_value(token: &str) -> bool {
     GLOBAL_FLAGS_WITH_VALUE.contains(&token)
 }
 
-/// True when `token` matches the composition shorthand-setter key pattern
-/// `^[A-Za-z_][A-Za-z0-9_-]*=`.
+/// True when `token` has the composition shorthand-setter shape
+/// `^[A-Za-z_][A-Za-z0-9_-]*=` ([`claudine::composition::setter_key`]).
 ///
-/// This is the same key validation used by
-/// `crate::commands::compose`'s `parse_compose_setter`; keeping them in lockstep
-/// guarantees the ownership partition classifies a token the same way the
-/// downstream positional parser will.
+/// Shape alone decides ownership only before the composition file, where a
+/// setter-shaped token leaves the file unclaimed. After the file, type-aware
+/// ownership decides: a declared `$schema` parameter is always Claudine's
+/// (rule 2), and any other setter goes to a provider only as the first value
+/// of a string or variadic switch (rule 3).
 pub(crate) fn looks_like_setter(token: &str) -> bool {
-    let Some(eq_pos) = token.find('=') else {
-        return false;
-    };
-    let key = &token[..eq_pos];
-    let mut chars = key.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphabetic() && first != '_' {
-        return false;
-    }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    claudine::composition::setter_key(token).is_some()
 }
 
 #[cfg(test)]

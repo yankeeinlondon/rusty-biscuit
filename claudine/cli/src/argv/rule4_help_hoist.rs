@@ -15,9 +15,8 @@ use crate::argv::{COMPOSITION_SUBCOMMANDS, find_subcommand, first_dash_dash_inde
 /// a non-global `help: bool`, which means composition subcommands never
 /// inherit a working `--help` handler. Without this rule, a user typing
 /// `claudine compose file.md --gemini name=Ken --help` lands in clap's
-/// greedy positional collector and sees either the misleading "unexpected
-/// argument" tip or a downstream "expected at most one file reference"
-/// error.
+/// greedy positional collector and sees the misleading "unexpected
+/// argument" tip.
 ///
 /// Hoisting `--help` / `-h` to position 1 converts the same argv into a
 /// root-help invocation, which `main.rs` catches and forwards to
