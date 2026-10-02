@@ -11,7 +11,9 @@
 //! In the per-item surfaces the item's own top-level fields are the document
 //! layer over the invoking document's frontmatter, so
 //! `template(color + '-is-great')` reads the item's `color` even when the
-//! invoking document defines one too. Reserved namespaces resolve first, so an
+//! invoking document defines one too. Layering is by top-level key: an item's
+//! `config` replaces the frontmatter's `config` whole, for a dotted path and a
+//! bare `doc` alike. Reserved namespaces resolve first, so an
 //! item field can never stand in for `ctx`, `env`, or `doc`.
 
 use std::path::Path;
@@ -77,15 +79,26 @@ impl<'a> SourceExpressionLookup<'a> {
         self
     }
 
-    /// A document-layer path: the item's field when it has one, else the
-    /// invoking document's.
+    /// A document-layer path, read from the first layer that has its
+    /// top-level key: the item when it defines that key, else the invoking
+    /// document's frontmatter.
+    ///
+    /// The layer is chosen by the top-level key alone, never per segment, so
+    /// a dotted path agrees with indexing the bare `doc` object
+    /// ([`document_object`](Self::document_object)): an item's `config`
+    /// replaces the frontmatter's `config` whole, and `config.b` is absent
+    /// when the item's `config` has no `b`.
     fn document(&self, path: &str) -> Option<Value> {
-        self.item
-            .and_then(|item| resolve_path(item, path))
-            .or_else(|| resolve_path(self.frontmatter, path))
+        let root = path.split('.').next().unwrap_or(path);
+        let layer = match self.item {
+            Some(item) if item.contains_key(root) => item,
+            _ => self.frontmatter,
+        };
+        resolve_path(layer, path)
     }
 
-    /// The whole document layer, for a bare `doc`.
+    /// The whole document layer, for a bare `doc`: the item's top-level keys
+    /// replace the frontmatter's.
     fn document_object(&self) -> Value {
         let mut merged = self.frontmatter.clone();
         if let Some(item) = self.item {
@@ -206,6 +219,42 @@ fn evaluate_authored<L: EvaluationLookup>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn object(value: Value) -> Map<String, Value> {
+        match value {
+            Value::Object(map) => map,
+            other => panic!("expected an object, got {other}"),
+        }
+    }
+
+    /// Every spelling of a nested document read agrees: an item key replaces
+    /// the frontmatter key whole, and a key only the frontmatter has still
+    /// reads through.
+    #[test]
+    fn item_layer_replaces_top_level_keys_for_every_spelling() {
+        let frontmatter = object(json!({ "config": { "b": 2 }, "only_fm": { "x": 3 } }));
+        let item = object(json!({ "config": { "a": 1 } }));
+        let base_dir = Path::new(".");
+        let lookup = SourceExpressionLookup::new(&frontmatter, base_dir).with_item(&item);
+
+        let cases = [
+            ("config.b", Value::Null),
+            ("doc.config.b", Value::Null),
+            ("doc['config']['b']", Value::Null),
+            ("config['b']", Value::Null),
+            ("config.a", json!(1)),
+            ("doc.config.a", json!(1)),
+            ("doc['config']['a']", json!(1)),
+            ("only_fm.x", json!(3)),
+            ("doc.only_fm.x", json!(3)),
+            ("doc['only_fm']['x']", json!(3)),
+        ];
+        for (expression, expected) in cases {
+            let actual = evaluate_whole(expression, &lookup).unwrap();
+            assert_eq!(actual, expected, "{expression}");
+        }
+    }
 
     #[test]
     fn sequence_expression_lookup_reuses_request_resolution_inputs() {

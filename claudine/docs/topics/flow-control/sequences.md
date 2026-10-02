@@ -191,7 +191,7 @@ The suffix parser respects quoted arguments, so a path containing a space or an
 |---|---|---|
 | `map(from, to)` | **Renames** `from` to `to` (the original key is removed) | an item lacks `from`, or is a scalar — the error names the item index |
 | `name(from)` | **Copies** `from` into `name` (the original is retained) | same as `map` |
-| `template(expr)` | Computes `name` per item with a Darkmatter expression; the item's top-level fields shadow globals | the result is null or empty |
+| `template(expr)` | Computes `name` per item with a Darkmatter expression; the item's top-level fields shadow globals, each replacing the same-named frontmatter key whole (an item `config: {a: 1}` over frontmatter `config: {b: 2}` makes `config.b`, `doc.config.b`, and `doc['config']['b']` all `null`) | the result is null or empty |
 
 ```yaml
 sequence: things.yaml -> colors.data                          # names become "1", "2", "3"
