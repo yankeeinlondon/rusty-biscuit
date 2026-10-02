@@ -132,7 +132,7 @@ Run once, now, one host, quick sample. No re-checks in later phases.
 
 ### Tasks
 
-- [ ] **Record rulings.** Write rulings 1-8 (author answers or accepted defaults)
+- [x] **Record rulings.** Write rulings 1-8 (author answers or accepted defaults)
   into `implementation-log.md`.
 - [ ] **Run the spikes.** Record each finding in a few lines; a finding that
   contradicts the spec is a ruling for the author, not a silent divergence.

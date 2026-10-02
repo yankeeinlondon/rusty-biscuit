@@ -20,7 +20,7 @@ $schema:
     implemented: boolean -> indicates whether this spec's plan has been implemented
     implemented_by: string -> the agent who implemented the plan
 area: claudine
-status: proposed
+status: planned
 created: 2026-07-22
 packages:
     - claudine-cli
