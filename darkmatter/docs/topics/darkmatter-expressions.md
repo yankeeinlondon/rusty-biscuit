@@ -1113,6 +1113,24 @@ session, on first read, and caches a `null` result too.
 branch, and runs no provider. `evaluate_prepared` evaluates through a session
 and fails on any parse or evaluation error.
 
+A static tool that parses its own text uses the same check per expression:
+`validate_expression(&expr, &view)` returns each problem's span and typed
+error. `BindingView::baseline()` is the view with no host globals, and
+`names_document_property(root)` says whether a bare root reads the document
+under a view (not a reserved namespace, a declared global, or `null`). DMLS
+classifies every bare root this way, so in the editor a host global such as
+Claudine's `err` is an undeclared document property:
+
+```rust
+use darkmatter::markdown::compose::expression::{BindingView, parse_spanned, validate_expression};
+
+let baseline = BindingView::baseline();
+assert!(baseline.names_document_property("err"));
+assert!(!baseline.names_document_property("ctx"));
+let problems = validate_expression(&parse_spanned("no_such_fn(title)").unwrap(), &baseline);
+assert_eq!(problems.len(), 1); // an unknown function, at `no_such_fn(title)`
+```
+
 Subtree compose (`SubtreeCompose`, `compose_subtree`) associates one session
 per `compose` call. Pass the view with `with_binding_view` to have the globals
 checked against it. Without a view, each supplied global is simply available,

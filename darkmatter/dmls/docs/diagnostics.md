@@ -83,12 +83,12 @@ feature layer.
   surface already reports, and never reuse a code for a different condition.
 - **Severity is per surface.** Each surface picks the severity that fits its
   moment, but the same condition should not contradict itself without reason.
-  `dm.expression.unknown_identifier` is a **Warning** both here and in
+  `dm.expression.undeclared_property` is a **Warning** both here and in
   `md compose`. `dm.expression.malformed` is a Warning squiggle while you type,
   while compose fails outright on the same expression.
 - **Adding a code.** Add a documented constant to `codes.rs` and a row to the
   layer table below. A compose-side emitter declares the same string on
-  `ComposeWarning` (as `UNKNOWN_IDENTIFIER_CODE` does). There is no shared
+  `ComposeWarning` (as `UNDECLARED_PROPERTY_CODE` does). There is no shared
   cross-crate constant module until a second shared code exists.
 
 ### Layer 0 — Markdown links (`source: darkmatter.links`)
@@ -133,7 +133,8 @@ feature layer.
 | `dm.style.unknown_key` | A `style:` key the style schema does not recognize. |
 | `dm.style.deprecated_key` | A deprecated `style:` key (a canonical replacement exists). |
 | `dm.expression.malformed` | An `expression`-typed value that does not parse. Emitted only for untagged single-line plain and quoted scalars; block and tagged values keep the schema problem. Pending `{{ … }}` / `$(…)` values are deferred. |
-| `dm.expression.unknown_identifier` | A bare root of an `expression`-typed value naming nothing DMLS can resolve. `err`, `timing`, and `current` are known beneath lifecycle event keys only. |
+| `dm.expression.undeclared_property` | **Warning (advisory).** A bare root of an `expression`-typed value that is an undeclared document property: valid, of unknown type, and `null` unless supplied at runtime. DMLS classifies against Darkmatter's baseline binding view and supplies no host globals, so Claudine's `err`, `timing`, and `group` are reported like any other undeclared property, beneath a lifecycle event or not. `current` is a reserved namespace and is never reported. |
+| `dm.expression.unknown_function` | **Error.** A call to a function outside Darkmatter's closed catalog, ranged on the function name, in every branch. Compose fails on the call. |
 | `dm.expression.nested_span_in_literal` | A `{{ … }}` inside a quoted string literal on a single-pass lifecycle surface — a whole-value communication field, stack action operand, or `proxy … with` value, or a `when` / `while` / `until` predicate — where it is never interpolated. Offers **Rewrite with + concatenation** when a safe rewrite exists (not for folded or tagged scalars, or a literal that spans lines). |
 
 Two Layer-2 behaviors reach beyond the Markdown document under edit:
@@ -162,7 +163,8 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |
-| `dm.expression.unknown_identifier` | **Warning**, matching `md compose`. An identifier, in any operand position and ranged at itself, whose root names no frontmatter key, schema-declared property, reserved root (`ctx`, `env`, `doc`, `current`, `null`, …), runtime-context name, or function. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition and its guarded root (`x ? x : "none"`), and a direct `is_null`/`is_empty` argument. Unlike compose, both ternary branches are checked. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
+| `dm.expression.undeclared_property` | **Warning** (advisory), matching `md compose`. An identifier, in any operand position and ranged at itself, whose root is an undeclared document property: no frontmatter key, schema-declared property, or function names it, and Darkmatter's binding model does not classify it as a reserved namespace (`ctx`, `env`, `doc`, `current`, `current_env`) or the `null` literal. A bare runtime-context name such as `repo` is a document property, never `ctx.repo`. The message says the property is valid, of unknown type, and `null` unless supplied at runtime. (A key the effective schema declares counts as known even when the document does not set it — it is a compose-time parameter.) Handled absence stays silent, as at compose time: a fallback primary (`x \|\| "d"`), a ternary condition and its guarded root (`x ? x : "none"`), and a direct `is_null`/`is_empty` argument. Unlike compose, both ternary branches are checked. A document without frontmatter is never diagnosed, since any name could be a `--set` value. A subtraction whose whitespace-free text is a frontmatter key (`foo--bar`, `a- b`) is reported once, over the subtraction, with a quick-fix. Content inside a `{{{ … }}}` literal is inert and never diagnosed. Also emitted on Expression-typed frontmatter values (`source: darkmatter.frontmatter`). |
+| `dm.expression.unknown_function` | **Error**, matching `md compose`, which fails on the call. A call to a function outside Darkmatter's closed catalog, ranged on the function name and reported in every branch. Unlike the advisory, it is reported on a document without frontmatter too. |
 | `dm.fence.unknown_language` | A fenced-code language token no grammar recognizes (with a nearest-match suggestion). |
 | `dm.security.disallowed_command` | A `::shell` / `::shell-block` / `$()` command the shell policy disallows. |
 | `dm.shell.invalid_suffix` | A frontmatter `$()` suffix `md compose` would reject, ranged at the suffix: an unrecognized suffix or text after a suffix (the message lists all five: `::ok`, `::exit-code`, `::result`, `::timeout:<seconds>`, `::no-cache`), an empty `::`, a repeated suffix, a second result suffix (the message names both), or an invalid timeout. Source `darkmatter.compose`. |
@@ -193,7 +195,8 @@ The expression family follows one ladder: a **warning** means the construct
 |------|----------|
 | `dm.expression.malformed` on a schema-typed frontmatter value | Error |
 | `dm.expression.malformed` on a body `{{ … }}` span | Warning (the braces may be foreign template syntax) |
-| `dm.expression.unknown_identifier` | Warning |
+| `dm.expression.undeclared_property` | Warning (advisory: the property is valid) |
+| `dm.expression.unknown_function` | Error (the function catalog is closed) |
 | `dm.expression.nested_span_in_literal` | Error |
 
 ## Ranging

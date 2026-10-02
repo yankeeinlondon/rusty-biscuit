@@ -303,9 +303,12 @@ root is declared by the final state, a caller input, or the effective schema.
 Read
 [compose.md](compose.md#undeclared-properties-dmexpressionundeclared_property)
 before changing a runtime evaluation surface: new surfaces must observe
-through the shared `AbsenceScope`, not a new walk. DMLS still reports its own
-`dm.expression.unknown_identifier` at `WARNING` through the static twin,
-`expression::static_variable_reads` (see [dmls.md](dmls.md#unknown-identifiers)).
+through the shared `AbsenceScope`, not a new walk. DMLS reports the same
+`dm.expression.undeclared_property` at `WARNING` through the static twin,
+`expression::static_variable_reads`, classified by `BindingView::baseline()`,
+and an unknown function as the `ERROR` `dm.expression.unknown_function` through
+`expression::validate_expression` (see
+[dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
 
 Each issue is reported once. A coded `ComposeWarning` family declares its
 identity in its constructor (`from_schema_advisory`,
