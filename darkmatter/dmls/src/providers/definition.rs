@@ -28,8 +28,9 @@ pub fn definition(ctx: &DocumentContext, offset: usize) -> Vec<Location> {
 }
 
 /// Eagerly-resolved document links for every local/external link in the
-/// document. Targets are cheap lexical path joins, so there is nothing worth
-/// deferring to `documentLink/resolve` (advertised `resolveProvider: false`).
+/// document. Targets are read from the link graph, which already resolved them
+/// through the repository context, so there is nothing worth deferring to
+/// `documentLink/resolve` (advertised `resolveProvider: false`).
 pub fn document_links(ctx: &DocumentContext) -> Vec<DocumentLink> {
     let Some(doc_id) = ctx.doc_id else {
         return Vec::new();

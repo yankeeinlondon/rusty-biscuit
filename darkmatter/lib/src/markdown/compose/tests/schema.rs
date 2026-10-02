@@ -165,7 +165,11 @@ mod schema_validation_integration {
     #[test]
     fn schema_number_increment_survives_quoted_persistence_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        let spec = dir.path().join("spec.md");
+        // Only interpolation runs, so the schema stage never makes `spec`
+        // absolute; a spec in a subfolder keeps `dirname(spec)` non-empty
+        // (a bare `spec.md` would build the root path `/review-N.md`).
+        std::fs::create_dir(dir.path().join("specs")).unwrap();
+        let spec = dir.path().join("specs").join("spec.md");
         let prompt = dir.path().join("prompt.md");
         std::fs::write(&spec, "---\n---\nSpec\n").unwrap();
         std::fs::write(
@@ -176,7 +180,7 @@ mod schema_validation_integration {
              \x20 iteration: number\n\
              \x20 review: file\n\
              \x20 previous: file\n\
-             spec: spec.md\n\
+             spec: specs/spec.md\n\
              iteration: \"{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1 : 1 }}\"\n\
              review: \"{{ dirname(spec) + '/review-' + iteration + '.md' }}\"\n\
              previous: \"{{ iteration < 2 ? null : decrement_file_index(review) }}\"\n\
@@ -203,7 +207,7 @@ mod schema_validation_integration {
                 frontmatter
                     .get("review")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|path| path.ends_with(&format!("review-{expected_iteration}.md"))),
+                    .is_some_and(|path| path == format!("specs/review-{expected_iteration}.md")),
                 "review should use iteration {expected_iteration}: {frontmatter:?}"
             );
             if expected_iteration == 1 {
@@ -214,7 +218,7 @@ mod schema_validation_integration {
                         .get("previous")
                         .and_then(serde_json::Value::as_str)
                         .is_some_and(|path| {
-                            path.ends_with(&format!("review-{}.md", expected_iteration - 1))
+                            path == format!("specs/review-{}.md", expected_iteration - 1)
                         }),
                     "previous should point to the prior iteration: {frontmatter:?}"
                 );
