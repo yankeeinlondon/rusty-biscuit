@@ -621,7 +621,16 @@ pub fn run_compose(
         use biscuit_terminal::prelude::{Status, StatusState};
         let term = term_cell.get_or_init(Terminal::default);
         for warning in &report.warnings {
-            let status = Status::from_prose(&warning.message).state(StatusState::Warning);
+            // A tolerated file-reference failure keeps its stable class row.
+            let prose = match warning.resolution_failure {
+                Some(failure) => format!(
+                    "{}\n<dim>failure:</dim> {}",
+                    warning.message,
+                    darkmatter::markdown::errors::resolution_failure_name(failure)
+                ),
+                None => warning.message.clone(),
+            };
+            let status = Status::from_prose(&prose).state(StatusState::Warning);
             eprintln!("{}", status.render(term));
         }
     }

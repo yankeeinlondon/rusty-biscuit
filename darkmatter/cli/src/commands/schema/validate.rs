@@ -352,6 +352,14 @@ fn emit_problem_bullet(problem: &ValidationProblem, terminal: &Terminal) {
         let sub_line = format!("        <dim>{}</dim>", escape_prose(description));
         println!("{}", Prose::new(sub_line).render(terminal));
     }
+    // The stable class of a failed `file` value (R5), on its own sub-line.
+    if let Some(reference) = problem.file_reference.as_ref() {
+        let sub_line = format!(
+            "        <dim>failure:</dim> {}",
+            darkmatter::markdown::errors::resolution_failure_name(reference.resolution_failure())
+        );
+        println!("{}", Prose::new(sub_line).render(terminal));
+    }
 }
 
 /// When `jsonschema` reports a `Required` failure, the message already starts
