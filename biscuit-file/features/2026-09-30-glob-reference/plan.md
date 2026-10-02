@@ -4,7 +4,7 @@ feature: 2026-09-30-glob-reference
 spec: biscuit-file/features/2026-09-30-glob-reference/spec.md
 total_phases: 8
 created: 2026-10-01
-phase: 1
+phase: 3
 agent: "claude/sonnet"
 yolo: "true"
 packages:
@@ -21,6 +21,82 @@ docs_updated_during_phase_1:
     - biscuit-file/docs/dependencies.md
 docs_created_during_phase_1: []
 skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+    - biscuit-file/lib/src/file_reference/glob/mod.rs
+    - biscuit-file/lib/src/file_reference/glob/error.rs
+    - biscuit-file/lib/src/file_reference/glob/parse.rs
+    - biscuit-file/lib/src/file_reference/glob/roots.rs
+    - biscuit-file/lib/src/file_reference/glob/list.rs
+    - biscuit-file/lib/src/file_reference/glob/matches.rs
+    - biscuit-file/lib/src/file_reference/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/src/lib.rs
+    - biscuit-file/lib/tests/l1/main.rs
+    - biscuit-file/lib/tests/l1/glob_reference/mod.rs
+    - biscuit-file/lib/tests/l1/glob_reference/grammar.rs
+    - biscuit-file/lib/tests/l1/glob_reference/order.rs
+    - biscuit-file/lib/tests/l1/glob_reference/boundary.rs
+    - biscuit-file/lib/tests/l1/glob_reference/literal.rs
+    - biscuit-file/lib/tests/l1/glob_reference/unfiltered.rs
+docs_updated_during_phase_2:
+    - biscuit-file/docs/topics/file-references.md
+    - biscuit-file/docs/dependencies.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/biscuit-file/references/file-references.md
+source_files_during_phase_3:
+    - darkmatter/lib/src/markdown/schemas/file_match.rs
+    - darkmatter/lib/src/markdown/schemas/validate.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - darkmatter/lib/src/markdown/schemas/format.rs
+    - darkmatter/lib/src/markdown/schemas/simplified/grammar.rs
+    - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+    - darkmatter/lib/src/markdown/compose/expression/error.rs
+    - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+    - darkmatter/lib/src/markdown/compose/file_links/discovery.rs
+    - darkmatter/lib/src/markdown/compose/file_links/types.rs
+    - darkmatter/lib/src/markdown/compose/file_links/mod.rs
+    - darkmatter/lib/src/markdown/compose/file_links/parser.rs
+    - darkmatter/lib/src/markdown/compose/transclusion/engine.rs
+    - darkmatter/lib/src/markdown/compose/glob_listing.rs
+    - darkmatter/lib/src/markdown/compose/mod.rs
+    - darkmatter/lib/src/markdown/compose/context/report.rs
+    - darkmatter/lib/src/markdown/compose/context/options.rs
+    - darkmatter/lib/src/markdown/compose/pipeline/mod.rs
+    - darkmatter/lib/src/markdown/compose/schema_validation.rs
+    - darkmatter/lib/src/markdown/compose/tests/transclusion.rs
+    - darkmatter/lib/src/markdown/types.rs
+    - darkmatter/lib/tests/l1/main.rs
+    - darkmatter/lib/tests/l1/glob_consumers.rs
+    - darkmatter/lib/tests/l1/find_files_and_try_frontmatter.rs
+    - darkmatter/lib/tests/l1/context_construction_guard.rs
+    - darkmatter/lib/tests/l1/schemas_grammar_proptest.rs
+    - darkmatter/lib/tests/level2/level2_render_tree_terminal/support/mod.rs
+    - biscuit-file/lib/src/file_reference/glob/mod.rs
+    - biscuit-file/lib/src/file_reference/resolve.rs
+    - biscuit-file/lib/tests/l1/glob_reference/literal.rs
+    - claudine/cli/src/completion/schema_completion/candidates.rs
+    - claudine/cli/src/completion/schema_completion/tests.rs
+    - claudine/lib/src/composition/prepare.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/schema/classify.rs
+    - claudine/lib/src/composition/schema/translate.rs
+    - claudine/lib/src/composition/schema/supplied.rs
+    - claudine/lib/src/composition/schema/tests.rs
+docs_updated_during_phase_3:
+    - darkmatter/docs/inline/file-links.md
+    - darkmatter/docs/topics/schemas/definition.md
+    - darkmatter/docs/schemas/expression-functions.yaml
+    - darkmatter/docs/topics/darkmatter-expressions.md
+    - biscuit-file/docs/topics/file-references.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3:
+    - .claude/skills/darkmatter/SKILL.md
+    - .claude/skills/darkmatter/compose.md
+    - .claude/skills/darkmatter/schema.md
+    - .claude/skills/biscuit-file/SKILL.md
+    - .claude/skills/os/windows.md
 ---
 
 # Plan: Glob References Share the File-Reference Grammar
@@ -236,7 +312,7 @@ before any consumer moves. Package: `biscuit-file`. Load the `biscuit-file`,
 
 ### Wave 1 (sequential; one subagent): grammar and types
 
-- [ ] **Pattern parser.** `GlobReference::new(impl IntoIterator<Item: AsRef<str>>)`.
+- [x] **Pattern parser.** `GlobReference::new(impl IntoIterator<Item: AsRef<str>>)`.
   Each pattern is `[!][prefix]glob`. Reuse `FileReference`'s prefix parser,
   `{{VAR}}` interpolation, and sigil-to-roots mapping by extracting what is
   needed from `parse.rs`/`resolve.rs` into shared `pub(super)` helpers
@@ -246,22 +322,22 @@ before any consumer moves. Package: `biscuit-file`. Load the `biscuit-file`,
   - A pattern with no metacharacters is valid and matches one path.
   - R6: no positive pattern is `NoPositivePattern`.
   - Invalid glob text is `InvalidGlob { pattern, source }`.
-- [ ] **Glob compile.** Build one `GlobMatcher` per pattern (R4: case-sensitive,
+- [x] **Glob compile.** Build one `GlobMatcher` per pattern (R4: case-sensitive,
   `literal_separator(true)`). `compile` is the only place in biscuit-file that
   names `globset`.
-- [ ] **Error enum** with `Display`/`source` and variants: `RejectedPrefix`,
+- [x] **Error enum** with `Display`/`source` and variants: `RejectedPrefix`,
   `MalformedPrefix`, `InvalidGlob`, `NoPositivePattern`, `RelativeTreeEscape`,
   `OutsideRepository`, plus a `From` for the existing `FileReferenceError`
   prefix failures so `ResolutionFailure` comparison works for the parity matrix.
-- [ ] **`GlobReference::escape`** (for `%`), tested with `[id].md`, `*`, `?`,
+- [x] **`GlobReference::escape`** (for `%`), tested with `[id].md`, `*`, `?`,
   `{`, `\`.
-- [ ] **Constructor option** `with_file_name_view()` (R11). Rule: applies per
+- [x] **Constructor option** `with_file_name_view()` (R11). Rule: applies per
   pattern when the glob text after the prefix has no `/`; applies to
   negations the same way.
 
 ### Wave 2 (parallel; disjoint files, after Wave 1)
 
-- [ ] **Task: Roots and ordering** (`roots.rs`, `list.rs`).
+- [x] **Task: Roots and ordering** (`roots.rs`, `list.rs`).
   - `roots(&ctx) -> Vec<PathBuf>` per the spec's root table: bare = value
     `cwd` then repository root (Decision 19); `./`/`../` = `cwd`; `&` =
     repository root; `^` = package, package area, repository; `@` = magic
@@ -286,7 +362,7 @@ before any consumer moves. Package: `biscuit-file`. Load the `biscuit-file`,
     symlink whose real target lies outside the tree is excluded from `matches`
     and reported in `skipped`; a symlink whose target stays inside is listed
     as before. Unbound globs (`~`, `@`, absolute, `&`, `^`, vault) skip nothing.
-- [ ] **Task: Lexical `matches`** (`matches.rs`; same crate, different file).
+- [x] **Task: Lexical `matches`** (`matches.rs`; same crate, different file).
   - `matches(&path, &ctx) -> bool`: canonicalize the longest existing prefix
     of `path`, append the rest unchanged, then judge by containment (R8
     helper) and glob checks with no walk and no further filesystem access.
@@ -302,16 +378,16 @@ before any consumer moves. Package: `biscuit-file`. Load the `biscuit-file`,
 
 ### Wave 3 (parallel; after Wave 2)
 
-- [ ] **Task: `%` rebuilt on `take_first`.** Replace `resolve_recursive_core`
+- [x] **Task: `%` rebuilt on `take_first`.** Replace `resolve_recursive_core`
   in `file_reference/resolve.rs` with `GlobReference::take_first` on
   `**/<escaped payload>` under the same prefix roots (Decision 15). Delete
   the old walk and its filters/ordering. Update the existing `%` tests; each
   changed expected result is logged under "Changed Outputs".
-- [ ] **Task: Literal-miss hint.** When a `FileReference` finds nothing and
+- [x] **Task: Literal-miss hint.** When a `FileReference` finds nothing and
   its text contains glob metacharacters, append a hint naming the
   glob-accepting form (`::file-links`). Typed error unchanged; the hint is
   part of its `Display`.
-- [ ] **Task: Input-grammar test** (`biscuit-file/lib/tests/l1/glob_reference.rs`),
+- [x] **Task: Input-grammar test** (`biscuit-file/lib/tests/l1/glob_reference.rs`),
   one test walking every shape in the pattern grammar from a real-fixture
   repository, one edit per cell, with a control row proving the unedited
   list is the positive result:
@@ -334,12 +410,12 @@ before any consumer moves. Package: `biscuit-file`. Load the `biscuit-file`,
 Each test names its acceptance criterion in a comment; tests assert through the
 public API (`list_files`, `take_first`, `matches`, `roots`, `FileReference`).
 
-- [ ] **Local-first order and ownership** (criteria 15, 16, 18): the fixture
+- [x] **Local-first order and ownership** (criteria 15, 16, 18): the fixture
   package `pkg` in area `area` with the five-file expectation, tie-break
   (`a/intro.md` before `b/intro.md`, `a/x.md` before `a-b/x.md`), ownership
   with exclusion (`["^**/*spec*.md", "!x/**"]`), and symlinked-spelling
   deduplication (macOS `/var` vs `/private/var` via a symlinked temp dir).
-- [ ] **Boundary and symlinks** (criteria 14 biscuit-file parts, 25): bare/`./`
+- [x] **Boundary and symlinks** (criteria 14 biscuit-file parts, 25): bare/`./`
   escape = `RelativeTreeEscape`; `allow_external_relative()` succeeds; `&`/`^`
   outside a repository = `OutsideRepository`; `~`/`@`/absolute/vault allowed;
   directory symlink out of the tree lists nothing behind it; file symlink out
@@ -347,10 +423,10 @@ public API (`list_files`, `take_first`, `matches`, `roots`, `FileReference`).
   fails `RelativeTreeEscape`. Windows: symlink creation needs privilege;
   gate with the repository's existing skip pattern for symlink tests, and
   record in the log if the cross-check cannot exercise it.
-- [ ] **Literal vs class, `%`, case** (criteria 19, 23, 26): `[id].md`;
+- [x] **Literal vs class, `%`, case** (criteria 19, 23, 26): `[id].md`;
   `%^README.md` local-first; `%vault:notes.md`; `matches` on missing paths;
   `*.MD` does not match `x.md`.
-- [ ] **Unfiltered** (criterion 13 biscuit-file part): hidden, gitignored, and
+- [x] **Unfiltered** (criterion 13 biscuit-file part): hidden, gitignored, and
   `_`-prefixed files are returned.
 
 **Checkpoint 2:** `just test` and `just lint` green in `biscuit-file`;
@@ -368,7 +444,7 @@ Load the `darkmatter` skill.
 
 ### Wave 5 (parallel; one subagent per track, disjoint files)
 
-- [ ] **Track A: `FileMatchGlobs`** (`schemas/file_match.rs`).
+- [x] **Track A: `FileMatchGlobs`** (`schemas/file_match.rs`).
   - Becomes a thin wrapper over `GlobReference` built with
     `with_file_name_view()`; keep only what is `match()`-specific.
   - Delete `admits`, `admits_path`, and the anchor list (this removes the
@@ -380,7 +456,7 @@ Load the `darkmatter` skill.
     existing definition-check path (R10). `match(vault:notes/*.md)` is valid.
   - Update `///` docs; existing bare-pattern tests (`*.png`, `src/**/*.rs`,
     `!_*.md`) must pass unchanged (criterion 9).
-- [ ] **Track B: `find_files()`** (`compose/expression/functions/mod.rs`,
+- [x] **Track B: `find_files()`** (`compose/expression/functions/mod.rs`,
   `find_files_fn`).
   - Delete the prefix splitter; call `list_files` for every prefix; return
     the full merged list in native order (not sorted).
@@ -390,7 +466,7 @@ Load the `darkmatter` skill.
   - Relative-boundary and `OutsideRepository` errors surface as typed
     expression errors.
   - Update `find_files()` docs, replacing "sorted absolute paths".
-- [ ] **Track C: `::file-links <glob>`** (`compose/file_links/`).
+- [x] **Track C: `::file-links <glob>`** (`compose/file_links/`).
   - Delete `resolve_boundary` (and its git discovery and CWD fallback). The
     boundary is read from the prepared context via `GlobReference`.
   - Use `list_files` for every prefix; a bare glob searches the containing
@@ -404,19 +480,19 @@ Load the `darkmatter` skill.
 
 ### Wave 6 (sequential; after Wave 5)
 
-- [ ] **Existing-test reconciliation.** Run `just test` in `darkmatter`,
+- [x] **Existing-test reconciliation.** Run `just test` in `darkmatter`,
   classify each red test as an intended output change (update it, log it
   under "Changed Outputs") or a bug (fix the code). Include
   `find_files_and_try_frontmatter.rs` (must still find `_completed/` files),
   `file_links` tests (merged bare globs, criterion 10), and CLI tests.
-- [ ] **New consumer tests** (criteria 9–14, 25 consumer side, 20 rows are
+- [x] **New consumer tests** (criteria 9–14, 25 consumer side, 20 rows are
   Phase 7): merged `::file-links *.md` from a nested document; `^docs/*.md`
   from package, area, repository; bare `find_files('spec.md')` does not
   return `x/spec.md`; `match(spec.md)` and `match(^spec.md)` do; file-name
   negation (`match(*.md, !_*.md)` rejects `docs/_x.md`); symlink warning
   count and wording; `RelativeTreeEscape` for bare/`./` globs in both
   consumers with and without `allow_external_relative()`.
-- [ ] **Handed-off reads.** Run the ambient-state guard test of
+- [x] **Handed-off reads.** Run the ambient-state guard test of
   `2026-09-30-file-refs-use-magic`; remove its two handed-off allowlist
   entries; the guard must pass with none.
 

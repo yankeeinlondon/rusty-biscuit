@@ -39,34 +39,36 @@ reviewed: true
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
-    Phase 1 (rulings, spikes, readiness) is done; see the implementation
-    log's Spikes, Changed Outputs, Departures, and Phase 1 sections. Facts the
-    Phase 2 implementer needs:
-    - globset 0.4.18: `**/x` matches a top-level `x` (no zero-depth
-      alternative needed for the `%` rewrite). With `literal_separator(true)`
-      neither `*` nor `?` crosses `/`. Matching is case-sensitive, and `*`
-      matches dot-files.
-    - Windows trap: globset's `backslash_escape` defaults to true on Unix and
-      false on Windows. Set it explicitly on every `GlobBuilder`, and make
-      `GlobReference::escape` delegate to `globset::escape`, which emits
-      portable character classes (`[[]id[]].md`). Cover this in Phase 2
-      tests and on `just cross-check biscuit-file --os windows`.
-    - R4 stands, but it changes behavior: `FileMatchGlobs::compile` and the
-      trigger matcher use `Glob::new` defaults today, so `*` crosses `/`
-      there. One shipped prompt is affected
-      (`prompts/_reviews/review-implementation.md`, which declares
-      `file(match(prompts/*.md,...))`); this is logged under Changed Outputs.
-    - R6 stands: no test or shipped artifact uses an all-negation list.
-      Today `match()` admits all and triggers admit nothing.
-    - R3's code is `dm.glob.skipped_symlink`, not `compose.glob.…`. Every
-      existing code uses the `dm.` prefix; this departure is logged.
-    - `globset = "0.4"` (optional) is already added to biscuit-file's
-      `file-reference` feature; no code uses it yet.
-    - Pre-existing darkmatter L1 failure, unrelated to this feature:
-      `error_snapshots::link::unrecognized_format_mentions_html_and_markdown`
-      (a snapshot of prose rendering). Expect it to stay red until someone
-      fixes it separately; do not count it against this feature.
-
+    Phase 3 (Darkmatter consumers) is done; see the implementation log's
+    "Phase 3" section and its Departures entries. What later phases need:
+    - Caller-supplied values are judged by `match()` from their origin
+      (launch) context. The plumbing is `schemas::validate::CallerOrigins`
+      (property -> origin), carried by `ValidatorCache`, `EffectiveSchema`,
+      and public `DarkmatterSchemas::with_caller_input_records`. The "no
+      explicit records" rule is public `caller_input_records_for_overrides`.
+      Any host that validates caller overrides itself must call
+      `with_caller_input_records` (Claudine's pre-validation, launch schema,
+      and translation already do). Phase 5's Claudine track only has to
+      replace the completion walks (they now call `MatchGlobs::new` and
+      `matches(path, &file_resolution_context(ctx))` but still walk the
+      launch directory) and fix rendering/order.
+    - `FileMatchGlobs` API is now `new(&[String]) -> Result<_, GlobReferenceError>`,
+      `matches(&Path, &FileResolutionContext)`, `roots(&ctx)`; `compile` and
+      `is_match` are gone.
+    - `match()` definition errors come from the simplified grammar via
+      `schemas::file_match::definition_error`; Phase 4's `$path` trigger
+      errors can follow the same shape (R10).
+    - biscuit-file gained `GlobReference::matches_without_context` for the
+      structural (no-request) validator. Root-union coercion is context-free,
+      so a `./`, `&`, `^`, or `@` pattern cannot steer coercion (pre-existing
+      gap, documented in `darkmatter/docs/topics/schemas/definition.md`).
+    - Skipped-symlink warnings use `dm.glob.skipped_symlink`
+      (`ComposeWarning::skipped_symlink`, `compose/glob_listing.rs`).
+    - The literal-miss hint (`DetailedResolution::glob_hint()`) is still not
+      rendered by any consumer: no Phase 3 consumer resolves a single file.
+      Whoever owns `::file`/`::code` no-match messages should append it.
+    - Fixtures that need a repository must `git init`; a bare `.git`
+      directory is not a repository to a prepared request context.
 ---
 
 # Glob References Share the File-Reference Grammar
