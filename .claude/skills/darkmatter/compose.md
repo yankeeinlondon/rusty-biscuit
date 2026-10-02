@@ -806,7 +806,9 @@ every policy and located by line and column:
 - a token in the body
 - a token inside an expression's string literal
 
-Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw token text.
+Keys in `exclude_keys` (Claudine's lifecycle keys) keep their raw text: pass 1
+neither decodes their tokens nor converts their `{{{ … }}}` literals, so the
+caller's event-time evaluation sees each escape as authored.
 
 **Schema pending.** Data is final, so it is judged at validation and never
 deferred. `value_pending_composition` in `compose/schema_validation.rs`

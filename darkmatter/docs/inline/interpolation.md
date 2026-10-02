@@ -354,7 +354,7 @@ Expression at line: 2, column: 5
 - **Decoding one token.** `literal_token::decode(token)` returns the string or a `TokenError` (`NotAToken`, `Unterminated`, `MissingVersion`, `UnsupportedVersion`, `InvalidPayload`, `InvalidUtf8`, `Embedded`). `decode_leaf(value)` returns `None` for a value that is not a token at all.
 - **Finding a token's bytes.** `darkmatter::markdown::hash::locate_frontmatter_leaves(document, paths)` returns the exact source range of each requested string leaf (quotes and a block scalar's header included), so a writer can replace one value in place without re-serializing the document. It refuses a leaf behind an anchor, alias, tag, or `<<` merge, a plain flow-collection item, and a nested sequence.
 - **Writing a token.** `literal_token::encode_yaml_scalar(value)` returns the quoted scalar and `encode(value)` the bare token. Decide from where the value came from, never from what it looks like: a string that already resembles a token is encoded again.
-- **Lifecycle keys.** A key the caller defers to event time (Claudine's lifecycle stacks) keeps its raw text, token included, for the caller that evaluates it.
+- **Lifecycle keys.** A key the caller defers to event time (Claudine's lifecycle stacks) keeps its raw text, tokens and `{{{ … }}}` escapes included, for the caller that evaluates it; that evaluation applies the same escape rules.
 
 #### Editing a Token by Hand
 

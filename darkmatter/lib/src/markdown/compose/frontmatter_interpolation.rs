@@ -813,23 +813,21 @@ fn interpolate_frontmatter_impl(
 
     // Pass 1 scans every authored seed's `{{{ … }}}` literals once, before any
     // key reads it, so a dependent sees the converted text as a data value.
-    // Excluded (event-time) keys keep their long-standing conversion.
+    // Excluded (event-time) keys keep their raw text here too: converting
+    // `{{{ x }}}` to an unmarked `{{ x }}` would turn the caller's literal
+    // escape into an expression its event-time evaluation then runs.
     if let FrontmatterPass::First { .. } = pass {
         let mut converted = Vec::new();
         let data = provenance.data().clone();
         for (key, value) in frontmatter.as_map_mut().iter_mut() {
-            let excluded = exclude_keys.contains(key);
-            let mut segments = vec![ValuePathSegment::Key(key.clone())];
-            if !excluded
-                && contains_interpolation(&data.authored_view(&mut segments, value))
-            {
+            if exclude_keys.contains(key) {
                 continue;
             }
-            let mut scanned = Vec::new();
-            convert_authored_literals(value, &mut segments, &data, &mut scanned);
-            if !excluded {
-                converted.extend(scanned);
+            let mut segments = vec![ValuePathSegment::Key(key.clone())];
+            if contains_interpolation(&data.authored_view(&mut segments, value)) {
+                continue;
             }
+            convert_authored_literals(value, &mut segments, &data, &mut converted);
         }
         for path in converted {
             provenance.data_mut().mark(path);
@@ -2623,6 +2621,32 @@ mod tests {
                 Some(&json!("{{ area }}")),
                 "whole-value expansion must be skipped for excluded keys"
             );
+        }
+
+        /// The caller evaluates an excluded key itself, so its literal escape
+        /// must reach that caller still meaning "literal"; a pass-1 rewrite to
+        /// `{{ title }}` would hand it an expression instead.
+        #[test]
+        fn excluded_key_keeps_triple_brace_escape_as_authored() {
+            let mut fm = fm_from_json(json!({
+                "title": "probe",
+                "note": "N=[{{{ title }}}]",
+                "initialize": {
+                    "stderr": "A=[{{{ title }}}]",
+                    "set": { "stored": "{{{ title }}}" }
+                }
+            }));
+            let exclude = ["initialize"].into_iter().map(String::from).collect::<HashSet<_>>();
+            interpolate_frontmatter(&mut fm, &test_context(), ExpressionFailurePolicy::Strict, false, None, &exclude, &[]).unwrap();
+            assert_eq!(
+                fm.as_map().get("initialize"),
+                Some(&json!({
+                    "stderr": "A=[{{{ title }}}]",
+                    "set": { "stored": "{{{ title }}}" }
+                })),
+            );
+            // An ordinary key still converts its escape to literal text.
+            assert_eq!(fm.as_map().get("note"), Some(&json!("N=[{{ title }}]")));
         }
 
         #[test]
