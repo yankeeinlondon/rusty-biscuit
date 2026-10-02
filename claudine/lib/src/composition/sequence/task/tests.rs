@@ -3713,6 +3713,80 @@ mod outcome_contract {
         );
     }
 
+    /// A task-value evaluation failure — `params`, group `variables`, or
+    /// `timeout` — reaches a library caller with the original Darkmatter error
+    /// on the outcome, not only its rendered text.
+    #[test]
+    fn a_task_value_failure_keeps_the_typed_darkmatter_cause() {
+        use darkmatter::markdown::MarkdownError;
+        use darkmatter::markdown::compose::expression::ExpressionError;
+
+        fn chain_finds<'a, T: std::error::Error + 'static>(
+            error: &'a (dyn std::error::Error + 'static),
+        ) -> Option<&'a T> {
+            let mut current = Some(error);
+            while let Some(error) = current {
+                if let Some(found) = error.downcast_ref::<T>() {
+                    return Some(found);
+                }
+                current = error.source();
+            }
+            None
+        }
+
+        let bad = "{{ no_such_fn() }}";
+        for (field, step) in [
+            (
+                "params.x",
+                json!({ "name": "alpha", "prompt": "target.md", "params": { "x": bad } }),
+            ),
+            (
+                "variables.label",
+                json!({ "name": "alpha", "group": {
+                    "name": "bundle",
+                    "variables": { "label": bad },
+                    "tasks": [{ "name": "member", "shell": "one" }],
+                } }),
+            ),
+            ("timeout", json!({ "name": "alpha", "shell": "one", "timeout": bad })),
+        ] {
+            let dir = TempDir::new().unwrap();
+            fs::write(dir.path().join("target.md"), "---\ntitle: t\n---\n\nBody.\n").unwrap();
+            let source = one_step_source(dir.path(), step);
+            let fixture = Fixture::build(dir, &source).unwrap();
+            let recorder = Recorder::default();
+            let shell = FakeTaskShell::with_stdout(&["one out"]);
+            let prompt = FakePrompt::succeeding("done");
+            let mut wiring = Wiring::new(&recorder, &shell);
+            wiring.prompt = &prompt;
+
+            let outcome = fixture.execute(&wiring);
+
+            assert_eq!(outcome.status, TaskStatus::Failed, "{field}");
+            let info = &outcome.error.as_ref().expect("a failure diagnostic").info;
+            assert!(info.msg.contains(field), "{field}: {}", info.msg);
+            let cause = info.cause.as_ref().unwrap_or_else(|| panic!("{field}: the typed cause was dropped"));
+            assert!(
+                matches!(cause.expression_error(), Some(ExpressionError::UnknownFunction { .. })),
+                "{field}: {cause:?}"
+            );
+            // Darkmatter boxes `Interpolation`'s cause, so the chain yields
+            // `Box<ExpressionError>` rather than a downcastable
+            // `ExpressionError`; the typed variant is read from the
+            // `MarkdownError` the chain does carry.
+            let Some(MarkdownError::Interpolation { cause: expression, .. }) =
+                chain_finds::<MarkdownError>(cause)
+            else {
+                panic!("{field}: the cause's source chain carries no Darkmatter interpolation error");
+            };
+            assert!(
+                matches!(expression.as_ref(), ExpressionError::UnknownFunction { .. }),
+                "{field}: {expression:?}"
+            );
+            assert!(shell.commands().is_empty(), "{field}: nothing ran past the failed value");
+            assert!(prompt.requests.lock().unwrap().is_empty(), "{field}: no prompt launched");
+        }
+    }
 }
 
 // -- serial groups (phase 9) ------------------------------------------------
@@ -5451,5 +5525,29 @@ mod byte_parity {
         );
         let fixture = Fixture::build(dir, &source).unwrap();
         assert_eq!(approved(&fixture), vec!["echo document".to_string()]);
+    }
+
+    /// A sequence shell command that fails resolution at approval keeps the
+    /// typed Darkmatter cause on the error a library caller receives.
+    #[test]
+    fn a_failed_shell_resolution_keeps_the_typed_darkmatter_cause() {
+        use darkmatter::markdown::MarkdownError;
+        use darkmatter::markdown::compose::expression::ExpressionError;
+
+        let dir = TempDir::new().unwrap();
+        let source = one_step_source(dir.path(), json!({"name": "alpha", "shell": "echo {{ no_such_fn() }}"}));
+        let Err(error) = Fixture::build(dir, &source) else {
+            panic!("approval must refuse an unknown function");
+        };
+        let CompositionError::SequenceShellResolution { source: Some(cause), .. } = &error else {
+            panic!("expected a typed SequenceShellResolution, got {error:?}");
+        };
+        let MarkdownError::Interpolation { cause: expression, .. } = cause.as_ref() else {
+            panic!("expected an interpolation cause, got {cause:?}");
+        };
+        assert!(matches!(expression.as_ref(), ExpressionError::UnknownFunction { .. }), "{expression:?}");
+        // The field is boxed, so the chain carries `Box<MarkdownError>`.
+        let chained = std::error::Error::source(&error).and_then(|c| c.downcast_ref::<Box<MarkdownError>>());
+        assert!(chained.is_some(), "reachable through Error::source");
     }
 }

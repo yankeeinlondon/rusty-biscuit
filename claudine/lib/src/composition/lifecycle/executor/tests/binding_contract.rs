@@ -235,8 +235,9 @@ fn successful_output_containing_braces_is_delivered_as_data() {
 
 /// A library caller can recover the original Darkmatter failure and the
 /// Claudine context it happened in — through the direct outcome, a proxy
-/// overlay failure, the lifecycle composition error, and the catch-side
-/// wrappers — without the CLI and without parsing rendered text.
+/// overlay failure, a `set` value failure, the lifecycle composition error,
+/// and the catch-side wrappers — without the CLI and without parsing rendered
+/// text.
 #[test]
 fn the_typed_darkmatter_cause_survives_every_library_wrapper() {
     fn darkmatter_cause<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a ExpressionError> {
@@ -293,6 +294,17 @@ fn the_typed_darkmatter_cause_survives_every_library_wrapper() {
     let cause = info.cause.as_ref().expect("the proxy failure keeps its cause");
     assert!(is_unknown_function(cause.expression_error()));
     assert!(is_unknown_function(darkmatter_cause(cause)), "the cause's source is the Darkmatter error");
+
+    // Set: a mapping value's failure.
+    let (outcome, ..) = run(
+        json!({"start": {"stack": [{"action": {"set": {"out": "{{ no_such_fn() }}"}}}]}}),
+        LifecycleSignal::Start,
+        json!({}),
+    );
+    let info = outcome.evaluation_error.expect("evaluation error");
+    assert_eq!(info.property.as_deref(), Some("start.stack[0].action[0].set.out"));
+    let cause = info.cause.as_ref().expect("the set failure keeps its cause");
+    assert!(is_unknown_function(cause.expression_error()));
 }
 
 /// The lifecycle executor renders the shared missing-property and escape table
