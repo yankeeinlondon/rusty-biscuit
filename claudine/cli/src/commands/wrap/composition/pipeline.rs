@@ -758,7 +758,10 @@ fn construct_argv_and_system_prompt(
         // tail-first base still lands after it, exactly like the wrapper). Announce
         // it once per distinct (provider, tail) for the owning command.
         crate::commands::wrap::provider_tail_report::announce(
-            provider,
+            &crate::commands::wrap::provider_tail_report::SwitchContext::for_launch(
+                profile,
+                effective_non_interactive,
+            ),
             &request.provider_tail,
             &request.provider_tail_notices,
             silent,

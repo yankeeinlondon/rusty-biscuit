@@ -271,9 +271,27 @@ composition and the direct wrappers (`claudine codex …`) print it:
 ```
 
 - Only switch names from the implicit part are listed. An `=value` suffix is
-  stripped, and a short token with attached text (`-csecret`, `-yq`) is
+  stripped. A short token with attached text is split only where the compiled
+  switch catalog researched that form for the switch: Codex's `-csecret`
+  becomes `-c`. Any other (`-yq`, or a provider whose catalog is a gap) is
   described as "a short switch with attached text (not shown)" rather than
   split or echoed. Tokens after `--` are never listed.
+- Below the line, each distinct implicit switch gets one sentence from the
+  compiled catalog, looked up at the command path the launch uses (`exec`
+  for a non-interactive Codex run; see
+  [Provider Metadata → Looking a switch up](provider-metadata.md#looking-a-switch-up)).
+  A researched switch says what it is; anything else says the catalog has
+  nothing for it there and that Claudine forwards it anyway, without claiming
+  the provider will reject it:
+
+  ```text
+  ℹ Forwarding provider arguments to Codex: -c, --frobnicate
+  - -c is Codex's --config switch (override one configuration value for this run); forwarding to Codex.
+  - --frobnicate: Claudine's compiled Codex switch catalog has no established type for it at its `exec` command; Claudine forwards it anyway.
+  ```
+
+  The sentences describe; they do not yet decide ownership. Which tokens
+  belong to the agent is still the rule above.
 - `--quiet` and `--silent` suppress it. It goes to stderr.
 - It appears once per distinct provider and tail for each command. The
   record belongs to the top-level command: every `sequence` step, parallel

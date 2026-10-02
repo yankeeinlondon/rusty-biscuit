@@ -245,6 +245,57 @@ Step body
     );
 }
 
+/// `stderr` with ANSI removed and every run of whitespace collapsed, so a
+/// word-wrapped sentence reads as one line.
+#[cfg(unix)]
+fn flattened(stderr: &str) -> String {
+    stderr.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Each implicit switch is explained from the compiled Codex catalog at the
+/// `exec` command the launch uses: a researched one by what it is, an
+/// unresearched one as forwarded anyway. Both launch paths read the same
+/// catalog, and the child still receives every token unchanged.
+#[cfg(unix)]
+#[test]
+fn each_forwarded_switch_is_explained_from_the_compiled_catalog() {
+    let fixture = CliProcessFixture::named("tail-notice-explained");
+    let log = recording_codex(&fixture);
+    let file = prompt_file(&fixture);
+    let unrecognized = "--frobnicate: Claudine's compiled Codex switch catalog has no established \
+                        type for it at its `exec` command; Claudine forwards it anyway.";
+
+    let (code, stderr) = run(
+        &fixture,
+        &["compose", "--codex", &file, "-c", "model_reasoning_effort=low", "--frobnicate"],
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let flat = flattened(&stderr);
+    assert!(flat.contains("-c is Codex's --config switch ("), "{flat}");
+    assert!(flat.contains("); forwarding to Codex."), "{flat}");
+    assert!(flat.contains(unrecognized), "{flat}");
+    for hidden in ["model_reasoning_effort", "reject", "recogni"] {
+        assert!(!flat.contains(hidden), "{hidden}: {flat}");
+    }
+    assert_eq!(
+        occurrences(&launches(&log)[0], &["-c", "model_reasoning_effort=low", "--frobnicate"]),
+        1
+    );
+
+    let (code, stderr) = run(&fixture, &["codex", "-c", "x=y", "--frobnicate", "do the thing"]);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let flat = flattened(&stderr);
+    assert!(flat.contains("-c is Codex's --config switch ("), "{flat}");
+    assert!(flat.contains(unrecognized), "{flat}");
+    assert!(!flat.contains("x=y"), "{flat}");
+    assert_eq!(occurrences(&launches(&log)[0], &["-c", "x=y", "--frobnicate"]), 1);
+
+    // Quiet output drops the explanations with the notice.
+    let (code, stderr) = run(&fixture, &["codex", "--quiet", "-c", "x=y", "do the thing"]);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(!flattened(&stderr).contains("--config switch"), "{stderr}");
+}
+
 #[cfg(unix)]
 #[test]
 fn direct_wrapper_announces_the_shared_notice() {

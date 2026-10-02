@@ -64,17 +64,21 @@ must be placed after `--`. The composition file must come first: an unowned
 switch (or a `--`) before the file is an error with ordering guidance.
 
 Before launch, one INFO status says what is forwarded. It names switches only,
-never values, and describes a tail after `--` as opaque:
+never values, and describes a tail after `--` as opaque. Each switch before
+the `--` is then explained from Claudine's compiled switch catalog:
 
 ```text
 ℹ Forwarding provider arguments to Codex: -c
+- -c is Codex's --config switch (override one configuration value for this run); forwarding to Codex.
+
 ℹ Forwarding an opaque argument tail to Codex (passed after --).
 ```
 
 The notice appears once per distinct provider and tail for the whole command,
 so a `sequence` whose steps and parallel tasks all launch Codex with the same
-tail shows it once. `--quiet` and `--silent` suppress it. Claudine makes no
-claim about whether the agent accepts a forwarded switch, so a genuinely
+tail shows it once. `--quiet` and `--silent` suppress it. A switch the catalog
+does not establish is still forwarded, and its sentence says so. Claudine
+makes no claim about whether the agent accepts a forwarded switch, so a genuinely
 invalid one may be rejected by the agent at startup (see
 [When the agent rejects the tail](#when-the-agent-rejects-the-tail)).
 
