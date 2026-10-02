@@ -22,7 +22,7 @@ row does not.
 | Row | Meaning | What to do |
 |---|---|---|
 | `failure: no-match` | The reference was valid, but no candidate is a file. | Check the spelling, or that the file exists where the reference starts (`./` beside the document, `&` at the repository root, `@` along the magic search order). |
-| `failure: invalid-reference` | The reference cannot be used as written, for example `../` leaving the document's file tree, or `{{VAR}}` expanding to a relative path where an absolute one is required. | Rewrite the reference: use `&` or `@` instead of climbing out with `../`, or fix the variable's value. |
+| `failure: invalid-reference` | The reference cannot be used as written, for example `../` leaving the document's file tree (or, for an `md` argument, the repository you ran `md` in), or `{{VAR}}` expanding to a relative path where an absolute one is required. | Rewrite the reference: use `&` or `@` instead of climbing out with `../` (an `md` argument may also be an absolute path), or fix the variable's value. |
 | `failure: missing-context` | The reference needs an anchor this request does not have: `&` or `^` outside a repository, `~` with no home directory, `{{VAR}}` with `VAR` unset, or a request whose context could not be built. | Run from inside the repository, set the variable, or open the document so its anchor exists. |
 | `failure: io` | A candidate exists but could not be read, usually a permission error. | Fix the file's permissions. |
 | `failure: unsupported-remote` | A remote URL was used where only local files are allowed. | Use a local path, or a directive that supports remote reads (`::file`, `::code`) with the host allowed. |
@@ -73,6 +73,10 @@ notice and carried on, prints the same row under its warning on stderr.
 A `::toc-linking` chain reports the class of its first (authored) target.
 A failure inside a nested transclusion reports the class of the reference
 that actually failed, however deep it is.
+
+`claudine compose`, `inline-compose`, and `sequence` print the same row:
+on a failed transclusion, on a schema `file` value (one row per failing
+value, below the problem list), and under a tolerated failure's warning.
 
 ## From the library
 

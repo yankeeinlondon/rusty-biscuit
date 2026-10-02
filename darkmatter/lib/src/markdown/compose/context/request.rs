@@ -64,17 +64,22 @@ impl RequestSnapshot {
     /// The running process's current directory, home directory, and
     /// environment.
     ///
-    /// Home and environment are read through the same biscuit-file helpers
-    /// [`FileResolutionContext::new`] uses, so `USERPROFILE` on Windows and
-    /// the skipping of non-UTF-8 variables are unchanged. This is the only
-    /// reader of process state on a request path; only binaries call it.
+    /// The home is the process environment's (`HOME`, or `USERPROFILE` on
+    /// Windows) with the platform's profile lookup as the fallback, as
+    /// [`std::env::home_dir`] reads it; a relative home is no home. Unlike
+    /// [`biscuit_file::home_dir`], which asks the Windows profile known folder
+    /// and ignores `USERPROFILE`, this lets a caller that launches a binary
+    /// choose its home through the child's environment. The environment is
+    /// read through [`biscuit_file::capture_env`], which skips non-UTF-8
+    /// variables. This is the only reader of process state on a request path;
+    /// only binaries call it.
     ///
     /// ## Errors
     ///
     /// Returns the I/O error when the current directory cannot be read.
     pub fn from_process() -> std::io::Result<Self> {
         Ok(Self::new(std::env::current_dir()?)
-            .with_home(biscuit_file::home_dir())
+            .with_home(std::env::home_dir().filter(|home| home.is_absolute()))
             .with_env(biscuit_file::capture_env()))
     }
 
@@ -647,7 +652,7 @@ pub(crate) mod test_support {
     pub(crate) fn request(options: ComposeOptions) -> ComposeRequest {
         let dir = legacy_request_dir(&options);
         let snapshot = RequestSnapshot::new(dir)
-            .with_home(biscuit_file::home_dir())
+            .with_home(std::env::home_dir().filter(|home| home.is_absolute()))
             .with_env(options.context().env().clone());
         ComposeRequest::prepare(options, &snapshot).expect("test request")
     }

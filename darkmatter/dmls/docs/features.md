@@ -125,7 +125,12 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
   reported). A `::toc-linking <file>` target gets the same document link,
   go-to-definition, hover, and broken-path diagnostic; it is not a
-  transclusion, so it takes no part in references or cycles.
+  transclusion, so it takes no part in references or cycles. A
+  `::toc-linking "a.md | b.md | false"` fallback chain is read as composition
+  reads it: the first existing alternative is linked (over its own span),
+  defined, and shown in hover; a chain ending in `false` that matches nothing
+  gets no diagnostic; and a chain that matches nothing otherwise gets one
+  broken-path diagnostic carrying the first alternative's failure class.
 - **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
   functions), hover showing the resolved static value (falling back to the
   effective-schema property description for a declared-but-unset key),

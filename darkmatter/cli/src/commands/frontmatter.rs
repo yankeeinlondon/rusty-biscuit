@@ -261,7 +261,8 @@ fn format_raw(value: &serde_json::Value) -> String {
 ///
 /// Resolves the file path using biscuit-file's `FileReference` system in the
 /// request's launch context; a reference that matches no file names a new file
-/// relative to the launch directory. Creates the file if it doesn't exist. After the editor exits, validates that the file exists
+/// relative to the launch directory, and a relative reference that climbs out
+/// of the launch repository is refused. Creates the file if it doesn't exist. After the editor exits, validates that the file exists
 /// and is non-empty (after trimming whitespace). Prints the fully qualified path on
 /// success.
 pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
@@ -271,7 +272,7 @@ pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
     let path = match FileReference::new(raw_file) {
         Ok(file_ref) => {
             let resolved = file_ref
-                .resolve_in_context(&request.launch_context()?.clone().allow_external_relative())
+                .resolve_in_context(request.launch_context()?)
                 .wrap_err("Failed to resolve file reference")?;
             match resolved {
                 Some(p) => p,

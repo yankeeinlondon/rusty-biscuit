@@ -30,6 +30,10 @@ let (composed, report) = md.compose_with(&request)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+`from_process` takes the home directory from the environment (`HOME`, or
+`USERPROFILE` on Windows) and falls back to the platform's profile lookup, so
+whoever launches a binary chooses its home through the child's environment.
+
 A library never reads the process. `RequestSnapshot::new(dir)` starts with no
 home directory and an empty environment, so a library call states every input
 it depends on:

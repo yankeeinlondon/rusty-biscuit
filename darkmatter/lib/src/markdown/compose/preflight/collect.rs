@@ -347,6 +347,7 @@ fn collect_recursive(
     // across the whole graph.
     let mut local_entries: Vec<ShellCommandEntry> = Vec::new();
     let mut edges: Vec<super::PreflightGraphEdge> = Vec::new();
+    let mut targets: Vec<super::PreflightTargetEdge> = Vec::new();
 
     // ── Deferred context reads ─────────────────────────────────────
     // Metadata only (R30): planning names the lazy reads and function calls
@@ -544,11 +545,32 @@ fn collect_recursive(
     )? {
         // `::file` and `::url` can both reference Markdown children that
         // contain shell directives. `::code` inserts literal code (no shell
-        // directives), so it is excluded.
-        if !matches!(
-            directive.kind,
-            transclusion::DirectiveKind::File | transclusion::DirectiveKind::Url
-        ) {
+        // directives): its target is resolved but never read.
+        if directive.kind == transclusion::DirectiveKind::Code {
+            if !options.is_enabled(ComposeOperation::CodeTransclusion) {
+                continue;
+            }
+            let resolved_target = match transclusion::resolve_target(
+                directive.kind,
+                &directive.raw_target,
+                &transclusion_opts,
+                &options.source,
+                directive.line,
+                prepared_ctx.clone(),
+            ) {
+                Ok(transclusion::ResolvedTarget::File { path, resolved, .. }) => {
+                    super::PreflightResolvedTarget::File { path, resolved }
+                }
+                Ok(transclusion::ResolvedTarget::Url { url, .. }) => super::PreflightResolvedTarget::Url(url),
+                Err(transclusion::TransclusionError::UrlExecutionDisabled { .. }) => continue,
+                Err(e) => return Err(e.into()),
+            };
+            targets.push(super::PreflightTargetEdge {
+                kind: super::PreflightTargetKind::Code,
+                line: directive.line,
+                raw_target: directive.raw_target.clone(),
+                resolved_target,
+            });
             continue;
         }
 
@@ -625,6 +647,32 @@ fn collect_recursive(
                     directive: directive.clone(),
                     resolved_target: super::PreflightResolvedTarget::Url(url),
                     child: std::sync::Arc::new(child),
+                });
+            }
+        }
+    }
+
+    // ── `::toc-linking` targets (resolved, never read) ─────────────
+    // The chain's selection rule is composition's: the first existing
+    // alternative wins, a trailing `false` suppresses, and otherwise the
+    // first alternative's failure class is the error.
+    if options.is_enabled(ComposeOperation::TocLinking) {
+        for directive in
+            crate::markdown::compose::toc_linking::parse_directives_in(prepared.content(), Some(&body_data))?
+        {
+            if let Some((raw_target, path)) = crate::markdown::compose::toc_linking::resolve_target_chain(
+                &directive,
+                &options.source,
+                &transclusion_opts,
+                // Body-relative, as the compose pass reports this directive.
+                prepared.source_context_for_errors(),
+            )? {
+                targets.push(super::PreflightTargetEdge {
+                    kind: super::PreflightTargetKind::TocLinking,
+                    line: directive.line + line_offset,
+                    raw_target,
+                    // The chain yields only the canonical path.
+                    resolved_target: super::PreflightResolvedTarget::File { resolved: path.clone(), path },
                 });
             }
         }
@@ -756,6 +804,7 @@ fn collect_recursive(
         entries: local_entries,
         edges,
         children,
+        targets,
     })
 }
 

@@ -26,7 +26,7 @@ const ALLOWLIST: &[Allowance] = &[
     ),
     // `RequestSnapshot::from_process`, the only process reader (R2).
     allow(Gate::AmbientState, "markdown/compose/context/request.rs", "std::env::current_dir", 1, "RequestSnapshot::from_process"),
-    allow(Gate::AmbientState, "markdown/compose/context/request.rs", "biscuit_file::home_dir", 1, "RequestSnapshot::from_process"),
+    allow(Gate::AmbientState, "markdown/compose/context/request.rs", "std::env::home_dir", 1, "RequestSnapshot::from_process"),
     allow(Gate::AmbientState, "markdown/compose/context/request.rs", "biscuit_file::capture_env", 1, "RequestSnapshot::from_process"),
     allow(
         Gate::AmbientState,

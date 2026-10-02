@@ -314,8 +314,8 @@ impl Markdown {
                 }
                 ComposeOperation::CodeTransclusion => {
                     if let Some(directives) = parsed_directives.as_ref() {
-                        // `::code` directives are never in the preflight graph
-                        // (they contribute no shell entries), so there is no
+                        // Pre-flight records `::code` targets as passive
+                        // targets, not graph edges, so there is no
                         // resolution cache to reuse here.
                         engine.prepare_block_transclusions(
                             directives,

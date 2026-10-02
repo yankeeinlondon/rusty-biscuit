@@ -89,7 +89,7 @@ The request context's tier-aware magic-root registrations are included in the co
 
 ## Use Case: Claudine
 
-The primary motivation for magic paths is [claudine](../../claudine/), which needs `@` references to reach Claudine-specific prompt directories as well as the repository. Its `~/.claudine` roots need the explicit user-tier override (**planned**: Claudine registers them on its request snapshot as shown; today it adds them to the context it builds itself):
+The primary motivation for magic paths is [claudine](../../claudine/), which needs `@` references to reach Claudine-specific prompt directories as well as the repository. Claudine registers those roots on its request snapshot, and the builder adds them to every context it builds for the invocation. Its `~/.claudine` roots need the explicit user-tier override:
 
 ```rust
 use biscuit_file::{MagicPathTier, PathPosition};

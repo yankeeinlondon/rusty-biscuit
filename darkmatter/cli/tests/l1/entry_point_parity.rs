@@ -4,21 +4,24 @@
 //! values from the repository root and from the package.
 //!
 //! Every spawn goes through `CliProcessFixture`, whose `home/` is the
-//! child's `HOME` and the fixture `HOME` of the matrix. A failure's class is
+//! child's `HOME` (`USERPROFILE` on Windows) and the fixture `HOME` of the
+//! matrix; `md`'s process snapshot reads its home from that environment on
+//! every OS. `md` configures no extra `@` root, so the matrix gives it no
+//! configured-root cell. A failure's class is
 //! read only from the stable `failure: <name>` row `md` renders for a failed
 //! file reference, never from message text.
 
 #[path = "../../../lib/tests/common/entry_point_parity/mod.rs"]
 mod matrix;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Output;
 
 use biscuit_file::{ResolutionFailure, to_portable_string};
 use biscuit_terminal::utils::escape_codes::strip_escape_codes;
 use matrix::{
-    Consumer, DocumentCell, EntryPoint, Expected, Form, Observed, Owner, ParityFixture, ParityReport,
-    Placement, Row, Supplied, ValueCell, rows_for,
+    Consumer, DocumentCell, EntryPoint, Expected, Observed, Owner, ParityFixture, ParityReport, Row,
+    ValueCell, rows_for,
 };
 
 use crate::common::CliProcessFixture;
@@ -57,45 +60,13 @@ fn observe(fixture: &ParityFixture, consumer: Consumer, tree_root: &Path, output
         Consumer::SchemaFile => stdout
             .lines()
             .filter_map(|line| line.trim().strip_prefix(matrix::STORED_VALUE_PREFIX))
-            .map(|value| match value.trim().strip_prefix("~/") {
-                Some(rest) => child_home(fixture).join(rest),
-                None => fixture.stored_value_path(value.trim(), tree_root),
-            })
+            .map(|value| fixture.stored_value_path(value.trim(), tree_root))
             .collect(),
         _ => fixture.marked_targets(&stdout),
     };
     match targets.as_slice() {
         [path] => Observed::File(path.clone()),
         _ => Observed::Unexpected(format!("{} targets in stdout {stdout:?}", targets.len())),
-    }
-}
-
-/// The home `md` resolves `~` against. Elsewhere it is the fixture `HOME`
-/// the builder hands the child; on Windows `RequestSnapshot::from_process()`
-/// reads the profile known folder, which ignores `USERPROFILE` (os skill,
-/// Windows trap 2), so it is this machine's real profile.
-fn child_home(fixture: &ParityFixture) -> PathBuf {
-    if cfg!(windows) {
-        biscuit_file::home_dir().expect("a Windows profile directory")
-    } else {
-        fixture.home()
-    }
-}
-
-/// Whether a row's expectation needs the fixture `HOME` to be `md`'s home:
-/// `@` (the chain's home tier), `~`, and documents reached through `~`. Not
-/// true on Windows (see [`child_home`]); the darkmatter and dmls runners,
-/// which pass the home in the snapshot, cover these forms there.
-fn needs_fixture_home(row: &Row) -> bool {
-    match row {
-        Row::Document(cell) => matches!(
-            cell.placement,
-            Placement::Repository(Form::Magic | Form::Home, _) | Placement::OpenedThroughHome(_)
-        ),
-        Row::Value(cell) => matches!(
-            cell.value,
-            Supplied::Form(Form::Magic | Form::Home) | Supplied::ThroughHome(_)
-        ),
     }
 }
 
@@ -202,12 +173,7 @@ fn md_entry_points_agree_on_every_reference() {
 
     let cli = CliProcessFixture::named("entry_point_parity");
     let fixture = ParityFixture::create(cli.workspace_path());
-    let (rows, skipped): (Vec<Row>, Vec<Row>) = rows_for(Owner::DarkmatterCli)
-        .into_iter()
-        .partition(|row| !(cfg!(windows) && needs_fixture_home(row)));
-    // Non-vacuity: the Windows skip is exactly the fixture-home rows.
-    let expected_skips = if cfg!(windows) { 38 } else { 0 };
-    assert_eq!(skipped.len(), expected_skips, "skipped rows: {skipped:?}");
+    let rows = rows_for(Owner::DarkmatterCli);
 
     // Documents are written before the spawns run concurrently, so two
     // threads never write one file.

@@ -29,6 +29,25 @@ line above: DMLS links it when it resolves but never flags it as broken,
 because a `{{ … }}` target may be an expression only composition can
 evaluate.
 
+A `::toc-linking` target can be a fallback chain, and DMLS reads it the way
+composition does: the first alternative that exists is the target, and a
+chain ending in `false` that matches nothing is intentional, not broken.
+
+```markdown
+::toc-linking "&missing.md | &CHANGELOG.md"   <!-- links to CHANGELOG.md -->
+::toc-linking "&NOTES.md | false"             <!-- no NOTES.md: renders nothing, no warning -->
+::toc-linking "&a.md | &b.md"                 <!-- neither exists: one warning over the chain -->
+```
+
+The link and go-to-definition point at the selected alternative, hover names
+it (or says the chain renders nothing), and a broken chain's diagnostic
+carries the first alternative's failure class, as `md compose` reports it.
+
+A directive target has no `#anchor` syntax. `::file guide.md#setup` names a
+file called `guide.md#setup`, in the editor as in composition, so it is a
+broken target unless that file exists. (A Markdown link's `#anchor` is still
+an anchor.)
+
 ## One context per repository
 
 To resolve a reference, DMLS needs a **file-resolution context**: the
@@ -125,13 +144,19 @@ it resolves as if it sat at that repository's root. With folders in two
 repositories, or in none, the buffer gets the `dm.context.build_failure`
 diagnostic and resolves nothing.
 
-## Unsaved edits count for links
+## Links resolve as composition does
 
-Markdown links resolve against the documents DMLS has indexed, not against
-the disk, so a link to a document you have open but not yet saved
-resolves. A link to a file that is not an indexed Markdown document (a
-YAML file or a PDF, say) is reported as broken. Transclusion targets and
-frontmatter file values are checked on disk, the way composition reads them.
+A Markdown link resolves to the same file `md compose` would read, whether
+or not that file is inside the folder you opened. Opening only `repo/docs/`
+does not break `[t](../target.md)`, `[t](&target.md)`, or `[t](~/notes.md)`:
+the link, go-to-definition, and hover all reach the existing file. A link to
+a document you have open but not yet saved also resolves.
+
+DMLS checks a link's `#fragment` only in documents it has indexed. A
+fragment on a file outside the opened folder (or on a non-Markdown file) is
+not checked, so it is never reported as a missing anchor. Transclusion targets
+and frontmatter file values are checked on disk, the way composition reads
+them.
 
 ## Learn more
 

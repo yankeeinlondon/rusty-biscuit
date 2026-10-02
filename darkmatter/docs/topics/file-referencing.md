@@ -54,8 +54,20 @@ in the repository.
 ::file ../../../outside.md  <!-- refused: leaves /work/repo -->
 ```
 
-A value you type yourself, such as `md compose ../other/doc.md`, is yours, not
-a document's, and may point anywhere.
+A value you type yourself follows the same rule, measured from the directory
+you ran `md` in: inside a repository, `md compose ../other/doc.md` may not
+climb out of it either, and fails with `failure: invalid-reference`. Name a
+file outside the repository by its absolute path, which is never refused:
+
+```sh
+cd /work/repo/docs
+md compose ../README.md           # /work/repo/README.md
+md compose ../../notes/todo.md    # refused: leaves /work/repo
+md compose /work/notes/todo.md    # an absolute path may point anywhere
+```
+
+Outside every repository nothing names a tree, so a relative argument may
+point anywhere.
 
 ## When a reference fails
 

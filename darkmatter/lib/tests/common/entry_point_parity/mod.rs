@@ -10,6 +10,8 @@
 //!   outside.md
 //!   home/                      the fixture HOME
 //!     magic-doc.md             the `@` target (the chain's home tier)
+//!     .claudine/prompts/       the configured extra `@` root
+//!       configured-doc.md
 //!     notes/beside.md
 //!   repo/                      git repository; Cargo workspace
 //!     root-only.md
@@ -34,6 +36,12 @@
 //! Rows come from an exhaustive `match` over [`EntryPoint`] (no `_` arm), so a
 //! new entry point without rows does not compile, and each runner matches the
 //! same enum, so it does not compile in any runner either.
+//!
+//! `home/.claudine/prompts/` is Claudine's user prompt root, the one extra `@`
+//! root a shipped binary configures. The darkmatter and dmls runners register
+//! the same directory on their request snapshot
+//! ([`ParityFixture::configured_magic_root`]), so `@configured-doc.md` is
+//! reachable only through a configured root at every entry point that has one.
 //!
 //! Shared by `#[path]` with the darkmatter-cli, dmls, and claudine-cli
 //! runners; each declares this file in `[package.metadata.ci.tests]
@@ -73,11 +81,13 @@ pub enum EntryPoint {
     DmlsDiagnostics,
     /// `textDocument/documentLink`.
     DmlsDocumentLinks,
-    /// The workspace link graph (Markdown links).
+    /// The workspace link graph: `references`, `transcludes`, and
+    /// `uses_file` edges.
     DmlsLinkGraph,
     /// `textDocument/definition`.
     DmlsDefinition,
-    /// `textDocument/codeAction` (create-file quick fixes).
+    /// `textDocument/codeAction` (create-file quick fixes, offered only for a
+    /// broken Markdown link; every other consumer must be offered none).
     DmlsCodeActions,
     /// Claudine composition of a prompt.
     ClaudineComposition,
@@ -118,25 +128,26 @@ impl EntryPoint {
     /// This entry point's cells in both tables.
     pub fn rows(self) -> Vec<Row> {
         use Consumer::*;
+        const EDITOR: &[Consumer] = &[File, Code, TocLinking, SchemaFile, MarkdownLink];
         match self {
             // Row (a) reaches the library only as `::file ~/…`.
-            Self::ComposePipeline => document_rows(self, &[File, Code, TocLinking, SchemaFile], true),
-            // Pre-flight resolves only the targets that can hold shell
-            // commands (`::file`) and validates frontmatter; `::code` and
-            // `::toc-linking` insert text it never reads.
-            Self::Preflight => document_rows(self, &[File, SchemaFile], true),
-            Self::SchemaValidation => document_rows(self, &[SchemaFile], false),
-            Self::MdCompose => document_rows(self, &[File, Code, TocLinking, SchemaFile], false),
-            Self::MdSchemaValidate => document_rows(self, &[SchemaFile], false),
+            Self::ComposePipeline => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
+            Self::Preflight => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, true),
+            Self::SchemaValidation => document_rows(self, &[SchemaFile], &Form::ALL, false),
+            // `md` configures no extra `@` root: its snapshot is the process's
+            // directory, home, and environment, so it has no
+            // `Form::ConfiguredMagic` cell.
+            Self::MdCompose => document_rows(self, &[File, Code, TocLinking, SchemaFile], &UNCONFIGURED, false),
+            Self::MdSchemaValidate => document_rows(self, &[SchemaFile], &UNCONFIGURED, false),
             // A quoted `'~/…'` argument is the only `~` spelling `md` sees.
-            Self::MdArgument => value_rows(self, true),
-            Self::DmlsDiagnostics => document_rows(self, &[SchemaFile], false),
-            Self::DmlsDocumentLinks => document_rows(self, &[File, Code, TocLinking, MarkdownLink], false),
-            Self::DmlsLinkGraph => document_rows(self, &[MarkdownLink], false),
-            Self::DmlsDefinition => document_rows(self, &[File, Code, TocLinking, MarkdownLink], false),
-            Self::DmlsCodeActions => document_rows(self, &[File, MarkdownLink], false),
-            Self::ClaudineComposition => document_rows(self, &[File, Code, TocLinking, SchemaFile], false),
-            Self::ClaudineCompletion => value_rows(self, false),
+            Self::MdArgument => value_rows(self, &UNCONFIGURED, true),
+            Self::DmlsDiagnostics => document_rows(self, &[SchemaFile], &Form::ALL, false),
+            Self::DmlsDocumentLinks => document_rows(self, EDITOR, &Form::ALL, false),
+            Self::DmlsLinkGraph => document_rows(self, EDITOR, &Form::ALL, false),
+            Self::DmlsDefinition => document_rows(self, EDITOR, &Form::ALL, false),
+            Self::DmlsCodeActions => document_rows(self, EDITOR, &Form::ALL, false),
+            Self::ClaudineComposition => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
+            Self::ClaudineCompletion => value_rows(self, &Form::ALL, false),
         }
     }
 }
@@ -204,8 +215,10 @@ pub enum Form {
     RepositoryRoot,
     /// `^area-doc.md` (package, then area, then repository).
     RepositoryScoped,
-    /// `@magic-doc.md`
+    /// `@magic-doc.md`, found in the `@` chain's home tier.
     Magic,
+    /// `@configured-doc.md`, found only under the configured extra `@` root.
+    ConfiguredMagic,
     /// `~/notes/beside.md`
     Home,
     /// `../…/outside.md`, climbing past the repository root.
@@ -213,13 +226,14 @@ pub enum Form {
 }
 
 impl Form {
-    pub const ALL: [Form; 8] = [
+    pub const ALL: [Form; 9] = [
         Self::ExplicitRelative,
         Self::BareBeside,
         Self::BareRootOnly,
         Self::RepositoryRoot,
         Self::RepositoryScoped,
         Self::Magic,
+        Self::ConfiguredMagic,
         Self::Home,
         Self::TreeEscape,
     ];
@@ -232,6 +246,7 @@ impl Form {
             Self::RepositoryRoot => "amp",
             Self::RepositoryScoped => "caret",
             Self::Magic => "magic",
+            Self::ConfiguredMagic => "configured",
             Self::Home => "home",
             Self::TreeEscape => "escape",
         }
@@ -247,11 +262,25 @@ impl Form {
             Self::RepositoryRoot => "&root-only.md".into(),
             Self::RepositoryScoped => "^area-doc.md".into(),
             Self::Magic => "@magic-doc.md".into(),
+            Self::ConfiguredMagic => "@configured-doc.md".into(),
             Self::Home => "~/notes/beside.md".into(),
             Self::TreeEscape => format!("{}outside.md", "../".repeat(levels_below_root)),
         }
     }
 }
+
+/// Every form except [`Form::ConfiguredMagic`], for an entry point that
+/// configures no extra `@` root.
+const UNCONFIGURED: [Form; 8] = [
+    Form::ExplicitRelative,
+    Form::BareBeside,
+    Form::BareRootOnly,
+    Form::RepositoryRoot,
+    Form::RepositoryScoped,
+    Form::Magic,
+    Form::Home,
+    Form::TreeEscape,
+];
 
 /// A document's directory in the package.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -382,10 +411,10 @@ impl Row {
     }
 }
 
-fn document_rows(entry: EntryPoint, consumers: &[Consumer], through_home: bool) -> Vec<Row> {
+fn document_rows(entry: EntryPoint, consumers: &[Consumer], forms: &[Form], through_home: bool) -> Vec<Row> {
     let mut rows = Vec::new();
     for &consumer in consumers {
-        for form in Form::ALL {
+        for &form in forms {
             for depth in Depth::ALL {
                 rows.push(Row::Document(DocumentCell {
                     entry,
@@ -412,10 +441,10 @@ fn document_rows(entry: EntryPoint, consumers: &[Consumer], through_home: bool) 
     rows
 }
 
-fn value_rows(entry: EntryPoint, documents: bool) -> Vec<Row> {
+fn value_rows(entry: EntryPoint, forms: &[Form], documents: bool) -> Vec<Row> {
     let mut rows = Vec::new();
     for launch in Launch::ALL {
-        for form in Form::ALL {
+        for &form in forms {
             rows.push(Row::Value(ValueCell { entry, value: Supplied::Form(form), launch }));
         }
         if documents {
@@ -478,6 +507,7 @@ impl ParityFixture {
         let mut targets = vec![
             "outside.md".to_string(),
             "home/magic-doc.md".into(),
+            "home/.claudine/prompts/configured-doc.md".into(),
             "home/notes/beside.md".into(),
             "repo/root-only.md".into(),
             "repo/area/area-doc.md".into(),
@@ -503,6 +533,12 @@ impl ParityFixture {
 
     pub fn home(&self) -> PathBuf {
         self.root.join("home")
+    }
+
+    /// The extra `@` root a runner registers on its request snapshot:
+    /// Claudine's user prompt root under the fixture `HOME`.
+    pub fn configured_magic_root(&self) -> PathBuf {
+        self.home().join(".claudine/prompts")
     }
 
     pub fn package(&self) -> PathBuf {
@@ -576,11 +612,6 @@ impl ParityFixture {
 
     pub fn expected_value(&self, cell: &ValueCell) -> Expected {
         match cell.value {
-            // The tree boundary guards document-authored references; a
-            // caller's relative value is the caller's own path and may leave
-            // the tree (`allow_external_relative`), as `md compose ../x.md`
-            // always could.
-            Supplied::Form(Form::TreeEscape) => Expected::File(self.root.join("outside.md")),
             Supplied::Form(form) => {
                 let dir = self.launch_dir(cell.launch);
                 let package = cell.launch == Launch::Package;
@@ -609,6 +640,7 @@ impl ParityFixture {
             Form::RepositoryScoped if in_package => Expected::File(self.repo().join("area/area-doc.md")),
             Form::RepositoryScoped => Expected::Failure(ResolutionFailure::NoMatch),
             Form::Magic => Expected::File(self.home().join("magic-doc.md")),
+            Form::ConfiguredMagic => Expected::File(self.configured_magic_root().join("configured-doc.md")),
             Form::Home => Expected::File(self.home().join("notes/beside.md")),
             // The repository root is a tree boundary (`RelativeTreeEscape`).
             Form::TreeEscape => Expected::Failure(ResolutionFailure::InvalidReference),
@@ -757,4 +789,109 @@ impl ParityReport {
 fn write(path: &Path, text: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, text).unwrap();
+}
+
+/// A `::toc-linking` fallback chain in a document at [`Depth::One`]. Every
+/// entry point that reads a directive target must apply the chain's grammar
+/// and selection rule: the first existing alternative wins, a trailing
+/// `false` intentionally renders nothing, and otherwise the first
+/// alternative's class is the failure. `&missing.md` and `./missing-too.md`
+/// exist nowhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChainCase {
+    /// `"&missing.md | &root-only.md"`: the fallback is selected.
+    FallbackSucceeds,
+    /// `"&root-only.md | ./sibling.md"`: both exist; the first wins.
+    FirstWins,
+    /// `"&missing.md | false"`: suppressed, never a broken target.
+    Suppressed,
+    /// `"&missing.md | ./missing-too.md"`: nothing exists.
+    Unresolved,
+}
+
+impl ChainCase {
+    pub const ALL: [ChainCase; 4] = [Self::FallbackSucceeds, Self::FirstWins, Self::Suppressed, Self::Unresolved];
+
+    fn slug(self) -> &'static str {
+        match self {
+            Self::FallbackSucceeds => "fallback",
+            Self::FirstWins => "first",
+            Self::Suppressed => "suppressed",
+            Self::Unresolved => "unresolved",
+        }
+    }
+
+    /// The quoted directive target.
+    pub fn reference(self) -> &'static str {
+        match self {
+            Self::FallbackSucceeds => "\"&missing.md | &root-only.md\"",
+            Self::FirstWins => "\"&root-only.md | ./sibling.md\"",
+            Self::Suppressed => "\"&missing.md | false\"",
+            Self::Unresolved => "\"&missing.md | ./missing-too.md\"",
+        }
+    }
+}
+
+/// What a chain resolved to, expected or observed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChainOutcome {
+    File(PathBuf),
+    /// No file and no failure: the chain's `false` suppressed it.
+    Suppressed,
+    Failure(ResolutionFailure),
+    /// Anything else, described for the report.
+    Unexpected(String),
+}
+
+impl ParityFixture {
+    /// Writes `case`'s `::toc-linking` document at [`Depth::One`].
+    pub fn write_chain_document(&self, case: ChainCase) -> PathBuf {
+        let path = self.depth_dir(Depth::One).join(format!("chain-{}.md", case.slug()));
+        write(&path, &Consumer::TocLinking.document(case.reference()));
+        path
+    }
+
+    pub fn expected_chain(&self, case: ChainCase) -> ChainOutcome {
+        match case {
+            ChainCase::FallbackSucceeds | ChainCase::FirstWins => ChainOutcome::File(self.repo().join("root-only.md")),
+            ChainCase::Suppressed => ChainOutcome::Suppressed,
+            ChainCase::Unresolved => ChainOutcome::Failure(ResolutionFailure::NoMatch),
+        }
+    }
+
+    /// `observed` against `case`'s expectation, or a one-line mismatch.
+    pub fn compare_chain(&self, case: ChainCase, observed: &ChainOutcome) -> Result<(), String> {
+        compare_outcome(&format!("{case:?} `{}`", case.reference()), &self.expected_chain(case), observed)
+    }
+
+    /// Writes a document whose one `consumer` directive targets
+    /// [`HASH_REFERENCE`], at [`Depth::One`].
+    pub fn write_hash_document(&self, consumer: Consumer) -> PathBuf {
+        let path = self.depth_dir(Depth::One).join(format!("hash-{}.md", consumer.slug()));
+        write(&path, &consumer.document(HASH_REFERENCE));
+        path
+    }
+
+    /// `observed` against [`HASH_REFERENCE`]'s expectation: `NoMatch`.
+    pub fn compare_hash(&self, consumer: Consumer, observed: &ChainOutcome) -> Result<(), String> {
+        let expected = ChainOutcome::Failure(ResolutionFailure::NoMatch);
+        compare_outcome(&format!("{consumer:?} `{HASH_REFERENCE}`"), &expected, observed)
+    }
+}
+
+/// The directives whose target is a file reference with no `#anchor`
+/// syntax.
+pub const HASH_CONSUMERS: [Consumer; 3] = [Consumer::File, Consumer::Code, Consumer::TocLinking];
+
+/// A directive target whose `#x` is part of the filename, as composition
+/// reads it: `root-only.md` exists at the repository root, but
+/// `root-only.md#x` does not, so every entry point reports `NoMatch`.
+pub const HASH_REFERENCE: &str = "\"&root-only.md#x\"";
+
+fn compare_outcome(label: &str, expected: &ChainOutcome, observed: &ChainOutcome) -> Result<(), String> {
+    let agrees = match (expected, observed) {
+        (ChainOutcome::File(want), ChainOutcome::File(got)) => identity(want) == identity(got),
+        (want, got) => want == got,
+    };
+    if agrees { Ok(()) } else { Err(format!("{label}: expected {expected:?}, got {observed:?}")) }
 }

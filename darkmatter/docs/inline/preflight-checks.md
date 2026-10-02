@@ -198,6 +198,16 @@ When Darkmatter is used through an external orchestrator (such as Claudine), the
 
 **Darkmatter's role is discovery.** It walks the document graph condition-blind — following transclusions, resolving interpolation, parsing `::shell`/`::shell-block` directives, and scanning frontmatter for `$(...)` expressions. `Markdown::compose_preflight(&request)` takes the same [`ComposeRequest`](../topics/compose-requests.md) the compose pass will use and returns a `ComposePreflightReport` whose `approval_set()` is every command that could run under any state, without checking policy files or making approval decisions. (`collect_shell_commands` remains as the lower-level entry point that returns the raw entries.)
 
+**Every file target is checked.** Discovery resolves the target of every `::file`, `::code`, and `::toc-linking` directive, including those in false branches. A `::file` child is walked for commands. A `::code` or `::toc-linking` target is only resolved: pre-flight never reads it, fetches it, or looks inside it for commands. A `::toc-linking` fallback chain follows composition's rule: the first existing alternative wins, a trailing `false` suppresses the directive, and otherwise the first alternative's failure is reported. A target that does not resolve fails pre-flight with the same [`failure` class](../errors/file-reference-failures.md) composition would report:
+
+```md
+::code &src/main.rs                     resolved; recorded in the report's graph
+::toc-linking "&missing.md | false"     suppressed; no error
+::toc-linking &missing.md               fails pre-flight with `failure: no-match`
+```
+
+Each resolved `::code` and `::toc-linking` target appears in `ComposePreflightReport::preflight_graph` as a `PreflightTargetEdge` on its document's node (`targets`), separate from the `::file` edges that composition reuses.
+
 **Before the body exists.** An orchestrator that must run a step before the body's includes exist (Claudine's `initialize`) reads the frontmatter first with `ComposeOptions::only_frontmatter_surface()`. That projection never walks the body graph; its approval set is `collect_frontmatter_shell_commands`, the document's frontmatter `$(...)` commands alone. The full condition-blind discovery above runs after the step, on the settled document.
 
 **Claudine's role is authorization.** It takes the approval set from Darkmatter, merges in commands from its harness, checks everything against the whitelist, and prompts the user once for anything missing. The merged, authorized set is handed back to the pipeline as the execution membership source.

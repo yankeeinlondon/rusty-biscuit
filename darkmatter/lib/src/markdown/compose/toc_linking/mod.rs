@@ -47,6 +47,7 @@ pub(crate) use types::{TocLinkingDirective, TocLinkingOptions};
 
 #[cfg(test)]
 use crate::markdown::Markdown;
+use crate::markdown::compose::target_chain::TargetSelection;
 use crate::markdown::compose::transclusion::{DirectiveKind, resolve_path};
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::toc::MarkdownTocNode;
@@ -84,31 +85,21 @@ pub(crate) fn resolve_target_chain(
 ) -> Result<Option<(String, std::path::PathBuf)>, TocLinkingError> {
     trace!(target = %directive.targets.join(" > "), "toc_linking: resolving target chain");
 
-    // The authored (first) target's class is the one reported: the reader
-    // acts on what they wrote, and a fallback's miss must not hide it.
-    let mut first_failure = None;
-    for (index, target) in directive.targets.iter().enumerate() {
-        match resolve_file(
-            target,
-            transclusion_options,
-            source,
-            directive.line,
-            ctx.clone(),
-        ) {
-            Ok(path) => return Ok(Some((target.clone(), path))),
-            Err(failure) if index == 0 => first_failure = failure,
-            Err(_) => {}
+    let selection = crate::markdown::compose::target_chain::select_target(
+        directive.targets.iter().map(String::as_str),
+        directive.suppress_not_found,
+        |target| resolve_file(target, transclusion_options, source, directive.line, ctx.clone()),
+    );
+    match selection {
+        TargetSelection::Found { index, resolved } => {
+            Ok(Some((directive.targets[index].clone(), resolved)))
         }
-    }
-
-    if directive.suppress_not_found || directive.targets.is_empty() {
-        Ok(None)
-    } else {
-        Err(TocLinkingError::Unresolved {
+        TargetSelection::Suppressed => Ok(None),
+        TargetSelection::Unresolved { failure } => Err(TocLinkingError::Unresolved {
             path: directive.targets.join(", "),
             line: directive.line,
-            failure: first_failure,
-        })
+            failure,
+        }),
     }
 }
 

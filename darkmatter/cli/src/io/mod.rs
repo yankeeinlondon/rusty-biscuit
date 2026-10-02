@@ -65,9 +65,9 @@ pub fn load_markdown_text(
 /// `context`.
 ///
 /// `@`, `&`, `^`, `~`, `{{VAR}}`, and relative forms resolve exactly as they
-/// would in a document opened at the context's directory, except that a
-/// relative argument may leave the repository tree: it is the caller's own
-/// path, not a document-authored one. An argument that is not valid
+/// would in a document opened at the context's directory, so a relative
+/// argument may not climb out of the launch repository (`InvalidReference`);
+/// an absolute path may name any file. An argument that is not valid
 /// reference syntax is returned unchanged as a plain path.
 ///
 /// ## Errors
@@ -80,8 +80,7 @@ pub fn resolve_file_path(raw_path: &Path, context: &FileResolutionContext) -> Re
         // Not a valid file reference syntax — treat as plain path
         return Ok(raw_path.to_path_buf());
     };
-    let argument_context = context.clone().allow_external_relative();
-    match reference.resolve_in_context(&argument_context) {
+    match reference.resolve_in_context(context) {
         Ok(Some(path)) => Ok(path),
         Ok(None) => Err(DocumentArgumentError {
             argument: raw.into_owned(),

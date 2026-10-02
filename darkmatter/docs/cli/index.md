@@ -61,6 +61,8 @@ All file references in the CLI use the `FileReference` struct from the `biscuit-
 
 **"Base directory"** means the directory a reference was authored from: for an argument you type at the shell that is the directory you ran `md` in; for a reference written inside a document it is the directory of the document being composed.
 
+A relative reference may not climb out of the repository that holds its base directory, whether you type it as an argument or a document contains it: inside `/work/repo`, `md compose ../../elsewhere.md` fails with `failure: invalid-reference` when it would leave `/work/repo`. An absolute path may name any file. See [Relative references stay in their tree](../topics/file-referencing.md#relative-references-stay-in-their-tree).
+
 Two modifiers compose with every kind above:
 
 - a leading `%` (`%@README.md`) switches from exact-path probing to a recursive search of the same roots

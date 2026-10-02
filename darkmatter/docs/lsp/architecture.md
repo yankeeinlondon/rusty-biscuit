@@ -90,12 +90,18 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link edges, `uses_schema`, `uses_file`, broken-link and missing-anchor diagnostics, link hover, anchor completion) | The first planned candidate that is an **indexed** document | No |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is an **indexed** document; otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer | Only when the first candidate is not indexed |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
+| Anchor completion | The first planned candidate that is an indexed document | No |
 
-Because the graph reads the indexed workspace rather than the disk, a link
-to an open, unsaved buffer resolves, and a Markdown link to a file that is
-not an indexed document is broken.
+The index decides where headings live, never whether a file exists. A graph
+edge lands on an indexed document's node, on an existing file the index does
+not hold (`EdgeTarget::File`: above the workspace folder, in `HOME`, under a
+magic root, or not Markdown), or stays unresolved. For example, with only
+`repo/docs/` open, `[t](../target.md)` links to `repo/target.md` and is not
+broken. A `#fragment` on an unindexed file is not checked, because its
+headings were never read; it is neither resolved to a heading nor reported
+missing. A link to an open, unsaved buffer still resolves.
 
 ### Invalidation
 
