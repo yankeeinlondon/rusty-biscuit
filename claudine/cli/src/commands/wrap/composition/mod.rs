@@ -49,7 +49,6 @@ pub(crate) mod launch;
 mod pipeline;
 mod preflight;
 pub(crate) mod prep_context;
-mod provider_args;
 pub(crate) mod runner;
 pub(crate) mod selection;
 pub(crate) mod staged_boot;

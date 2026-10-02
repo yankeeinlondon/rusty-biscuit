@@ -11,6 +11,10 @@ pub(crate) fn build_harness_launch(
     provider: Provider,
     profile: &dyn super::super::profile::WrapperProfile,
     base_args: &[String],
+    // The forwarded provider tail `base_args` already contains. A resume
+    // appends it once after the resume entrypoint (see
+    // `resume::assemble_resume_args`).
+    provider_tail: &claudine::composition::ProviderTail,
     base_env: &HashMap<OsString, OsString>,
     // The live session to resume, or `None` for a fresh session. Read from the
     // active-document state's provider-attempt slice by the caller — there is no
@@ -33,12 +37,15 @@ pub(crate) fn build_harness_launch(
     cli_stall_timeout: Option<String>,
 ) -> Result<AttemptLaunch> {
     let mut args = if let Some(session_id) = resume_session {
-        let mut args = super::super::resume::normalize_resume_args(
+        let entrypoint_args = super::super::resume::normalize_resume_args(
             profile,
             profile.build_resume_args(session_id)?,
         );
-        super::super::resume::append_resume_passthrough_args(&mut args, base_args);
-        args
+        super::super::resume::assemble_resume_args(
+            entrypoint_args,
+            base_args,
+            provider_tail.launch_args(),
+        )
     } else {
         base_args.to_vec()
     };
@@ -86,6 +93,7 @@ pub(crate) fn build_harness_launch(
 
     Ok(AttemptLaunch {
         args,
+        provider_tail: provider_tail.clone(),
         env,
         stdin_seed,
         wire_prompt,

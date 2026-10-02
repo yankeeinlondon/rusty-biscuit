@@ -9,10 +9,15 @@ use biscuit_terminal::utils::color::{Color, Tailwind};
 use biscuit_terminal::utils::layout::{Length, TargetValue};
 use claudine::provider::Provider;
 
-use crate::commands::wrap::profile::ModelSource;
+use claudine::composition::ProviderTail;
+use claudine::harness::ProcessTermination;
+use claudine::secrets::Redactor;
 use claudine::stream::semantic::SemanticErrorKind;
 
+use crate::commands::wrap::profile::ModelSource;
+use crate::commands::wrap::provider_tail_report::{tail_names_switch, tail_redactor, tail_summary};
 use crate::log;
+use crate::output::native_exit::NativeExit;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AgentErrorCategory {
@@ -43,27 +48,195 @@ pub(crate) enum SuggestionStyle {
     DidYouMean,
 }
 
-/// Typed cause distilled from a provider's native (non-stream) process exit —
-/// `exit_code` plus the captured stdout/stderr tails.
+/// Typed cause distilled from a provider's native (non-stream) process exit.
 ///
 /// This is deliberately **separate** from the structured-stream
 /// `stream/providers/vocabulary.rs` classification: that table classifies
-/// semantic stream error *events*, whereas these are process-level argv/exit
-/// rejections that only the wrapper observes. The two must not be conflated.
+/// semantic stream error *events*, whereas these are process-level exits that
+/// only the wrapper observes. The two must not be conflated.
+///
+/// Variants are listed in classification precedence: the first that matches
+/// wins, so a stronger cause is never overwritten by a weaker one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NativeCliCause {
-    /// The provider rejected its argv during argument parsing (unknown flag,
-    /// unexpected/invalid argument). Carries the offending flag when one could
-    /// be extracted from the diagnostic.
-    ArgumentRejected { flag: Option<String> },
-    /// A required argument was missing from the command.
-    MissingArgument,
-    /// The provider could not resolve the requested model.
-    ModelNotFound { suggestions: Option<Vec<String>> },
+    /// The user interrupted the run.
+    Interrupted,
+    /// A Claudine timeout stopped the provider.
+    TimedOut,
+    /// The provider binary (or a command it needed) could not be found.
+    MissingBinary,
     /// An authentication or permission failure.
     AuthOrPermission,
-    /// A required file or command was not found (typically exit 127).
-    FileNotFound,
+    /// The provider's API layer reported an error.
+    ApiFailure,
+    /// The provider could not resolve the requested model.
+    ModelNotFound { suggestions: Option<Vec<String>> },
+    /// The provider rejected its argv during argument parsing. Carries the
+    /// switch the diagnostic named, when it named one.
+    ArgumentRejected { switch: Option<String> },
+    /// A required argument was missing from the command.
+    MissingArgument,
+}
+
+/// A classified exit plus the diagnostic line that decided it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeClassification {
+    pub(crate) cause: NativeCliCause,
+    /// The provider line whose signature matched; `None` for causes decided
+    /// by termination or exit code alone.
+    pub(crate) line: Option<String>,
+    /// That line's stream already reached the terminal verbatim.
+    pub(crate) line_shown: bool,
+}
+
+/// Signatures for each text-backed cause. Each entry is backed by a positive
+/// and a near-miss fixture in the tests; a phrase that also occurs in
+/// ordinary auth or API messages (such as a bare `invalid argument`) is not
+/// a signature.
+const AUTH_SIGNATURES: &[&str] = &[
+    "permission denied",
+    "access denied",
+    "not authorized",
+    "unauthorized",
+    "authentication failed",
+    "authentication error",
+    "authentication required",
+    "invalid api key",
+];
+const MODEL_SIGNATURES: &[&str] = &["providermodelnotfounderror", "model not found", "invalid model"];
+const ARGUMENT_SIGNATURES: &[&str] = &[
+    "unrecognized argument",
+    "unknown flag",
+    "unknown option",
+    "unexpected argument",
+];
+const MISSING_ARGUMENT_SIGNATURES: &[&str] = &[
+    "missing required argument",
+    "the following required arguments were not provided",
+];
+
+/// Classify a provider's native process exit.
+///
+/// Precedence: interruption, timeout, missing binary,
+/// authentication/permission, API failure, model not found, argument
+/// rejected, missing argument. Text signatures are read from stderr, then
+/// stdout. An exit that matches nothing returns `None`; so does one with no
+/// captured evidence beyond its exit code.
+pub(crate) fn classify_native_exit(exit: &NativeExit) -> Option<NativeClassification> {
+    let decided = |cause| {
+        Some(NativeClassification {
+            cause,
+            line: None,
+            line_shown: false,
+        })
+    };
+    if exit.termination == ProcessTermination::Interrupted
+        || exit.exit_code == 130
+        || exit.exit_code == 143
+    {
+        return decided(NativeCliCause::Interrupted);
+    }
+    if exit.termination == ProcessTermination::TimedOut {
+        return decided(NativeCliCause::TimedOut);
+    }
+    if exit.termination == ProcessTermination::LaunchFailed {
+        return decided(NativeCliCause::MissingBinary);
+    }
+    if !exit.failed() {
+        return None;
+    }
+    let with_line = |cause, (line, shown): (&str, bool)| NativeClassification {
+        cause,
+        line: Some(line.to_string()),
+        line_shown: shown,
+    };
+    if exit.exit_code == 127
+        && let Some(found) = find_line(exit, |lower| {
+            lower.contains("not found") || lower.contains("no such file")
+        })
+    {
+        return Some(with_line(NativeCliCause::MissingBinary, found));
+    }
+    if let Some(found) = find_signature(exit, AUTH_SIGNATURES) {
+        return Some(with_line(NativeCliCause::AuthOrPermission, found));
+    }
+    // Case-sensitive: the provider's own API-layer prefix.
+    if let Some(found) = find_line_raw(exit, |line| line.contains("API Error:")) {
+        return Some(with_line(NativeCliCause::ApiFailure, found));
+    }
+    if let Some(found) = find_signature(exit, MODEL_SIGNATURES) {
+        let suggestions = exit.tails().find_map(|tail| parse_model_suggestions(&tail.text));
+        return Some(with_line(NativeCliCause::ModelNotFound { suggestions }, found));
+    }
+    if let Some(found) = find_signature(exit, ARGUMENT_SIGNATURES) {
+        let switch = extract_switch(found.0);
+        return Some(with_line(NativeCliCause::ArgumentRejected { switch }, found));
+    }
+    if let Some(found) = find_signature(exit, MISSING_ARGUMENT_SIGNATURES) {
+        return Some(with_line(NativeCliCause::MissingArgument, found));
+    }
+    None
+}
+
+fn find_signature<'a>(exit: &'a NativeExit, signatures: &[&str]) -> Option<(&'a str, bool)> {
+    find_line(exit, |lower| signatures.iter().any(|signature| lower.contains(signature)))
+}
+
+/// The first captured line (stderr before stdout) whose lowercase form
+/// satisfies `matches`, with whether its stream was shown.
+fn find_line<'a>(exit: &'a NativeExit, matches: impl Fn(&str) -> bool) -> Option<(&'a str, bool)> {
+    find_line_raw(exit, |line| matches(&line.to_lowercase()))
+}
+
+fn find_line_raw<'a>(exit: &'a NativeExit, matches: impl Fn(&str) -> bool) -> Option<(&'a str, bool)> {
+    exit.tails().find_map(|tail| {
+        tail.text
+            .lines()
+            .find(|line| matches(line))
+            .map(|line| (line, tail.shown))
+    })
+}
+
+/// The switch a rejection line names, trimmed of the quotes and punctuation
+/// providers wrap it in (`'--foo'`, `"--foo"`, `--foo,`). Only the matched
+/// line is read, so a switch quoted elsewhere in the output is never taken.
+fn extract_switch(line: &str) -> Option<String> {
+    line.split_whitespace().find_map(|candidate| {
+        let trimmed =
+            candidate.trim_matches(|c: char| matches!(c, '\'' | '"' | ',' | '.' | '`' | ':' | ';'));
+        (trimmed.starts_with('-') && trimmed.len() > 1 && trimmed != "--")
+            .then(|| trimmed.to_string())
+    })
+}
+
+/// Whether [`AgentErrorReport::for_native_exit`] would attribute `exit` to
+/// `tail`. A launch path that echoes provider output itself asks this first,
+/// so a correlated diagnostic reaches the user once, inside the report.
+pub(crate) fn attributes_to_tail(exit: &NativeExit, tail: &ProviderTail) -> bool {
+    classify_native_exit(exit)
+        .is_some_and(|classified| classification_attributes_to_tail(exit, tail, &classified))
+}
+
+fn classification_attributes_to_tail(
+    exit: &NativeExit,
+    tail: &ProviderTail,
+    classified: &NativeClassification,
+) -> bool {
+    !tail.is_empty()
+        && exit.failed()
+        && match &classified.cause {
+            NativeCliCause::ArgumentRejected { switch: None } => true,
+            NativeCliCause::ArgumentRejected { switch: Some(switch) } => tail_names_switch(tail, switch),
+            _ => false,
+        }
+}
+
+/// The one report for a provider's terminal native failure, and whether it
+/// attributes the failure to the forwarded tail.
+#[derive(Debug, Clone)]
+pub(crate) struct NativeExitReport {
+    pub(crate) report: AgentErrorReport,
+    pub(crate) correlated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -83,19 +256,116 @@ pub(crate) struct AgentErrorReport {
 }
 
 impl AgentErrorReport {
-    #[allow(dead_code)]
-    pub(crate) fn from_exit_code(provider: Provider, exit_code: i32, stderr: Option<&str>) -> Self {
-        Self::from_exit_code_with_source(provider, exit_code, stderr, None)
+    /// Build the report for a provider's terminal native failure.
+    ///
+    /// Both launch paths call this exactly once per terminal failure. The
+    /// report correlates the failure with `tail` only when the tail is
+    /// non-empty, the exit failed, the classifier found an argument
+    /// rejection, and any switch the rejection names belongs to the tail; a
+    /// rejection naming one of Claudine's own injected switches stays a
+    /// generic native error. Every other exit keeps its cause's category and
+    /// remediation.
+    ///
+    /// Provider text in the report is masked with [`tail_redactor`] (shared
+    /// secret recognizer plus echoes of the tail's sensitive values) and
+    /// escaped for the terminal. A line from a stream the user already saw
+    /// is never repeated.
+    pub(crate) fn for_native_exit(
+        provider: Provider,
+        exit: &NativeExit,
+        tail: &ProviderTail,
+        model_source: Option<&ModelSource>,
+    ) -> NativeExitReport {
+        let classification = classify_native_exit(exit);
+        let redactor = tail_redactor(tail);
+        let correlated = classification
+            .as_ref()
+            .filter(|classified| classification_attributes_to_tail(exit, tail, classified));
+        // A matched line the user already saw, streamed live or as the
+        // failure headline, is not repeated.
+        let line_shown = |classification: &NativeClassification| {
+            classification.line_shown
+                || classification.line.as_deref().is_some_and(|line| {
+                    let masked = redactor.redact(line.trim()).to_string();
+                    exit.shown_headline
+                        .as_deref()
+                        .is_some_and(|headline| !masked.is_empty() && headline.contains(&masked))
+                })
+        };
+        let excerpt = |classification: &NativeClassification| {
+            classification
+                .line
+                .as_deref()
+                .filter(|_| !line_shown(classification))
+                .map(|line| display_safe(&redactor, line))
+        };
+        if let Some(classified) = correlated {
+            let provider_name = crate::output::capitalize_provider(provider);
+            let shown_note = if line_shown(classified) {
+                " Its own message is shown above."
+            } else {
+                ""
+            };
+            let report = Self {
+                provider,
+                exit_code: exit.exit_code,
+                category: AgentErrorCategory::AgentNative,
+                summary: format!(
+                    "{provider_name} rejected its arguments. This was likely caused by the \
+                     forwarded arguments: {}.",
+                    tail_summary(tail).phrase()
+                ),
+                body_list: None,
+                footer: None,
+                detail: excerpt(classified),
+                hint: Some(format!(
+                    "Check {provider_name}'s usage for the forwarded arguments.{shown_note}"
+                )),
+                suggestions: None,
+                suggestion_style: SuggestionStyle::DidYouMean,
+                location: None,
+            };
+            return NativeExitReport {
+                report,
+                correlated: true,
+            };
+        }
+
+        let report = match classification {
+            Some(classified) => {
+                let detail = excerpt(&classified);
+                cause_report(provider, exit.exit_code, &classified.cause, detail, &redactor, model_source)
+            }
+            None => {
+                let provider_name = crate::output::capitalize_provider(provider);
+                let detail = exit
+                    .stderr
+                    .as_ref()
+                    .filter(|tail| !tail.shown)
+                    .and_then(|tail| tail.text.lines().find(|line| !line.trim().is_empty()))
+                    .map(|line| display_safe(&redactor, line));
+                Self::with_summary(
+                    provider,
+                    exit.exit_code,
+                    AgentErrorCategory::AgentNative,
+                    format!("{provider_name} exited with error code {}", exit.exit_code),
+                    detail,
+                )
+            }
+        };
+        NativeExitReport {
+            report,
+            correlated: false,
+        }
     }
 
-    pub(crate) fn from_exit_code_with_source(
+    fn with_summary(
         provider: Provider,
         exit_code: i32,
-        stderr: Option<&str>,
-        model_source: Option<&crate::commands::wrap::profile::ModelSource>,
+        category: AgentErrorCategory,
+        summary: String,
+        detail: Option<String>,
     ) -> Self {
-        let (category, summary, detail, hint, suggestions, location) =
-            classify_exit(provider, exit_code, stderr, model_source);
         Self {
             provider,
             exit_code,
@@ -104,72 +374,7 @@ impl AgentErrorReport {
             body_list: None,
             footer: None,
             detail,
-            hint,
-            suggestions,
-            suggestion_style: SuggestionStyle::DidYouMean,
-            location,
-        }
-    }
-
-    /// Build a report for a provider that exited non-zero after Claudine
-    /// forwarded a provider-argument tail, correlating the failure with that
-    /// tail **only** when the native classifier attributes it to argument
-    /// rejection. For every other cause (auth, missing binary, model, or an
-    /// unclassified exit) this defers to [`Self::from_exit_code_with_source`]
-    /// so a stronger classification is never overwritten and an unrelated
-    /// failure is never misattributed to the forwarded arguments.
-    ///
-    /// `forwarded_switch_names` must already be redacted and reduced to switch
-    /// names (no values); `explicit` selects opaque-tail wording. `stderr` is
-    /// the provider's captured diagnostic.
-    // Wired into the composition failure path once the harness loop surfaces
-    // the terminal attempt's stderr tail (the composition-correlation
-    // follow-up); the wrapper path already renders via the shared typed
-    // classifier below.
-    #[allow(dead_code)]
-    pub(crate) fn correlated_with_forwarded_tail(
-        provider: Provider,
-        exit_code: i32,
-        stderr: Option<&str>,
-        model_source: Option<&crate::commands::wrap::profile::ModelSource>,
-        forwarded_switch_names: &[String],
-        explicit: bool,
-    ) -> Self {
-        let stderr_text = stderr.unwrap_or("");
-        let is_arg_rejection = matches!(
-            classify_native_cli_cause(exit_code, stderr_text),
-            Some(NativeCliCause::ArgumentRejected { .. })
-        );
-        if exit_code == 0 || forwarded_switch_names.is_empty() || !is_arg_rejection {
-            return Self::from_exit_code_with_source(provider, exit_code, stderr, model_source);
-        }
-
-        let provider_name = crate::output::capitalize_provider(provider);
-        let tail_desc = if explicit {
-            "the opaque argument tail forwarded after `--`".to_string()
-        } else {
-            format!(
-                "the forwarded argument(s): {}",
-                forwarded_switch_names.join(" ")
-            )
-        };
-        Self {
-            provider,
-            exit_code,
-            category: AgentErrorCategory::AgentNative,
-            summary: format!(
-                "{provider_name} rejected its arguments during startup — this was \
-                 likely caused by {tail_desc}, which Claudine forwarded to {provider_name} \
-                 without recognizing."
-            ),
-            body_list: None,
-            footer: None,
-            detail: Some(stderr_text.lines().next().unwrap_or("").to_string()),
-            hint: Some(
-                "If this is a valid provider switch Claudine doesn't yet know about, \
-                 the run still forwarded it; check the provider's own usage above."
-                    .to_string(),
-            ),
+            hint: None,
             suggestions: None,
             suggestion_style: SuggestionStyle::DidYouMean,
             location: None,
@@ -314,212 +519,91 @@ impl AgentErrorReport {
     }
 }
 
-#[allow(clippy::type_complexity)]
-fn classify_exit(
+/// The generic report for a classified cause. `detail` is the already
+/// masked and escaped diagnostic line, absent when the user saw it.
+fn cause_report(
     provider: Provider,
     exit_code: i32,
-    stderr: Option<&str>,
-    model_source: Option<&crate::commands::wrap::profile::ModelSource>,
-) -> (
-    AgentErrorCategory,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<Vec<String>>,
-    Option<String>,
-) {
-    let stderr_text = stderr.unwrap_or("");
+    cause: &NativeCliCause,
+    detail: Option<String>,
+    redactor: &Redactor,
+    model_source: Option<&ModelSource>,
+) -> AgentErrorReport {
     let provider_name = crate::output::capitalize_provider(provider);
-
-    if exit_code == 130 || exit_code == 143 {
-        return (
+    let report = |category, summary: String| {
+        AgentErrorReport::with_summary(provider, exit_code, category, summary, detail.clone())
+    };
+    match cause {
+        NativeCliCause::Interrupted => AgentErrorReport::with_summary(
+            provider,
+            exit_code,
             AgentErrorCategory::Interrupted,
             format!("{provider_name} was interrupted by the user"),
             None,
-            None,
-            None,
-            None,
-        );
-    }
-
-    if let Some(cause) = classify_native_cli_cause(exit_code, stderr_text) {
-        return native_cause_report(&cause, provider, stderr_text, model_source);
-    }
-
-    if stderr_text.contains("API Error:") {
-        let message = extract_first_api_error_message(stderr_text);
-        return (
-            AgentErrorCategory::ApiRemote,
-            message,
-            Some("This error came from the provider's API layer.".to_string()),
-            Some("Check API key, rate limits, and service status.".to_string()),
-            None,
-            None,
-        );
-    }
-
-    (
-        AgentErrorCategory::AgentNative,
-        format!("{provider_name} exited with error code {exit_code}"),
-        stderr_text.lines().next().map(|l| l.to_string()),
-        None,
-        None,
-        None,
-    )
-}
-
-/// Classify a provider's native process exit into a typed [`NativeCliCause`].
-///
-/// Pure and side-effect free so it can be unit-tested against positive and
-/// collision fixtures. Signatures are kept deliberately narrow; an uncertain
-/// exit returns `None` and falls through to the generic provider-error report
-/// rather than risk a misattribution.
-pub(crate) fn classify_native_cli_cause(exit_code: i32, stderr: &str) -> Option<NativeCliCause> {
-    let lower = stderr.to_lowercase();
-
-    if lower.contains("providermodelnotfounderror")
-        || lower.contains("model not found")
-        || lower.contains("invalid model")
-    {
-        return Some(NativeCliCause::ModelNotFound {
-            suggestions: parse_model_suggestions(stderr),
-        });
-    }
-
-    if lower.contains("unrecognized argument")
-        || lower.contains("unknown flag")
-        || lower.contains("unknown option")
-        || lower.contains("unexpected argument")
-        || lower.contains("invalid argument")
-    {
-        return Some(NativeCliCause::ArgumentRejected {
-            flag: extract_unknown_flag(stderr),
-        });
-    }
-
-    if lower.contains("missing required argument")
-        || lower.contains("required argument")
-        || lower.contains("the following required arguments were not provided")
-    {
-        return Some(NativeCliCause::MissingArgument);
-    }
-
-    if lower.contains("permission denied")
-        || lower.contains("access denied")
-        || lower.contains("not authorized")
-        || lower.contains("authentication")
-    {
-        return Some(NativeCliCause::AuthOrPermission);
-    }
-
-    if lower.contains("no such file") || lower.contains("not found") && exit_code == 127 {
-        return Some(NativeCliCause::FileNotFound);
-    }
-
-    None
-}
-
-/// Map a typed [`NativeCliCause`] to the report tuple `classify_exit` returns.
-#[allow(clippy::type_complexity)]
-fn native_cause_report(
-    cause: &NativeCliCause,
-    provider: Provider,
-    stderr: &str,
-    model_source: Option<&crate::commands::wrap::profile::ModelSource>,
-) -> (
-    AgentErrorCategory,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<Vec<String>>,
-    Option<String>,
-) {
-    let first_line = || stderr.lines().next().unwrap_or("").to_string();
-    match cause {
+        ),
+        NativeCliCause::TimedOut => report(
+            AgentErrorCategory::AgentNative,
+            format!("{provider_name} was stopped by a timeout"),
+        ),
+        NativeCliCause::MissingBinary => report(
+            AgentErrorCategory::Configuration,
+            "A required file or command was not found.".to_string(),
+        ),
+        NativeCliCause::AuthOrPermission => AgentErrorReport {
+            hint: Some("Check API keys and provider authentication configuration.".to_string()),
+            ..report(
+                AgentErrorCategory::Configuration,
+                "An authentication or permission error occurred.".to_string(),
+            )
+        },
+        NativeCliCause::ApiFailure => AgentErrorReport {
+            hint: Some("Check API key, rate limits, and service status.".to_string()),
+            ..report(
+                AgentErrorCategory::ApiRemote,
+                "The provider's API layer returned an error.".to_string(),
+            )
+        },
         NativeCliCause::ModelNotFound { suggestions } => {
             let location = model_source.map(ModelSource::location_string);
             let loc = location.as_deref().unwrap_or("the command line");
-            (
-                AgentErrorCategory::AgentNative,
-                format!(
-                    "Invalid model specified in {loc}! Running <yellow>opencode models</yellow> will give you\n\
-                     a list of all valid models. Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim>\n\
-                     for direct providers like Google or Anthropic but take the form\n\
-                     <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
-                ),
-                None,
-                None,
-                suggestions.clone(),
-                location,
-            )
-        }
-        NativeCliCause::ArgumentRejected { flag } => {
-            let suffix = flag
-                .as_deref()
-                .map(|f| format!(" (`{f}`)"))
-                .unwrap_or_default();
-            (
-                AgentErrorCategory::AgentNative,
-                format!(
-                    "{} did not recognize a flag{suffix}",
-                    crate::output::capitalize_provider(provider)
-                ),
-                Some(first_line()),
-                None,
-                None,
-                None,
-            )
-        }
-        NativeCliCause::MissingArgument => (
-            AgentErrorCategory::AgentNative,
-            "A required argument was missing from the command.".to_string(),
-            Some(first_line()),
-            None,
-            None,
-            None,
-        ),
-        NativeCliCause::AuthOrPermission => (
-            AgentErrorCategory::Configuration,
-            "An authentication or permission error occurred.".to_string(),
-            Some(first_line()),
-            Some("Check API keys and provider authentication configuration.".to_string()),
-            None,
-            None,
-        ),
-        NativeCliCause::FileNotFound => (
-            AgentErrorCategory::Configuration,
-            "A required file or command was not found.".to_string(),
-            Some(first_line()),
-            None,
-            None,
-            None,
-        ),
-    }
-}
-
-/// Extract the offending flag token from a native argument-rejection
-/// diagnostic, trimming the surrounding quotes/punctuation providers wrap it
-/// in (`'--foo'`, `"--foo"`, `--foo,`). Returns `None` when none is found.
-fn extract_unknown_flag(stderr: &str) -> Option<String> {
-    for line in stderr.lines() {
-        for candidate in line.split_whitespace() {
-            let trimmed = candidate
-                .trim_matches(|c: char| c == '\'' || c == '"' || c == ',' || c == '.' || c == '`');
-            if trimmed.starts_with('-') && trimmed.len() > 1 && !trimmed.contains("error") {
-                return Some(trimmed.to_string());
+            AgentErrorReport {
+                suggestions: suggestions.clone(),
+                location: location.clone(),
+                detail: None,
+                ..report(
+                    AgentErrorCategory::AgentNative,
+                    format!(
+                        "Invalid model specified in {loc}! Running <yellow>opencode models</yellow> will give you\n\
+                         a list of all valid models. Model names follow the format <dim>[provider]</dim>/<dim>[model]</dim>\n\
+                         for direct providers like Google or Anthropic but take the form\n\
+                         <dim>[aggregator]</dim>/<dim>[provider]</dim>/<dim>[model]</dim> for aggregators like OpenRouter."
+                    ),
+                )
             }
         }
+        NativeCliCause::ArgumentRejected { switch } => {
+            let suffix = switch
+                .as_deref()
+                .map(|switch| format!(" (`{}`)", display_safe(redactor, switch)))
+                .unwrap_or_default();
+            report(
+                AgentErrorCategory::AgentNative,
+                format!("{provider_name} did not recognize a flag{suffix}"),
+            )
+        }
+        NativeCliCause::MissingArgument => report(
+            AgentErrorCategory::AgentNative,
+            "A required argument was missing from the command.".to_string(),
+        ),
     }
-    None
 }
 
-fn extract_first_api_error_message(stderr: &str) -> String {
-    for line in stderr.lines() {
-        if line.contains("API Error:") {
-            return line.to_string();
-        }
-    }
-    "An API error occurred.".to_string()
+/// Provider text made safe to place in report markup: recognized and
+/// tail-known secrets masked, control characters removed, markup escaped.
+fn display_safe(redactor: &Redactor, text: &str) -> String {
+    let masked = redactor.redact(text);
+    let printable: String = masked.as_str().chars().filter(|c| !c.is_control()).collect();
+    Prose::escape_text(printable.trim())
 }
 
 fn parse_model_suggestions(stderr: &str) -> Option<Vec<String>> {
@@ -552,288 +636,4 @@ fn parse_model_suggestions(stderr: &str) -> Option<Vec<String>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::commands::wrap::profile::{ConfiguredModel, ModelSource};
-
-    fn opencode_report(
-        exit_code: i32,
-        stderr: &str,
-        model_source: Option<&ModelSource>,
-    ) -> AgentErrorReport {
-        AgentErrorReport::from_exit_code_with_source(
-            Provider::OpenCode,
-            exit_code,
-            Some(stderr),
-            model_source,
-        )
-    }
-
-    #[test]
-    fn classify_provider_model_not_found_error() {
-        let stderr = "Error: ProviderModelNotFoundError: model xyz not found\nsuggestions: [\"abc/one\", \"abc/two\"]";
-        let source = ModelSource::CliSwitch("xyz".to_string());
-        let report = opencode_report(1, stderr, Some(&source));
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(
-            report
-                .summary
-                .contains("Invalid model specified in the --model CLI switch")
-        );
-        assert!(report.suggestions.is_some());
-        assert_eq!(report.suggestions.as_ref().unwrap().len(), 2);
-        assert_eq!(report.suggestions.as_ref().unwrap()[0], "abc/one");
-        assert_eq!(report.suggestions.as_ref().unwrap()[1], "abc/two");
-        assert_eq!(report.location.as_deref(), Some("the --model CLI switch"));
-    }
-
-    #[test]
-    fn classify_model_not_found_lowercased() {
-        let stderr = "model not found: invalid model name";
-        let source = ModelSource::ProviderEnv {
-            var: "OPENCODE_MODEL",
-            model: "bad".to_string(),
-        };
-        let report = opencode_report(1, stderr, Some(&source));
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(
-            report
-                .summary
-                .contains("the OPENCODE_MODEL environment variable")
-        );
-        assert_eq!(
-            report.location.as_deref(),
-            Some("the OPENCODE_MODEL environment variable")
-        );
-    }
-
-    #[test]
-    fn classify_invalid_model_text() {
-        let stderr = "invalid model specified";
-        let source = ModelSource::ConfigDefault(ConfiguredModel {
-            model: "bad".to_string(),
-            path: std::path::PathBuf::from("/home/u/.config/opencode/opencode.jsonc"),
-        });
-        let report = opencode_report(1, stderr, Some(&source));
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report.summary.contains("the config file"));
-        assert_eq!(
-            report.location.as_deref(),
-            Some("the config file /home/u/.config/opencode/opencode.jsonc")
-        );
-    }
-
-    #[test]
-    fn suggestions_parsed_from_stderr_payload() {
-        let result = parse_model_suggestions(
-            "some output\nSuggestions: [\"provider/a\", \"provider/b\", \"provider/c\"]\nmore",
-        );
-        assert_eq!(
-            result,
-            Some(vec![
-                "provider/a".to_string(),
-                "provider/b".to_string(),
-                "provider/c".to_string(),
-            ])
-        );
-    }
-
-    #[test]
-    fn suggestions_none_when_absent() {
-        assert_eq!(parse_model_suggestions("no suggestions here"), None);
-    }
-
-    #[test]
-    fn suggestions_none_when_empty_array() {
-        assert_eq!(parse_model_suggestions("suggestions: []"), None);
-    }
-
-    #[test]
-    fn no_model_provided_report_has_expected_content() {
-        let report = AgentErrorReport::no_model_provided(Provider::OpenCode);
-        assert_eq!(report.exit_code, 1);
-        assert_eq!(report.category, AgentErrorCategory::Configuration);
-        assert!(report.summary.contains("No model specified"));
-        assert!(report.summary.contains("<yellow>model</yellow>"));
-        assert!(
-            report
-                .summary
-                .contains("<blue>~/.config/opencode/opencode.json</blue>")
-        );
-        assert!(report.body_list.is_some());
-        let body_list = report.body_list.as_ref().unwrap();
-        assert!(body_list.iter().any(|s| s.contains("OPENCODE_MODEL")));
-        assert!(body_list.iter().any(|s| s.contains("--model")));
-        assert!(report.footer.is_some());
-        let footer = report.footer.as_ref().unwrap();
-        assert!(footer.contains("<yellow>opencode models</yellow>"));
-        assert!(footer.contains("<dim>[provider]</dim>"));
-        assert!(footer.contains("<dim>[aggregator]</dim>"));
-        assert!(report.suggestions.is_none());
-        assert_eq!(report.suggestion_style, SuggestionStyle::BareList);
-        assert!(report.location.is_none());
-    }
-
-    #[test]
-    fn invalid_model_report_has_suggestions_and_location() {
-        let report = AgentErrorReport::invalid_model(
-            Provider::OpenCode,
-            1,
-            "the --model CLI switch".to_string(),
-            vec!["suggestion/a".to_string(), "suggestion/b".to_string()],
-        );
-        assert_eq!(report.exit_code, 1);
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(
-            report
-                .summary
-                .contains("Invalid model specified in the --model CLI switch")
-        );
-        assert!(report.summary.contains("<yellow>opencode models</yellow>"));
-        assert!(report.summary.contains("<dim>[provider]</dim>"));
-        assert!(report.summary.contains("<dim>[aggregator]</dim>"));
-        assert_eq!(report.suggestions.as_ref().unwrap().len(), 2);
-        assert_eq!(report.location.as_deref(), Some("the --model CLI switch"));
-    }
-
-    #[test]
-    fn interrupted_exit_code_classified_correctly() {
-        let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 130, None);
-        assert_eq!(report.category, AgentErrorCategory::Interrupted);
-    }
-
-    #[test]
-    fn unknown_flag_classified_correctly() {
-        let stderr = "error: unexpected argument '--foo' found";
-        let report = AgentErrorReport::from_exit_code(Provider::Claude, 1, Some(stderr));
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report.summary.contains("did not recognize a flag"));
-        assert!(
-            report.summary.contains("--foo"),
-            "flag name should be named: {}",
-            report.summary
-        );
-    }
-
-    #[test]
-    fn native_cause_classifies_argument_rejection() {
-        let cause = classify_native_cli_cause(2, "error: unexpected argument '--nope' found");
-        assert_eq!(
-            cause,
-            Some(NativeCliCause::ArgumentRejected {
-                flag: Some("--nope".to_string())
-            })
-        );
-    }
-
-    #[test]
-    fn native_cause_does_not_misclassify_auth_as_argument() {
-        // Collision fixture: an auth failure must not be read as arg rejection.
-        let cause = classify_native_cli_cause(1, "Error: authentication failed: invalid api key");
-        assert_eq!(cause, Some(NativeCliCause::AuthOrPermission));
-    }
-
-    #[test]
-    fn native_cause_none_for_unclassified_exit() {
-        assert_eq!(
-            classify_native_cli_cause(1, "some unrelated crash output"),
-            None
-        );
-    }
-
-    #[test]
-    fn correlated_report_names_forwarded_switch_on_arg_rejection() {
-        let report = AgentErrorReport::correlated_with_forwarded_tail(
-            Provider::Codex,
-            2,
-            Some("error: unexpected argument '--badflag' found"),
-            None,
-            &["--badflag".to_string()],
-            false,
-        );
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(
-            report.summary.contains("--badflag"),
-            "summary: {}",
-            report.summary
-        );
-        assert!(report.summary.contains("likely caused by"));
-    }
-
-    #[test]
-    fn correlated_report_defers_when_not_arg_rejection() {
-        // An auth failure with a forwarded tail must NOT be attributed to it.
-        let report = AgentErrorReport::correlated_with_forwarded_tail(
-            Provider::Codex,
-            1,
-            Some("Error: authentication failed"),
-            None,
-            &["--badflag".to_string()],
-            false,
-        );
-        assert_eq!(report.category, AgentErrorCategory::Configuration);
-        assert!(!report.summary.contains("likely caused by"));
-    }
-
-    #[test]
-    fn correlated_report_defers_when_no_forwarded_tail() {
-        let report = AgentErrorReport::correlated_with_forwarded_tail(
-            Provider::Codex,
-            2,
-            Some("error: unexpected argument '--x' found"),
-            None,
-            &[],
-            false,
-        );
-        assert!(!report.summary.contains("likely caused by"));
-    }
-
-    #[test]
-    fn model_not_found_without_source_uses_default_location() {
-        let stderr = "ProviderModelNotFoundError: nope\nsuggestions: [\"a\"]";
-        let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 1, Some(stderr));
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(report.summary.contains("the command line"));
-        assert_eq!(report.suggestions.as_ref().unwrap()[0], "a");
-    }
-
-    #[test]
-    fn semantic_error_kind_maps_to_agent_error_category() {
-        assert_eq!(
-            AgentErrorCategory::from(SemanticErrorKind::Configuration),
-            AgentErrorCategory::Configuration
-        );
-        assert_eq!(
-            AgentErrorCategory::from(SemanticErrorKind::AgentNative),
-            AgentErrorCategory::AgentNative
-        );
-        assert_eq!(
-            AgentErrorCategory::from(SemanticErrorKind::ApiRemote),
-            AgentErrorCategory::ApiRemote
-        );
-        assert_eq!(
-            AgentErrorCategory::from(SemanticErrorKind::Interrupted),
-            AgentErrorCategory::Interrupted
-        );
-        // Unknown maps to AgentNative so the surface stays consistent with
-        // the existing four-category reporting scheme.
-        assert_eq!(
-            AgentErrorCategory::from(SemanticErrorKind::Unknown),
-            AgentErrorCategory::AgentNative
-        );
-    }
-
-    #[test]
-    fn model_not_found_without_source_or_suggestions_still_classifies() {
-        let stderr = "ProviderModelNotFoundError: model xyz not found";
-        let report = AgentErrorReport::from_exit_code(Provider::OpenCode, 1, Some(stderr));
-        assert_eq!(report.category, AgentErrorCategory::AgentNative);
-        assert!(
-            report
-                .summary
-                .contains("Invalid model specified in the command line")
-        );
-        assert!(report.suggestions.is_none());
-        assert_eq!(report.location, None);
-    }
-}
+mod tests;

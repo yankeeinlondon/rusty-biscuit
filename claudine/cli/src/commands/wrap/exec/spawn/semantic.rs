@@ -470,6 +470,11 @@ pub(crate) fn run_child_stream_semantic(
     let capture_always = has_bridge;
     let first_stderr_at_clone = Arc::clone(&first_stderr_at);
     let stderr_byte_metrics = live_metrics.clone();
+    // Bounded ring of the stderr lines that reach the terminal, for the
+    // native-exit failure report.
+    let stderr_tail_ring: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+    let stderr_tail_ring_clone = Arc::clone(&stderr_tail_ring);
     let stderr_handle = thread::spawn(move || {
         let _stderr_guard = stderr_span.enter();
         let mut captured = String::new();
@@ -505,6 +510,14 @@ pub(crate) fn run_child_stream_semantic(
                 && matches!(bridge.ingest(&line), StderrIngestOutcome::Consumed)
             {
                 continue;
+            }
+
+            {
+                let mut ring = stderr_tail_ring_clone.lock().unwrap();
+                if ring.len() == claudine::signals::EXIT_STDERR_TAIL_LINES {
+                    ring.pop_front();
+                }
+                ring.push_back(line.clone());
             }
 
             let formatted = crate::output::try_format_api_error(&line, &stderr_term);
@@ -728,6 +741,10 @@ pub(crate) fn run_child_stream_semantic(
         agent_pid: Some(captured_pid),
         guard_context,
         signals: signal_hub.drain(),
+        stream_tails: Some(super::super::StreamTails {
+            stdout: stdout_tail,
+            stderr: stderr_tail_ring.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n"),
+        }),
     };
     if !result.signals.is_empty() {
         let per_kind: Vec<String> = result

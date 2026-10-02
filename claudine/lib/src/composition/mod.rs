@@ -37,6 +37,7 @@ pub mod looping;
 pub mod mismatch;
 pub mod preflight;
 mod prepare;
+pub mod provider_tail;
 mod reserved;
 mod resolve;
 pub mod runtime_state;
@@ -44,6 +45,7 @@ pub mod schema;
 mod select;
 pub mod sequence;
 mod types;
+pub use provider_tail::{ProviderTail, ProviderTailNotices, SwitchAssignment};
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
 pub use authored_order::AuthoredOrder;

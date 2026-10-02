@@ -151,6 +151,15 @@ fn redactor_masks_repeated_values_and_provider_echoes() {
 }
 
 #[test]
+fn caller_known_values_are_masked_like_learned_ones() {
+    let redactor = Redactor::for_message("--password")
+        .with_known_values(["hunter22".to_string(), "abc".to_string(), MASK.to_string()]);
+    assert_eq!(redactor.redact("bad credential hunter22").as_str(), "bad credential ****");
+    assert_eq!(redactor.redact("abc stays").as_str(), "abc stays");
+    assert_eq!(format!("{redactor:?}"), "Redactor(1 known values)");
+}
+
+#[test]
 fn short_known_values_are_not_masked_elsewhere() {
     let redactor = Redactor::for_message("password=abc");
     assert_eq!(redactor.redact("abc is the alphabet").as_str(), "abc is the alphabet");

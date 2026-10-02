@@ -46,7 +46,7 @@ mod rule1_provider_bool;
 mod rule2_canonicalize;
 mod rule4_help_hoist;
 
-pub(crate) use partition::{ProviderArgs, partition_composition_tail};
+pub(crate) use partition::partition_composition_tail;
 pub(crate) use rule1_provider_bool::provider_for_boolean_flag;
 pub(crate) use rule2_canonicalize::is_fuzzy_provider_value;
 pub(crate) use rule4_help_hoist::hoist_composition_help;

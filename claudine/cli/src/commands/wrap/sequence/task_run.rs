@@ -584,8 +584,8 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             prep_env_context: Some(self.run.prep_context.env_context.clone()),
             prep_launch_detection_error: self.run.prep_context.launch_detection_error.clone(),
             header_emitted: false,
-            provider_args: shared.provider_args.clone(),
-            provider_args_explicit: shared.provider_args_explicit,
+            provider_tail: shared.provider_tail.clone(),
+            provider_tail_notices: shared.provider_tail_notices.clone(),
             // The task executor's cell, not the sequence's: a parallel group
             // member hands over its private buffer, so the launched document's
             // own lifecycle `set` stays invisible to its siblings.

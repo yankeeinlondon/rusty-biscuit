@@ -346,6 +346,21 @@ impl Redactor {
         Self { known }
     }
 
+    /// Also masks every occurrence of `values`, for secrets a caller
+    /// identified by position rather than by shape (the value after
+    /// `--password`). Values shorter than [`MIN_KNOWN_SECRET_BYTES`] are
+    /// ignored, as for learned values.
+    pub fn with_known_values(mut self, values: impl IntoIterator<Item = String>) -> Self {
+        self.known.extend(
+            values
+                .into_iter()
+                .filter(|value| value.len() >= MIN_KNOWN_SECRET_BYTES && value != MASK),
+        );
+        self.known.sort();
+        self.known.dedup();
+        self
+    }
+
     /// `text` with recognized spans and known values masked.
     pub fn redact(&self, text: &str) -> RedactedText {
         let mut spans = find_secret_spans(text);

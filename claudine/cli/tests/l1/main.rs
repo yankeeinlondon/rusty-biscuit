@@ -124,6 +124,8 @@ mod propagated_context_fixtures;
 mod prose_escape_guard;
 mod protect_cli;
 mod provider_error_finalize;
+mod provider_tail_launch;
+mod provider_tail_notice;
 mod run_harness_loop_call_sites;
 // Spawns the `claudine-fake-goose` fixture binary, which only
 // `test-fixtures` builds.

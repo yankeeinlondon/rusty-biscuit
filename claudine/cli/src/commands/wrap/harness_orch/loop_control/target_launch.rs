@@ -297,6 +297,10 @@ pub(crate) struct RebuiltLaunchIdentity {
     /// document. Identical to the invocation's own argv whenever the document
     /// moved no launch facet — see [`crate::commands::wrap::launch_plan`].
     pub(crate) args: Vec<String>,
+    /// The invocation's forwarded provider tail, already seeded into
+    /// [`Self::args`]. Carried separately so a resume appends it once and the
+    /// terminal failure report can name it.
+    pub(crate) provider_tail: claudine::composition::ProviderTail,
     /// The environment patch the rebuilt plan contributes (MCP runtime
     /// injection, the OpenCode inline config, the permission mode, the
     /// interactivity markers, and removals for provider-shaped keys the
@@ -489,6 +493,7 @@ pub(crate) fn rebuild_launch_identity(
         dispatch_context,
         env_overrides,
         args: plan.args,
+        provider_tail: intent.launch_plan_inputs.provider_tail.clone(),
         launch_env,
         system_prompt_artifacts: plan.system_prompt_artifacts,
         warnings: plan.warnings,

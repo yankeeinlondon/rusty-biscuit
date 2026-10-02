@@ -63,10 +63,25 @@ always win before a `--` — a colliding native switch (e.g. Codex's own `-m`)
 must be placed after `--`. The composition file must come first: an unowned
 switch (or a `--`) before the file is an error with ordering guidance.
 
-A generic INFO status names the forwarded switches (values redacted); `--dry-run`
-shows the forwarded tail in its metadata table so a launch can be audited.
-Because unknown switches are always forwarded, a genuinely invalid one may be
-rejected by the agent at startup. See the mechanism in
+Before launch, one INFO status says what is forwarded. It names switches only,
+never values, and describes a tail after `--` as opaque:
+
+```text
+ℹ Forwarding provider arguments to Codex: -c
+ℹ Forwarding an opaque argument tail to Codex (passed after --).
+```
+
+The notice appears once per distinct provider and tail for the whole command,
+so a `sequence` whose steps and parallel tasks all launch Codex with the same
+tail shows it once. `--quiet` and `--silent` suppress it. Claudine makes no
+claim about whether the agent accepts a forwarded switch, so a genuinely
+invalid one may be rejected by the agent at startup.
+
+`--dry-run` shows the forwarded tail in its metadata table, with secret-shaped
+values (`--api-key ****`, `--token=****`) masked, so a launch can be audited.
+The agent itself receives the original tokens. A forwarded token that is not
+valid UTF-8 is refused before anything runs, because Claudine will not change
+its bytes. See the mechanism in
 [argv-normalization.md → Provider-argument partition](argv-normalization.md#provider-argument-partition).
 
 ### Shell Completion

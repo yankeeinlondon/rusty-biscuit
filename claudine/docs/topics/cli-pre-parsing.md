@@ -68,6 +68,9 @@ provider-argument forwarding (a synthetic `--` collided with an authored `--`
 boundary). Its job — plus forwarding the agent tail — now belongs to the
 post-normalization ownership partition, `argv::partition_composition_tail`,
 described in [argv-normalization.md](./argv-normalization.md#provider-argument-partition).
+It returns the tail as one `ProviderTail` descriptor that records where an
+authored `--` split it; the same page documents the forwarding notice and
+redaction that composition and the direct wrappers share.
 Rule 4 still runs so `--help` is hoisted before the partition sees it.
 
 For the token-level semantics of each rule — including every pass-through
@@ -86,7 +89,9 @@ The normalizer never mutates argv when any of the following hold:
 2. **Tokens at or after the first literal `--`** — the wrapper separator
    ends the rule scan window.
 3. **Non-UTF-8 tokens** — rules are pattern-based on `&str`; opaque
-   `OsString` values are copied verbatim.
+   `OsString` values are copied verbatim. The ownership partition that
+   follows refuses a non-UTF-8 token that would be forwarded to the agent,
+   rather than rewriting its bytes.
 4. **Argv with fewer than two elements** — nothing downstream needs
    parsing.
 5. **Non-composition subcommands** — Rules 1 and 4 are gated to the

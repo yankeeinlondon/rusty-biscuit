@@ -915,12 +915,11 @@ pub struct CompositionExecutionRequest {
     /// argv at the same stage as direct-wrapper passthrough, ahead of
     /// Claudine's entrypoint / model / transport / prompt-delivery
     /// injections. Distinct from MCP arguments. Empty when no tail was given.
-    pub provider_args: Vec<String>,
+    pub provider_tail: super::ProviderTail,
 
-    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
-    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
-    /// Drives the INFO status wording only; never affects forwarding.
-    pub provider_args_explicit: bool,
+    /// The command-scoped record of forwarding notices already shown, shared
+    /// by every attempt and `sequence` task of one top-level command.
+    pub provider_tail_notices: super::ProviderTailNotices,
 
     /// The committed proxy handoff's evaluated `with:` overlay for this
     /// document, when it was reached through a proxy. Re-applied over the

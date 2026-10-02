@@ -25,4 +25,5 @@ Environment Variables:
 ┃ 
 ┃ You are a test fixture system prompt.
 
+ℹ Forwarding an opaque argument tail to Codex (passed after --).
 ✓ Pre-flight checks have passed

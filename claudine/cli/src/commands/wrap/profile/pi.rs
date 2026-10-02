@@ -149,7 +149,7 @@ impl WrapperProfile for PiWrapper {
         // rejected: its "partial UUID" match can trigger a cross-project fork
         // prompt (a hang risk unattended); `--session-id` also degrades safely
         // ("creating it if missing") instead of erroring. Resume args replace
-        // the base argv wholesale; `append_resume_passthrough_args` carries
+        // the base argv wholesale; `assemble_resume_args` carries
         // the structured launch's `--mode` and trust flag over, and the
         // follow-up prompt goes wherever that mode takes it.
         Ok(vec![

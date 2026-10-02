@@ -18,6 +18,7 @@ fn claude() -> &'static dyn WrapperProfile {
 fn launch_with(args: Vec<String>, env: HashMap<OsString, OsString>) -> AttemptLaunch {
     AttemptLaunch {
         args,
+        provider_tail: claudine::composition::ProviderTail::default(),
         env,
         stdin_seed: None,
         wire_prompt: None,

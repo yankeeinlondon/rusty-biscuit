@@ -185,9 +185,10 @@ It splits the normalized argv into:
 
 1. the **Claudine argv** handed to clap (the file, `key=value` setters, and
    every Claudine-owned option with its value); and
-2. the **provider tail** (`ProviderArgs`) forwarded verbatim to the underlying
-   agent, threaded through `CompositionExecutionRequest` and seeded into the
-   child argv at the same base position as direct-wrapper passthrough.
+2. the **provider tail** (`claudine::composition::ProviderTail`) forwarded
+   verbatim to the underlying agent, threaded through
+   `CompositionExecutionRequest` and seeded into the child argv at the same base
+   position as direct-wrapper passthrough.
 
 **Ownership model** (left to right, after the composition file has been seen):
 
@@ -200,7 +201,8 @@ It splits the normalized argv into:
   bare operands) is forwarded in original order.
 - A literal `--` after the file starts an **explicit** opaque tail: the `--` is
   consumed by Claudine and everything after it is forwarded with no further
-  classification.
+  classification. Only the first `--` is consumed; a later one is forwarded
+  as an ordinary token.
 
 The owned-flag surface is derived from the clap command definitions
 (`OwnedFlags::for_composition`) and covered by a drift test — never a second
@@ -224,6 +226,67 @@ Claudine argv:  claudine sequence fleet.md --provider codex
 provider tail:  -c model_reasoning_effort=low   (→ codex)
 ```
 
+### The tail descriptor
+
+`ProviderTail` keeps the forwarded tokens in order together with the
+**boundary**: the index where the tokens that followed an authored `--` begin.
+The `--` itself is consumed, so the boundary is the only record of where the
+caller put it.
+
+| Command line after the file | Forwarded tokens | `boundary()` |
+| --- | --- | --- |
+| `-c x=y` | `-c x=y` | `None` (all implicit) |
+| `-- -c value` | `-c value` | `Some(0)` (all opaque) |
+| `-c x=y -- --native z` | `-c x=y --native z` | `Some(2)` |
+| `-c x --` | `-c x` | `Some(2)` (authored, empty suffix) |
+
+`implicit_args()` and `opaque_args()` return the two halves. The child always
+receives `launch_args()`, the whole list, unchanged. The descriptor's `Debug`
+output prints counts only, so a traced request never shows a token.
+
+### Non-UTF-8 tokens are refused
+
+Child argv is `String`-based, so a forwarded token that is not valid UTF-8
+cannot be passed on byte for byte. Rather than rewrite it, the partition fails
+before anything runs and names the token's position among the forwarded
+arguments, never its bytes:
+
+```text
+Error: provider argument 2 (counting forwarded arguments from 1) is not valid UTF-8.
+```
+
+A non-UTF-8 token that is not part of the tail (for example in the file
+position) is left for clap, which rejects it. Direct wrappers behave the same
+way: clap refuses non-UTF-8 passthrough for them.
+
+### Forwarding notice and redaction
+
+Before launch, Claudine prints one INFO status naming what it forwards. Both
+composition and the direct wrappers (`claudine codex …`) print it:
+
+```text
+ℹ Forwarding provider arguments to Codex: -c
+ℹ Forwarding an opaque argument tail to Codex (passed after --).
+ℹ Forwarding provider arguments to Codex: -c, followed by an opaque argument tail (passed after --).
+```
+
+- Only switch names from the implicit part are listed. An `=value` suffix is
+  stripped, and a short token with attached text (`-csecret`, `-yq`) is
+  described as "a short switch with attached text (not shown)" rather than
+  split or echoed. Tokens after `--` are never listed.
+- `--quiet` and `--silent` suppress it. It goes to stderr.
+- It appears once per distinct provider and tail for each command. The
+  record belongs to the top-level command: every `sequence` step, parallel
+  task, and retry of that command shares it, and a separate command starts
+  fresh. The tail's boundary is part of the key, so `-c x` and `-c -- x` are
+  announced separately.
+
+Every surface that shows argument values passes them through the shared
+`redact_sensitive_args` policy first: the composition `--dry-run` "Provider
+args" row, the direct-wrapper `--dry-run` command line, the debug trace of the
+provider argv, and `AGENT_PARAMS`. The child still receives the original
+tokens.
+
 ## Pass-through guarantees
 
 The normalizer never mutates argv when any of the following hold:
@@ -235,7 +298,9 @@ The normalizer never mutates argv when any of the following hold:
 2. **Tokens at or after `--`.** The first literal `--` terminates the
    rule scan; everything after it is copied verbatim.
 3. **Non-UTF-8 tokens.** Rules are pattern-based on `&str`; `OsString`
-   values that are not valid UTF-8 are left in place.
+   values that are not valid UTF-8 are left in place. (The ownership
+   partition that runs afterwards refuses one that would be forwarded; see
+   [Non-UTF-8 tokens are refused](#non-utf-8-tokens-are-refused).)
 4. **Argv with fewer than two elements.** Nothing downstream needs
    parsing.
 5. **Non-composition subcommands.** Rule 1 and Rule 4 (and the ownership
@@ -254,14 +319,15 @@ rewriting inputs it should leave alone.
 Unit tests live inside the `argv` module (`#[cfg(test)] mod tests` in
 `mod.rs` and `partition.rs`) and cover every rewrite rule, each
 boolean-to-slug mapping, every pass-through guarantee, and the ownership
-partition (implicit/explicit tails, owned-flag reclaim after tail start,
-ordering errors, setter-vs-tail classification, owned-surface drift).
+partition (implicit/explicit/mixed tails and the boundary, owned-flag reclaim
+after tail start, ordering errors, setter-vs-tail classification, non-UTF-8
+refusal, owned-surface drift).
 
 Integration tests live in
 [`claudine/cli/tests/l1/argv_normalization.rs`](../../cli/tests/l1/argv_normalization.rs)
 and drive the compiled `claudine` binary through the headline cases plus
 the key pass-through cases (`--version`, root `--help`, `hooks --describe`)
 and the provider-forwarding cases (non-owned flag after/before the file).
-
-Reference: features `2026-04-17-cli-pre-processing` and
-`2026-07-13-cli-switches`.
+[`provider_tail_notice.rs`](../../cli/tests/l1/provider_tail_notice.rs) covers
+the notice, its deduplication across sequence steps and parallel tasks,
+redaction, and non-UTF-8 refusal on both launch paths.

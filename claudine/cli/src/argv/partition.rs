@@ -9,7 +9,7 @@
 //!
 //! - the **Claudine argv** handed to clap (file, `key=value` setters, and
 //!   Claudine-owned options with their values), and
-//! - the **provider tail** ([`ProviderArgs`]) threaded into execution as
+//! - the **provider tail** ([`ProviderTail`]) threaded into execution as
 //!   first-class launch state.
 //!
 //! ## Ownership model
@@ -27,11 +27,14 @@
 //!    forwarded in original order.
 //! 3. A literal `--` after the file starts an **explicit** opaque tail: the
 //!    delimiter is consumed by Claudine and everything after it is forwarded
-//!    verbatim with no further classification.
+//!    verbatim with no further classification. Its position is kept as the
+//!    tail's boundary, so an implicit prefix before it stays distinguishable.
 //!
 //! An unowned switch — or a `--` — appearing *before* the composition file is
 //! a [`PartitionError`], because the file must be resolvable independently of
-//! provider argv.
+//! provider argv. So is a forwarded token that is not valid UTF-8: the child
+//! argv is `String`-based, and a lossy conversion would send different bytes
+//! than the caller wrote.
 //!
 //! The owned-flag surface is derived from the clap command definitions (see
 //! [`OwnedFlags::for_composition`]); it is never a second hand-maintained list.
@@ -40,22 +43,13 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 
 use clap::{ArgAction, Args, CommandFactory};
+use claudine::composition::ProviderTail;
 
 use crate::args::Cli;
 use crate::commands::compose::ComposeArgs;
 use crate::commands::sequence::SequenceArgs;
 
 use super::{COMPOSITION_SUBCOMMANDS, as_utf8, find_subcommand, looks_like_flag, looks_like_setter};
-
-/// The provider-argument tail forwarded to the underlying agent.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ProviderArgs {
-    /// Forwarded tokens, in original order.
-    pub args: Vec<String>,
-    /// `true` when the tail was introduced by an explicit `--` boundary
-    /// (opaque, unclassified) rather than by an implicit non-Claudine switch.
-    pub explicit: bool,
-}
 
 /// Error surfaced when composition argv cannot be partitioned deterministically.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +58,9 @@ pub(crate) enum PartitionError {
     SwitchBeforeFile { subcommand: String, switch: String },
     /// A literal `--` appeared before the composition file.
     SeparatorBeforeFile { subcommand: String },
+    /// A forwarded token is not valid UTF-8. `position` counts forwarded
+    /// tokens from 1; the bytes themselves are never echoed.
+    NonUtf8ProviderArgument { position: usize },
 }
 
 impl std::fmt::Display for PartitionError {
@@ -84,6 +81,13 @@ impl std::fmt::Display for PartitionError {
                  the composition file.\n\
                  Supported order: claudine {subcommand} <file> [key=value ...] \
                  [CLAUDINE_OPTIONS] -- [AGENT_ARGS ...]"
+            ),
+            Self::NonUtf8ProviderArgument { position } => write!(
+                f,
+                "provider argument {position} (counting forwarded arguments from 1) is not \
+                 valid UTF-8.\n\
+                 Claudine forwards provider arguments unchanged and will not rewrite one \
+                 into different text. Pass the argument as valid UTF-8."
             ),
         }
     }
@@ -226,17 +230,18 @@ impl OwnedFlags {
 /// Partition an already-[normalized](super::normalize) argv into the Claudine
 /// argv (for clap) and the provider tail (for execution).
 ///
-/// Returns `(claudine_argv, None)` unchanged for any non-composition argv.
+/// Returns the argv unchanged, with an empty tail, for any non-composition
+/// argv.
 ///
 /// ## Errors
 ///
 /// [`PartitionError`] when a non-Claudine switch or a `--` appears before the
-/// composition file.
+/// composition file, or when a forwarded token is not valid UTF-8.
 pub(crate) fn partition_composition_tail(
     argv: Vec<OsString>,
-) -> Result<(Vec<OsString>, ProviderArgs), PartitionError> {
+) -> Result<(Vec<OsString>, ProviderTail), PartitionError> {
     let Some((sub_idx, sub_name)) = find_subcommand(&argv, COMPOSITION_SUBCOMMANDS) else {
-        return Ok((argv, ProviderArgs::default()));
+        return Ok((argv, ProviderTail::default()));
     };
 
     let owned = OwnedFlags::for_composition();
@@ -244,8 +249,8 @@ pub(crate) fn partition_composition_tail(
     // Everything up to and including the subcommand stays in the Claudine argv.
     let mut claudine: Vec<OsString> = argv[..=sub_idx].to_vec();
     let mut tail: Vec<String> = Vec::new();
+    let mut opaque: Option<Vec<String>> = None;
     let mut tail_started = false;
-    let mut explicit = false;
     let mut file_seen = false;
 
     let mut i = sub_idx + 1;
@@ -260,10 +265,11 @@ pub(crate) fn partition_composition_tail(
                     subcommand: sub_name.to_string(),
                 });
             }
-            for opaque in &argv[i + 1..] {
-                tail.push(opaque.to_string_lossy().into_owned());
+            let mut suffix = Vec::with_capacity(argv.len() - i - 1);
+            for token in &argv[i + 1..] {
+                suffix.push(forwarded_text(token, tail.len() + suffix.len())?);
             }
-            explicit = true;
+            opaque = Some(suffix);
             break;
         }
 
@@ -306,7 +312,7 @@ pub(crate) fn partition_composition_tail(
 
         // Positional token (file, setter, operand) or a non-UTF-8 token.
         if tail_started {
-            tail.push(token.to_string_lossy().into_owned());
+            tail.push(forwarded_text(token, tail.len())?);
         } else if !file_seen {
             // Before the file: a setter-shaped token is a Claudine setter and
             // leaves the file unclaimed; any other bare token is the file.
@@ -323,7 +329,15 @@ pub(crate) fn partition_composition_tail(
         i += 1;
     }
 
-    Ok((claudine, ProviderArgs { args: tail, explicit }))
+    Ok((claudine, ProviderTail::new(tail, opaque)))
+}
+
+/// The UTF-8 text of a token joining the tail at zero-based `index`.
+fn forwarded_text(token: &OsString, index: usize) -> Result<String, PartitionError> {
+    token
+        .to_str()
+        .map(str::to_owned)
+        .ok_or(PartitionError::NonUtf8ProviderArgument { position: index + 1 })
 }
 
 #[cfg(test)]
@@ -338,7 +352,7 @@ mod tests {
         tokens.iter().map(|s| s.to_string()).collect()
     }
 
-    fn partition(tokens: &[&str]) -> (Vec<String>, ProviderArgs) {
+    fn partition(tokens: &[&str]) -> (Vec<String>, ProviderTail) {
         let (claudine, tail) = partition_composition_tail(argv(tokens)).expect("no partition error");
         let claudine: Vec<String> = claudine
             .into_iter()
@@ -351,7 +365,7 @@ mod tests {
     fn non_composition_argv_passes_through() {
         let (claudine, tail) = partition(&["claudine", "codex", "-c", "x"]);
         assert_eq!(claudine, strs(&["claudine", "codex", "-c", "x"]));
-        assert!(tail.args.is_empty());
+        assert!(tail.is_empty());
     }
 
     #[test]
@@ -372,8 +386,8 @@ mod tests {
             claudine,
             strs(&["claudine", "sequence", "fleet.md", "-y", "--provider", "codex"])
         );
-        assert_eq!(tail.args, strs(&["-c", "model_reasoning_effort=low"]));
-        assert!(!tail.explicit);
+        assert_eq!(tail.launch_args(), strs(&["-c", "model_reasoning_effort=low"]));
+        assert_eq!(tail.boundary(), None);
     }
 
     #[test]
@@ -383,7 +397,7 @@ mod tests {
             claudine,
             strs(&["claudine", "compose", "file.md", "name=Ken"])
         );
-        assert_eq!(tail.args, strs(&["--codexflag"]));
+        assert_eq!(tail.launch_args(), strs(&["--codexflag"]));
     }
 
     #[test]
@@ -397,7 +411,7 @@ mod tests {
             claudine,
             strs(&["claudine", "compose", "file.md", "-m", "gpt5"])
         );
-        assert_eq!(tail.args, strs(&["--config", "foo"]));
+        assert_eq!(tail.launch_args(), strs(&["--config", "foo"]));
     }
 
     #[test]
@@ -407,8 +421,39 @@ mod tests {
         ]);
         assert_eq!(claudine, strs(&["claudine", "compose", "file.md"]));
         // Even `--silent` (a Claudine flag) is opaque after `--`.
-        assert_eq!(tail.args, strs(&["-c", "--silent", "value"]));
-        assert!(tail.explicit);
+        assert_eq!(tail.launch_args(), strs(&["-c", "--silent", "value"]));
+        assert_eq!(tail.boundary(), Some(0));
+    }
+
+    #[test]
+    fn separator_after_implicit_prefix_keeps_the_boundary() {
+        // `-c x=y -- --native z`: one Boolean could not describe this tail.
+        let (claudine, tail) = partition(&[
+            "claudine", "compose", "file.md", "-c", "x=y", "--", "--native", "z",
+        ]);
+        assert_eq!(claudine, strs(&["claudine", "compose", "file.md"]));
+        assert_eq!(tail.launch_args(), strs(&["-c", "x=y", "--native", "z"]));
+        assert_eq!(tail.boundary(), Some(2));
+        assert_eq!(tail.implicit_args(), strs(&["-c", "x=y"]));
+        assert_eq!(tail.opaque_args().unwrap(), strs(&["--native", "z"]));
+    }
+
+    #[test]
+    fn authored_empty_suffix_is_preserved() {
+        let (_, prefix_only) = partition(&["claudine", "compose", "file.md", "-c", "x", "--"]);
+        assert_eq!(prefix_only.launch_args(), strs(&["-c", "x"]));
+        assert_eq!(prefix_only.boundary(), Some(2));
+
+        let (_, bare) = partition(&["claudine", "compose", "file.md", "--"]);
+        assert!(bare.is_empty());
+        assert_eq!(bare.boundary(), Some(0));
+    }
+
+    #[test]
+    fn only_the_first_separator_is_consumed() {
+        let (_, tail) = partition(&["claudine", "compose", "file.md", "--", "a", "--", "b"]);
+        assert_eq!(tail.launch_args(), strs(&["a", "--", "b"]));
+        assert_eq!(tail.boundary(), Some(0));
     }
 
     #[test]
@@ -434,7 +479,7 @@ mod tests {
             claudine,
             strs(&["claudine", "compose", "-m", "gpt5", "file.md"])
         );
-        assert_eq!(tail.args, strs(&["--x"]));
+        assert_eq!(tail.launch_args(), strs(&["--x"]));
     }
 
     #[test]
@@ -443,7 +488,7 @@ mod tests {
         // existing multiple-file error rather than starting a tail.
         let (claudine, tail) = partition(&["claudine", "compose", "a.md", "b.md"]);
         assert_eq!(claudine, strs(&["claudine", "compose", "a.md", "b.md"]));
-        assert!(tail.args.is_empty());
+        assert!(tail.is_empty());
     }
 
     #[test]
@@ -453,7 +498,7 @@ mod tests {
             claudine,
             strs(&["claudine", "compose", "file.md", "-yq"])
         );
-        assert_eq!(tail.args, strs(&["--x"]));
+        assert_eq!(tail.launch_args(), strs(&["--x"]));
     }
 
     // ── Drift detection: the owned surface is derived from clap definitions ──
@@ -479,5 +524,54 @@ mod tests {
         }
         // The `sequence`-only flag is in the union.
         assert!(owned.is_value_flag("--fail-fast"));
+    }
+
+    // ── Non-UTF-8 refusal: never rewrite the bytes a caller forwarded ──
+
+    #[cfg(unix)]
+    fn invalid_token() -> OsString {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec(vec![b'b', 0xFF, b'd'])
+    }
+
+    #[cfg(windows)]
+    fn invalid_token() -> OsString {
+        use std::os::windows::ffi::OsStringExt;
+        // An unpaired surrogate: valid WTF-16, not valid UTF-8.
+        OsString::from_wide(&[0x0062, 0xD800, 0x0064])
+    }
+
+    fn with_invalid(tokens: &[&str], at: usize) -> Vec<OsString> {
+        let mut argv = argv(tokens);
+        argv.insert(at, invalid_token());
+        argv
+    }
+
+    #[test]
+    fn non_utf8_implicit_tail_token_is_refused_by_position() {
+        let argv = with_invalid(&["claudine", "compose", "file.md", "--x", "-c"], 5);
+        let err = partition_composition_tail(argv).expect_err("lossy conversion must be refused");
+        assert_eq!(err, PartitionError::NonUtf8ProviderArgument { position: 3 });
+        let message = err.to_string();
+        assert!(message.contains("provider argument 3"), "{message}");
+        assert!(message.contains("not valid UTF-8"), "{message}");
+        assert!(!message.contains('\u{FFFD}'), "{message}");
+    }
+
+    #[test]
+    fn non_utf8_opaque_tail_token_is_refused_by_position() {
+        let argv = with_invalid(&["claudine", "compose", "file.md", "-c", "x", "--", "a"], 7);
+        let err = partition_composition_tail(argv).expect_err("lossy conversion must be refused");
+        assert_eq!(err, PartitionError::NonUtf8ProviderArgument { position: 4 });
+    }
+
+    #[test]
+    fn non_utf8_token_outside_the_tail_is_left_for_clap() {
+        // Before any tail starts, the token is a Claudine positional; clap
+        // reports it, so the partition passes it through untouched.
+        let argv = with_invalid(&["claudine", "compose", "file.md"], 3);
+        let (claudine, tail) = partition_composition_tail(argv).expect("not a tail token");
+        assert_eq!(claudine[3], invalid_token());
+        assert!(tail.is_empty());
     }
 }

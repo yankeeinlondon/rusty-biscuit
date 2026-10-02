@@ -221,12 +221,13 @@ pub struct SharedComposeArgs {
     /// Not parsed by clap — populated in `main` after the parse from the
     /// partitioned argv, so it is deliberately excluded from the CLI surface.
     #[arg(skip)]
-    pub provider_args: Vec<String>,
+    pub provider_tail: claudine::composition::ProviderTail,
 
-    /// `true` when [`Self::provider_args`] came from an explicit `--` boundary
-    /// (opaque, unclassified) rather than an implicit non-Claudine switch.
+    /// Forwarding notices already shown by this command. Created with the
+    /// parse, so it lives exactly as long as the top-level command; every
+    /// request built from these args shares it.
     #[arg(skip)]
-    pub provider_args_explicit: bool,
+    pub provider_tail_notices: claudine::composition::ProviderTailNotices,
 }
 
 /// CLI-facing wrapper for [`claudine::composition::OnRateLimit`], exposed
