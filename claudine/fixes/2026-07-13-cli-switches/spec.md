@@ -26,63 +26,37 @@ review_iterations: 0
 refreshed_on: 2026-10-01
 human_review: false
 message_to_agent: |-
-    Phase 4 is done; read "## Phase 4" in implementation-log.md. Facts Phase 5 needs:
-    - Contract: docs/research/agent-cli/_schema.yaml is revision 2 (schema_revision: literal(2));
-      record types live in agent-cli/_types.yaml (cli_switch, switch_scope). The old contract is
-      frozen as _schema.r1.yaml; claudine-gen validates any document without schema_revision
-      against it and generates CliSwitchCatalog::Unknown { gap } for its switches. Every committed
-      agent-cli doc is still revision 1, so all ten providers are Unknown today. Delete
-      _schema.r1.yaml once every agent-cli doc is revision 2 (tests copy it in
-      gen/tests/l1/pipeline.rs; remove that copy too).
-    - No document carries revision 2 yet, so you may still change revision 2 before the fleet runs.
-      The rest of the agent-cli contract is not narrowed (the description lint reports 25 problems
-      on older properties such as binaries/config_paths quoted objects). Decide whether to narrow
-      them inside revision 2 now, so a single fleet run covers it, rather than forcing a revision 3
-      refresh later. If you change config_paths' shape, update the ConfigPathRecordsToConfigPaths
-      coercion and its RecordArray expectation.
-    - The fleet prompt (agent-cli/_fleet.md) is untouched and still asks for the revision-1 shape;
-      it has no success-event validation or revision-aware skip yet (copy reasoning-level/_fleet.md).
-      A revision-2 doc needs versions_examined, evidence (shared ../_types.yaml), per-switch
-      evidence_ids, and gap wherever value_type or variadic_min is unknown; an empty inventory needs
-      cli_switches_gap. The generator also enforces relations md schema validate cannot: null on an
-      optional field, value_optional only on string/number, variadic_min only on variadic,
-      attachment empty exactly for none/unknown, short_attached only with a -x spelling, no
-      spelling shared by two records at a command path both accept. The fleet's relations check
-      should mirror these, or the generator will be the first to refuse the document.
-    - Generated shape: ProviderInfo::cli_switches: CliSwitchCatalog (catalog-types cli_switch.rs,
-      re-exported as claudine::provider::{CliSwitch, CliSwitchCatalog, SwitchValue, VariadicMin,
-      SwitchAttachment, SwitchScope}). Records are sorted by flag then scope. No lookup API exists
-      yet; scope semantics (global meets every path, command meets only the identical path) are in
-      gen/src/generate/coerce/cli_switches.rs::scopes_meet and should be shared, not re-derived.
-    - The Researched emitter form compiles (checked once by generating Codex from
-      gen/tests/fixtures/agent-cli-r2/codex.md), but no committed data.rs uses it until the fleet
-      lands. Regenerating changes data.rs bytes: re-bless gen/tests/fixtures/generated-artifact-baseline.json
-      (xxh64, seed 0).
-    Phase 3 facts still relevant:
-    - Heads-up on history: commit 778fea8bb (titled as the Phase 2 fix) was made by a process
-      outside the Phase 3 session and captured most of Phase 3's source mid-phase. The working
-      tree is authoritative; do not try to rewrite history.
-    - Phase 4 (generator/catalog-types) is independent of the argv/wrap code Phase 3 touched.
-    - For Phase 5 message enrichment, the shared display seams are in
-      cli/src/commands/wrap/provider_tail_report.rs: `tail_summary(tail)` (value-free names,
-      opaque phrase) feeds both the INFO notice and the correlated report, `switch_names_for_display`
-      describes `-csecret` as "a short switch with attached text (not shown)" until metadata can
-      split it, and `tail_names_switch(tail, switch)` decides whether a rejection's named switch
-      belongs to the tail. Enrich there, not in error_report.rs.
-    - Without metadata, `redact_sensitive_args` masks only a credential-shaped value attached to a
-      short switch (`-csk-…` -> `-c****`); an ordinary `-cfoo` stays visible in dry-run and
-      AGENT_PARAMS. Researched attachable switches (Phase 5/6) can widen this.
-    - The tail is `LaunchPlanInputs::provider_tail: ProviderTail` and rides on
-      `RebuiltLaunchIdentity`/`AttemptLaunch`. Resume assembly relies on the tail staying one
-      contiguous run of the launch argv; keep seeding it first (Phase 6 per-spawn checks should
-      read `rebuilt.provider_tail`, which already has the per-attempt provider beside it).
-    - The correlated report is rendered in `classify_attempt_phase` after recovery is exhausted;
-      a resolved-provider check (Phase 6) that fails before spawn is a different error and must not
-      go through `AgentErrorReport::for_native_exit`.
-    - Sequence steps share the sequence's `agent`; a multi-provider sequence needs a proxy (see the
-      L1 test `provider_tail_launch::each_step_of_a_multi_provider_sequence_carries_the_tail_once`).
-    Gates after Phase 4 from claudine/: `just test` 8142 passed, 9 skipped; `just lint` clean;
-    `claudine-gen check` clean.
+    Phase 6 is done; read "## Phase 6" in implementation-log.md. Facts Phase 7 needs:
+    - Ownership is ONE pure function: claudine::composition::own_arguments(&ArgumentsAfterFile,
+      &SchemaParameters, &[OwnershipCandidate]) -> Result<OwnedArguments, OwnershipError>
+      (lib/src/composition/ownership.rs). Completion (R4) must build an ArgumentsAfterFile from the
+      tokens before the cursor (CallerArgument::ClaudineOption where OwnedFlags::for_composition
+      removes a Claudine option) and call it; it must never prompt, so treat every Err
+      (Ambiguous, ContestedSetter, Mismatch, ReservedArgv) as "no suggestions".
+    - The CLI half to reuse or mirror is cli/src/commands/compose/ownership.rs: candidates() (CLI
+      provider, else literal frontmatter agent, a templated entry keeps all, else every provider,
+      each at SwitchContext::for_launch(profile, !interactive)) and
+      composition::authored_schema_parameters(source, fallback, ctx) for schema names. Completion
+      must swallow a schema read error (no suggestions), unlike execution. own_caller_arguments
+      itself is execution-only: it may prompt and it writes shared.provider_tail.
+    - "Unfinished value slot vs terminal missing-value": an open value run at the end of the
+      tokens yields Mismatch(MissingValue) only when EVERY candidate requires a value; with the
+      cursor right after a switch, completion should treat the slot as the provider's (offer
+      nothing) rather than run the final check. check_launch_tail is the per-launch check; do not
+      call it from completion.
+    - Docs were updated in Phase 6 (argv-normalization.md "Type-aware ownership" with a Mermaid
+      flow, composition.md positional arguments/argv and forwarding, cli-pre-parsing.md,
+      frontmatter-properties.md argv row) and the claudine skill (SKILL.md, cli-reference.md,
+      timeline.md). Phase 7 still owes docs/topics/completions/ and a polish pass.
+    - The spec acceptance table was refreshed: open are 12 (completion) and the completion halves
+      of 20 and 27.
+    - claudine::provider::{lookup_candidates, CandidateSwitch} (Phase 5) are unused outside their
+      own tests; ownership needed attachment-aware arms and uses match_switch_token per candidate.
+      Remove them or keep them deliberately.
+    - Windows (`just cross-check claudine --os windows`): 7 failures, all path spelling or home
+      resolution in modules Phase 6 did not touch (listed in the log); all ownership tests pass.
+    Gates after Phase 6 from claudine/: `just test` 8211 passed, 9 skipped; `just test-l2` 277
+    passed; `just lint` clean; `claudine-gen check` clean.
 ---
 
 # Composition forwards provider CLI switches to the agent
@@ -102,9 +76,9 @@ claudine sequence docs/research/agent-errors/_fleet.md -y --codex -c 'model_reas
 On 2026-10-01 the token-ownership contract was revised: the split between
 Claudine and the agent is now decided by switch **types** researched for every
 provider, not by "everything after the first unknown switch". The revised rules
-are [Token ownership](#token-ownership) and the work is [researched switch metadata](#r8-research-backed-switch-types-not-started) and [type-aware ownership](#r9-type-aware-token-ownership). Until [type-aware ownership](#r9-type-aware-token-ownership)
-lands, the code still uses the original rule, described under
-[Current partition](#current-partition).
+are [Token ownership](#token-ownership) and the work is [researched switch metadata](#r8-research-backed-switch-types-not-started) and [type-aware ownership](#r9-type-aware-token-ownership). Status 2026-10-02: both have
+landed (Phases 5 and 6); [Current partition](#current-partition) describes
+the rule they replaced. What remains is completion (R4) and close-out.
 
 The rest of this spec states the contract and describes only the work that
 remains. [Remaining work](#remaining-work) lists the gaps, and
@@ -828,7 +802,7 @@ name the corresponding work in [Remaining work](#remaining-work).
 | 1 | `sequence`/`compose`/`inline-compose <file> --codex -c 'model_reasoning_effort=low'` launches Codex with exactly that tail. The value is not applied as frontmatter | Done |
 | 2 | `compose <file> --codex -- -c value` consumes `--`, forwards `-c value`, and does no collision extraction | Done |
 | 3 | `compose --unknown <file>` fails with file-before-tail guidance | Done |
-| 4 | A shorthand setter is applied wherever it appears, unless rule 3 gives it to the string switch directly before it | Revised 2026-10-01. Open ([type-aware ownership](#r9-type-aware-token-ownership)). Today a setter after tail start is forwarded |
+| 4 | A shorthand setter is applied wherever it appears, unless rule 3 gives it to the string switch directly before it | Done (type-aware ownership) |
 | 5 | A Claudine flag before `--` stays Claudine's even after the first provider switch. The same spelling after `--` is forwarded | Done (unit) |
 | 6 | Bare provider operands require `--` | Done |
 | 7 | The exact tail survives sequence steps, retries, proxy runs, and **resume**. Multi-provider sequences classify messages per provider without changing argv | Done |
@@ -838,19 +812,19 @@ name the corresponding work in [Remaining work](#remaining-work).
 | 11 | Direct wrappers share the tail descriptor, notice, classification, and reporting, with no child-argv change | Done |
 | 12 | Completion uses the shared ownership function, never fails (offering nothing when ownership cannot decide), stops Claudine suggestions after `--`, and keeps file/setter completion | Open ([shared completion ownership](#r4-completion-uses-the-owned-surface)) |
 | 13 | No synthetic separator can be mistaken for an authored boundary. Rule 3 is retired | Done |
-| 14 | Generated metadata recognizes Codex `-c` as `--config` with type `string`, enriches the message, and rejects alias/type drift | Open ([researched switch metadata](#r8-research-backed-switch-types-not-started)) |
+| 14 | Generated metadata recognizes Codex `-c` as `--config` with type `string`, enriches the message, and rejects alias/type drift | Done |
 | 15 | A non-UTF-8 tail token is refused with a targeted error, never rewritten | Done |
-| 16 | A declared `$schema` parameter before `--` is always a Claudine setter, including directly after a provider switch | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 17 | `-c model_reasoning_effort=low phase=2` forwards `-c model_reasoning_effort=low` and applies `phase=2`, both with `--codex` and with no provider named | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 18 | A variadic switch takes a contiguous run up to the next switch or setter, and never takes a `key=value` that is not its first value | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 19 | The candidate set narrows to the CLI provider, then frontmatter `agent`, then all providers. A single candidate uses only its own types | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 20 | Disagreement over bare-word consumption never silently chooses ownership. When eligible, Claudine asks which agent is intended and the answer decides ownership only; otherwise execution fails with guidance. Completion never prompts | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 21 | A researched mismatch in an implicit switch's value count fails before spawn; explicit tails remain opaque. The check runs at ownership when it holds for every candidate, at preflight for every statically known launch and `sequence` step, and before each spawn otherwise | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 22 | An unrecognized switch takes a following bare word, never a `key=value`, and the notice names it as unrecognized | Open ([researched switch metadata](#r8-research-backed-switch-types-not-started), [type-aware ownership](#r9-type-aware-token-ownership)) |
-| 23 | Leftover bare words become the `argv` frontmatter array in order, excluding the file and anything after `--`. They override an authored `argv`. An `argv=…` setter or `--set` key before `--` is an error. A second bare word is no longer a multiple-file error | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 24 | Exact names and aliases take precedence. Only researched value-bearing switches accept attached forms; unknown clusters are not split. Attached tokens remain unchanged | Open ([researched switch metadata](#r8-research-backed-switch-types-not-started), [type-aware ownership](#r9-type-aware-token-ownership)) |
-| 25 | Mixed implicit and explicit tails preserve the authored boundary; only the implicit prefix receives ownership checks. Resume preserves repeated authored switches exactly once | Boundary and resume Done. Open: ownership checks ([type-aware ownership](#r9-type-aware-token-ownership)) |
-| 26 | Missing/unknown metadata does not mean a no-value switch. Optional values, variadic minimum counts, and different candidate consumption lengths follow the documented rules | Open ([researched switch metadata](#r8-research-backed-switch-types-not-started), [type-aware ownership](#r9-type-aware-token-ownership)) |
-| 27 | Help needs no readable file. Ownership reads are side-effect free and use existing source-relative resolution; completion never prompts or launches a provider | Open ([shared completion ownership](#r4-completion-uses-the-owned-surface), [type-aware ownership](#r9-type-aware-token-ownership)) |
+| 16 | A declared `$schema` parameter before `--` is always a Claudine setter, including directly after a provider switch | Done |
+| 17 | `-c model_reasoning_effort=low phase=2` forwards `-c model_reasoning_effort=low` and applies `phase=2`, both with `--codex` and with no provider named | Done |
+| 18 | A variadic switch takes a contiguous run up to the next switch or setter, and never takes a `key=value` that is not its first value | Done |
+| 19 | The candidate set narrows to the CLI provider, then frontmatter `agent`, then all providers. A single candidate uses only its own types | Done |
+| 20 | Disagreement over bare-word consumption never silently chooses ownership. When eligible, Claudine asks which agent is intended and the answer decides ownership only; otherwise execution fails with guidance. Completion never prompts | Done for execution (prompt and error). Open: completion never prompting ([shared completion ownership](#r4-completion-uses-the-owned-surface)) |
+| 21 | A researched mismatch in an implicit switch's value count fails before spawn; explicit tails remain opaque. The check runs at ownership when it holds for every candidate, at preflight for every statically known launch and `sequence` step, and before each spawn otherwise | Done |
+| 22 | An unrecognized switch takes a following bare word, never a `key=value`, and the notice names it as unrecognized | Done |
+| 23 | Leftover bare words become the `argv` frontmatter array in order, excluding the file and anything after `--`. They override an authored `argv`. An `argv=…` setter or `--set` key before `--` is an error. A second bare word is no longer a multiple-file error | Done |
+| 24 | Exact names and aliases take precedence. Only researched value-bearing switches accept attached forms; unknown clusters are not split. Attached tokens remain unchanged | Done |
+| 25 | Mixed implicit and explicit tails preserve the authored boundary; only the implicit prefix receives ownership checks. Resume preserves repeated authored switches exactly once | Done |
+| 26 | Missing/unknown metadata does not mean a no-value switch. Optional values, variadic minimum counts, and different candidate consumption lengths follow the documented rules | Done |
+| 27 | Help needs no readable file. Ownership reads are side-effect free and use existing source-relative resolution; completion never prompts or launches a provider | Done for help and ownership reads. Open: completion ([shared completion ownership](#r4-completion-uses-the-owned-surface)) |
 | 28 | A rejection naming only an injected switch is not attributed to the tail; stdout rejection and operand-only explicit rejection are reported once, with echoed recognized secrets masked | Done |
-| 29 | Ownership uses the authored snapshot: a setter or `--set` that changes `agent` or `$schema` does not change ownership, raw JSON Schema contributes only top-level property names, unestablished names make a contested setter-shaped token an error, and final validation still uses the effective frontmatter | Open ([type-aware ownership](#r9-type-aware-token-ownership)) |
+| 29 | Ownership uses the authored snapshot: a setter or `--set` that changes `agent` or `$schema` does not change ownership, raw JSON Schema contributes only top-level property names, unestablished names make a contested setter-shaped token an error, and final validation still uses the effective frontmatter | Done |

@@ -8,6 +8,7 @@ packages:
     - claudine-cli
     - claudine-gen
     - claudine-catalog-types
+    - darkmatter
 source_files_during_phase_1: []
 docs_updated_during_phase_1: []
 docs_created_during_phase_1: []
@@ -140,6 +141,108 @@ docs_created_during_phase_4:
 skills_files_updated_during_phase_4:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/research-contracts.md
+source_files_during_phase_5:
+    - claudine/catalog-types/src/cli_switch.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/cli_switch/tests.rs
+    - claudine/lib/src/provider/mod.rs
+    - claudine/lib/src/provider/antigravity/data.rs
+    - claudine/lib/src/provider/claude/data.rs
+    - claudine/lib/src/provider/codex/data.rs
+    - claudine/lib/src/provider/gemini/data.rs
+    - claudine/lib/src/provider/goose/data.rs
+    - claudine/lib/src/provider/kilo/data.rs
+    - claudine/lib/src/provider/kimi/data.rs
+    - claudine/lib/src/provider/opencode/data.rs
+    - claudine/lib/src/provider/pi/data.rs
+    - claudine/lib/src/provider/qwen/data.rs
+    - claudine/gen/src/main.rs
+    - claudine/gen/src/report.rs
+    - claudine/gen/tests/l1/cli_switches.rs
+    - claudine/gen/tests/l1/generate_ux.rs
+    - claudine/gen/tests/l1/pipeline.rs
+    - claudine/gen/tests/fixtures/agent-cli-r1/codex.md
+    - claudine/gen/tests/fixtures/agent-cli-r1/_schema.r1.yaml
+    - claudine/gen/tests/fixtures/agent-cli-r2/codex.md
+    - claudine/gen/tests/fixtures/generated-artifact-baseline.json
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report/tests.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+    - claudine/docs/research/agent-cli/_relations.py
+    - claudine/justfile
+docs_updated_during_phase_5:
+    - claudine/docs/research/agent-cli/_schema.yaml
+    - claudine/docs/research/agent-cli/_types.yaml
+    - claudine/docs/research/agent-cli/_fleet.md
+    - claudine/docs/research/agent-cli/antigravity.md
+    - claudine/docs/research/agent-cli/claude.md
+    - claudine/docs/research/agent-cli/codex.md
+    - claudine/docs/research/agent-cli/gemini.md
+    - claudine/docs/research/agent-cli/goose.md
+    - claudine/docs/research/agent-cli/kilo.md
+    - claudine/docs/research/agent-cli/kimi.md
+    - claudine/docs/research/agent-cli/opencode.md
+    - claudine/docs/research/agent-cli/pi.md
+    - claudine/docs/research/agent-cli/qwen.md
+    - claudine/docs/providers/catalog.json
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/docs/topics/provider-metadata.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/composition.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/research-contracts.md
+    - .claude/skills/claudine/cli-reference.md
+source_files_during_phase_6:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/schema/mod.rs
+    - claudine/lib/src/composition/types.rs
+    - claudine/lib/src/provider/cli_switch.rs
+    - claudine/lib/src/provider/mod.rs
+    - darkmatter/lib/src/markdown/schemas/mod.rs
+    - claudine/cli/src/main.rs
+    - claudine/cli/src/argv/mod.rs
+    - claudine/cli/src/argv/partition.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/argv/rule4_help_hoist.rs
+    - claudine/cli/src/commands/compose/mod.rs
+    - claudine/cli/src/commands/compose/ownership.rs
+    - claudine/cli/src/commands/compose/prep.rs
+    - claudine/cli/src/commands/compose/prep/tests.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/commands/sequence.rs
+    - claudine/cli/src/commands/wrap/provider_tail_report.rs
+    - claudine/cli/src/commands/wrap/composition/pipeline.rs
+    - claudine/cli/src/commands/wrap/harness_orch/launch.rs
+    - claudine/cli/src/commands/wrap/sequence/mod.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/level1_ownership_prompt_pty.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/provider_tail_notice.rs
+    - claudine/cli/tests/l1/wrap_compose_validation.rs
+    - claudine/cli/tests/l1/effective_diagnostic_render.rs
+    - claudine/cli/tests/level2/level2_typed_error_render_capture.rs
+docs_updated_during_phase_6:
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/topics/cli-pre-parsing.md
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/frontmatter-properties.md
+    - claudine/docs/providers/dispatch-inventory.json
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6:
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
 ---
 
 # Implementation Log for 2026-07-13-cli-switches (7 phases)
@@ -856,3 +959,374 @@ read through `include_str!`.
 Linux and WSL2 were not run separately. The new code is pure data handling,
 and its only path operations are `with_file_name` and manifest-relative joins,
 which the Windows run covered. CI's Linux leg runs the same L1 binary.
+
+## Phase 5
+
+Phase 5 narrowed the rest of the `agent-cli` contract inside revision 2,
+rewrote the fleet prompt with three gates, piloted Codex, re-researched all
+ten providers, regenerated the catalog, and added the switch lookup and the
+catalog-driven forwarding explanations (R8, part 2).
+
+### What landed
+
+- **Contract narrowed inside revision 2.** No document carried revision 2
+  yet, so the remaining quoted-object properties became named types in
+  `agent-cli/_types.yaml` (`binary_record`, `install_method`, `subcommand`,
+  `config_path`, `env_var`, `introspection_command`), and the header gained
+  `provider`, `contract_checked`, `reasoning_effort`, and the shared
+  `research_agent`/`research_model`/`research_effort` enums. Field names are
+  unchanged, so the `config_paths` coercion and its `RecordArray` expectation
+  needed no edit. Contract lint: 25 problems → 0 (87 properties). A
+  `subcommand.name` is a command path with words separated by one space
+  (`exec resume`); the grammar refuses a literal space in a pattern, and
+  `\x20` works.
+- **Relations gate** (`agent-cli/_relations.py`, new). Researcher pairing and
+  no self-research, provider matches file, unique evidence ids, every cited id
+  exists, a typed switch cites evidence that is not inference alone, every
+  evidence version is in `versions_examined`, subcommand paths are normalized
+  and unique, each command scope names a listed subcommand, exactly one binary
+  record per OS, and the body sections. It then runs
+  `claudine-gen --area <claudine> validate <slug>` (see below) so the
+  generator's own switch rules judge the document; nothing is mirrored in
+  Python.
+- **`claudine-gen validate <slug>`** (new subcommand). Generates one provider
+  from the working tree and exits non-zero only when the generator refuses an
+  input, printing the reason on stdout; drift from the committed `data.rs` is
+  not a failure. The `research` recipe now builds `claudine-gen` before a
+  fleet starts.
+- **Fleet prompt** (`agent-cli/_fleet.md`) copied from the reasoning-level
+  pattern: rotation, `only=`, `covering=`, `skip_research`, revision-aware
+  refresh (`schema_revision == 2 && contract_checked` within 14 days), shape
+  then relations gates in `success`, `contract_checked` stamp, cap-aware
+  retry with the rejected findings shown to the researcher. Scope rule: every
+  switch at the root and at every `non_interactive` path (including resume) is
+  required; management-only paths may be omitted, which is safe because an
+  unlisted switch reads as unrecognized. Attachment forms need parser source
+  or a test whose result shows the value was read (`--help` proves nothing).
+- **Pilot (Codex)** by Claude/Sonnet (the rotation assigns Codex to Claude):
+  passed all three gates first time. 50 switches at Codex 0.159.3, 19
+  evidence entries (source, local help, disposable tests). `-c` = `--config`,
+  `string`, global, `space`/`equals`/`short_attached`. It found `--image`
+  variadic at the root and `exec` but scalar at `exec resume`/`exec fork`.
+- **Fleet.** All ten providers researched and confirmed on 2026-10-01, every
+  one on its first attempt (no retries, no usage caps), about 75 minutes.
+
+  | Provider | Researcher | Versions | Switches | unknown |
+  | --- | --- | --- | --- | --- |
+  | antigravity | opencode / glm-5.3 | 1.2.13, 1.2.14 | 33 | 0 |
+  | claude | opencode / glm-5.3 | 2.1.287 | 129 | 0 |
+  | codex | claude / sonnet | 0.159.3 | 50 | 0 |
+  | gemini | codex / gpt-6.1-sol | 0.61.0, 0.62.0 | 152 | 0 |
+  | goose | opencode / glm-5.3 | 1.52.0 | 78 | 0 |
+  | kilo | codex / gpt-6.1-sol | 7.3.45, 7.8.3 | 175 | 1 |
+  | kimi | claude / sonnet | 2.1.1 | 29 | 0 |
+  | opencode | codex / gpt-6.1-sol | 1.18.33 | 156 | 2 |
+  | pi | claude / sonnet | 0.87.1, 1.0.0 | 66 | 0 |
+  | qwen | opencode / glm-5.3 | 0.24.7, 0.19.8 | 170 | 0 |
+
+  No roster entry carries `skip_research: true`, so no compiled provider
+  needed a stand-alone gap.
+- **Regenerated** every `data.rs` and `catalog.json`; `claudine-gen check`
+  clean; 11 byte-baseline pins re-blessed (xxh64 seed 0, computed with a
+  throwaway pure-Python xxh64 that first reproduced the four unchanged pins).
+- **Lookup API** (`lib/src/provider/cli_switch.rs`, re-exported from
+  `claudine::provider`): `lookup_switch(provider, path, spelling) ->
+  SwitchLookup { Known | NotInCatalog | CatalogGap { gap } }`,
+  `SwitchLookup::value()` (anything unestablished is `SwitchValue::Unknown`),
+  `match_switch_token(provider, path, token) -> Option<SwitchToken>` (exact
+  spelling, then `--name=value` only for `equals`, then `-xvalue` only for
+  `short_attached`), and `lookup_candidates(...) -> CandidateSwitch` keeping
+  every `(provider, lookup)` arm with `agreed_value()`. Scope logic is
+  `SwitchScope::applies_at` / `CliSwitch::{applies_at, spellings, accepts}` in
+  `claudine-catalog-types`.
+- **Message enrichment** (`cli/src/commands/wrap/provider_tail_report.rs`).
+  `announce` now takes a `SwitchContext { provider, command_path }`, built by
+  `SwitchContext::for_launch(profile, non_interactive)` from what the
+  profile's own `apply_entrypoint` puts in front of an empty argv. After the
+  unchanged INFO line, an `UnorderedList` gives one sentence per distinct
+  implicit switch: `-c is Codex's --config switch (override one configuration
+  value for this run); forwarding to Codex.`, or `--frobnicate: Claudine's
+  compiled Codex switch catalog has no established type for it at its `exec`
+  command; Claudine forwards it anyway.` A researched short-attached value is
+  split off in the notice (`-csecret` → `-c`). Explicit tails stay opaque.
+- **Guard.** `cli/tests/l1/switch_catalog_guard.rs` fails on a hand-written
+  switch table in `lib/src` or `cli/src` (a `CliSwitch {` literal, a
+  `[CliSwitch` array, or `CliSwitchCatalog::Researched(&`) outside generated
+  `data.rs`, and checks that a generated `data.rs` still carries one.
+- **Frozen revision-1 contract retired** from the docs tree (every document is
+  revision 2). It and the last revision-1 Codex document (from `6a29f4f09`)
+  moved to `gen/tests/fixtures/agent-cli-r1/`, so the revision mechanism and
+  `ResearchRevisionUnsupported` stay tested; `pipeline.rs` no longer copies it.
+
+### Departures and decisions
+
+- **Contract narrowed inside revision 2** rather than a later revision 3, as
+  the Phase 4 handoff suggested: one fleet run covered both.
+- **The generator gate lives in the relations script, not the lifecycle.**
+  The first prompt draft ran `cargo run -p claudine-gen` from `success`; the
+  dry run refused it (`'cargo' is a dangerous command`), and an interpolated
+  executable path is refused too. `python3` is a literal executable, so the
+  script calls the pre-built binary. Recorded as a trap in
+  `research-contracts.md`.
+- **Entrypoint for messages comes from the profile, not the catalog.** Codex's
+  `entrypoints` list puts `review` first for interactive mode, but its profile
+  launches the root command; reading the catalog would have looked switches
+  up at the wrong path.
+- **Explanations are a list under the existing line**, not a replacement:
+  the Phase 2 wording, keys, and dedup are unchanged, and each item carries
+  the spec's sentence. The description is cut at its first `. ` or `; ` so it
+  reads inside parentheses (Codex's is one long sentence).
+- **The correlated error report still uses the metadata-free summary.** Its
+  builder does not know the launch's command path; Phase 6 can pass a
+  `SwitchContext` through when per-spawn checks land.
+- **Guard needles are constructions only.** A first version also matched
+  `SwitchValue::String` etc. and failed on the lookup's own `match` arm;
+  Phase 6 ownership must match on values, so patterns are allowed.
+- **Re-research also refreshed `config_paths`** (same field, new research):
+  for example Gemini dropped credential/state files and gained `.env`
+  locations, and Kilo gained its `kilo.json`/`opencode.json` config files. All
+  L1 tests pass with the new paths; no consumer test pinned the old lists.
+- **Dispatch inventory regenerated**: 1750 → 1762 sites, all `reference`
+  class (`Provider::Codex` in tests); `conditional` stays 60.
+- **Commits outside this session.** As in Phase 3, a process outside this
+  session committed this phase's work while it was in progress (`70e6584f0`
+  through `7cca26546`). History was not rewritten; the working tree is
+  authoritative, and the remaining edits are uncommitted.
+
+### Test mapping
+
+| Behavior | Test (tier) |
+| --- | --- |
+| Narrowed contract refuses each probed shape (model `default`, effort, provider case, version, URL, unknown keys, `os: all`) | probed by hand with `md schema validate` (log above); the gen matrix test still walks every switch cell on the updated fixture |
+| `validate` accepts drifted inputs, refuses a conflicting alias with the reason on stdout, writes nothing | `claudine-gen::l1 generate_ux::validate_accepts_drifted_inputs_and_reports_a_refusal_on_stdout` (L1) |
+| Revision-1 document → gap; missing frozen contract → `ResearchRevisionUnsupported` (fixtures) | `cli_switches::a_revision_one_document_generates_an_explicit_gap` (L1) |
+| Scope applies at global or identical path; spellings; attachment | `claudine-catalog-types cli_switch::tests::a_scope_applies_at_global_or_its_identical_path` (L1) |
+| Exact spelling/alias lookup, no prefix/case/attached match | `claudine provider::cli_switch::tests::a_spelling_or_alias_finds_its_record_exactly` (L1) |
+| Command-path scoping incl. resume path | `…::a_record_applies_only_at_its_command_paths` (fixed data), `…::codex_resume_entrypoint_has_its_own_answers` (real catalog) (L1) |
+| Gap is not empty; unknown never none | `…::a_catalog_gap_establishes_nothing` (L1) |
+| Attached forms split only where researched | `…::a_token_splits_only_in_researched_attachment_forms` (L1) |
+| Candidate arms kept; agreement only on equal values | `…::candidates_keep_each_answer_and_agree_only_on_equal_values` (L1) |
+| Criterion 14: Codex `-c` = `--config`, `string`, enriched message | `claudine-cli provider_tail_report::tests::codex_dash_c_is_explained_from_the_compiled_catalog` (L1); drift rejected by `drift::committed_data_matches_regenerated_inputs` and `claudine-gen check` |
+| Launch entrypoint is the profile's | `…::the_switch_context_is_the_launch_entrypoint` (L1) |
+| `-csecret` → `-c` only with research | `…::a_researched_attached_value_is_split_off_its_switch` (L1) |
+| Unrecognized wording, no rejection claim, root phrasing | `…::an_unrecognized_switch_is_forwarded_without_a_rejection_claim` (L1) |
+| Explicit tail never explained | `…::an_explicit_tail_is_never_explained` (L1) |
+| End to end through the binary (compose and direct wrapper, quiet) | `claudine-cli::l1 provider_tail_notice::each_forwarded_switch_is_explained_from_the_compiled_catalog` (L1, unix) |
+| No hand-written switch table | `claudine-cli::l1 switch_catalog_guard::switch_metadata_is_never_written_by_hand` (L1) |
+
+New test files are declared: `switch_catalog_guard` in `cli/tests/l1/main.rs`;
+`lib/src/provider/cli_switch/tests.rs` via `#[cfg(test)] mod tests;`. No path
+segment carries a tier marker. Fixtures are read with `include_str!`.
+
+### Gates
+
+| Gate | Result |
+| --- | --- |
+| `just research agent-cli only=codex` (pilot) | confirmed, first attempt |
+| `just research agent-cli` | ✓ every provider researched and confirmed |
+| `cargo run -p claudine-gen -- check` | clean (10 providers and every artifact) |
+| `claudine-gen` + `claudine-catalog-types` nextest | 236 passed / 33 passed |
+| `just test` (claudine/) | 8157 passed, 9 skipped, 0 failed |
+| `just lint` (claudine/) | clean; only the pre-existing `__eh_frame` linker warning |
+| Windows native (`just cross-check claudine-gen --os windows`) | 203 passed (every gen L1 test, including `validate` and the revision-1 fixtures) |
+
+Linux and WSL2 were not run separately, and `claudine-cli` was not
+cross-checked: the new CLI code is string handling over static data with no
+path or platform branch, and the new end-to-end test is `#[cfg(unix)]` like
+its siblings (the recording fake provider is a shell script). The fleet
+itself ran on macOS only; `_relations.py` appends `.exe` to the generator
+path on Windows but was not exercised there. CI covers the Linux and macOS
+L1 legs.
+
+## Phase 6
+
+Phase 6 replaced the "first unowned switch starts the tail" partition with
+type-aware ownership (R9): a pure ownership function in the library, the CLI
+half that reads the authored snapshot and the candidate providers, `argv`
+positionals, the ambiguity prompt and error, and the resolved-provider check at
+ownership, at preflight, and before every spawn.
+
+### What landed
+
+- **Pure core** (`lib/src/composition/ownership.rs`, re-exported from
+  `claudine::composition`). `own_arguments(&ArgumentsAfterFile,
+  &SchemaParameters, &[OwnershipCandidate]) -> Result<OwnedArguments,
+  OwnershipError>` applies rules 1–9 left to right. Each forwarded switch opens
+  a value run with one `Arm` per candidate (value type, attached, accepts a
+  separate value), read through `match_switch_token` at that candidate's
+  command path; a bare word is taken when every arm takes it, left as a
+  positional when none does, and is `Ambiguous` otherwise. Rule 3 (`key=value`
+  as a first value of a string/variadic switch in space form, for at least one
+  arm) keeps its explicit precedence and is never an ambiguity. The result is
+  Claudine's setter/positional tokens in order and a `ProviderTail` carrying one
+  `SwitchAssignment` per implicit switch (`ProviderTail::with_assignments`,
+  crate-private). `check_launch_tail(tail, provider, path)` is the one
+  resolved-provider check (missing value, extra value, too few values, attached
+  only); ownership fails with it only when every candidate fails. Both read a
+  `SwitchSource`, so the tests can supply a fixed catalog
+  (`provider::match_token_in` is now `pub(crate)` and re-exported for tests).
+- **`ArgumentsAfterFile` / `CallerArgument`**: the partition's output. A removed
+  Claudine option leaves `CallerArgument::ClaudineOption`, which closes any open
+  value run, so `--codex -c phase=2 x=y` (with `phase` declared) fails instead
+  of attaching `x=y`.
+- **Authored snapshot** (`composition::authored_schema_parameters`): the literal
+  `$schema` through the composer's own `load_effective_schema_in_context`
+  (source-relative, no baseline/trigger layers, no templates or shell, remote
+  refused by Darkmatter). Names come from Darkmatter
+  `EffectiveSchema::declares_top_level_property`, now `pub` (ruling 10;
+  `darkmatter` joins `packages`). A string or union-arm `$schema` holding `{{`
+  or `$(` is `SchemaParameters::Unestablished`; a contested setter is then
+  `ContestedSetter`. A load failure is an error.
+- **Partition** (`cli/src/argv/partition.rs`): returns `(claudine argv,
+  ArgumentsAfterFile)`. Claudine options (anywhere before `--`), setters before
+  the file, and the file go to clap; every other token after the file is held.
+  Non-UTF-8 after the file is `PartitionError::NonUtf8Argument { position }`
+  (position counted after the file). Tests moved to `partition/tests.rs`.
+- **CLI half** (`cli/src/commands/compose/ownership.rs::own_caller_arguments`),
+  called by `compose`/`inline-compose` (`prep.rs`) and `sequence`
+  (`sequence.rs`) right after the file resolves and before setters merge.
+  Candidates: `--provider`, else literal `agent` (a templated entry keeps every
+  provider), else every provider; each at
+  `SwitchContext::for_launch(profile, !interactive)` with interactivity from
+  `-i`/`--no-interactive` and the literal `interactive` hint. The schema is read
+  only when a setter-shaped token exists; with no token at all nothing is read.
+  On `Ambiguous` with more than one candidate and
+  `resolve_interactive_options(silent).allowed()`, a `ChooseOne` prompt (same
+  inline viewport as the provider picker) asks which agent the arguments are
+  for; the answer narrows the candidates for ownership only.
+- **`argv`** (`setters.rs`): `parse_composition_positionals` collects every
+  non-setter after the file as `positionals` (the multiple-file error is gone);
+  `merge_set_overrides(set, shorthand, positionals)` inserts `argv` as a string
+  array only when there is at least one positional, and one validator
+  (`reject_reserved_key`) refuses `argv` from a setter or a `--set` key. Sequence
+  steps and proxy targets receive it through the existing caller overlay;
+  `inline-compose` never persists it.
+- **Resolved-provider check sites**: `SwitchContext::check` (new) in
+  `composition/pipeline.rs` before the notice (the command's preflight, before
+  `start`); in `wrap/sequence/mod.rs` for every review-eligible step whose target
+  is resolved before step 1 (skipped under `--dry-run`); and in
+  `harness_orch/launch.rs::build_harness_launch` before every spawn, with a
+  resume checked at `SwitchContext::for_resume` (the resume entrypoint's words,
+  minus the session id). A failure is a plain error before the spawn and never
+  reaches `AgentErrorReport::for_native_exit`.
+- **`looks_like_setter`** now delegates to `composition::setter_key`; its doc
+  says shape decides ownership only before the file.
+
+### Departures and decisions
+
+- **An unresearched `--name=value` takes nothing more.** Rule 6 read literally
+  would make any unmatched token unrecognized and let rule 5 give it the next
+  bare word; a long switch with `=` already holds its value, so it does not.
+  Unmatched short tokens (`-cfoo` for Claude) still take the next bare word, per
+  rule 5.
+- **The mismatch error shows the token redacted.** The spec asks the error to
+  name the token. It is shown after a secret-named switch as `****`, with
+  recognized secrets masked and control characters escaped. The ambiguity error
+  never echoes the word.
+- **Schema names are read lazily** (only when a setter-shaped token is present),
+  so a document whose `$schema` cannot load still fails where it always did when
+  nothing needs classifying.
+- **`--exclude` does not shrink the candidate set**; the spec names only the CLI
+  provider, `agent`, and every provider.
+- **One prompt answer per invocation.** It narrows the candidates to the chosen
+  provider for every remaining switch.
+- **Ownership errors are plain `std::error::Error` values** (like
+  `PartitionError`) carried as `eyre::Report::new`, not new
+  `CompositionError` variants or catalog codes. `error_guards` requires
+  `Report::new` rather than `eyre!` interpolation.
+- **`lookup_candidates`/`CandidateSwitch` (Phase 5) are unused by ownership.**
+  Ownership needs each arm's attached form and space acceptance, not just the
+  value type, so it matches every candidate with `match_switch_token`. The pair
+  is now used only by its own tests; a reviewer may want it removed.
+- **Existing tests updated because behavior changed on purpose**:
+  `wrap_compose_validation::compose_multiple_file_candidates_errors` became
+  `compose_second_bare_word_is_a_positional_not_a_file`; the L1 and L2
+  "unstructured error" controls now use an `argv=x` setter (a second bare word
+  is no longer an error); the non-UTF-8 notice test asserts the new position
+  wording; `each_step_of_a_multi_provider_sequence_carries_the_tail_once` now
+  forwards `--add-dir x` (read the same way by Codex and Claude) because
+  `-c x=y` handed to Claude now fails before the spawn, which the new
+  `a_proxy_to_a_provider_that_types_the_tail_differently_fails_before_its_spawn`
+  asserts.
+- **Dispatch inventory regenerated**: conditional 60 → 62. Both new conditional
+  sites are in `lib/src/provider/cli_switch/tests.rs`, a test file that was
+  already modified before this phase began; the ownership tests pass explicit
+  command paths rather than matching on `Provider`.
+- **Docs updated now, not in Phase 7**: `argv-normalization.md` (partition
+  rewritten, new "Type-aware ownership" section with a flow diagram),
+  `composition.md` (positional arguments and `argv`, provider forwarding),
+  `cli-pre-parsing.md`, and `frontmatter-properties.md` (`argv` row), because the
+  docs tree must not describe the retired rule. Completion docs are untouched:
+  completion still uses its old scan until Phase 7.
+
+### Input robustness (token reader)
+
+| Shape | Switch value | Type metadata | Schema parameter names | `argv` key |
+| --- | --- | --- | --- | --- |
+| absent | missing value error (`a_dash_value_must_be_attached`, `every_candidate_must_be_wrong…`, binary `…interrupting_a_value_run…`) | unknown, takes a bare word (`unknown_is_never_none`) | no `$schema` → rule 3 (`no_schema_declared_names_and_unestablished_names_are_three_outcomes`) | authored left alone (`bare_words_become_argv…`) |
+| explicit null | n/a | researched `unknown` record reads as unrecognized (`unknown_is_never_none`, opencode `--get-yargs-completions`) | n/a (names only) | `argv=null` refused (`argv_is_reserved…`, `positionals_reject_an_argv_setter`) |
+| wrong type, whole | `--max-turns abc` not taken → missing value (`a_number_switch_takes_only_a_number`) | n/a | unreadable/templated schema → error (`an_unreadable_schema…`, `a_templated_schema…`) | `argv=[1]` refused (`argv_is_reserved…`) |
+| wrong type, one element | variadic run ends at a setter (`a_variadic_switch_takes_a_contiguous_run…`) | n/a | name in one union arm counts (`schema_names_come_from_a_source_relative_union`) | n/a |
+| empty | `""` and `--config=` kept (`an_empty_value_is_a_value`) | n/a | empty schema ≠ no schema ≠ unestablished (three-outcomes test) | no positionals ≠ positionals (`merge_sets_argv_from_positionals_only_when_there_are_some`) |
+| duplicate | repeated scalar = two assignments (`a_repeated_scalar_switch_is_two_assignments`) | duplicate alias rejected at generation (Phase 4) | — | duplicates kept in order (`bare_words_no_switch_takes_are_positionals_in_order`, `positionals_after_the_file_are_collected_in_order`) |
+| trailing/invalid | non-UTF-8 refused by position (partition tests, `composition_refuses_a_non_utf8_tail_token…`); only first `--` consumed (`only_the_first_separator_is_consumed`) | n/a | nested raw-schema property is not a top-level name (`a_raw_json_schema_contributes_its_top_level_names`) | after `--` it is provider data (`argv_cannot_be_set_by_name`) |
+
+Control row: `a_string_switch_takes_one_setter_and_the_next_setter_is_claudines`
+(lib) and `a_string_switch_takes_one_setter_and_a_schema_parameter_stays_claudines`
+(binary), `--codex -c model_reasoning_effort=low phase=2`.
+
+Grep smells checked: no `#[serde(default)]`, `filter_map(.. as_str())`,
+`unwrap_or_default()`, or `.ok()` on a load-bearing parse in the new code. The
+one `.ok()` (`parse_selection_hints_from_frontmatter(..).ok()` in
+`candidates`) is deliberate: an invalid `agent` keeps every provider a
+candidate and ordinary preparation reports the diagnostic, as the spec
+requires.
+
+### Test mapping
+
+| Behavior (criterion) | Test (tier) |
+| --- | --- |
+| Rules 1–9, union readings, attached forms, numbers, empty values, repeated switches, opaque suffix, resume-path answers, secrets in errors, redacted `Debug`, variadic minimum and unknown minimum (fixed catalog) (4, 16–18, 21, 22, 24–26) | `claudine composition::ownership::tests::*` — 28 tests (L1) |
+| Partition: what reaches clap vs ownership, markers, boundary, ordering errors, non-UTF-8 by position, partition + ownership exact tokens (13, 15, 25) | `claudine-cli argv::partition::tests::*` (L1) |
+| `argv` collection, reserved key from setter and `--set`, strings not JSON5 (23) | `claudine-cli commands::compose::tests::{positionals_after_the_file_are_collected_in_order, positionals_reject_an_argv_setter, merge_sets_argv_from_positionals_only_when_there_are_some, merge_rejects_argv_in_set_json}` (L1) |
+| Spec's three example commands through the binary (16, 17, 18) | `provider_tail_ownership::{a_string_switch_takes_one_setter…, with_no_provider_named…, a_variadic_switch_takes_a_run…}` (L1, unix) |
+| Resolved-provider check at preflight, sequence before step 1, resume entrypoint, proxy before spawn (21) | `provider_tail_ownership::{a_resolved_provider_that_takes_no_value…, a_sequence_fails_before_step_one…, a_resume_is_checked_at_the_resume_entrypoint}`, `provider_tail_launch::a_proxy_to_a_provider_that_types_the_tail_differently…` (L1, unix) |
+| Ambiguity error and candidate narrowing; snapshot `agent=codex`; templated `agent` (19, 20, 29) | `provider_tail_ownership::{a_disagreement_without_a_terminal…, a_caller_agent_setter_does_not_narrow…, a_templated_agent_keeps_every_provider…}` (L1, unix) |
+| Ambiguity prompt; answer decides ownership only (20) | `level1_ownership_prompt_pty::{…choosing_codex_forwards_the_word…, …choosing_claude_decides_ownership_only}` (L1 PTY, unix) |
+| Source-relative union schema, raw JSON Schema top-level names, unreadable and templated schema, `--set $schema` does not change ownership (29) | `provider_tail_ownership::{schema_names_come_from_a_source_relative_union, a_raw_json_schema_contributes_its_top_level_names, an_unreadable_schema…, a_templated_schema…, a_caller_schema_override_does_not_change_ownership}` (L1, unix) |
+| `argv` order, override, `--` excluded, reserved, through sequence steps and a proxy target, never persisted by inline (23) | `provider_tail_ownership::{bare_words_become_argv…, argv_cannot_be_set_by_name, argv_reaches_every_sequence_step_and_a_proxy_target, inline_compose_never_persists_argv}`, `wrap_compose_validation::compose_second_bare_word_is_a_positional_not_a_file` (L1) |
+| Help opens no file (27) | `provider_tail_ownership::help_opens_no_composition_file` (L1, unix) |
+
+New files are declared: `provider_tail_ownership` and
+`level1_ownership_prompt_pty` (both `#[cfg(unix)]`) in `cli/tests/l1/main.rs`;
+`partition/tests.rs` and `ownership/tests.rs` via `#[cfg(test)] mod tests;`.
+No path segment carries a tier marker (`level1_` is not one).
+`just check-tier-coverage claudine`: 0 stranded.
+
+### Gates
+
+| Gate | Result |
+| --- | --- |
+| `just test` (claudine/) | 8211 passed, 9 skipped, 0 failed |
+| `just test-l2` (claudine/) | 277 passed (+3 gen); tmux sessions in the background |
+| `just lint` (claudine/) | clean (only the pre-existing `__eh_frame` linker warning) |
+| `cargo clippy -p darkmatter --lib` | clean |
+| `cargo run -p claudine-gen -- check` | clean |
+| `just check-tier-coverage claudine` | 0 stranded |
+| Windows native (`just cross-check claudine --os windows`) | 4610 passed, 7 failed; all 32 `composition::ownership` tests pass |
+
+The seven Windows failures are path-spelling and home-resolution failures in
+code this phase did not change, so none is attributed to it:
+`coordinator::tests::commit_records_only_handoffs` ×2 (a `\\?\` verbatim
+prefix on one side of a path comparison), `resolve::tests::{resolve_missing_file,
+detailed_resolution_preserves_non_no_match_typed_errors}`,
+`schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message`
+(`/` vs `\` in a rendered `git add` path), `invocation_context::tests::an_external_prompt_opened_through_home_takes_home_as_its_tree_root`
+(`~` resolves to the real profile), and
+`sequence::task::tests::side_effect_tasks::a_failed_nested_mapping_set_projects_one_path_and_commits_nothing`.
+Their only overlap with this phase is that `schema/mod.rs` gained a new
+function. CI's push-to-`main` Windows leg is where they are fixed forward. The
+CLI half was not cross-checked: it is string handling with no path or platform
+branch, and its new binary tests are `#[cfg(unix)]` like their siblings; the
+partition's non-UTF-8 test has a Windows (`from_wide`) fixture that CI's
+Windows leg compiles.
