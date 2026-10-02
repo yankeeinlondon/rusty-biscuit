@@ -287,7 +287,7 @@ Details are in [compose.md](compose.md#inserted-text-is-data) and
 
 `interpolate_text`/`interpolate_value` take an explicit
 `ExpressionFailurePolicy`. Pass `Strict` from document stages. Use `Lenient`
-only for `compose_subtree(..., Lenient)` and preflight discovery (see
+only for preflight discovery (see
 [compose.md](compose.md#error-handling)). The error carries the authored
 span (`SourceRef::OnDiskSpan`) whenever it is provable, including after an
 earlier stage rewrote the body and inside block (`|`, `>`), multi-line,
@@ -309,6 +309,18 @@ through the shared `AbsenceScope`, not a new walk. DMLS reports the same
 and an unknown function as the `ERROR` `dm.expression.unknown_function` through
 `expression::validate_expression` (see
 [dmls.md](dmls.md#undeclared-properties-and-unknown-functions)).
+
+Hosts add globals (Claudine's `err`, `timing`, `group`) through the binding
+model in `expression/binding.rs`, never through a lookup override. A root
+resolves as reserved namespace → registered global (available, possibly
+`null`, or unavailable with a namespaced reason) → document property. Declare
+globals in an immutable `BindingView`, pair them with runtime entries through
+`EvaluationSession::associate` (rejects reserved names, omissions, and
+contradictions before any provider runs), check authored text passively with
+`prepare_value` + `validate_prepared` (every branch, no provider), and evaluate
+with `evaluate_prepared` or `SubtreeCompose::with_binding_view`. There is no
+strict mode and no root-membership hook. See
+[Host Bindings](../../../darkmatter/docs/topics/darkmatter-expressions.md#host-bindings).
 
 Each issue is reported once. A coded `ComposeWarning` family declares its
 identity in its constructor (`from_schema_advisory`,

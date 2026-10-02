@@ -1020,8 +1020,8 @@ otherwise it is file-only `SourceRef::OnDisk`, never a guess.
   introduced has no authored span, so it reports file-only.
 
 The helper takes an explicit
-`ExpressionFailurePolicy`; only `compose_subtree(..., Lenient)`, preflight's
-best-effort frontmatter pass, and the discovery compose pass
+`ExpressionFailurePolicy`; only preflight's best-effort frontmatter pass and
+the discovery compose pass
 (`ComposeOptions::defer_expression_failures`, crate-private) use `Lenient`.
 Discovery must stay lenient because it runs without page blocks and would
 otherwise reject a failure inside a region a false `::block` removes.
