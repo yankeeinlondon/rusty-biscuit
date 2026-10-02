@@ -14,6 +14,7 @@ use std::path::Path;
 use crate::common;
 use common::TestWorkspace;
 use common::completion::{run_complete, seed_plain_git_repo, write_file};
+use common::owned_value_options::OWNED_VALUE_OPTIONS;
 
 /// A plan declaring `phase` (number) and `mode` (enum), plus `extra`
 /// frontmatter lines.
@@ -181,6 +182,7 @@ enum Offer {
 }
 
 /// The words before the cursor and what each makes of a line.
+#[derive(Clone, Copy)]
 struct Preceding {
     label: &'static str,
     words: &'static [&'static str],
@@ -248,4 +250,107 @@ fn a_flag_before_the_file_or_after_a_clean_switch_still_completes() {
         let got = run_complete(ws.path(), &[command, "prompts/plan.md", "--codex", "-c", "low", "--cl"]);
         assert!(got.iter().any(|c| c == "--claude"), "{command}: {got:?}");
     }
+}
+
+/// The words before an owned option and whether execution accepts them. A
+/// provider selection anywhere on the line narrows the candidates, so it can
+/// settle an ambiguity but never supply a missing value.
+const BEFORE_AN_OPTION: [Preceding; 5] = [
+    PRECEDING[0],
+    PRECEDING[1],
+    PRECEDING[2],
+    Preceding { label: "ambiguity settled by a later selection", words: &["-c", "low", "--codex"], valid: true },
+    Preceding { label: "missing value before a later selection", words: &["-c", "phase=2", "--codex"], valid: false },
+];
+
+/// Options whose value slot offers candidates on a clean line, so their rows
+/// prove suggestions survive as well as disappear.
+const OPTIONS_WITH_CANDIDATES: [&str; 5] = ["--debug", "--provider", "--exclude", "--on-rate-limit", "--budget-ledger"];
+
+/// The value slot of every owned option and alias, separate or attached,
+/// empty and partial, after each kind of preceding line: a clean line offers what the option offers
+/// with no provider arguments at all, and any other line offers nothing.
+fn every_owned_option_value_follows_the_words_before_it(command: &str, form: ValueForm) {
+    let ws = TestWorkspace::named(&format!("complete-ownership-option-values-{command}"));
+    plan(ws.path(), "");
+    let mut with_candidates = Vec::new();
+    for option in OWNED_VALUE_OPTIONS {
+        if option.sequence_only && command != "sequence" {
+            continue;
+        }
+        for spelling in option.spellings {
+            for value in ["", option.partial] {
+                let attached = format!("{spelling}={value}");
+                let cursor = match form {
+                    ValueForm::Separate => vec![*spelling, value],
+                    // Only a long spelling takes `=`.
+                    ValueForm::Attached if spelling.starts_with("--") => vec![attached.as_str()],
+                    ValueForm::Attached => continue,
+                };
+                let mut baseline_argv = vec![command, "prompts/plan.md"];
+                baseline_argv.extend_from_slice(&cursor);
+                let baseline = run_complete(ws.path(), &baseline_argv);
+                if !baseline.is_empty() && value.is_empty() {
+                    with_candidates.push(*spelling);
+                }
+                for preceding in &BEFORE_AN_OPTION {
+                    let mut argv = vec![command, "prompts/plan.md"];
+                    argv.extend_from_slice(preceding.words);
+                    argv.extend_from_slice(&cursor);
+                    let got = run_complete(ws.path(), &argv);
+                    let context = format!("{} / {cursor:?}: {argv:?} => {got:?}", preceding.label);
+                    if preceding.valid {
+                        assert_eq!(got, baseline, "{context}");
+                    } else {
+                        assert!(got.is_empty(), "{context}");
+                    }
+                }
+            }
+        }
+    }
+    for option in OPTIONS_WITH_CANDIDATES {
+        if option == "--budget-ledger" && command != "sequence" {
+            continue;
+        }
+        assert!(with_candidates.contains(&option), "{command}: {option} offered nothing on a clean line");
+    }
+}
+
+/// How the cursor carries an owned option's value.
+#[derive(Clone, Copy)]
+enum ValueForm {
+    /// `--option value`
+    Separate,
+    /// `--option=value`
+    Attached,
+}
+
+#[test]
+fn compose_option_values_follow_the_words_before_them() {
+    every_owned_option_value_follows_the_words_before_it("compose", ValueForm::Separate);
+}
+
+#[test]
+fn compose_attached_option_values_follow_the_words_before_them() {
+    every_owned_option_value_follows_the_words_before_it("compose", ValueForm::Attached);
+}
+
+#[test]
+fn inline_compose_option_values_follow_the_words_before_them() {
+    every_owned_option_value_follows_the_words_before_it("inline-compose", ValueForm::Separate);
+}
+
+#[test]
+fn inline_compose_attached_option_values_follow_the_words_before_them() {
+    every_owned_option_value_follows_the_words_before_it("inline-compose", ValueForm::Attached);
+}
+
+#[test]
+fn sequence_option_values_follow_the_words_before_them() {
+    every_owned_option_value_follows_the_words_before_it("sequence", ValueForm::Separate);
+}
+
+#[test]
+fn sequence_attached_option_values_follow_the_words_before_them() {
+    every_owned_option_value_follows_the_words_before_it("sequence", ValueForm::Attached);
 }

@@ -216,6 +216,22 @@ fn owned_surface_is_derived_from_clap_and_non_empty() {
     assert!(owned.is_value_flag("--fail-fast"));
 }
 
+// Shared with the completion matrix, which reads the rest of it.
+#[path = "../../../tests/common/owned_value_options.rs"]
+#[allow(dead_code)]
+mod owned_value_options;
+
+/// The completion matrix enumerates these spellings, so it covers every
+/// value slot exactly when they match the clap-derived surface.
+#[test]
+fn the_completion_matrix_lists_every_owned_value_option() {
+    let listed: HashSet<String> = owned_value_options::OWNED_VALUE_OPTIONS
+        .iter()
+        .flat_map(|option| option.spellings.iter().map(|spelling| spelling.to_string()))
+        .collect();
+    assert_eq!(listed, OwnedFlags::for_composition().value_flags);
+}
+
 // ── Non-UTF-8 refusal: never rewrite the bytes a caller forwarded ──
 
 #[cfg(unix)]

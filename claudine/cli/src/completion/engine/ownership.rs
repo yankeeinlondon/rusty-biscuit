@@ -5,9 +5,9 @@
 //! provider switch takes is the provider's, not a setter or positional. The
 //! completer asks the same question of the same code, with the word under the
 //! cursor as the last argument, so it never offers a setter where execution
-//! would forward the word to the agent. A flag at the cursor is offered only
-//! when the words before it read cleanly: a new switch cannot repair an
-//! error earlier on the line.
+//! would forward the word to the agent. A flag at the cursor, or the value of
+//! a Claudine option, is offered only when the words before it read cleanly:
+//! neither can repair an error earlier on the line.
 //!
 //! Completion never fails and never prompts. Anything ownership cannot decide
 //! (an ambiguous word, an unreadable file or `$schema`, a line execution would
@@ -25,24 +25,39 @@ use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
 
 use crate::args::{Cli, Commands};
-use crate::argv::{normalize_for_completion, partition_composition_tail};
+use crate::argv::{OwnedFlags, normalize_for_completion, partition_composition_tail};
 use crate::commands::compose::ownership::candidates;
 use crate::completion::schema_completion::resolve_prompt_path;
 use crate::completion::scopes::ScopeContext;
 
-/// Whether Claudine owns the word at `current_index` of `argv`.
+/// Whether Claudine owns the word at `current_index` of `argv`, and the words
+/// before it read without an ownership error.
 ///
-/// `true` for anything ownership does not govern: a word before the
-/// composition file, a Claudine option or its value, or a command that is not
-/// a composition command. `false` when the word belongs to the provider or
-/// ownership cannot decide.
+/// `true` for a word ownership does not govern (before the composition file,
+/// or in a command that is not a composition command). A Claudine option's
+/// value after the file is Claudine's, so it is `true` exactly when the words
+/// before that option read cleanly. `false` when the word belongs to the
+/// provider or ownership cannot decide.
 pub(super) fn cursor_is_claudines(argv: &[String], current_index: usize) -> bool {
     let cursor = argv.get(current_index).map(String::as_str).unwrap_or("");
     let Some((claudine_argv, arguments)) = partition(argv, current_index, Some(cursor)) else {
         return false;
     };
     match arguments.arguments().last() {
-        None | Some(CallerArgument::ClaudineOption) => true,
+        None => true,
+        // The cursor is a Claudine option's value. The option and its
+        // unfinished value are left out of the check: clap would reject a
+        // partial value (`--on-rate-limit a`) and refuse the line.
+        Some(CallerArgument::ClaudineOption) => {
+            let option_index = current_index
+                .checked_sub(1)
+                .filter(|&index| {
+                    argv.get(index)
+                        .is_some_and(|option| OwnedFlags::for_composition().consumes_next(option))
+                })
+                .unwrap_or(current_index);
+            committed_arguments_are_owned(argv, option_index)
+        }
         Some(CallerArgument::Token(_)) => {
             last_owner(&claudine_argv, &arguments) == Ok(Some(ArgumentOwner::Claudine))
         }

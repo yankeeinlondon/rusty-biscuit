@@ -654,6 +654,10 @@ What you can expect, with a `plan.md` whose `$schema` declares `phase`
 | `compose plan.md --codex -c low --mod<TAB>` | `--model` | the words before the flag read cleanly |
 | `compose plan.md --codex -c phase=2 --mod<TAB>` | nothing | `-c` still has no value; a new flag cannot repair it |
 | `compose plan.md -c low --mod<TAB>` | nothing | `low` is ambiguous, whatever the cursor shape |
+| `compose plan.md --codex -c low --exclude co<TAB>` | `codex` | a Claudine option's value; the words before the option read cleanly |
+| `compose plan.md --codex -c phase=2 --exclude co<TAB>` | nothing | `-c` still has no value; an option's value cannot repair it |
+| `compose plan.md -c low --on-rate-limit <TAB>` | nothing | `low` is ambiguous |
+| `compose plan.md -c low --codex --on-rate-limit <TAB>` | `pause`, `abort`, `continue` | the later `--codex` names the agent, so `low` is `-c`'s value |
 | `compose plan.md -- ph<TAB>` | nothing | everything after `--` is forwarded to the agent untouched |
 
 The rules:
@@ -671,7 +675,9 @@ The rules:
   when a provider switch makes it matter, or an `argv=` setter. Completion
   never prompts (an interactive run asks which agent the arguments are for;
   completion does not) and never reports an error. This holds for every
-  cursor shape: a setter, a bare word, or a flag.
+  cursor shape: a setter, a bare word, a flag, or a Claudine option's value
+  (`--provider`, `--exclude`, `--on-rate-limit`, `--debug`,
+  `sequence --budget-ledger`, and every other value-taking option or alias).
 - **A flag is judged by the words before it.** A partial flag such as
   `--mod` may become a Claudine option, so it is not itself read as a
   forwarded switch; the words before it must read cleanly for any flag to
@@ -683,9 +689,11 @@ The rules:
   working for a file that does not exist yet.
 - **Claudine options keep their own slots.** A Claudine option's value
   (`--model <TAB>`, `--step-timeout <TAB>`) goes to clap's completion,
-  never to the setter or file completers. Which options take a value comes
-  from the same clap definitions the argument partition reads, so the two
-  cannot disagree.
+  never to the setter or file completers, once the words before the option
+  read cleanly. The option and its unfinished value are left out of that
+  check, so `--on-rate-limit a<TAB>` still offers `abort`. Which options
+  take a value comes from the same clap definitions the argument partition
+  reads, so the two cannot disagree.
 - **Provider switches are not completed.** `--codex -c` is never offered
   as a candidate; the flag completer offers Claudine's own options and the
   `--<provider>` selection switches.
@@ -696,9 +704,9 @@ flowchart TD
     B -->|yes| N["offer nothing"]
     B -->|no| C{"after the composition file?"}
     C -->|no| S["slot completer (file, setter, flag)"]
-    C -->|yes| D{"a Claudine option or its value?"}
-    D -->|yes| S
-    D -->|"no (a flag: judge the words before it)"| E{"any provider switch after the file?"}
+    C -->|yes| D{"a flag, or a Claudine option's value?"}
+    D -->|"yes: judge only the words before it"| E
+    D -->|"no: judge the word as well"| E{"any provider switch after the file?"}
     E -->|no| F["ownership without reading the file"]
     E -->|yes| G["read the file's agent and literal $schema"]
     G -->|unreadable| N
@@ -1096,7 +1104,7 @@ flowchart TD
 | Module | Role |
 |---|---|
 | [`engine/mod.rs`](../../../cli/src/completion/engine/mod.rs) | Entry point; classifies the cursor slot and dispatches. |
-| [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's, and, for a flag at the cursor, whether the words before it read cleanly. |
+| [`engine/ownership.rs`](../../../cli/src/completion/engine/ownership.rs) | Asks type-aware ownership whether the word after the composition file is Claudine's, and, for a flag or a Claudine option's value at the cursor, whether the words before it read cleanly. |
 | [`root_menu.rs`](../../../cli/src/completion/root_menu.rs) | Curated subcommand menu + `init` visibility. |
 | [`composition/mod.rs`](../../../cli/src/completion/composition/mod.rs) | Shared compose/inline-compose/sequence pipeline. |
 | [`setter_value.rs`](../../../cli/src/completion/setter_value.rs) | `@`-gated file completion inside `name=value` setters. |
