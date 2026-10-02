@@ -36,6 +36,54 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/ownership/tests/setters.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+documentation:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/cli/README.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 5
+implemented: true
 packages:
     - claudine
     - claudine-cli
@@ -311,33 +359,33 @@ every Phase 2 table row green.
 Depends on Phase 3. All tests use `CliProcessFixture`; Spike B settles fixture
 gaps. Tasks parallel unless noted.
 
-- [ ] **Reproduction, dry-run.** Portable Rust fixture writing the shell-free
+- [x] **Reproduction, dry-run.** Portable Rust fixture writing the shell-free
   `plan.md` (`phase: 1`, body `Phase {{ phase }}`) in a temp dir. Control
   `phase=2 --codex -c ... --dry-run` and defect
   `--codex -c ... phase=2 --dry-run` both render "Phase 2". Assert the stderr
   "Provider args" **token list** (not table spacing) holds `-c` and its value
   and no `phase=2`. No Codex install required; temp dir removed.
-- [ ] **`compose` output.** A post-switch setter changes rendered output and is
+- [x] **`compose` output.** A post-switch setter changes rendered output and is
   absent from the fake provider's recorded argv; exact child argv asserted.
-- [ ] **`inline-compose` effective launch input.** Setter applies to the launch
+- [x] **`inline-compose` effective launch input.** Setter applies to the launch
   input; the source file is not modified by the overlay (assert file bytes).
-- [ ] **`sequence`, every applicable step.** Multi-step fixture; each step sees
+- [x] **`sequence`, every applicable step.** Multi-step fixture; each step sees
   the setter and none receives it as an argument; the tail still reaches every
   step token for token.
-- [ ] **Propagation.** A reclaimed setter survives retry, resume, and proxy
+- [x] **Propagation.** A reclaimed setter survives retry, resume, and proxy
   adoption with the original ownership and no reclassification (fake provider
   scripted to fail once, then resume).
-- [ ] **Failure paths launch nothing.** `--codex -c phase=2` (declared `phase`),
+- [x] **Failure paths launch nothing.** `--codex -c phase=2` (declared `phase`),
   `--codex -c phase=2 x=y`, the Claude-resolved `-c x=y phase=2`, and an
   unestablished schema each exit non-zero before any spawn with the expected
   message fields; stderr/stdout split preserved.
-- [ ] **Escape hatch and typing.** `--codex -- -c x=y phase=2` forwards both
+- [x] **Escape hatch and typing.** `--codex -- -c x=y phase=2` forwards both
   verbatim even with `phase` declared; numeric, boolean, empty, and
   string-containing-`=` setters keep types end to end; duplicate setters
   last-wins; shorthand beats `--set`.
-- [ ] **Preserved errors.** Switch-before-file and separator-before-file still
+- [x] **Preserved errors.** Switch-before-file and separator-before-file still
   produce today's ordering guidance.
-- [ ] **Placement.** Place tests per `rust-testing` (L1 under `cli/tests/l1`,
+- [x] **Placement.** Place tests per `rust-testing` (L1 under `cli/tests/l1`,
   registered so `test_placement.rs` stays green). L2 only if a real-terminal
   behavior is needed (none expected); any L2 stays in the background.
 
@@ -357,28 +405,28 @@ terminal or browser window took focus; the reproduction passes.
 
 Tasks are parallel unless noted.
 
-- [ ] **`docs/topics/composition.md`.** Under Positional Arguments and Provider
+- [x] **`docs/topics/composition.md`.** Under Positional Arguments and Provider
   Argument Forwarding explain, for a reader with no repo experience: setters
   after provider switches (compact example per rule: `-c x=y phase=2`, variadic
   run, `-m` after a switch), the schema-priority missing-value error, and `--` as
   the provider-data escape hatch; include a Mermaid flowchart of the
   per-token ownership decision if the dependency has not already added one
   (extend it rather than duplicate).
-- [ ] **Related docs.** Update argument-normalization and cli-pre-parsing topic
+- [x] **Related docs.** Update argument-normalization and cli-pre-parsing topic
   pages with the dependency. Remove any text saying a setter after a switch is
   forwarded. The `docs/` tree must not link to or name this fix or its
   dependency by path or `{date}-{name}`.
-- [ ] **Skill.** Update `.claude/skills/claudine/` (architecture and
+- [x] **Skill.** Update `.claude/skills/claudine/` (architecture and
   compose-related pages) for the changed ownership behavior.
-- [ ] **Reader's-note behavior change.** Doc that routing before an authored `--`
+- [x] **Reader's-note behavior change.** Doc that routing before an authored `--`
   intentionally changed: callers wanting `key=value` as provider data put it
   after `--`.
-- [ ] **Drift pass.** Review `///`/`//!` and inline comments across all touched
+- [x] **Drift pass.** Review `///`/`//!` and inline comments across all touched
   files; resolve in favor of the code; report in `implementation-log.md`.
-- [ ] **Final verification.** From `claudine/`: `just test`, `just test-l2`,
+- [x] **Final verification.** From `claudine/`: `just test`, `just test-l2`,
   `just lint`. Walk the spec's acceptance checklist and check each box with
   evidence (test names) in `implementation-log.md`.
-- [ ] **Hand off.** Do not edit spec frontmatter beyond what the author directs,
+- [x] **Hand off.** Do not edit spec frontmatter beyond what the author directs,
   do not move the fix to `_completed`, do not run `just complete`, do not commit
   unless asked. State "implementation complete, ready for review", and note that
   completing this spec does not complete the dependency's larger fix.

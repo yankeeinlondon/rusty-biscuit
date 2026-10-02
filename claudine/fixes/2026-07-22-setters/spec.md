@@ -34,28 +34,14 @@ reviewed_by: codex/gpt-6.1-sol
 reviewed_on: 2026-10-01
 human_review: false
 message_to_agent: |-
-    Phase 3 is done; read `## Phase 3` in implementation-log.md.
-    - The routing was already the dependency's (2026-07-13-cli-switches).
-      Phase 3 added `SwitchAssignment::declared_setter` and
-      `TailMismatch::declared_setter`, so the missing-value error (at ownership
-      AND at every per-launch check) names the declared setter key, e.g.
-      "... none was forwarded with it: the `phase` setter after it is a
-      parameter the document declares ... Give `-c` a separate provider value,
-      or put intentional provider arguments after `--`." It never shows a
-      value. The substring "`-c` takes a value for Codex" is unchanged.
-    - One setter grammar now: `claudine::composition::{setter_key,
-      is_setter_name}`. `parse_compose_setter` still rejects an empty key
-      (`=v`) on its own; completion delegates.
-    - Already covered, so do not duplicate it in Phase 4:
-      `compose_caller_file_provenance::setters_after_a_provider_switch_keep_caller_file_provenance`
-      (post-switch setter as a file reference, direct and proxied, absent from
-      the Goose stub's argv), and the classify-once guard
-      `switch_catalog_guard::composition_arguments_are_classified_once_per_invocation`.
-    - For Phase 4 binary tests: argv-recording stubs are `stub()`/`launches()`
-      in `cli/tests/l1/provider_tail_ownership.rs` (unix only). A document with
-      no `agent` cannot resolve a provider without a terminal, so take a
-      candidate union from an `agent` list. New `Provider::X` references in
-      tests need `CLAUDINE_UPDATE_INVENTORY=1 just test-cli dispatch_inventory::`.
+    All five phases are done; read `## Phase 5` in implementation-log.md for
+    the acceptance checklist with test evidence.
+    - Phase 5 changed docs only: `docs/topics/composition.md` (new
+      "Setters after a provider switch" section), `cli/README.md`, and the
+      skill's `cli-reference.md` and `timeline.md`.
+    - The spec `status` is still `planned`; the author decides when to move
+      it to `implemented`/`completed`. Nothing was moved to `_completed`.
+implemented: true
 ---
 
 # A shorthand setter after a provider switch is forwarded to the agent
@@ -252,40 +238,40 @@ quick sample; broader measurement is for the author to decide.
 
 ## Acceptance criteria
 
-- [ ] The existing `reported_command_forwards_config_switch` test passes:
+- [x] The existing `reported_command_forwards_config_switch` test passes:
       `-c model_reasoning_effort=low` still reaches the provider unchanged.
-- [ ] Every ownership-table case asserts both the caller setters and exact
+- [x] Every ownership-table case asserts both the caller setters and exact
       forwarded tokens. The no-provider case uses a document with no `agent`
       hint, so the candidate union is actually exercised.
-- [ ] `--codex -c x=y -m gpt5 phase=2` keeps `-m gpt5` with Claudine,
+- [x] `--codex -c x=y -m gpt5 phase=2` keeps `-m gpt5` with Claudine,
       forwards `-c x=y`, and applies `phase=2`.
-- [ ] A Claudine option interrupting a variadic provider value run ends that
+- [x] A Claudine option interrupting a variadic provider value run ends that
       run; later tokens cannot reconnect to the earlier switch.
-- [ ] Inline schemas, a root schema union, and a source-relative external
+- [x] Inline schemas, a root schema union, and a source-relative external
       schema protect a declared `phase` directly after `-c`. Missing-value
       errors name `-c`, `phase`, and Codex and launch no provider. An
       unestablished schema follows the dependency's contested-value error.
-- [ ] `--codex -c phase=2 x=y` with a declared `phase` fails without
+- [x] `--codex -c phase=2 x=y` with a declared `phase` fails without
       reconnecting `x=y` to `-c`; no fake provider is launched.
-- [ ] With no schema claiming `x`, `-c x=y phase=2` classified across candidates
+- [x] With no schema claiming `x`, `-c x=y phase=2` classified across candidates
       but resolved to Claude fails before spawn, rather than rerouting `x=y`
       into frontmatter. Use controlled metadata and fake provider fixtures.
-- [ ] `--codex -- -c x=y phase=2` forwards both setter-shaped values unchanged,
+- [x] `--codex -- -c x=y phase=2` forwards both setter-shaped values unchanged,
       even when the schema declares `phase`; neither becomes a caller setter.
-- [ ] Reclaimed numeric, boolean, empty, and string-containing-`=` setters
+- [x] Reclaimed numeric, boolean, empty, and string-containing-`=` setters
       retain their types. Duplicate shorthand setters keep last-occurrence
       precedence, and shorthand still wins over `--set`.
-- [ ] Compiled-binary coverage proves a post-switch setter affects `compose`
+- [x] Compiled-binary coverage proves a post-switch setter affects `compose`
       output, `inline-compose`'s effective launch input, and every applicable
       step of `sequence`; it is absent from provider arguments. Inline launch
       overlays are not automatically written to the source file.
-- [ ] Existing caller propagation coverage includes a reclaimed setter through
+- [x] Existing caller propagation coverage includes a reclaimed setter through
       retry, resume, and proxy adoption, without adding a second classifier or
       changing its original ownership.
-- [ ] The reproduction renders "Phase 2" and reports only the Codex
+- [x] The reproduction renders "Phase 2" and reports only the Codex
       configuration switch/value as provider arguments. Dry-run does not
       require Codex to be installed.
-- [ ] `docs/topics/composition.md`, under Positional Arguments and Provider
+- [x] `docs/topics/composition.md`, under Positional Arguments and Provider
       Argument Forwarding, explains setters after provider switches, the
       schema-priority missing-value error, and `--` as the provider-data escape
       hatch. Update argument-normalization docs and the Claudine skill with

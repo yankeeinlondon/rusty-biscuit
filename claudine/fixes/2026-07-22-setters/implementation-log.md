@@ -31,6 +31,54 @@ docs_updated_during_phase_3:
 docs_created_during_phase_3: []
 skills_files_updated_during_phase_3:
     - .claude/skills/claudine/SKILL.md
+source_files_during_phase_4:
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+docs_updated_during_phase_4: []
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/claudine/SKILL.md
+source_files_during_phase_5: []
+docs_updated_during_phase_5:
+    - claudine/docs/topics/composition.md
+    - claudine/cli/README.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5:
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+source_code:
+    - claudine/lib/src/composition/ownership.rs
+    - claudine/lib/src/composition/provider_tail.rs
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/ownership/tests.rs
+    - claudine/lib/src/composition/ownership/tests/setters.rs
+    - claudine/cli/src/argv/partition/tests.rs
+    - claudine/cli/src/commands/compose/setters.rs
+    - claudine/cli/src/commands/compose/tests.rs
+    - claudine/cli/src/completion/engine/tokens.rs
+    - claudine/cli/src/completion/engine/tests.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/common/launch_recorder.rs
+    - claudine/cli/tests/l1/main.rs
+    - claudine/cli/tests/l1/setter_after_switch.rs
+    - claudine/cli/tests/l1/provider_tail_ownership.rs
+    - claudine/cli/tests/l1/provider_tail_launch.rs
+    - claudine/cli/tests/l1/compose_caller_file_provenance.rs
+    - claudine/cli/tests/l1/switch_catalog_guard.rs
+documentation:
+    - claudine/docs/topics/composition.md
+    - claudine/docs/topics/argv-normalization.md
+    - claudine/docs/providers/dispatch-inventory.json
+    - claudine/cli/README.md
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/claudine/cli-reference.md
+    - .claude/skills/claudine/timeline.md
+completed_phase: 5
+implemented: true
 packages:
     - claudine
     - claudine-cli
@@ -431,3 +479,201 @@ already runs on Windows. Windows CI runs on push to `main`.
 ### Input robustness matrix
 
 Not applicable: no file format or configuration reader was added or changed.
+
+## Phase 4
+
+Run 2026-10-02, macOS host.
+
+### What was built
+
+One new L1 file, `cli/tests/l1/setter_after_switch.rs` (declared in
+`cli/tests/l1/main.rs`), dedicated to a setter written after a provider switch.
+The dependency's binary files (`provider_tail_ownership.rs`,
+`provider_tail_launch.rs`) already prove the tail and the ownership errors;
+none of them proved a post-switch setter is *applied* on every command and
+every relaunch, which is what this file adds.
+
+- Two tests are portable (no provider, every OS): the spec's dry-run
+  reproduction and the ordering errors.
+- Ten tests sit in a `#[cfg(unix)] mod launched` because they record argv
+  with `/bin/sh` stub providers. The module name carries no tier marker.
+
+**Shared recorder.** The argv-recording stub was copied in two files already;
+this would have been the third. Phase 1 recommended lifting it, so it is now
+`cli/tests/common/launch_recorder.rs` (`install`, `launches`, `prompts`,
+`occurrences`; `#[cfg(unix)]` in `common/mod.rs`). Both existing files now
+import it, and 108 duplicated lines were removed. The shared stub also
+captures stdin as `launches/prompt-NNN`, because Codex and Claude both receive
+the composed prompt on stdin (checked by hand first). That lets a test assert
+the rendered output and the exact argv from the same launch. Behavior of the
+two migrated files is unchanged: the shared version is a superset (it also
+records `params-N`, and `launches` returns empty instead of panicking when
+nothing launched).
+
+### Requirement-to-test mapping
+
+All in `setter_after_switch::` unless noted.
+
+| Plan task | Test | Asserts |
+| --- | --- | --- |
+| Reproduction, dry-run | `the_reproduction_applies_a_setter_after_the_switch_in_a_dry_run` | control and defect orderings both put `Phase 2` (and no `Phase 1`) on stdout; the "Provider args" cell, split into tokens, is exactly `["-c", "model_reasoning_effort=\"medium\""]`; file bytes unchanged; no Codex installed |
+| `compose` output | `launched::compose_renders_a_post_switch_setter_and_forwards_only_the_switch` | child argv starts `codex exec -c x=y`; no `phase=` token; prompt on stdin is `Phase 2` |
+| `inline-compose` launch input | `launched::inline_compose_launches_with_the_setter_and_never_persists_it` | prompt contains `Write phase 2.`; file keeps `phase: 1`, gains the agent's text, never `phase: 2` or `x=y` |
+| `sequence`, every step | `launched::every_sequence_step_sees_the_setter_and_receives_only_the_switch` | two steps render `phase 2`; each launch has `-c x=y` once and no setter |
+| Propagation: retry | `launched::a_retry_relaunches_with_the_setter_applied_and_the_switch_once` | both attempts render `Phase 2` with `-c x=y` once; `success` probe sees `phase=2` |
+| Propagation: proxy | `launched::a_proxy_target_composes_with_the_setter_and_gets_the_switch_once` | target renders `Target phase 2`; switch once on both launches |
+| Propagation: resume | `launched::a_resume_keeps_the_setter_and_resends_the_switch_once` | resume launch has `resume thread-7`, `-c x=y` once, no setter; post-resume `success` probe sees `phase=2` |
+| No reclassification on relaunch | Phase 3's `switch_catalog_guard::composition_arguments_are_classified_once_per_invocation` | (unchanged; the three propagation tests prove the outcome) |
+| Failure paths launch nothing | `launched::refused_codex_ownership_launches_nothing` (`--codex -c phase=2` declared; `--codex -c phase=2 x=y`; templated `$schema`), `launched::refused_claude_resolution_launches_nothing` (`[claude, codex]` union, `-c x=y phase=2`, resolved to Claude) | non-zero exit, no spawn, no lifecycle, expected fields (switch, `phase` key, provider, separate value / `--`, or the contested-value `--set` guidance), `phase=2` never echoed, stdout empty |
+| Escape hatch | `launched::after_the_separator_setter_shaped_words_are_provider_data` | `phase` declared (`number`); `-c x=y phase=2` forwarded contiguously, `--` consumed, prompt and probe stay at `1` |
+| Typing, duplicates, `--set` | `launched::reclaimed_setters_keep_types_and_precedence_end_to_end` | `count + 1` renders `4`, `enabled == true` renders `true`, `empty=` renders empty, `label=a=b` keeps `a=b`; `-c count=3` forwarded as a string while the next `count=3` is a setter; `phase=7 … phase=2` gives `2`; run twice, `--set {"phase": 9}` before and after the switch, shorthand wins both times |
+| Preserved errors | `a_switch_or_separator_before_the_file_keeps_its_ordering_guidance` | `-c` before the file and `--` before the file keep today's text and `Supported order` line |
+
+### Load-bearing check
+
+I temporarily removed `open.taken == 0 &&` from the setter offer in
+`lib/src/composition/ownership.rs` (line 514), which lets a switch take a
+setter again, as before the fix. Eight tests failed: the reproduction, compose,
+inline-compose, sequence, retry, proxy, resume, and typing. The four that
+stayed green test refusals, the `--` escape hatch, and ordering errors, which
+that mutation does not reach. Source restored from a copy; `git diff` on the
+file is empty.
+
+### Deviations and findings
+
+- `--set` is accepted once per command (clap), so "shorthand beats `--set`
+  regardless of placement" runs as two invocations, one per placement.
+- With both `claude` and `codex` stubs installed, a `[claude, codex]` document
+  fails agent resolution without a terminal (the choice is interactive). The
+  Claude-resolved refusal therefore runs in its own fixture with only `claude`
+  installed, as the dependency's test does.
+- SimplifiedSchema has no `integer` type; `number` is the numeric type.
+- `cross-check` passes extra arguments through a remote shell, so a nextest
+  filterset with parentheses (`-E 'test(/…/)'`) fails with a syntax error.
+  A plain substring filter (`setter_after_switch`) works.
+- No L2 test was added; no terminal behavior was needed.
+
+### Gates
+
+From `claudine/` on macOS:
+
+- `just test`: 8280 passed, 9 skipped, 0 failed (Phase 3: 8268; +12 new).
+- `just test-l2`: 278 + 3 passed, 0 failed. No window took focus.
+- `just lint`: exit 0 (only the existing `__eh_frame` linker notice).
+- `just check-tier-coverage claudine`: 0 stranded.
+- `dispatch_inventory_matches_committed_file` stayed green; no regeneration
+  was needed.
+
+Other OSes (`just cross-check`, local tree):
+
+- native Windows, filter `setter_after_switch`: the two portable tests pass
+  (the quoted `model_reasoning_effort="medium"` argument and the table cell
+  parse both hold), and the L1 binary compiles with the Unix-only recorder
+  gated out.
+- Linux, filters `setter_after_switch` and `provider_tail_`: 85 passed,
+  including the two migrated files on the shared stub.
+
+### Input robustness matrix
+
+Not applicable: no reader or format was added or changed.
+
+### Skill
+
+`.claude/skills/claudine/SKILL.md`: one sentence in the L1 spawn-contract
+paragraph pointing at `common::launch_recorder` for argv/prompt assertions.
+
+## Phase 5
+
+Run 2026-10-02, macOS host. Docs only; no source file changed.
+
+### Documentation
+
+- `claudine/docs/topics/composition.md`
+    - **Positional Arguments**: setter values split at the first `=`
+      (`label=a=b`, empty `phase=`); setters may sit after provider switches;
+      last occurrence of a key wins; shorthand beats `--set` wherever either
+      is written, and `--set` is accepted once per command.
+    - **New `#### Setters after a provider switch`** under Provider Argument
+      Forwarding, written for a reader new to the repo: one example per rule
+      (`-c x=y phase=2`, `--config=x=y phase=2`, the `--add-dir a b phase=2`
+      variadic run, `--add-dir x=y phase=2`, `-m gpt5` ending a run), the
+      no-value and unrecognized switch rule, provider values staying strings,
+      the declared-parameter missing-value error (text copied from
+      `ownership.rs`, including that a later word never reattaches), the
+      templated-`$schema` contested-value error, `--` as the escape hatch,
+      propagation to every launch and `inline-compose` not persisting, and a
+      **Behavior change** reader's note.
+    - **Mermaid:** the dependency already ships the per-token ownership
+      flowchart in `argv-normalization.md → Type-aware ownership`, and it
+      already covers every case above (removed Claudine option ends the run,
+      schema key wins, first value of a string/variadic switch). The new
+      section links to it instead of duplicating it.
+- `claudine/cli/README.md`: the composition setter paragraph now says a setter
+  may follow provider switches, schema keys are never a switch's value, `--`
+  words are provider data, last-wins, and shorthand beats `--set` wherever
+  placed; links to the new section.
+- `argv-normalization.md` and `cli-pre-parsing.md`: reviewed against the code;
+  Phase 3 had already updated them and no text says a setter after a switch is
+  forwarded. No change. No `docs/` page names this fix or its dependency
+  (checked by grep on the diff).
+
+### Skill
+
+- `.claude/skills/claudine/cli-reference.md`: the Composition Commands
+  ownership paragraph states a post-switch setter is applied, never
+  forwarded, is last-wins, beats `--set`, and that a declared key after a
+  string switch yields the key-naming missing-value error.
+- `.claude/skills/claudine/timeline.md`: new 2026-10-02 `setters` entry.
+- `SKILL.md` already described `SwitchAssignment::declared_setter` and the
+  single setter grammar (Phase 3) and `launch_recorder` (Phase 4); unchanged.
+
+### Drift pass
+
+Reviewed `///`/`//!` and inline comments in `cli/src/argv/partition.rs`
+(module "Ownership model"), `cli/src/argv/mod.rs` (`looks_like_setter`),
+`cli/src/commands/compose/setters.rs` (`parse_composition_positionals`),
+`cli/src/completion/engine/tokens.rs`, and `lib/src/composition/ownership.rs`
+(missing-value and contested-setter messages). All match the code; Phase 3
+had already retired the "first unowned switch" wording. No drift found, no
+edit made.
+
+### Acceptance checklist (evidence)
+
+| Criterion | Evidence |
+| --- | --- |
+| `reported_command_forwards_config_switch` passes | `argv::partition::tests` (unchanged), green in `just test` |
+| Every table row asserts setters and exact forwarded tokens; no-hint row uses no `agent` | `ownership::tests::setters::every_setter_ownership_row_keeps_setters_and_forwards_exact_tokens`; `partition::tests::the_no_hint_union_forwards_a_value_the_resolved_provider_may_refuse` |
+| `--codex -c x=y -m gpt5 phase=2` | `partition::tests::setters_after_provider_switches_are_claudines_for_every_routed_row` |
+| Claudine option ends a variadic run | same partition table; lib table marker rows |
+| Inline / union / source-relative / unestablished schema | `ownership::tests::setters::every_schema_source_protects_a_declared_parameter_after_a_switch`, `…::an_unestablished_schema_never_routes_a_contested_setter_silently`, `…::the_missing_value_error_names_the_conflicting_setter`; binary `setter_after_switch::launched::refused_codex_ownership_launches_nothing` |
+| `--codex -c phase=2 x=y` fails, no reattach, no launch | `ownership::tests::setters::a_declared_setter_after_a_string_switch_leaves_it_without_a_value`; `setter_after_switch::launched::refused_codex_ownership_launches_nothing` |
+| Claude-resolved `-c x=y phase=2` fails before spawn | `ownership::tests::setters::a_union_forwarded_value_fails_for_a_resolved_provider_that_takes_none`; `provider_tail_ownership::a_union_setter_row_resolved_to_claude_fails_before_its_spawn`; `setter_after_switch::launched::refused_claude_resolution_launches_nothing` |
+| `--codex -- -c x=y phase=2` forwarded unchanged | lib table `--` rows; `setter_after_switch::launched::after_the_separator_setter_shaped_words_are_provider_data` |
+| Types, duplicates, shorthand over `--set` | `compose::tests::reclaimed_setters_keep_their_types`, `…::the_last_shorthand_setter_wins_across_a_provider_switch`, `…::a_reclaimed_shorthand_setter_beats_set_wherever_set_is_placed`; `setter_after_switch::launched::reclaimed_setters_keep_types_and_precedence_end_to_end` |
+| Binary coverage compose / inline-compose / sequence; inline not persisted | `setter_after_switch::launched::{compose_renders_a_post_switch_setter_and_forwards_only_the_switch, inline_compose_launches_with_the_setter_and_never_persists_it, every_sequence_step_sees_the_setter_and_receives_only_the_switch}` |
+| Retry, resume, proxy propagation, no second classifier | `setter_after_switch::launched::{a_retry_…, a_resume_…, a_proxy_target_…}`; `compose_caller_file_provenance::setters_after_a_provider_switch_keep_caller_file_provenance`; `switch_catalog_guard::composition_arguments_are_classified_once_per_invocation` |
+| Reproduction renders "Phase 2", provider args only `-c` value, no Codex | `setter_after_switch::the_reproduction_applies_a_setter_after_the_switch_in_a_dry_run` |
+| Docs and skill | this phase (above) |
+
+### Gates
+
+From `claudine/` on macOS:
+
+- `just test`: 8280 passed, 9 skipped, 0 failed (same count as Phase 4; no
+  tests added this phase).
+- `just test-l2`: 278 + 3 passed, 0 failed. No window took focus.
+- `just lint`: exit 0.
+
+No OS-specific code changed this phase, so no `cross-check` was run; Phase 4
+recorded Linux and native Windows runs for the new tests.
+
+### Input robustness matrix
+
+Not applicable: no reader or format was added or changed.
+
+### Hand off
+
+Implementation complete, ready for review. The fix was not moved to
+`_completed`, `just complete` was not run, and nothing was committed.
+Completing this spec does not complete the dependency's larger fix
+(`2026-07-13-cli-switches`).
