@@ -769,14 +769,21 @@ Each lifecycle property interpolates **when its event fires**, not during the in
 
 Claudine renders `{{ … }}` templates on two frontmatter surfaces: **loop action values** (`set`/`append`/`prepend`/`merge`, via `looping::actions::render_action_value`) and **lifecycle event text** (via the Darkmatter DM2 substrate `SubtreeCompose`). The loop/capability API keeps the positional spelling `set(key, value)`; Claudine lifecycle YAML uses only `set: {property: value}`. Both consume the *same* Darkmatter expression core — `parse` / `evaluate` / `ExpressionFinder` / `scalar_string` over an `EvaluationLookup` — so the loop renderer is **not** a second expression engine; it is a loop-specific value renderer sharing that core. A [shared conformance matrix](../../lib/src/composition/interpolation_conformance.rs) pins the overlap: literal/mixed strings, whole-value typed expansion, arrays/objects, the `doc` namespace, functions, string-literal escaping, and malformed-expression fail-closed behavior all resolve **identically** from the same input and state.
 
-Two semantic differences are deliberate and keep the two renderers separate rather than merging the loop path into DM2:
+Two differences remain between the renderers:
 
 | Concern | Loop action renderer | Lifecycle DM2 (`SubtreeCompose`) |
 |---------|----------------------|-----------------------------------|
-| Error on a malformed/invalid template | Contextual `CompositionError::InvalidAction` carrying iteration + action index (`InvalidAction at iteration N, action M of K`) | Generic `MarkdownError::Transform` |
-| Unknown variable root in a mixed string (e.g. `"x={{typo}}"`) | Lenient → resolves empty (`"x="`), matching loop **condition** evaluation | Strict / fail-closed → typed error before any side effect dispatches |
+| Error on a malformed/invalid template | Contextual `CompositionError::LoopActionExpressionInvalid` carrying iteration + action index | Typed `MarkdownError::Interpolation` |
+| A `{{{ … }}}` escape | Not recognized; the text passes through unchanged | Renders the literal `{{ … }}` |
 
-Both keep a mixed string such as `"{{a}}{{b}}"` (with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the result is never re-parsed as JSON. The loop renderer's leniency serves state mutation (a loop action writes frontmatter, where an empty result is the natural outcome and mirrors `while`/`until` evaluation), while DM2 serves side-effect dispatch (a malformed span or unknown function fails before a lifecycle message reaches Discord/TTS/stderr; an absent property is `null` and renders empty, as it does in the loop renderer). Both engines are held to the shared matrix so the overlap cannot silently drift.
+Everything else is shared, and the matrix holds both engines (and the sequence
+source renderer) to one missing-property table: an absent property is `null` as
+a whole value and empty in a mixed string (`"x={{typo}}"` renders `"x="`), a
+ternary over it takes the falsy branch, a fallback chooses the next operand, and
+a bare name never reads `ctx`. Both keep a mixed string such as `"{{a}}{{b}}"`
+(with `a=1, b=2`) as the string `"12"`: the inserted values are data, so the
+result is never re-parsed as JSON. A malformed span or unknown function fails in
+both before anything is written or dispatched.
 
 ### Loop Execution
 
