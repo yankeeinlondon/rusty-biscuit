@@ -93,7 +93,7 @@ flowchart TD
 
 | Consumer | How it resolves | Touches disk? |
 |---|---|---|
-| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is an **indexed** document; otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer | Only when the first candidate is not indexed |
+| Workspace graph (link, transclusion, `uses_schema`, and `uses_file` edges; broken-link and missing-anchor diagnostics; link hover, document links, and definition) | The first planned candidate when it is an **indexed** document; otherwise `resolve_reference`, falling back to a later candidate that is an open, unsaved buffer when nothing matched (never past an I/O failure) | Only when the first candidate is not indexed |
 | Single-target features (directive links, definition and hover, transclusion diagnostics, frontmatter navigation, the create-missing-file action) | `resolve_reference`: the first planned candidate that exists, else the first candidate as the place a new file would go | Yes, as composition does |
 | Anchor completion | The first planned candidate that is an indexed document | No |
 
@@ -104,7 +104,9 @@ magic root, or not Markdown), or stays unresolved. For example, with only
 `repo/docs/` open, `[t](../target.md)` links to `repo/target.md` and is not
 broken. A `#fragment` on an unindexed file is not checked, because its
 headings were never read; it is neither resolved to a heading nor reported
-missing. A link to an open, unsaved buffer still resolves.
+missing. A link to an open, unsaved buffer still resolves, unless a place
+searched before it could not be checked (permission denied, a symlink loop):
+that link stays broken with the `Io` failure class, as `md compose` would fail.
 
 ### Invalidation
 

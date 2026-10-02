@@ -85,6 +85,26 @@ flowchart LR
 built context (for example one derived for a document in another repository)
 uses `ComposeRequest::with_context(options, context)`, which validates it.
 
+A context built at another repository's directory carries that directory's
+launch `@` scope. To keep `@` searching the tree the request was launched in,
+copy the launch scope onto it, as `md` does:
+
+```rust
+let source = build_resolution_context(&snapshot.at_request_dir(document_dir))?
+    .for_trusted_external_source(&document)
+    .with_launch_magic_scope(launch.launch_magic_scope().clone());
+```
+
+The document's own repository then anchors its `./`, bare, `&`, and `^`
+references, and `@` keeps the launch tree.
+
+Passive readers that take a context and never discover a repository need
+that prepared context as well. Schema detection is one: given the launch
+context for a document outside its tree, every reference in the document
+fails to resolve and is detected as `string` rather than `file`. Pass each
+document its own context with `detect_schema_with_contexts`, as `md schema
+detect` does.
+
 A source document outside the request's repository is admitted the way a
 transcluded file outside it is: as a trusted external source. Requested from
 `/work/repo`, the document `/home/me/notes/doc.md` resolves `./beside.md`

@@ -10,7 +10,9 @@ use darkmatter::markdown::CodeBlock;
 use darkmatter::markdown::dsl::{CodeBlockMeta, parse_highlight_spec};
 use darkmatter::markdown::highlighting::ThemePair;
 use std::io::{self, IsTerminal};
-use std::path::PathBuf;
+use crate::io::open_argument;
+use biscuit_file::FileReference;
+use std::path::{Path, PathBuf};
 use tracing::instrument;
 
 /// Run the `md code-block` subcommand: render a single [`CodeBlock`] from a
@@ -31,34 +33,30 @@ pub fn run_code_block(
     cli: &Cli,
     request: &MdRequest,
 ) -> Result<()> {
-    // Resolve input source: --file / --content force the interpretation;
-    // otherwise prefer filesystem existence and fall back to literal content.
-    let (code, inferred_lang_token) = if force_content {
-        (input.to_string(), None)
+    // `--content` keeps the input literal and `--file` requires a file; with
+    // neither, see `default_input_file` for when the input names a file.
+    let source_file = if force_content {
+        None
     } else if force_file {
-        let path = resolve_file_path_raw(input, request).wrap_err_with(|| {
-            format!("`{input}` is not a valid file path (--file was passed)")
-        })?;
-        let body = std::fs::read_to_string(&path)
-            .wrap_err_with(|| format!("Failed to read code source from `{}`", path.display()))?;
-        let lang_token = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|s| s.to_string());
-        (body, lang_token)
+        Some(
+            open_argument(Path::new(input), request)
+                .wrap_err_with(|| format!("`{input}` is not a valid file path (--file was passed)"))?
+                .into_path(),
+        )
     } else {
-        let path = std::path::Path::new(input);
-        if path.is_file() {
-            let body = std::fs::read_to_string(path)
+        default_input_file(input, request)?
+    };
+    let (code, inferred_lang_token) = match source_file {
+        Some(path) => {
+            let body = std::fs::read_to_string(&path)
                 .wrap_err_with(|| format!("Failed to read code source from `{}`", path.display()))?;
             let lang_token = path
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .map(|s| s.to_string());
             (body, lang_token)
-        } else {
-            (input.to_string(), None)
         }
+        None => (input.to_string(), None),
     };
 
     // Build the CodeBlock. The CLI's explicit --language wins over both the
@@ -210,15 +208,28 @@ fn code_block_markdown(block: &CodeBlock) -> String {
     }
 }
 
-/// Resolves a raw file path string (no FileReference syntax) to a `PathBuf`.
+/// The file an input given without `--file` or `--content` names, if any.
 ///
-/// The `code-block` command treats the positional input as a plain file path
-/// when `--file` is passed, so we deliberately skip the `FileReference`
-/// indirection and resolve a relative path against the request's launch
-/// directory.
-fn resolve_file_path_raw(raw: &str, request: &MdRequest) -> Result<PathBuf> {
-    // `join` keeps an absolute path as is.
-    Ok(request.launch_dir().join(raw))
+/// The input names a file only when it is one line of valid reference syntax
+/// that resolves, in the launch context, to an existing file; `&src/main.rs`
+/// and `^lib.rs` work like any file argument. Everything else is literal
+/// code: multi-line text, text that is not reference syntax (so a file
+/// literally named `@` is read only as `./@`), a reference that matches no
+/// file, and a reference that fails to resolve, such as a relative path
+/// climbing out of the launch repository or a missing `{{VAR}}`. Such input
+/// is rendered as typed, never read.
+///
+/// ## Errors
+///
+/// The launch context builder's error.
+fn default_input_file(input: &str, request: &MdRequest) -> Result<Option<PathBuf>> {
+    if input.contains(['\n', '\r']) {
+        return Ok(None);
+    }
+    let Ok(reference) = FileReference::new(input) else {
+        return Ok(None);
+    };
+    Ok(reference.resolve_in_context(request.launch_context()?).ok().flatten())
 }
 
 #[cfg(test)]

@@ -161,6 +161,11 @@ md compose README.md --fm
 # Search another directory for @ references (repeatable, before the subcommand)
 md --magic-root shared compose '@prompts/feature.md'
 
+# Every command's file argument takes the same reference forms; a literal
+# file named `@` is spelled `./@` (a bare `@` is invalid-reference)
+md schema validate '&docs/plan.md'
+md get ./@ title
+
 # Compose from stdin
 echo "# Hello {{ name }}" | md compose - --state '{"name":"Alice"}'
 

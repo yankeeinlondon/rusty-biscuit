@@ -47,3 +47,13 @@ fn reference_delegates_inner_block() {
         &["ReferenceError", "validation failed", "orphan node"],
     );
 }
+
+#[test]
+fn not_a_file_resolved_path_has_no_verbatim_prefix() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let err = FileTreeError::NotAFile(dir.path().to_path_buf());
+    let out = render(&err);
+    // A Windows `\\?\` prefix from a raw `canonicalize` must never reach the user.
+    assert!(!out.contains(r"\\?\"), "verbatim path leaked: {out}");
+    assert_contains_all(&out, &["not a file", "Resolved:"]);
+}

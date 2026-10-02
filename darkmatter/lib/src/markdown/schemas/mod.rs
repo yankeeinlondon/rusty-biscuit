@@ -742,7 +742,10 @@ impl DarkmatterSchemas {
     }
 
     /// Detects a [`SimplifiedSchema`] from one or more documents through this
-    /// instance's context. See [`detect::detect_schema`] for the algorithm.
+    /// instance's context, which must admit every source (see
+    /// [`detect::detect_from_document`]); use
+    /// [`detect::detect_schema_with_contexts`] for documents that each carry
+    /// their own context. See [`detect::detect_schema`] for the algorithm.
     pub fn detect(&self, sources: &[&Markdown], opts: DetectOptions) -> SimplifiedSchema {
         detect::detect_schema(sources, opts, &self.file_resolution_context)
     }

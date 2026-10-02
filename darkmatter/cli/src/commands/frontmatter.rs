@@ -1,7 +1,7 @@
 //! `md get` / `md set` / `md rm` / `md edit` frontmatter subcommand implementations.
 
 use crate::args::Cli;
-use crate::io::{load_markdown, resolve_file_path};
+use crate::io::{DocumentArgumentError, load_markdown, parse_argument, resolve_file_path};
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use std::path::PathBuf;
@@ -259,31 +259,30 @@ fn format_raw(value: &serde_json::Value) -> String {
 
 /// Open a file in the user's preferred editor, blocking until the editor exits.
 ///
-/// Resolves the file path using biscuit-file's `FileReference` system in the
-/// request's launch context; a reference that matches no file names a new file
-/// relative to the launch directory, and a relative reference that climbs out
-/// of the launch repository is refused. Creates the file if it doesn't exist. After the editor exits, validates that the file exists
-/// and is non-empty (after trimming whitespace). Prints the fully qualified path on
-/// success.
+/// The argument is a file reference resolved in the request's launch context
+/// ([`parse_argument`] then `resolve_in_context`): malformed reference syntax
+/// and a relative reference that climbs out of the launch repository are
+/// refused before any file is created or editor launched. A reference that
+/// matches no file names a new file at its first candidate location (the
+/// launch directory for a relative path, the repository root for `&`, and so
+/// on); a recursive (`%`) reference that matches nothing is an error. Creates
+/// the file if it doesn't exist. After the editor exits, validates that the
+/// file exists and is non-empty (after trimming whitespace). Prints the fully
+/// qualified path on success.
 pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
-    use biscuit_file::FileReference;
-
-    // --- Resolve the file path ---
-    let path = match FileReference::new(raw_file) {
-        Ok(file_ref) => {
-            let resolved = file_ref
-                .resolve_in_context(request.launch_context()?)
-                .wrap_err("Failed to resolve file reference")?;
-            match resolved {
-                Some(p) => p,
-                // No match: the raw input names a new file relative to the
-                // launch directory (it may not exist yet, which is fine).
-                None => request.launch_dir().join(raw_file),
-            }
-        }
-        // Not a valid file reference syntax — treat as plain path. `join`
-        // keeps an absolute path as is.
-        Err(_) => request.launch_dir().join(raw_file),
+    let argument = std::path::Path::new(raw_file);
+    let reference = parse_argument(argument)?;
+    let context = request.launch_context()?;
+    let path = match reference.resolve_in_context(context) {
+        Ok(Some(path)) => path,
+        Ok(None) if !reference.class().recursive => reference
+            .candidate_plan(context)
+            .map_err(|source| DocumentArgumentError::new(raw_file.to_string(), source))?
+            .first()
+            .map(|candidate| candidate.path().to_path_buf())
+            .ok_or_else(|| DocumentArgumentError::no_match(raw_file.to_string()))?,
+        Ok(None) => return Err(DocumentArgumentError::no_match(raw_file.to_string()).into()),
+        Err(source) => return Err(DocumentArgumentError::new(raw_file.to_string(), source).into()),
     };
 
     // Ensure parent directory exists
@@ -301,8 +300,9 @@ pub fn run_edit(raw_file: &str, request: &MdRequest) -> Result<()> {
     }
 
     // --- Launch the editor ---
-    let canonical = path
-        .canonicalize()
+    // `canonicalize_simplified`: the printed path must not carry a Windows
+    // verbatim `\\?\` prefix.
+    let canonical = biscuit_file::canonicalize_simplified(&path)
         .wrap_err_with(|| format!("Failed to canonicalize path: {}", path.display()))?;
     darkmatter::editor::launch_editor_on_path(&canonical)?;
 

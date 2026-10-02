@@ -7,7 +7,7 @@ use crate::artifact::{
     OutputArtifact, emit_or_show_artifact, html_artifact, json_artifact, markdown_plus_artifact,
     open_output_artifact,
 };
-use crate::io::{load_markdown, resolve_file_path};
+use crate::io::{load_markdown, open_argument, resolve_file_path};
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::Markdown;
@@ -197,13 +197,14 @@ pub fn run_compose(
     // Resolve the input path once through FileReference (handles @-prefixed paths)
     // and reuse for both loading and source_file/policy_root.
     let resolve_start = perf.then(Instant::now);
-    let resolved_input = if let Some(path) = input
+    let opened_input = if let Some(path) = input
         && path.to_str() != Some("-")
     {
-        Some(resolve_file_path(path, request.launch_context()?)?)
+        Some(open_argument(path, request)?)
     } else {
         None
     };
+    let resolved_input = opened_input.as_ref().map(|opened| opened.path().to_path_buf());
     let resolve_input_dur = resolve_start.map(|s| s.elapsed()).unwrap_or_default();
 
     let load_start = perf.then(Instant::now);
@@ -214,16 +215,14 @@ pub fn run_compose(
         load_markdown(None, request)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
-    // The input as authored, so a quoted `~/…` or `{{VAR}}/…` argument can
-    // supply the document's tree root (an unquoted `~` was already expanded by
-    // the shell and carries no anchor).
-    let input_reference =
-        input.and_then(|path| biscuit_file::FileReference::new(&path.to_string_lossy()).ok());
     // One context for validation, pre-flight, and compose: the document's own
     // (derived from the launch context, or built at the document when it lies
-    // in another repository), or the launch context itself for stdin.
-    let file_resolution_context = match &resolved_input {
-        Some(resolved) => request.document_context(input_reference.as_ref(), resolved)?,
+    // in another repository), or the launch context itself for stdin. It
+    // derives from the input as authored, so a quoted `~/…` or `{{VAR}}/…`
+    // argument supplies the document's tree root (an unquoted `~` was already
+    // expanded by the shell and carries no anchor).
+    let file_resolution_context = match &opened_input {
+        Some(opened) => opened.document_context(request)?,
         None => request.launch_context()?.clone(),
     };
 

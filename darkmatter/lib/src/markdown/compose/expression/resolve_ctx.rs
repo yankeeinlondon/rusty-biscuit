@@ -470,28 +470,30 @@ pub(crate) fn resolve_document_file_ref_shape(
         })
 }
 
-/// Resolves a document-backed reference to the first existing **directory**
-/// in its candidate plan, or `None` when no candidate is a directory.
+/// Resolves a document-backed reference to the directory it names, or `None`
+/// when its first existing candidate is a file or no candidate exists.
 ///
-/// File resolution takes only regular files, so a directory reference is
-/// read from the same candidate order instead: `&dir` is the repository
-/// root's `dir`, `^dir` the package, package-area, then repository `dir`.
+/// The candidate that decides is the one
+/// [`resolve_entry_in_context`](crate::markdown::fs::resolve_entry_in_context)
+/// selects, so a directory reader and a file reader agree on precedence:
+/// `&dir` is the repository root's `dir`, `^dir` the first of the package,
+/// package-area, then repository `dir` that exists.
 ///
 /// ## Errors
 ///
 /// Propagates the typed [`FileReferenceError`] when the plan cannot be built
-/// (an invalid context or a missing home, vault, or repository anchor).
+/// (an invalid context or a missing home, vault, or repository anchor) or a
+/// candidate before the deciding one cannot be probed (`Io`).
 pub(crate) fn resolve_document_directory(
     file_ref: &FileReference,
     cwd: &Path,
     request_context: &biscuit_file::FileResolutionContext,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
     let ctx = document_file_context(cwd, request_context);
-    Ok(file_ref
-        .candidate_plan(&ctx)?
-        .into_iter()
-        .map(|candidate| candidate.path().to_path_buf())
-        .find(|path| path.is_dir()))
+    Ok(match crate::markdown::fs::resolve_entry_in_context(file_ref, &ctx)? {
+        Some(crate::markdown::fs::ReferenceEntry::Directory(directory)) => Some(directory),
+        Some(crate::markdown::fs::ReferenceEntry::File(_)) | None => None,
+    })
 }
 
 #[cfg(test)]

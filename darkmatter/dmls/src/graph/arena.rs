@@ -825,8 +825,9 @@ enum Located {
 ///
 /// The shared resolver ([`resolve_reference`]) decides existence. Two index
 /// lookups keep it cheap and buffer-aware: a first planned candidate that is
-/// indexed needs no probe, and a missing reference whose later candidate is
-/// an open (not yet saved) buffer resolves to that buffer.
+/// indexed needs no probe, and a reference that matched no file (not one whose
+/// probe failed) resolves to its first candidate that is an open, not yet
+/// saved, buffer.
 fn locate(
     context: &FileResolutionContext,
     raw: &str,
@@ -844,10 +845,13 @@ fn locate(
             Some(&document) => Located::Document(document),
             None => Located::File(path),
         },
-        ReferenceTarget::Missing { failure, .. } => candidates
+        // A candidate that could not be probed stops the search, as it stops
+        // composition; a later buffer never answers for it.
+        ReferenceTarget::Missing { failure: ResolutionFailure::NoMatch, .. } => candidates
             .iter()
             .find_map(|candidate| by_path.get(candidate).copied())
-            .map_or(Located::Missing(failure), Located::Document),
+            .map_or(Located::Missing(ResolutionFailure::NoMatch), Located::Document),
+        ReferenceTarget::Missing { failure, .. } => Located::Missing(failure),
     }
 }
 
@@ -1400,6 +1404,42 @@ mod tests {
         let targets: Vec<EdgeTarget> =
             g.outgoing(link, EdgeKind::References).map(|edge| edge.target.clone()).collect();
         assert_eq!(targets, vec![EdgeTarget::File(root.join("docs/t.md"))]);
+    }
+
+    #[test]
+    fn test_an_unprobeable_earlier_candidate_is_not_answered_by_a_later_buffer() {
+        // `docs/t.md` is a symlink to itself, so probing it fails with an I/O
+        // error; the root's `t.md` is an open, unsaved buffer. Composition
+        // stops at the failure, so the link stays unresolved.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let looped = root.join("docs/t.md");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("t.md", &looped).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file("t.md", &looped)
+            .expect("creating a file symlink needs Developer Mode or SeCreateSymbolicLinkPrivilege");
+        let doc = root.join("docs/doc.md");
+        let buffer = root.join("t.md");
+        let indices = BTreeMap::from([
+            (doc.clone(), index_document(&doc, "[t](t.md)\n")),
+            (buffer.clone(), index_document(&buffer, "# Buffer\n")),
+        ]);
+        let contexts = crate::context::FixedContext(
+            FileResolutionContext::from_snapshot(root, None, HashMap::new()).with_repository_root(root),
+        );
+        let g = WorkspaceGraph::build(&indices, 1, &contexts);
+        let id = g.document_id(&doc).unwrap();
+        let (link, node) = g.links(id).next().unwrap();
+        let targets: Vec<EdgeTarget> =
+            g.outgoing(link, EdgeKind::References).map(|edge| edge.target.clone()).collect();
+        assert_eq!(targets, vec![EdgeTarget::Unresolved("t.md".into())]);
+        let context = contexts.0.for_source(&doc);
+        assert_eq!(
+            g.diagnose_unresolved(id, &node.as_link().unwrap().target, Ok(&context)),
+            Some(LinkDiagnostic::BrokenPath { failure: ResolutionFailure::Io })
+        );
     }
 
     #[test]

@@ -120,10 +120,11 @@ impl MdRequest {
     /// environment: when that build finds a repository (the launch directory
     /// is in another repository, or in none) the document derives from it as a
     /// trusted external source, so its links, `&` references, and trigger
-    /// schemas see its own repository. A document in no repository, outside
-    /// the launch repository, also derives as a trusted external source; one
-    /// in no repository launched from no repository keeps the launch
-    /// derivation.
+    /// schemas see its own repository, while its `@` references keep the
+    /// launch `@` scope (the launch tree and `--magic-root` directories). A
+    /// document in no repository, outside the launch repository, also derives
+    /// as a trusted external source; one in no repository launched from no
+    /// repository keeps the launch derivation.
     ///
     /// ## Errors
     ///
@@ -154,10 +155,14 @@ impl MdRequest {
         if derived_is_valid && external.repository_root().is_none() {
             return Ok(derived);
         }
-        Ok(match opening {
+        let source = match opening {
             Some(reference) => external.for_trusted_external_source_reference(reference, resolved),
             None => external.for_trusted_external_source(resolved),
-        })
+        };
+        // The rebuild re-anchors `./`, bare, `&`, and `^` on the document's
+        // repository; `@` keeps searching the launch tree, as it does for a
+        // source derived from the launch context.
+        Ok(source.with_launch_magic_scope(launch.launch_magic_scope().clone()))
     }
 }
 

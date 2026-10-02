@@ -62,8 +62,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   requires a context.
 - The graph takes `&dyn DocumentContexts` (`WorkspaceIndex::new(contexts)`):
   `arena::locate` takes the first planned candidate when it is indexed (no
-  probe), else asks `context::resolve_reference`, else a later indexed
-  candidate (an unsaved buffer). An existing unindexed file is
+  probe), else asks `context::resolve_reference`, else, only on a clean
+  `NoMatch`, a later indexed candidate (an unsaved buffer); an `Io` probe
+  failure stays a broken path. An existing unindexed file is
   `EdgeTarget::File`, never a broken link; the index decides headings, never
   existence, and anchors on unindexed files are not checked. Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a

@@ -48,6 +48,7 @@ mod get_set_rm;
 mod graph;
 mod hash;
 mod hash_directory;
+mod hash_entry_precedence;
 mod hash_kind_save_diff;
 mod help;
 mod layout_alignment;

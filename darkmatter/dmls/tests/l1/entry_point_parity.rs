@@ -371,7 +371,7 @@ fn dmls_entry_points_agree_on_every_reference() {
                 | EntryPoint::SchemaValidation
                 | EntryPoint::MdCompose
                 | EntryPoint::MdSchemaValidate
-                | EntryPoint::MdArgument
+                | EntryPoint::MdArgument(_)
                 | EntryPoint::ClaudineComposition
                 | EntryPoint::ClaudineCompletion
                 | EntryPoint::ClaudinePromptArgument

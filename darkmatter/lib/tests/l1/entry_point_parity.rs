@@ -139,7 +139,7 @@ fn darkmatter_entry_points_agree_on_every_reference() {
             EntryPoint::SchemaValidation => schema_validation(&fixture, &cell),
             EntryPoint::MdCompose
             | EntryPoint::MdSchemaValidate
-            | EntryPoint::MdArgument
+            | EntryPoint::MdArgument(_)
             | EntryPoint::DmlsDiagnostics
             | EntryPoint::DmlsDocumentLinks
             | EntryPoint::DmlsLinkGraph
@@ -301,5 +301,37 @@ fn outcome_matches(expected: &ChainOutcome, observed: &ChainOutcome) -> bool {
     match (expected, observed) {
         (ChainOutcome::File(want), ChainOutcome::File(got)) => matrix::identity(want) == matrix::identity(got),
         (want, got) => want == got,
+    }
+}
+
+/// A request prepared in one repository composes and pre-flights a document
+/// from another with the launch `@` scope: `::file @magic.md` reads the
+/// launch repository's file. The library derives the source from the
+/// request's context, so the scope cannot be lost here; the CLI and Claudine
+/// runners hold the rebuilds that could lose it to this expectation.
+#[test]
+fn external_document_magic_reference_keeps_the_launch_scope() {
+    let root = tempfile::TempDir::new().expect("fixture root");
+    let fixture = matrix::CrossRepositoryFixture::create(root.path());
+    let document = fixture.write_magic_document();
+    let request = ComposeRequest::prepare(
+        ComposeOptions::new().with_source_file(&document),
+        &RequestSnapshot::new(fixture.launch()),
+    )
+    .expect("prepare the request");
+    let md = Markdown::try_from(document.as_path()).expect("read the document");
+
+    let (composed, _) = md.compose_with(&request).expect("compose");
+    assert!(
+        composed.content().contains(matrix::LAUNCH_MAGIC) && !composed.content().contains(matrix::SOURCE_MAGIC),
+        "{}",
+        composed.content(),
+    );
+    let report = md.compose_preflight(&request).expect("pre-flight");
+    match leaf_target(&report.preflight_graph) {
+        Some(PreflightResolvedTarget::File { path, .. }) => {
+            assert_eq!(matrix::identity(path), matrix::identity(&fixture.launch().join("magic.md")));
+        }
+        other => panic!("pre-flight target {other:?}"),
     }
 }

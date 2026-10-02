@@ -5,22 +5,26 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use darkmatter::markdown::Markdown;
+use crate::io::{DocumentOutsideRepository, open_argument};
 use crate::request::MdRequest;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, normalize_path, trace_registry};
 use std::path::Path;
 
 /// Prints repository roots, shadowing, and arm-by-arm trigger results.
 pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
+    // The argument resolves first, so a tree escape or malformed reference is
+    // `InvalidReference` rather than a later missing-repository error.
+    let opened = open_argument(file, request)?;
     // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
     // path segment the gix-derived boundary lacks, failing `normalize_path`.
-    let document_path =
-        biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
+    let document_path = biscuit_file::canonicalize_simplified(opened.path())
+        .unwrap_or_else(|_| opened.path().to_path_buf());
     let markdown = Markdown::try_from(document_path.as_path())?;
-    let context = request.document_context(None, &document_path)?;
+    let context = request.document_context(Some(opened.reference()), &document_path)?;
     let boundary = context
         .repository_root()
         .map(Path::to_path_buf)
-        .ok_or_else(|| eyre!("no repository boundary found for `{}`", file.display()))?;
+        .ok_or_else(|| DocumentOutsideRepository { document: opened.path().to_path_buf() })?;
     let api = DarkmatterSchemas::new(context.clone()).with_trigger_discovery(&document_path, &boundary)?;
     let registry = api
         .trigger_registry()
@@ -38,6 +42,7 @@ pub fn run_triggers(file: &Path, request: &MdRequest) -> Result<()> {
     let trace = trace_registry(registry, &frontmatter, &normalized);
     let terminal = Terminal::default();
 
+    emit(&terminal, format!("<bold>Document:</bold> {}", escaped(opened.path())));
     emit(&terminal, format!("<bold>Boundary:</bold> {}", escaped(&trace.boundary)));
     emit(&terminal, "<bold>Schema roots:</bold>".to_string());
     if trace.roots.is_empty() {

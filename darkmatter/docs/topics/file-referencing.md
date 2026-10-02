@@ -17,6 +17,12 @@ defines, and it resolves them all the same way. The common forms:
 | Variable | `{{NOTES}}/intro.md` | the value of `NOTES` in the request's environment |
 | Absolute | `/srv/docs/intro.md` | the path itself |
 
+Text that is not valid reference syntax is never read as a plain filename.
+A bare `@`, `&`, or `^`, or a reference starting with the removed `!` sigil,
+fails with `failure: invalid-reference` even where a file of that literal name
+exists; write `./@` to name such a file. Every `md` command that reads a file
+argument follows this rule (see the [CLI file references](../cli/index.md#every-file-argument-uses-this-grammar)).
+
 ## One answer per request
 
 Every reference in a composition resolves against one **request context**,

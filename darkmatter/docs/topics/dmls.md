@@ -150,7 +150,9 @@ A Markdown link resolves to the same file `md compose` would read, whether
 or not that file is inside the folder you opened. Opening only `repo/docs/`
 does not break `[t](../target.md)`, `[t](&target.md)`, or `[t](~/notes.md)`:
 the link, go-to-definition, and hover all reach the existing file. A link to
-a document you have open but not yet saved also resolves.
+a document you have open but not yet saved also resolves, unless a place
+searched before it could not be checked (for example a symlink loop); that
+link is reported broken with the `Io` failure class, as `md compose` would fail.
 
 DMLS checks a link's `#fragment` only in documents it has indexed. A
 fragment on a file outside the opened folder (or on a non-Markdown file) is

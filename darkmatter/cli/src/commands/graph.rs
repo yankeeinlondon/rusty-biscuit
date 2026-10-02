@@ -1,6 +1,6 @@
 //! `md graph` subcommand implementation.
 
-use crate::io::resolve_file_path;
+use crate::io::open_argument;
 use crate::request::MdRequest;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::TerminalRenderable;
@@ -20,13 +20,13 @@ pub(crate) fn run_graph(
     json: bool,
     request: &MdRequest,
 ) -> Result<()> {
-    let resolved = resolve_file_path(input, request.launch_context()?)?;
+    let opened = open_argument(input, request)?;
     // The graph resolves through the document's own context: one derived from
     // the launch context, or built at the document for a document in another
     // repository (a launch-anchored request rejects such a document).
-    let opening = biscuit_file::FileReference::new(&input.to_string_lossy()).ok();
-    let context = request.document_context(opening.as_ref(), &resolved)?;
-    let md = Markdown::try_from(resolved.as_path())
+    let context = opened.document_context(request)?;
+    let resolved = opened.path();
+    let md = Markdown::try_from(resolved)
         .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
     let graph_request = ComposeRequest::with_context(
         ComposeOptions::for_document(request.launch_dir(), &md),

@@ -8,7 +8,7 @@
 
 mod frontmatter_repair;
 
-use crate::io::resolve_file_path;
+use crate::io::{OpenedArgument, open_argument};
 use crate::request::MdRequest;
 use color_eyre::eyre::{Context, Result, eyre};
 use biscuit_terminal::components::prose::Prose;
@@ -71,7 +71,8 @@ pub(crate) fn resolve_list_spacing(compact: bool, loose: bool) -> ListSpacingMod
 
 #[instrument(skip_all)]
 pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRequest) -> Result<()> {
-    let resolved = resolve_input_path(input, request)?;
+    let opened = open_input(input, request)?;
+    let resolved = opened.as_ref().map(|opened| opened.path().to_path_buf());
     // Resolving the destination up front means the stdin-under-`--save`
     // rejection happens once, before any read, and the write branch below
     // needs no second guard.
@@ -86,8 +87,7 @@ pub fn run_clean(input: Option<&PathBuf>, options: &CleanOptions, request: &MdRe
     };
     let raw = read_source(resolved.as_ref())?;
 
-    let opening = input.and_then(|path| biscuit_file::FileReference::new(&path.to_string_lossy()).ok());
-    let document_request = DocumentRequest { request, opening: opening.as_ref() };
+    let document_request = DocumentRequest { request, opening: opened.as_ref().map(|opened| opened.reference()) };
     let repair = repair_frontmatter(&raw, resolved.as_deref(), &options.schema, &document_request)?;
 
     // Building the document is what enforces the unrepairable-YAML contract.
@@ -177,17 +177,17 @@ fn assemble(source: &str, cleaned: &Markdown) -> String {
     }
 }
 
-/// Resolves the input path through biscuit-file's reference system.
+/// Opens the input argument through the shared reference reader.
 ///
 /// ## Returns
 ///
 /// `None` when the document comes from stdin — either no path at all, or the
 /// explicit `-` marker.
-fn resolve_input_path(input: Option<&PathBuf>, request: &MdRequest) -> Result<Option<PathBuf>> {
+fn open_input(input: Option<&PathBuf>, request: &MdRequest) -> Result<Option<OpenedArgument>> {
     match input {
         None => Ok(None),
         Some(path) if path.to_str() == Some("-") => Ok(None),
-        Some(path) => resolve_file_path(path, request.launch_context()?).map(Some),
+        Some(path) => open_argument(path, request).map(Some),
     }
 }
 

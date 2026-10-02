@@ -29,6 +29,11 @@ helper that resolves it is named so it is not re-derived.
    `ls-files --exclude-from=`. The include resolver uses
    `biscuit_file::canonicalize_simplified` for that argument. Raw canonical
    paths remain inside the copy record's identity comparison.
+   A "closed key space" is not one whose values are ever printed: Darkmatter's
+   reference-graph node ids (`source_to_id`) and `md edit`'s printed path used
+   raw `canonicalize`, so `md validate refs --graph mermaid` node ids and
+   `md edit` output carried `\\?\C:` on Windows only (found 2026-10-02 by
+   the `md` route parity matrix). Both now use `canonicalize_simplified`.
    `reflink-copy` reports an unsupported block clone on NTFS as an HRESULT
    shaped `io::Error` (`0x80070001`, "Incorrect function"), not raw error 1.
    The worktree copy fallback recognizes that form and byte-copies instead.

@@ -76,8 +76,10 @@ pub enum EntryPoint {
     MdCompose,
     /// `md schema validate <document>`.
     MdSchemaValidate,
-    /// `md compose <value>`: the document path argument (Table 2).
-    MdArgument,
+    /// `md <route> <value>`: one `md` route's source-file argument (Table 2).
+    /// Every route opens its argument through the same reader, and each runs
+    /// as its own entry point so a route that bypasses it fails on its own.
+    MdArgument(MdRoute),
     /// DMLS published diagnostics for schema `file` values.
     DmlsDiagnostics,
     /// `textDocument/documentLink`.
@@ -110,13 +112,30 @@ pub enum EntryPoint {
 }
 
 impl EntryPoint {
-    pub const ALL: [EntryPoint; 15] = [
+    pub const ALL: [EntryPoint; 32] = [
         Self::ComposePipeline,
         Self::Preflight,
         Self::SchemaValidation,
         Self::MdCompose,
         Self::MdSchemaValidate,
-        Self::MdArgument,
+        Self::MdArgument(MdRoute::Render),
+        Self::MdArgument(MdRoute::Compose),
+        Self::MdArgument(MdRoute::Clean),
+        Self::MdArgument(MdRoute::Toc),
+        Self::MdArgument(MdRoute::FrontmatterGet),
+        Self::MdArgument(MdRoute::FrontmatterSet),
+        Self::MdArgument(MdRoute::FrontmatterRm),
+        Self::MdArgument(MdRoute::Hash),
+        Self::MdArgument(MdRoute::DeltaBase),
+        Self::MdArgument(MdRoute::DeltaUpdated),
+        Self::MdArgument(MdRoute::Graph),
+        Self::MdArgument(MdRoute::Edit),
+        Self::MdArgument(MdRoute::ValidateRefs),
+        Self::MdArgument(MdRoute::SchemaValidate),
+        Self::MdArgument(MdRoute::SchemaDetect),
+        Self::MdArgument(MdRoute::SchemaTriggers),
+        Self::MdArgument(MdRoute::CodeBlockFile),
+        Self::MdArgument(MdRoute::CodeBlockDefault),
         Self::DmlsDiagnostics,
         Self::DmlsDocumentLinks,
         Self::DmlsLinkGraph,
@@ -131,7 +150,7 @@ impl EntryPoint {
     pub fn owner(self) -> Owner {
         match self {
             Self::ComposePipeline | Self::Preflight | Self::SchemaValidation => Owner::Darkmatter,
-            Self::MdCompose | Self::MdSchemaValidate | Self::MdArgument => Owner::DarkmatterCli,
+            Self::MdCompose | Self::MdSchemaValidate | Self::MdArgument(_) => Owner::DarkmatterCli,
             Self::DmlsDiagnostics
             | Self::DmlsDocumentLinks
             | Self::DmlsLinkGraph
@@ -156,7 +175,17 @@ impl EntryPoint {
             Self::MdCompose => document_rows(self, &[File, Code, TocLinking, SchemaFile], &Form::ALL, false),
             Self::MdSchemaValidate => document_rows(self, &[SchemaFile], &Form::ALL, false),
             // A quoted `'~/…'` argument is the only `~` spelling `md` sees.
-            Self::MdArgument => value_rows(self, &Form::ALL, true),
+            // Rows (a) and (b) test the opened document's own references, so
+            // only composition, which reads them, runs them.
+            Self::MdArgument(route) => {
+                let mut rows = value_rows(self, &Form::ALL, route == MdRoute::Compose);
+                for launch in Launch::ALL {
+                    for value in Supplied::ARGUMENT_ONLY {
+                        rows.push(Row::Value(ValueCell { entry: self, value, launch }));
+                    }
+                }
+                rows
+            }
             Self::DmlsDiagnostics => document_rows(self, &[SchemaFile], &Form::ALL, false),
             Self::DmlsDocumentLinks => document_rows(self, EDITOR, &Form::ALL, false),
             Self::DmlsLinkGraph => document_rows(self, EDITOR, &Form::ALL, false),
@@ -179,6 +208,59 @@ pub fn rows_for(owner: Owner) -> Vec<Row> {
         .filter(|entry| entry.owner() == owner)
         .flat_map(EntryPoint::rows)
         .collect()
+}
+
+/// An `md` route that opens a caller-named source file. Output
+/// destinations, cache directories, and `--magic-root` directories are
+/// settings, not source files, and have no route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MdRoute {
+    /// `md render <value>`
+    Render,
+    /// `md compose <value>`
+    Compose,
+    /// `md clean <value>`
+    Clean,
+    /// `md toc --json <value>`
+    Toc,
+    /// `md get <value> title`
+    FrontmatterGet,
+    /// `md set <value> …` (printed, not saved)
+    FrontmatterSet,
+    /// `md rm <value> title --json`, which saves in place
+    FrontmatterRm,
+    /// `md hash <value>`
+    Hash,
+    /// `md delta <value> <control>`
+    DeltaBase,
+    /// `md delta <control> <value>`
+    DeltaUpdated,
+    /// `md graph --json <value>`
+    Graph,
+    /// `md edit <value>` with a no-op editor; a lookup that matches nothing
+    /// names a new file at its first candidate.
+    Edit,
+    /// `md validate refs --graph mermaid <value>`
+    ValidateRefs,
+    /// `md schema validate <value>`
+    SchemaValidate,
+    /// `md schema detect <value>`
+    SchemaDetect,
+    /// `md schema triggers <value>`, which needs the document's repository.
+    SchemaTriggers,
+    /// `md code-block --file <value>`
+    CodeBlockFile,
+    /// `md code-block <value>`: a file only when the value is a reference to
+    /// an existing file, otherwise literal code.
+    CodeBlockDefault,
+}
+
+impl MdRoute {
+    /// Whether the route writes to the fixture, so the runner restores the
+    /// fixture before each of its cells and runs them one at a time.
+    pub fn mutates(self) -> bool {
+        matches!(self, Self::FrontmatterRm | Self::Edit)
+    }
 }
 
 /// The construct in a document that carries the reference.
@@ -393,6 +475,53 @@ pub enum Supplied {
     ThroughHome(NotesReference),
     /// Row (b): the same document by its absolute path.
     AbsolutePath(NotesReference),
+    /// The absolute path of `repo/root-only.md`.
+    Absolute,
+    /// A malformed reserved introducer whose literal file exists in the
+    /// launch directory ([`ParityFixture::write_route_files`]); it must be
+    /// refused, never opened.
+    Malformed(Malformed),
+    /// `./@`: the spelling that names the literal `@` file.
+    LiteralReserved,
+}
+
+impl Supplied {
+    /// The `md` argument rows beyond the shared forms.
+    pub const ARGUMENT_ONLY: [Supplied; 6] = [
+        Self::Absolute,
+        Self::Malformed(Malformed::Magic),
+        Self::Malformed(Malformed::RepositoryRoot),
+        Self::Malformed(Malformed::RepositoryScoped),
+        Self::Malformed(Malformed::Legacy),
+        Self::LiteralReserved,
+    ];
+}
+
+/// Text that is not valid reference syntax although a file of that name
+/// exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Malformed {
+    /// `@`
+    Magic,
+    /// `&`
+    RepositoryRoot,
+    /// `^`
+    RepositoryScoped,
+    /// `!legacy.md`, the removed `!` sigil.
+    Legacy,
+}
+
+impl Malformed {
+    pub const ALL: [Malformed; 4] = [Self::Magic, Self::RepositoryRoot, Self::RepositoryScoped, Self::Legacy];
+
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Self::Magic => "@",
+            Self::RepositoryRoot => "&",
+            Self::RepositoryScoped => "^",
+            Self::Legacy => "!legacy.md",
+        }
+    }
 }
 
 /// One Table 2 cell: entry point × value × launch directory.
@@ -469,6 +598,9 @@ fn value_rows(entry: EntryPoint, forms: &[Form], documents: bool) -> Vec<Row> {
 pub enum Expected {
     File(PathBuf),
     Failure(ResolutionFailure),
+    /// The value is rendered as literal text and no file is read
+    /// ([`MdRoute::CodeBlockDefault`]).
+    Literal,
 }
 
 /// What an entry point produced for one cell.
@@ -487,6 +619,8 @@ pub enum Observed {
     /// an `Expected::Failure` cell of any class, and the class is compared at
     /// the same value's execution ([`EntryPoint::ClaudinePromptArgument`]).
     Unresolved,
+    /// The value was rendered as literal text, naming no file.
+    Literal,
     /// Anything else, described for the report (several files, a failure
     /// with no class, an unexpected success).
     Unexpected(String),
@@ -603,6 +737,9 @@ impl ParityFixture {
             Supplied::AbsolutePath(reference) => {
                 self.write_notes_document(Consumer::File, reference).to_string_lossy().into_owned()
             }
+            Supplied::Absolute => self.repo().join("root-only.md").to_string_lossy().into_owned(),
+            Supplied::Malformed(malformed) => malformed.spelling().into(),
+            Supplied::LiteralReserved => "./@".into(),
         }
     }
 
@@ -615,7 +752,7 @@ impl ParityFixture {
     }
 
     pub fn expected_value(&self, cell: &ValueCell) -> Expected {
-        match cell.value {
+        let expected = match cell.value {
             Supplied::Form(form) => {
                 let dir = self.launch_dir(cell.launch);
                 let package = cell.launch == Launch::Package;
@@ -623,6 +760,36 @@ impl ParityFixture {
             }
             Supplied::ThroughHome(reference) => self.expected_notes(reference, true),
             Supplied::AbsolutePath(reference) => self.expected_notes(reference, false),
+            Supplied::Absolute => Expected::File(self.repo().join("root-only.md")),
+            Supplied::Malformed(_) => Expected::Failure(ResolutionFailure::InvalidReference),
+            Supplied::LiteralReserved => Expected::File(self.launch_dir(cell.launch).join("@")),
+        };
+        match cell.entry {
+            EntryPoint::MdArgument(route) => self.route_expectation(route, cell, expected),
+            _ => expected,
+        }
+    }
+
+    /// How one `md` route reports the shared expectation.
+    fn route_expectation(&self, route: MdRoute, cell: &ValueCell, expected: Expected) -> Expected {
+        match (route, expected) {
+            // Trigger inspection needs the document's repository; a file
+            // outside every repository is `MissingContext` once opened.
+            (MdRoute::SchemaTriggers, Expected::File(path)) if !path.starts_with(self.repo()) => {
+                Expected::Failure(ResolutionFailure::MissingContext)
+            }
+            // A miss names a new file at the first candidate. Every miss
+            // here is from the repository root, where that is the root
+            // joined with the payload (`./sibling.md`, `beside.md`,
+            // `^area-doc.md`).
+            (MdRoute::Edit, Expected::Failure(ResolutionFailure::NoMatch)) => {
+                let spelling = self.value(cell);
+                let payload = spelling.trim_start_matches(['^', '&', '@']).trim_start_matches("./");
+                Expected::File(self.launch_dir(cell.launch).join(payload))
+            }
+            // Only an existing file is read; anything else is code.
+            (MdRoute::CodeBlockDefault, Expected::Failure(_)) => Expected::Literal,
+            (_, expected) => expected,
         }
     }
 
@@ -661,6 +828,42 @@ impl ParityFixture {
         }
     }
 
+    /// Prepares the fixture for the `md` route rows, and restores it after a
+    /// mutating route: every target, plus a literal `@`, `&`, `^`, and
+    /// `!legacy.md` file in each launch directory, holds
+    /// [`route_document`] for its id, so every route can name the file it
+    /// opened: `title` (`get`, `toc`), a `target-<slug>` property (schema
+    /// detection), and the `## TARGET <id>` heading.
+    pub fn write_route_files(&self) {
+        for path in self.route_files() {
+            let id = to_portable_string(path.strip_prefix(&self.root).unwrap());
+            write(&path, &route_document(&id));
+        }
+    }
+
+    /// Every file a route row can open: the targets and the literal
+    /// reserved-name files of [`Self::write_route_files`].
+    pub fn route_files(&self) -> Vec<PathBuf> {
+        let mut files = self.targets();
+        for launch in Launch::ALL {
+            for name in Malformed::ALL.map(Malformed::spelling) {
+                files.push(self.launch_dir(launch).join(name));
+            }
+        }
+        files
+    }
+
+    /// The route file whose [`route_slug`] property `text` names.
+    pub fn route_file_by_slug(&self, text: &str) -> Vec<PathBuf> {
+        self.route_files()
+            .into_iter()
+            .filter(|path| {
+                let id = to_portable_string(path.strip_prefix(&self.root).unwrap());
+                text.contains(&format!("{}:", route_slug(&id))) || text.contains(&format!("\"{}\"", route_slug(&id)))
+            })
+            .collect()
+    }
+
     /// Every fixture target named in rendered output, in order of first
     /// appearance.
     pub fn marked_targets(&self, output: &str) -> Vec<PathBuf> {
@@ -669,7 +872,7 @@ impl ParityFixture {
             let rest = &output[offset + TARGET_MARKER.len()..];
             let id: String = rest
                 .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | '_'))
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | '_' | '@' | '&' | '^' | '!'))
                 .collect();
             let path = self.root.join(id.trim_end_matches('.'));
             if !found.contains(&path) {
@@ -723,6 +926,8 @@ impl ParityFixture {
                 }
             }
             (Expected::File(_), Observed::Accepted) => Ok(()),
+            (Expected::Literal, Observed::Literal) => Ok(()),
+            (Expected::Literal, other) => Err(format!("expected literal text, got {other:?}")),
             (Expected::Failure(want), Observed::Failure(got)) if want == got => Ok(()),
             (Expected::Failure(_), Observed::Unresolved) => Ok(()),
             (Expected::File(want), other) => Err(format!("expected {}, got {other:?}", self.show(want))),
@@ -744,9 +949,16 @@ impl ParityFixture {
 }
 
 /// One spelling per file: `/var` and `/private/var` (macOS) or a verbatim
-/// prefix (Windows) name the same file.
+/// prefix (Windows) name the same file. A file that no longer exists (one
+/// `md edit` created and the runner removed) is spelled through its folder.
 pub fn identity(path: &Path) -> PathIdentity {
-    PathIdentity::new(&canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf()))
+    let canonical = canonicalize_simplified(path).unwrap_or_else(|_| {
+        match (path.parent().map(canonicalize_simplified), path.file_name()) {
+            (Some(Ok(parent)), Some(name)) => parent.join(name),
+            _ => path.to_path_buf(),
+        }
+    });
+    PathIdentity::new(&canonical)
 }
 
 /// Folds a runner's per-cell results into one report naming every
@@ -789,6 +1001,27 @@ impl ParityReport {
             self.mismatches.join("\n")
         );
     }
+}
+
+/// A route file's content: a `title` and a [`route_slug`] property naming
+/// `id`, then the target heading.
+pub fn route_document(id: &str) -> String {
+    format!("---\ntitle: {id}\n{}: true\n---\n\n## {TARGET_MARKER}{id}\n", route_slug(id))
+}
+
+/// `target-` and `id` with every character but ASCII letters and digits
+/// spelled as its code point, so no two ids share a slug and the slug is a
+/// plain property name.
+pub fn route_slug(id: &str) -> String {
+    let mut slug = String::from("target-");
+    for c in id.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else {
+            slug.push_str(&format!("-{:x}-", c as u32));
+        }
+    }
+    slug
 }
 
 /// Every target's id: its `/`-spelled path below the fixture root.
@@ -917,4 +1150,121 @@ fn compare_outcome(label: &str, expected: &ChainOutcome, observed: &ChainOutcome
         (want, got) => want == got,
     };
     if agrees { Ok(()) } else { Err(format!("{label}: expected {expected:?}, got {observed:?}")) }
+}
+
+/// Two repositories under one root, for a source outside the launch
+/// repository: every runner launches in `launch/` and opens a document or
+/// prompt in `source/`.
+///
+/// ```text
+/// {root}/
+///   launch/                   git repository; the launch directory
+///     magic.md                ## LAUNCH_MAGIC
+///     order.yaml              LAUNCH_SCHEMA, found by `@order.yaml`
+///     schemas/order.yaml      LAUNCH_SCHEMA, a wrong `&`/`^`/bare answer
+///   source/                   a second git repository
+///     magic.md                ## SOURCE_MAGIC, a wrong `@` answer
+///     order.yaml              SOURCE_SCHEMA
+///     schemas/order.yaml      SOURCE_SCHEMA
+///     prompts/                the documents and prompts the runners open
+///       order.yaml            SOURCE_SCHEMA, the `./` control
+/// ```
+///
+/// The source's own repository anchors `&`, `^`, and bare root lookups; `@`
+/// keeps the launch `@` scope. The anchors are independent, so each wrong
+/// answer exists on disk and names the other repository. Both schemas declare
+/// `zebra` before `apple`, and their `zebra` enums are disjoint.
+pub struct CrossRepositoryFixture {
+    root: PathBuf,
+}
+
+pub const LAUNCH_MAGIC: &str = "LAUNCH_MAGIC";
+pub const SOURCE_MAGIC: &str = "SOURCE_MAGIC";
+pub const LAUNCH_SCHEMA: &str = "$schema:\n  zebra: enum(launch, other)\n  apple: enum(one, two)\n";
+pub const SOURCE_SCHEMA: &str = "$schema:\n  zebra: enum(red, blue)\n  apple: enum(one, two)\n";
+
+/// The repository whose schema a `$schema` reference must find.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemaOwner {
+    Launch,
+    Source,
+}
+
+impl SchemaOwner {
+    /// The `zebra` enum members the owner's schema declares.
+    pub fn zebra_values(self) -> [&'static str; 2] {
+        match self {
+            Self::Launch => ["launch", "other"],
+            Self::Source => ["red", "blue"],
+        }
+    }
+}
+
+impl CrossRepositoryFixture {
+    pub fn create(root: &Path) -> Self {
+        let fixture = Self { root: root.to_path_buf() };
+        for repo in [fixture.launch(), fixture.source()] {
+            std::fs::create_dir_all(repo.join(".git/objects")).unwrap();
+            std::fs::create_dir_all(repo.join(".git/refs/heads")).unwrap();
+            write(&repo.join(".git/HEAD"), "ref: refs/heads/main\n");
+            write(&repo.join(".git/config"), "[core]\n\trepositoryformatversion = 0\n\tbare = false\n");
+        }
+        let (launch, source) = (fixture.launch(), fixture.source());
+        write(&launch.join("magic.md"), &format!("## {LAUNCH_MAGIC}\n"));
+        write(&source.join("magic.md"), &format!("## {SOURCE_MAGIC}\n"));
+        for path in [launch.join("order.yaml"), launch.join("schemas/order.yaml")] {
+            write(&path, LAUNCH_SCHEMA);
+        }
+        for path in [source.join("order.yaml"), source.join("schemas/order.yaml"), source.join("prompts/order.yaml")] {
+            write(&path, SOURCE_SCHEMA);
+        }
+        fixture
+    }
+
+    pub fn launch(&self) -> PathBuf {
+        self.root.join("launch")
+    }
+
+    pub fn source(&self) -> PathBuf {
+        self.root.join("source")
+    }
+
+    /// Every `$schema` spelling a source prompt can use, labelled, with the
+    /// repository whose schema it must find.
+    pub fn schema_references(&self) -> Vec<(&'static str, String, SchemaOwner)> {
+        vec![
+            ("bare", "schemas/order.yaml".into(), SchemaOwner::Source),
+            ("repository root", "&schemas/order.yaml".into(), SchemaOwner::Source),
+            ("repository scoped", "^schemas/order.yaml".into(), SchemaOwner::Source),
+            ("explicit relative", "./order.yaml".into(), SchemaOwner::Source),
+            (
+                "absolute",
+                to_portable_string(&self.source().join("schemas/order.yaml")),
+                SchemaOwner::Source,
+            ),
+            ("magic", "@order.yaml".into(), SchemaOwner::Launch),
+        ]
+    }
+
+    /// `source/prompts/<name>.md`, whose only frontmatter is
+    /// `$schema: '<reference>'` plus `extra` lines.
+    pub fn write_schema_document(&self, name: &str, reference: &str, extra: &str) -> PathBuf {
+        let path = self.source().join(format!("prompts/{name}.md"));
+        write(&path, &format!("---\n$schema: '{reference}'\n{extra}---\n\n# Schema\n"));
+        path
+    }
+
+    /// `source/prompts/magic-doc.md`, whose one reference is
+    /// `::file @magic.md`.
+    pub fn write_magic_document(&self) -> PathBuf {
+        let path = self.source().join("prompts/magic-doc.md");
+        write(&path, &Consumer::File.document("@magic.md"));
+        path
+    }
+
+    /// `source/prompts/enum-doc.md`: `$schema: '@order.yaml'` with
+    /// `zebra: launch`, valid only against the launch schema.
+    pub fn write_launch_enum_document(&self) -> PathBuf {
+        self.write_schema_document("enum-doc", "@order.yaml", "zebra: launch\n")
+    }
 }
