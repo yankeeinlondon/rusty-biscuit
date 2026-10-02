@@ -30,5 +30,5 @@ TODO
 A _prompt_ file in Claudine is a **composable** document that can dynamically respond to the environment it is in:
 
 - [**Interpolation**]() allows a prompt author to replace handlebar templates:
-    - this can be a straight Frontmatter interpolation like `{{{ foo }}}` where the contents of the Frontmatter property `foo` replace the template tag
+    - this can be a straight Frontmatter interpolation like `{{ foo }}` where the contents of the Frontmatter property `foo` replace the template tag
     - but Claudine also allows a robust

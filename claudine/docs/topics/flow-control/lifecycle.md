@@ -75,7 +75,7 @@ it always was. See
 
 Every frontmatter property of a lifecycle event interpolates **when that event fires**, not during the initial compose. This is what lets a lifecycle message report the state at the moment it runs — including the late-binding roots (`err`, `timing`, `current`, `current_env`) that do not exist at compose time. So `failure.message: "❌️  {{err.code}}"` renders the real error's code, and a `failure` stack `message: "❌️  {{err.code}}"` does too.
 
-The variables a lifecycle `{{{ … }}}` span can read fall into two groups:
+The variables a lifecycle `{{ … }}` span can read fall into two groups:
 
 - **Early-binding** (resolvable before the run): `doc.*` (frontmatter), `ctx.*`, `env.*`, and read-side functions (`parent_dir`, `dirname`, `frontmatter`, `file_exists`, …).
 - **Late-binding** (only exists at event-time): `err` (in `blocked`/`failure`/optional-error `finalize`), `timing`, `group` (inside a sequence group), `current`, `current_env`.
@@ -107,7 +107,7 @@ produced one yet when the whole graph is approved.
 
 A lifecycle property's interpolation resolves against the union of the early- and late-binding surfaces, at event-time. Bare frontmatter references (`{{phase}}`, `{{artifact.path}}`) read the **current** effective document state at the moment the event fires — not a copy captured at the initial compose — so a `set_frontmatter` side effect that mutates `phase` between loop iterations is visible to the next iteration's lifecycle message.
 
-Spans follow ordinary Darkmatter rules: `{{ … }}` is evaluated, and `{{{ … }}}` is an escape that renders the literal text `{{ … }}` without evaluating it. The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
+Spans follow ordinary Darkmatter rules: `{{ … }}` is evaluated, and `{{{ … }}}` is an escape that renders the literal text `{{ … }}` without evaluating it. The backslash escapes `\{{ … }}` and `\{\{ … }}` are not evaluated either, but interpolation keeps them exactly as written, backslash included; the backslash disappears only on a channel that renders inline Markdown, such as `stderr`. Use `{{{ … }}}` when the braces must arrive without a backslash wherever the value goes (a `set:` value, a file, a shell command). The document body and ordinary (non-lifecycle) frontmatter keys still interpolate at compose-time and are unchanged.
 
 ## When Lifecycle Properties Interpolate
 
@@ -191,7 +191,7 @@ Actions run in order. The first [flow-control directive](flow-control.md) (`skip
 
 An action is written in one of exactly two forms — **positional** or **key/value**. Both follow a single evaluation rule:
 
-> **Every value in a lifecycle action is literal text. Use `{{{ … }}}` to inject a variable or expression. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
+> **Every value in a lifecycle action is literal text. Use `{{ … }}` to inject a variable or expression, and `{{{ … }}}` to write the literal text `{{ … }}`. The only expression-evaluated keys in the entire lifecycle surface are the boolean predicates `when`, `until`, and `while`.**
 
 **Positional** — an object whose single key is a known verb; the value carries the argument(s):
 
@@ -257,7 +257,7 @@ Darkmatter's document body and mixed frontmatter strings are single-pass too: th
 
 #### Object-valued arguments
 
-Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{{ … }}}` span:
+Some side-effect verbs take an object argument (`merge_frontmatter`, `append_jsonl`, key/value `http_post`). Direct nested YAML maps are **not** accepted inside action values. Place the object in frontmatter or context and pass it through a whole-value `{{ … }}` span:
 
 ```yaml
 payload:
@@ -408,7 +408,7 @@ start:
 
 ### `no_error`
 
-The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{{ … }}}` interpolation that raised) always halts and is never suppressed by `no_error`.
+The `no_error` flag can be set on any action category. When `true`, an unintentional side-effect **dispatch** failure is logged but does not stop the stack or change the composition outcome. Its scope is the side-effect layer only: an expression-layer evaluation error (a crashed `when:` guard or a `{{ … }}` interpolation that raised) always halts and is never suppressed by `no_error`.
 
 ```yaml
 start:
@@ -882,7 +882,7 @@ This also means these effects cannot write a template into a file. An authored `
 
 ### `LifecycleErrNotAvailable`
 
-`err` is read in an event that never carries an error (`initialize`, `start`, `success`, `loop`). Darkmatter's passive validation checks every `{{{ … }}}` span in communication and action strings and every `when:` expression against the event's declared globals — every branch, without evaluating anything — and the document fails preparation before any event runs. The typed Darkmatter error is the diagnostic's source. `timing`, `current`, and `current_env` are readable in every event; `doc.err` reads the document.
+`err` is read in an event that never carries an error (`initialize`, `start`, `success`, `loop`). Darkmatter's passive validation checks every `{{ … }}` span in communication and action strings and every `when:` expression against the event's declared globals — every branch, without evaluating anything — and the document fails preparation before any event runs. The typed Darkmatter error is the diagnostic's source. `timing`, `current`, and `current_env` are readable in every event; `doc.err` reads the document.
 
 ```yaml
 start:
