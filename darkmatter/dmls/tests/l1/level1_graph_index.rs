@@ -7,10 +7,19 @@
 //! ungated.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use darkmatter::markdown::compose::RequestSnapshot;
+use dmls::context::RepositoryContexts;
 
 use dmls::config::WorkspaceConfig;
 use dmls::graph::{EdgeKind, WorkspaceIndex};
 use dmls::workspace::{SilentProgress, index_workspace};
+
+/// The contexts the server would build for documents under `root`.
+fn contexts(root: &Path) -> Arc<RepositoryContexts> {
+    Arc::new(RepositoryContexts::new(RequestSnapshot::new(root)))
+}
 
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
@@ -27,7 +36,12 @@ fn cross_file_link_edges_resolve_through_discovery() {
     write(root, "index.md", "# Home\n\nSee [setup](guide/setup.md#install).\n");
     write(root, "guide/setup.md", "# Setup\n\n## Install\n\nSteps.\n");
 
-    let index = index_workspace(&[root.to_path_buf()], &WorkspaceConfig::default(), &SilentProgress);
+    let index = index_workspace(
+        &[root.to_path_buf()],
+        &WorkspaceConfig::default(),
+        &SilentProgress,
+        contexts(root),
+    );
     let snapshot = index.snapshot();
     assert_eq!(snapshot.document_count(), 2);
 
@@ -49,7 +63,12 @@ fn wiki_basename_index_flags_ambiguity() {
     write(root, "b/note.md", "# B note\n");
     write(root, "c/unique.md", "# Unique\n");
 
-    let index = index_workspace(&[root.to_path_buf()], &WorkspaceConfig::default(), &SilentProgress);
+    let index = index_workspace(
+        &[root.to_path_buf()],
+        &WorkspaceConfig::default(),
+        &SilentProgress,
+        contexts(root),
+    );
     let keys = index.snapshot();
     let keys = keys.key_index();
     assert!(keys.is_ambiguous("note"));
@@ -58,7 +77,7 @@ fn wiki_basename_index_flags_ambiguity() {
 
 #[test]
 fn invalidation_matrix_edit_delete_rename() {
-    let mut index = WorkspaceIndex::new();
+    let mut index = WorkspaceIndex::new(Arc::new(dmls::graph::NoContexts));
     let a = PathBuf::from("/w/a.md");
     let b = PathBuf::from("/w/b.md");
 
@@ -101,6 +120,7 @@ fn generated_corpus_indexes_without_panic() {
         &[temp.path().to_path_buf()],
         &WorkspaceConfig::default(),
         &SilentProgress,
+        contexts(temp.path()),
     );
     assert_eq!(index.len(), 100);
     assert!(index.snapshot().edge_count() > 0);
