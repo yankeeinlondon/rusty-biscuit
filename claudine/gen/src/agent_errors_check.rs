@@ -242,11 +242,21 @@ pub fn evaluate(
     evaluate_with_fixture_base(provider, seed, research, None)
 }
 
+/// Where empirical `./_fixtures/...` references resolve: the area's request
+/// context derived onto the research topic directory.
+pub(crate) struct FixtureBase(FileResolutionContext);
+
+impl FixtureBase {
+    pub(crate) fn new(context: &FileResolutionContext, topic_dir: &Path) -> Self {
+        Self(context.for_cwd(topic_dir))
+    }
+}
+
 fn evaluate_with_fixture_base(
     provider: &str,
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
 ) -> FindingsReport {
     let mut findings = Vec::new();
 
@@ -400,7 +410,7 @@ fn check_needle_hygiene(research: &ResearchVocabulary, findings: &mut Vec<Findin
 fn check_provenance(
     seed: Option<&ErrorVocabulary>,
     research: &ResearchVocabulary,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
     findings: &mut Vec<Finding>,
 ) {
     let seed_rows = seed.map(seed_rows).unwrap_or_default();
@@ -414,7 +424,7 @@ fn check_provenance(
 fn provenance_for(
     row: &ProvenanceRow<'_>,
     in_seed: bool,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
     findings: &mut Vec<Finding>,
 ) {
     let branch = row.row.branch;
@@ -463,7 +473,7 @@ fn check_empirical_provenance(
     branch: Branch,
     label: &str,
     empirical: Option<&EmpiricalEvidence>,
-    fixture_base: Option<&Path>,
+    fixture_base: Option<&FixtureBase>,
     findings: &mut Vec<Finding>,
 ) {
     let Some(empirical) = empirical else {
@@ -508,7 +518,7 @@ fn check_empirical_provenance(
         return;
     };
     let resolved = FileReference::new(fixture)
-        .and_then(|reference| reference.resolve_from(fixture_base));
+        .and_then(|reference| reference.resolve_in_context(&fixture_base.0));
     match resolved {
         Ok(Some(_)) => {}
         Ok(None) => findings.push(Finding {
@@ -786,7 +796,7 @@ pub fn check_provider(
     findings_path: &Path,
     context: &FileResolutionContext,
 ) -> Result<FindingsReport, GenError> {
-    let fixture_base = area.join(format!("docs/research/{TOPIC}"));
+    let fixture_base = FixtureBase::new(context, &area.join(format!("docs/research/{TOPIC}")));
     let report = match read_seed(area, slug) {
         Err(error) => {
             FindingsReport::gate_error(slug, GateErrorScope::GateInput, error.to_string())
