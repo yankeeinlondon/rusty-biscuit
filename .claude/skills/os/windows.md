@@ -45,6 +45,13 @@ helper that resolves it is named so it is not re-derived.
    Windows launch test names its roots instead: the provider selector (e.g.
    `CODEX_HOME`) for the source and `CLAUDINE_OVERLAY_DIR` for overlay
    storage (`level2_provider_overlay_capture.rs`, 2026-09-16).
+   The same holds for a request context: `RequestSnapshot::from_process()`
+   takes its home from `biscuit_file::home_dir()` (the known folder), so in
+   an `md` `CliProcessFixture` on Windows the context's home is the real
+   profile, not the fixture's `USERPROFILE`. Any default that falls back to
+   the context's home (shell policy files for a stdin document did, until
+   `md` pinned `policy_root` to the launch directory) reaches the real
+   profile there only (2026-10-01, 11 CLI tests red on build-win-native).
    `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded
@@ -143,6 +150,14 @@ Compare against that, never against `to_string_lossy()`.
     Likewise, never write a `..` loop that calls `Vec::pop` on components:
     it pops the `RootDir` or drive prefix and makes `/../a` relative.
     Confirmed 2026-10-01 on `build-win-native`.
+14. **A rootless `/w/...` test path is relative on Windows**, so a
+    `FileResolutionContext` built over it fails `validate()` with
+    `RelativeContextDirectory` and resolves nothing. Lexical unit tests that
+    used `/w` paths with a hand-rolled join pass everywhere; the same tests
+    moved onto a context fail only on Windows, silently, as "no target".
+    Give such tests a drive (DMLS's `context::test_support::abs` maps `/w/x`
+    to `C:/w/x`) or use a real temporary directory. Found 2026-10-01 on
+    `build-win-native` (DMLS frontmatter navigation tests).
 
 ## WezTerm on `build-win`
 

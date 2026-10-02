@@ -269,8 +269,12 @@ The supplied entry points are:
 - `ComposeContext::capture_for_document_with_evidence`
 
 Existing `ComposeContext::capture_for_content`,
-`ComposeContext::capture_for_document`, and `ComposeOptions::new()` remain
-ambient compatibility APIs and use the same `populate_*` code. Ambient capture
+`ComposeContext::capture_for_document`, and `capture_for_dir` remain
+ambient compatibility APIs and use the same `populate_*` code; they still read
+the process environment (a request replaces it with the snapshot's). The
+CWD-based `ComposeContext::capture()` is gone, and `capture_minimal()` (what
+`ComposeOptions::new()` uses) is anchored at an empty path until a request
+re-anchors it, so neither reads the process directory. Ambient capture
 snapshots the environment once and reuses its original `GitRepo` handle for
 file changes rather than discovering the repository a second time.
 

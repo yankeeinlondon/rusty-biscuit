@@ -92,10 +92,34 @@ reuses it for the builder (one discovery per request), re-anchors a
 `ComposeOptions::new()` context on the request directory, and makes `ctx.env`
 the context's environment. Magic roots enter only through
 `RequestSnapshot::with_magic_root*`; `ComposeOptions` has no magic paths and no
-public context setter. Only binaries call `RequestSnapshot::from_process()`.
-Unit tests use `crate::markdown::compose::test_request(options)`;
-`lib/tests/l1` uses `crate::request_support::{request, request_at}`. Internal
-inline passes over derived options use `Markdown::compose_with_options`.
+public context setter. Only binaries call `RequestSnapshot::from_process()`. DMLS builds one
+context per repository (`dmls/src/context.rs`, see
+[dmls.md](dmls.md#file-resolution-contexts)).
+Unit tests use `crate::markdown::compose::test_request(options)` /
+`test_request_in(options, context)`; `lib/tests/l1` uses
+`crate::request_support::{request, request_at, context_at, cwd_context}`.
+
+**The context is required, never `Option`.** `ComposeOptions` is only the
+settings builder and holds no context. The pipeline runs on `ComposeRequest`,
+which `Deref`s to `ComposeOptions`: stages take `&ComposeRequest`, context
+views live on the request (`transclusion_options`,
+`source_file_resolution_context`, `*_resolution_context`,
+`with_accepted_source_file`, `extended_for`), and in-pipeline builder chains
+use `request.derive(|o| …)`. `request.resolution_context()` is the
+file-resolution context; `request.context()` (through `Deref`) is the
+captured `ctx.*` `ComposeContext`, so never name a new request method
+`context`. Internal inline passes use `Markdown::compose_with_options(request)`.
+`DarkmatterSchemas::new(ctx)`, `CleanSchemaConfig::new(ctx)`,
+`ResolutionContext::new(ctx)`, `ReferenceGraphOptions::with_compose(&request)`,
+`FileTree::new(path, &request)`, `evaluate_condition_against(expr, data, &ctx)`,
+`detect_schema(.., &ctx)`, `resolve_schema*(.., &ctx)`, and
+`triggers::scan(.., &ctx)` all take one; none has a context-free form.
+Validators are either context-bound (`ValidatorCache::validator_for(schema,
+base, &ctx)`) or structural (`structural_validator_for`, `build_structural_validator`) for
+callers with no request (coercion probes, examples, lint): an absolute path is
+judged as resolved (it must exist; `match()` judges its full path), and every
+value that needs a context is judged by syntax only. Root-union coercion relies
+on the absolute-path half to pick an arm by glob.
 
 Keep this order stable. Whole-value `{{ ... }}` and `$(...)` values are
 executable state: they must resolve or fail, never leak as literal syntax.
@@ -116,6 +140,8 @@ Important contracts:
 - Optional schema properties accept missing or `null` values.
 - Validation keeps source positions, origin information, typed problem codes,
   pending values, and file-reference diagnostics.
+  `FileReferenceDiagnostic::resolution_failure()` gives the biscuit-file
+  class; the diagnostic is re-derived in the validator's own request context.
 - Eager `file(eager)` values may normalize only on successful composition;
   validation-only APIs remain read-only.
 - `literal(value)` preserves YAML scalar typing and lowers to JSON Schema
