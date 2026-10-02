@@ -113,6 +113,7 @@ pub(super) fn run_step_task(
 
     let stack = StackExecutionContext {
         signal: claudine::composition::LifecycleSignal::Start,
+        scope: None,
         frontmatter: &frontmatter,
         live_frontmatter: Some(&live),
         runtime_state: Some(runtime_state),
@@ -266,6 +267,8 @@ fn push_task_scan(task: &PreflightTask, scan: &mut String) {
         // Authored key names and a JSON Pointer, never expression text.
         authored: _,
         diagnostic: _,
+        // Bytes approval already resolved; they hold no expression to read.
+        approved_stack_commands: _,
     } = task;
     push_json_scan(
         &(name, label, params, timeout, operation, flow, setup, teardown),
@@ -742,9 +745,7 @@ mod tests {
             PreflightTask {
                 name: Some("external".to_string()),
                 label: "external".to_string(),
-                action: PreflightAction::Shell {
-                    commands: vec!["true".to_string()],
-                },
+                action: PreflightAction::Shell { commands: vec!["true".to_string()] },
                 params: Map::new(),
                 timeout: None,
                 operation: None,
@@ -759,6 +760,7 @@ mod tests {
                     action_property: "shell".to_string(),
                     task_property: String::new(),
                 },
+                approved_stack_commands: Vec::new(),
             }
         }
     }

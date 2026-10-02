@@ -8,26 +8,32 @@
 //! - a `::template(expr)` operator, resolved per item;
 //! - a formal sequence document's `template:` values, also per item.
 //!
-//! In the per-item surfaces the item's own top-level fields shadow globals, so
+//! In the per-item surfaces the item's own top-level fields are the document
+//! layer over the invoking document's frontmatter, so
 //! `template(color + '-is-great')` reads the item's `color` even when the
-//! invoking document defines one too.
+//! invoking document defines one too. Reserved namespaces resolve first, so an
+//! item field can never stand in for `ctx`, `env`, or `doc`.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use darkmatter::markdown::compose::expression::{
-    CtxLookup, EvaluationLookup, ExpressionFinder, ResolutionContext, evaluate, parse,
-    scalar_string,
+    AuthoredMode, BindingView, CtxLookup, EvaluationLookup, EvaluationSession, ExpressionError,
+    ParseMode, ResolutionContext, ResolvedBinding, ScopeId, evaluate_prepared,
+    is_reserved_namespace, prepare_value,
 };
+use darkmatter::markdown::MarkdownError;
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, SequenceExpressionCause};
 
 /// Lookup for sequence-source expressions.
 ///
-/// Resolution order: item fields (when evaluating per item) → `env.NAME` →
-/// document frontmatter → `ctx.*`. `ctx` is consulted last and captured on
-/// demand, so a document property named like a context key keeps winning and no
-/// context group is captured unless an expression actually reads one.
+/// Resolution order: the reserved namespaces (`ctx.*` captured on demand,
+/// `env.NAME`, `doc.*`), then the document layer — item fields (when evaluating
+/// per item) over the invoking document's frontmatter. A bare name never reads
+/// `ctx`, and no context group is captured unless an expression reads one.
+/// `current` and `current_env` have no event here and read as `null`.
 pub struct SourceExpressionLookup<'a> {
     item: Option<&'a Map<String, Value>>,
     frontmatter: &'a Map<String, Value>,
@@ -52,7 +58,7 @@ impl<'a> SourceExpressionLookup<'a> {
         }
     }
 
-    /// Shadow the globals with one item's top-level fields.
+    /// Lay one item's top-level fields over the document's frontmatter.
     #[must_use]
     pub fn with_item(mut self, item: &'a Map<String, Value>) -> Self {
         self.item = Some(item);
@@ -70,25 +76,44 @@ impl<'a> SourceExpressionLookup<'a> {
         self.source_path = Some(source_path);
         self
     }
+
+    /// A document-layer path: the item's field when it has one, else the
+    /// invoking document's.
+    fn document(&self, path: &str) -> Option<Value> {
+        self.item
+            .and_then(|item| resolve_path(item, path))
+            .or_else(|| resolve_path(self.frontmatter, path))
+    }
+
+    /// The whole document layer, for a bare `doc`.
+    fn document_object(&self) -> Value {
+        let mut merged = self.frontmatter.clone();
+        if let Some(item) = self.item {
+            merged.extend(item.iter().map(|(key, value)| (key.clone(), value.clone())));
+        }
+        Value::Object(merged)
+    }
 }
 
 impl EvaluationLookup for SourceExpressionLookup<'_> {
     fn get(&self, path: &str) -> Option<Value> {
-        if let Some(item) = self.item
-            && let Some(value) = resolve_path(item, path)
-        {
-            return Some(value);
+        let root = path.split('.').next().unwrap_or(path);
+        match root {
+            "ctx" => self.ctx.resolve_ctx(path),
+            "env" => path
+                .strip_prefix("env.")
+                .and_then(|key| std::env::var(key).ok().map(Value::String)),
+            "doc" => match path.strip_prefix("doc.") {
+                Some(rest) => self.document(rest),
+                None => Some(self.document_object()),
+            },
+            root if is_reserved_namespace(root) => None,
+            _ => self.document(path),
         }
+    }
 
-        if let Some(key) = path.strip_prefix("env.") {
-            return std::env::var(key).ok().map(Value::String);
-        }
-
-        if let Some(value) = resolve_path(self.frontmatter, path) {
-            return Some(value);
-        }
-
-        self.ctx.resolve_ctx(path)
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        Ok(ResolvedBinding::classify(path, self.get(path)))
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
@@ -118,26 +143,24 @@ fn resolve_path(map: &Map<String, Value>, path: &str) -> Option<Value> {
 ///
 /// ## Errors
 ///
-/// Returns [`CompositionError::SequenceExpressionFailed`] with the parse or
-/// evaluation message.
+/// Returns [`CompositionError::SequenceExpressionFailed`] with the typed parse
+/// or evaluation cause.
 pub fn evaluate_whole<L: EvaluationLookup>(
     expression: &str,
     lookup: &L,
 ) -> Result<Value, CompositionError> {
-    let parsed = parse(expression).map_err(|e| CompositionError::SequenceExpressionFailed {
-        expression: expression.to_string(),
-        source: SequenceExpressionCause::Parse(e),
-    })?;
-    evaluate(&parsed, lookup).map_err(|e| CompositionError::SequenceExpressionFailed {
-        expression: expression.to_string(),
-        source: SequenceExpressionCause::Evaluate(Box::new(e)),
-    })
+    evaluate_authored(
+        expression,
+        AuthoredMode::Expression(ParseMode::Interpolation),
+        lookup,
+    )
 }
 
 /// Render a string that may contain `{{ … }}` spans.
 ///
 /// A string that is exactly one span keeps its typed value (so a template can
-/// carry a number or a list); anything else is interpolated into text.
+/// carry a number or a list); anything else is interpolated into text,
+/// following composition's whole-value, mixed-string, and escape rules.
 ///
 /// ## Errors
 ///
@@ -147,29 +170,37 @@ pub fn render_interpolated<L: EvaluationLookup>(
     raw: &str,
     lookup: &L,
 ) -> Result<Value, CompositionError> {
-    let locations = ExpressionFinder::find_all_plain(raw);
-    if locations.is_empty() {
-        return Ok(Value::String(raw.to_string()));
-    }
+    evaluate_authored(raw, AuthoredMode::InterpolatedValue, lookup)
+}
 
-    let single_span =
-        locations.len() == 1 && locations[0].start == 0 && locations[0].end == raw.len();
+/// The sequence source layer declares no globals.
+fn source_view() -> Arc<BindingView> {
+    Arc::new(
+        BindingView::builder(ScopeId::new("claudine.sequence-source"))
+            .build()
+            .expect("an empty view is valid"),
+    )
+}
 
-    let mut output = String::with_capacity(raw.len());
-    let mut cursor = 0usize;
-
-    for location in &locations {
-        output.push_str(&raw[cursor..location.start]);
-        let value = evaluate_whole(location.expression.trim(), lookup)?;
-        if single_span {
-            return Ok(value);
-        }
-        output.push_str(&scalar_string(&value));
-        cursor = location.end;
-    }
-
-    output.push_str(&raw[cursor..]);
-    Ok(Value::String(output))
+fn evaluate_authored<L: EvaluationLookup>(
+    text: &str,
+    mode: AuthoredMode,
+    lookup: &L,
+) -> Result<Value, CompositionError> {
+    let failed = |source| CompositionError::SequenceExpressionFailed {
+        expression: text.to_string(),
+        source,
+    };
+    let prepared = prepare_value(&Value::String(text.to_string()), mode)
+        .map_err(|error| failed(SequenceExpressionCause::Prepare(error)))?;
+    let session = EvaluationSession::associate(source_view(), lookup, [])
+        .map_err(|error| failed(SequenceExpressionCause::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))))?;
+    evaluate_prepared(&prepared, &session).map_err(|error| {
+        failed(match error {
+            MarkdownError::Interpolation { cause, .. } => SequenceExpressionCause::Evaluate(cause),
+            other => SequenceExpressionCause::Compose(Box::new(other)),
+        })
+    })
 }
 
 #[cfg(test)]

@@ -348,7 +348,7 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
 }
 
 /// Late-binding lifecycle evaluation error (process-level, non-interactive):
-/// an `initialize` stack whose `when:` guard references an undefined root
+/// an `initialize` stack whose `when:` guard calls an unknown function
 /// *raises* at event time. Under DM2 strict mode this is a crashed expression,
 /// not a clean `false` guard, so the run must surface a styled
 /// `lifecycle evaluation error` to **stderr** and exit **non-zero** — never a
@@ -365,7 +365,7 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
     fs::write(
         &md_file,
         "---\nname: late-bind\nagent: goose\ninitialize:\n  stack:\n    \
-         - when: \"missing_root == true\"\n      action: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
+         - when: \"missing_root() == true\"\n      action: {stderr: \"ready\"}\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
@@ -405,8 +405,8 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
 
 /// Late-binding lifecycle evaluation error swallowing — regression for the
 /// previously-broken explicit-`error(...)` catch path. When `initialize.error`
-/// routes the run to `failure` and the catch `failure.when:` guard references
-/// an undefined root, the run must surface the FAILURE evaluation error (the
+/// routes the run to `failure` and the catch `failure.when:` guard calls an
+/// unknown function, the run must surface the FAILURE evaluation error (the
 /// latest lifecycle crash) to stderr and exit non-zero — not swallow it and
 /// return only the original `error(...)` reason. This is the explicit-control
 /// counterpart to `compose_initialize_when_evaluation_error_exits_non_zero`
@@ -422,7 +422,7 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
         &md_file,
         "---\nname: explicit-error\nagent: goose\ninitialize:\n  stack:\n    \
          - action: {error: \"preflight refused\"}\nfailure:\n  stderr: \"fail\"\n  stack:\n    \
-         - when: \"missing_root == true\"\n      action: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
+         - when: \"missing_root() == true\"\n      action: {stderr: \"unreachable\"}\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
@@ -468,7 +468,7 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
 /// that *raises* must surface its styled `lifecycle evaluation error` to stderr
 /// **at the point of error — before the catch `finalize` event fires** — and
 /// exactly **once**. The provider runs and exits 0 (so `success` fires), the
-/// first `success` guard references an undefined root (a crashed expression),
+/// first `success` guard calls an unknown function (a crashed expression),
 /// and `finalize.stderr` writes a recognizable marker. The assertion is a byte
 /// offset ordering: the evaluation-error text must appear earlier in captured
 /// stderr than the `finalize` marker, proving the original crash is visible
@@ -481,12 +481,12 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("prompt.md");
-    // `success` first guard raises (undefined root under DM2 strict mode);
+    // `success` first guard raises (an unknown function);
     // `finalize.stderr` emits a marker the catch event prints to stderr.
     fs::write(
         &md_file,
         "---\nname: late-bind-success\nagent: goose\nsuccess:\n  stack:\n    \
-         - when: \"missing_root == true\"\n      action: {stderr: \"unreachable\"}\n\
+         - when: \"missing_root() == true\"\n      action: {stderr: \"unreachable\"}\n\
          finalize:\n  stderr: \"FINALIZE_MARKER_ZZZ\"\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();

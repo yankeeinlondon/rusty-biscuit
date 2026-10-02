@@ -8,14 +8,17 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::expression::{Expr, ExpressionFinder, ResolutionContext, parse};
+use darkmatter::markdown::compose::expression::{Expr, ResolutionContext};
 use darkmatter::markdown::compose::subtree::SubtreeCompose;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, EffectiveStateBuilder};
 
 use crate::composition::error::{CompositionError, ShellApprovalFailure};
 use crate::composition::lifecycle::{
-    LATE_BINDING_ROOTS, LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
+    LifecycleConfig, LifecycleSignal, collect_lifecycle_shell_commands,
     collect_lifecycle_shell_commands_for,
+};
+use crate::composition::lifecycle::bindings::{
+    LifecycleScope, LifecycleValues, approval_diagnostics, runtime_bindings, unavailable_root,
 };
 use crate::composition::lifecycle_actions::LifecycleActionKind;
 use crate::harness::shell::{ShellApprovalOptions, tokenize_words_strict};
@@ -287,14 +290,15 @@ pub(super) fn approve_discovered_commands(
 /// command so the approved command equals the executed command.
 ///
 /// Shell commands live inside the deferred lifecycle subtree (see
-/// [`LATE_BINDING_ROOTS`] and `ComposeOptions::with_exclude_keys`), so after
+/// `ComposeOptions::with_exclude_keys`), so after
 /// main compose they still carry their authored `{{ }}` spans. Unlike the
 /// communication/action surfaces — which interpolate at event-time (C2) —
 /// `shell` commands are approved at pre-flight, before any event fires, and so
-/// resolve against an **early-binding-only** lookup: `doc.*`, `ctx.*`, `env.*`,
-/// and read-side functions. A late-binding reference
-/// (`err`/`timing`/`current`/`current_env`)
-/// is rejected with [`CompositionError::LifecycleShellResolution`] because its
+/// resolve in the lifecycle shell approval scope of the binding catalog
+/// ([`LifecycleScope::LifecycleShellApproval`]): `doc.*`, `ctx.*`, `env.*`,
+/// document properties, and read-side functions. A late-binding reference
+/// (`err`, `timing`, `group`, `current`, `current_env`) is rejected with
+/// [`CompositionError::LifecycleShellResolution`], in any branch, because its
 /// value does not yet exist.
 ///
 /// Each resolved action is marked [`ShellAction::pre_resolved`], so the
@@ -314,8 +318,8 @@ pub(super) fn approve_discovered_commands(
 /// ## Errors
 ///
 /// Returns [`CompositionError::LifecycleShellResolution`] when a command's
-/// interpolation references a late-binding global, fails to parse, references
-/// an unknown root (a typo), or calls an unknown function. The error names the
+/// interpolation references a late-binding global, fails to parse, or calls an
+/// unknown function. The error names the
 /// dotted property path (e.g. `failure.stack[0].action[1].command`) and the
 /// raw command string.
 pub fn resolve_lifecycle_shell_commands(
@@ -441,8 +445,11 @@ fn resolve_set_shell_value(
 /// resolved string literal back in place.
 ///
 /// Only string-literal expressions carrying an interpolation span are touched.
-/// Late-binding references are rejected before resolution so the diagnostic
-/// names the offending global rather than a generic "unknown root".
+/// The command is first checked passively against the lifecycle shell approval
+/// scope, in every branch, so a late global (`err`, `timing`, `group`) or a
+/// late namespace (`current`, `current_env`) is refused by name before
+/// anything is evaluated; the bytes are then resolved through a session in the
+/// same scope.
 fn resolve_shell_command_expr(
     expr: &mut Expr,
     state: &darkmatter::markdown::compose::EffectiveState,
@@ -457,26 +464,35 @@ fn resolve_shell_command_expr(
         return Ok(());
     }
 
-    if let Some(root) = first_late_binding_root(raw) {
-        return Err(CompositionError::LifecycleShellResolution {
-            source_path: source_path.to_path_buf(),
-            property: property.to_string(),
-            raw: raw.clone(),
-            message: format!(
+    let scope = LifecycleScope::LifecycleShellApproval;
+    // A parse failure is left to the resolution below, which reports it typed.
+    if let Ok(diagnostics) = approval_diagnostics(raw, scope)
+        && let Some(diagnostic) = diagnostics.into_iter().next()
+    {
+        let message = match unavailable_root(&diagnostic.error) {
+            Some(root) => format!(
                 "late-binding reference `{root}` is not available in shell commands; \
                  shell commands are resolved at pre-flight (before any event fires), so only \
                  early-binding values (`doc.*`, `ctx.*`, `env.*`, read-side functions) may be \
                  used here"
             ),
-            // This layer's own guard, raised before Darkmatter is consulted, so
-            // there is no typed failure to retain.
-            source: None,
+            None => diagnostic.error.to_string(),
+        };
+        return Err(CompositionError::LifecycleShellResolution {
+            source_path: source_path.to_path_buf(),
+            property: property.to_string(),
+            raw: raw.clone(),
+            message,
+            source: Some(Box::new(approval_failure(raw, diagnostic.error))),
         });
     }
 
+    let (view, globals) = runtime_bindings(scope, LifecycleValues::default());
     let value = serde_json::Value::String(raw.clone());
     let resolved = SubtreeCompose::new(&value, state)
         .with_resolution_context(resolution_ctx.clone())
+        .with_globals(globals)
+        .with_binding_view(view)
         .compose()
         .map_err(|e| CompositionError::LifecycleShellResolution {
             source_path: source_path.to_path_buf(),
@@ -494,71 +510,20 @@ fn resolve_shell_command_expr(
     Ok(())
 }
 
-/// Returns the first late-binding root
-/// (`err`/`timing`/`current`/`current_env`) referenced by
-/// any `{{ }}` span in `raw`, or `None` when the command uses only
-/// early-binding values.
-fn first_late_binding_root(raw: &str) -> Option<String> {
-    for loc in ExpressionFinder::find_all_plain(raw) {
-        let Ok(expr) = parse(&loc.expression) else {
-            continue;
-        };
-        if let Some(root) = late_binding_root_in_expr(&expr) {
-            return Some(root);
-        }
-    }
-    None
-}
-
-/// Walks an expression tree for the first variable whose root is a late-binding
-/// global. `doc.*` is exempt: it reaches a literal frontmatter property, not a
-/// lifecycle global.
-fn late_binding_root_in_expr(expr: &Expr) -> Option<String> {
-    match expr {
-        Expr::Variable(path) => {
-            let root = path.split('.').next().unwrap_or(path);
-            LATE_BINDING_ROOTS
-                .contains(&root)
-                .then(|| root.to_string())
-        }
-        Expr::MemberAccess { base, .. } => {
-            if let Expr::Variable(base_path) = base.as_ref() {
-                let root = base_path.split('.').next().unwrap_or(base_path);
-                if root == "doc" {
-                    return None;
-                }
-            }
-            late_binding_root_in_expr(base)
-        }
-        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
-            late_binding_root_in_expr(inner)
-        }
-        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
-            late_binding_root_in_expr(left).or_else(|| late_binding_root_in_expr(right))
-        }
-        Expr::Index { base, index } => {
-            late_binding_root_in_expr(base).or_else(|| late_binding_root_in_expr(index))
-        }
-        Expr::FunctionCall { args, .. } => args.iter().find_map(late_binding_root_in_expr),
-        // Container literals are scanned element-by-element so a late-binding
-        // reference cannot hide inside `[err.msg]` or `{ reason: err.msg }`.
-        // Object keys are authored text, not expressions, so only values are
-        // walked.
-        Expr::ArrayLiteral(elements) => elements.iter().find_map(late_binding_root_in_expr),
-        Expr::ObjectLiteral(entries) => entries
-            .iter()
-            .find_map(|(_, value)| late_binding_root_in_expr(value)),
-        Expr::Fallback { primary, fallback } => {
-            late_binding_root_in_expr(primary).or_else(|| late_binding_root_in_expr(fallback))
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => late_binding_root_in_expr(condition)
-            .or_else(|| late_binding_root_in_expr(then_branch))
-            .or_else(|| late_binding_root_in_expr(else_branch)),
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => None,
+/// A passive approval finding as the Darkmatter error composition would have
+/// raised for `raw`, so callers read one typed cause either way.
+pub(crate) fn approval_failure(
+    raw: &str,
+    cause: darkmatter::markdown::compose::expression::ExpressionError,
+) -> darkmatter::markdown::MarkdownError {
+    darkmatter::markdown::MarkdownError::Interpolation {
+        key: None,
+        expression: raw.to_string(),
+        source: Box::new(darkmatter::markdown::SourceRef::Effective {
+            rendered: raw.to_string(),
+            origin_key: None,
+        }),
+        cause: Box::new(cause),
     }
 }
 

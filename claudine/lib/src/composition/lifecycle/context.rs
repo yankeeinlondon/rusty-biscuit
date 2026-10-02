@@ -1,18 +1,13 @@
-//! Lifecycle execution context: the stack-only globals `err` and `timing`.
+//! Lifecycle execution context: the values of the lifecycle globals `err` and
+//! `timing`.
 //!
-//! These globals supplement the document state at event-time. They reach the
-//! evaluator as Darkmatter **injected globals** (see [`InjectedGlobal`]) layered
-//! over the current effective document state — claudine no longer carries a
-//! bespoke expression lookup. [`lifecycle_injected_globals`] builds that layer;
-//! the lifecycle executor hands it to Darkmatter's subtree compose (DM2) so
-//! event-time interpolation reuses the same parsing/interpolation core as main
-//! compose.
-//!
-//! Both are eager: they are already captured by the time the event fires. The
-//! late-binding *facts* — `current.<key>` and `current_env.<key>` — are not
-//! globals at all. They are Darkmatter reserved roots served by the request's
-//! `CurrentAuthority`, which the executor installs on the event's effective
-//! state; an injected global of either name is unreachable (spec R30–R33).
+//! These globals supplement the document state at event time. Which scopes
+//! declare them, and as what, is the binding catalog's policy
+//! ([`super::bindings`]); this module owns their values. Both are eager: they
+//! are already captured by the time the event fires. The late-binding *facts* —
+//! `current.<key>` and `current_env.<key>` — are not globals at all. They are
+//! Darkmatter reserved roots served by the request's `CurrentAuthority`, which
+//! the executor installs on the event's effective state (spec R30–R33).
 //!
 //! ## `err`
 //!
@@ -29,21 +24,23 @@
 //! [`select_effective_diagnostic`](crate::diagnostics::select_effective_diagnostic) —
 //! the same walk the CLI renders through and
 //! the snapshot serializes through, so a route cannot classify one cause while
-//! rendering another. Parse-time validation (see
-//! [`super::lifecycle::validate_no_err_in_no_error_events`]) rejects `err`
-//! references in `initialize`, `start`, `success`, and `loop`.
+//! rendering another. The binding catalog declares `err` unavailable in
+//! `initialize`, `start`, `success`, and `loop`, so a read there fails
+//! preparation; in `finalize` and task teardown with no failure it is `null`.
 //!
 //! ## `timing`
 //!
 //! Carries observed durations. All fields are optional so the public shape
 //! never commits to a value the runtime may not have captured.
 //!
-use std::collections::HashMap;
 use std::error::Error as StdError;
+use std::sync::Arc;
 
-use darkmatter::markdown::compose::expression::UnavailabilityReason;
-use darkmatter::markdown::compose::subtree::InjectedGlobal;
+use darkmatter::markdown::MarkdownError;
+use darkmatter::markdown::compose::expression::ExpressionError;
 use serde_json::Value;
+
+use super::executor::LifecycleExprError;
 
 use super::super::error::{CompositionError, LifecycleEvaluationReason};
 use crate::diagnostics::DiagnosticSnapshot;
@@ -124,6 +121,67 @@ pub struct LifecycleErrorInfo {
     /// (the source chain is not walked).
     /// Not projected into `err.*`.
     pub reason: LifecycleEvaluationReason,
+
+    /// The typed error an event-time evaluation raised, kept so a library
+    /// caller can inspect the original Darkmatter failure. Not projected into
+    /// `err.*`; `None` for every other failure.
+    pub cause: Option<LifecycleCause>,
+}
+
+/// The typed error behind a lifecycle evaluation failure, shared by every
+/// copy of the [`LifecycleErrorInfo`] and [`CompositionError`] that report it.
+///
+/// Its [`Error::source`](StdError::source) is the Darkmatter error itself
+/// ([`ExpressionError`] or [`MarkdownError`]), so a caller can downcast it from
+/// any error chain that carries this cause.
+#[derive(Debug, Clone)]
+pub struct LifecycleCause(Arc<LifecycleExprError>);
+
+impl LifecycleCause {
+    pub fn new(error: LifecycleExprError) -> Self {
+        Self(Arc::new(error))
+    }
+
+    pub fn error(&self) -> &LifecycleExprError {
+        &self.0
+    }
+
+    /// The Darkmatter expression error, wherever the evaluation raised it: a
+    /// direct evaluation, or the cause of an interpolation failure.
+    pub fn expression_error(&self) -> Option<&ExpressionError> {
+        match self.0.as_ref() {
+            LifecycleExprError::Evaluate(error) => Some(error),
+            LifecycleExprError::Compose(error) => match error.as_ref() {
+                MarkdownError::Interpolation { cause, .. } => Some(cause),
+                _ => None,
+            },
+            LifecycleExprError::Prose(_) => None,
+        }
+    }
+}
+
+/// Two causes are equal when they render the same failure: equality of a
+/// [`LifecycleErrorInfo`] compares what it reports, not error identity.
+impl PartialEq for LifecycleCause {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || self.0.to_string() == other.0.to_string()
+    }
+}
+
+impl std::fmt::Display for LifecycleCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl StdError for LifecycleCause {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self.0.as_ref() {
+            LifecycleExprError::Evaluate(error) => Some(error.as_ref()),
+            LifecycleExprError::Compose(error) => Some(error.as_ref()),
+            LifecycleExprError::Prose(_) => None,
+        }
+    }
 }
 
 impl LifecycleErrorInfo {
@@ -147,6 +205,7 @@ impl LifecycleErrorInfo {
     /// legacy aliases.
     pub fn from_composition_error(err: &CompositionError) -> Self {
         let mut info = Self::from_selection("CompositionError", variant_name_from_debug(err), err);
+        info.cause = err.lifecycle_cause().cloned();
         if let (Some(snapshot), Some(excerpt)) =
             (info.snapshot.as_mut(), err.frontmatter_excerpt())
         {
@@ -164,6 +223,14 @@ impl LifecycleErrorInfo {
     /// keeps its facets, where `from_action_failure(verb, err.to_string())`
     /// would flatten them to prose and force `err.*` to disagree with what the
     /// same failure renders.
+    /// [`Self::from_error_or_action`] for an event-time evaluation failure,
+    /// keeping the typed error as [`Self::cause`].
+    pub fn from_expr_error(verb: impl Into<String>, error: LifecycleExprError) -> Self {
+        let mut info = Self::from_error_or_action(verb, &error);
+        info.cause = Some(LifecycleCause::new(error));
+        info
+    }
+
     pub fn from_error_or_action(verb: impl Into<String>, error: &(dyn StdError + 'static)) -> Self {
         let variant = verb.into();
         match Self::select(error) {
@@ -200,6 +267,7 @@ impl LifecycleErrorInfo {
                 snapshot: None,
                 property: None,
                 reason: LifecycleEvaluationReason::Expression,
+                cause: None,
             },
         }
     }
@@ -214,6 +282,7 @@ impl LifecycleErrorInfo {
             snapshot: Some(Box::new(snapshot)),
             property: None,
             reason: LifecycleEvaluationReason::Expression,
+            cause: None,
         }
     }
 
@@ -286,6 +355,7 @@ impl LifecycleErrorInfo {
             snapshot,
             property: None,
             reason: LifecycleEvaluationReason::Expression,
+            cause: None,
         }
     }
 
@@ -465,46 +535,6 @@ impl LifecycleTiming {
         }
         Value::Object(obj)
     }
-}
-
-/// Build the event-time injected-globals layer handed to Darkmatter's subtree
-/// compose (DM2).
-///
-/// The returned map layers the lifecycle stack-only globals over the current
-/// effective document state. Both are eager: their snapshots are already
-/// captured when the event fires.
-///
-/// An unattached global is simply absent from the map, so a bare `err`/`timing`
-/// reference falls through to the document state (a literal frontmatter
-/// property of that name stays reachable). `doc.err` reaches a literal `err`
-/// property because the `doc` root is never an injected global.
-///
-/// `current` and `current_env` are deliberately not here. They are Darkmatter
-/// reserved roots resolved by the event's effective state before the injected
-/// map is consulted, so a global of either name could never be reached.
-pub fn lifecycle_injected_globals(
-    err: Option<&LifecycleErrorInfo>,
-    timing: Option<&LifecycleTiming>,
-) -> HashMap<String, InjectedGlobal> {
-    let mut globals = HashMap::new();
-    if let Some(err) = err {
-        globals.insert("err".to_string(), InjectedGlobal::eager(err.to_value()));
-    }
-    if let Some(timing) = timing {
-        globals.insert(
-            "timing".to_string(),
-            InjectedGlobal::eager(timing.to_value()),
-        );
-    }
-    globals
-}
-
-/// The `group` entry for a scope with no established group: every bare read
-/// fails with `claudine.outside-group`, so a group's variables cannot leak into
-/// a later step or event and a same-named document property is never read
-/// instead (`doc.group` still reads the document).
-pub(crate) fn outside_group_global() -> InjectedGlobal {
-    InjectedGlobal::unavailable(UnavailabilityReason::new("claudine.outside-group"))
 }
 
 #[cfg(test)]

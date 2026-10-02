@@ -329,6 +329,7 @@ fn finalize_requires_recorded_terminal_not_just_stack_run() {
     let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Failure,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,
@@ -442,6 +443,7 @@ fn run_event_stack_emits_top_level_and_stack() {
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,
@@ -509,6 +511,7 @@ fn execute_event_still_runs_full_event() {
 
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,
@@ -607,6 +610,7 @@ fn run_event_stack_marks_only_terminal_events_as_terminal_lifecycle_work() {
         .build();
     let stack_ctx = crate::composition::lifecycle_executor::StackExecutionContext {
         signal: LifecycleSignal::Start,
+        scope: None,
         frontmatter: &serde_json::Map::new(),
         live_frontmatter: None,
         runtime_state: None,

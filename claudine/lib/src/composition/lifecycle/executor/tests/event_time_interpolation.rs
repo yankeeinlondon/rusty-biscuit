@@ -36,6 +36,7 @@ fn io_err(msg: &str) -> LifecycleErrorInfo {
         snapshot: None,
         property: None,
         reason: crate::composition::LifecycleEvaluationReason::Expression,
+        cause: None,
     }
 }
 
@@ -220,7 +221,14 @@ fn event_time_rendering_matches_compose() {
     let compose_value = compose_subtree(
         &json!(template),
         &state,
-        lifecycle_injected_globals(Some(&err), None),
+        crate::composition::lifecycle::bindings::runtime_bindings(
+            crate::composition::lifecycle::bindings::LifecycleScope::Event(LifecycleSignal::Failure),
+            crate::composition::lifecycle::bindings::LifecycleValues {
+                err: Some(&err),
+                ..Default::default()
+            },
+        )
+        .1,
     )
     .unwrap();
     assert_eq!(executor_text, compose_value.as_str().unwrap());
@@ -300,10 +308,11 @@ fn known_but_empty_reference_renders_empty() {
     assert_eq!(recorder.events(), vec![Emitted::Message("spec=".to_string())]);
 }
 
-/// A typo (an unknown root) fails closed: the action errors and nothing is
-/// dispatched (5.6).
+/// A typo is an absent document property, not an error (R1): the whole-value
+/// span is `null`, which a message renders empty. A genuine defect still fails
+/// closed (see `expression_raise_keeps_the_missing_path_hint`).
 #[test]
-fn unknown_root_typo_fails_closed() {
+fn a_typo_in_a_stack_message_is_an_absent_property() {
     let config = parse_lifecycle_config(
         &json!({"success": {"stack": [{"action": {"message": "{{spec_fil}}"}}]}}),
         Path::new("t.md"),
@@ -325,12 +334,8 @@ fn unknown_root_typo_fails_closed() {
         Path::new("t.md"),
     );
     let outcome = context.execute_event(&config);
-    assert!(
-        outcome.evaluation_error.is_some(),
-        "typo must fail closed through the evaluation channel"
-    );
-    assert!(outcome.action_error.is_none());
-    assert!(recorder.events().is_empty(), "nothing dispatched");
+    assert_eq!(outcome, LifecycleEventOutcome::default());
+    assert_eq!(recorder.events(), vec![Emitted::Message(String::new())]);
 }
 
 /// A top-level field reading an absent document property is not an error: the
@@ -468,7 +473,7 @@ fn expression_raise_keeps_the_missing_path_hint() {
     let config = parse_lifecycle_config(
         &json!({"success": {"stack": [
             {"when": "false", "action": "stop"},
-            {"when": "missing_key == 1", "action": "stop"}
+            {"when": "missing_key() == 1", "action": "stop"}
         ]}}),
         Path::new("t.md"),
     )
@@ -491,7 +496,7 @@ fn expression_raise_keeps_the_missing_path_hint() {
     let info = context
         .execute_event(&config)
         .evaluation_error
-        .expect("an undefined guard root raises");
+        .expect("an unknown function in a guard raises");
     assert_eq!(info.property.as_deref(), Some("success.stack[1].when"));
     assert_eq!(info.reason, crate::composition::LifecycleEvaluationReason::Expression);
 
@@ -559,12 +564,12 @@ fn evaluation_raise_projects_typed_cause_without_moving_err_aliases() {
 }
 
 /// The `Prose` arm carries a failure the expression layer describes itself, and
-/// round-trips its text unchanged through `Display` — the leak guard's message
-/// is a user surface.
+/// round-trips its text unchanged through `Display` — the message is a user
+/// surface.
 #[test]
 fn lifecycle_expr_error_prose_arm_round_trips_its_text() {
-    let error = LifecycleExprError::Prose("references undefined variable `x`".to_string());
-    assert_eq!(error.to_string(), "references undefined variable `x`");
+    let error = LifecycleExprError::Prose("expected a number, got \"x\"".to_string());
+    assert_eq!(error.to_string(), "expected a number, got \"x\"");
     assert!(std::error::Error::source(&error).is_none());
 }
 

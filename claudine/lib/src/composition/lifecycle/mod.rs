@@ -38,6 +38,7 @@ use crate::messaging::RuntimeMessagingSettings;
 mod action_shape;
 pub mod actions;
 mod audio;
+pub mod bindings;
 pub mod context;
 pub mod control;
 pub mod executor;
@@ -47,6 +48,7 @@ mod source_map;
 mod validate;
 
 use action_shape::*;
+pub(crate) use action_shape::action_value_to_expr;
 pub(crate) use audio::*;
 pub(crate) use parse::parse_task_action_stack_with_order;
 pub use parse::{
@@ -57,38 +59,16 @@ pub(crate) use parse::parse_lifecycle_config_with_orders;
 pub(crate) use parse::parse_single_action_with_order;
 pub use validate::{
     collect_lifecycle_shell_commands, collect_lifecycle_shell_commands_for,
-    validate_no_err_in_no_error_events,
-    validate_no_nested_spans_in_literals, validate_no_undefined_lifecycle_variables,
+    validate_no_err_in_no_error_events, validate_no_nested_spans_in_literals,
 };
-pub(crate) use validate::first_undefined_stack_variable;
-#[cfg(test)]
-use validate::undefined_bare_variable;
 
-/// The canonical communication-field names for [`LifecycleNotification`],
-/// in the deterministic iteration order used by every validator that walks
-/// lifecycle event surfaces.
+/// The notification's nine communication-field name/value pairs, in a fixed
+/// iteration order.
 ///
-/// Excludes `stack` because `stack` is a structured (list) field rather
-/// than a string. Use [`LIFECYCLE_CONCERN_KEYS`] when the full set of
-/// lifecycle concern keys (including `stack`) is needed.
-const LIFECYCLE_COMM_FIELDS: &[&str] = &[
-    "say",
-    "say_first",
-    "message",
-    "stderr",
-    "notify",
-    "info",
-    "warn",
-    "success",
-    "stdout",
-];
-
-/// The notification's nine communication-field name/value pairs, in the
-/// [`LIFECYCLE_COMM_FIELDS`] iteration order.
-///
-/// Shared by the lifecycle string guards that walk top-level communication
-/// surfaces (the nested-span scan and the `err`-availability scan) so they agree on
-/// the field set and iteration order.
+/// Shared by the lifecycle string guards that read top-level communication
+/// surfaces (the nested-span scan and the `err` availability check) so they
+/// agree on the field set and iteration order. `stack` is a list, not a
+/// communication field, so it is not here.
 fn notification_comm_fields(
     n: &LifecycleNotification,
 ) -> [(&'static str, Option<&String>); 9] {
@@ -128,16 +108,6 @@ pub const LIFECYCLE_EVENT_KEYS: &[&str] = &[
     "loop",
 ];
 
-/// The lifecycle late-binding roots — values that exist only at event-time:
-/// `err` (active failure), `timing` (observed durations), and the two
-/// Darkmatter reserved roots `current` (a `ctx` key observed when referenced)
-/// and `current_env` (the live process environment, reread when referenced).
-///
-/// Shared authority for the pre-flight shell resolution (C3), which rejects
-/// any late-binding reference inside a `shell` command because shell commands
-/// are resolved at pre-flight — before any event fires — so only early-binding
-/// values (`doc.*`, `ctx.*`, `env.*`, read-side functions) are available there.
-pub use super::reserved::LATE_BINDING_ROOTS;
 
 /// A single lifecycle notification configuration.
 ///
@@ -270,9 +240,9 @@ pub struct LifecycleStacks {
 /// The seven composition lifecycle signals, in deterministic iteration
 /// order: `Initialize`, `Start`, `Success`, `Blocked`, `Failure`,
 /// `Finalize`, `Loop`. This order is used by validators that walk every
-/// event surface (nested-span scan, undefined-variable scan, `err`
-/// scan) and is exposed via [`Self::all`].
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+/// event surface (nested-span scan, `err` availability check) and is exposed
+/// via [`Self::all`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum LifecycleSignal {
     /// Prompt file has been identified and frontmatter has parsed, before
     /// user `$schema` validation and shell pre-flight checks.

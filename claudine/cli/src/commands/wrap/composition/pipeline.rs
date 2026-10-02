@@ -1732,6 +1732,7 @@ fn provider_run_handoff(
     );
     let init_ctx = StackExecutionContext {
         signal: LifecycleSignal::Initialize,
+        scope: None,
         frontmatter: fm_map.unwrap_or(&empty_frontmatter),
         // Single pre-launch `initialize` event; the cross-event live cell is
         // owned by the harness loop, which re-materializes frontmatter before

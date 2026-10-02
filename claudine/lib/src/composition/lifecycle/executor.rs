@@ -48,10 +48,13 @@ use std::path::{Path, PathBuf};
 use biscuit_file::{FileReference, FileReferenceKind};
 use biscuit_terminal::terminal::Terminal;
 use darkmatter::effects::EffectEngine;
+use std::sync::Arc;
+
 use darkmatter::markdown::compose::expression::{
-    Expr, ExpressionError, ExpressionFinder, ResolutionContext, evaluate, is_truthy, scalar_string,
+    BindingView, Expr, ExpressionError, ExpressionFinder, ResolutionContext, RuntimeBinding,
+    evaluate, is_truthy, scalar_string,
 };
-use darkmatter::markdown::compose::subtree::{InjectedGlobal, SubtreeCompose, layered_session};
+use darkmatter::markdown::compose::subtree::{SubtreeCompose, layered_session};
 use darkmatter::markdown::compose::{
     ComposeContext, ComposeOptions, CurrentAuthority, EffectiveState, EffectiveStateBuilder,
     ResolvedShellValue, execute_resolved_shell_values,
@@ -63,16 +66,15 @@ use tracing::warn;
 use super::super::error::{CompositionError, LifecycleEvaluationReason};
 use super::{
     LifecycleConfig, LifecycleEmitter, LifecycleNotification, LifecycleSignal, audio_phases,
-    first_undefined_stack_variable, tts_config_from_settings,
+    tts_config_from_settings,
 };
+use super::bindings::{LifecycleScope, LifecycleValues, runtime_bindings};
 use super::actions::{
     CommunicationChannel, LifecycleAction, LifecycleActionKind, LifecycleControlAction, ProxyWith,
     ProxyWithValue, RetryBackoff, RuntimeSet, is_known_side_effect,
 };
 use crate::composition::coordinator::ActionLocation;
-use super::context::{
-    LifecycleErrorInfo, LifecycleTiming, lifecycle_injected_globals,
-};
+use super::context::{LifecycleCause, LifecycleErrorInfo, LifecycleTiming};
 use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
 
@@ -226,8 +228,9 @@ pub enum LifecycleExprError {
     Compose(#[from] Box<darkmatter::markdown::MarkdownError>),
 
     /// A failure the expression layer describes itself, with no lower-layer
-    /// error in hand: an undefined-variable rejection or a control argument of
-    /// the wrong shape.
+    /// error in hand: a control argument of the wrong shape, or template syntax
+    /// in a `proxy.with` value that becomes the target's lifecycle
+    /// configuration.
     #[error("{0}")]
     Prose(String),
 }
@@ -413,6 +416,10 @@ fn system_shell_command(
 pub struct StackExecutionContext<'a> {
     /// The event being processed.
     pub signal: LifecycleSignal,
+    /// The binding scope expressions evaluate in; `None` is the event
+    /// `signal` names. A sequence task's `setup:`/`teardown:` stack sets its
+    /// own scope ([`Self::in_scope`]) because it reuses the step's context.
+    pub scope: Option<LifecycleScope>,
     /// Composed frontmatter — the base namespace for expression evaluation.
     pub frontmatter: &'a Map<String, Value>,
     /// Shared cross-event live document frontmatter for the current attempt.
@@ -758,6 +765,7 @@ impl StackExecutionContext<'_> {
     pub fn with_signal(&self, signal: LifecycleSignal) -> StackExecutionContext<'_> {
         StackExecutionContext {
             signal,
+            scope: if signal == self.signal { self.scope } else { None },
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
             runtime_state: self.runtime_state,
@@ -797,6 +805,7 @@ impl StackExecutionContext<'_> {
     ) -> StackExecutionContext<'a> {
         StackExecutionContext {
             signal: self.signal,
+            scope: self.scope,
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
             runtime_state: self.runtime_state,
@@ -834,6 +843,19 @@ impl StackExecutionContext<'_> {
         }
     }
 
+    /// Return a copy of this context evaluating in binding `scope`.
+    pub fn in_scope(&self, scope: LifecycleScope) -> StackExecutionContext<'_> {
+        StackExecutionContext {
+            scope: Some(scope),
+            ..self.with_signal(self.signal)
+        }
+    }
+
+    /// The binding scope this context's expressions evaluate in.
+    pub fn binding_scope(&self) -> LifecycleScope {
+        self.scope.unwrap_or(LifecycleScope::Event(self.signal))
+    }
+
     /// Redirect this context's two mutable cells to private ones.
     ///
     /// A parallel group member runs against a private runtime buffer, so its
@@ -868,9 +890,6 @@ impl StackExecutionContext<'_> {
             .map(|cell| cell.lock().expect(LIVE_POISONED).clone())
     }
 
-    /// Build the event-time injected-globals layer (`err`/`timing`, plus
-    /// `group` inside a sequence group) handed to Darkmatter's subtree compose
-    /// and layered lookup.
     /// Return a copy of this context that reuses `prepared` as its single
     /// early-binding snapshot.
     ///
@@ -883,6 +902,7 @@ impl StackExecutionContext<'_> {
     ) -> StackExecutionContext<'b> {
         StackExecutionContext {
             signal: self.signal,
+            scope: self.scope,
             frontmatter: self.frontmatter,
             live_frontmatter: self.live_frontmatter,
             runtime_state: self.runtime_state,
@@ -905,16 +925,17 @@ impl StackExecutionContext<'_> {
         }
     }
 
-    /// Build the event-time injected-globals layer (`err`/`timing`) handed to
-    /// Darkmatter's subtree compose and layered lookup.
-    fn injected_globals(&self) -> HashMap<String, InjectedGlobal> {
-        let mut globals = lifecycle_injected_globals(self.err, self.timing);
-        let group = match self.group {
-            Some(variables) => InjectedGlobal::eager(Value::Object(variables.clone())),
-            None => super::context::outside_group_global(),
-        };
-        globals.insert("group".to_string(), group);
-        globals
+    /// This scope's binding view and a runtime entry for every lifecycle
+    /// global it declares, from the catalog.
+    fn bindings(&self) -> (Arc<BindingView>, HashMap<String, RuntimeBinding<'static>>) {
+        runtime_bindings(
+            self.binding_scope(),
+            LifecycleValues {
+                err: self.err,
+                timing: self.timing,
+                group: self.group,
+            },
+        )
     }
 
     /// Build resolution state for expressions authored by `source_path`.
@@ -958,7 +979,7 @@ impl StackExecutionContext<'_> {
     /// `ctx.*`/`env.*` come from [`Self::early_binding_context`] — the single
     /// composition-start snapshot when available, otherwise a demand-driven
     /// re-capture against `scan_hint`. `err`/`timing` are the event-time
-    /// globals (injected separately via [`Self::injected_globals`]);
+    /// globals (supplied separately by [`Self::bindings`]);
     /// `current.*`/`current_env.*` are the reserved roots this state's refresh
     /// authority serves.
     fn build_state(&self, fm: &Map<String, Value>, scan_hint: &str) -> EffectiveState {
@@ -988,10 +1009,9 @@ impl StackExecutionContext<'_> {
     /// Evaluate a parsed expression at event-time against the live document
     /// state plus the injected globals, through Darkmatter's layered lookup.
     fn eval_expr(&self, expr: &Expr, fm: &Map<String, Value>) -> Result<Value, LifecycleExprError> {
-        let hint = ctx_scan_hint(expr);
-        let state = self.build_state(fm, &hint);
-        let globals = self.injected_globals();
-        let lookup = layered_session(&state, globals, None, Some(self.resolution_context()))
+        let state = self.build_state(fm, &expr.to_string());
+        let (view, globals) = self.bindings();
+        let lookup = layered_session(&state, globals, Some(view), Some(self.resolution_context()))
             .map_err(|error| {
                 LifecycleExprError::Evaluate(Box::new(ExpressionError::Binding(Box::new(error))))
             })?;
@@ -1001,10 +1021,10 @@ impl StackExecutionContext<'_> {
     /// Interpolate a string's `{{ … }}` spans at event-time through Darkmatter's
     /// subtree compose (DM2), preserving whole-value typing.
     ///
-    /// Subtree compose fails closed (C4): a malformed span or unknown function
-    /// returns an error instead of degrading to empty. An absent document
-    /// property renders as `null`/empty; undefined lifecycle variables are
-    /// rejected earlier, by the stack's own variable scan.
+    /// Subtree compose fails closed (C4): a malformed span, an unknown
+    /// function, or a read of a global this scope declares unavailable returns
+    /// an error instead of degrading to empty. An absent document property
+    /// renders as `null`/empty.
     ///
     /// `s` is authored text and is scanned exactly once. Whatever the spans
     /// insert is data: a frontmatter value or file content that itself holds
@@ -1015,10 +1035,11 @@ impl StackExecutionContext<'_> {
         fm: &Map<String, Value>,
     ) -> Result<Value, LifecycleExprError> {
         let state = self.build_state(fm, s);
-        let globals = self.injected_globals();
+        let (view, globals) = self.bindings();
         let value = Value::String(s.to_string());
         SubtreeCompose::new(&value, &state)
             .with_globals(globals)
+            .with_binding_view(view)
             .with_resolution_context(self.resolution_context())
             .compose()
             .map_err(|error| LifecycleExprError::Compose(Box::new(error)))
@@ -1068,10 +1089,11 @@ impl StackExecutionContext<'_> {
     /// audio phases (`say`/`say_first` and `effect`, in their deterministic
     /// order). These strings are deferred lifecycle keys (raw `{{ … }}` through
     /// main compose), so each is interpolated **at event-time** against the live
-    /// document state plus the late-binding roots (`err`/`timing`/`current`/
-    /// `current_env`).
+    /// document state plus the event's lifecycle globals (`err`/`timing`/`group`)
+    /// and the late-binding roots (`current`/`current_env`).
     ///
-    /// Fails closed (C4): a resolution raise (malformed/unknown root) becomes an
+    /// Fails closed (C4): a resolution raise (malformed span, unknown function,
+    /// unavailable global) becomes an
     /// [`ActionFailure::Evaluation`] and an unknown resolved `effect` name an
     /// [`ActionFailure::Dispatch`], aborting emission before the offending field
     /// is sent, so no side effect dispatches silently-empty or raw operational
@@ -1124,7 +1146,7 @@ impl StackExecutionContext<'_> {
     ///
     /// `None` input (absent field) yields `Ok(None)`. A field with no `{{ … }}`
     /// span is emitted verbatim. A field carrying interpolation is resolved
-    /// through DM2 (strict) against [`Self::frontmatter`]; a resolution raise is
+    /// through DM2 against [`Self::frontmatter`]; a resolution raise is
     /// returned as an [`ActionFailure::Evaluation`] so the caller fails the
     /// event closed rather than dispatching silently-empty or raw template text.
     fn resolve_emit(
@@ -1147,7 +1169,7 @@ impl StackExecutionContext<'_> {
             .map(|value| Some(scalar_string(&value)))
             .map_err(|error| {
                 ActionFailure::Evaluation(
-                    LifecycleErrorInfo::from_error_or_action("interpolation", &error)
+                    LifecycleErrorInfo::from_expr_error("interpolation", error)
                         .at_property(format!("{}.{field}", self.signal.property_name())),
                 )
             })
@@ -1240,15 +1262,11 @@ impl StackExecutionContext<'_> {
     /// Evaluate an optional `when:` clause, failing closed on an unresolvable
     /// guard. Omitted clauses always match (`Ok(true)`).
     ///
-    /// A `when:` guard reacts to live document state, so it cannot be statically
-    /// validated at prepare time (its referenced keys may be set by an earlier
-    /// stack action). Instead it is checked just-in-time here against the live
-    /// `fm`: an unknown root (a typo such as `spec_fil`) or a malformed/illegal
-    /// expression returns `Err`, so the event fails closed before any side
-    /// effect dispatches rather than silently skipping a recovery/messaging/
-    /// file-mutating action. The walk shares the lifecycle-stack tolerance, so a
-    /// guarded optional fallback (`maybe_missing || false`) is allowed. A guard
-    /// that legitimately evaluates falsy returns `Ok(false)` and skips the item.
+    /// A `when:` guard reads live document state, evaluated just in time
+    /// against the live `fm`. An absent property is `null`, so a guard over it
+    /// is falsy and skips the item. A malformed expression, an unknown
+    /// function, or a read of a global this scope declares unavailable returns
+    /// `Err`, so the event fails closed before any side effect dispatches.
     fn when_matches(
         &self,
         when: Option<&Expr>,
@@ -1257,15 +1275,9 @@ impl StackExecutionContext<'_> {
         let Some(expr) = when else {
             return Ok(true);
         };
-        if let Some(variable) = first_undefined_stack_variable(expr, Some(fm)) {
-            return Err(LifecycleErrorInfo::from_action_failure(
-                "when",
-                format!("`when:` references undefined variable `{variable}`"),
-            ));
-        }
         self.eval_expr(expr, fm)
             .map(|value| is_truthy(&value))
-            .map_err(|error| LifecycleErrorInfo::from_error_or_action("when", &error))
+            .map_err(|error| LifecycleErrorInfo::from_expr_error("when", error))
     }
 
     /// Run one action, applying the `no_error` escape hatch.
@@ -1342,9 +1354,9 @@ impl StackExecutionContext<'_> {
                 let message = self
                     .render_message(&comm.message, working)
                     .map_err(|error| {
-                        ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
+                        ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error(
                             comm.channel.verb(),
-                            &error,
+                            error,
                         ))
                     })?;
                 // Deferred effect validation (C4): an `effect` positional
@@ -1380,9 +1392,9 @@ impl StackExecutionContext<'_> {
                 self.invoke_expression_function(&func.function, &func.args, working)
                     .map(|_| None)
                     .map_err(|error| {
-                        ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(
+                        ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error(
                             func.function.clone(),
-                            &error,
+                            error,
                         ))
                     })
             }
@@ -1396,20 +1408,13 @@ impl StackExecutionContext<'_> {
     /// `fm` plus the injected globals; a whole-value `{{ … }}` span resolves to
     /// a typed expression whose result is data ([`Self::evaluate_operand`]).
     ///
-    /// Fails closed (C4): a whole-value span (or a function argument) referencing
-    /// a genuinely-unknown frontmatter root — a typo — errors before dispatch
-    /// rather than evaluating leniently to `null`/empty, matching the `when:`
-    /// guard. A *known* root resolving to `null`/empty still renders empty.
+    /// An absent document property renders through ordinary `null` semantics.
+    /// A genuine evaluation error fails before dispatch.
     fn render_message(
         &self,
         expr: &Expr,
         fm: &Map<String, Value>,
     ) -> Result<String, LifecycleExprError> {
-        if let Some(variable) = first_undefined_stack_variable(expr, Some(fm)) {
-            return Err(LifecycleExprError::prose(format!(
-                "references undefined variable `{variable}`"
-            )));
-        }
         self.evaluate_operand(expr, fm).map(|value| scalar_string(&value))
     }
 
@@ -1452,7 +1457,7 @@ impl StackExecutionContext<'_> {
             )));
         }
         let command = self.render_shell_text(shell, &shell.command, fm).map_err(|error| {
-            ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action("shell", &error))
+            ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error("shell", error))
         })?;
         match self.shell_runner.run(&command) {
             Err(ShellRunError::BeforePreflight) => Err(ActionFailure::Evaluation(
@@ -1517,9 +1522,7 @@ impl StackExecutionContext<'_> {
             .iter()
             .map(|expr| self.evaluate_operand(expr, working))
             .collect::<Result<Vec<_>, LifecycleExprError>>()
-            .map_err(|error| {
-                ActionFailure::Evaluation(LifecycleErrorInfo::from_error_or_action(verb, &error))
-            })?;
+            .map_err(|error| ActionFailure::Evaluation(LifecycleErrorInfo::from_expr_error(verb, error)))?;
         // From here on, an error is a side-effect dispatch failure (a missing
         // argument, an unknown verb, or an effect-engine error).
         let dispatch_err =
@@ -1603,13 +1606,15 @@ impl StackExecutionContext<'_> {
             let resolved = self.resolve_with_value(value, &snapshot).map_err(|(suffix, error)| {
                 let value_property = format!("{property}.{key}{suffix}");
                 let reason = LifecycleEvaluationReason::Expression;
+                let cause = LifecycleCause::new(error);
                 let diagnostic = CompositionError::LifecycleEvaluationError {
                     source_path: self.source_path.to_path_buf(),
                     event: self.signal.property_name().to_string(),
                     surface: "set".to_string(),
-                    message: error.to_string(),
+                    message: cause.to_string(),
                     property: Some(value_property.clone()),
-                    reason: Box::new(reason.clone()),
+                    reason: reason.clone(),
+                    cause: Some(cause),
                 };
                 let mut info = LifecycleErrorInfo::from_composition_error(&diagnostic)
                     .at_property(value_property);
@@ -1870,9 +1875,7 @@ impl StackExecutionContext<'_> {
     ) -> Result<StackControl, LifecycleErrorInfo> {
         use LifecycleControlAction as C;
         let verb = control.verb();
-        let classify = |error: LifecycleExprError| {
-            LifecycleErrorInfo::from_error_or_action(verb, &error)
-        };
+        let classify = |error: LifecycleExprError| LifecycleErrorInfo::from_expr_error(verb, error);
         Ok(match control {
             C::Stop => StackControl::Stop,
             C::Skip => StackControl::Skip,
@@ -1973,12 +1976,14 @@ impl StackExecutionContext<'_> {
                 .resolve_with_value(value, fm)
                 .and_then(|resolved| reject_control_plane_template(key, resolved))
                 .map_err(|(suffix, error)| {
+                    let cause = LifecycleCause::new(error);
                     let err = CompositionError::LifecycleProxyWithEvaluationFailed {
                         source_path: self.source_path.to_path_buf(),
                         property: format!("{}.stack[{}]", location.signal().property_name(), location.stack_index()),
                         path: format!("action[{}].with.{key}{suffix}", location.action_index()),
                         target: target.to_string(),
-                        message: error.to_string(),
+                        message: cause.to_string(),
+                        cause: Some(cause),
                     };
                     LifecycleErrorInfo::from_composition_error(&err)
                 })?;
@@ -2040,7 +2045,7 @@ impl StackExecutionContext<'_> {
     /// `bool`/number/array/object/null; a mixed string interpolates through DM2
     /// and stays a string.
     ///
-    /// Fails closed the same way `render_message` does. The resolved value is
+    /// An absent document property resolves to `null`. The resolved value is
     /// data: a `{{ … }}` inside it — at any depth of a container — reaches a
     /// `set:` or a `proxy.with:` target as text, never as a template.
     fn resolve_typed_value(
@@ -2048,11 +2053,6 @@ impl StackExecutionContext<'_> {
         expr: &Expr,
         fm: &Map<String, Value>,
     ) -> Result<Value, LifecycleExprError> {
-        if let Some(variable) = first_undefined_stack_variable(expr, Some(fm)) {
-            return Err(LifecycleExprError::prose(format!(
-                "references undefined variable `{variable}`"
-            )));
-        }
         self.evaluate_operand(expr, fm)
     }
 
@@ -2113,9 +2113,9 @@ fn take_proxy_with_fallback_capture_hints() -> Vec<String> {
 ///
 /// A mixed-interpolation leaf is an [`Expr::StringLiteral`] whose raw text still
 /// holds its `{{ … }}` spans, so that text is scanned directly; a whole-value
-/// span is a parsed [`Expr`], so its variable paths are collected. The union
-/// feeds [`ComposeContext::capture_for_content`], which stays datetime-only when
-/// no leaf references `ctx.*`.
+/// span is a parsed [`Expr`], scanned as its rendering. The union feeds
+/// [`ComposeContext::capture_for_content`], which stays datetime-only when no
+/// leaf references `ctx.*`.
 fn proxy_with_scan_content(with: &ProxyWith) -> String {
     let mut content = String::new();
     for (_, value) in with.iter() {
@@ -2137,12 +2137,8 @@ fn push_proxy_with_scan_content(value: &ProxyWithValue, content: &mut String) {
             content.push_str(s);
         }
         ProxyWithValue::Scalar(expr) => {
-            let mut paths = Vec::new();
-            collect_variable_paths(expr, &mut paths);
-            for path in paths {
-                content.push(' ');
-                content.push_str(&path);
-            }
+            content.push(' ');
+            content.push_str(&expr.to_string());
         }
         ProxyWithValue::Array(items) => {
             for item in items {
@@ -2152,70 +2148,6 @@ fn push_proxy_with_scan_content(value: &ProxyWithValue, content: &mut String) {
         ProxyWithValue::Object(map) => {
             for (_, value) in map {
                 push_proxy_with_scan_content(value, content);
-            }
-        }
-    }
-}
-
-/// Build a demand-driven `ctx.*` capture hint from an expression's variable
-/// references, so [`ComposeContext::capture_for_content`] only captures the
-/// sniff groups the expression actually reads (most read none).
-fn ctx_scan_hint(expr: &Expr) -> String {
-    let mut paths = Vec::new();
-    collect_variable_paths(expr, &mut paths);
-    paths
-        .into_iter()
-        .filter(|p| p.starts_with("ctx."))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Walk an [`Expr`] pushing every [`Expr::Variable`] dotted path onto `paths`.
-fn collect_variable_paths(expr: &Expr, paths: &mut Vec<String>) {
-    match expr {
-        Expr::Variable(path) => paths.push(path.clone()),
-        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
-        Expr::UnaryNot(inner)
-        | Expr::UnaryMinus(inner)
-        | Expr::Paren(inner)
-        | Expr::MemberAccess { base: inner, .. } => collect_variable_paths(inner, paths),
-        Expr::Fallback { primary, fallback } => {
-            collect_variable_paths(primary, paths);
-            collect_variable_paths(fallback, paths);
-        }
-        Expr::Ternary {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            collect_variable_paths(condition, paths);
-            collect_variable_paths(then_branch, paths);
-            collect_variable_paths(else_branch, paths);
-        }
-        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
-            collect_variable_paths(left, paths);
-            collect_variable_paths(right, paths);
-        }
-        Expr::Index { base, index } => {
-            collect_variable_paths(base, paths);
-            collect_variable_paths(index, paths);
-        }
-        Expr::FunctionCall { args, .. } => {
-            for arg in args {
-                collect_variable_paths(arg, paths);
-            }
-        }
-        // A container literal reads every path its elements read, so
-        // `[ctx.area, ctx.package]` must contribute both capture hints.
-        // Object keys are authored text, not variable references.
-        Expr::ArrayLiteral(elements) => {
-            for element in elements {
-                collect_variable_paths(element, paths);
-            }
-        }
-        Expr::ObjectLiteral(entries) => {
-            for (_, value) in entries {
-                collect_variable_paths(value, paths);
             }
         }
     }

@@ -1,23 +1,23 @@
-//! Shared interpolation conformance matrix (Phase 12).
+//! Shared interpolation conformance matrix.
 //!
-//! One matrix, two engines. The loop action renderer
+//! One matrix, every engine. The loop action renderer
 //! (`looping::actions::render_action_value`, driven here through the public
-//! `ActionStaging` `set` path) and the lifecycle DM2 substrate
-//! (`darkmatter::markdown::compose::subtree::SubtreeCompose`) are the two
-//! interpolation surfaces the frontmatter action grammar exposes. Both consume
-//! the *same* Darkmatter expression core (`parse` / `evaluate` /
-//! `ExpressionFinder` / `scalar_string`) over an `EvaluationLookup`; the loop is
-//! not a parallel expression engine, only a loop-specific value renderer.
+//! `ActionStaging` `set` path), the lifecycle DM2 substrate
+//! (`darkmatter::markdown::compose::subtree::SubtreeCompose`), and the sequence
+//! source renderer (`sequence::expr::render_interpolated`) are the
+//! interpolation surfaces the frontmatter grammar exposes. All consume the
+//! *same* Darkmatter expression core over an `EvaluationLookup`.
 //!
-//! [`overlap_cases`] enumerates the syntax both engines support and asserts they
-//! produce the *same* value from the *same* input and state. The `divergence_*`
-//! test pins the documented, intentional difference that keeps the loop
-//! renderer separate (its error type); `mixed_string_stays_a_string_in_both_engines`
-//! and `an_absent_root_is_empty_in_both_engines` pin two former differences
-//! that no longer exist. See `docs/topics/flow-control/looping.md`
-//! (§"When templates inside action values are rendered") and
-//! `docs/topics/composition.md` (§"Loop vs lifecycle interpolation") for the
-//! rationale.
+//! [`overlap_cases`] enumerates the syntax every engine supports and asserts
+//! they produce the *same* value from the *same* input and state.
+//! [`missing_property_cases`] is the one missing-property and escape table —
+//! the inputs of Darkmatter's `absent_property_contract` — shared with the
+//! lifecycle executor's own run of it (`executor/tests/binding_contract.rs`),
+//! so no consumer can drift from Darkmatter's semantics. The `divergence_*`
+//! test pins the one documented, intentional difference (the loop's error
+//! type). See `docs/topics/flow-control/looping.md` (§"When templates inside
+//! action values are rendered") and `docs/topics/composition.md` (§"Loop vs
+//! lifecycle interpolation").
 
 use std::collections::HashMap;
 
@@ -82,12 +82,12 @@ fn obj(value: Value) -> Map<String, Value> {
 }
 
 /// A single overlap case: the same input rendered against the same state must
-/// produce `expected` from *both* engines.
-struct OverlapCase {
-    name: &'static str,
-    input: Value,
-    frontmatter: Map<String, Value>,
-    expected: Value,
+/// produce `expected` from every engine.
+pub(crate) struct OverlapCase {
+    pub(crate) name: &'static str,
+    pub(crate) input: Value,
+    pub(crate) frontmatter: Map<String, Value>,
+    pub(crate) expected: Value,
 }
 
 fn overlap_cases() -> Vec<OverlapCase> {
@@ -240,20 +240,79 @@ fn mixed_string_stays_a_string_in_both_engines() {
     );
 }
 
-/// An absent root in a mixed string renders empty in both engines: it is an
-/// absent document property, which is `null`, not an error. (DM2 strict mode
-/// used to reject it; strict mode no longer exists.)
+/// The missing-property and escape table, with the inputs of Darkmatter's
+/// `absent_property_contract` L1 tests: an absent property is `null` as a whole
+/// value and empty in a mixed string, takes a ternary's falsy branch and a
+/// fallback's next operand, and never reads `ctx`; every escape form is inert;
+/// inserted data is never evaluated again.
+pub(crate) fn missing_property_cases() -> Vec<OverlapCase> {
+    let case = |name, input: &str, frontmatter: Value, expected: Value| OverlapCase {
+        name,
+        input: Value::String(input.to_string()),
+        frontmatter: obj(frontmatter),
+        expected,
+    };
+    vec![
+        case("absent bare whole value", "{{ missing }}", json!({}), json!(null)),
+        case("absent doc whole value", "{{ doc.missing }}", json!({}), json!(null)),
+        case("absent descendant", "{{ missing.deep }}", json!({}), json!(null)),
+        case("absent in mixed text", "x {{ missing }} y", json!({}), json!("x  y")),
+        case("absent bare and doc in mixed text", "[{{ missing }}][{{ doc.missing }}]", json!({}), json!("[][]")),
+        case("absent is null", "{{ is_null(missing) }}", json!({}), json!(true)),
+        case("ternary falsy branch", "{{ missing ? 'yes' : 'no' }}", json!({}), json!("no")),
+        case(
+            "fallback chain skips empty",
+            "{{ missing || blank || 'last' }}",
+            json!({"blank": ""}),
+            json!("last"),
+        ),
+        case("a context key is not a bare name", "[{{ repo }}]", json!({}), json!("[]")),
+        case("triple-brace whole value", "{{{ ghost }}}", json!({}), json!("{{ ghost }}")),
+        case("triple-brace in mixed text", "a {{{ ghost }}} b", json!({}), json!("a {{ ghost }} b")),
+        case(
+            "inserted braces are data",
+            "{{ body }}",
+            json!({"body": "agent wrote {{ x }} and $(y)"}),
+            json!("agent wrote {{ x }} and $(y)"),
+        ),
+        case(
+            "inserted braces in mixed text are data",
+            "> {{ body }}",
+            json!({"body": "{{ x }}"}),
+            json!("> {{ x }}"),
+        ),
+    ]
+}
+
+/// Every engine renders the missing-property and escape table exactly as
+/// Darkmatter's subtree compose does, with no strict-versus-lenient split.
 #[test]
-fn an_absent_root_is_empty_in_both_engines() {
-    let input = json!("x={{typo}}");
-    let frontmatter = obj(json!({}));
+fn every_engine_agrees_on_missing_properties_and_escapes() {
     let context = prepared_context();
+    for case in missing_property_cases() {
+        let dm2 = dm2_render(&case.input, &case.frontmatter, &context)
+            .unwrap_or_else(|error| panic!("DM2 failed for `{}`: {error}", case.name));
+        assert_eq!(dm2, case.expected, "DM2 for `{}`", case.name);
 
-    let loop_result = loop_render(&input, &frontmatter).expect("loop renders");
-    assert_eq!(loop_result, json!("x="), "loop resolves the absent root empty");
+        let Value::String(raw) = &case.input else { unreachable!() };
+        let lookup = super::sequence::expr::SourceExpressionLookup::new(
+            &case.frontmatter,
+            std::path::Path::new("."),
+        );
+        let source = super::sequence::expr::render_interpolated(raw, &lookup)
+            .unwrap_or_else(|error| panic!("sequence source failed for `{}`: {error}", case.name));
+        assert_eq!(source, case.expected, "sequence source for `{}`", case.name);
 
-    let dm2_result = dm2_render(&input, &frontmatter, &context).expect("DM2 renders");
-    assert_eq!(dm2_result, json!("x="), "DM2 resolves the absent root empty");
+        // The loop action renderer does not recognize `{{{ … }}}` escapes; it
+        // is outside this contract's migration (loop action handling is not
+        // reworked here), so only its escape rows are excluded.
+        if case.name.starts_with("triple-brace") {
+            continue;
+        }
+        let looped = loop_render(&case.input, &case.frontmatter)
+            .unwrap_or_else(|error| panic!("loop failed for `{}`: {error}", case.name));
+        assert_eq!(looped, case.expected, "loop for `{}`", case.name);
+    }
 }
 
 /// Both engines fail closed on a malformed expression — the shared invariant —

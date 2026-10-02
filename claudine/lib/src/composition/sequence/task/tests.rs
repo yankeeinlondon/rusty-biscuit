@@ -336,6 +336,7 @@ impl Fixture {
         let live = std::sync::Mutex::new(self.frontmatter.clone());
         let stack = StackExecutionContext {
             signal: LifecycleSignal::Start,
+            scope: None,
             frontmatter: &self.frontmatter,
             live_frontmatter: Some(&live),
             runtime_state: wiring.runtime.map(Arc::as_ref),
@@ -2362,7 +2363,7 @@ mod side_effect_tasks {
                 "name": "alpha",
                 "side_effect": { "set": {
                     "stable": "changed",
-                    "metadata": {"files": ["{{unknown_root}}"]}
+                    "metadata": {"files": ["{{unknown_root()}}"]}
                 } },
             }),
         );
@@ -2733,8 +2734,8 @@ mod authored_set_order {
                 "    setup:\n",
                 "      - action:\n",
                 "          set:\n",
-                "            z_last_lexically: \"{{ z_unknown_root }}\"\n",
-                "            a_first_lexically: \"{{ a_unknown_root }}\"\n",
+                "            z_last_lexically: \"{{ z_unknown_root() }}\"\n",
+                "            a_first_lexically: \"{{ a_unknown_root() }}\"\n",
                 "---\n\n",
                 "Document body.\n",
             ),
@@ -2787,7 +2788,7 @@ mod task_stack_diagnostics {
             "  stable: changed",
             "  metadata:",
             "    files:",
-            "      - \"{{unknown_root}}\"",
+            "      - \"{{unknown_root()}}\"",
         ]
         .iter()
         .map(|line| format!("{pad}{line}\n"))
@@ -3004,7 +3005,7 @@ mod task_stack_diagnostics {
             &outcome,
             Path::new(&source),
             "tasks[0].setup[0].action[0].set.metadata.files[0]",
-            Some("{{unknown_root}}"),
+            Some("{{unknown_root()}}"),
         );
         assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Setup);
         // Atomic: neither half of the mapping commits, and the primary never ran.
@@ -3042,7 +3043,7 @@ mod task_stack_diagnostics {
             &outcome,
             Path::new(&source),
             "tasks[0].teardown[0].action[0].set.metadata.files[0]",
-            Some("{{unknown_root}}"),
+            Some("{{unknown_root()}}"),
         );
         assert_eq!(outcome.error.as_ref().unwrap().stage, TaskStage::Teardown);
         // The primary ran and succeeded; the teardown mapping still commits
@@ -3131,7 +3132,7 @@ mod task_stack_diagnostics {
             &outcome,
             Path::new(&source),
             "tasks[0].group.tasks[0].setup[0].action[0].set.metadata.files[0]",
-            Some("{{unknown_root}}"),
+            Some("{{unknown_root()}}"),
         );
         assert!(runtime.snapshot().mutations.is_empty());
     }
@@ -3856,7 +3857,7 @@ mod serial_groups {
         let source_path = dir.path().join("seq.md");
         fs::write(
             &source_path,
-            "---\nsequence:\n    - name: alpha\n      group:\n        name: bundle\n        tasks:\n            - side_effect:\n                set:\n                    stable: changed\n                    metadata:\n                        files:\n                            - \"{{unknown_root}}\"\n---\n\nDocument body.\n",
+            "---\nsequence:\n    - name: alpha\n      group:\n        name: bundle\n        tasks:\n            - side_effect:\n                set:\n                    stable: changed\n                    metadata:\n                        files:\n                            - \"{{unknown_root()}}\"\n---\n\nDocument body.\n",
         )
         .unwrap();
         let source = source_path.display().to_string();
@@ -3875,7 +3876,7 @@ mod serial_groups {
             &runtime,
             Path::new(&source),
             "tasks[0].group.tasks[0].side_effect.set.metadata.files[0]",
-            Some("{{unknown_root}}"),
+            Some("{{unknown_root()}}"),
         );
     }
 
@@ -3892,7 +3893,7 @@ mod serial_groups {
                 "tasks": [{
                     "side_effect": { "set": {
                         "stable": "changed",
-                        "metadata": {"files": ["{{unknown_root}}"]}
+                        "metadata": {"files": ["{{unknown_root()}}"]}
                     } }
                 }],
             }),
@@ -3930,7 +3931,7 @@ mod serial_groups {
                 "kind": "task",
                 "side_effect": { "set": {
                     "stable": "changed",
-                    "metadata": {"files": ["{{unknown_root}}"]}
+                    "metadata": {"files": ["{{unknown_root()}}"]}
                 } }
             }),
         );
@@ -5312,4 +5313,142 @@ fn strip_ansi(text: &str) -> String {
         }
     }
     out
+}
+
+/// Shell approval byte parity: sequence-wide approval fixes the bytes of every
+/// primary, `setup:`, and `teardown:` command once, and execution runs exactly
+/// those bytes — never the authored text evaluated again.
+mod byte_parity {
+    use super::*;
+
+    fn approved(fixture: &Fixture) -> Vec<String> {
+        fixture
+            .graph
+            .shell_commands
+            .iter()
+            .map(|command| command.command.clone())
+            .collect()
+    }
+
+    #[test]
+    fn primary_setup_and_teardown_run_the_bytes_approval_fixed() {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("value", json!("original")),
+                (
+                    "sequence",
+                    json!([{
+                        "name": "alpha",
+                        "shell": "primary {{ value }}",
+                        // A setup `set` changes `value` before the commands
+                        // that read it run: re-evaluating would see `changed`.
+                        "setup": [
+                            {"action": {"set": {"value": "changed"}}},
+                            {"action": {"shell": "setup {{ value }}"}},
+                            {"action": {"action": "shell", "command": "{{ 'whole ' + value }}"}}
+                        ],
+                        "teardown": [{"action": {"shell": "teardown {{ value }}"}}],
+                    }]),
+                ),
+            ],
+            "Document body.\n",
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        let approved = approved(&fixture);
+        for bytes in ["primary original", "setup original", "whole original", "teardown original"] {
+            assert!(approved.contains(&bytes.to_string()), "`{bytes}` approved: {approved:?}");
+        }
+
+        let recorder = Recorder::default();
+        let shell = FakeTaskShell::with_stdout(&["out"]);
+        let runtime = Arc::new(RuntimeState::new());
+        let mut wiring = Wiring::new(&recorder, &shell);
+        wiring.runtime = Some(&runtime);
+        let outcome = fixture.execute(&wiring);
+
+        assert!(outcome.succeeded(), "{}", failure_message(&outcome));
+        assert_eq!(shell.commands(), vec!["primary original".to_string()]);
+        assert_eq!(
+            recorder.events(),
+            vec![
+                "stack-shell:setup original".to_string(),
+                "stack-shell:whole original".to_string(),
+                "stack-shell:teardown original".to_string(),
+            ],
+            "setup and teardown ran the approved bytes, not a re-evaluation"
+        );
+        assert_eq!(
+            runtime.snapshot().mutations.get("value"),
+            Some(&json!("changed")),
+            "the setup `set` did run, so the parity is not vacuous"
+        );
+    }
+
+    #[test]
+    fn group_is_unavailable_at_sequence_approval_while_doc_group_reads_the_document() {
+        for (shell, setup) in [
+            (Some("echo {{ group.label }}"), None),
+            (Some("echo {{ false ? group.label : 'x' }}"), None),
+            (None, Some("echo {{ group.label }}")),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let mut step = json!({"name": "alpha", "shell": shell.unwrap_or("true")});
+            if let Some(setup) = setup {
+                step["setup"] = json!([{"action": {"shell": setup}}]);
+            }
+            let source = write_source(
+                dir.path(),
+                "seq.md",
+                &[("group", json!({"label": "document"})), ("sequence", json!([step]))],
+                "Document body.\n",
+            );
+            let Err(error) = Fixture::build(dir, &source) else {
+                panic!("`{shell:?}`/`{setup:?}`: approval must refuse `group`");
+            };
+            let CompositionError::SequenceShellLateBinding { root, source: Some(cause), .. } = &error else {
+                panic!("expected a typed late-binding refusal, got {error:?}");
+            };
+            assert_eq!(root, "group");
+            assert!(
+                crate::composition::lifecycle::bindings::unavailable_root(cause) == Some("group"),
+                "{cause:?}"
+            );
+        }
+
+        // Inside a group too: a member's command cannot read its group.
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([{"name": "bundle", "group": {
+                    "name": "bundle",
+                    "variables": {"label": "g"},
+                    "tasks": [{"name": "member", "shell": "echo {{ group.label }}"}]
+                }}]),
+            )],
+            "Document body.\n",
+        );
+        assert!(matches!(
+            Fixture::build(dir, &source),
+            Err(CompositionError::SequenceShellLateBinding { ref root, .. }) if root == "group"
+        ));
+
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[
+                ("group", json!({"label": "document"})),
+                ("sequence", json!([{"name": "alpha", "shell": "echo {{ doc.group.label }}"}])),
+            ],
+            "Document body.\n",
+        );
+        let fixture = Fixture::build(dir, &source).unwrap();
+        assert_eq!(approved(&fixture), vec!["echo document".to_string()]);
+    }
 }

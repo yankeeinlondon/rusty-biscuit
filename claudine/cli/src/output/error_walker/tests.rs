@@ -285,6 +285,7 @@ fn renders_lifecycle_evaluation_error_for_success_when() {
         message: "frontmatter(review_file,'ready') raised: path did not resolve".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let report: Report = eyre!(err);
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
@@ -314,6 +315,7 @@ fn renders_lifecycle_evaluation_error_for_finalize() {
         message: "unknown root `missing_root`".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let report: Report = eyre!(err);
     let rendered = try_render_block_report(&report, &width80()).expect("block error found");
@@ -336,6 +338,7 @@ fn lifecycle_evaluation_error_is_plain_without_color() {
         message: "boom".to_string(),
         property: None,
         reason: Default::default(),
+        cause: None,
     };
     let report: Report = eyre!(err);
     let mut term = Terminal::new_optimistic(80);

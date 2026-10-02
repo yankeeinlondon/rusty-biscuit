@@ -3,7 +3,8 @@
 use std::path::Path;
 
 use darkmatter::markdown::compose::expression::{
-    EvaluationLookup, ResolutionContext, evaluate, is_truthy, parse_condition,
+    EvaluationLookup, ExpressionError, ResolutionContext, ResolvedBinding, evaluate,
+    is_reserved_namespace, is_truthy, parse_condition,
 };
 use serde_json::{Map, Value};
 
@@ -142,12 +143,13 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
             return resolve_doc(self.frontmatter, path);
         }
 
-        if let Some(name) = path.strip_prefix("ctx.")
-            && let Some(value) = self
+        // A reserved namespace is never a document property, so a miss inside
+        // one stays a miss rather than reading a same-named frontmatter key.
+        if let Some(name) = path.strip_prefix("ctx.") {
+            return self
                 .prepared_context
                 .and_then(|context| context.get(name))
-        {
-            return Some(value.clone());
+                .cloned();
         }
 
         if let Some(env_key) = path.strip_prefix("env.") {
@@ -160,6 +162,10 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
             return resolve_env(env_key);
         }
 
+        if is_reserved_namespace(path.split('.').next().unwrap_or(path)) {
+            return None;
+        }
+
         if let Some(value) = resolve_ambient(path, self.ambient) {
             return Some(value);
         }
@@ -169,6 +175,10 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         }
 
         resolve_frontmatter(self.frontmatter, path)
+    }
+
+    fn resolve(&self, path: &str) -> Result<ResolvedBinding, ExpressionError> {
+        Ok(ResolvedBinding::classify(path, self.get(path)))
     }
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
