@@ -122,8 +122,8 @@ pub struct LifecycleErrorInfo {
     /// Not projected into `err.*`.
     pub reason: LifecycleEvaluationReason,
 
-    /// The typed error an event-time evaluation raised, kept so a library
-    /// caller can inspect the original Darkmatter failure. Not projected into
+    /// The typed error an event-time or sequence task-value evaluation raised,
+    /// kept so a library caller can inspect the original Darkmatter failure. Not projected into
     /// `err.*`; `None` for every other failure.
     pub cause: Option<LifecycleCause>,
 }

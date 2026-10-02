@@ -49,8 +49,8 @@ use super::super::error::CompositionError;
 use super::super::lifecycle::actions::{
     LifecycleAction, LifecycleActionKind, LifecycleStackItem, is_known_side_effect,
 };
-use super::super::lifecycle::context::LifecycleErrorInfo;
-use super::super::lifecycle::executor::StackExecutionContext;
+use super::super::lifecycle::context::{LifecycleCause, LifecycleErrorInfo};
+use super::super::lifecycle::executor::{LifecycleExprError, StackExecutionContext};
 use super::super::lifecycle::{
     LifecycleSignal, parse_single_action_with_order, parse_task_action_stack_with_order,
 };
@@ -995,7 +995,7 @@ impl TaskExecution<'_> {
                 task: self.label(),
                 field: field.to_string(),
                 message: error.to_string(),
-                source: Box::new(error),
+                cause: LifecycleCause::new(LifecycleExprError::Compose(Box::new(error))),
             })
     }
 

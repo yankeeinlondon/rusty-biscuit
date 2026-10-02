@@ -2061,9 +2061,14 @@ pub enum CompositionError {
         field: String,
         /// The underlying evaluation failure.
         message: String,
-        /// The typed lower-layer failure.
+        /// The typed Darkmatter failure. A [`LifecycleCause`] rather than the
+        /// bare error so it survives into the cloneable
+        /// [`LifecycleErrorInfo`](super::lifecycle_context::LifecycleErrorInfo)
+        /// a task outcome reports.
+        ///
+        /// [`LifecycleCause`]: super::lifecycle_context::LifecycleCause
         #[source]
-        source: Box<MarkdownError>,
+        cause: super::lifecycle_context::LifecycleCause,
     },
 
     /// A task shape reached execution that only a later phase can schedule.
@@ -3122,8 +3127,8 @@ impl CompositionError {
         }
     }
 
-    /// The typed lifecycle evaluation failure this error reports, seeing
-    /// through the transparent render wrappers.
+    /// The typed lifecycle or sequence-task-value evaluation failure this
+    /// error reports, seeing through the transparent render wrappers.
     ///
     /// Its [`source`](std::error::Error::source) is the original Darkmatter
     /// error, so a library caller can inspect it without parsing rendered
@@ -3132,6 +3137,7 @@ impl CompositionError {
         match self {
             Self::LifecycleEvaluationError { cause, .. }
             | Self::LifecycleProxyWithEvaluationFailed { cause, .. } => cause.as_ref(),
+            Self::SequenceTaskValueResolution { cause, .. } => Some(cause),
             Self::WithFrontmatter { inner, .. } | Self::LifecycleEvaluationAlreadyEmitted { inner } => {
                 inner.lifecycle_cause()
             }
