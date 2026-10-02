@@ -989,7 +989,30 @@ impl FileReference {
     /// [`resolve()`]: Self::resolve
     #[cfg(feature = "url")]
     pub fn resolve_target(&self) -> Result<Option<Resolved>, FileReferenceError> {
-        resolve::resolve_target(&self.parsed, &self.magic_paths, &self.vault_roots)
+        let ctx = context::ResolutionContext::from_ambient()?;
+        resolve::resolve_target(&self.parsed, &self.magic_paths, &self.vault_roots, &ctx)
+    }
+
+    /// Resolve the reference to a typed target against an explicit context.
+    ///
+    /// The context-bound twin of [`resolve_target()`]: the working directory,
+    /// home, environment (including `{{VAR}}` segments of a URL), and magic
+    /// and vault roots all come from `ctx`, and no process state is read.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the context's validation error when `ctx` is invalid, and
+    /// otherwise the same errors as [`resolve_target()`].
+    ///
+    /// [`resolve_target()`]: Self::resolve_target
+    #[cfg(feature = "url")]
+    pub fn resolve_target_in_context(
+        &self,
+        ctx: &FileResolutionContext,
+    ) -> Result<Option<Resolved>, FileReferenceError> {
+        ctx.validate()?;
+        let internal = context::ResolutionContext::from_context(ctx);
+        resolve::resolve_target(&self.parsed, ctx.magic_paths(), ctx.vault_roots(), &internal)
     }
 }
 

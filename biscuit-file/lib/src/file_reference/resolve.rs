@@ -407,11 +407,10 @@ pub(crate) fn resolve_target(
     parsed: &ParsedReference,
     magic_paths: &MagicPathList,
     vault_roots: &[PathBuf],
+    ctx: &ResolutionContext,
 ) -> Result<Option<Resolved>, FileReferenceError> {
-    let ctx = ResolutionContext::from_ambient()?;
-
     if let ReferenceKind::Url(_) = &parsed.kind {
-        let raw = interpolated_url_string(&parsed.kind, &ctx)?;
+        let raw = interpolated_url_string(&parsed.kind, ctx)?;
         let url = ::url::Url::parse(&raw)
             .map_err(|e| FileReferenceError::InvalidUrl(e.to_string()))?;
         let scheme = url.scheme();
@@ -423,7 +422,7 @@ pub(crate) fn resolve_target(
         return Ok(Some(Resolved::Remote(url)));
     }
 
-    let local = resolve(parsed, magic_paths, vault_roots, &ctx)?;
+    let local = resolve(parsed, magic_paths, vault_roots, ctx)?;
     Ok(local.map(Resolved::Local))
 }
 
