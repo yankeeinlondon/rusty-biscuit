@@ -52,10 +52,10 @@ pub struct ProviderTail {
 
 /// Which implicit-prefix tokens one provider switch took as its values.
 ///
-/// Indices refer to [`ProviderTail::launch_args`]. The CLI's current
-/// partition does not type provider switches, so it records none; type-aware
-/// ownership fills these so later checks can name the assignment a resolved
-/// provider disagrees with.
+/// Indices refer to [`ProviderTail::launch_args`]. Composition's type-aware
+/// ownership ([`super::ownership::own_arguments`]) records one per implicit
+/// switch, so [`super::ownership::check_launch_tail`] can name the assignment
+/// a resolved provider disagrees with. A direct wrapper's tail records none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchAssignment {
     /// Index of the switch token.
@@ -107,6 +107,12 @@ impl ProviderTail {
     /// Switch/value assignments recorded for the implicit prefix.
     pub fn assignments(&self) -> &[SwitchAssignment] {
         &self.assignments
+    }
+
+    /// The same tail with the switch/value assignments ownership decided.
+    pub(crate) fn with_assignments(mut self, assignments: Vec<SwitchAssignment>) -> Self {
+        self.assignments = assignments;
+        self
     }
 
     /// `true` when no token is forwarded, even if an empty `--` suffix was

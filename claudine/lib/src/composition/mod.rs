@@ -38,6 +38,7 @@ pub mod mismatch;
 pub mod preflight;
 mod prepare;
 pub mod provider_tail;
+pub mod ownership;
 mod reserved;
 mod resolve;
 pub mod runtime_state;
@@ -45,6 +46,10 @@ pub mod schema;
 mod select;
 pub mod sequence;
 mod types;
+pub use ownership::{
+    ARGV_KEY, ArgumentsAfterFile, CallerArgument, OwnedArguments, OwnershipCandidate,
+    OwnershipError, SchemaParameters, TailMismatch, check_launch_tail, own_arguments, setter_key,
+};
 pub use provider_tail::{ProviderTail, ProviderTailNotices, SwitchAssignment};
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
@@ -142,7 +147,7 @@ pub use runtime_state::{
     layered_set_overrides, trim_transport_newline,
 };
 pub use schema::{
-    InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
+    InteractiveSchemaOptions, authored_schema_parameters, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
     description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
     pre_validate_layered_for_mode, pre_validate_schema, pre_validate_schema_for_mode,

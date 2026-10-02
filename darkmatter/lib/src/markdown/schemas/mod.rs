@@ -830,7 +830,7 @@ impl EffectiveSchema {
     /// of those in any root-union, `allOf`, or `if`/`then`/`else` arm
     /// (baseline and trigger layers are already merged in). Declaring is not
     /// requiring; an optional property is declared.
-    pub(crate) fn declares_top_level_property(&self, name: &str) -> bool {
+    pub fn declares_top_level_property(&self, name: &str) -> bool {
         schema_declares_property(&self.json_schema, &self.json_schema, name, 0)
     }
 

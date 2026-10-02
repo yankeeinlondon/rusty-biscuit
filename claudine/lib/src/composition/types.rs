@@ -910,8 +910,9 @@ pub struct CompositionExecutionRequest {
     /// executor emits it after resolving the target itself.
     pub header_emitted: bool,
 
-    /// Provider-argument tail forwarded verbatim to the underlying agent,
-    /// captured by the CLI's pre-clap ownership partition. Seeds the child
+    /// Provider-argument tail forwarded verbatim to the underlying agent, as
+    /// type-aware ownership ([`super::own_arguments`]) decided it, with each
+    /// implicit switch's value assignment. Seeds the child
     /// argv at the same stage as direct-wrapper passthrough, ahead of
     /// Claudine's entrypoint / model / transport / prompt-delivery
     /// injections. Distinct from MCP arguments. Empty when no tail was given.

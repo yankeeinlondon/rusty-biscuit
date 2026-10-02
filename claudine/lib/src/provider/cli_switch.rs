@@ -90,7 +90,7 @@ pub fn match_switch_token<'t>(provider: Provider, path: &[&str], token: &'t str)
     match_token_in(provider_info(provider).cli_switches, path, token)
 }
 
-fn match_token_in<'t>(catalog: CliSwitchCatalog, path: &[&str], token: &'t str) -> Option<SwitchToken<'t>> {
+pub(crate) fn match_token_in<'t>(catalog: CliSwitchCatalog, path: &[&str], token: &'t str) -> Option<SwitchToken<'t>> {
     let known = |spelling: &str| match lookup_in(catalog, path, spelling) {
         SwitchLookup::Known(switch) => Some(switch),
         SwitchLookup::NotInCatalog | SwitchLookup::CatalogGap { .. } => None,
