@@ -81,6 +81,35 @@ flowchart LR
 built context (for example one derived for a document in another repository)
 uses `ComposeRequest::with_context(options, context)`, which validates it.
 
+A source document outside the request's repository is admitted the way a
+transcluded file outside it is: as a trusted external source. Requested from
+`/work/repo`, the document `/home/me/notes/doc.md` resolves `./beside.md`
+beside itself and `../../outside.md` to `/home/outside.md`; its own folder,
+not the repository, bounds nothing. Its schema `file` values resolve the
+same way. A document opened through `~` (`::file ~/notes/doc.md`) instead
+keeps `HOME` as its tree root, so the same `../../outside.md` is refused.
+
+## Reading a failure's class
+
+Every failed file reference keeps biscuit-file's `ResolutionFailure` class
+(`InvalidReference`, `MissingContext`, `NoMatch`, `Io`, `UnsupportedRemote`).
+Compare failures by class, never by message:
+
+```rust,ignore
+match markdown.compose_with(&request) {
+    Err(error) => assert_eq!(error.resolution_failure(), Some(ResolutionFailure::NoMatch)),
+    // A failure composition tolerated (the content replaced by a notice)
+    // is a warning carrying the same class.
+    Ok((_, report)) => assert!(report.warnings.iter().all(|w| w.resolution_failure.is_none())),
+}
+```
+
+`MarkdownError::resolution_failure()` finds the class through nested
+transclusions, `::toc-linking` chains (which report the first target's
+class), and schema `file` values. `md` prints the class as a
+`failure: <class>` row, in kebab case, on every error block and warning for
+a failed reference.
+
 ## When a request cannot be built
 
 The builder returns `ContextBuildError` instead of letting a bad context fail
@@ -102,3 +131,9 @@ tree root. `resolution_failure()` uses the same classes as biscuit-file's
 reference all read the snapshot's environment. An expression and a file
 reference in one request therefore always agree, even if the process
 environment changes or differs.
+
+A `ComposeContext` captured on its own (`ComposeContext::capture_for_document`
+and its siblings) reads no process environment either: its `env` starts empty,
+so `ctx.agent` is `"unknown"` until a request installs the snapshot's
+environment over it. Only `current_env.NAME` reads the live process
+environment, by design: it names the value at the moment it is referenced.

@@ -1,9 +1,9 @@
 # How DMLS Resolves File References
 
 Every editor feature that follows a path resolves it the way `md compose`
-does when you run it from the repository root. That covers links, `::file`
-and `::code` targets, `$schema` values, and `file(...)`-typed frontmatter
-values. A `&`, `^`, or `@` reference that composes also resolves in the
+does when you run it from the repository root. That covers links, `::file`,
+`::code`, and `::toc-linking` targets, `$schema` values, and `file(...)`-typed
+frontmatter values. A `&`, `^`, or `@` reference that composes also resolves in the
 editor, and one that fails to compose is flagged.
 
 ```markdown

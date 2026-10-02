@@ -52,6 +52,12 @@ helper that resolves it is named so it is not re-derived.
    the context's home (shell policy files for a stdin document did, until
    `md` pinned `policy_root` to the launch directory) reaches the real
    profile there only (2026-10-01, 11 CLI tests red on build-win-native).
+   The `md` entry-point parity runner (`cli/tests/l1/entry_point_parity.rs`)
+   therefore skips, on Windows only, the 38 rows whose answer needs the
+   fixture `HOME` as `md`'s home (`@` home tier, `~`, documents reached
+   through `~`), and decodes a stored `~/…` value against the real profile;
+   the darkmatter and dmls runners pass `HOME` in the snapshot and cover
+   those forms on Windows.
    `dirs::cache_dir()` is the same (`%LOCALAPPDATA%` from the known folder),
    so a Windows test that seeds a cache file writes to the real per-user
    path, keyed by its temporary repository, and deletes what it seeded

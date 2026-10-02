@@ -105,6 +105,13 @@ push mode.
   (`env!("CARGO_BIN_EXE_*")`, `CARGO_MANIFEST_DIR` fixtures outside the
   archived paths, toolchain lookups) breaks there. Reproduce with the recipe in
   [wsl.md](wsl.md); the fix for binaries is `biscuit_test_harness::bin_exe!`.
+- **Red only in an archive run (WSL2, or `just cross-check --os windows`),
+  "could not resolve `../../…`":** an extracted archive workspace has no
+  `.git`, so `build_resolution_context` finds no repository and the request
+  directory itself becomes the tree root. A test that builds its snapshot at
+  `messenger/lib` (or any package) then refuses a fixture's `..` climb out of
+  it. Anchor the snapshot at the run-time repository root
+  (`manifest_dir!()`'s ancestor), never at `env!("CARGO_MANIFEST_DIR")`.
 - **Red on Linux and WSL, green on macOS and Windows, only an order differs:**
   `read_dir` order. APFS and NTFS return entries sorted by name; ext4 returns
   hash order (`lib` before `app`). Sniff's leaf-marker layers (Bazel, Pants,

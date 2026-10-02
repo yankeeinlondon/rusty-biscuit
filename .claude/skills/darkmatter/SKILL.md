@@ -95,6 +95,13 @@ the context's environment. Magic roots enter only through
 public context setter. Only binaries call `RequestSnapshot::from_process()`. DMLS builds one
 context per repository (`dmls/src/context.rs`, see
 [dmls.md](dmls.md#file-resolution-contexts)).
+A file source (root or child) outside the request's tree is admitted
+trusted-external when only that derivation validates (`source_derivation_for`,
+applied to the root in `ComposeRequest::assemble`). The schema stage validates
+in the source's derived context (`source_file_resolution_context`), and
+`resolve_ctx::document_file_context` recognizes that context by canonical
+directory, not spelling (`/var` vs `/private/var`); re-deriving it with
+`for_cwd` would drop a `~` tree root.
 Unit tests use `crate::markdown::compose::test_request(options)` /
 `test_request_in(options, context)`; `lib/tests/l1` uses
 `crate::request_support::{request, request_at, context_at, cwd_context}`.
@@ -395,6 +402,36 @@ The ordinary local L1 recipe excludes `slow_` tests and leaves the internal
 `terminal-tests` / `browser-tests` build features disabled. Tier recipes enable
 their required targets; CI enables both features when constructing all-tier
 coverage.
+
+**Context guards.** `context_construction_guard.rs` in darkmatter lib, cli,
+dmls, messenger lib/cli, and claudine-gen (Claudine pending) runs the shared
+engine `cli/tests/common/context_guard.rs` over that crate's `src/`:
+construction (`FileResolutionContext::new|from_snapshot`, `::from_process`),
+optional context (`Option<[&]FileResolutionContext>`, no allowlist allowed),
+and ambient state (`std::env::*` reads, `dirs`/`home`/biscuit-file
+`home_dir`, `capture_env`, `.resolve()`/`.resolve_from(..)`/`.resolve_target()`,
+`PortablePath` without `with_ctx`). Allowlists are exact
+`(gate, path, identifier, count, reason)`; a read may be listed only when it
+feeds neither file resolution, `ctx.*`, nor `env.*`. A failing guard prints
+the `Allowance` to paste; fix the read instead when it resolves a path or
+seeds `ctx.*`. The production-scope rule (`#[cfg(test)]` blanking) lives in
+`source_scan::production_sources`, shared with
+`semantic_results_never_persist.rs`.
+
+**Entry-point parity matrix.** `lib/tests/common/entry_point_parity/mod.rs`
+holds the fixture (monorepo + fixture `HOME` + `outside.md`), the
+`EntryPoint` enum with exhaustive `owner()`/`rows()`, both tables, and
+`ParityReport`. Runners: `lib/tests/l1/entry_point_parity.rs` (pipeline,
+pre-flight, schema validation), `cli/tests/l1/entry_point_parity.rs` (`md`),
+`dmls/tests/l1/entry_point_parity.rs`; Claudine's is pending. A new entry
+point is an `EntryPoint` variant plus rows; a failing cell is an entry-point
+defect, never a table edit, except where a design decision says otherwise
+(caller-supplied `../` may leave the tree: `md`'s argument opts in with
+`allow_external_relative`). Compare failures only by `ResolutionFailure`:
+`MarkdownError::resolution_failure()` walks the cause chain (nested children,
+`TocLinkingError::Unresolved`, schema `file` values), a tolerated failure's
+`ComposeWarning::resolution_failure` carries it, and `md` renders it as a
+`failure: <kebab-class>` row on every block and warning.
 
 Do not run workspace-wide Cargo gates for a Darkmatter-only change. Use Sniff
 and GitNexus first to include actual downstream consumers such as Claudine when

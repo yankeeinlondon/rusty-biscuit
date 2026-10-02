@@ -172,7 +172,7 @@ Two Layer-2 behaviors reach beyond the Markdown document under edit:
 | `dm.directive.unmatched_end` | A `::end-block` closer with no matching opener. |
 | `dm.directive.malformed_option` | An option key a directive family does not recognize. |
 | `dm.directive.malformed_disclosure` | A `::disclosure` triple left structurally malformed. |
-| `dm.transclusion.broken_path` | A `::file` / `::code` / prologue / epilogue target matched no file. |
+| `dm.transclusion.broken_path` | A `::file` / `::code` / `::toc-linking` / prologue / epilogue target matched no file. |
 | `dm.transclusion.nullable_target` | **Warning.** A whole-value `::file`, `::code`, or `::url` expression is statically nullable and is not narrowed by an enclosing guard. |
 | `dm.transclusion.cycle` | A `::file` / `::code` transclusion cycle (ancestry in `relatedInformation`). |
 | `dm.expression.malformed` | A malformed `{{ … }}` interpolation or `when=` expression. |

@@ -270,13 +270,20 @@ The supplied entry points are:
 
 Existing `ComposeContext::capture_for_content`,
 `ComposeContext::capture_for_document`, and `capture_for_dir` remain
-ambient compatibility APIs and use the same `populate_*` code; they still read
-the process environment (a request replaces it with the snapshot's). The
+ambient compatibility APIs and use the same `populate_*` code. They read no
+process environment: their `env` starts empty and a request installs the
+snapshot's (`align_context_environment`). Internal group captures take the
+environment from their caller (`capture_runtime_context_for_groups(dir,
+groups, &env)`: `CtxLookup::new(dir, &env)` from a condition's context,
+`AnchoredRefresh` from its request). The
 CWD-based `ComposeContext::capture()` is gone, and `capture_minimal()` (what
 `ComposeOptions::new()` uses) is anchored at an empty path until a request
 re-anchors it, so neither reads the process directory. Ambient capture
 snapshots the environment once and reuses its original `GitRepo` handle for
-file changes rather than discovering the repository a second time.
+file changes rather than discovering the repository a second time. Shell
+directives of a pathless source run in `context.cwd()`
+(`resolve_working_directory(opts, source, &context)`), never the process
+directory.
 
 ### Lazy reserved roots (`current`, `current_env`)
 

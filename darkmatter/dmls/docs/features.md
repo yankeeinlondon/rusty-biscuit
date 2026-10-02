@@ -123,7 +123,9 @@ Intelligence for Darkmatter's composition DSL — all **read-only**:
 - **Transclusion** (`::file` / `::code` / `prologue` / `epilogue`) — document
   links, go-to-definition, "who transcludes this file" references,
   broken-path diagnostics, and **cycle detection** (with the cycle ancestry
-  reported).
+  reported). A `::toc-linking <file>` target gets the same document link,
+  go-to-definition, hover, and broken-path diagnostic; it is not a
+  transclusion, so it takes no part in references or cycles.
 - **Interpolation** (`{{ }}`) — completion (frontmatter keys, `ctx.*`,
   functions), hover showing the resolved static value (falling back to the
   effective-schema property description for a declared-but-unset key),

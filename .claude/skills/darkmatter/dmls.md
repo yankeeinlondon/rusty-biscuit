@@ -51,7 +51,9 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   failures included. `for_document(path)` derives with `for_source`;
   `for_untitled(roots)` needs exactly one repository across the folders.
 - Every provider resolves through `DocumentContext.resolution`
-  (`ctx.file_context()`, `ctx.resolve_reference(raw)`). A failed resolution
+  (`ctx.file_context()` is `Result<&FileResolutionContext, &ContextFailure>`,
+  `ctx.resolve_reference(raw)`; no context is ever an `Option`, which the
+  context guard enforces). A failed resolution
   means **no** resolution: never reintroduce a lexical join (the old
   `normalize_join` is deleted). `providers/diagnostics.rs` publishes the one
   `dm.context.build_failure` diagnostic. With a failed context the overlay
@@ -63,7 +65,8 @@ User-facing contract: `dmls/docs/file-references.md`. Code: `dmls/src/context.rs
   document, with no disk probe. Tests use `context::test_support`
   (`abs`, `workspace_contexts`, `resolution_for`) because a context rejects a
   rootless `/w` path on Windows; integration tests use `FixedContext` or a
-  real `RepositoryContexts`; empty graphs use `NoContexts`.
+  real `RepositoryContexts`; empty graphs use `NoContexts`
+  (`ContextFailure::NotProvided`).
 - Invalidation: every watched path calls `invalidate_contexts`, which drops
   ancestor-keyed entries (plus folder keys inside the repository for a
   `.git/` path), then `relink`s the graph. Package manifests and `.git/config`
