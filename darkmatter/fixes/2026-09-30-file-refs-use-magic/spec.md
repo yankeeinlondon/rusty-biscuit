@@ -81,6 +81,7 @@ human_review_items:
 clarified: true
 clarified_by: claude/opus
 reviewed: true
+review_iterations: 1
 review_note: the clarification process served as a review
 needs_rulings: false
 message_to_agent: |-
